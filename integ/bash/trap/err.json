@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "err_trap_keeps_the_failed_status",
+      "id": "err_trap_reads_the_failed_status",
       "seq": 512060,
       "targets": [
         "ram",
@@ -27,15 +27,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'echo \"ERR $?\"' ERR; false; echo \"after $?\" )",
+      "command": "( trap 'echo \"ERR $?\"' ERR; false; echo \"after $?\" ); ( trap 'echo \"E $?\"' ERR && false; true && { false; }; echo end ); ( trap 'echo E $?' ERR; x=$(false); echo \"end $?\"; set -E; x=$(false; echo in); echo \"[$x]\" )",
       "expect": {
         "exit": 0,
-        "stdout": "ERR 1\nafter 1\n",
+        "stdout": "ERR 1\nafter 1\nE 1\nE 1\nend\nE 1\nend 1\n[E 1\nin]\n",
         "stderr": ""
       }
     },
     {
-      "id": "err_trap_skips_where_errexit_is_ignored",
+      "id": "err_trap_runs_where_errexit_would_act",
       "seq": 512061,
       "targets": [
         "ram",
@@ -61,49 +61,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'echo ERR' ERR; if false; then :; fi; false || true; ! true; true && false; echo end )",
+      "command": "( trap 'echo ERR' ERR; if false; then :; fi; false || true; ! true; true && false; echo end ); ( trap 'echo ERR' ERR; { false; }; for i in 1; do false; done; echo end ); ( trap 'echo ERR' ERR; (( 0 )); [[ a == b ]]; echo end ); ( trap 'echo ERR' ERR; { { :; } < /data/missing; }; echo \"end $?\" )",
       "expect": {
         "exit": 0,
-        "stdout": "ERR\nend\n",
-        "stderr": ""
+        "stdout": "ERR\nend\nERR\nERR\nend\nERR\nERR\nend\nERR\nend 1\n",
+        "stderr": "/data/missing: No such file or directory\n"
       }
     },
     {
-      "id": "err_trap_runs_once_for_a_group_or_loop",
-      "seq": 512062,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap 'echo ERR' ERR; { false; }; for i in 1; do false; done; echo end )",
-      "expect": {
-        "exit": 0,
-        "stdout": "ERR\nERR\nend\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_answers_subshells_and_function_calls",
+      "id": "err_trap_function_scope",
       "seq": 512063,
       "targets": [
         "ram",
@@ -129,49 +95,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'echo ERR' ERR; ( false ); f() { false; echo in-f; }; f; g() { return 2; }; g; echo end )",
+      "command": "( trap 'echo ERR' ERR; ( false ); f() { false; echo in-f; }; f; g() { return 2; }; g; echo end ); ( set -E; trap 'echo E' ERR; f() { trap -p ERR; false; }; f; echo end ); ( f() { trap 'echo B' ERR; false; }; f; false; echo end ); ( trap 'echo E' ERR; f() { trap 'echo F' ERR; false; }; f; false; echo end ); ( trap 'echo E' ERR; f() { trap -p ERR; trap - ERR; echo in; }; f; trap -p ERR; false; g() { trap '' ERR; }; g; false; echo end )",
       "expect": {
         "exit": 0,
-        "stdout": "ERR\nin-f\nERR\nend\n",
+        "stdout": "ERR\nin-f\nERR\nend\ntrap -- 'echo E' ERR\nE\nE\nend\nB\nB\nend\nF\nF\nF\nend\nin\ntrap -- 'echo E' ERR\nE\nend\n",
         "stderr": ""
       }
     },
     {
-      "id": "err_trap_errtrace_reaches_functions",
-      "seq": 512064,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( set -E; trap 'echo E' ERR; f() { trap -p ERR; false; }; f; echo end )",
-      "expect": {
-        "exit": 0,
-        "stdout": "trap -- 'echo E' ERR\nE\nE\nend\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_ignored_and_reset",
+      "id": "err_trap_in_child_shells",
       "seq": 512065,
       "targets": [
         "ram",
@@ -197,15 +129,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap '' ERR; false; trap -p ERR; trap 'echo E' ERR; trap - ERR; false; echo \"end $?\" )",
+      "command": "( trap '' ERR; false; trap -p ERR; trap 'echo E' ERR; trap - ERR; false; echo \"end $?\" ); ( trap 'echo E' ERR; ( trap -p ERR; false; echo in ); f() { false; }; ( f ); echo \"end $?\" ); ( trap '(trap \"echo CHILD\" ERR; false); echo PARENT' ERR; false ); echo \"rc=$?\"; if bash -ec 'false; echo BAD'; then echo WRONG; else echo EXPECTED; fi",
       "expect": {
         "exit": 0,
-        "stdout": "trap -- '' ERR\nend 1\n",
+        "stdout": "trap -- '' ERR\nend 1\ntrap -- 'echo E' ERR\nin\nE\nend 1\nCHILD\nPARENT\nrc=1\nEXPECTED\n",
         "stderr": ""
       }
     },
     {
-      "id": "err_trap_runs_before_errexit",
+      "id": "err_trap_with_errexit",
       "seq": 512066,
       "targets": [
         "ram",
@@ -231,287 +163,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'echo ERR' ERR; set -e; false; echo unreached ); echo \"rc=$?\"",
+      "command": "( trap 'echo ERR' ERR; set -e; false; echo unreached ); echo \"rc=$?\"; ( set -e; trap '! true' ERR; false; echo BAD ); echo \"rc=$?\"; ( set -eE; trap 'echo E' ERR; f() { false; }; f; echo after ); echo \"rc=$?\"; ( set -e; trap 'echo E' ERR; f() { false; }; f; echo after ); echo \"rc=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "ERR\nrc=1\n",
+        "stdout": "ERR\nrc=1\nrc=1\nE\nrc=1\nrc=1\n",
         "stderr": ""
       }
     },
     {
-      "id": "err_trap_set_in_a_function_stays",
-      "seq": 512067,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( f() { trap 'echo B' ERR; false; }; f; false; echo end )",
-      "expect": {
-        "exit": 0,
-        "stdout": "B\nB\nend\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_replaced_in_a_function_stays",
-      "seq": 512068,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap 'echo E' ERR; f() { trap 'echo F' ERR; false; }; f; false; echo end )",
-      "expect": {
-        "exit": 0,
-        "stdout": "F\nF\nF\nend\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_function_scope_gives_it_back",
-      "seq": 512069,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap 'echo E' ERR; f() { trap -p ERR; trap - ERR; echo in; }; f; trap -p ERR; false; g() { trap '' ERR; }; g; false; echo end )",
-      "expect": {
-        "exit": 0,
-        "stdout": "in\ntrap -- 'echo E' ERR\nE\nend\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_arithmetic_and_test_fail",
-      "seq": 512070,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap 'echo ERR' ERR; (( 0 )); [[ a == b ]]; echo end )",
-      "expect": {
-        "exit": 0,
-        "stdout": "ERR\nERR\nend\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_command_substitution",
-      "seq": 512071,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap 'echo E $?' ERR; x=$(false); echo \"end $?\"; set -E; x=$(false; echo in); echo \"[$x]\" )",
-      "expect": {
-        "exit": 0,
-        "stdout": "E 1\nend 1\n[E 1\nin]\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_hidden_in_a_child_shell",
-      "seq": 512072,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap 'echo E' ERR; ( trap -p ERR; false; echo in ); f() { false; }; ( f ); echo \"end $?\" )",
-      "expect": {
-        "exit": 0,
-        "stdout": "trap -- 'echo E' ERR\nin\nE\nend 1\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_new_shell_ends_on_its_own_errexit",
-      "seq": 512090,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "if bash -ec 'false; echo BAD'; then echo WRONG; else echo EXPECTED; fi",
-      "expect": {
-        "exit": 0,
-        "stdout": "EXPECTED\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_action_keeps_its_statement_errexit",
-      "seq": 512091,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( set -e; trap '! true' ERR; false; echo BAD ); echo \"rc=$?\"",
-      "expect": {
-        "exit": 0,
-        "stdout": "rc=1\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_does_not_run_while_it_runs",
+      "id": "err_trap_action_leaves",
       "seq": 512092,
       "targets": [
         "ram",
@@ -537,248 +197,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'trap \"echo NEW\" ERR; false; echo OLD' ERR; false; echo end )",
+      "command": "( trap 'trap \"echo NEW\" ERR; false; echo OLD' ERR; false; echo end ); ( trap 'echo TRAP; exit 7' ERR; echo BEFORE; false; echo after ); echo \"rc=$?\"; ( f() { trap 'echo T; return 5' ERR; false; echo after; }; f; echo \"rc=$?\" )",
       "expect": {
         "exit": 0,
-        "stdout": "OLD\nend\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_errexit_in_a_function_answers_once",
-      "seq": 512093,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( set -eE; trap 'echo E' ERR; f() { false; }; f; echo after ); echo \"rc=$?\"",
-      "expect": {
-        "exit": 0,
-        "stdout": "E\nrc=1\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_errexit_in_a_function_leaves_at_once",
-      "seq": 512094,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( set -e; trap 'echo E' ERR; f() { false; }; f; echo after ); echo \"rc=$?\"",
-      "expect": {
-        "exit": 0,
-        "stdout": "rc=1\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_answers_a_list_command_once",
-      "seq": 512095,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap 'echo \"E $?\"' ERR && false; true && { false; }; echo end )",
-      "expect": {
-        "exit": 0,
-        "stdout": "E 1\nE 1\nend\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_answers_a_failed_redirect",
-      "seq": 512096,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap 'echo ERR' ERR; { { :; } < /data/missing; }; echo \"end $?\" )",
-      "expect": {
-        "exit": 0,
-        "stdout": "ERR\nend 1\n",
-        "stderr": "/data/missing: No such file or directory\n"
-      }
-    },
-    {
-      "id": "err_trap_exit_ends_the_shell",
-      "seq": 512097,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap 'echo TRAP; exit 7' ERR; echo BEFORE; false; echo after ); echo \"rc=$?\"",
-      "expect": {
-        "exit": 0,
-        "stdout": "BEFORE\nTRAP\nrc=7\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_return_leaves_the_function",
-      "seq": 512098,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( f() { trap 'echo T; return 5' ERR; false; echo after; }; f; echo \"rc=$?\" )",
-      "expect": {
-        "exit": 0,
-        "stdout": "T\nrc=5\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "err_trap_child_shell_runs_its_own_action",
-      "seq": 512099,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap '(trap \"echo CHILD\" ERR; false); echo PARENT' ERR; false )",
-      "expect": {
-        "exit": 1,
-        "stdout": "CHILD\nPARENT\n",
+        "stdout": "OLD\nend\nBEFORE\nTRAP\nrc=7\nT\nrc=5\n",
         "stderr": ""
       }
     }

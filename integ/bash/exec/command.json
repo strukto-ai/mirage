@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "exec_command_ends_a_subshell_with_its_status",
+      "id": "exec_command_ends_its_shell",
       "seq": 962410,
       "targets": [
         "ram",
@@ -27,10 +27,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( exec echo hi; echo x ); echo \"after $?\"; ( exec false; echo x ); echo \"rc=$?\"",
+      "command": "( exec echo hi; echo x ); echo \"after $?\"; ( exec false; echo x ); echo \"rc=$?\"; ( exec echo a b > /data/ex.txt; echo x ); cat /data/ex.txt; rm /data/ex.txt; echo \"[$(exec echo inner; echo x)]\"; bash -c 'exec echo hi; echo x'; echo \"after $?\"",
       "expect": {
         "exit": 0,
-        "stdout": "hi\nafter 0\nrc=1\n",
+        "stdout": "hi\nafter 0\nrc=1\na b\n[inner]\nhi\nafter 0\n",
         "stderr": ""
       }
     },
@@ -61,15 +61,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( exec nosuchcmd; echo x ); echo \"rc=$?\"; ( f() { :; }; exec f ); echo \"rc=$?\"",
+      "command": "( exec nosuchcmd; echo x ); echo \"rc=$?\"; ( f() { :; }; exec f ); echo \"rc=$?\"; ( trap 'echo X' EXIT; exec nosuchcmd ) 2>/dev/null; echo \"rc=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "rc=127\nrc=127\n",
+        "stdout": "rc=127\nrc=127\nX\nrc=127\n",
         "stderr": "bash: exec: nosuchcmd: not found\nbash: exec: f: not found\n"
       }
     },
     {
-      "id": "exec_command_drops_the_exit_trap",
+      "id": "exec_command_drops_the_shells_actions",
       "seq": 962412,
       "targets": [
         "ram",
@@ -95,117 +95,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'echo X' EXIT; exec echo hi )",
+      "command": "( trap 'echo X' EXIT; exec echo hi ); ( trap 'echo ERR' ERR; exec false ); echo \"rc=$?\"; ( set -e; trap 'echo X' EXIT; exec false ); echo \"rc=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "hi\n",
+        "stdout": "hi\nrc=1\nrc=1\n",
         "stderr": ""
       }
     },
     {
-      "id": "exec_command_not_found_runs_the_exit_trap",
-      "seq": 962413,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap 'echo X' EXIT; exec nosuchcmd ) 2>/dev/null; echo \"rc=$?\"",
-      "expect": {
-        "exit": 0,
-        "stdout": "X\nrc=127\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "exec_command_takes_its_redirects",
-      "seq": 962414,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( exec echo a b > /data/ex.txt; echo x ); cat /data/ex.txt; rm /data/ex.txt",
-      "expect": {
-        "exit": 0,
-        "stdout": "a b\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "exec_command_ends_a_substitution",
-      "seq": 962415,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "echo \"[$(exec echo inner; echo x)]\"",
-      "expect": {
-        "exit": 0,
-        "stdout": "[inner]\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "exec_command_c_clears_the_environment",
+      "id": "exec_command_clears_and_writes",
       "seq": 962416,
       "targets": [
         "ram",
@@ -231,112 +129,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( X=1; export X; exec -c env ) | grep -c '^X='",
+      "command": "( exec echo hi >&- ); echo \"rc=$?\"; ( X=1; export X; exec -c env ) | grep -c '^X='",
       "expect": {
         "exit": 1,
-        "stdout": "0\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "exec_command_ends_a_nested_shell",
-      "seq": 962417,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "bash -c 'exec echo hi; echo x'; echo \"after $?\"",
-      "expect": {
-        "exit": 0,
-        "stdout": "hi\nafter 0\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "exec_command_drops_the_actions_before_it_runs",
-      "seq": 962418,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( trap 'echo ERR' ERR; exec false ); echo \"rc=$?\"; ( set -e; trap 'echo X' EXIT; exec false ); echo \"rc=$?\"",
-      "expect": {
-        "exit": 0,
-        "stdout": "rc=1\nrc=1\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "exec_command_write_error_is_the_programs",
-      "seq": 962419,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( exec echo hi >&- ); echo \"rc=$?\"",
-      "expect": {
-        "exit": 0,
-        "stdout": "rc=1\n",
+        "stdout": "rc=1\n0\n",
         "stderr": "echo: write error: Bad file descriptor\n"
       }
     }
