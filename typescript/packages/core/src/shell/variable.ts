@@ -157,8 +157,15 @@ export function copyVar(v: ShellVar): ShellVar {
   return v
 }
 
-/** The variable with a new value and the same attributes. */
+/**
+ * The variable with a new value and the same attributes, but a reference's
+ * under an array: bash's reference cannot hold one, so `declare -n r;
+ * r=(x)` leaves `declare -a r`.
+ */
 export function withValue(v: ShellVar, value: ShellValue | null): ShellVar {
+  if (value !== null && typeof value === 'object' && v.attrs.has(VarAttr.Nameref)) {
+    return { ...v, value, attrs: new Set([...v.attrs].filter((a) => a !== VarAttr.Nameref)) }
+  }
   return { ...v, value }
 }
 

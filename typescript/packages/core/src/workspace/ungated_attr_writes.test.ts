@@ -37,10 +37,6 @@ const ALLOWED: Record<string, string> = {
     "only when the name resolves where it did before the caller's " +
     '`view.set` gated it; a write that re-aimed a `declare -n` ' +
     'reference marks its new target through `view.mark`',
-  'workspace/node/declaration.ts::stampExport':
-    'the `covered` branch only, which is the names that carried a ' +
-    'value or a staged array literal; a bare name has no gated write ' +
-    'to ride on and goes through `view.mark`',
   'workspace/node/command_dispatch.ts::executeCommand':
     'the prefix-assignment loop calls `preSessionGate` explicitly ' +
     'before seeding, since `seedVar` is the ungated door',

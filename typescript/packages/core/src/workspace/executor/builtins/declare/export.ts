@@ -20,13 +20,14 @@ import type { SessionState } from '../../../session/session.ts'
 import { exportedNames } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { readonlyRefusal, refusal, requireView } from '../shared.ts'
+import { readonlyLine, refusal, requireView } from '../shared.ts'
 import { EXPORT_FLAGS, EXPORT_USAGE } from './constants.ts'
 import {
+  declarationResult,
   declaredKind,
+  dropReference,
   heldValue,
   declareLine,
-  identifierFailure,
   identifierRefusal,
   kindConflict,
   kindListed,
@@ -103,21 +104,31 @@ export async function handleExport(
   }
   const view = requireView(state)
   const errors: string[] = []
+  const warnings: string[] = []
   if (arrays !== null && arrays.length > 0) {
     // `export ARR=(a b)` marks the array as surely as it marks a scalar:
     // GNU prints `declare -ax ARR=([0]="a" [1]="b")`.
+    const stored: string[] = []
     const refused = await storeStagedArrays(
       'export',
       session,
       view,
       arrays,
-      VarAttr.Export,
-      on,
+      errors,
+      warnings,
       true,
-      null,
+      stored,
       kind,
     )
     if (refused !== null) return refused
+    try {
+      for (const name of stored) {
+        await markWritten(session, view, name, deref(session, name) || name, VarAttr.Export, on)
+      }
+    } catch (err) {
+      if (err instanceof PolicyDenied) return refusal('export', err)
+      throw err
+    }
   }
   for (const assign of names) {
     const badName = identifierRefusal('export', assign)
@@ -127,7 +138,10 @@ export async function handleExport(
     }
     const eq = assign.indexOf('=')
     const key = eq >= 0 ? assign.slice(0, eq) : assign
-    if (eq >= 0 && view.isReadonly(key)) return readonlyRefusal('export', key)
+    if (eq >= 0 && view.isReadonly(key)) {
+      errors.push(readonlyLine('export', key))
+      continue
+    }
     // A value of the other array kind is refused and the name is still
     // marked, as bash does.
     const held = eq >= 0 ? heldValue(session, key) : null
@@ -137,6 +151,7 @@ export async function handleExport(
       const [value, assigned] = scalarValue(held, assign.slice(eq + 1), kind)
       const checked = deref(session, key) || key
       try {
+        if (kind !== null) await dropReference(session, view, key)
         await view.set(key, value, true, assigned)
         await markWritten(session, view, key, checked, VarAttr.Export, on)
       } catch (err) {
@@ -160,8 +175,7 @@ export async function handleExport(
     }
     if (on) outliveCall(session, key)
   }
-  if (errors.length > 0) return identifierFailure('export', errors)
-  return [null, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
+  return declarationResult('export', errors, warnings)
 }
 
 /** The `export` arm. */

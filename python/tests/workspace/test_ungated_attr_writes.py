@@ -38,12 +38,6 @@ ALLOWED = {
     "`view.set` gated it; a write that re-aimed a `declare -n` "
     "reference marks its new target through `view.mark`",
     (
-        "mirage/workspace/node/declaration.py",
-        "_stamp_export",
-    ): "the `covered` branch only, which is the names that carried a "
-    "value or a staged array literal; a bare name has no gated write "
-    "to ride on and goes through `view.mark`",
-    (
         "mirage/workspace/node/command_dispatch.py",
         "execute_command",
     ): "the prefix-assignment loop calls `pre_session_gate` explicitly "

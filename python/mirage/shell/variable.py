@@ -161,12 +161,16 @@ def copy_var(var: ShellVar) -> ShellVar:
 
 
 def with_value(var: ShellVar, value: ShellValue | None) -> ShellVar:
-    """The variable with a new value and the same attributes.
+    """The variable with a new value and the same attributes, but a
+    reference's under an array: bash's reference cannot hold one, so
+    ``declare -n r; r=(x)`` leaves ``declare -a r``.
 
     Args:
         var (ShellVar): the variable to copy.
         value (ShellValue | None): the value to store.
     """
+    if isinstance(value, (list, dict)) and VarAttr.NAMEREF in var.attrs:
+        return replace(var, value=value, attrs=var.attrs - {VarAttr.NAMEREF})
     return replace(var, value=value)
 
 

@@ -1187,6 +1187,74 @@
         "stdout": "declare -x QG2=\"1\"\n",
         "stderr": "bash: declare: `1BAD2=x': not a valid identifier\n"
       }
+    },
+    {
+      "id": "declare_marks_each_operand_as_it_lands",
+      "seq": 930435,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( declare -r R=first R=second X=3; echo \"rc=$? R=$R X=$X\"; declare -rl L=ABC L=DEF; echo \"rc=$? L=$L\"; declare -r Q Q=1; echo \"rc=$? Q=${Q-unset}\"; readonly P; declare P Y=1; echo \"rc=$? Y=$Y\" ); ( readonly R=1 R=2 X=3; echo \"rc=$? R=$R X=$X\"; export R=3 Y=4; echo \"rc=$? Y=$Y\"; readonly A=(1 2) A=(3); echo \"rc=$? ${A[*]}\"; readonly B=(1 2) B=3; echo \"rc=$? ${B[*]}\" ); ( readonly R=1; declare -x +r A=2 R B=3; echo rc=$?; declare -p A R B; C=(1); declare -x +a D=1 C E=2; echo rc=$?; declare -p C D E )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1 R=first X=3\nrc=1 L=abc\nrc=1 Q=unset\nrc=0 Y=1\nrc=1 R=1 X=3\nrc=1 Y=4\nrc=0 3\nrc=1 1 2\nrc=1\ndeclare -x A=\"2\"\ndeclare -r R=\"1\"\ndeclare -x B=\"3\"\nrc=1\ndeclare -a C=([0]=\"1\")\ndeclare -x D=\"1\"\ndeclare -x E=\"2\"\n",
+        "stderr": "bash: declare: R: readonly variable\nbash: declare: L: readonly variable\nbash: declare: Q: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\nbash: B: readonly variable\nbash: declare: R: readonly variable\nbash: declare: C: cannot destroy array variables in this way\n"
+      }
+    },
+    {
+      "id": "declare_g_marks_reach_the_global",
+      "seq": 930436,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( G=outer; f(){ local G=inner; declare -gr G=new; G=x; echo \"in=$G\"; }; f; echo \"out=$G\"; (G=y) 2>/dev/null || echo frozen; H=outer; export K=outer; g(){ local H=inner K=inner; declare -gxu H=new; declare -gi I=1+2; declare -g +x K=new; declare -p H K; }; g; declare -p H I K; J=outer; h(){ declare -gr J=new; }; k(){ local J=inner; h; echo \"in=$J\"; }; k; declare -p J )",
+      "expect": {
+        "exit": 0,
+        "stdout": "in=x\nout=new\nfrozen\ndeclare -- H=\"inner\"\ndeclare -x K=\"inner\"\ndeclare -xu H=\"NEW\"\ndeclare -i I=\"3\"\ndeclare -- K=\"new\"\nin=inner\ndeclare -r J=\"new\"\n",
+        "stderr": ""
+      }
     }
   ]
 }

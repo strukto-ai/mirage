@@ -298,25 +298,21 @@ async def execute_assignment(
         if amap is not None:
             built, bad_words = build_assoc_literal(amap, items, append)
             await _assign_var(view, key, built)
-            if bad_words:
-                err = encode_text(
-                    "\n".join(
-                        f"bash: {key}: '{word}': must use subscript when "
-                        "assigning associative array"
-                        for word in bad_words
-                    )
-                    + "\n"
+            # A plain word in a keyed literal is dropped with a warning
+            # and the assignment still succeeds; unlike a declaration's,
+            # this voice does not quote the word (pinned on 5.2.37).
+            err = encode_text(
+                "".join(
+                    f"bash: {key}: {word}: must use subscript when "
+                    "assigning associative array\n"
+                    for word in bad_words
                 )
-                return (
-                    None,
-                    IOResult(exit_code=1, stderr=err),
-                    ExecutionNode(command=text, exit_code=1, stderr=err),
-                )
+            )
             code = assignment_status(context.frame, sub_seq)
             return (
                 None,
-                IOResult(exit_code=code),
-                ExecutionNode(command=text, exit_code=code),
+                IOResult(exit_code=code, stderr=err or None),
+                ExecutionNode(command=text, exit_code=code, stderr=err),
             )
         held = session.arrays.get(key)
         if append and held is None:

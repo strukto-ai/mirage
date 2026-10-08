@@ -241,26 +241,22 @@ export async function executeAssignment(
     if (heldMap !== undefined) {
       const { map, badWords } = buildAssocLiteral(heldMap, items, append)
       await assignVar(view, key, map)
-      if (badWords.length > 0) {
-        const errBytes = encodeText(
-          badWords
-            .map(
-              (word) =>
-                `bash: ${key}: '${word}': must use subscript when assigning associative array`,
-            )
-            .join('\n') + '\n',
-        )
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: errBytes }),
-          new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
-        ]
-      }
+      // A plain word in a keyed literal is dropped with a warning and the
+      // assignment still succeeds; unlike a declaration's, this voice does
+      // not quote the word (pinned on 5.2.37).
+      const errBytes = encodeText(
+        badWords
+          .map(
+            (word) =>
+              `bash: ${key}: ${word}: must use subscript when assigning associative array\n`,
+          )
+          .join(''),
+      )
       const mapCode = assignmentStatus(context.frame, subSeq)
       return [
         null,
-        new IOResult({ exitCode: mapCode }),
-        new ExecutionNode({ command: text, exitCode: mapCode }),
+        new IOResult({ exitCode: mapCode, stderr: errBytes.length > 0 ? errBytes : null }),
+        new ExecutionNode({ command: text, exitCode: mapCode, stderr: errBytes }),
       ]
     }
     let held: ShellArray | null = session.arrays[key] ?? null

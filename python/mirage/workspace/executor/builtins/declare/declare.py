@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+from collections.abc import Callable
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
@@ -44,7 +45,7 @@ from mirage.workspace.executor.builtins.declare.constants import (
 from mirage.workspace.executor.builtins.shared import (
     arith_refusal,
     is_valid_name,
-    readonly_refusal,
+    readonly_line,
     refusal,
     require_view,
 )
@@ -52,6 +53,7 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     conversion_scalar,
     deref,
+    in_call_env,
     set_attr,
     shadow_local,
     subscript_index,
@@ -95,25 +97,15 @@ def declared_kind(flags: set[str] | frozenset[str]) -> VarKind | None:
     return None
 
 
-def held_value(
-    session: SessionState, name: str, global_scope: bool = False
-) -> ShellValue | None:
+def held_value(session: SessionState, name: str) -> ShellValue | None:
     """The value a declaration's ``NAME=...`` lands on: the variable a
-    ``declare -n`` reference names, and under ``-g`` the global record a
-    function's local shadows.
+    ``declare -n`` reference names.
 
     Args:
         session (SessionState): shell session state.
         name (str): the declared name.
-        global_scope (bool): the declaration carried ``-g``.
     """
-    target = deref(session, name)
-    if global_scope:
-        frame = next((f for f in session._local_frames if target in f), None)
-        if frame is not None:
-            saved = frame[target]
-            return None if saved is None else saved.value
-    var = session.vars.get(target)
+    var = session.vars.get(deref(session, name))
     return None if var is None else var.value
 
 
@@ -136,7 +128,9 @@ def local_attrs(var: ShellVar | None, inherit: bool) -> frozenset[VarAttr]:
 
 def start_local(session: SessionState, name: str, inherit: bool) -> None:
     """Reset a name the running function just shadowed to what a new
-    local starts as: unset, with the attributes ``local_attrs`` keeps.
+    local starts as: unset, with the attributes ``local_attrs`` keeps,
+    or under ``-I`` the shadowed value too, so ``local -I A=new`` over
+    ``A=(old keep)`` writes element 0 of ``(old keep)``.
 
     This is the scope's own bookkeeping, not a session write: the
     caller's record is the frame's to put back on return, so no policy
@@ -148,9 +142,10 @@ def start_local(session: SessionState, name: str, inherit: bool) -> None:
         name (str): the name a ``shadow_local`` just recorded.
         inherit (bool): the declaration carried ``-I``.
     """
-    kept = local_attrs(session.vars.pop(name, None), inherit)
-    if kept:
-        session.vars[name] = ShellVar(None, kept)
+    var = session.vars.pop(name, None)
+    kept = local_attrs(var, inherit)
+    if var is not None and (kept or inherit):
+        session.vars[name] = ShellVar(var.value if inherit else None, kept)
 
 
 def kind_conflict(held: ShellValue | None, kind: VarKind | None) -> str | None:
@@ -217,13 +212,16 @@ async def mark_written(
     checked: str,
     attr: VarAttr,
     on: bool = True,
+    follow_ref: bool = True,
 ) -> None:
     """Put ``attr`` on the variable a write to ``name`` landed on.
 
     The write's gate covered ``checked``, the target before it, so the
     mark rides on that decision; a write that re-aimed an unset
     ``declare -n`` reference (``declare -n r; export r=X``) landed on a
-    target no gate has seen, so that mark goes through the gated door.
+    target no gate has seen, so that mark goes through the gated door,
+    as does the reference mark itself (``+n``), which belongs to the
+    reference's own record.
 
     Args:
         session (SessionState): shell session state.
@@ -232,12 +230,144 @@ async def mark_written(
         checked (str): what ``name`` resolved to before the write.
         attr (VarAttr): the attribute to set or clear.
         on (bool): set rather than clear.
+        follow_ref (bool): the write followed a reference (a
+            ``declare -n`` declaration writes the reference itself).
     """
-    target = deref(session, name)
+    follows = follow_ref and attr is not VarAttr.NAMEREF
+    target = deref(session, name) if follows else name
     if target == checked:
         set_attr(session, target, attr, on)
     else:
-        await view.mark(name, attr, on)
+        await view.mark(name, attr, on, follow_ref)
+
+
+async def stamp_marks(
+    session: SessionState,
+    view: SessionView,
+    name: str,
+    checked: str | None,
+    marks: tuple[tuple[VarAttr, bool], ...],
+    follow_ref: bool = True,
+) -> None:
+    """Put a declaration's attribute marks on what one operand landed
+    on, as soon as it lands: ``declare -r R=1 R=2`` refuses the second
+    write, and under ``-g`` the global record takes them.
+
+    A written operand's marks ride on its write's gate
+    (``mark_written``); a bare one wrote nothing, so each mark goes
+    through the gated door.
+
+    Args:
+        session (SessionState): shell session state.
+        view (SessionView): the session plane's gated door.
+        name (str): the operand's name.
+        checked (str | None): what ``name`` resolved to before its
+            write, None for a bare operand.
+        marks (tuple[tuple[VarAttr, bool], ...]): each attribute and
+            whether it goes on or off, in order.
+        follow_ref (bool): mark a reference's target, not the reference.
+    """
+    for attr, on in marks:
+        if checked is None:
+            await view.mark(name, attr, on, follow_ref)
+        else:
+            await mark_written(
+                session, view, name, checked, attr, on, follow_ref
+            )
+
+
+async def drop_reference(
+    session: SessionState, view: SessionView, name: str
+) -> None:
+    """Take the mark off an unaimed ``declare -n`` reference a declared
+    array kind is about to land on, silently, as bash's
+    ``export -a ref=v`` does (an undeclared array warns at the door).
+
+    Args:
+        session (SessionState): shell session state.
+        view (SessionView): the session plane's gated door.
+        name (str): the declared name.
+    """
+    target = deref(session, name)
+    var = session.vars.get(target)
+    if var is not None and VarAttr.NAMEREF in var.attrs:
+        await view.mark(target, VarAttr.NAMEREF, False)
+
+
+def plus_refusal(
+    cmd: str, session: SessionState, view: SessionView, name: str, plus: str
+) -> str | None:
+    """The line a ``+letter`` earns on one operand, if any.
+
+    Two letters cannot be taken off. ``+r`` on a readonly name is
+    ``declare: R: readonly variable`` and the name stays frozen; ``+a``
+    / ``+A`` on an array is ``cannot destroy array variables in this
+    way``, since the kind is what the value is, not a mark. Either skips
+    that operand's value and marks, and the others still declare
+    (pinned on 5.2.37).
+
+    Args:
+        cmd (str): the builtin's spelling, for the diagnostic.
+        session (SessionState): shell session state.
+        view (SessionView): the session plane's gated door.
+        name (str): the operand's name.
+        plus (str): the declaration's ``+`` letters.
+    """
+    if "r" in plus and view.is_readonly(name):
+        return readonly_line(cmd, name)
+    if ("a" in plus and name in session.arrays) or (
+        "A" in plus and name in session.assocs
+    ):
+        return (
+            f"bash: {cmd}: {name}: cannot destroy array variables in this way"
+        )
+    return None
+
+
+def _place(session: SessionState, name: str, var: ShellVar | None) -> None:
+    if var is None:
+        session.vars.pop(name, None)
+    else:
+        session.vars[name] = var
+
+
+def reach_global(
+    session: SessionState, names: list[str]
+) -> Callable[[], None]:
+    """Put each name's global record in place for a ``declare -g``, and
+    return the call that puts the running locals back.
+
+    Outside a function, or for a name no frame on the call path shadows,
+    the global record is already in place. Otherwise the running local
+    lives in ``session.vars`` and the global is what the *outermost*
+    shadowing frame saved, so the two swap for the declaration: its
+    reads, writes and marks reach the global, and the local comes back
+    untouched, which is what GNU shows (``local G=5; declare -gr G=1``
+    leaves ``$G`` at 5 and writable in the function, 1 and frozen
+    outside, and a nested ``declare -g`` reaches past the caller's local
+    too).
+
+    Args:
+        session (SessionState): shell session state.
+        names (list[str]): the declaration's operand names.
+    """
+    swapped: list[tuple[str, dict[str, ShellVar | None], ShellVar | None]]
+    swapped = []
+    for name in dict.fromkeys(names):
+        outer = next(
+            (frame for frame in session._local_frames if name in frame), None
+        )
+        if outer is None:
+            continue
+        swapped.append((name, outer, session.vars.get(name)))
+        _place(session, name, outer[name])
+
+    def restore() -> None:
+        for name, outer, running in swapped:
+            outer[name] = session.vars.get(name)
+            _place(session, name, running)
+
+    return restore
 
 
 async def store_staged_arrays(
@@ -245,14 +375,14 @@ async def store_staged_arrays(
     session: SessionState,
     view: SessionView,
     arrays: list[tuple[str, bool, list[str]]],
-    mark: VarAttr | None = None,
-    on: bool = True,
+    errors: list[str],
+    warnings: list[str],
     fatal: bool = False,
     stored: list[str] | None = None,
     kind: VarKind | None = None,
-    errors: list[str] | None = None,
     shaping: frozenset[VarAttr] = frozenset(),
     global_scope: bool = False,
+    inherit: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode] | None:
     """Store a declaration's array literals through the session door.
 
@@ -266,10 +396,14 @@ async def store_staged_arrays(
     function-scoped `declare` refuse in the builtin's voice and the
     body keeps running (pinned on bash 5.2, debian:stable-slim).
 
-    Inside a function, ``declare`` and ``local`` make each name local;
-    ``export`` and ``readonly`` (``VISIBLE_SCOPE_BUILTINS``) assign the
-    variable already visible, so ``f() { export A=(1); }`` leaves ``A``
-    set after ``f`` returns.
+    Inside a function, ``declare`` and ``local`` make each name local,
+    starting as ``start_local`` leaves it; ``export`` and ``readonly``
+    (``VISIBLE_SCOPE_BUILTINS``) assign the variable already visible, so
+    ``f() { export A=(1); }`` leaves ``A`` set after ``f`` returns.
+
+    The caller marks the stored names once every literal has stored:
+    bash's ``readonly A=(1) A=(2)`` keeps ``(2)``, so a literal is not
+    refused by a mark the same declaration put on.
 
     Args:
         cmd (str): builtin name for refusal rendering and scoping.
@@ -277,19 +411,14 @@ async def store_staged_arrays(
         view (SessionView): the session plane's gated door.
         arrays (list[tuple[str, bool, list[str]]]): staged
             ``(name, append, items)`` literals from the declaration.
-        mark (VarAttr | None): the attribute the declaring keyword puts
-            on each stored name -- READONLY for ``readonly``, EXPORT for
-            ``export``. An attribute rather than a bool because both
-            keywords stage array literals through here and hardcoding
-            one of them silently dropped the other: ``export ARR=(a b)``
-            stored the array and never marked it, so GNU's
-            ``declare -ax`` came out ``declare -a``.
-        on (bool): the direction of that mark. ``export -n ARR=(b)``
-            stores the array and takes the attribute *off*, and the
-            store keeps whatever the name already carried, so leaving
-            the mark unapplied left an exported array exported.
-        fatal (bool): render a readonly refusal as the fatal
-            assignment error instead of a builtin failure.
+        errors (list[str]): filled with bash-voiced refusal lines for a
+            readonly name or a kind conflict outside ``fatal``; the
+            caller folds them into its exit status.
+        warnings (list[str]): filled with ``must use subscript`` lines
+            for the plain words a keyed associative literal cannot take;
+            GNU stores the valid elements and the status stays 0.
+        fatal (bool): render a readonly refusal or a kind conflict as
+            the fatal assignment error instead of a builtin failure.
         stored (list[str] | None): filled with each name that actually
             stored, in order. A declaration keeps its valid operands
             when a sibling refuses, so the caller cannot read "what was
@@ -300,52 +429,46 @@ async def store_staged_arrays(
             plain ``m+=([k]=v)`` keeps the variable's own kind. A kind
             that meets a variable of the other kind is bash's
             ``cannot convert`` assignment error.
-        errors (list[str] | None): filled with bash-voiced refusal
-            lines for the plain words a keyed associative literal
-            cannot take, and for a kind conflict outside ``fatal``; the
-            caller folds them into its exit status, because GNU stores
-            the valid elements and still fails the builtin.
         shaping (frozenset[VarAttr]): the value-shaping attributes to
             put on each name before its literal stores.
         global_scope (bool): the declaration carried ``-g``, so no
-            local snapshot is taken for the names.
+            local is started for the names.
+        inherit (bool): the declaration carried ``-I``, so a new local
+            starts from the value it shadows.
 
     Returns:
         The refusal result, or None when every literal stored.
 
     Raises:
-        ExitSignal: a readonly refusal under ``fatal``.
+        DiscardSignal: a readonly refusal or kind conflict under
+            ``fatal``.
     """
+    scoped = not global_scope and cmd not in VISIBLE_SCOPE_BUILTINS
+    local_vars = session._local_vars if scoped else None
     for name, append, items in arrays:
-        checked = deref(session, name)
         if view.is_readonly(name):
             if fatal:
                 raise DiscardSignal(
                     encode_text(f"bash: {name}: readonly variable\n")
                 )
-            return readonly_refusal(cmd, name)
-        # A new local shadows the caller's variable, so its kind is
-        # free; `export`, `readonly` and `-g` write the visible one.
-        shadowed = (
-            not global_scope
-            and cmd not in VISIBLE_SCOPE_BUILTINS
-            and note_local_array(session, name)
-        )
-        conflict = (
-            None
-            if shadowed
-            else kind_conflict(held_value(session, name, global_scope), kind)
-        )
+            errors.append(readonly_line(cmd, name))
+            continue
+        fresh = local_vars is not None and name not in local_vars
+        if local_vars is not None:
+            shadow_local(session, local_vars, name)
+        if fresh and not in_call_env(session, name):
+            start_local(session, name, inherit)
+        held = None if fresh and not inherit else held_value(session, name)
+        conflict = kind_conflict(held, kind)
         if conflict is not None:
             if fatal:
                 raise DiscardSignal(encode_text(f"bash: {name}: {conflict}\n"))
-            line = f"bash: {cmd}: {name}: {conflict}"
-            if errors is None:
-                return identifier_failure(cmd, [line])
-            errors.append(line)
+            errors.append(f"bash: {cmd}: {name}: {conflict}")
             continue
         try:
             await premark(view, name, shaping)
+            if kind is not None:
+                await drop_reference(session, view, name)
         except PolicyDenied as exc:
             return refusal(cmd, exc)
         base: ShellValue
@@ -357,41 +480,30 @@ async def store_staged_arrays(
                 built, bad_words = build_assoc_literal(
                     session.assocs.get(name), items, append
                 )
-                if errors is not None:
-                    errors.extend(
-                        f"bash: {name}: '{word}': must use subscript "
-                        "when assigning associative array"
-                        for word in bad_words
-                    )
+                warnings.extend(
+                    f"bash: {name}: '{word}': must use subscript "
+                    "when assigning associative array"
+                    for word in bad_words
+                )
                 base = built
             else:
-                held = session.arrays.get(name)
-                if append and held is None:
+                indexed = session.arrays.get(name)
+                if append and indexed is None:
                     scalar = conversion_scalar(session, name)
-                    held = None if scalar is None else [scalar]
+                    indexed = None if scalar is None else [scalar]
                 base = await build_indexed_literal(
-                    held,
+                    indexed,
                     items,
                     append,
                     functools.partial(subscript_index, session, view=view),
                 )
-            if global_scope:
-                await write_global(session, view, name, base)
-            else:
-                await view.set(name, base)
+            await view.set(name, base)
         except PolicyDenied as exc:
             return refusal(cmd, exc)
         except ArithError as exc:
             return arith_refusal(cmd, exc)
         if stored is not None:
             stored.append(name)
-        if mark is not None:
-            # Ungated when it lands where the `view.set` above was gated,
-            # so a policy does not see two writes for one operand.
-            try:
-                await mark_written(session, view, name, checked, mark, on)
-            except PolicyDenied as exc:
-                return refusal(cmd, exc)
     return None
 
 
@@ -494,24 +606,31 @@ def identifier_refusal(cmd: str, word: str) -> str | None:
     return f"bash: {cmd}: `{quoted}': not a valid identifier"
 
 
-def identifier_failure(
-    cmd: str, errors: list[str]
+def declaration_result(
+    cmd: str, errors: list[str], warnings: list[str] | None = None
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Render the refusals collected while declaring names.
+    """A declaration's answer once every operand ran.
 
-    One line per bad operand, exit 1, and the good operands on the same
-    line are already stored: GNU reports each and keeps going, so
-    ``export GOOD=1 1BAD=x GOOD2=2`` exports both good names.
+    Each warning, then each refusal, one line apiece, and exit 1 when an
+    operand refused. The good operands on the same line are already
+    stored: GNU reports each and keeps going, so ``export GOOD=1 1BAD=x
+    GOOD2=2`` exports both good names. A warning alone (``must use
+    subscript``) leaves the status 0.
 
     Args:
         cmd (str): builtin name for the node.
         errors (list[str]): the refusal lines, in operand order.
+        warnings (list[str] | None): lines that print without failing.
     """
-    err = encode_text("\n".join(errors) + "\n")
+    lines = [*(warnings or []), *errors]
+    if not lines:
+        return None, IOResult(), ExecutionNode(command=cmd, exit_code=0)
+    code = 1 if errors else 0
+    err = encode_text("\n".join(lines) + "\n")
     return (
         None,
-        IOResult(exit_code=1, stderr=err),
-        ExecutionNode(command=cmd, exit_code=1, stderr=err),
+        IOResult(exit_code=code, stderr=err),
+        ExecutionNode(command=cmd, exit_code=code, stderr=err),
     )
 
 
@@ -794,8 +913,9 @@ async def mark_functions(
     A name that is not a function is ``not a function``, exit 1, and the
     other operands are still marked (or, with ``on`` False, unmarked).
     An array literal (``export -f ARR=(a b)``) still stores first, with
-    no attribute, and its name is then checked like the others, as bash
-    assigns it before it looks for the function. With no names the
+    no attribute and its ``must use subscript`` warnings, and its name
+    is then checked like the others, as bash assigns it before it looks
+    for the function. With no names the
     marked functions print as bodies, each followed by its ``declare``
     line.
 
@@ -811,12 +931,16 @@ async def mark_functions(
             ``(name, append, items)`` literals from the declaration.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
     """
+    errors: list[str] = []
+    warnings: list[str] = []
     if arrays:
         refused = await store_staged_arrays(
             cmd,
             session,
             require_view(state),
             arrays,
+            errors,
+            warnings,
             fatal=True,
             kind=kind,
         )
@@ -828,7 +952,6 @@ async def mark_functions(
         lines = function_lines(session, listed, True, True)
         out = encode_text(("\n".join(lines) + "\n") if lines else "")
         return out, IOResult(), ExecutionNode(command=cmd, exit_code=0)
-    errors: list[str] = []
     for name in names:
         if name not in session.functions:
             errors.append(f"bash: {cmd}: {name}: not a function")
@@ -836,14 +959,7 @@ async def mark_functions(
             marked.add(name)
         else:
             marked.discard(name)
-    if errors:
-        err = encode_text("\n".join(errors) + "\n")
-        return (
-            None,
-            IOResult(exit_code=1, stderr=err),
-            ExecutionNode(command=cmd, exit_code=1, stderr=err),
-        )
-    return None, IOResult(), ExecutionNode(command=cmd, exit_code=0)
+    return declaration_result(cmd, errors, warnings)
 
 
 def note_local_array(session: SessionState, name: str) -> bool:
@@ -899,52 +1015,3 @@ def nameref_refusal(cmd: str, name: str, target: str) -> str | None:
             "not allowed"
         )
     return None
-
-
-async def write_global(
-    session: SessionState,
-    view: SessionView,
-    key: str,
-    value: ShellValue,
-    assigned: frozenset[int | str] | None = None,
-) -> None:
-    """Store a `declare -g` value on the global record.
-
-    Outside a function, or for a name no function on the call path has
-    shadowed, that is an ordinary write. Otherwise the running locals
-    live in `session.vars` and the global record is what the
-    *outermost* shadowing frame saved, so the write goes through the
-    door with the two swapped for its duration: the gate sees an
-    ordinary write, and the local comes back untouched, which is what
-    GNU shows (`local G=5; declare -g G=1` leaves `$G` at 5 in the
-    function and 1 outside, and a nested `declare -g` reaches past the
-    caller's local too).
-
-    Args:
-        session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
-        key (str): the variable.
-        value (ShellValue): the value.
-        assigned (frozenset[int | str] | None): the elements written,
-            None for the whole value.
-    """
-    outer = next(
-        (frame for frame in session._local_frames if key in frame), None
-    )
-    if outer is None:
-        await view.set(key, value, assigned=assigned)
-        return
-    shadowing = session.vars.get(key)
-    saved = outer[key]
-    if saved is None:
-        session.vars.pop(key, None)
-    else:
-        session.vars[key] = saved
-    try:
-        await view.set(key, value, assigned=assigned)
-        outer[key] = session.vars.get(key)
-    finally:
-        if shadowing is None:
-            session.vars.pop(key, None)
-        else:
-            session.vars[key] = shadowing

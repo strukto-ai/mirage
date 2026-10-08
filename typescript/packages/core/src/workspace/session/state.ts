@@ -32,6 +32,7 @@ import {
   RANDOM_MODULUS,
   RANDOM_UNSET,
 } from '../../shell/constants.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import { ArithError } from '../../shell/errors.ts'
 import type { ArithWrite, ElementOps } from '../../shell/types.ts'
 import { varHidden } from '../../utils/hidden.ts'
@@ -749,6 +750,17 @@ async function setVar(
   // The assignments the coercion or the seed made land now, gated each,
   // before the name they were made for.
   await landCoercion(session, policies, coercion, diagnostics)
+  // A reference cannot hold an array: one landing on an unaimed
+  // `declare -n` record drops the mark (`withValue`) and bash says so
+  // (`declare -n r; r=(x)`). A declaration that named the kind (`-a`,
+  // `-A`) took the mark off before writing, silently, as bash does.
+  if (
+    diagnostics !== undefined &&
+    existing?.attrs.has(VarAttr.Nameref) === true &&
+    typeof shaped === 'object'
+  ) {
+    diagnostics.push(encodeText(`bash: warning: ${name}: removing nameref attribute\n`))
+  }
   let stored = existing === undefined ? makeVar(shaped) : withValue(existing, shaped)
   // An agent write to a managed name shadows session-locally: the
   // pointer drops and the record becomes a plain variable for this
@@ -998,10 +1010,12 @@ async function markVar(
   name: string,
   attr: VarAttr | null,
   on: boolean,
+  followRef = true,
 ): Promise<void> {
-  // `readonly r` and `export r` on a reference mark what it points at;
-  // the nameref attribute itself belongs to the reference's own record.
-  if (attr !== VarAttr.Nameref) name = deref(session, name) || name
+  // `readonly r` and `export r` on a reference mark what it points at,
+  // and `declare -rn r` the reference itself (`followRef` false); the
+  // nameref attribute always belongs to the reference's own record.
+  if (followRef && attr !== VarAttr.Nameref) name = deref(session, name) || name
   ensureVarVisible(session, name)
   await preSessionGate(policies, {
     plane: 'env',
@@ -1024,7 +1038,8 @@ export function sessionView(
     set: (name, value, followRef = true, assigned = null) =>
       setVar(session, policies, name, value, followRef, diagnostics, assigned),
     unset: (name, followRef = true) => unsetVar(session, policies, name, followRef),
-    mark: (name, attr, on) => markVar(session, policies, name, attr, on),
+    mark: (name, attr, on, followRef = true) =>
+      markVar(session, policies, name, attr, on, followRef),
     isReadonly: (name) => envIsReadonly(session, name),
     profile: () => session.profile,
   }

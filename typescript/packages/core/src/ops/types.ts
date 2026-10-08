@@ -138,8 +138,9 @@ export interface SessionView {
   // and a bare `local NAME` on a fresh name leave it *unset* and merely
   // declared, which is a state `set` cannot express. Gated all the same
   // -- a mark is a session write, so a hidden name refuses and
-  // `preSession` rules.
-  mark(name: string, attr: VarAttr | null, on: boolean): Promise<void>
+  // `preSession` rules. `followRef` is `set`'s: `declare -rn r` marks the
+  // reference itself.
+  mark(name: string, attr: VarAttr | null, on: boolean, followRef?: boolean): Promise<void>
   // Whether `readonly` has marked the name.
   isReadonly(name: string): boolean
   // The name of the profile the session runs under, null for an

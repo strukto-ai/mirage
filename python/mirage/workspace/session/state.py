@@ -30,6 +30,7 @@ from mirage.shell.array import (
     array_with,
     make_array,
 )
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import (
     FUNCNAME,
@@ -1027,6 +1028,19 @@ async def set_var(
     # The assignments the coercion or the seed made land now, gated
     # each, before the name they were made for.
     await _land_coercion(session, policies, coercion, diagnostics)
+    # A reference cannot hold an array: one landing on an unaimed
+    # `declare -n` record drops the mark (`with_value`) and bash says so
+    # (`declare -n r; r=(x)`). A declaration that named the kind (`-a`,
+    # `-A`) took the mark off before writing, silently, as bash does.
+    if (
+        diagnostics is not None
+        and existing is not None
+        and VarAttr.NAMEREF in existing.attrs
+        and isinstance(value, (list, dict))
+    ):
+        diagnostics.append(
+            encode_text(f"bash: warning: {name}: removing nameref attribute\n")
+        )
     stored = (
         ShellVar(value) if existing is None else with_value(existing, value)
     )
@@ -1323,6 +1337,7 @@ async def mark_var(
     name: str,
     attr: VarAttr | None,
     on: bool = True,
+    follow_ref: bool = True,
 ) -> None:
     """Turn one attribute on or off through the session plane's gate.
 
@@ -1347,15 +1362,17 @@ async def mark_var(
         attr (VarAttr | None): the attribute to change, None to declare
             the name and change nothing.
         on (bool): set it, or clear it.
+        follow_ref (bool): mark what a ``declare -n`` reference points
+            at, as ``readonly r`` and ``export r`` do; ``declare -rn r``
+            marks the reference itself and passes False.
 
     Raises:
         PolicyDenied: the name is hidden for this session, or a
             pre_session policy refused the mark.
     """
-    # `readonly r` and `export r` on a reference mark what it points at,
-    # as bash does; the nameref attribute itself is the one mark that
-    # belongs to the reference's own record, on and off.
-    if attr is not VarAttr.NAMEREF:
+    # The nameref attribute itself is the one mark that belongs to the
+    # reference's own record, on and off.
+    if follow_ref and attr is not VarAttr.NAMEREF:
         name = deref(session, name) or name
     ensure_var_visible(session, name)
     await pre_session_gate(

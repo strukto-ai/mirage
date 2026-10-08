@@ -23,7 +23,6 @@ import { VarAttr, VarKind } from '../../shell/variable.ts'
 import { sessionEntry } from '../session/session.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import type { SessionView } from '../../ops/types.ts'
 import {
   handleDeclareFunctions,
   handleDeclarePrint,
@@ -46,13 +45,7 @@ import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
-import {
-  conversionScalar,
-  ensureVarVisible,
-  seedVar,
-  sessionView,
-  setAttr,
-} from '../session/state.ts'
+import { conversionScalar, ensureVarVisible, seedVar, sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { expandArrayItems } from './assignment.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -88,13 +81,8 @@ function mergeConversionErrors(result: Result, errors: readonly string[]): Resul
 // Every letter GNU's `declare` accepts, so a typo refuses with the usage
 // line instead of being silently dropped. `-a`/`-A` are kinds, not
 // attributes, and are handled by the array branch; `-p`/`-f`/`-F`/`-g`
-// /`-I` are modes the handlers read. `-n` is accepted and stored, but
-// aliasing (reads and writes through the reference) is not wired: it is
-// a separate seam through every expansion site, so a name carrying it
-// declares and prints, and nothing more, rather than a partial alias
-// that works in some spellings and not others.
-// `-n` stores the reference and every reader and writer resolves through
-// it (`deref` in `session/state`).
+// /`-I` are modes the handlers read. `-n` stores the reference and every
+// reader and writer resolves through it (`deref` in `session/state`).
 const DECLARE_LETTERS: ReadonlySet<string> = new Set('aAfFgiIlnprtux')
 const DECLARE_USAGE =
   'declare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]'
@@ -107,6 +95,11 @@ const ATTR_LETTERS: ReadonlyMap<string, VarAttr> = new Map([
   ['t', VarAttr.Trace],
   ['x', VarAttr.Export],
   ['r', VarAttr.Readonly],
+])
+// `-l` displaces `-u` and vice versa; the record keeps one.
+const DISPLACES: ReadonlyMap<string, VarAttr> = new Map([
+  ['l', VarAttr.Upper],
+  ['u', VarAttr.Lower],
 ])
 
 /** The attributes the given letters name, in the order given, skipping
@@ -146,163 +139,42 @@ function declareOptionRefusal(
 }
 
 /**
- * The per-name refusals a `+letter` earns after the operands are known.
+ * The attribute marks a declaration puts on each operand once it lands, in
+ * order, readonly last.
  *
- * Two letters cannot be taken off. `+r` on a readonly name is
- * `declare: R: readonly variable`, exit 1, and the name stays frozen.
- * `+a` / `+A` on an array is `cannot destroy array variables in this
- * way`, exit 1, since the kind is what the value is, not a mark. Both
- * are pinned on 5.2.37 and neither stops the other operands from
- * declaring; the first refusal is what the builtin reports.
+ * The letters that shape a value (`-i -l -u`) are stored as attributes and
+ * applied by the door on every *later* write, which is GNU's rule:
+ * `v=MiXeD; declare -l v` keeps `MiXeD`, and the next `v=ABC` stores `abc`.
+ * So this marks and never rewrites. `-l` and `-u` are exclusive: setting
+ * one clears the other, and a cluster naming both (`-lu`, `-ul`) sets
+ * neither, both pinned on 5.2.37. A `+` letter clears; `+r` is not an off
+ * toggle, since it is refused on a readonly name (`plusRefusal`) and a
+ * no-op otherwise. `r` lands last, as each operand's own last step:
+ * `declare -rl L=ABC L=DEF` keeps `abc` and refuses the second write.
  */
-function plusRefusals(
-  cmd: string,
-  context: EvaluationContext,
-  view: SessionView,
-  plusChars: ReadonlySet<string>,
-  assignments: readonly string[],
-  staged: readonly { name: string }[] | null,
-): Result | null {
-  const session = context.session
-  if (!plusChars.has('r') && !plusChars.has('a') && !plusChars.has('A')) return null
-  const names = assignments.map((a) => a.split('=')[0] ?? a)
-  for (const { name } of staged ?? []) names.push(name)
-  for (const name of names) {
-    if (plusChars.has('r') && view.isReadonly(name)) {
-      const err = encodeText(`bash: ${cmd}: ${name}: readonly variable\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: err }),
-        new ExecutionNode({ command: cmd, exitCode: 1, stderr: err }),
-      ]
-    }
-    if (
-      (plusChars.has('a') && Object.hasOwn(session.arrays, name)) ||
-      (plusChars.has('A') && Object.hasOwn(session.assocs, name))
-    ) {
-      const err = encodeText(`bash: ${cmd}: ${name}: cannot destroy array variables in this way\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: err }),
-        new ExecutionNode({ command: cmd, exitCode: 1, stderr: err }),
-      ]
-    }
-  }
-  return null
-}
-
-/**
- * Apply every `-attr` / `+attr` letter to the names a declaration
- * stored, on top of the export stamp.
- *
- * The letters that shape a value (`-i -l -u`) are stored as attributes
- * and applied by the door on every *later* write, which is GNU's rule:
- * `v=MiXeD; declare -l v` keeps `MiXeD`, and the next `v=ABC` stores
- * `abc`. So this stamps and never rewrites. `-l` and `-u` are exclusive:
- * setting one clears the other, and a cluster naming both (`-lu`, `-ul`)
- * sets neither, both pinned on 5.2.37. A `+` letter clears; `+r` is
- * refused earlier on a readonly name and a no-op otherwise, so it is not
- * an off toggle. Through the gated mark door for every name, covered or
- * not: the handler already cleared the gate for these names, so this is
- * one redundant policy call per attribute, and it keeps this stamp out
- * of the ungated-write allowlist that `setAttr` sites must justify.
- */
-async function stampAttrs(
-  context: EvaluationContext,
-  view: SessionView,
+function declaredMarks(
   flagChars: ReadonlySet<string>,
   plusChars: ReadonlySet<string>,
-  assignments: readonly string[],
-  staged: readonly { name: string }[] | null,
-  stored: readonly string[],
-): Promise<Result | null> {
-  const refused = await stampExport(context, view, flagChars, assignments, staged, stored)
-  if (refused !== null) return refused
-  // `r` last: a frozen name takes no further attribute.
-  let onAttrs = attrsFor('iluntr', (c) => flagChars.has(c) && !plusChars.has(c))
-  if (flagChars.has('l') && flagChars.has('u')) {
-    onAttrs = onAttrs.filter((a) => a !== VarAttr.Lower && a !== VarAttr.Upper)
+): (readonly [VarAttr, boolean])[] {
+  const on = new Set<string>()
+  for (const c of 'iluntxr') if (flagChars.has(c) && !plusChars.has(c)) on.add(c)
+  if (on.has('l') && on.has('u')) {
+    on.delete('l')
+    on.delete('u')
   }
-  const offAttrs = attrsFor('iluntx', (c) => plusChars.has(c))
-  if (onAttrs.length === 0 && offAttrs.length === 0) return null
-  try {
-    for (const name of stored) {
-      for (const attr of onAttrs) {
-        await view.mark(name, attr, true)
-        // `-l` displaces `-u` and vice versa; the record keeps one.
-        if (attr === VarAttr.Lower) await view.mark(name, VarAttr.Upper, false)
-        else if (attr === VarAttr.Upper) await view.mark(name, VarAttr.Lower, false)
-      }
-      for (const attr of offAttrs) await view.mark(name, attr, false)
-    }
-  } catch (err) {
-    if (!(err instanceof PolicyDenied)) throw err
-    const denied = encodeText(`${err.message}\n`)
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: denied }),
-      new ExecutionNode({ command: 'declare', exitCode: 1, stderr: denied }),
-    ]
-  }
-  return null
-}
-
-/**
- * Mark every name a `-x` declaration stored as exported.
- *
- * `declare -x NAME` marks an existing name without touching its value and
- * `declare -x NAME=v` assigns then marks, so the stamp lands after the
- * assignment either way. Staged array literals are stamped too, since an
- * array is as exportable as a scalar: GNU answers `declare -x A=(a b)`
- * with `declare -ax A=([0]="a" [1]="b")`, and reading only `assignments`
- * left every `declare -x NAME=(...)` unmarked.
- *
- * Only the names the handler reports storing are marked, and marking is
- * not gated on the aggregate status: a declaration keeps its valid
- * operands when a sibling refuses, so `declare -x GOOD=1 1BAD=x` exits 1
- * and still answers `declare -x GOOD="1"`.
- *
- * A name that carried a value went through `view.set`, so its mark rides
- * on that decision; a bare name did not, and on an *existing* name the
- * handler writes nothing at all, so the mark is the only session write
- * there is and has to clear `pre_session` itself. Stamping it through
- * `setAttr` let `declare -x AWS_TOKEN` export a host-seeded credential
- * the deployment had refused.
- */
-async function stampExport(
-  context: EvaluationContext,
-  view: SessionView,
-  flagChars: ReadonlySet<string>,
-  assignments: readonly string[],
-  staged: readonly { name: string }[] | null,
-  stored: readonly string[],
-): Promise<Result | null> {
-  const session = context.session
-  if (!flagChars.has('x')) return null
-  const covered = new Set<string>()
-  for (const a of assignments) {
-    const eq = a.indexOf('=')
-    if (eq >= 0) covered.add(a.slice(0, eq))
-  }
-  for (const { name } of staged ?? []) covered.add(name)
-  for (const name of stored) {
-    if (covered.has(name)) {
-      setAttr(session, name, VarAttr.Export)
-      continue
-    }
-    try {
-      await view.mark(name, VarAttr.Export, true)
-    } catch (err) {
-      if (!(err instanceof PolicyDenied)) throw err
-      const encoded = encodeText(`${err.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: encoded }),
-        new ExecutionNode({ command: 'declare', exitCode: 1, stderr: encoded }),
-      ]
+  const marks: (readonly [VarAttr, boolean])[] = []
+  for (const c of 'xiluntr') {
+    const attr = ATTR_LETTERS.get(c)
+    if (attr === undefined) continue
+    if (on.has(c)) {
+      marks.push([attr, true])
+      const displaced = DISPLACES.get(c)
+      if (displaced !== undefined) marks.push([displaced, false])
+    } else if (plusChars.has(c) && c !== 'r') {
+      marks.push([attr, false])
     }
   }
-  return null
+  return marks
 }
 
 /**
@@ -310,9 +182,9 @@ async function stampExport(
  *
  * The executor only reads the operands: it expands them, sorts them
  * into option letters, plain names and staged array literals, then
- * hands the result to the builtin handler that owns the keyword. The
- * attribute letters (`-x`, `-i`, `-l`) are stamped afterwards through
- * the same gated door, so `declare -rx X=1` keeps both marks.
+ * hands the result to the builtin handler that owns the keyword, which
+ * marks each operand with the attribute letters (`-x`, `-i`, `-l`) as it
+ * lands, so `declare -rx X=1` keeps both marks.
  */
 export async function executeDeclaration(
   node: TSNodeLike,
@@ -471,36 +343,30 @@ export async function executeDeclaration(
         if (!(err instanceof PolicyDenied)) throw err
         throw new DiscardSignal(encodeText(`${err.message}\n`))
       }
-      // A new local shadows the caller's variable (and its reference), so
-      // its kind is free.
       const fresh =
         !flagChars.has('g') && session.localVars !== null && !session.localVars.has(bare)
       const heldVar = sessionEntry(session.vars, bare)
       // `handleLocal` refuses a readonly name in its voice.
       if (fresh && heldVar?.attrs.has(VarAttr.Readonly) === true) continue
-      const conflict = fresh ? null : kindConflict(heldValue(session, bare), kind)
+      // Inside a function the name is a local of the declared kind, a new
+      // one starting as `startLocal` leaves it (with `-I`, the value it
+      // shadows); `-g` declares at global scope.
+      const local = !flagChars.has('g') && noteLocalArray(session, bare)
+      if (local && fresh) startLocal(session, bare, flagChars.has('I'))
+      const held = heldValue(session, bare)
+      const conflict = kindConflict(held, kind)
       if (conflict !== null) {
         conversionErrors.push(`bash: ${cmdWord}: ${bare}: ${conflict}`)
         continue
       }
-      if (!flagChars.has('g') && noteLocalArray(session, bare)) {
-        // Inside a function this shadows whatever the caller had with
-        // a fresh empty array of the declared kind, which takes the
-        // attributes `localAttrs` keeps; `-g` declares at global scope
-        // instead.
-        if (fresh) startLocal(session, bare, flagChars.has('I'))
-        seedVar(session, bare, wantAssoc ? {} : [])
-      } else if (wantAssoc && !Object.hasOwn(session.assocs, bare)) {
-        // At top level an existing scalar becomes the value at the
-        // literal key "0" (GNU allows scalar-to-associative
-        // conversion, unlike indexed).
-        const scalar = conversionScalar(session, bare)
-        seedVar(session, bare, scalar === undefined ? {} : { '0': scalar })
-      } else if (!wantAssoc && !Object.hasOwn(session.arrays, bare)) {
-        // At top level an existing scalar becomes element 0.
-        const scalar = conversionScalar(session, bare)
-        seedVar(session, bare, scalar === undefined ? [] : [scalar])
-      }
+      const isMap = held !== null && typeof held === 'object' && !Array.isArray(held)
+      if (wantAssoc ? isMap : Array.isArray(held)) continue
+      // A local of another kind starts empty; at top level an existing
+      // scalar becomes element 0, or the value at the literal key "0" (GNU
+      // allows scalar-to-associative conversion, unlike indexed).
+      const scalar = local ? undefined : conversionScalar(session, bare)
+      if (wantAssoc) seedVar(session, bare, scalar === undefined ? {} : { '0': scalar })
+      else seedVar(session, bare, scalar === undefined ? [] : [scalar])
     }
   }
   // Array literals travel as data: the handler stores them through
@@ -520,38 +386,26 @@ export async function executeDeclaration(
   // declare/typeset scope like `local` inside a function (bash
   // semantics) and assign globally at top level, which is exactly
   // handleLocal's fallback when no function scope is active. `-r` rides
-  // the same path and is stamped after the value lands, so
+  // the same path and lands on what each operand wrote, so
   // `f() { local -r A=(x); }` freezes f's own A, not the caller's.
   if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
-    const declView2 = sessionView(session, registry.policies, context.frame.diagnostics)
-    const stored2: string[] = []
     const result = await handleLocal(
       assignments,
       session,
-      declView2,
+      sessionView(session, registry.policies, context.frame.diagnostics),
       staged,
       // `declare`/`typeset` share this handler but have to name
       // themselves in a diagnostic rather than say `local`.
       cmdWord,
-      stored2,
       kind,
       shaping,
+      declaredMarks(flagChars, plusChars),
+      [...plusChars].sort(compareCodePoints).join(''),
       flagChars.has('n') && !plusChars.has('n'),
       flagChars.has('g'),
       flagChars.has('I'),
     )
-    const plusRefused = plusRefusals(cmdWord, context, declView2, plusChars, assignments, staged)
-    if (plusRefused !== null) return plusRefused
-    const refused2 = await stampAttrs(
-      context,
-      declView2,
-      flagChars,
-      plusChars,
-      assignments,
-      staged,
-      stored2,
-    )
-    return refused2 ?? mergeConversionErrors(result, conversionErrors)
+    return mergeConversionErrors(result, conversionErrors)
   }
   // Pass export flags through so -p / bare print and illegal options work.
   const exportResult = await handleExport(

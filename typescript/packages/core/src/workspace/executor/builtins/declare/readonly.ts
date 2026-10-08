@@ -21,14 +21,15 @@ import { deref, outliveCall } from '../../../session/state.ts'
 import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { arithRefusal, readonlyRefusal, refusal, requireView } from '../shared.ts'
+import { arithRefusal, readonlyLine, refusal, requireView } from '../shared.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { READONLY_FLAGS, READONLY_USAGE } from './constants.ts'
 import {
+  declarationResult,
   declareLine,
   declaredKind,
+  dropReference,
   heldValue,
-  identifierFailure,
   identifierRefusal,
   kindConflict,
   kindListed,
@@ -100,20 +101,31 @@ export async function handleReadonly(
   }
   const view = requireView(state)
   const errors: string[] = []
+  const warnings: string[] = []
   if (arrays !== null && arrays.length > 0) {
+    // Frozen once every literal has stored: bash's `readonly A=(1) A=(2)`
+    // keeps `(2)`, and a later `A=3` refuses.
+    const stored: string[] = []
     const refused = await storeStagedArrays(
       'readonly',
       session,
       view,
       arrays,
-      VarAttr.Readonly,
-      true,
-      true,
-      null,
-      kind,
       errors,
+      warnings,
+      true,
+      stored,
+      kind,
     )
     if (refused !== null) return refused
+    try {
+      for (const name of stored) {
+        await markWritten(session, view, name, deref(session, name) || name, VarAttr.Readonly)
+      }
+    } catch (err) {
+      if (err instanceof PolicyDenied) return refusal('readonly', err)
+      throw err
+    }
   }
   for (const assign of names) {
     const badName = identifierRefusal('readonly', assign)
@@ -123,7 +135,10 @@ export async function handleReadonly(
     }
     const eq = assign.indexOf('=')
     const key = eq >= 0 ? assign.slice(0, eq) : assign
-    if (eq >= 0 && view.isReadonly(key)) return readonlyRefusal('readonly', key)
+    if (eq >= 0 && view.isReadonly(key)) {
+      errors.push(readonlyLine('readonly', key))
+      continue
+    }
     // A value of the other array kind is refused and the name is still
     // frozen, as bash does.
     const held = eq >= 0 ? heldValue(session, key) : null
@@ -133,6 +148,7 @@ export async function handleReadonly(
       const [value, assigned] = scalarValue(held, assign.slice(eq + 1), kind)
       const checked = deref(session, key) || key
       try {
+        if (kind !== null) await dropReference(session, view, key)
         await view.set(key, value, true, assigned)
         // Rides on the gate the `view.set` above passed, unless the write
         // re-aimed a reference (`markWritten`).
@@ -157,6 +173,5 @@ export async function handleReadonly(
     }
     outliveCall(session, key)
   }
-  if (errors.length > 0) return identifierFailure('readonly', errors)
-  return [null, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
+  return declarationResult('readonly', errors, warnings)
 }

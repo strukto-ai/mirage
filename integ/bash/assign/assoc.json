@@ -1223,6 +1223,40 @@
         "stdout": "rc=1\ndeclare -r R=\"outer\"\ndeclare -i I=\"7\"\n5\ndeclare -ai I=([0]=\"5\")\ndeclare -i K=\"2\"\ndeclare -- I=\"2+3\"\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "assoc_stray_words_warn_without_failing",
+      "seq": 930536,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( MAP(){ :; }; readonly -Af MAP=([k]=v stray); echo rc=$?; export -A M2=([k]=v s2); echo rc=$?; declare -A M3; M3=([k]=v s3); echo rc=$?; declare -A M4=([k]=v s4) 1BAD=x; echo rc=$?; declare -p MAP M2 M3 M4 )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=0\nrc=0\nrc=1\ndeclare -A MAP=([k]=\"v\" )\ndeclare -Ax M2=([k]=\"v\" )\ndeclare -A M3=([k]=\"v\" )\ndeclare -A M4=([k]=\"v\" )\n",
+        "stderr": "bash: MAP: 'stray': must use subscript when assigning associative array\nbash: M2: 's2': must use subscript when assigning associative array\nbash: M3: s3: must use subscript when assigning associative array\nbash: M4: 's4': must use subscript when assigning associative array\nbash: declare: `1BAD=x': not a valid identifier\n"
+      }
     }
   ]
 }

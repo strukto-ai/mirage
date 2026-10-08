@@ -30,6 +30,7 @@ import { attrLetters, VarAttr, VarKind } from '../../../../shell/variable.ts'
 import {
   conversionScalar,
   deref,
+  inCallEnv,
   setAttr,
   shadowLocal,
   subscriptIndex,
@@ -37,7 +38,7 @@ import {
 import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { arithRefusal, isValidName, readonlyRefusal, refusal, requireView } from '../shared.ts'
+import { arithRefusal, isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import {
   ANSI_C_ESCAPES,
@@ -59,46 +60,6 @@ export async function premark(
 }
 
 /**
- * Store a declaration's array literals through the session door.
- *
- * The builtin owns the store so a refusal speaks in its own voice:
- * readonly is the shell's rule, checked per name before the door, and
- * the door's gate covers the policy half. Names are processed in
- * order, so an earlier operand stays stored when a later one refuses,
- * as bash does. Returns the refusal result, or null when every
- * literal stored.
- *
- * `mark` is the attribute the declaring keyword puts on each stored
- * name: Readonly for `readonly`, Export for `export`. An attribute
- * rather than a bool because both keywords stage array literals through
- * here and hardcoding one of them silently dropped the other:
- * `export ARR=(a b)` stored the array and never marked it, so GNU's
- * `declare -ax` came out `declare -a`.
- *
- * `stored` is filled with each name that actually stored, in order. A
- * declaration keeps its valid operands when a sibling refuses, so the
- * caller cannot read "what was written" off the aggregate exit status.
- *
- * `on` is the direction of that mark. `export -n ARR=(b)` stores the
- * array and takes the attribute *off*, and the store keeps whatever the
- * name already carried, so leaving the mark unapplied left an exported
- * array exported.
- *
- * A readonly refusal of an array literal is a variable-assignment error
- * in GNU, not a builtin failure: for `export`/`readonly` (and `declare`
- * at top level) `fatal` abandons the rest of the line, while `local`
- * and a function-scoped `declare` refuse in the builtin's voice and the
- * body keeps running (pinned on bash 5.2, debian:stable-slim).
- *
- * `assoc` means the declaration carried `-A`, so every literal builds
- * an associative map; without it a name that already holds one still
- * builds a map, since a plain `m+=([k]=v)` keeps the variable's own
- * kind. `errors` is filled with bash-voiced refusal lines for the
- * plain words a keyed associative literal cannot take; the caller
- * folds them into its exit status, because GNU stores the valid
- * elements and still fails the builtin.
- */
-/**
  * The array kind a declaration's `-a` / `-A` asks for, `-A` winning when both
  * are given (bash's `export -aA B=(1)` builds a map), or null for neither.
  */
@@ -110,20 +71,10 @@ export function declaredKind(flags: ReadonlySet<string>): VarKind | null {
 
 /**
  * The value a declaration's `NAME=...` lands on: the variable a `declare -n`
- * reference names, and under `-g` the global record a function's local
- * shadows.
+ * reference names.
  */
-export function heldValue(
-  session: SessionState,
-  name: string,
-  globalScope = false,
-): ShellValue | null {
-  const target = deref(session, name) || name
-  if (globalScope) {
-    const frame = session.localFrames.find((f) => f.has(target))
-    if (frame !== undefined) return frame.get(target)?.value ?? null
-  }
-  return sessionEntry(session.vars, target)?.value ?? null
+export function heldValue(session: SessionState, name: string): ShellValue | null {
+  return sessionEntry(session.vars, deref(session, name) || name)?.value ?? null
 }
 
 /**
@@ -139,16 +90,20 @@ export function localAttrs(v: ShellVar | undefined, inherit: boolean): Set<VarAt
 
 /**
  * Reset a name the running function just shadowed to what a new local starts
- * as: unset, with the attributes `localAttrs` keeps. This is the scope's own
- * bookkeeping, not a session write: the caller's record is the frame's to
- * put back on return, so no policy is asked to delete it. The local's value
- * lands later through the gated door, which judges that write.
+ * as: unset, with the attributes `localAttrs` keeps, or under `-I` the
+ * shadowed value too, so `local -I A=new` over `A=(old keep)` writes element
+ * 0 of `(old keep)`. This is the scope's own bookkeeping, not a session
+ * write: the caller's record is the frame's to put back on return, so no
+ * policy is asked to delete it. The local's value lands later through the
+ * gated door, which judges that write.
  */
 export function startLocal(session: SessionState, name: string, inherit: boolean): void {
-  const kept = localAttrs(sessionEntry(session.vars, name), inherit)
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-  delete session.vars[name]
-  if (kept.size > 0) setSessionEntry(session.vars, name, { value: null, attrs: kept })
+  const v = sessionEntry(session.vars, name)
+  const kept = localAttrs(v, inherit)
+  place(session, name, null)
+  if (v !== undefined && (kept.size > 0 || inherit)) {
+    place(session, name, { value: inherit ? v.value : null, attrs: kept })
+  }
 }
 
 /**
@@ -203,7 +158,9 @@ export function kindListed(
  * covered `checked`, the target before it, so the mark rides on that
  * decision; a write that re-aimed an unset `declare -n` reference
  * (`declare -n r; export r=X`) landed on a target no gate has seen, so that
- * mark goes through the gated door.
+ * mark goes through the gated door, as does the reference mark itself
+ * (`+n`), which belongs to the reference's own record. `followRef` is false
+ * when the write was a `declare -n` declaration's, on the reference itself.
  */
 export async function markWritten(
   session: SessionState,
@@ -212,49 +169,172 @@ export async function markWritten(
   checked: string,
   attr: VarAttr,
   on = true,
+  followRef = true,
 ): Promise<void> {
-  const target = deref(session, name) || name
+  const follows = followRef && attr !== VarAttr.Nameref
+  const target = follows ? deref(session, name) || name : name
   if (target === checked) setAttr(session, target, attr, on)
-  else await view.mark(name, attr, on)
+  else await view.mark(name, attr, on, followRef)
 }
 
+/**
+ * Put a declaration's attribute marks on what one operand landed on, as
+ * soon as it lands: `declare -r R=1 R=2` refuses the second write, and
+ * under `-g` the global record takes them. A written operand's marks ride
+ * on its write's gate (`markWritten`); a bare one (`checked` null) wrote
+ * nothing, so each mark goes through the gated door.
+ */
+export async function stampMarks(
+  session: SessionState,
+  view: SessionView,
+  name: string,
+  checked: string | null,
+  marks: readonly (readonly [VarAttr, boolean])[],
+  followRef = true,
+): Promise<void> {
+  for (const [attr, on] of marks) {
+    if (checked === null) await view.mark(name, attr, on, followRef)
+    else await markWritten(session, view, name, checked, attr, on, followRef)
+  }
+}
+
+/**
+ * Take the mark off an unaimed `declare -n` reference a declared array kind
+ * is about to land on, silently, as bash's `export -a ref=v` does (an
+ * undeclared array warns at the door).
+ */
+export async function dropReference(
+  session: SessionState,
+  view: SessionView,
+  name: string,
+): Promise<void> {
+  const target = deref(session, name) || name
+  if (sessionEntry(session.vars, target)?.attrs.has(VarAttr.Nameref) === true) {
+    await view.mark(target, VarAttr.Nameref, false)
+  }
+}
+
+/**
+ * The line a `+letter` earns on one operand, if any. Two letters cannot be
+ * taken off: `+r` on a readonly name is `declare: R: readonly variable` and
+ * the name stays frozen; `+a` / `+A` on an array is `cannot destroy array
+ * variables in this way`, since the kind is what the value is, not a mark.
+ * Either skips that operand's value and marks, and the others still declare
+ * (pinned on 5.2.37).
+ */
+export function plusRefusal(
+  cmd: string,
+  session: SessionState,
+  view: SessionView,
+  name: string,
+  plus: string,
+): string | null {
+  if (plus.includes('r') && view.isReadonly(name)) return readonlyLine(cmd, name)
+  if (
+    (plus.includes('a') && Object.hasOwn(session.arrays, name)) ||
+    (plus.includes('A') && Object.hasOwn(session.assocs, name))
+  ) {
+    return `bash: ${cmd}: ${name}: cannot destroy array variables in this way`
+  }
+  return null
+}
+
+function place(session: SessionState, name: string, v: ShellVar | null): void {
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  if (v === null) delete session.vars[name]
+  else setSessionEntry(session.vars, name, v)
+}
+
+/**
+ * Put each name's global record in place for a `declare -g`, and return the
+ * call that puts the running locals back. Outside a function, or for a name
+ * no frame on the call path shadows, the global record is already in place.
+ * Otherwise the running local lives in `session.vars` and the global is
+ * what the *outermost* shadowing frame saved, so the two swap for the
+ * declaration: its reads, writes and marks reach the global, and the local
+ * comes back untouched, which is what GNU shows (`local G=5; declare -gr
+ * G=1` leaves `$G` at 5 and writable in the function, 1 and frozen outside,
+ * and a nested `declare -g` reaches past the caller's local too).
+ */
+export function reachGlobal(session: SessionState, names: readonly string[]): () => void {
+  const swapped: [string, Map<string, ShellVar | null>, ShellVar | null][] = []
+  for (const name of new Set(names)) {
+    const outer = session.localFrames.find((frame) => frame.has(name))
+    if (outer === undefined) continue
+    swapped.push([name, outer, sessionEntry(session.vars, name) ?? null])
+    place(session, name, outer.get(name) ?? null)
+  }
+  return () => {
+    for (const [name, outer, running] of swapped) {
+      outer.set(name, sessionEntry(session.vars, name) ?? null)
+      place(session, name, running)
+    }
+  }
+}
+
+/**
+ * Store a declaration's array literals through the session door.
+ *
+ * The builtin owns the store; readonly is the shell's rule, checked per name
+ * before the door, and the door's gate covers the policy half. Names are
+ * processed in order, so an earlier operand stays stored when a later one
+ * refuses, as bash does. A readonly refusal or kind conflict of an array
+ * literal is a variable-assignment error in GNU, not a builtin failure: for
+ * `export`/`readonly` (and `declare` at top level) `fatal` abandons the rest
+ * of the line, while `local` and a function-scoped `declare` refuse in the
+ * builtin's voice into `errors` and the body keeps running (pinned on bash
+ * 5.2, debian:stable-slim). Returns the refusal result, or null.
+ *
+ * Inside a function `declare` and `local` make each name local, starting as
+ * `startLocal` leaves it (with `-I`, the value it shadows); `export` and
+ * `readonly` (`VISIBLE_SCOPE_BUILTINS`) and `-g` write the visible one.
+ *
+ * `kind` is the kind `-a` / `-A` declared: `-A` builds every literal as an
+ * associative map, and without it a name that already holds one still
+ * builds a map, since a plain `m+=([k]=v)` keeps the variable's own kind.
+ * `warnings` is filled with the `must use subscript` lines for the plain
+ * words a keyed associative literal cannot take; GNU stores the valid
+ * elements and the status stays 0.
+ *
+ * The caller marks the names `stored` reports once every literal has
+ * stored: bash's `readonly A=(1) A=(2)` keeps `(2)`, so a literal is not
+ * refused by a mark the same declaration put on.
+ */
 export async function storeStagedArrays(
   cmd: string,
   session: SessionState,
   view: SessionView,
-  arrays: { name: string; append: boolean; items: string[] }[],
-  mark: VarAttr | null = null,
-  on = true,
+  arrays: readonly { name: string; append: boolean; items: string[] }[],
+  errors: string[],
+  warnings: string[],
   fatal = false,
   stored: string[] | null = null,
   kind: VarKind | null = null,
-  errors: string[] | null = null,
   shaping: ReadonlySet<VarAttr> = new Set(),
   globalScope = false,
+  inherit = false,
 ): Promise<Result | null> {
+  const scoped = !globalScope && !VISIBLE_SCOPE_BUILTINS.has(cmd)
+  const locals = scoped ? session.localVars : null
   for (const { name, append, items } of arrays) {
-    const checked = deref(session, name) || name
     if (view.isReadonly(name)) {
-      if (fatal) {
-        throw new DiscardSignal(encodeText(`bash: ${name}: readonly variable\n`))
-      }
-      return readonlyRefusal(cmd, name)
+      if (fatal) throw new DiscardSignal(encodeText(`bash: ${name}: readonly variable\n`))
+      errors.push(readonlyLine(cmd, name))
+      continue
     }
-    // Inside a function `declare` and `local` make the name local, which
-    // shadows the caller's variable so its kind is free; `export`,
-    // `readonly` and `-g` write the visible one.
-    const shadowed =
-      !globalScope && !VISIBLE_SCOPE_BUILTINS.has(cmd) && noteLocalArray(session, name)
-    const conflict = shadowed ? null : kindConflict(heldValue(session, name, globalScope), kind)
+    const fresh = locals !== null && !locals.has(name)
+    if (locals !== null) shadowLocal(session, locals, name)
+    if (fresh && !inCallEnv(session, name)) startLocal(session, name, inherit)
+    const held = fresh && !inherit ? null : heldValue(session, name)
+    const conflict = kindConflict(held, kind)
     if (conflict !== null) {
       if (fatal) throw new DiscardSignal(encodeText(`bash: ${name}: ${conflict}\n`))
-      const line = `bash: ${cmd}: ${name}: ${conflict}`
-      if (errors === null) return identifierFailure(cmd, [line])
-      errors.push(line)
+      errors.push(`bash: ${cmd}: ${name}: ${conflict}`)
       continue
     }
     try {
       await premark(view, name, shaping)
+      if (kind !== null) await dropReference(session, view, name)
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal(cmd, err)
       throw err
@@ -266,42 +346,29 @@ export async function storeStagedArrays(
     try {
       if (kind === VarKind.Assoc || Object.hasOwn(session.assocs, name)) {
         const { map, badWords } = buildAssocLiteral(session.assocs[name] ?? null, items, append)
-        if (errors !== null) {
-          for (const word of badWords) {
-            errors.push(
-              `bash: ${name}: '${word}': must use subscript when assigning associative array`,
-            )
-          }
+        for (const word of badWords) {
+          warnings.push(
+            `bash: ${name}: '${word}': must use subscript when assigning associative array`,
+          )
         }
         base = map
       } else {
-        let held: ShellArray | null = session.arrays[name] ?? null
-        if (append && held === null) {
+        let indexed: ShellArray | null = session.arrays[name] ?? null
+        if (append && indexed === null) {
           const scalar = conversionScalar(session, name)
-          held = scalar === undefined ? null : [scalar]
+          indexed = scalar === undefined ? null : [scalar]
         }
-        base = await buildIndexedLiteral(held, items, append, (sub) =>
+        base = await buildIndexedLiteral(indexed, items, append, (sub) =>
           subscriptIndex(session, sub, view),
         )
       }
-      if (globalScope) await writeGlobal(session, view, name, base)
-      else await view.set(name, base)
+      await view.set(name, base)
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal(cmd, err)
       if (err instanceof ArithError) return arithRefusal(cmd, err)
       throw err
     }
     if (stored !== null) stored.push(name)
-    // Ungated when it lands where the `view.set` above was gated, so a
-    // policy does not see two writes for one operand.
-    if (mark !== null) {
-      try {
-        await markWritten(session, view, name, checked, mark, on)
-      } catch (err) {
-        if (err instanceof PolicyDenied) return refusal(cmd, err)
-        throw err
-      }
-    }
   }
   return null
 }
@@ -425,18 +492,29 @@ export function identifierRefusal(cmd: string, word: string): string | null {
 }
 
 /**
- * Render the refusals collected while declaring names.
+ * A declaration's answer once every operand ran: each warning, then each
+ * refusal, one line apiece, and exit 1 when an operand refused. A warning
+ * alone (`must use subscript`) leaves the status 0.
  *
  * One line per bad operand, exit 1, and the good operands on the same
  * line are already stored: GNU reports each and keeps going, so
  * `export GOOD=1 1BAD=x GOOD2=2` exports both good names.
  */
-export function identifierFailure(cmd: string, errors: string[]): Result {
-  const err = encodeText(`${errors.join('\n')}\n`)
+export function declarationResult(
+  cmd: string,
+  errors: readonly string[],
+  warnings: readonly string[] = [],
+): Result {
+  const lines = [...warnings, ...errors]
+  if (lines.length === 0) {
+    return [null, new IOResult(), new ExecutionNode({ command: cmd, exitCode: 0 })]
+  }
+  const code = errors.length > 0 ? 1 : 0
+  const err = encodeText(`${lines.join('\n')}\n`)
   return [
     null,
-    new IOResult({ exitCode: 1, stderr: err }),
-    new ExecutionNode({ command: cmd, exitCode: 1, stderr: err }),
+    new IOResult({ exitCode: code, stderr: err }),
+    new ExecutionNode({ command: cmd, exitCode: code, stderr: err }),
   ]
 }
 
@@ -656,9 +734,9 @@ export function handleDeclareFunctions(
  * Run `readonly -f` or `export -f`: mark functions, or list them. A name
  * that is not a function is `not a function`, exit 1, and the other operands
  * are still marked (or, with `on` false, unmarked). An array literal
- * (`export -f ARR=(a b)`) still stores first, with no attribute, and its name
- * is then checked like the others, as bash assigns it before it looks for
- * the function. With no names the marked functions print as bodies, each
+ * (`export -f ARR=(a b)`) still stores first, with no attribute and its
+ * `must use subscript` warnings, and its name is then checked like the
+ * others, as bash assigns it before it looks for the function. With no names the marked functions print as bodies, each
  * followed by its `declare` line.
  */
 export async function markFunctions(
@@ -672,14 +750,16 @@ export async function markFunctions(
   parser?: ParseScope,
   kind: VarKind | null = null,
 ): Promise<Result> {
+  const errors: string[] = []
+  const warnings: string[] = []
   if (arrays !== null && arrays.length > 0) {
     const refused = await storeStagedArrays(
       cmd,
       session,
       requireView(state),
       arrays,
-      null,
-      true,
+      errors,
+      warnings,
       true,
       null,
       kind,
@@ -693,21 +773,12 @@ export async function markFunctions(
     const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: cmd, exitCode: 0 })]
   }
-  const errors: string[] = []
   for (const name of names) {
     if (!(name in session.functions)) errors.push(`bash: ${cmd}: ${name}: not a function`)
     else if (on) marked.add(name)
     else marked.delete(name)
   }
-  if (errors.length > 0) {
-    const err = encodeText(`${errors.join('\n')}\n`)
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: err }),
-      new ExecutionNode({ command: cmd, exitCode: 1, stderr: err }),
-    ]
-  }
-  return [null, new IOResult(), new ExecutionNode({ command: cmd, exitCode: 0 })]
+  return declarationResult(cmd, errors, warnings)
 }
 
 /**
@@ -726,13 +797,6 @@ export function noteLocalArray(session: SessionState, name: string): boolean {
 }
 
 /**
- * Declare names in the running function's scope, or globally.
- *
- * `cmd` is the spelling that reached here: `declare` and `typeset` route
- * through this handler and must say their own name in a diagnostic, not
- * `local`.
- */
-/**
  * The line `declare -n NAME=TARGET` earns when TARGET is unusable: bash
  * refuses a target that is not a variable name, a self reference, and
  * (mirage-only) a target spelled as an array element, since the resolver
@@ -749,44 +813,4 @@ export function namerefRefusal(cmd: string, name: string, target: string): strin
     return `bash: ${cmd}: ${name}: nameref variable self references not allowed`
   }
   return null
-}
-
-/**
- * Store a `declare -g` value on the global record. Outside a function,
- * or for a name no frame on the call path shadows, an ordinary write;
- * otherwise the running locals live in `session.vars` and the global
- * record is what the outermost shadowing frame saved, so the write goes
- * through the door with the two swapped for its duration.
- */
-export async function writeGlobal(
-  session: SessionState,
-  view: SessionView,
-  key: string,
-  value: ShellValue,
-  assigned: ReadonlySet<number | string> | null = null,
-): Promise<void> {
-  const outer = session.localFrames.find((frame) => frame.has(key))
-  if (outer === undefined) {
-    await view.set(key, value, true, assigned)
-    return
-  }
-  const shadowing = sessionEntry(session.vars, key)
-  const saved = outer.get(key) ?? null
-  if (saved === null) {
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete session.vars[key]
-  } else {
-    setSessionEntry(session.vars, key, saved)
-  }
-  try {
-    await view.set(key, value, true, assigned)
-    outer.set(key, sessionEntry(session.vars, key) ?? null)
-  } finally {
-    if (shadowing === undefined) {
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.vars[key]
-    } else {
-      setSessionEntry(session.vars, key, shadowing)
-    }
-  }
 }

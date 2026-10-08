@@ -23,10 +23,11 @@ from mirage.workspace.executor.builtins.declare.constants import (
     EXPORT_USAGE,
 )
 from mirage.workspace.executor.builtins.declare.declare import (
+    declaration_result,
     declare_line,
     declared_kind,
+    drop_reference,
     held_value,
-    identifier_failure,
     identifier_refusal,
     kind_conflict,
     kind_listed,
@@ -37,7 +38,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     store_staged_arrays,
 )
 from mirage.workspace.executor.builtins.shared import (
-    readonly_refusal,
+    readonly_line,
     refusal,
     require_view,
 )
@@ -131,21 +132,36 @@ async def handle_export(
         return out, IOResult(), ExecutionNode(command="export", exit_code=0)
     view = require_view(state)
     errors: list[str] = []
+    warnings: list[str] = []
     if arrays:
         # `export ARR=(a b)` marks the array as surely as it marks a
         # scalar: GNU prints `declare -ax ARR=([0]="a" [1]="b")`.
+        stored: list[str] = []
         refused = await store_staged_arrays(
             "export",
             session,
             view,
             arrays,
-            mark=VarAttr.EXPORT,
-            on=on,
+            errors,
+            warnings,
             fatal=True,
+            stored=stored,
             kind=kind,
         )
         if refused is not None:
             return refused
+        try:
+            for name in stored:
+                await mark_written(
+                    session,
+                    view,
+                    name,
+                    deref(session, name),
+                    VarAttr.EXPORT,
+                    on,
+                )
+        except PolicyDenied as exc:
+            return refusal("export", exc)
     for assign in names:
         bad_name = identifier_refusal("export", assign)
         if bad_name is not None:
@@ -153,7 +169,8 @@ async def handle_export(
             continue
         key, eq, val = assign.partition("=")
         if eq and view.is_readonly(key):
-            return readonly_refusal("export", key)
+            errors.append(readonly_line("export", key))
+            continue
         # A value of the other array kind is refused and the name is
         # still marked, as bash does.
         held = held_value(session, key) if eq else None
@@ -164,6 +181,8 @@ async def handle_export(
             value, assigned = scalar_value(held, val, kind)
             checked = deref(session, key)
             try:
+                if kind is not None:
+                    await drop_reference(session, view, key)
                 await view.set(key, value, assigned=assigned)
                 await mark_written(
                     session, view, key, checked, VarAttr.EXPORT, on
@@ -184,9 +203,7 @@ async def handle_export(
                 return refusal("export", exc)
         if on:
             outlive_call(session, key)
-    if errors:
-        return identifier_failure("export", errors)
-    return None, IOResult(), ExecutionNode(command="export", exit_code=0)
+    return declaration_result("export", errors, warnings)
 
 
 async def export_builtin(call: BuiltinCall) -> Result:

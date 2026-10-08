@@ -105,7 +105,21 @@ class EnvUnset(Protocol):
 # `local NAME` on a fresh name leave it *unset* and merely declared,
 # which is a state `EnvSet` cannot express. Gated all the same -- a mark
 # is a session write, so a hidden name refuses and `pre_session` rules.
-EnvMark = Callable[[str, VarAttr | None, bool], Awaitable[None]]
+# `follow_ref` is `EnvSet`'s: `declare -rn r` marks the reference itself.
+
+
+class EnvMark(Protocol):
+    """Turn one attribute on or off through the session plane."""
+
+    def __call__(
+        self,
+        name: str,
+        attr: VarAttr | None,
+        on: bool,
+        follow_ref: bool = True,
+    ) -> Awaitable[None]: ...
+
+
 # Whether `readonly` has marked the name.
 EnvIsReadonly = Callable[[str], bool]
 # The name of the profile the session runs under, None for an

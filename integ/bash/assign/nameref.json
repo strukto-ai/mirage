@@ -203,6 +203,40 @@
         "stdout": "f=local\ntop=inner\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "nameref_array_write_drops_the_reference",
+      "seq": 940119,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( declare -n r1; export -a r1=new; declare -n r2; readonly -A r2=([k]=v); declare -n r3; r3=(x y); declare -n r4; declare r4=(z); T=1; declare -n r5=T; declare -rn r6=T; declare -x r5=5; declare -p r1 r2 r3 r4 r5 r6 T )",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -ax r1=([0]=\"new\")\ndeclare -Ar r2=([k]=\"v\" )\ndeclare -a r3=([0]=\"x\" [1]=\"y\")\ndeclare -a r4=([0]=\"z\")\ndeclare -n r5=\"T\"\ndeclare -nr r6=\"T\"\ndeclare -x T=\"5\"\n",
+        "stderr": "bash: warning: r3: removing nameref attribute\nbash: warning: r4: removing nameref attribute\n"
+      }
     }
   ]
 }
