@@ -927,8 +927,10 @@ export function inputSubstitutionRedirect(node: TSNodeLike): Redirect | null {
   return redirect
 }
 
+/** A process substitution's command text, with the heredoc bodies the line
+ * reads after it moved inside it. */
 export function getProcessSubBody(node: TSNodeLike): string {
-  const text = node.sourceText ?? node.text
+  const text = node.inlined ?? node.sourceText ?? node.text
   if ((text.startsWith('<(') || text.startsWith('>(')) && text.endsWith(')')) {
     return text.slice(2, -1)
   }

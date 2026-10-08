@@ -201,7 +201,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near '`echo a'\n"
+        "stderr": "mirage: unexpected EOF while looking for matching ``'\n"
       }
     }
   ]

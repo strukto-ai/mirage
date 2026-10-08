@@ -648,7 +648,11 @@ async def _substitution(
             raise arith_exit(expr, exc) from exc
         await land_arith_writes(session, view, result.writes, reader)
         return str(result.value)
-    source = getattr(ts_node, "source_text", ts_node.text) or b""
+    source = (
+        getattr(ts_node, "inlined", None)
+        or getattr(ts_node, "source_text", ts_node.text)
+        or b""
+    )
     raw = decode_text(source)[len(prefix) :]
     if raw.startswith("`") and raw.endswith("`"):
         # Backtick regions are re-lexed here rather than trusted from

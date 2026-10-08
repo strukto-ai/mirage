@@ -41,12 +41,9 @@ import {
   runWithSession,
 } from '../../context/session_context.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
-import {
-  syntaxErrorResult,
-  findSyntaxError,
-  findUnterminatedBacktick,
-  type ShellParser,
-} from '../../shell/parse/index.ts'
+import { checkSyntax, syntaxErrorResult, type ShellParser } from '../../shell/parse/index.ts'
+import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
+import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
 import {
@@ -427,19 +424,24 @@ async function runPreparedLine(
         try {
           const root = argv === undefined ? parser.parse(command) : literalTree(argv)
           // Syntax gates before policy, mirroring bash: an unparsable line exits 2
-          // and the policy is never consulted about it. tree-sitter accepts an
-          // unclosed backtick as a complete command, so the region is scanned
-          // separately.
-          const offending =
+          // and the policy is never consulted about it. bash's reading of the
+          // line decides; the grammar's own errors only stop a line it cannot
+          // build.
+          const found =
             argv === undefined
-              ? (findSyntaxError(
-                  root,
-                  (source) => parser.parse(source),
-                  expandingAliases(effectiveSession),
-                ) ?? findUnterminatedBacktick(root.text))
+              ? (checkSyntax(command, expandingAliases(effectiveSession)) ?? findSyntaxIssue(root))
               : null
-          if (offending !== null) {
-            const io = syntaxErrorResult(offending, root)
+          if (found !== null) {
+            const io = syntaxErrorResult(found)
+            const callStack = options.callStack
+            // A substitution bash cannot parse ends the shell, from `eval` and
+            // `source` too: 127, or 1 out of a child.
+            if (callStack !== undefined && io.exitCode === 127)
+              throw new ExitSignal(127, await materialize(io.stderr), null, 1)
+            // An array bash cannot read discards its line: `eval` and `source`
+            // return 1, and a child shell ends there.
+            if (callStack?.subshell === true && io.exitCode === 1)
+              throw new DiscardSignal(await materialize(io.stderr))
             return await answerLine(
               env,
               command,

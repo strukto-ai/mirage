@@ -38,6 +38,12 @@ export function ansiCEnd(token: string, start: number): number {
   return token.length
 }
 
+/** Where a word's next character is once continued lines are joined. */
+function joined(token: string, index: number): number {
+  while (token.startsWith('\\\n', index)) index += 2
+  return index
+}
+
 /**
  * The delimiter word as bash reads it: quotes removed, escapes resolved.
  *
@@ -48,7 +54,8 @@ export function ansiCEnd(token: string, start: number): number {
  * only `$`, `` ` ``, `"` and itself inside double quotes, so `"E\$F"`
  * names `E$F` while `"E\xF"` keeps its backslash. A `$` that is neither
  * quoted nor escaped opens a dollar-quoted section instead of naming
- * itself, wherever in the word it sits: `$'A\tB'` names the word its
+ * itself, wherever in the word it sits and a continued line between it and
+ * its quote included: `$'A\tB'` names the word its
  * ANSI-C escapes build, and `$"A"` names its double-quoted content,
  * which is what a locale carrying no translation for it gives back.
  * Every other `$` is literal, since a delimiter is never expanded. A
@@ -93,13 +100,19 @@ export function cleanDelimiter(token: string): string {
       } else {
         out += char
       }
-    } else if (char === '$' && token[index + 1] === "'") {
-      const end = ansiCEnd(token, index + 2)
-      out += decodeAnsiC(token.slice(index + 2, end))
-      index = end
-    } else if (char === '$' && token[index + 1] === '"') {
-      quote = '"'
-      index += 1
+    } else if (
+      char === '$' &&
+      (token[joined(token, index + 1)] === "'" || token[joined(token, index + 1)] === '"')
+    ) {
+      const after = joined(token, index + 1)
+      if (token[after] === "'") {
+        const end = ansiCEnd(token, after + 1)
+        out += decodeAnsiC(token.slice(after + 1, end))
+        index = end
+      } else {
+        quote = '"'
+        index = after
+      }
     } else if (char === "'" || char === '"') {
       quote = char
     } else if (char === '\\' && token[index + 1] === '\n') {

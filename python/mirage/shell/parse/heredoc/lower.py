@@ -77,12 +77,18 @@ def quoted_body(doc: Heredoc) -> tuple[bytes, list[int]]:
     return bytes(out), offsets
 
 
-def lower_heredocs(data: bytes, documents: list[Heredoc]) -> HeredocSource:
+def lower_heredocs(
+    data: bytes,
+    documents: list[Heredoc],
+    closes: tuple[tuple[int, tuple[int, ...]], ...] = (),
+) -> HeredocSource:
     """Give the grammar inline input words; keep heredoc identity separately.
 
     Args:
         data (bytes): original shell source.
         documents (list[Heredoc]): fully read heredocs.
+        closes (tuple[tuple[int, tuple[int, ...]], ...]): the plan's
+            substitutions that close with bodies still to read.
     """
     edits: list[tuple[int, int, bytes, list[int], Heredoc | None]] = []
     for doc in documents:
@@ -115,7 +121,9 @@ def lower_heredocs(data: bytes, documents: list[Heredoc]) -> HeredocSource:
     out.extend(data[cursor:])
     offsets.extend(range(cursor, len(data)))
     offsets.append(len(data))
-    return HeredocSource(data, bytes(out), tuple(offsets), tuple(attached))
+    return HeredocSource(
+        data, bytes(out), tuple(offsets), tuple(attached), closes
+    )
 
 
 def rebase_source(source: HeredocSource, repaired: bytes) -> HeredocSource:

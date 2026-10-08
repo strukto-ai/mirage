@@ -31,19 +31,16 @@ from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.routing import RouteDecision, RouteError
 from mirage.runtime.types import DispatchFn
 from mirage.secrets.types import ResolvedSource
-from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import FORK_FAILED, FORK_FAILED_STATUS
+from mirage.shell.errors import DiscardSignal, ExitSignal
 from mirage.shell.helpers import input_substitution_redirect
 from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.literal import literal_tree
-from mirage.shell.parse import (
-    find_syntax_error,
-    find_unterminated_backtick,
-    syntax_error_result,
-)
+from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.scope import ParseScope
+from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
@@ -670,20 +667,29 @@ async def run_prepared_line(
         )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
-        # consulted about it.
-        offending = find_syntax_error(
-            ast,
-            expanding_aliases(effective_session),
-            parse_fn=parse_scope.parse,
-        )
-        if offending is None and argv is None:
-            # tree-sitter accepts an unclosed backtick as a complete
-            # command, so the region is scanned separately.
-            offending = find_unterminated_backtick(
-                decode_text(ast.text or b"")
-            )
-        if offending is not None:
-            io = syntax_error_result(offending, ast)
+        # consulted about it. bash's reading of the line decides; the
+        # grammar's own errors only stop a line it cannot build.
+        found = None
+        if argv is None:
+            found = check_syntax(
+                command, expanding_aliases(effective_session)
+            ) or find_syntax_issue(ast)
+        if found is not None:
+            io = syntax_error_result(found)
+            if call_stack is not None and io.exit_code == 127:
+                # A substitution bash cannot parse ends the shell, from
+                # `eval` and `source` too: 127, or 1 out of a child.
+                raise ExitSignal(
+                    127, await io.materialize_stderr(), contained_code=1
+                )
+            if (
+                call_stack is not None
+                and call_stack.subshell
+                and io.exit_code == 1
+            ):
+                # An array bash cannot read discards its line: `eval`
+                # and `source` return 1, and a child shell ends there.
+                raise DiscardSignal(await io.materialize_stderr())
             record_status(session, io.exit_code)
             return io
         nested = NestedRefusal()
