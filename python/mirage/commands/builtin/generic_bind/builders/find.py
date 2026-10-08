@@ -26,9 +26,9 @@ from mirage.commands.builtin.generic_bind.adapter import (
     overlaid_stat,
 )
 from mirage.commands.config import CommandIO, CommandOpts
-from mirage.doors.namespace_view import paths_scoped
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, PathSpec
+from mirage.view.namespace_view import paths_scoped
 
 
 async def _dir_is_empty(

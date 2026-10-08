@@ -16,8 +16,6 @@ import dataclasses
 import posixpath
 
 from mirage.context import session_visibility
-from mirage.doors.namespace_view import child_mount_names, namespace_names
-from mirage.doors.types import NamespaceLinks
 from mirage.errors.constants import WALK_ERRORS
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
@@ -33,6 +31,8 @@ from mirage.utils.glob_walk import (
 )
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError
+from mirage.view.namespace_view import child_mount_names, namespace_names
+from mirage.view.types import NamespaceLinks
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session import SessionState

@@ -15,7 +15,7 @@
 from dataclasses import dataclass
 
 from mirage.commands.config import CommandOpts
-from mirage.doors.types import NamespaceView, SessionView
+from mirage.view.types import NamespaceView, SessionView
 
 # What an owner or group column prints when nothing names one: no uid
 # on the entry and no workspace user, or no gid and no profile.

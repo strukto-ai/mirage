@@ -16,8 +16,8 @@ import asyncio
 import errno
 
 from mirage.commands.builtin.generic.crossmount.relay.ls import run_ls
-from mirage.doors.types import MountView, NamespaceView
 from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.view.types import MountView, NamespaceView
 
 # Two mounts, /a/ and /b/, as a plain virtual-path tree. The relayed
 # primitives route by full virtual path, so one table stands for both,

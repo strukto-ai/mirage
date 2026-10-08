@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.doors.types import SessionView
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar, VarAttr, VarKind, appended
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.constants import SUBSCRIPT_RE
 from mirage.workspace.executor.builtins.declare.declare import (
     declaration_result,

@@ -41,7 +41,6 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.builtins import registered_spec
 from mirage.commands.spec.flag_view import spread_operands
 from mirage.commands.spec.standard import standard_request
-from mirage.doors.types import NamespaceView, StatPath
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -54,6 +53,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
+from mirage.view.types import NamespaceView, StatPath
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.cli import (
     CLIContext,

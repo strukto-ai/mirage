@@ -19,7 +19,6 @@ import time
 
 import pytest
 
-from mirage.doors.namespace_view import merge_readdir
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSStat
 from mirage.runtime.vfs import RuntimeVFS
@@ -36,6 +35,7 @@ from mirage.utils.stat_view import (
     FILE_MODE,
     mtime_ns,
 )
+from mirage.view.namespace_view import merge_readdir
 
 # The stamp a link's own row carries, deliberately not the stamp the
 # double gives a file, so a test can tell which row it was answered.

@@ -1,6 +1,6 @@
 import git from 'isomorphic-git'
 import Hash from 'sha.js'
-import type { StatPath } from '../../../../doors/types.ts'
+import type { StatPath } from '../../../../view/types.ts'
 import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'

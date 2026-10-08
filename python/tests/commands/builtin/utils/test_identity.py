@@ -8,11 +8,11 @@ from mirage.commands.builtin.utils.identity import (
     owner_name,
 )
 from mirage.commands.config import CommandOpts
-from mirage.doors.types import NamespaceView
 from mirage.io.types import materialize
 from mirage.policy.profile import SessionProfile
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
+from mirage.view.types import NamespaceView
 from mirage.workspace import Workspace
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import session_view

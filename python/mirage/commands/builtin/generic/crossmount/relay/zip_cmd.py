@@ -20,9 +20,9 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 from mirage.commands.builtin.generic.zip_cmd import parse_flags, zip_cmd
 from mirage.commands.builtin.generic_bind.archive_io import relay_walk_of
 from mirage.commands.spec.types import FlagValue
-from mirage.doors.types import NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.view.types import NamespaceView
 
 
 async def run_zip(

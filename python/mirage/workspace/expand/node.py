@@ -16,7 +16,6 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any
 
-from mirage.doors.types import SessionView
 from mirage.io import IOResult
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.backticks import split_backtick_region
@@ -40,6 +39,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
 from mirage.utils.path import expand_tilde
+from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.statement import record_status
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS

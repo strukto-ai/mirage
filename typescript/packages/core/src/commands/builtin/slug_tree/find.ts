@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
-import { pathsScoped } from '../../../doors/namespace_view.ts'
+import { pathsScoped } from '../../../view/namespace_view.ts'
 import { makeSearchBackedFind } from '../../../core/generic/find.ts'
 import type { SlugTree } from '../../../core/slug_tree/tree.ts'
 import { materialize, type ByteSource } from '../../../io/types.ts'

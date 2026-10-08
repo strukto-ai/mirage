@@ -12,8 +12,6 @@ from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.doors.namespace_view import paths_scoped
-from mirage.doors.types import LinkView, MountView, NamespaceView, StatPath
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import ZERO_LENGTH_NAME
@@ -24,6 +22,8 @@ from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
 from mirage.vfs.types import DuEntries
+from mirage.view.namespace_view import paths_scoped
+from mirage.view.types import LinkView, MountView, NamespaceView, StatPath
 
 logger = logging.getLogger(__name__)
 

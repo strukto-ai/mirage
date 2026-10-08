@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CommandOpts } from '../../config.ts'
-import type { LinkView } from '../../../doors/types.ts'
+import type { LinkView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { type FileStat, PathSpec } from '../../../types.ts'
 import { eloop } from '../../../errors/fs.ts'

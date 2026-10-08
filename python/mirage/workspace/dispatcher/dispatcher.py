@@ -33,11 +33,6 @@ from mirage.context import (
     hidden_refusal,
     session_visibility,
 )
-from mirage.doors.namespace_view import (
-    merge_readdir,
-    namespace_listing,
-    namespace_stat,
-)
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
@@ -77,6 +72,11 @@ from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError, norm, norm_dir, owner_prefix, parent
 from mirage.utils.ranges import slice_window
 from mirage.utils.remnants import remove_remnants, visible_below
+from mirage.view.namespace_view import (
+    merge_readdir,
+    namespace_listing,
+    namespace_stat,
+)
 from mirage.workspace.dispatcher.constants import (
     DISPATCH_READ_OPS,
     DISPATCH_WRITE_OPS,

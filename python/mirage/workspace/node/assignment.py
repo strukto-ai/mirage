@@ -17,7 +17,6 @@ from collections.abc import Awaitable
 from typing import Any, Callable
 
 from mirage.cache.index.scope import command_scope
-from mirage.doors.types import SessionView
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
@@ -36,6 +35,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import ShellValue, VarAttr, appended
 from mirage.shell.xtrace import trace_assignment
 from mirage.types import word_text
+from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.statement import assignment_status
 from mirage.workspace.expand import expand_and_classify, expand_node

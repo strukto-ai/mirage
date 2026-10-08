@@ -15,7 +15,6 @@
 from collections.abc import Callable
 from typing import Any
 
-from mirage.doors.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import SET_OPTION_DEFAULTS
 from mirage.shell.escapes import unescape_unquoted
@@ -24,6 +23,7 @@ from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import mark_escaped_globs
 from mirage.utils.path import expand_tilde
+from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.brace import (
     expand_template,

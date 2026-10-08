@@ -35,7 +35,6 @@ from mirage.commands.config import AggregateFn
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
-from mirage.doors.types import NamespaceView, SessionView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import format_fs_error
 from mirage.io import IOResult
@@ -43,6 +42,7 @@ from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
+from mirage.view.types import NamespaceView, SessionView
 
 
 async def handle_cross_mount(

@@ -24,7 +24,6 @@ from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.commands.errors import CommandTimeoutError
 from mirage.context import program_invocation
-from mirage.doors.types import SessionView
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.stream import close_quietly
@@ -56,6 +55,7 @@ from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
 from mirage.utils.timezone import zone_from_env
+from mirage.view.types import SessionView
 from mirage.workspace.evaluation import (
     EvaluationContext,
     child_context,

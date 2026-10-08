@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ByteSource, IOResult } from '../../../../../io/types.ts'
-import type { NamespaceView } from '../../../../../doors/types.ts'
+import type { NamespaceView } from '../../../../../view/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { relayIsDirOf, relayWalkOf } from '../../../generic_bind/archive_io.ts'

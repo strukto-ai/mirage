@@ -9,13 +9,13 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.doors.types import MountView, ReaddirPath, StatPath
 from mirage.errors.constants import MISS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import enoent
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec, ReaddirFn
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
+from mirage.view.types import MountView, ReaddirPath, StatPath
 
 # GNU tree's ASCII (C-locale) drawing set, matching `tree` in the battery's
 # docker oracle; the vertical/indent continuations are 4 columns wide.

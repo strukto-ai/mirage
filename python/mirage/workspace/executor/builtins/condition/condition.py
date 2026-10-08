@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.context import program_invocation
-from mirage.doors.types import SessionView
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
@@ -21,6 +20,7 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ExitSignal
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.types import PathSpec, word_text
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.condition.flat import eval_flat
 from mirage.workspace.executor.builtins.condition.tree import eval_cond
 from mirage.workspace.executor.builtins.condition.types import (

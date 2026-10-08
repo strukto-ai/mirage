@@ -15,7 +15,7 @@
 import { isStdin, resolveSource } from '../../utils/stream.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
-import type { NamespaceView, SessionView } from '../../../../doors/types.ts'
+import type { NamespaceView, SessionView } from '../../../../view/types.ts'
 import { formatFsError } from '../../../../errors/render.ts'
 import { isFsError } from '../../../../errors/fs.ts'
 import { strategyFor } from './detect.ts'

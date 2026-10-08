@@ -30,9 +30,9 @@ from mirage.commands.spec import SPECS
 from mirage.core.github.find import find as find_core
 from mirage.core.github.stat import stat as stat_core
 from mirage.core.github.tree import ensure_tree
-from mirage.doors.namespace_view import paths_scoped
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.view.namespace_view import paths_scoped
 
 
 @command("find", vfs="github", spec=SPECS["find"])

@@ -33,11 +33,11 @@ from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.github.stat import stat
 from mirage.core.github.tree import ensure_tree
-from mirage.doors.namespace_view import paths_scoped
-from mirage.doors.types import NamespaceView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
+from mirage.view.namespace_view import paths_scoped
+from mirage.view.types import NamespaceView
 
 
 def _subtree(

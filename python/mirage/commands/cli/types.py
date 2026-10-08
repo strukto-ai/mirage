@@ -22,11 +22,11 @@ from mirage.commands.constants import ROOT_CWD
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import CommandSpec, FlagValue, UsageStyle
-from mirage.doors.types import NamespaceView, SessionView, StatPath
 from mirage.io.types import ByteSource, IOResult
 from mirage.process.view import ProcessView
 from mirage.runtime.types import DispatchFn, ScriptSource
 from mirage.types import Limit, PathSpec
+from mirage.view.types import NamespaceView, SessionView, StatPath
 
 # The group-level flag bag the walk accumulates, keyed by canonical
 # dashed spelling like ParsedArgs.flags.

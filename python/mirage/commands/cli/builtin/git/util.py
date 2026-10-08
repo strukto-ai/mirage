@@ -31,10 +31,10 @@ from mirage.commands.cli.refusal import (
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation, CLISpec
 from mirage.commands.spec.flag_view import FlagView
-from mirage.doors.types import LinkView, MountView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.view.types import LinkView, MountView
 
 ROOT = "/"
 STDOUT = "stdout"

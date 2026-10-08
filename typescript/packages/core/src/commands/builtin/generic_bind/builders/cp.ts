@@ -14,7 +14,7 @@
 
 import { transferLinksOf } from '../../generic/crossmount/utils.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
-import type { StatOverlay } from '../../../../doors/types.ts'
+import type { StatOverlay } from '../../../../view/types.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { NativeCopy, PathSpec, PrimitiveCopy, StatFn } from '../../../../types.ts'
 import { walkFind } from '../../../../core/generic/find.ts'

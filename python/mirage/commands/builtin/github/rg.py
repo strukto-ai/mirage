@@ -37,9 +37,9 @@ from mirage.core.github.constants import SCOPE_ERROR
 from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as _readdir
 from mirage.core.github.stat import stat as _stat
-from mirage.doors.namespace_view import paths_scoped
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.view.namespace_view import paths_scoped
 
 
 @command("rg", vfs="github", spec=SPECS["rg"])

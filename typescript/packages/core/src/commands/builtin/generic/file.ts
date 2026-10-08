@@ -22,7 +22,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { detectFileType, formatFileResult } from '../file_sniff.ts'
 import { MIME_SYMLINK } from '../constants.ts'
 import { LINK_TARGET_KEY } from '../../../types.ts'
-import type { LinkView } from '../../../doors/types.ts'
+import type { LinkView } from '../../../view/types.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
 

@@ -21,8 +21,8 @@ from dulwich.index import ConflictedIndexEntry, IndexEntry
 
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.types import CLIInvocation
-from mirage.doors.types import NamespaceView
 from mirage.types import FileStat, PathSpec
+from mirage.view.types import NamespaceView
 
 
 @dataclass(frozen=True, slots=True)

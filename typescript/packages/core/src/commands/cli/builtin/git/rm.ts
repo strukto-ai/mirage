@@ -37,7 +37,7 @@ import type { TreeEntry } from './tree.ts'
 import type { Dispatch, IndexEntry, RepoLocation, WorkTree } from './types.ts'
 import { checkSwitches, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
-import type { LinkView, MountView, StatPath } from '../../../../doors/types.ts'
+import type { LinkView, MountView, StatPath } from '../../../../view/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()

@@ -36,11 +36,11 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.core.generic.find import make_search_backed_find
 from mirage.core.slug_tree.tree import SlugTree
 from mirage.core.slug_tree.types import A
-from mirage.doors.namespace_view import paths_scoped
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.vfs.types import StatOp
+from mirage.view.namespace_view import paths_scoped
 
 
 def reads_times(expr: FindExpr) -> bool:

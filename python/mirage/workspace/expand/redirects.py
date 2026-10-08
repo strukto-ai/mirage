@@ -14,7 +14,6 @@
 
 from typing import Any, Callable
 
-from mirage.doors.types import SessionView
 from mirage.io.types import materialize
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
@@ -24,6 +23,7 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ProcessSubDirection, Redirect, RedirectKind
+from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.classify import classify_bare_path
 from mirage.workspace.expand.node import child_line, expand_node

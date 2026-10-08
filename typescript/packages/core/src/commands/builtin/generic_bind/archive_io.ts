@@ -15,7 +15,7 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { walkFind, type WalkFindDeps } from '../../../core/generic/find.ts'
-import type { ChildMounts } from '../../../doors/types.ts'
+import type { ChildMounts } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../../io/types.ts'
-import type { NamespaceView, SessionView } from '../../../../../doors/types.ts'
+import type { NamespaceView, SessionView } from '../../../../../view/types.ts'
 import type { FileStat, PathSpec } from '../../../../../types.ts'
 import { gnuBasename } from '../../../../../utils/path.ts'
 import { rstripSlash } from '../../../../../utils/slash.ts'

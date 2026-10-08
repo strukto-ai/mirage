@@ -41,7 +41,6 @@ from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.concurrency.limiter import run_blocking
-from mirage.doors.types import NamespaceView, SessionView, StatPath
 from mirage.errors.types import FsCondition
 from mirage.io import IOResult
 from mirage.io.stream import materialize
@@ -54,6 +53,7 @@ from mirage.runtime.routing import runtime_for_language
 from mirage.runtime.types import CodeExecution, DispatchFn, ScriptSource
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
+from mirage.view.types import NamespaceView, SessionView, StatPath
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node

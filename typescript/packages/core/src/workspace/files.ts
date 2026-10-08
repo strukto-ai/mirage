@@ -23,7 +23,7 @@ import { dottedSpelling } from '../utils/path.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { getCurrentSession, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from '../utils/hidden.ts'
-import type { NamespaceLinks, OpKwargs, SessionBind } from '../doors/types.ts'
+import type { NamespaceLinks, OpKwargs, SessionBind } from '../view/types.ts'
 
 /** Receives each record with the id of the session the op ran as. */
 export type OpSink = (rec: OpRecord, sessionId: string) => Promise<void>

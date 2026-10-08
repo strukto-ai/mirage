@@ -15,7 +15,7 @@
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { MountView } from '../../../doors/types.ts'
+import type { MountView } from '../../../view/types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandOpts } from '../../config.ts'
 import {

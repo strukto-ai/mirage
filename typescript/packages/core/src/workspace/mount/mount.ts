@@ -38,7 +38,7 @@ import type {
 import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
 import { hasInjectedVersion } from '../../commands/spec/standard.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
-import type { LinkView, OpKwargs } from '../../doors/types.ts'
+import type { LinkView, OpKwargs } from '../../view/types.ts'
 import { commandIo, resolveGlobOf } from '../../commands/builtin/generic_bind/adapter.ts'
 import {
   appendByRewrite,

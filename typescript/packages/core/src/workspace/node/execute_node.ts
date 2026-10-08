@@ -101,7 +101,7 @@ import { executeDeclaration } from './declaration.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { HandOff } from '../../policy/types.ts'
 import { definedAt } from './occurrence.ts'
-import type { SessionView } from '../../doors/types.ts'
+import type { SessionView } from '../../view/types.ts'
 import {
   ensureVarVisible,
   randomReader,

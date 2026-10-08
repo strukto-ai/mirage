@@ -57,7 +57,6 @@ from mirage.core.generic.rewrite import (
     pwrite_by_rewrite,
     refuse_taken,
 )
-from mirage.doors.types import StatPath
 from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.io.cachable_iterator import CachableAsyncIterator
@@ -90,6 +89,7 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import call_effect
 from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.types import Effect
+from mirage.view.types import StatPath
 from mirage.workspace.mount.activity import VFSActivity
 from mirage.workspace.mount.read_policy import coerce_read_policy
 

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import type { MountView } from '../../../doors/types.ts'
+import type { MountView } from '../../../view/types.ts'
 import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { isMissError } from '../../../errors/fs.ts'
 import { operandName } from './operands.ts'

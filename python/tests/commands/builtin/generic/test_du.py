@@ -9,11 +9,11 @@ from mirage.commands.builtin.generic.du import (
     to_virtual,
 )
 from mirage.commands.config import CommandIO, CommandOpts
-from mirage.doors.types import LinkView, MountView
 from mirage.io.types import SizedRun
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import DuOps
+from mirage.view.types import LinkView, MountView
 
 
 async def _ok(value):

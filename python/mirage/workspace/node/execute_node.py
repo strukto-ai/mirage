@@ -24,7 +24,6 @@ from mirage.context import (
     reset_program_invocation,
     set_program_invocation,
 )
-from mirage.doors.types import SessionView
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
 from mirage.io.stream import async_chain
@@ -68,6 +67,7 @@ from mirage.shell.parse.names import literal_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import PipelineStages, Redirect, RedirectKind
 from mirage.types import PathSpec
+from mirage.view.types import SessionView
 from mirage.workspace.evaluation import (
     EvaluationContext,
     child_context,

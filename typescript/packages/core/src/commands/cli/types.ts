@@ -15,7 +15,7 @@
 import type { ProcessView } from '../../process/view.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
-import type { NamespaceView, SessionView, StatPath } from '../../doors/types.ts'
+import type { NamespaceView, SessionView, StatPath } from '../../view/types.ts'
 import { type ScriptSource, type DispatchFn } from '../../runtime/types.ts'
 import type { CommandFnResult } from '../config.ts'
 import type { ZodObject, ZodRawShape } from 'zod'

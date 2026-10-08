@@ -40,7 +40,6 @@ from mirage.context import (
     set_current_session,
     set_mount_gate,
 )
-from mirage.doors.types import NamespaceView
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import OperationNotSupportedError
 from mirage.policy import Action, Deny, Policy, VfsContext
@@ -62,6 +61,7 @@ from mirage.types import (
 )
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.vfs.types import ContentSearchOps
+from mirage.view.types import NamespaceView
 from mirage.workspace.session import SessionState
 
 TREE = {

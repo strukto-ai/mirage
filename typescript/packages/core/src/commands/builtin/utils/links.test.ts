@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../../io/types.ts'
-import type { LinkView } from '../../../doors/types.ts'
+import type { LinkView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec, type WalkErrno } from '../../../types.ts'
 import { isDotWalkError } from '../../../errors/fs.ts'

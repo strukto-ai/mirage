@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { OpKwargs } from '../../doors/types.ts'
+import type { OpKwargs } from '../../view/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { applyIo } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -52,7 +52,7 @@ import type { EntryGate } from '../../policy/types.ts'
 import { record, runWithMountContext, runWithRevisions, startOp } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import { mergeReaddir, namespaceListing, namespaceStat } from '../../doors/namespace_view.ts'
+import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import {

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { NamespaceView } from '../../../../../doors/types.ts'
+import type { NamespaceView } from '../../../../../view/types.ts'
 import { transferLinksOf } from '../utils.ts'
 import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'

@@ -24,7 +24,6 @@ from mirage.commands.spec.usage import (
     argmatch_line,
     usage_hint,
 )
-from mirage.doors.types import ChildMounts, LinkView, MountView, StatPath
 from mirage.errors.classify import failure_text
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import DotWalkError, DotWalkLoop
@@ -44,6 +43,7 @@ from mirage.utils.path import CycleError, respell_one
 from mirage.utils.quote import escape_name
 from mirage.utils.stat_view import content_size
 from mirage.utils.width import char_width
+from mirage.view.types import ChildMounts, LinkView, MountView, StatPath
 
 logger = logging.getLogger(__name__)
 

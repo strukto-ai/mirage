@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.commands.spec.usage import read_fail_exit_code
-from mirage.doors.types import LinkView, MountView, StatPath
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import eisdir
 from mirage.errors.render import fs_error_line
@@ -34,6 +33,7 @@ from mirage.types import (
     ReadBytesFn,
     StatFn,
 )
+from mirage.view.types import LinkView, MountView, StatPath
 
 
 def mount_points(mounts: MountView | None, directory: str) -> list[str]:

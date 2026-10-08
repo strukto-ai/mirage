@@ -14,7 +14,7 @@
 
 import { RAMIndexCacheStore } from './cache/index/ram.ts'
 import type { IndexCacheStore } from './cache/index/store.ts'
-import type { OpKwargs } from './doors/types.ts'
+import type { OpKwargs } from './view/types.ts'
 import { type FileStat, MountMode, type PathSpec } from './types.ts'
 import { BaseVFS } from './vfs/base.ts'
 import type { Accessor } from './accessor/base.ts'

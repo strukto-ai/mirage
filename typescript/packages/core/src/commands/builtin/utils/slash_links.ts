@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LinkView } from '../../../doors/types.ts'
+import type { LinkView } from '../../../view/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { CycleError } from '../../../utils/path.ts'

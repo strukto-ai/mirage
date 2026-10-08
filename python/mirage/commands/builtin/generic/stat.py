@@ -21,7 +21,6 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import missing_operand_error
-from mirage.doors.types import LinkView, MountView, StatPath
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
@@ -46,6 +45,7 @@ from mirage.utils.stat_view import (
     is_dir,
     posix_mode,
 )
+from mirage.view.types import LinkView, MountView, StatPath
 
 _STR_DIRECTIVES = frozenset("nNF")
 

@@ -16,12 +16,12 @@ from mirage.commands.builtin.find_eval import (
 from mirage.commands.builtin.find_printf import printf_kind
 from mirage.commands.errors import is_entry_error
 from mirage.context import session_visibility
-from mirage.doors.types import LinkView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp, matches_mtime
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.stat_view import DIR_SIZE, content_size
+from mirage.view.types import LinkView
 
 
 class ResolvedPath(Protocol):

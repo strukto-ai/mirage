@@ -27,7 +27,7 @@ import {
   visibleArrays,
   visibleAssocs,
 } from '../../../session/state.ts'
-import type { SessionView } from '../../../../doors/types.ts'
+import type { SessionView } from '../../../../view/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { arithRefusal, isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
 import { SUBSCRIPT_RE } from './constants.ts'

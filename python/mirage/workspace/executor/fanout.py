@@ -31,7 +31,6 @@ from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.errors import CommandTimeoutError, UsageError
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
-from mirage.doors.types import NamespaceView, SessionView
 from mirage.errors.render import format_fs_error
 from mirage.io import IOResult
 from mirage.io.stream import materialize
@@ -40,6 +39,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
 from mirage.utils.hidden import path_visible
+from mirage.view.types import NamespaceView, SessionView
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,

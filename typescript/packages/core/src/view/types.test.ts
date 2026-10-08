@@ -20,7 +20,7 @@ import { Workspace } from '../workspace/workspace/workspace.ts'
 import type { NamespaceLinks } from './types.ts'
 
 // The seam's members in declaration order. The Python twin
-// (tests/doors/test_types.py) pins this same list snake_cased and in
+// (tests/view/test_types.py) pins this same list snake_cased and in
 // this same order, so a member added, dropped or moved in one language
 // fails the other language's test instead of drifting quietly.
 const MEMBERS = ['follow', 'isLink', 'readlink', 'linkStatAt', 'symlinkTargets'] as const

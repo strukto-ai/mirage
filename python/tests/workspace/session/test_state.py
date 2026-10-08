@@ -16,7 +16,6 @@ import asyncio
 
 import pytest
 
-from mirage.doors.types import SessionView
 from mirage.policy import Action, Deny, Policies, Policy, PolicyDenied
 from mirage.policy.types import SessionContext
 from mirage.shell.array import make_array
@@ -24,6 +23,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ManagedRef, ShellVar, TempEnv, VarAttr
 from mirage.types import HiddenVars, Visibility
+from mirage.view.types import SessionView
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.session import vars_from_env

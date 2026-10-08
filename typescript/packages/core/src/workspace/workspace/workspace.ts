@@ -23,7 +23,7 @@ import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import type { OpKwargs } from '../../doors/types.ts'
+import type { OpKwargs } from '../../view/types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'

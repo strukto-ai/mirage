@@ -9,7 +9,6 @@ from mirage.commands.builtin.generic.zip_cmd import (
     member_name,
     zip_cmd,
 )
-from mirage.doors.types import LinkView, MountView
 from mirage.types import (
     LINK_TARGET_KEY,
     ContentType,
@@ -18,6 +17,7 @@ from mirage.types import (
     PathSpec,
 )
 from mirage.utils.key_prefix import mount_key
+from mirage.view.types import LinkView, MountView
 
 
 def _spec(path: str, prefix: str = "") -> PathSpec:

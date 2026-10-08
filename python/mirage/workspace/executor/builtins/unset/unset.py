@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.doors.types import SessionView
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
@@ -20,6 +19,7 @@ from mirage.shell.array import array_extent, array_unset
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import FUNCNAME
 from mirage.shell.errors import ArithError, ExitSignal
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.shared import refusal, require_view
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result

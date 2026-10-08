@@ -17,7 +17,6 @@ from mirage.commands.builtin.generic.find import (
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import CommandTimeoutError, FindParseError
 from mirage.core.generic.find import walk_find
-from mirage.doors.types import LinkView
 from mirage.io.types import materialize
 from mirage.types import (
     ContentType,
@@ -26,6 +25,7 @@ from mirage.types import (
     FindType,
     PathSpec,
 )
+from mirage.view.types import LinkView
 
 
 async def find(*args, **kwargs):

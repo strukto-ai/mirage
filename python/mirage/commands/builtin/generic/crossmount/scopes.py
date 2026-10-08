@@ -18,11 +18,11 @@ from typing import cast
 
 from mirage.commands.builtin.generic.crossmount.types import OwnedScope
 from mirage.commands.builtin.utils.stream import is_stdin
-from mirage.doors.types import NamespaceView
 from mirage.errors.constants import FS_ERRORS
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import respell_one
+from mirage.view.types import NamespaceView
 
 logger = logging.getLogger(__name__)
 

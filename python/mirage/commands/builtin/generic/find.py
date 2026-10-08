@@ -22,7 +22,6 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.core.generic.find import link_results, modified_ts, walk_find
-from mirage.doors.types import LinkView, StatPath
 from mirage.errors.classify import failure_text
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
@@ -34,6 +33,7 @@ from mirage.utils.dates import matches_mtime
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import respell_one, respell_raw
+from mirage.view.types import LinkView, StatPath
 
 
 def parse_find_args(

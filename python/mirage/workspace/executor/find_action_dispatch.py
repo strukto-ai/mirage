@@ -32,7 +32,6 @@ from mirage.context import (
     reset_program_invocation,
     set_program_invocation,
 )
-from mirage.doors.types import NamespaceView, StatPath
 from mirage.errors.classify import failure_text
 from mirage.errors.fs import enoent
 from mirage.errors.posix import posix_phrase
@@ -44,6 +43,7 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import resolve_path
+from mirage.view.types import NamespaceView, StatPath
 from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
 from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.types import Consumer

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { NamespaceView } from '../../../../doors/types.ts'
+import type { NamespaceView } from '../../../../view/types.ts'
 import { type PathSpec, type FileStat } from '../../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Zone } from '../../../../utils/timezone.ts'

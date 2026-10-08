@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.commands.spec.types import CommandSpec, ValueType
-from mirage.doors.types import SessionView
 from mirage.policy.match import scopes_paths
 from mirage.runtime.routing.types import RouteDecision
 from mirage.shell.call_stack import CallStack
@@ -30,6 +29,7 @@ from mirage.utils.glob_walk import (
     mark_globs,
     unmark_globs,
 )
+from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.expand.globs import glob_options, resolve_globs

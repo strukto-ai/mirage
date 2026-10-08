@@ -14,9 +14,9 @@
 
 import inspect
 
-from mirage.doors.types import NamespaceLinks
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
+from mirage.view.types import NamespaceLinks
 from mirage.workspace import Workspace
 
 # The seam's members in declaration order. The TypeScript twin

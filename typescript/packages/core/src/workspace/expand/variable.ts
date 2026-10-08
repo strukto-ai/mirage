@@ -40,7 +40,7 @@ import {
 } from '../../shell/errors.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
-import type { SessionView } from '../../doors/types.ts'
+import type { SessionView } from '../../view/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { SessionState } from '../session/session.ts'
 import { assignElement } from '../session/elements.ts'

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat, Visibility } from '../../../types.ts'
-import type { LinkView, MountView, NamespaceView, StatOverlay } from '../../../doors/types.ts'
-import { namespaceNames } from '../../../doors/namespace_view.ts'
+import type { LinkView, MountView, NamespaceView, StatOverlay } from '../../../view/types.ts'
+import { namespaceNames } from '../../../view/namespace_view.ts'
 import { getAdmission, liveSessions, sessionVisibility } from '../../../context/session_context.ts'
 import { hiddenUnder, pathVisible } from '../../../utils/hidden.ts'
 import type { SessionState } from '../../session/session.ts'

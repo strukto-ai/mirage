@@ -57,13 +57,13 @@ from mirage.commands.resolve import get_extension
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.doors.types import NamespaceView
 from mirage.errors.render import fs_error_line
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.view.types import NamespaceView
 
 
 def _admit_grep(flags: GrepFlags, path: PathSpec, info: FileStat) -> bool:

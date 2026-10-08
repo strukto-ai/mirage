@@ -15,7 +15,6 @@
 from collections.abc import Callable
 from dataclasses import replace
 
-from mirage.doors.types import LinkView, StatPath
 from mirage.errors.fs import dot_walk_error, eexist, eloop, enoent
 from mirage.errors.render import operand_spelling
 from mirage.errors.types import (
@@ -31,6 +30,7 @@ from mirage.utils.path import (
     parent,
     resolve_path,
 )
+from mirage.view.types import LinkView, StatPath
 
 
 def has_unresolved_glob(paths: list[PathSpec]) -> bool:

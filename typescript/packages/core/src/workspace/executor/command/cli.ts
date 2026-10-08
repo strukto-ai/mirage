@@ -26,7 +26,7 @@ import { CLISpec, type CLIInvocation, type CLIDoors } from '../../../commands/cl
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import { verbVisible } from '../../lookup/lookup.ts'
 import { type DispatchFn, type ScriptSource } from '../../../runtime/types.ts'
-import type { NamespaceView, SessionView, StatPath } from '../../../doors/types.ts'
+import type { NamespaceView, SessionView, StatPath } from '../../../view/types.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle, Operand, type FlagValue } from '../../../commands/spec/types.ts'
 import { PartialOutputError, UsageError, CommandTimeoutError } from '../../../commands/errors.ts'

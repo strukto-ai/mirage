@@ -35,10 +35,10 @@ from mirage.commands.builtin.generic.crossmount.types import (
 )
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.spec.types import FlagValue
-from mirage.doors.types import NamespaceView, SessionView
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.view.types import NamespaceView, SessionView
 
 
 async def run_relay(

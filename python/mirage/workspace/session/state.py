@@ -17,7 +17,6 @@ import functools
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import replace
 
-from mirage.doors.types import EnvSet, SessionView
 from mirage.policy import Policies, PolicyDenied, pre_session_gate
 from mirage.policy.types import SessionContext
 from mirage.shell.arith import evaluate_arith
@@ -52,6 +51,7 @@ from mirage.shell.variable import (
     with_value,
 )
 from mirage.utils.hidden import var_hidden
+from mirage.view.types import EnvSet, SessionView
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.rng import draw, initial_seed
 from mirage.workspace.session.session import SessionState

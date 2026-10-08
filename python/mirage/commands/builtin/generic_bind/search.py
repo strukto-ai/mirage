@@ -42,12 +42,12 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.doors.namespace_view import paths_scoped
 from mirage.errors.types import FileTooLargeError
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import utf8_locale
 from mirage.types import FileType, JsonValue, PathSpec
 from mirage.vfs.types import SearchQuery
+from mirage.view.namespace_view import paths_scoped
 
 logger = logging.getLogger(__name__)
 

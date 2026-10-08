@@ -37,7 +37,6 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
-from mirage.doors.types import LinkView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
@@ -65,6 +64,7 @@ from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import CycleError, resolve_path
 from mirage.utils.quote import shell_quote_always
+from mirage.view.types import LinkView
 
 UPDATE_MODES = ("all", "none", "none-fail", "older")
 

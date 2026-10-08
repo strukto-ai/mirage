@@ -30,7 +30,6 @@ from mirage.core.awk import (
 )
 from mirage.core.awk.builtins import unescape
 from mirage.core.awk.value import text as text_value
-from mirage.doors.types import NamespaceView
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import eisdir, fs_strerror
 from mirage.errors.posix import posix_phrase
@@ -47,6 +46,7 @@ from mirage.shell.bytes import (
 )
 from mirage.shell.join import shell_join
 from mirage.types import FileType, PathSpec
+from mirage.view.types import NamespaceView
 
 STDIN_NAMES = frozenset({"-", "/dev/stdin"})
 

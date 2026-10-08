@@ -23,12 +23,12 @@ from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.doors.types import LinkView, MountView, NamespaceView
 from mirage.errors.fs import eisdir
 from mirage.io.stream import ensure_stream, materialize
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.view.types import LinkView, MountView, NamespaceView
 
 
 def _mounted(accessor: Accessor) -> bool:

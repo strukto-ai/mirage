@@ -33,11 +33,11 @@ from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.generic.find import walk_find
-from mirage.doors.types import StatOverlay
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import NativeCopy, PathSpec, PrimitiveCopy
 from mirage.utils.key_prefix import rekey
 from mirage.vfs.types import OperationFn
+from mirage.view.types import StatOverlay
 
 
 async def _walk_find(
