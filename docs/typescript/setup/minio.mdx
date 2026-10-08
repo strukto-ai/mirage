@@ -4,7 +4,7 @@ icon: /images/minio-logo.svg
 description: Set up MinIO as a MIRAGE VFS from Node or the browser.
 ---
 
-MinIO speaks the S3 API with AWS Signature V4 against your own server endpoint (e.g. `http://localhost:9000`). MinIO is self-hosted, so the endpoint is required and path-style addressing is used by default.
+MinIO speaks the S3 API with AWS Signature V4 against your own server endpoint (e.g. `http://localhost:9000`). MinIO is self-hosted, so the endpoint is required and path-style addressing is used by default. MinIO ignores copy and delete conditions, so under [`write: conditional`](/home/yaml#the-write-policy) mirage refuses what would copy or delete on a MinIO mount (such as a `cp` or `mv` within the mount, a `mv` out of it, `rm`, or `find -delete`); a `cp` or `mv` into it from another mount is a write, and goes through.
 
 Credentials (access key + secret key from the MinIO Console) are created the same way in both runtimes, see [MinIO Credentials](/home/setup/minio).
 

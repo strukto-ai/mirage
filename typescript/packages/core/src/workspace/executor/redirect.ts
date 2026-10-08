@@ -53,6 +53,7 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { createFile, writeDescription } from './create.ts'
 import {
   CLOSED as EXEC_CLOSED,
+  EXEC_STREAM_UNBOUND,
   OPEN_FOR_READ_WRITE,
   OPEN_FOR_READING,
   TO_STDERR as EXEC_TO_STDERR,
@@ -61,7 +62,7 @@ import {
 } from './builtins/exec/constants.ts'
 import { drained, pump } from './jobs.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
-import { carried, isUnwinding, takeStderr, type Unwinding } from './control.ts'
+import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
 import { concat } from '../../io/cachable_iterator.ts'
@@ -253,6 +254,9 @@ export async function handleRedirect(
   const files: FileDescription[] = []
   const expanded: Redirect[] = []
   const targets: PathSpec[] = []
+  // Admission needs the final input binding before any target can be opened.
+  // An empty source marks redirected stdin without reading it ahead of its gate.
+  const admissionStdin = redirects.some((r) => r.fd === FD_STDIN) ? new Uint8Array() : stdin
   const readPaths = new Map<number, string>()
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
@@ -307,7 +311,7 @@ export async function handleRedirect(
     const scope = ensureScope(r.target)
     targets.push(scope)
     if (guard !== undefined) {
-      const denied = await guard(targets)
+      const denied = await guard(targets, admissionStdin)
       if (denied !== null) return denied
     }
     const refusal = await openRefusal(dispatch, context, [r])
@@ -420,6 +424,27 @@ export async function handleRedirect(
   const jobOutput = session.jobOutput
   const route = new JobRoute(recorder, outputs, jobOutput ?? session.tty.jobs, dispatch, session)
   session.jobOutput = route
+  // A stream the statement redirects is its own while it runs, in the lines
+  // it runs too (`eval`, `exec CMD`, `bash -c`): an earlier `exec >` binding
+  // of it waits until the statement ends.
+  const held = {
+    ...(claimed.has(1)
+      ? {
+          execStdout: session.execStdout,
+          execStdoutAppend: session.execStdoutAppend,
+          execStdoutInput: session.execStdoutInput,
+        }
+      : {}),
+    ...(claimed.has(2)
+      ? {
+          execStderr: session.execStderr,
+          execStderrAppend: session.execStderrAppend,
+          execStderrInput: session.execStderrInput,
+        }
+      : {}),
+  }
+  if (claimed.has(1)) Object.assign(session, EXEC_STREAM_UNBOUND[1])
+  if (claimed.has(2)) Object.assign(session, EXEC_STREAM_UNBOUND[2])
   try {
     const given = inputs.get(0) ?? null
     if (command === null) {
@@ -447,6 +472,8 @@ export async function handleRedirect(
     unwound = error
     // What the command wrote on its way out goes where it writes; an error
     // expanding its own words came before its redirects.
+    const output = await takeStdout(error)
+    if (output.byteLength > 0) await recorder.emit(Channel.STDOUT, output)
     const own =
       error instanceof ExitSignal && error.expanding !== null && error.expanding === command?.id
     if (!own) {
@@ -454,6 +481,7 @@ export async function handleRedirect(
       if (diagnostic.byteLength > 0) await recorder.emit(Channel.STDERR, diagnostic)
     }
   } finally {
+    Object.assign(session, held)
     // A body that raised (an abort, an error) skips the writes below: its
     // jobs write straight through.
     route.recorder = null
@@ -485,7 +513,7 @@ export async function handleRedirect(
       command !== null &&
       chunks.some(([channel]) => channel === Channel.STDOUT)
     ) {
-      chunks.push([Channel.STDERR, closedWriteLine(command)])
+      chunks.push([Channel.STDERR, closedWriteLine(command, unwound)])
       io.exitCode = 1
     }
     const dest = (key: Channel | Inherited): FdDest | undefined => {
@@ -556,7 +584,14 @@ export async function handleRedirect(
   } finally {
     await route.release()
   }
-  if (unwound !== null) throw await carried(unwound, stdout, new IOResult({ stderr: io.stderr }))
+  if (unwound !== null) {
+    if (unwound instanceof ExitSignal && unwound.replaced !== null && io.exitCode !== 0) {
+      // The replacing program's own write failed: its status is the shell's.
+      unwound.exitCode = io.exitCode
+      unwound.containedCode = io.exitCode
+    }
+    throw await carried(unwound, stdout, new IOResult({ stderr: io.stderr }))
+  }
   return [stdout, io, new ExecutionNode({ command: 'redirect', exitCode: io.exitCode, refused })]
 }
 
@@ -645,18 +680,26 @@ function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
   return encodeText(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
 }
 
-/** GNU's line for a write onto a closed stdout, in the command's name. */
-function closedWriteLine(command: TSNodeLike): Uint8Array {
+/**
+ * GNU's line for a write onto a closed stdout, in the name of what wrote:
+ * the command, or the program an `exec` in it replaced the shell with.
+ */
+function closedWriteLine(command: TSNodeLike, unwound: Unwinding | null = null): Uint8Array {
   const words = getText(command)
     .split(/\s+/)
     .filter((w) => w !== '')
-  const name = words[0] ?? 'redirect'
+  const name =
+    unwound instanceof ExitSignal && unwound.replaced !== null
+      ? unwound.replaced
+      : (words[0] ?? 'redirect')
   return encodeText(`${name}: write error: Bad file descriptor\n`)
 }
 
 /** Shell-attributed IOResult for a redirect target that cannot be opened. */
 function redirectFailure(scope: PathSpec, err: unknown): Result {
-  return shellFailure(redirectErrorLine(scope, err))
+  const [stdout, io, node] = shellFailure(redirectErrorLine(scope, err))
+  node.unopened = true
+  return [stdout, io, node]
 }
 
 /**

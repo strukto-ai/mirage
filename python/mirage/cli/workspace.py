@@ -19,7 +19,6 @@ from typing import Any
 from urllib.parse import quote
 
 import typer
-import yaml
 
 from mirage.cli.client import make_client
 from mirage.cli.output import (
@@ -29,12 +28,9 @@ from mirage.cli.output import (
     format_table,
     handle_response,
 )
+from mirage.utils.yaml import parse_yaml
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspaces.")
-
-
-def _load_yaml(path: Path) -> dict[str, Any]:
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def resolve_config(path: Path) -> dict[str, Any]:
@@ -73,7 +69,7 @@ def _resolve_config_arg(path: Path) -> dict[str, Any]:
     """
     from mirage.config import _absolutize_scripts, _interpolate_env
 
-    raw = _load_yaml(path)
+    raw = parse_yaml(path.read_text(encoding="utf-8")) or {}
     try:
         resolved = _interpolate_env(raw, dict(os.environ))
     except ValueError as e:

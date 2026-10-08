@@ -109,7 +109,7 @@ from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import path_stat
 from mirage.workspace.mount.namespace.view import namespace_view_of
-from mirage.workspace.mount.storage import make_storage_key
+from mirage.workspace.mount.storage import make_check_unlink, make_storage_key
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
@@ -268,6 +268,7 @@ async def handle_command(
             handed,
             registry.decisions,
             sink,
+            execute_fn,
         )
 
     # Installed CLIs: dispatch by name, never by operand path. Sits
@@ -598,6 +599,7 @@ async def handle_command(
                 cwd=session.cwd,
                 argv=spelled_words(parts[1:]),
                 aggregate=aggregate_for(cmd_name, cross_scopes, registry),
+                check_unlink=make_check_unlink(registry),
             ),
         )
         if cmd_name == "find":

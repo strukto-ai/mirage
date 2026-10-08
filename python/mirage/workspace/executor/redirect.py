@@ -60,13 +60,19 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.executor.builtins.exec.constants import (
     CLOSED,
+    EXEC_STREAM_UNBOUND,
     OPEN_FOR_READ_WRITE,
     OPEN_FOR_READING,
     TO_STDERR,
     TO_STDIN,
     TO_STDOUT,
 )
-from mirage.workspace.executor.control import UNWINDING, carried, take_stderr
+from mirage.workspace.executor.control import (
+    UNWINDING,
+    carried,
+    take_stderr,
+    take_stdout,
+)
 from mirage.workspace.executor.create import create_file, write_description
 from mirage.workspace.executor.jobs import drained, pump
 from mirage.workspace.types import ExecutionNode
@@ -378,6 +384,11 @@ async def handle_redirect(
     files: list[FileDescription] = []
     expanded: list[Redirect] = []
     targets: tuple[PathSpec, ...] = ()
+    # Admission needs the final input binding before any target can be opened.
+    # An empty source marks redirected stdin without reading it ahead of its gate.
+    admission_stdin = (
+        b"" if any(r.fd == FD_STDIN for r in redirects) else stdin
+    )
     read_paths: dict[int, str] = {}
     for raw in redirects:
         r = await expand(raw) if expand is not None else raw
@@ -436,7 +447,7 @@ async def handle_redirect(
         scope = _ensure_scope(r.target)
         targets = (*targets, scope)
         if guard is not None:
-            denied = await guard(targets)
+            denied = await guard(targets, admission_stdin)
             if denied is not None:
                 return denied
         refusal = await _open_refusal(dispatch, context, [r])
@@ -549,6 +560,18 @@ async def handle_redirect(
     )
     session.job_output = route
     enclosing = ENCLOSING.set(recorder)
+    # A stream the statement redirects is its own while it runs, in the
+    # lines it runs too (`eval`, `exec CMD`, `bash -c`): an earlier
+    # `exec >` binding of it waits until the statement ends.
+    unbound = {
+        field: value
+        for fd, fields in EXEC_STREAM_UNBOUND.items()
+        if fd in claimed
+        for field, value in fields.items()
+    }
+    held = {field: getattr(session, field) for field in unbound}
+    for field, value in unbound.items():
+        setattr(session, field, value)
     try:
         if command is None:
             if capture_input and not isinstance(inputs[0], _Unreadable):
@@ -572,6 +595,9 @@ async def handle_redirect(
         unwound, io = sig, IOResult()
         # What the command wrote on its way out goes where it writes; an
         # error expanding its own words came before its redirects.
+        output = await take_stdout(sig)
+        if output:
+            await recorder.emit(Channel.STDOUT, output)
         if not (
             isinstance(sig, ExitSignal)
             and command is not None
@@ -581,6 +607,8 @@ async def handle_redirect(
             if diagnostic:
                 await recorder.emit(Channel.STDERR, diagnostic)
     finally:
+        for field, value in held.items():
+            setattr(session, field, value)
         ENCLOSING.reset(enclosing)
         # A body that raised (a cancel, an error) skips the writes below:
         # its jobs write straight through.
@@ -612,7 +640,9 @@ async def handle_redirect(
             and command is not None
             and any(c == Channel.STDOUT for c, _ in chunks)
         ):
-            chunks.append((Channel.STDERR, _closed_write_line(command)))
+            chunks.append(
+                (Channel.STDERR, _closed_write_line(command, unwound))
+            )
             io.exit_code = 1
 
         def dest(
@@ -709,6 +739,14 @@ async def handle_redirect(
     finally:
         await route.release()
     if unwound is not None:
+        if (
+            isinstance(unwound, ExitSignal)
+            and unwound.replaced
+            and io.exit_code
+        ):
+            # The replacing program's own write failed: its status is the
+            # shell's.
+            unwound.exit_code = unwound.contained_code = io.exit_code
         raise await carried(unwound, stdout, IOResult(stderr=io.stderr))
     return (
         stdout,
@@ -836,14 +874,22 @@ def _redirect_error_line(scope: PathSpec, exc: OSError) -> bytes:
     return encode_text(f"{label}: {strerror}\n" if strerror else f"{label}\n")
 
 
-def _closed_write_line(command: TSNodeLike) -> bytes:
-    """GNU's line for a write onto a closed stdout, in the command's name.
+def _closed_write_line(
+    command: TSNodeLike, unwound: Exception | None = None
+) -> bytes:
+    """GNU's line for a write onto a closed stdout, in the name of what
+    wrote: the command, or the program an ``exec`` in it replaced the
+    shell with.
 
     Args:
         command (TSNodeLike): the command whose stdout was closed.
+        unwound (Exception | None): the signal it left by, if any.
     """
-    words = get_text(command).split()
-    name = words[0] if words else "redirect"
+    if isinstance(unwound, ExitSignal) and unwound.replaced is not None:
+        name = unwound.replaced
+    else:
+        words = get_text(command).split()
+        name = words[0] if words else "redirect"
     return encode_text(f"{name}: write error: Bad file descriptor\n")
 
 
@@ -867,7 +913,9 @@ def _redirect_failure(
         scope (PathSpec): The redirect target that could not be opened.
         exc (OSError): The filesystem error raised by the open.
     """
-    return _shell_failure(_redirect_error_line(scope, exc))
+    _, io, node = _shell_failure(_redirect_error_line(scope, exc))
+    node.unopened = True
+    return None, io, node
 
 
 def _shell_failure(

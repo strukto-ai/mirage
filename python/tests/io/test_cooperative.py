@@ -327,9 +327,9 @@ async def test_cancel_during_cache_fill_aborts():
 
     real_apply_io = ws._dispatcher.apply_io
 
-    async def slow_apply_io(io, records=None, cache_facts=None):
+    async def slow_apply_io(io, records=None, **kwargs):
         if io.exit_code != 0:
-            await real_apply_io(io, records=records, cache_facts=cache_facts)
+            await real_apply_io(io, records=records, **kwargs)
             return
         cancel.set()
         await asyncio.Event().wait()

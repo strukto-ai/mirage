@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type MockInstance, vi } from 'vitest'
+import { RAMFileCacheStore } from './file/ram.ts'
 
 /**
  * Move performance.now() forward for the listing window without freezing it.
@@ -33,5 +34,19 @@ export function shiftPerformanceNow(): {
       offset += ms
     },
     spy,
+  }
+}
+
+/** A store whose server refuses every fill, and every drop when down. */
+export class RefusingStore extends RAMFileCacheStore {
+  constructor(private readonly down = false) {
+    super()
+  }
+  override set(): Promise<void> {
+    return Promise.reject(new Error('OOM command not allowed'))
+  }
+  override remove(key: string): Promise<void> {
+    if (this.down) return Promise.reject(new Error('connection refused'))
+    return super.remove(key)
   }
 }

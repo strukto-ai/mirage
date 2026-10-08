@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   const ws = new Workspace({ '/data': ram }, { mode: MountMode.EXEC })
 
   console.log('python3 in @mirage-ai — Pyodide-backed, three invocation modes')
-  console.log('(first call takes ~1-2s to boot Pyodide; subsequent calls are instant)\n')
+  console.log('(each command starts a fresh Pyodide interpreter)\n')
 
   await runLabeled(ws, 'python3 -c "print(2+3)"', 'python3 -c "print(2+3)"')
 

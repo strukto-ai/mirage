@@ -15,7 +15,7 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
-import { fsStrerror, isFsError } from '../../../errors/fs.ts'
+import { fsStrerror, innerSuffix, isFsError, withInner } from '../../../errors/fs.ts'
 import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
 import type { Command, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -97,7 +97,8 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
       // A refused removal (a read-only region) is GNU's line for the
       // operand, and rm goes on to the rest.
       if (!isFsError(err)) throw err
-      return [`rm: cannot remove '${label}': ${String(fsStrerror(err))}`, []]
+      const named = withInner(label, innerSuffix(path, err))
+      return [`rm: cannot remove '${named}': ${String(fsStrerror(err))}`, []]
     }
     return [null, opts.verbose ? [`removed '${label}'`] : []]
   }

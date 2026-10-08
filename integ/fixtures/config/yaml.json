@@ -1,0 +1,177 @@
+{
+  "cases": [
+    {
+      "name": "mount and index TTL 1e3",
+      "yaml": "mounts: {/d: {vfs: ram, read: bounded, ttl: 1e3, index: {type: ram, ttl: 1e3}}}\nindex: {type: ram, ttl: 1e3}\n",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": 1000,
+            "index": {
+              "type": "ram",
+              "ttl": 1000
+            }
+          }
+        },
+        "index": {
+          "type": "ram",
+          "ttl": 1000
+        }
+      }
+    },
+    {
+      "name": "mount and index TTL 1E+3",
+      "yaml": "mounts: {/d: {vfs: ram, read: bounded, ttl: 1E+3, index: {type: ram, ttl: 1E+3}}}\nindex: {type: ram, ttl: 1E+3}\n",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": 1000,
+            "index": {
+              "type": "ram",
+              "ttl": 1000
+            }
+          }
+        },
+        "index": {
+          "type": "ram",
+          "ttl": 1000
+        }
+      }
+    },
+    {
+      "name": "mount and index TTL 1.0e3",
+      "yaml": "mounts: {/d: {vfs: ram, read: bounded, ttl: 1.0e3, index: {type: ram, ttl: 1.0e3}}}\nindex: {type: ram, ttl: 1.0e3}\n",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": 1000,
+            "index": {
+              "type": "ram",
+              "ttl": 1000
+            }
+          }
+        },
+        "index": {
+          "type": "ram",
+          "ttl": 1000
+        }
+      }
+    },
+    {
+      "name": "mount and index TTL 1.e3",
+      "yaml": "mounts: {/d: {vfs: ram, read: bounded, ttl: 1.e3, index: {type: ram, ttl: 1.e3}}}\nindex: {type: ram, ttl: 1.e3}\n",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": 1000,
+            "index": {
+              "type": "ram",
+              "ttl": 1000
+            }
+          }
+        },
+        "index": {
+          "type": "ram",
+          "ttl": 1000
+        }
+      }
+    },
+    {
+      "name": "mount and index TTL +.1e4",
+      "yaml": "mounts: {/d: {vfs: ram, read: bounded, ttl: +.1e4, index: {type: ram, ttl: +.1e4}}}\nindex: {type: ram, ttl: +.1e4}\n",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": 1000,
+            "index": {
+              "type": "ram",
+              "ttl": 1000
+            }
+          }
+        },
+        "index": {
+          "type": "ram",
+          "ttl": 1000
+        }
+      }
+    },
+    {
+      "name": "mount and index TTL 10000e-1",
+      "yaml": "mounts: {/d: {vfs: ram, read: bounded, ttl: 10000e-1, index: {type: ram, ttl: 10000e-1}}}\nindex: {type: ram, ttl: 10000e-1}\n",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": 1000,
+            "index": {
+              "type": "ram",
+              "ttl": 1000
+            }
+          }
+        },
+        "index": {
+          "type": "ram",
+          "ttl": 1000
+        }
+      }
+    },
+    {
+      "name": "fractional exponent index TTL",
+      "yaml": "mounts: {/d: {vfs: ram}}\nindex: {type: ram, ttl: 1e-3}\n",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "index": {
+          "type": "ram",
+          "ttl": 0.001
+        }
+      }
+    },
+    {
+      "name": "quoted exponents remain strings",
+      "yaml": "mounts: {/d: {vfs: ram}}\nenv: {SINGLE: '1e3', DOUBLE: \"1e3\", TAGGED: !!str 1e3}\n",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "env": {
+          "SINGLE": "1e3",
+          "DOUBLE": "1e3",
+          "TAGGED": "1e3"
+        }
+      }
+    },
+    {
+      "name": "fractional mount TTL is refused",
+      "yaml": "mounts: {/d: {vfs: ram, read: bounded, ttl: 1e-3}}\n"
+    },
+    {
+      "name": "quoted mount TTL is refused",
+      "yaml": "mounts: {/d: {vfs: ram, read: bounded, ttl: \"1e3\"}}\n"
+    },
+    {
+      "name": "quoted index TTL is refused",
+      "yaml": "mounts: {/d: {vfs: ram}}\nindex: {type: ram, ttl: \"1e3\"}\n"
+    },
+    {
+      "name": "unquoted exponent in string field is refused",
+      "yaml": "mounts: {/d: {vfs: ram}}\nenv: {BUILD_ID: 1e3}\n"
+    }
+  ]
+}

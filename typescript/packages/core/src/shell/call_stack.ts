@@ -18,6 +18,7 @@ export interface CallFrameInit {
   functionName?: string
   loopLevel?: number
   sourced?: boolean
+  closed?: boolean
 }
 
 export class CallFrame {
@@ -26,6 +27,8 @@ export class CallFrame {
   functionName: string
   loopLevel: number
   sourced: boolean
+  // A sourced file whose RETURN action runs: it has returned.
+  closed: boolean
 
   constructor(init: CallFrameInit = {}) {
     this.positional = init.positional ?? []
@@ -33,6 +36,7 @@ export class CallFrame {
     this.functionName = init.functionName ?? ''
     this.loopLevel = init.loopLevel ?? 0
     this.sourced = init.sourced ?? false
+    this.closed = init.closed ?? false
   }
 }
 
@@ -65,6 +69,7 @@ export class CallStack {
             functionName: frame.functionName,
             loopLevel: loops ? frame.loopLevel : 0,
             sourced: frame.sourced,
+            closed: frame.closed,
           }),
       ),
     )
@@ -106,6 +111,11 @@ export class CallStack {
     return this.frames.length
   }
 
+  /** Whether a function or sourced file is running for `return` to leave. */
+  get returnable(): boolean {
+    return this.frames.slice(1).some((frame) => !frame.closed)
+  }
+
   /** Count a loop the current frame runs, for `break` and `continue`. */
   async loop<T>(run: () => Promise<T>): Promise<T> {
     const frame = this.current
@@ -120,10 +130,10 @@ export class CallStack {
   /**
    * `${FUNCNAME[@]}`: the frames innermost first, a sourced file as
    * `source`. Empty while no function runs, as bash hides a sourced file's
-   * entry outside one.
+   * entry outside one, and one whose RETURN action runs: it has returned.
    */
   functionNames(): readonly string[] {
-    const frames = this.frames.slice(1)
+    const frames = this.frames.slice(1).filter((frame) => !frame.closed)
     if (frames.every((frame) => frame.sourced)) return []
     return frames.reverse().map((frame) => frame.functionName)
   }

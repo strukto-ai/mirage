@@ -15,7 +15,8 @@
 import type { S3Client } from '@aws-sdk/client-s3'
 import { describe, expect, it } from 'vitest'
 import type { S3HttpAgents } from '../../vfs/s3/config.ts'
-import { createS3Client } from './client.ts'
+import { LOST_CODES, sdkError } from './_test_util.ts'
+import { createS3Client, isConditionLost } from './client.ts'
 
 interface ResolvedHandlerConfig {
   connectionTimeout?: number
@@ -103,5 +104,20 @@ describe('S3 client', () => {
     expect(resolved.connectionTimeout).toBe(1234)
     expect(resolved.httpsAgent).toBe(agents.httpsAgent)
     client.destroy()
+  })
+})
+
+describe('isConditionLost', () => {
+  it.each(LOST_CODES.cases.map((c) => [c.name, c] as const))('%s', (_name, c) => {
+    expect(isConditionLost(sdkError(c.code, c.status))).toBe(c.lost)
+  })
+
+  it.each([
+    // The SDK names a bodiless reply Unknown; its status is the code.
+    ['412-unknown', sdkError('Unknown', 412), true],
+    ['409-unknown', sdkError('Unknown', 409), true],
+    ['transport', new Error('socket hang up'), false],
+  ] as const)('%s', (_name, err, lost) => {
+    expect(isConditionLost(err)).toBe(lost)
   })
 })

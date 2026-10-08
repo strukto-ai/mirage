@@ -13,8 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
+from enum import Enum
 
 from pydantic import BaseModel
+
+
+class Holds(Enum):
+    """What a cache entry holds."""
+
+    BYTES = "bytes"
+    BYTES_AND_VERSION = "bytes_and_version"
+    VERSION = "version"
 
 
 class CacheEntry(BaseModel):
@@ -22,6 +31,12 @@ class CacheEntry(BaseModel):
     cached_at: int
     fingerprint: str | None = None
     ttl: int | None = None
+    holds: Holds = Holds.BYTES
+
+    @property
+    def has_bytes(self) -> bool:
+        """Whether the entry holds the file's bytes, not only its version."""
+        return self.holds is not Holds.VERSION
 
     @property
     def expired(self) -> bool:

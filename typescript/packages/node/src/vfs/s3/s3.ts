@@ -36,6 +36,21 @@ export interface S3VFSState {
   config: S3ConfigRedacted
 }
 
+/**
+ * The endpoint a mount declares, for its write-condition row: the config's,
+ * else AWS_ENDPOINT_URL_S3 or AWS_ENDPOINT_URL unless
+ * AWS_IGNORE_CONFIGURED_ENDPOINT_URLS is true. An endpoint set only in an AWS
+ * profile is not read.
+ */
+function declaredEndpoint(config: S3Config): string | undefined {
+  if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
+  const env = process.env
+  if (env.AWS_IGNORE_CONFIGURED_ENDPOINT_URLS?.toLowerCase() === 'true') return undefined
+  const endpoint = env.AWS_ENDPOINT_URL_S3 ?? ''
+  if (endpoint !== '') return endpoint
+  return env.AWS_ENDPOINT_URL !== '' ? env.AWS_ENDPOINT_URL : undefined
+}
+
 export class S3VFS extends S3VFSBase {
   override readonly name: string = VFSName.S3
   override readonly cachesReads: boolean = true
@@ -49,6 +64,8 @@ export class S3VFS extends S3VFSBase {
   readonly config: S3Config
   override readonly accessor: S3Accessor
 
+  private readonly declared: string | undefined
+
   constructor(config: S3Config) {
     super()
     const normalized = normalizeKeyPrefix(config.keyPrefix)
@@ -59,13 +76,25 @@ export class S3VFS extends S3VFSBase {
       delete cfg.keyPrefix
     }
     this.config = cfg
+    this.declared = declaredEndpoint(cfg)
     const proxy = cfg.proxy
     this.accessor = new S3Accessor({
       ...cfg,
+      ...(this.declared !== undefined ? { endpoint: this.declared } : {}),
       ...(proxy !== undefined && proxy !== ''
         ? { httpAgentProvider: () => createProxyAgents(proxy) }
         : {}),
     })
+  }
+
+  /**
+   * The endpoint this mount's writes go to. One declared when the mount was
+   * built is fixed, and the client is pinned to it; without one, the
+   * environment is read again, as each op's client reads it. Mirrors
+   * Python's `resolved_endpoint`.
+   */
+  override get resolvedEndpoint(): string | undefined {
+    return this.declared ?? declaredEndpoint(this.config)
   }
 
   override storageLocation(): string {

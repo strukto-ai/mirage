@@ -39,7 +39,7 @@ import type { ValueType } from '../../commands/spec/types.ts'
 import { commandNodes } from '../../runtime/routing/index.ts'
 import { getParts, getRedirects, literalWord, splitEnvPrefix } from '../../shell/helpers.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
+import type { Redirect, TSNodeLike } from '../../shell/types.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import { isGlob } from '../../utils/hidden.ts'
@@ -578,6 +578,7 @@ async function admitWords(
   // The command and its line, as `admit` takes it (the lines it runs
   // stand under it).
   claimant: Claimant | null = null,
+  stdin: ByteSource | null = null,
 ): Promise<Refused | null> {
   const head = words[0]
   if (head === undefined) return null
@@ -595,7 +596,7 @@ async function admitWords(
     registry,
     namespace,
     agentId,
-    null,
+    stdin,
     redirects,
     signal,
     claimant,
@@ -739,6 +740,7 @@ export async function admitLine(
       statementRedirects(node, home),
       signal,
       handed === null ? null : { line: handed, occurrence: occurrenceIn(node, scope) },
+      statementStdin(node),
     )
     if (refusal !== null) return refusal
   }
@@ -763,7 +765,7 @@ export async function admitLine(
  * every command inside it, which is not a chain, so none is claimed
  * here and the op door judges the write.
  */
-export function statementRedirects(node: TSNodeLike, home: string | null): Word[] {
+function statementRedirectsRaw(node: TSNodeLike): Redirect[] {
   let owner = node
   let parent = owner.parent
   while (parent !== undefined && parent !== null && REDIRECT_CHAIN.has(parent.type)) {
@@ -777,8 +779,17 @@ export function statementRedirects(node: TSNodeLike, home: string | null): Word[
   const body = parent.namedChildren[0]
   if (body === undefined || body.startIndex !== owner.startIndex) return []
   const [, redirects] = getRedirects(parent)
+  return redirects
+}
+
+/** Mark redirected input without opening or expanding its source. */
+export function statementStdin(node: TSNodeLike): Uint8Array | null {
+  return statementRedirectsRaw(node).some((r) => r.fd === 0) ? new Uint8Array(0) : null
+}
+
+export function statementRedirects(node: TSNodeLike, home: string | null): Word[] {
   const words: Word[] = []
-  for (const r of redirects) {
+  for (const r of statementRedirectsRaw(node)) {
     if (
       r.kind === RedirectKind.HEREDOC ||
       r.kind === RedirectKind.HERESTRING ||

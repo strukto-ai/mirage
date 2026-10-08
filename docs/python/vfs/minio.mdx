@@ -6,7 +6,9 @@ description: Mount a self-hosted MinIO bucket as a virtual filesystem.
 The MinIO VFS is a thin wrapper over the [S3 VFS](/python/vfs/s3).
 It maps a `MinIOConfig` to an `S3Config` and reuses the exact same backend,
 commands, and behavior as S3, it just points at your MinIO `endpoint_url` and
-uses path-style addressing by default.
+uses path-style addressing by default. One difference is MinIO's: it ignores
+copy and delete conditions, so under [`write: conditional`](/home/yaml#the-write-policy)
+mirage refuses what would copy or delete on a MinIO mount (such as a `cp` or `mv` within the mount, a `mv` out of it, `rm`, or `find -delete`), where AWS S3 runs them; a `cp` or `mv` into it from another mount is a write, and goes through.
 
 MinIO is self-hosted, so `endpoint_url` is **required** (there is no
 region-derived host). Uses aioboto3 against MinIO's S3-compatible API.

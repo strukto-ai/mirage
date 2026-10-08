@@ -15,7 +15,7 @@
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { normalizeCacheConfig } from '@struktoai/mirage-core/cache/file/config'
@@ -1329,13 +1329,15 @@ describe('CLI to daemon round trip', () => {
 // block that is not a permission verb, then a verb each.
 const ACCEPTED_FIXTURES = ['blocks', 'allow', 'ask', 'deny'] as const
 
-function fixtureCases(name: string): { name: string; config: Record<string, unknown> }[] {
+function fixtureCases(
+  name: string,
+): { name: string; error?: string; config: Record<string, unknown> }[] {
   const path = fileURLToPath(
     new URL(`../../../../integ/fixtures/config/${name}.json`, import.meta.url),
   )
   return (
     JSON.parse(readFileSync(path, 'utf8')) as {
-      cases: { name: string; config: Record<string, unknown> }[]
+      cases: { name: string; error?: string; config: Record<string, unknown> }[]
     }
   ).cases
 }
@@ -1347,8 +1349,32 @@ describe('shared rejection fixture', () => {
     expect(cases.length).toBeGreaterThan(0)
   })
 
-  it.each(cases)('refuses $name', ({ config }) => {
-    expect(() => loadWorkspaceConfig(config)).toThrow()
+  it.each(cases)('refuses $name', ({ config, error }) => {
+    // Where a case names the phrase, both loaders must say it.
+    if (error === undefined) expect(() => loadWorkspaceConfig(config)).toThrow()
+    else expect(() => loadWorkspaceConfig(config)).toThrow(error)
+  })
+})
+
+describe('shared YAML scalars', () => {
+  const path = new URL('../../../../integ/fixtures/config/yaml.json', import.meta.url)
+  const { cases } = JSON.parse(readFileSync(path, 'utf8')) as {
+    cases: { name: string; yaml: string; config?: Record<string, unknown> }[]
+  }
+
+  it.each(cases)('$name', ({ yaml, config }) => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-yaml-'))
+    const file = join(dir, 'workspace.yaml')
+    try {
+      writeFileSync(file, yaml)
+      if (config === undefined) {
+        expect(() => loadWorkspaceConfigFile(file)).toThrow()
+      } else {
+        expect(loadWorkspaceConfigFile(file)).toEqual(loadWorkspaceConfig(config))
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
@@ -1686,5 +1712,36 @@ describe('mount index block', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+// Non-default neighbours fail a door that rebuilds the mount around the key.
+describe('mount write block', () => {
+  it.each([
+    ['neither', undefined, undefined, WritePolicy.UNCONDITIONAL],
+    ['workspace', 'conditional', undefined, WritePolicy.CONDITIONAL],
+    ['block-overrides', 'conditional', 'unconditional', WritePolicy.UNCONDITIONAL],
+    ['block', undefined, 'conditional', WritePolicy.CONDITIONAL],
+  ] as const)('reaches its mount (%s)', async (_id, workspace, block, expected) => {
+    const a: Record<string, unknown> = {
+      vfs: 's3',
+      config: { bucket: 'b' },
+      mode: 'write',
+      read: 'fresh',
+      ttl: 45,
+      index: { type: 'ram', ttl: 37 },
+    }
+    if (block !== undefined) a.write = block
+    const doc: Record<string, unknown> = {
+      mounts: { '/a': a, '/b': { vfs: 'ram', write: 'unconditional' } },
+    }
+    if (workspace !== undefined) doc.write = workspace
+    const { mounts } = await configToWorkspaceArgs(loadWorkspaceConfig(doc))
+    const options = mounts['/a']?.options
+    expect(options?.write).toBe(expected)
+    expect(options?.mode).toBe(MountMode.WRITE)
+    expect(options?.read).toEqual({ policy: ReadPolicy.FRESH, ttl: 45 })
+    expect(options?.index).toEqual({ type: 'ram', ttl: 37 })
+    expect(mounts['/b']?.options.write).toBe(WritePolicy.UNCONDITIONAL)
   })
 })

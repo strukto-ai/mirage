@@ -45,6 +45,10 @@ class S3Accessor(Accessor):
         """
         return await self._clients.get(factory)
 
+    def open_client(self) -> Any:
+        """Return the running loop's open client, None before its first op."""
+        return self._clients.peek()
+
     async def close(self) -> None:
         """Close every client this accessor opened."""
         await self._clients.close()

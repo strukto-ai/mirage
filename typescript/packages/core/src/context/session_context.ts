@@ -15,6 +15,7 @@
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
 import type { ByteSource, IOResult } from '../io/types.ts'
+import type { Redirect } from '../shell/types.ts'
 import type { JobConsole } from '../shell/console/index.ts'
 import type { ExecutionNode } from '../workspace/types.ts'
 import type { EvaluationContext } from '../workspace/evaluation.ts'
@@ -495,7 +496,10 @@ export type RedirectRun = (
   sink: JobConsole | undefined,
   paths: readonly PathSpec[],
 ) => Promise<RedirectResult>
-export type RedirectGuard = (paths: readonly PathSpec[]) => Promise<RedirectResult | null>
+export type RedirectGuard = (
+  paths: readonly PathSpec[],
+  stdin: ByteSource | null,
+) => Promise<RedirectResult | null>
 export type RedirectRunner = (
   run: RedirectRun,
   guard: RedirectGuard | undefined,
@@ -503,7 +507,8 @@ export type RedirectRunner = (
   args: readonly string[],
 ) => Promise<RedirectResult>
 
-const redirectStorage = createAsyncContext<[object, readonly PathSpec[], RedirectRunner | null]>()
+const redirectStorage =
+  createAsyncContext<[object, readonly PathSpec[], RedirectRunner | null, readonly Redirect[]]>()
 
 /**
  * Bind a statement's expanded redirect targets to the command node they
@@ -524,8 +529,9 @@ export function runWithRedirectPaths<T>(
   paths: readonly PathSpec[],
   fn: () => Promise<T>,
   runner: RedirectRunner | null = null,
+  syntax: readonly Redirect[] = [],
 ): Promise<T> {
-  return Promise.resolve(redirectStorage.run([node, paths, runner], fn))
+  return Promise.resolve(redirectStorage.run([node, paths, runner, syntax], fn))
 }
 
 const programStorage = createAsyncContext<SessionState | null>()
@@ -598,6 +604,16 @@ export function redirectPathsFor(node: object): readonly PathSpec[] {
   for (let at = bindings.length - 1; at >= 0; at--) {
     const bound = bindings[at]
     if (bound?.[0] === node) return bound[1]
+  }
+  return []
+}
+
+/** Pending redirects, before a rewritten command reaches admission. */
+export function redirectSyntaxFor(node: object): readonly Redirect[] {
+  const bindings = redirectStorage.liveStores()
+  for (let at = bindings.length - 1; at >= 0; at--) {
+    const bound = bindings[at]
+    if (bound?.[0] === node) return bound[3]
   }
   return []
 }

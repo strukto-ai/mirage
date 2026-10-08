@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { Accessor } from '@struktoai/mirage-core/accessor/base'
 import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -22,12 +22,15 @@ import {
   FileType,
   MountMode,
   type PathSpec,
+  WritePolicy,
 } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { MountKey } from '@struktoai/mirage-core/workspace/snapshot/keys'
 import { buildMountArgs, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { buildVfs, register } from './vfs/registry.ts'
+import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
+import { conditionalS3, s3Vfs } from './test-utils.ts'
 import { Workspace } from './workspace.ts'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 
@@ -192,5 +195,120 @@ describe('snapshot rebuild through the registry', () => {
     await expect(Workspace.fromState(state)).rejects.toThrow(
       /mounts= must include overrides for: \/s\//,
     )
+  })
+})
+
+describe('the write policy in a snapshot', () => {
+  const built: Workspace[] = []
+  function track(ws: Workspace): Workspace {
+    built.push(ws)
+    return ws
+  }
+  afterEach(async () => {
+    for (const ws of built.splice(0).reverse()) await ws.close()
+  })
+  async function savedState(
+    mounts: Record<string, Mount | RAMVFS>,
+    write: WritePolicy = WritePolicy.UNCONDITIONAL,
+  ): Promise<WorkspaceStateDict> {
+    const ws = new Workspace(mounts, { mode: MountMode.WRITE, write })
+    try {
+      return await toStateDict(ws)
+    } finally {
+      await ws.close()
+    }
+  }
+
+  it.each(['state', 'copy'])('survives the %s door', async (door) => {
+    // Two mounts with two values and a workspace default for later mounts.
+    const ws = track(
+      new Workspace(
+        {
+          '/s3': s3Vfs(),
+          '/d': new Mount(new RAMVFS(), { mode: MountMode.WRITE, write: 'unconditional' }),
+        },
+        { mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL },
+      ),
+    )
+    const back = track(
+      door === 'copy'
+        ? await ws.copy()
+        : await Workspace.fromState(
+            await toStateDict(ws),
+            { mode: MountMode.WRITE },
+            { '/s3/': s3Vfs() },
+          ),
+    )
+    expect(back.mount('/s3/').write).toBe(WritePolicy.CONDITIONAL)
+    expect(back.mount('/d/').write).toBe(WritePolicy.UNCONDITIONAL)
+    expect(back.addMount('/more', s3Vfs(), MountMode.WRITE).write).toBe(WritePolicy.CONDITIONAL)
+  })
+
+  it.each([
+    ['cannot honour', () => new RAMVFS(), 'ram does not'],
+    [
+      'names another',
+      () => new Mount(s3Vfs(), { mode: MountMode.WRITE, write: WritePolicy.UNCONDITIONAL }),
+      'saved write: conditional',
+    ],
+  ] as const)(
+    'refuses a load override that %s the saved policy',
+    async (_name, override, message) => {
+      // Unlike read, the saved write policy is kept: an override is refused.
+      const state = await savedState({ '/s3': conditionalS3() })
+      await expect(
+        Workspace.fromState(state, { mode: MountMode.WRITE }, { '/s3/': override() }),
+      ).rejects.toThrow(message)
+    },
+  )
+
+  it.each([
+    ['mount', undefined, 'missing its write policy'],
+    ['mount', 1, "unknown write policy '1'"],
+    ['mount', 'staged', 'write: staged needs a staging layer'],
+    ['mount', 'conditional', 'ram does not'],
+    ['workspace', undefined, 'missing its workspace write policy'],
+    ['workspace', 1, "unknown write policy '1'"],
+  ] as const)('judges a saved %s write policy at load: %j', async (level, value, message) => {
+    // A value no writer of ours would emit is refused, never cast.
+    const state = await savedState({ '/d': new RAMVFS() })
+    const holder = (level === 'mount'
+      ? state.mounts.find((m) => m.prefix === '/d/')
+      : state) as unknown as Record<string, unknown>
+    if (value === undefined) delete holder.write
+    else holder.write = value
+    await expect(Workspace.fromState(state, { mode: MountMode.WRITE })).rejects.toThrow(message)
+  })
+
+  it('refuses an option naming another default', async () => {
+    const state = await savedState(
+      { '/d': new Mount(new RAMVFS(), { mode: MountMode.WRITE, write: 'unconditional' }) },
+      WritePolicy.CONDITIONAL,
+    )
+    await expect(
+      Workspace.fromState(state, { mode: MountMode.WRITE, write: 'unconditional' }),
+    ).rejects.toThrow('saved write: conditional')
+  })
+
+  it('keeps the saved default when an option leaves write undefined', async () => {
+    // A JS caller or a looser tsconfig can spread write: undefined in.
+    const state = await savedState(
+      { '/d': new Mount(new RAMVFS(), { mode: MountMode.WRITE, write: 'unconditional' }) },
+      WritePolicy.CONDITIONAL,
+    )
+    const options = { mode: MountMode.WRITE, write: undefined } as unknown as Parameters<
+      typeof Workspace.fromState
+    >[1]
+    const restored = track(await Workspace.fromState(state, options))
+    expect(restored.addMount('/more', s3Vfs(), MountMode.WRITE).write).toBe(WritePolicy.CONDITIONAL)
+  })
+
+  it('leaves a version kept without bytes out', async () => {
+    // It has no bytes to restore; captured, it would come back an empty file.
+    const ws = track(new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE }))
+    await ws.cache.set('/d/a', new TextEncoder().encode('bytes'), { fingerprint: 'v1' })
+    await ws.cache.keepFingerprints({ '/d/b': 'v2' })
+    const state = await toStateDict(ws)
+    expect(state.cache.entries.map((e) => e.key)).toEqual(['/d/a'])
   })
 })

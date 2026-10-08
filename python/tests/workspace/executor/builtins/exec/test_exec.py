@@ -100,12 +100,15 @@ async def test_bare_exec_is_a_noop():
 
 
 @pytest.mark.asyncio
-async def test_exec_command_is_refused():
+async def test_exec_command_runs_and_ends_the_line():
     ws = _ws()
     io = await ws.shell("exec echo hi; echo after", session_id="reader")
-    assert io.exit_code == 0
-    assert (await io.stdout_str()) == "after\n"
-    assert b"process replacement is not supported" in (io.stderr or b"")
+    assert (io.exit_code, await io.stdout_str()) == (0, "hi\n")
+    io = await ws.shell("exec nosuchcmd; echo after", session_id="reader")
+    assert (io.exit_code, await io.stdout_str()) == (127, "")
+    assert io.stderr == b"bash: exec: nosuchcmd: not found\n"
+    io = await ws.shell("echo survived", session_id="reader")
+    assert await io.stdout_str() == "survived\n"
     await ws.close()
 
 
@@ -214,6 +217,11 @@ async def test_a_failed_later_redirect_puts_every_earlier_one_back():
             "toerr\n",
         )
         assert await _file(ws, "/data/e") == missing
+        io = await ws.shell("exec > /data/expanded >$((1/0))")
+        assert io.exit_code == 1
+        io = await ws.shell("echo restored")
+        assert await io.stdout_str() == "restored\n"
+        assert await _file(ws, "/data/expanded") == ""
         io = await ws.shell(
             "exec > /data/g2; exec >> /data/g3 < /data/missing; echo where"
         )

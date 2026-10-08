@@ -222,6 +222,24 @@ export const ReadPolicy = Object.freeze({
 export type ReadPolicy = (typeof ReadPolicy)[keyof typeof ReadPolicy]
 
 /**
+ * Whether a mount's writes carry the version they were based on.
+ *
+ * UNCONDITIONAL writes always land and the last write wins. CONDITIONAL writes
+ * send the version the mount last saw for the path (the backend's native
+ * precondition, If-Match on the S3 family), so a write based on a stale read
+ * is refused instead of overwriting the newer bytes. STAGED names a staging
+ * layer mirage does not have; a mount declaring it is refused at mount time,
+ * as `read: pinned` is. Mirrors Python's `WritePolicy`.
+ */
+export const WritePolicy = Object.freeze({
+  UNCONDITIONAL: 'unconditional',
+  CONDITIONAL: 'conditional',
+  STAGED: 'staged',
+} as const)
+
+export type WritePolicy = (typeof WritePolicy)[keyof typeof WritePolicy]
+
+/**
  * What a backend's cached listings can be checked against under fresh.
  *
  * NONE: nothing, so a listing the running command did not write itself is
@@ -287,6 +305,8 @@ export const DEFAULT_READ_SPEC: ReadSpec = Object.freeze({
 export interface CacheFacts {
   readonly cacheable: boolean
   readonly ttl: number
+  /** Whether the mount's writes are conditional, so a line keeps a path's version even where it keeps no bytes. */
+  readonly keepsVersions?: boolean
 }
 
 /**
@@ -884,6 +904,8 @@ export interface PrimitiveMove {
   readdir: ReaddirFn
   unlink: MoveFn<[path: PathSpec]>
   rmdir: MoveFn<[path: PathSpec]>
+  /** Throws when the source's mount cannot condition its delete. */
+  checkUnlink?: (path: PathSpec) => void
 }
 
 export type MoveStrategy = NativeMove | PrimitiveMove

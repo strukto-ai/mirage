@@ -38,6 +38,8 @@ export async function runMv(
   ns?: NamespaceView,
   // Where -i reads its answers.
   stdin: ByteSource | null = null,
+  // Refuses a source whose mount cannot condition the delete.
+  checkUnlink?: (path: PathSpec) => void,
 ): Promise<CrossResult> {
   const flat = flatten(scopes)
   const stat = statOp(dispatch)
@@ -58,7 +60,15 @@ export async function runMv(
   return mvGeneric(
     flat,
     stat,
-    { readBytes, write, mkdir, readdir, unlink, rmdir },
+    {
+      readBytes,
+      write,
+      mkdir,
+      readdir,
+      unlink,
+      rmdir,
+      ...(checkUnlink !== undefined ? { checkUnlink } : {}),
+    },
     parseFlags(new FlagView(flagKwargs, specOf('mv'))),
     undefined,
     storageKey,

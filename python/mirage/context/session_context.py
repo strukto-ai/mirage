@@ -43,6 +43,7 @@ from mirage.workspace.session.session import SessionState
 if TYPE_CHECKING:
     from mirage.io.types import ByteSource, IOResult
     from mirage.shell.console import JobConsole
+    from mirage.shell.types import Redirect
     from mirage.workspace.types import ExecutionNode
 
 
@@ -482,7 +483,8 @@ RedirectRun = Callable[
     Awaitable[RedirectResult],
 ]
 RedirectGuard = Callable[
-    [tuple[PathSpec, ...]], Awaitable[RedirectResult | None]
+    [tuple[PathSpec, ...], "ByteSource | None"],
+    Awaitable[RedirectResult | None],
 ]
 RedirectRunner = Callable[
     [RedirectRun, RedirectGuard | None, str, tuple[str, ...]],
@@ -490,7 +492,13 @@ RedirectRunner = Callable[
 ]
 
 _redirect_paths: ContextVar[
-    tuple[int, tuple[PathSpec, ...], RedirectRunner | None] | None
+    tuple[
+        int,
+        tuple[PathSpec, ...],
+        RedirectRunner | None,
+        tuple["Redirect", ...],
+    ]
+    | None
 ] = ContextVar("mirage_redirect_paths", default=None)
 
 
@@ -498,6 +506,7 @@ def set_redirect_paths(
     node_id: int,
     paths: tuple[PathSpec, ...],
     runner: RedirectRunner | None = None,
+    syntax: tuple["Redirect", ...] = (),
 ) -> Token[Any]:
     """Bind a statement's expanded redirect targets to the command node
     they belong to, for that node's run.
@@ -517,8 +526,9 @@ def set_redirect_paths(
         node_id (int): the command node the targets belong to.
         paths (tuple[PathSpec, ...]): the expanded targets.
         runner (RedirectRunner | None): runs the command under its redirects.
+        syntax (tuple[Redirect, ...]): pending redirects to carry through a rewrite.
     """
-    return _redirect_paths.set((node_id, paths, runner))
+    return _redirect_paths.set((node_id, paths, runner, syntax))
 
 
 def reset_redirect_paths(token: Token[Any]) -> None:
@@ -537,6 +547,16 @@ def redirect_paths_for(node_id: int) -> tuple[PathSpec, ...]:
     if bound is None or bound[0] != node_id:
         return ()
     return bound[1]
+
+
+def redirect_syntax_for(node_id: int) -> tuple["Redirect", ...]:
+    """Pending redirects, before a rewritten command reaches admission.
+
+    Args:
+        node_id (int): the command or rewritten program holding the redirects.
+    """
+    bound = _redirect_paths.get()
+    return bound[3] if bound is not None and bound[0] == node_id else ()
 
 
 def redirect_runner_for(node_id: int) -> RedirectRunner | None:

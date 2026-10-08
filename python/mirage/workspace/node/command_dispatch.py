@@ -16,18 +16,22 @@ import asyncio
 import dataclasses
 from collections.abc import Awaitable, Callable
 from functools import partial
+from itertools import accumulate
 from types import SimpleNamespace
 from typing import Any, TypeVar
 
 from mirage.commands.builtin.utils.limit import guard_io, run_with_timeout
 from mirage.context import (
     RedirectRunner,
+    program_invocation,
     redirect_paths_for,
     redirect_runner_for,
     reset_admission,
+    reset_redirect_paths,
     set_admission,
+    set_redirect_paths,
 )
-from mirage.context.session_context import RedirectResult
+from mirage.context.session_context import RedirectResult, redirect_syntax_for
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.policy import PolicyDenied, resolve_limit, resolve_producer
@@ -47,9 +51,10 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.scope import ParseScope
+from mirage.shell.parse.source import source_offsets
 from mirage.shell.parse.syntax import find_syntax_issue
+from mirage.shell.types import AliasExpansion, ProcessSubDirection
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import ProcessSubDirection
 from mirage.shell.variable import TempEnv, VarAttr
 from mirage.shell.xtrace import trace_command
 from mirage.types import LsLinkMode, PathSpec, Producer, word_text
@@ -159,11 +164,14 @@ async def execute_command(
     # alias holding a pipe is a pipe. Only an unquoted plain word
     # qualifies (`\x` and `'x'` are never aliases), and `alias_value`
     # applies the rest of bash's rules (expand_aliases, the same-line
-    # mark, the no-second-expansion stack). The rewritten line runs
+    # mark, the guards on inserted text). The rewritten line runs
     # through the same executor with the same call stack, so `$1`
-    # inside a function still means the function's argument.
+    # inside a function still means the function's argument. A line run
+    # as a program (`exec`, `env`, `find -exec`) is an argv, which no
+    # alias rewrites.
     if (
         session.aliases
+        and not program_invocation(session)
         and parts
         and parts[0].type == NT.COMMAND_NAME
         and parts[0].named_children
@@ -175,24 +183,21 @@ async def execute_command(
             session._parse_current,
             session._parse_row + node.start_point[0],
         )
-        source = node.text or b""
-        base = node.start_byte
-        rest = decode_text(source[head_node.end_byte - base :])
-        rewrite = alias_command_text(session, head, rest, mark)
+        rewrite = alias_command_text(session, node, head_node, mark)
         if rewrite is not None:
-            rewritten, texts = rewrite
-            lead = decode_text(source[: head_node.start_byte - base])
-            line = lead + rewritten
+            line, owners = rewrite
+            offsets = tuple(
+                accumulate((len(encode_text(c)) for c in line), initial=0)
+            )
+            names = frozenset(name for names in owners for name in names)
+            previous = session._alias_expansion
             scope = ParseScope()
             try:
                 ast = scope.parse(line)
-                own: dict[str, tuple[int, int]] = {}
-                at = len(lead)
-                for alias, text in texts:
-                    own[alias] = (at, at + len(text))
-                    at = own[alias][1]
                 found = check_syntax(
-                    line, expanding_aliases(session), own
+                    line,
+                    expanding_aliases(session) | names,
+                    lambda name, at: name in owners[offsets[at]],
                 ) or find_syntax_issue(ast)
                 if found is not None:
                     io = syntax_error_result(found)
@@ -204,7 +209,12 @@ async def execute_command(
                             command=head, exit_code=io.exit_code, stderr=bad
                         ),
                     )
-                session._alias_stack.append(head)
+                mapped = owners + (frozenset(),)
+                session._alias_expansion = AliasExpansion(
+                    ast.id,
+                    tuple(mapped[i] for i in source_offsets(line, ast)),
+                    names,
+                )
                 # The rewritten line is read from this node, so it runs as
                 # a line of its own under the word that named it: each
                 # invocation of one alias is a place of its own on the line
@@ -219,23 +229,21 @@ async def execute_command(
                     else None
                 )
 
-                async def run_alias(given, output, paths):
+                token = set_redirect_paths(
+                    ast.id, (), syntax=redirect_syntax_for(node.id)
+                )
+                try:
                     return await recurse(
                         ast,
                         context,
-                        given,
+                        stdin,
                         call_stack,
                         handed=expansion,
-                        sink=output,
+                        sink=sink,
                     )
-
-                try:
-                    runner = redirect_runner_for(node.id)
-                    if runner is not None:
-                        return await runner(run_alias, None, "", ())
-                    return await run_alias(stdin, sink, ())
                 finally:
-                    session._alias_stack.pop()
+                    reset_redirect_paths(token)
+                    session._alias_expansion = previous
                     if expansion is not None:
                         registry.decisions.hand_up(
                             session.session_id, expansion
@@ -624,7 +632,7 @@ async def _run_argv(
     admitted: Admitted | None = None
 
     async def guard(
-        paths: tuple[PathSpec, ...], given: ByteSource | None = stdin
+        paths: tuple[PathSpec, ...], given: ByteSource | None
     ) -> RedirectResult | None:
         nonlocal admitted
         if name:

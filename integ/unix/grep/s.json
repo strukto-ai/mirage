@@ -1,0 +1,205 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "grep_s_setup",
+      "seq": 1516001,
+      "command": "mkdir -p /data/grep-s-dir; printf 'hit\\n' > /data/grep-s-dir/good.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_s_missing",
+      "seq": 1516002,
+      "command": "grep -s hit /data/grep-s-missing",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "grep_s_long_missing",
+      "seq": 1516003,
+      "command": "grep --no-messages hit /data/grep-s-missing",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "no-messages"
+      ]
+    },
+    {
+      "id": "grep_s_directory",
+      "seq": 1516004,
+      "command": "grep -s hit /data/grep-s-dir",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "grep_s_multi_file",
+      "seq": 1516005,
+      "command": "grep -s hit /data/grep-s-missing /data/grep-s-dir/good.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "/data/grep-s-dir/good.txt:hit\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "grep_s_quiet_match",
+      "seq": 1516006,
+      "command": "grep -sq hit /data/grep-s-missing /data/grep-s-dir/good.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "grep_s_quiet_no_match",
+      "seq": 1516007,
+      "command": "grep -sq absent /data/grep-s-missing /data/grep-s-dir/good.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "grep_s_no_match",
+      "seq": 1516008,
+      "command": "grep -s absent /data/grep-s-dir/good.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "grep_s_invalid_regexp",
+      "seq": 1516009,
+      "command": "grep -s '[' /data/grep-s-dir/good.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: Invalid regular expression\n"
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "grep_s_invalid_option",
+      "seq": 1516010,
+      "command": "grep -s --bogus hit /data/grep-s-dir/good.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: unrecognized option '--bogus'\nTry 'grep --help' for more information.\n"
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "grep_s_invalid_context",
+      "seq": 1516011,
+      "command": "grep -s -A bad hit /data/grep-s-dir/good.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: bad: invalid context length argument\n"
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "grep_s_missing_pattern_file",
+      "seq": 1516012,
+      "command": "grep -s -f /data/grep-s-pattern-missing /data/grep-s-dir/good.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: /data/grep-s-pattern-missing: No such file or directory\n"
+      },
+      "flags": [
+        "s",
+        "f"
+      ]
+    },
+    {
+      "id": "grep_s_binary_match_notice",
+      "seq": 1516013,
+      "command": "printf 'hit\\000tail\\n' > /data/grep-s-dir/binary; grep -s hit /data/grep-s-dir/binary",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "grep: /data/grep-s-dir/binary: binary file matches\n"
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "grep_s_cleanup",
+      "seq": 1516014,
+      "command": "rm -r /data/grep-s-dir",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -2,7 +2,7 @@
   "cases": [
     {
       "id": "content_outside_the_view_is_refused",
-      "note": "Pyodide is not on the shared view rule yet: a write outside every mount (/tmp/new.txt) lands in the interpreter's own MEMFS, where monty, quickjs and wasi refuse it.",
+      "note": "Pyodide is not on the shared view rule yet: a write outside every mount (/tmp/new.txt) lands in the interpreter's own MEMFS, where monty, quickjs and wasi refuse it. MEMFS belongs to one invocation, so the file is absent in the next command.",
       "runtimes": [
         "monty",
         "wasi",
@@ -96,11 +96,6 @@
             "js": {
               "exit": 0,
               "stdout": "44\n"
-            }
-          },
-          "expect_on": {
-            "pyodide": {
-              "stdout": "True\n"
             }
           }
         },

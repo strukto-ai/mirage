@@ -42,7 +42,7 @@ from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import EnvVar, SecretRef
 from mirage.shell.console import JobConsole
 from mirage.shell.console.redis import RedisConsoleStore
-from mirage.types import ReadPolicy, ReadSpec
+from mirage.types import ReadPolicy, ReadSpec, WritePolicy
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS
 from mirage.workspace.mount.namespace import RAMNamespaceStore
@@ -911,6 +911,22 @@ def _shared_fixture_cases(name: str) -> list[dict]:
     return cases
 
 
+@pytest.mark.parametrize(
+    "case", _shared_fixture_cases("yaml"), ids=lambda case: case["name"]
+)
+def test_shared_yaml_scalars(case, tmp_path):
+    path = tmp_path / "workspace.yaml"
+    path.write_text(case["yaml"], encoding="utf-8")
+    if "config" not in case:
+        with pytest.raises(ValueError):
+            load_config(path)
+    else:
+        assert (
+            load_config(path).model_dump()
+            == load_config(case["config"]).model_dump()
+        )
+
+
 @pytest.mark.asyncio
 async def test_console_redis_block_builds_factory():
     cfg = load_config(
@@ -952,8 +968,11 @@ async def test_console_ram_block_emits_no_factory():
 
 def test_shared_rejection_fixture_is_refused():
     for case in _shared_fixture_cases("rejected"):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as info:
             load_config(case["config"])
+        # Where a case names the phrase, both loaders must say it.
+        if "error" in case:
+            assert case["error"] in str(info.value), case["name"]
 
 
 @pytest.mark.parametrize("fixture", ACCEPTED_FIXTURES)
@@ -1359,3 +1378,38 @@ def test_a_mount_index_block_becomes_its_mount_index(block, built):
     index = kwargs["mounts"]["/a"].index
     assert (type(index), index) == (type(built), built)
     assert kwargs["mounts"]["/b"].index is None
+
+
+# Non-default neighbours fail a door that rebuilds the mount around the key.
+@pytest.mark.parametrize(
+    "workspace, block, expected",
+    [
+        (None, None, WritePolicy.UNCONDITIONAL),
+        ("conditional", None, WritePolicy.CONDITIONAL),
+        ("conditional", "unconditional", WritePolicy.UNCONDITIONAL),
+        (None, "conditional", WritePolicy.CONDITIONAL),
+    ],
+    ids=["neither", "workspace", "block-overrides", "block"],
+)
+def test_a_write_policy_reaches_its_mount(workspace, block, expected):
+    a = {
+        "vfs": "s3",
+        "config": {"bucket": "b"},
+        "mode": "write",
+        "read": "fresh",
+        "ttl": 45,
+        "index": {"type": "ram", "ttl": 37},
+    }
+    if block is not None:
+        a["write"] = block
+    doc: dict = {
+        "mounts": {"/a": a, "/b": {"vfs": "ram", "write": "unconditional"}}
+    }
+    if workspace is not None:
+        doc["write"] = workspace
+    mounts = load_config(doc).to_workspace_kwargs()["mounts"]
+    assert mounts["/a"].write is expected
+    assert mounts["/a"].mode is MountMode.WRITE
+    assert mounts["/a"].read == ReadSpec(policy=ReadPolicy.FRESH, ttl=45)
+    assert mounts["/a"].index == IndexConfig(ttl=37)
+    assert mounts["/b"].write is WritePolicy.UNCONDITIONAL

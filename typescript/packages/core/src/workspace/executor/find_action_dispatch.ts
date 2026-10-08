@@ -33,6 +33,7 @@ import { type ByteSource, materialize } from '../../io/types.ts'
 import { getCurrentSession, runAsProgram } from '../../context/session_context.ts'
 import { type FileStat, type PathSpec, FileType } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { SessionState } from '../session/session.ts'
 import { SHELL_ONLY_BUILTINS } from '../lookup/constants.ts'
 import { lookupAll } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
@@ -106,15 +107,17 @@ export function execWords(action: ExecAction, paths: readonly string[]): string[
 }
 
 /**
- * Whether `execvp` would fail to find an `-exec` head word, and whether
- * a shell function shadows the program it would find. A head carrying a
- * slash is a file the loader runs, which no builtin, function or CLI can
- * claim, so it is statted where the line would read it; any other head
- * is looked up by name across the layers dispatch consults. Outside a
- * workspace there is no stat and the loader answers for itself.
+ * Whether `execvp` would fail to find a head word (`find -exec`, `exec`),
+ * and whether a shell function shadows the program it would find. A head
+ * carrying a slash is a file the loader runs, which no builtin, function or
+ * CLI can claim, so it is statted where the line would read it; any other
+ * head is looked up by name across the layers dispatch consults, in
+ * `session`'s shell. Outside a workspace there is no stat and the loader
+ * answers for itself.
  */
-async function headState(
+export async function programHead(
   head: string,
+  session: SessionState | null,
   registry: MountRegistry,
   cwd: string,
   statPath: StatPath | null,
@@ -122,7 +125,7 @@ async function headState(
   if (head.includes('/')) {
     return [statPath !== null && (await statPath(resolvePath(head, cwd))) === null, false]
   }
-  const sess = getCurrentSession()
+  const sess = session
   // A shell function is not found either, nor a builtin that is the
   // shell's own: GNU execs the head through execvp, which sees programs
   // and nothing the shell defined, so `f(){ :; }; find d -exec f {} \;`
@@ -138,9 +141,9 @@ async function headState(
     (layer) =>
       layer !== Consumer.FUNCTION && (layer !== Consumer.SESSION || !SHELL_ONLY_BUILTINS.has(head)),
   )
-  // An alias is as invisible to execvp as a function, and `command` masks
-  // both for the run.
-  const shadowed = layers.includes(Consumer.FUNCTION) || head in sess.aliases
+  // A function is invisible to execvp, and `command` masks it for the run;
+  // no alias rewrites a program line.
+  const shadowed = layers.includes(Consumer.FUNCTION)
   return [!program, shadowed]
 }
 
@@ -161,7 +164,7 @@ async function runExec(
   // \;` runs each match itself.
   const words = execWords(action, paths)
   const head = words[0] ?? action.argv[0] ?? ''
-  const [missing, shadowed] = await headState(head, registry, cwd, statPath)
+  const [missing, shadowed] = await programHead(head, getCurrentSession(), registry, cwd, statPath)
   if (missing) {
     errors.push(encodeText(`find: '${head}': No such file or directory\n`))
     return false

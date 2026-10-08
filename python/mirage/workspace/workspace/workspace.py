@@ -115,6 +115,7 @@ from mirage.types import (
     MountMode,
     PathSpec,
     ReadSpec,
+    WritePolicy,
     parse_mount_mode,
 )
 from mirage.utils.ids import new_session_id, new_workspace_id
@@ -139,6 +140,10 @@ from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.mount.read_policy import check_read_capability
 from mirage.workspace.mount.spec import Mount
+from mirage.workspace.mount.write_policy import (
+    check_write_capability,
+    coerce_write_policy,
+)
 from mirage.workspace.node.explain import (
     explain_line,
     explained_line,
@@ -236,6 +241,7 @@ class Workspace:
         index: IndexConfig | None = None,
         mode: MountMode = MountMode.READ,
         read: ReadSpec | None = None,
+        write: WritePolicy | str | None = None,
         command_limits: Mapping[str, Limit] | None = None,
         session_id: str | None = None,
         agent_id: str | None = None,
@@ -411,6 +417,8 @@ class Workspace:
         # The workspace-level default a mount overrides, as `mode` is.
         self._read_default = read if read is not None else ReadSpec()
         self._registry.set_default_read(self._read_default)
+        self._write_default = coerce_write_policy(write)
+        self._registry.set_default_write(self._write_default)
         self._registry.attach_file_cache(self._cache)
         # Only an explicit agent_id claims the workspace user; a bare
         # launch adopts whatever identity the namespace store holds.
@@ -426,7 +434,14 @@ class Workspace:
         self._registry.set_reconciler(self._dispatcher.reconciler)
         self._watch = WatchManager(self._registry)
 
-        specs = normalize_mounts(mounts, mode, self._read_default, index)
+        specs = normalize_mounts(
+            mounts,
+            mode,
+            self._read_default,
+            index,
+            default_write=self._write_default,
+            caching=self._cache.cache_limit > 0,
+        )
         self._implicit_root = install_mounts(
             self._registry, specs, index, mode, self._read_default
         )
@@ -455,6 +470,7 @@ class Workspace:
             HistoryViewVFS(self.observer),
             MountMode.READ,
             ReadSpec(),
+            write=WritePolicy.UNCONDITIONAL,
         )
         # One file per program the session can run, where PATH finds it:
         # the same lookup which, type and command -v answer from.
@@ -468,6 +484,7 @@ class Workspace:
             ),
             MountMode.READ,
             ReadSpec(),
+            write=WritePolicy.UNCONDITIONAL,
         )
         # The facade delegates every op to the dispatcher, so FUSE and
         # programmatic ws.vfs walk the same pipeline as a shell command
@@ -819,6 +836,7 @@ class Workspace:
         read: ReadSpec | None = None,
         vfs_ref: str | None = None,
         index: IndexConfig | None = None,
+        write: WritePolicy | str | None = None,
     ) -> MountEntry:
         """Add a VFS to a running workspace, mirroring TS ``addMount``.
 
@@ -838,6 +856,9 @@ class Workspace:
                 the workspace's. A VFS already mounted elsewhere keeps
                 the index of that mount, as in the constructor, and this
                 one goes unused.
+            write (WritePolicy | str | None): the mount's write policy;
+                None takes the workspace default. It is judged like the
+                constructor's.
 
         Returns:
             MountEntry: the installed mount, with its normalized prefix.
@@ -860,6 +881,18 @@ class Workspace:
             resolved_read,
             alias.index_config if alias is not None else own,
         )
+        resolved_write = (
+            coerce_write_policy(write)
+            if write is not None
+            else self._write_default
+        )
+        check_write_capability(
+            prefix,
+            vfs,
+            resolved_write,
+            mode,
+            self._cache.cache_limit > 0 and vfs.caches_reads,
+        )
         self._registry.check_vfs_available(vfs)
         previous = self._registry.mounts()
         entry = self._registry.mount(
@@ -867,6 +900,7 @@ class Workspace:
             vfs,
             mode,
             resolved_read,
+            write=resolved_write,
             index=own,
             vfs_ref=vfs_ref,
         )
@@ -1629,10 +1663,10 @@ class Workspace:
         profile: str | None = None,
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
-        # No read= here: each restored Mount carries its own spec, and
-        # the state dict has no workspace-level default to pass.
+        # No read= here: each restored Mount carries its own spec.
         ws = cls(
             args.mount_args,
+            write=args.write_default,
             session_id=args.default_session_id,
             agent_id=args.default_agent_id,
             clis=args.clis,

@@ -40,6 +40,7 @@ export const WASI: Record<FsCondition, number> = {
   // preview1 has no xattr syscalls, so this row is unreachable from a
   // guest; ENOTSUP is the honest answer if a future host ever asks.
   NO_XATTR: 58,
+  STALE_WRITE: 72,
 }
 
 /** The preview1 wire number for a condition. */

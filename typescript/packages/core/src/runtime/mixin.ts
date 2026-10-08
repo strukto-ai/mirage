@@ -47,8 +47,9 @@ export interface Evaluator {
   /**
    * Evaluate one program and return its last expression. `inputs`
    * bind as globals in the evaluator's own idiom; a `session` id
-   * keeps state alive per id (console semantics), absent evaluates
-   * one-shot.
+   * keeps interpreter state alive per id (console semantics), isolated
+   * from other sessions and runs. Absent evaluates with fresh interpreter
+   * state for this call only.
    */
   eval(
     code: string,

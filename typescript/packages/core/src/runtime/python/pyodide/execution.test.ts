@@ -25,6 +25,52 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+
+describe('Pyodide execution lifetime', { timeout: 120_000 }, () => {
+  it.each(['inline', 'worker', 'fallback'] as const)(
+    'isolates commands, one-shot eval, and named consoles (%s)',
+    async (mode) => {
+      const rt = new PyodideRuntime({ config: { autoLoadFromImports: false } })
+      const fallback =
+        mode === 'fallback' ? vi.spyOn(PyodideWorkerClient, 'create').mockResolvedValue(null) : null
+      if (mode !== 'inline') {
+        rt.bind(
+          new WorkspaceBinding(
+            () => Promise.reject(new Error('unexpected filesystem operation')),
+            new PrefixResolver(() => []),
+          ),
+        )
+      }
+      const mutate =
+        "import builtins, json, sys, types; builtins.mirage_token = 42; json.mirage_token = 42; sys.modules['mirage_token'] = types.ModuleType('mirage_token')"
+      const inspect =
+        "import builtins, json, sys; print(hasattr(builtins, 'mirage_token'), hasattr(json, 'mirage_token'), 'mirage_token' in sys.modules)"
+      const clean = 'False False False\n'
+      const dec = new TextDecoder()
+      try {
+        const first = await rt.run({ code: mutate, args: [], env: {}, stdin: null })
+        expect(first.exitCode).toBe(0)
+        expect(dec.decode((await rt.eval(inspect)).stdout)).toBe(clean)
+        await rt.eval(mutate)
+        const next = await rt.run({ code: inspect, args: [], env: {}, stdin: null })
+        expect(next.exitCode).toBe(0)
+        expect(dec.decode(next.stdout)).toBe(clean)
+        expect((await rt.eval(mutate, { session: 'one' })).exitCode).toBe(0)
+        expect(dec.decode((await rt.eval(inspect, { session: 'two' })).stdout)).toBe(clean)
+        expect(dec.decode((await rt.eval(inspect)).stdout)).toBe(clean)
+        const command = await rt.run({ code: inspect, args: [], env: {}, stdin: null })
+        expect(dec.decode(command.stdout)).toBe(clean)
+        expect(dec.decode((await rt.eval(inspect, { session: 'one' })).stdout)).toBe(
+          'True True True\n',
+        )
+      } finally {
+        await rt.close()
+        fallback?.mockRestore()
+      }
+    },
+  )
+})
+
 describe('Python guest module', { timeout: 120_000 }, () => {
   it('preserves output bytes across calls with buffers above the signed wasm32 boundary', async () => {
     const pyodide = await loadPyodideRuntime()
@@ -538,8 +584,10 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
     'keeps executing with a cwd on an unsupported root mount (eager: %s)',
     async (eager) => {
       const rt = new PyodideRuntime()
+      const fallback = eager
+        ? vi.spyOn(PyodideWorkerClient, 'create').mockResolvedValue(null)
+        : null
       try {
-        if (eager) await rt.eval('pass')
         rt.bind(
           new WorkspaceBinding(
             () => Promise.reject(new Error('root mount must not be read')),
@@ -570,6 +618,7 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
         expect(new TextDecoder().decode(root.stdout)).toBe('/\n')
       } finally {
         await rt.close()
+        fallback?.mockRestore()
       }
     },
   )
@@ -598,11 +647,13 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
   })
 
   it('restores trusted cwd functions when user code replaces or deletes them', async () => {
-    const rt = new PyodideRuntime()
+    const rt = new PyodideRuntime({
+      config: {
+        bootstrapCode:
+          "import os; os.makedirs('/tmp/a', exist_ok=True); os.makedirs('/tmp/b', exist_ok=True)",
+      },
+    })
     try {
-      await rt.eval(
-        "import os; os.makedirs('/tmp/a', exist_ok=True); os.makedirs('/tmp/b', exist_ok=True)",
-      )
       const before = await rt.eval('import os; os.getcwd()')
       for (const code of [
         'import os; os.chdir = lambda _: None',
@@ -628,11 +679,13 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
   })
 
   it('isolates queued runs and restores cwd after success and errors', async () => {
-    const rt = new PyodideRuntime()
+    const rt = new PyodideRuntime({
+      config: {
+        bootstrapCode:
+          "import os; os.makedirs('/tmp/a', exist_ok=True); os.makedirs('/tmp/b', exist_ok=True)",
+      },
+    })
     try {
-      await rt.eval(
-        "import os; os.makedirs('/tmp/a', exist_ok=True); os.makedirs('/tmp/b', exist_ok=True)",
-      )
       const before = await rt.eval('import os; os.getcwd()')
       if (typeof before.value !== 'string') throw new Error('cwd must be a string')
       const results = await Promise.all(
@@ -720,7 +773,9 @@ describe('Pyodide evaluation cwd', { timeout: 120_000 }, () => {
     'recovers a console after its cwd disappears (eager: %s)',
     async (eager) => {
       const rt = new PyodideRuntime({ config: { autoLoadFromImports: false } })
-      if (eager) await rt.eval('pass')
+      const fallback = eager
+        ? vi.spyOn(PyodideWorkerClient, 'create').mockResolvedValue(null)
+        : null
       const ws = new Workspace(
         { '/data': new RAMVFS() },
         { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [rt, 'workspace'] },
@@ -750,13 +805,14 @@ describe('Pyodide evaluation cwd', { timeout: 120_000 }, () => {
         }
       } finally {
         await ws.close()
+        fallback?.mockRestore()
       }
     },
   )
 
   it.each([false, true])('inherits cwd and isolates consoles (eager: %s)', async (eager) => {
     const rt = new PyodideRuntime({ config: { autoLoadFromImports: false } })
-    if (eager) await rt.eval('pass')
+    const fallback = eager ? vi.spyOn(PyodideWorkerClient, 'create').mockResolvedValue(null) : null
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
@@ -826,6 +882,7 @@ describe('Pyodide evaluation cwd', { timeout: 120_000 }, () => {
       expect((await rt.eval('import os; os.getcwd()')).value).toBe('/')
     } finally {
       await ws.close()
+      fallback?.mockRestore()
     }
   })
 })

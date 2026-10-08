@@ -12,14 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import { IOResult, type ByteSource } from '../../io/types.ts'
 import { OpRecord } from '../../observe/record.ts'
+import type * as RecordModule from '../../observe/record.ts'
 import type { CacheFacts, PathSpec } from '../../types.ts'
 import { applyIo, latestFingerprint, writtenVerdict } from './io.ts'
 import { RAMFileCacheStore } from './ram.ts'
+import { RefusingStore } from '../_test_util.ts'
+
+const built = vi.hoisted((): number[] => [])
+vi.mock('../../observe/record.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof RecordModule>()
+  class CountedIndex extends real.RecordIndex {
+    constructor(records: readonly OpRecord[]) {
+      built.push(records.length)
+      super(records)
+    }
+  }
+  return { ...real, RecordIndex: CountedIndex }
+})
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -152,6 +166,44 @@ class CountingCache extends RAMFileCacheStore {
     return await super.exists(key)
   }
 }
+
+describe('what the cache will hold', () => {
+  it.each(['reads', 'writes'] as const)(
+    'keeps no bytes bigger than the cache: %s',
+    async (side) => {
+      // Bytes bigger than the cache would flush it; the stale copy goes too.
+      const cache = new RAMFileCacheStore({ limit: 10 })
+      await cache.set('/s3/warm', ENC.encode('abc'))
+      await cache.set('/s3/big', ENC.encode('old'))
+      const io = new IOResult({
+        [side]: { '/s3/big': ENC.encode('x'.repeat(11)) },
+        cache: ['/s3/big'],
+      })
+      await applyIo(cache, io)
+      expect(await cache.exists('/s3/big')).toBe(false)
+      expect(DEC.decode((await cache.get('/s3/warm')) ?? new Uint8Array())).toBe('abc')
+    },
+  )
+
+  it.each([
+    [false, ['/s3/f', '/s3/other']],
+    [true, ['/s3/f']],
+  ] as const)('never fails the line on a store that refuses (down=%s)', async (down, written) => {
+    // The write landed: a refused fill, or a refused drop too, is no failure.
+    const cache = new RefusingStore(down)
+    for (const path of written)
+      await RAMFileCacheStore.prototype.set.call(cache, path, ENC.encode('old'))
+    const io = new IOResult({
+      writes: Object.fromEntries(written.map((p) => [p, ENC.encode('new')])),
+      cache: ['/s3/f'],
+    })
+    await applyIo(cache, io)
+    if (!down) {
+      expect(await cache.exists('/s3/f')).toBe(false)
+      expect(await cache.exists('/s3/other')).toBe(false)
+    }
+  })
+})
 
 describe('backend fingerprint threading', () => {
   it('stamps the cache entry with the record fingerprint', async () => {
@@ -651,5 +703,75 @@ describe('applyIo bound stamping', () => {
     const io = new IOResult({ reads: { '/s3/f.txt': ENC.encode('hello') }, cache: ['/s3/f.txt'] })
     await applyIo(cache, io, facts(30, false))
     expect(await cache.exists('/s3/f.txt')).toBe(false)
+  })
+})
+
+describe('version lookups', () => {
+  it('indexes the line once', async () => {
+    // One index for every per-path lookup; one per path cost N passes.
+    const paths = Array.from({ length: 50 }, (_, i) => `/s3/f${String(i)}`)
+    const records = paths.map((p, i) => readRecord(p, `v${String(i)}`))
+    const io = new IOResult({
+      reads: Object.fromEntries(paths.map((p) => [p, ENC.encode('x')])),
+      cache: paths,
+    })
+    built.length = 0
+    await applyIo(
+      new RAMFileCacheStore(),
+      io,
+      () => ({ cacheable: true, ttl: 60, keepsVersions: true }),
+      records,
+    )
+    expect(built).toEqual([records.length])
+  })
+})
+
+class RemovingStore extends RAMFileCacheStore {
+  constructor(
+    private readonly records: OpRecord[],
+    private path: string | null,
+  ) {
+    super()
+  }
+
+  override async set(
+    key: string,
+    data: Uint8Array,
+    options: { fingerprint?: string | null; ttl?: number | null } = {},
+  ): Promise<void> {
+    await super.set(key, data, options)
+    if (this.path !== null) {
+      this.records.push(opRecord('unlink', this.path, null))
+      this.path = null
+    }
+  }
+}
+
+describe('records appended while applying', () => {
+  it('keeps a file removed while the cache fills out of the cache', async () => {
+    // An rm a background job finishes mid-fill keeps the file out of the cache.
+    const records = [readRecord('/s3/a', 'va'), readRecord('/s3/b', 'vb')]
+    const cache = new RemovingStore(records, '/s3/b')
+    const io = new IOResult({
+      reads: { '/s3/a': ENC.encode('a'), '/s3/b': ENC.encode('b') },
+      cache: ['/s3/a', '/s3/b'],
+    })
+    await applyIo(cache, io, () => ({ cacheable: true, ttl: 60, keepsVersions: true }), records)
+    expect(await cache.exists('/s3/a')).toBe(true)
+    expect(await cache.exists('/s3/b')).toBe(false)
+  })
+})
+
+describe('a path the line removed', () => {
+  it.each([
+    ['cond', true, false],
+    ['uncond', false, true],
+  ] as const)('is dropped only on a conditional mount: %s', async (_name, versions, kept) => {
+    // A conditional mount drops a read the line then removed; others keep it.
+    const records = [readRecord('/s3/a', 'va'), opRecord('unlink', '/s3/a', null)]
+    const cache = new RAMFileCacheStore()
+    const io = new IOResult({ reads: { '/s3/a': ENC.encode('a') }, cache: ['/s3/a'] })
+    await applyIo(cache, io, () => ({ cacheable: true, ttl: 60, keepsVersions: versions }), records)
+    expect(await cache.exists('/s3/a')).toBe(kept)
   })
 })

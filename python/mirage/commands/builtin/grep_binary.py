@@ -33,6 +33,7 @@ class GrepFlags:
     syntax: RegexSyntax
     only_matching: bool
     quiet: bool
+    no_messages: bool
     recursive: bool
     with_filename: bool
     no_filename: bool
