@@ -59,7 +59,7 @@ async def _cached_stat_result(
         and getattr(result, "size", None) is None
         and manager is not None
     ):
-        # cached_size, not cached_bytes: this runs only where the backend
+        # The length alone, ungated: this runs only where the backend
         # named no size -- the API mounts -- so gating it would turn a
         # stat into a backend stat.
         size = await manager.cached_size(path)

@@ -40,7 +40,7 @@ function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
     if (result.size !== null) return result
     const manager = activeCacheManager()
     if (manager === null) return result
-    // cachedSize, not cachedBytes: this backfill runs only when the backend
+    // The length alone: this backfill runs only when the backend
     // could not name a size, which is precisely the API mounts, so
     // revalidating here would turn a stat into a backend stat. The length is
     // read straight out of the cache, ungated.
