@@ -83,6 +83,12 @@ export abstract class LanguageRuntime extends Runtime {
     })
   }
 
-  /** Execute one program and return its captured outcome. */
+  /**
+   * Execute one program with fresh guest interpreter state, including
+   * globals, imported modules and builtins, even after a failed invocation.
+   * Workspace file writes persist through the dispatcher; interpreter
+   * state does not cross into other runs or evaluator sessions. Immutable
+   * engine assets may be reused.
+   */
   abstract run(args: RunArgs): Promise<RunResult>
 }

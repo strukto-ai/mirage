@@ -164,6 +164,7 @@ describe('hasSearchShapingFlags', () => {
     [{ F: true }, false],
     [{ r: true }, false],
     [{ v: true }, true],
+    [{ no_messages: true }, true],
     [{ n: true }, true],
     [{ c: true }, true],
     [{ args_l: true }, true],

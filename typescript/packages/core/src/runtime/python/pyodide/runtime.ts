@@ -190,10 +190,9 @@ export interface PyodideConfig {
    */
   sysPath?: readonly string[]
   /**
-   * Packages loaded once at init from the pyodide distribution, before
-   * the first run. Composes with autoLoadFromImports rather than
-   * replacing it: the per-run import scan is a no-op for anything
-   * already resident.
+   * Packages loaded from the distribution when each interpreter starts:
+   * per invocation, or once per named console session. The subsequent
+   * autoLoadFromImports scan skips packages already loaded at initialization.
    */
   packages?: readonly string[]
   /**
@@ -246,6 +245,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private bootstrapPromise: Promise<void> | null = null
   private disposeModule: (() => void | Promise<void>) | null = null
   private queue: Promise<unknown> = Promise.resolve()
+  private readonly sessions = new Map<string, PyodideRuntime>()
   private readonly autoLoadFromImports: boolean
   private readonly bootstrapCode: string | null
   private readonly denyPackages: ReadonlySet<string>
@@ -258,8 +258,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private readonly journal: MutationJournal = createJournal()
   private readonly mounted = new Set<string>()
   private readonly mountedFilesystems = new Map<string, PyodideFs>()
-  // Prefixes this runtime cannot mount, remembered so the refusal is
-  // reported once rather than on every run.
+  // Prefixes this interpreter cannot mount, reported once per interpreter.
   private readonly refused = new Set<string>()
   // Same rule for a sysPath glob that expanded to nothing. Seeding runs
   // on every syncMounts pass, so without this a misconfigured pattern
@@ -308,15 +307,10 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   }
 
   async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
-    if (this.sync === undefined && (context?.processes?.depth ?? 0) > 0) {
-      const nested = new PyodideRuntime({ config: this.config as PyodideConfig })
-      try {
-        return await nested.runOne(args, context)
-      } finally {
-        await nested.close()
-      }
-    }
     if (args.cwd === undefined && context !== undefined) args = { ...args, cwd: context.cwd }
+    if (this.sync === undefined && (context?.processes?.depth ?? 0) > 0) {
+      return this.withFreshRuntime((runtime) => runtime.runOne(args, context))
+    }
     const scope =
       context?.scope ??
       new ContextScope([
@@ -324,7 +318,8 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         ...captureOpPolicies(),
         ...captureRecordingContext(),
       ])
-    const task = (): Promise<RunResult> => scope.run(() => this.runOne(args, context))
+    const task = (): Promise<RunResult> =>
+      scope.run(() => this.withFreshRuntime((runtime) => runtime.runOne(args, context)))
     const next = this.queue.then(task, task)
     this.queue = next.catch(() => undefined)
     return next
@@ -346,12 +341,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     if (this.sync === undefined && (context?.processes?.depth ?? 0) > 0) {
       if (opts.session !== undefined)
         throw new EvalError('nested persistent evaluation is unsupported')
-      const nested = new PyodideRuntime({ config: this.config as PyodideConfig })
-      try {
-        return await nested.evalOne(code, opts, context)
-      } finally {
-        await nested.close()
-      }
+      return this.withFreshRuntime((runtime) => runtime.evalOne(code, opts, context))
     }
     const scope =
       context?.scope ??
@@ -360,10 +350,37 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         ...captureOpPolicies(),
         ...captureRecordingContext(),
       ])
-    const task = (): Promise<EvalResult> => scope.run(() => this.evalOne(code, opts, context))
+    const task = (): Promise<EvalResult> =>
+      scope.run(() => {
+        if (opts.session === undefined)
+          return this.withFreshRuntime((runtime) => runtime.evalOne(code, opts, context))
+        let runtime = this.sessions.get(opts.session)
+        if (runtime === undefined) {
+          runtime = this.createRuntime()
+          this.sessions.set(opts.session, runtime)
+        }
+        return runtime.evalOne(code, opts, context)
+      })
     const next = this.queue.then(task, task)
     this.queue = next.catch(() => undefined)
     return next
+  }
+
+  private createRuntime(): PyodideRuntime {
+    return new PyodideRuntime(
+      { config: this.config as PyodideConfig },
+      this.sync,
+      this.interruptBuffer,
+    )
+  }
+
+  private async withFreshRuntime<T>(execute: (runtime: PyodideRuntime) => Promise<T>): Promise<T> {
+    const runtime = this.createRuntime()
+    try {
+      return await execute(runtime)
+    } finally {
+      await runtime.close()
+    }
   }
 
   private async evalOne(
@@ -444,6 +461,20 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   }
 
   private async closeOne(): Promise<void> {
+    const sessions = [...this.sessions.values()]
+    this.sessions.clear()
+    const results = await Promise.allSettled([
+      ...sessions.map((runtime) => runtime.close()),
+      this.closeEngine(),
+    ])
+    const failures = results
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason as unknown)
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, 'pyodide runtime cleanup failed')
+  }
+
+  private async closeEngine(): Promise<void> {
     this.guest?.close()
     this.guest = null
     const dispose = this.disposeModule

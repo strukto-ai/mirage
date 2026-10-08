@@ -17,7 +17,10 @@ packages ship two:
 
 Pyodide is full CPython in WebAssembly: real stdlib, `sys.argv`, stdin,
 and auto-loaded scientific packages. `open()` and `os.listdir` access the
-workspace's existing mounts through Pyodide's filesystem adapter.
+workspace's existing mounts through Pyodide's filesystem adapter. Each command
+and one-shot evaluation starts a fresh interpreter; imports and other guest
+state do not carry over. Workspace files persist across calls. An explicit
+console session retains its own interpreter, isolated from other sessions.
 
 A script file runs the way CPython runs one: `__file__` is its path made
 absolute against the working directory, tracebacks name it and quote
@@ -31,7 +34,7 @@ read-only `sys.flags` view for that invocation. `-O` and `-OO` also compile the
 modules the program imports from source. Interpreter flags and
 import paths are restored when the invocation ends, including on errors.
 
-Installed Python script CLIs receive bare `argv` (including the installed name at index 0) and `stdin` (bytes, or `None` when absent), on both Monty and Pyodide. Pyodide also keeps `sys.argv` and `sys.stdin`. Ordinary `python3` commands retain their interpreter's existing globals.
+Installed Python script CLIs receive bare `argv` (including the installed name at index 0) and `stdin` (bytes, or `None` when absent), on both Monty and Pyodide. Pyodide also keeps `sys.argv` and `sys.stdin`. Ordinary `python3` commands use the normal Python globals without these CLI bindings.
 
 ```ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
@@ -229,7 +232,9 @@ const ws = new Workspace(mounts, {
 
 `pyodide.config.initModule` accepts a trusted host module URL or absolute
 Node path. Its default export receives the loaded Pyodide instance before
-`bootstrapCode` runs, and may return a cleanup function. This supports
+`bootstrapCode` runs, and may return a cleanup function. Initialization runs
+for each command or one-shot evaluation, and once per explicit console
+session. This supports
 registering narrow JavaScript capabilities with `registerJsModule` without
 exposing host globals through `import js`. The initializer also runs inside
 the execution worker; it must not depend on caller-thread state. It has host

@@ -23,6 +23,7 @@ from mirage.commands.builtin.slack.grep import grep
 from mirage.commands.config import CommandOpts
 from mirage.core.slack.config import SlackConfig
 from mirage.core.time_range import TimeRange
+from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.slack import SlackVFS
@@ -72,5 +73,6 @@ async def test_grep_on_a_time_scoped_mount_skips_native_search():
             ),
         )
     fake_search.assert_not_awaited()
+    assert await materialize(_out) == b""
     assert io.exit_code == 2
     assert b"Is a directory" in io.stderr

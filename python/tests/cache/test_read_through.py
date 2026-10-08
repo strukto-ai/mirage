@@ -14,7 +14,7 @@
 
 import asyncio
 from functools import partial
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -24,10 +24,14 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.cache.read_through import (
+    cache_aware_bound_bytes,
+    cache_aware_bound_stream,
     cache_aware_read_bytes,
     cache_aware_read_stream,
 )
 from mirage.commands.builtin.utils.stream import stdin_stream
+from mirage.context.session_context import reset_admission, set_admission
+from mirage.policy.types import EntryGate
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -285,3 +289,56 @@ async def test_failed_read_never_populates_cache():
     with pytest.raises(OSError, match="failed read"):
         await manager.read_through(_spec(), fetch)
     assert await manager.cached_bytes(_spec()) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_bound_readers_capture_cache_before_lazy_drain(streamed):
+    backend = _CountingBackend(b"changed")
+    manager = await _warm_manager(b"cached")
+    prev = push_cache_manager(manager)
+    try:
+        reader = (
+            cache_aware_bound_stream(partial(backend.read_stream, None))
+            if streamed
+            else cache_aware_bound_bytes(partial(backend.read_bytes, None))
+        )
+    finally:
+        push_cache_manager(prev)
+    source = reader(_spec())
+    result = await _drain(source) if streamed else await source
+    assert result == b"cached"
+    assert backend.stream_calls == 0
+    assert backend.bytes_calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_bound_readers_keep_admission_after_context_is_reset(streamed):
+    manager = await _warm_manager(b"cached")
+    gate = Mock(spec=EntryGate)
+    gate.scopes.return_value = True
+    read_bytes = AsyncMock(side_effect=PermissionError("denied"))
+
+    async def read_stream(path):
+        yield await read_bytes(path)
+
+    prev = push_cache_manager(manager)
+    token = set_admission(gate)
+    try:
+        reader = (
+            cache_aware_bound_stream(read_stream)
+            if streamed
+            else cache_aware_bound_bytes(read_bytes)
+        )
+    finally:
+        reset_admission(token)
+        push_cache_manager(prev)
+    with pytest.raises(PermissionError, match="denied"):
+        source = reader(_spec())
+        if streamed:
+            await _drain(source)
+        else:
+            await source
+    gate.scopes.assert_called_once_with("/s3/a.txt")
+    read_bytes.assert_awaited_once()

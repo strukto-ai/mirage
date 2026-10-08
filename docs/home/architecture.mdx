@@ -144,6 +144,12 @@ For a workspace backed by stored sessions, hydrate with `ensure_sessions_loaded`
 (Python) or `ensureSessionsLoaded` (TypeScript) before spawning. A session replaced
 by hydration fails a pending spawn instead of executing with stale permissions.
 
+Every language command and one-shot evaluation starts with fresh guest state.
+Runtimes may retain compiled engines, package assets, and worker capacity, but
+imports, globals, and mutations to the interpreter do not pass to another
+invocation. Workspace file writes persist. Explicit console sessions retain
+their own interpreter state, isolated from other sessions and commands.
+
 | Runtime or entry point | Managed execution | Guest child execution |
 | --- | --- | --- |
 | Builtins, commands, registered CLIs | Shared supervisor and admission | Scoped process door for handlers |

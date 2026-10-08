@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../../utils/key_prefix.ts'
+import { noMount } from '../../../errors/fs.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize, type IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -178,11 +179,129 @@ describe('grepGeneric failures that are not filesystem errors', () => {
     return decode(out)
   }
 
-  it('propagate out of a recursive walk instead of becoming a warning', async () => {
-    await expect(scanned([spec('/data')], { r: true })).rejects.toThrow('token expired')
+  it.each([false, true])(
+    'propagate out of a recursive walk (suppressed=%s)',
+    async (noMessages) => {
+      await expect(scanned([spec('/data')], { r: true, no_messages: noMessages })).rejects.toThrow(
+        'token expired',
+      )
+    },
+  )
+
+  it.each([false, true])(
+    'propagate out of a single-file read (suppressed=%s)',
+    async (noMessages) => {
+      await expect(scanned([spec('/data/a.txt')], { no_messages: noMessages })).rejects.toThrow(
+        'token expired',
+      )
+    },
+  )
+})
+
+describe('grepGeneric no messages', () => {
+  it.each<[string[], Record<string, boolean>, string, number]>([
+    [['/missing'], {}, '', 2],
+    [['/data'], {}, '', 2],
+    [['/data/bad.txt'], {}, '', 2],
+    [['/missing', '/data/a.txt'], {}, '/data/a.txt:alice\n', 2],
+    [['/missing', '/data/a.txt'], { q: true }, '', 0],
+    [['/data'], { r: true }, '/data/a.txt:alice\n', 2],
+  ])('suppresses diagnostics for %j, preserving status', async (paths, flags, expected, status) => {
+    const probe = (p: PathSpec): Promise<FileStat> =>
+      p.virtual === '/missing'
+        ? Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+        : stat(p)
+    const [out, io] = (await grepGeneric(
+      'grep',
+      paths.map(spec),
+      ['alice'],
+      opts({ no_messages: true, ...flags }),
+      probe,
+      readdir,
+      stream,
+    )) as [GrepOut, IOResult]
+    expect(await decode(out)).toBe(expected)
+    expect(await io.stderrStr()).toBe('')
+    expect(io.exitCode).toBe(status)
   })
 
-  it('propagate out of a single-file read', async () => {
-    await expect(scanned([spec('/data/a.txt')], {})).rejects.toThrow('token expired')
-  })
+  it.each([false, true])(
+    'handles errors while draining a single file (suppressed=%s)',
+    async (noMessages) => {
+      async function* unreadable(p: PathSpec): AsyncIterable<Uint8Array> {
+        await Promise.resolve()
+        if (p.virtual === '/data/bad.txt')
+          throw Object.assign(new Error('denied'), { code: 'EACCES' })
+        yield* good()
+      }
+      const [out, io] = (await grepGeneric(
+        'grep',
+        [spec('/data/bad.txt')],
+        ['alice'],
+        opts({ no_messages: noMessages }),
+        stat,
+        readdir,
+        unreadable,
+      )) as [GrepOut, IOResult]
+      expect(await decode(out)).toBe('')
+      expect(await io.stderrStr()).toBe(
+        noMessages ? '' : 'grep: /data/bad.txt: Permission denied\n',
+      )
+      expect(io.exitCode).toBe(2)
+    },
+  )
 })
+
+it.each([['/data/a.txt'], ['/data/a.txt', '/data/b.txt'], ['/data']])(
+  'grep -s propagates decoding failures while draining %j',
+  async (...paths) => {
+    const error = new SyntaxError('invalid backend JSON')
+    async function* broken(): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield ENC.encode('alice\n')
+      throw error
+    }
+    const [out] = (await grepGeneric(
+      'grep',
+      paths.map(spec),
+      ['alice'],
+      opts({ no_messages: true, r: true }),
+      stat,
+      readdir,
+      broken,
+    )) as [GrepOut, IOResult]
+    await expect(decode(out)).rejects.toBe(error)
+  },
+)
+
+it.each(['stat', 'readdir', 'read'] as const)(
+  'grep -s limits missing-mount handling to probes (%s)',
+  async (phase) => {
+    const error = noMount('/data')
+    const probe = (p: PathSpec): Promise<FileStat> =>
+      phase === 'stat' ? Promise.reject(error) : stat(p)
+    const listing = (p: PathSpec): Promise<string[]> =>
+      phase === 'readdir' ? Promise.reject(error) : readdir(p)
+    async function* broken(): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield ENC.encode('alice\n')
+      throw error
+    }
+    const [out, io] = (await grepGeneric(
+      'grep',
+      [spec('/data')],
+      ['alice'],
+      opts({ no_messages: true, r: true }),
+      probe,
+      listing,
+      broken,
+    )) as [GrepOut, IOResult]
+    if (phase === 'read') {
+      await expect(decode(out)).rejects.toBe(error)
+    } else {
+      expect(await decode(out)).toBe('')
+      expect(io.exitCode).toBe(2)
+      expect(await io.stderrStr()).toBe('')
+    }
+  },
+)
