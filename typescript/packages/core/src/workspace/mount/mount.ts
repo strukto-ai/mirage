@@ -46,7 +46,7 @@ import {
   pwriteByRewrite,
   refuseTaken,
 } from '../../core/generic/rewrite.ts'
-import { callEffect } from '../../vfs/call.ts'
+import { declared } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { Effect } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
@@ -523,22 +523,18 @@ export class MountEntry {
 
   /** Whether the VFS declares the function `name` a write. */
   writes(name: string): boolean {
-    const effect = callEffect(this.vfs.constructor, name)
-    return effect !== null && WRITE_EFFECTS.includes(effect)
+    const effect = declared(this.vfs.constructor, name)?.effect
+    return effect !== undefined && WRITE_EFFECTS.includes(effect)
   }
 
   /**
-   * Refuse a write the mount's mode does not grant at every path. Every path
-   * the call is handed is one it may change: a rename's destination, a custom
-   * function's other paths. A rename mutates everything under its endpoints
-   * in one backend call, so a read-only region below either one refuses it
-   * too. Removals stay per-path: the runtimes compose rmtree from unlink and
-   * rmdir, and each answers for its own path. Mirrors Python's
-   * `MountEntry.require_writable`.
+   * Refuse a write the mount's mode does not grant at any path. A rename moves
+   * everything below its endpoints, so a read-only region below either refuses
+   * it; a removal answers per path. Mirrors Python's `require_writable`.
    */
   requireWritable(name: string, path: PathSpec, values: readonly unknown[]): void {
-    const effect = callEffect(this.vfs.constructor, name)
-    if (effect === null || !WRITE_EFFECTS.includes(effect)) return
+    const effect = declared(this.vfs.constructor, name)?.effect
+    if (effect === undefined || !WRITE_EFFECTS.includes(effect)) return
     requirePathsWritable(
       [path, ...values.filter((value): value is PathSpec => value instanceof PathSpec)],
       this.prefix,
@@ -547,11 +543,7 @@ export class MountEntry {
     )
   }
 
-  /**
-   * Refuse a keyword the function `name` does not take. The door asks before
-   * it answers a read from the cache, so a warm read refuses the keyword a
-   * cold one would. Mirrors Python's `MountEntry.refuse_keywords`.
-   */
+  /** Refuse a keyword `name` does not take, as a cold call would. Mirrors Python's `refuse_keywords`. */
   refuseKeywords(name: string, kwargs: OpKwargs): void {
     taken(name, kwargs)
   }
@@ -645,7 +637,7 @@ export class MountEntry {
               this.pwriteByRewrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
           ]
     }
-    if (callEffect(vfs.constructor, name) === null) return []
+    if (declared(vfs.constructor, name) === null) return []
     if (!vfs.supports(name)) return []
     switch (name) {
       case 'readdir':

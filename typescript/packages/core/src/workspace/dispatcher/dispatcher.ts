@@ -172,11 +172,8 @@ function judge(gate: EntryGate, ...paths: readonly unknown[]): void {
 }
 
 /**
- * A function's path arguments beside its path, by position or keyword. A
- * custom function can name more than one path; each is a path the call
- * reaches, so each passes the door the way `path` does. A rename's
- * destination has stages of its own and is not one. Mirrors Python's
- * `_operands`.
+ * A custom function's other path arguments, by position or keyword; a
+ * rename's destination is walked on its own. Mirrors Python's `_operands`.
  */
 function operands(
   name: string,
@@ -192,15 +189,6 @@ function operands(
     if (value instanceof PathSpec) found.push([key, value])
   }
   return found
-}
-
-/** `spec` addressed against a mount: its key below the mount's prefix. */
-function rekeyed(spec: PathSpec, mountPrefix: string): PathSpec {
-  return new PathSpec({
-    virtual: spec.virtual,
-    directory: spec.virtual.slice(0, spec.virtual.lastIndexOf('/')) || '/',
-    vfsPath: mountKey(spec.virtual, rstripSlash(mountPrefix)),
-  })
 }
 
 /** The byte window a read asked for, whole file when it asked none. */
@@ -605,12 +593,9 @@ export class Dispatcher {
   }
 
   /**
-   * Walk and follow a function's other path arguments as its path. Each
-   * answers to the session's hides as typed, walked and followed, its dots
-   * and trailing slash are judged as the path's are, and the command's gate
-   * judges every spelling, so a second path is no way around a hide, a
-   * missing directory or a rule. The followed spelling replaces the
-   * argument. Mirrors Python's Dispatcher._walk_operands.
+   * Walk and follow each other path argument the way the path is: the same
+   * hides, spelling checks and rule gate apply, and the followed spelling
+   * replaces it. Mirrors Python's Dispatcher._walk_operands.
    */
   private async walkOperands(call: Call): Promise<void> {
     for (const [at, typed] of operands(call.name, call.args, call.kwargs)) {
@@ -844,11 +829,16 @@ export class Dispatcher {
     // because its dispatcher routes through Mount.call, which
     // stamps the filetype. Stamp it here the same way.
     // Every path argument beside the path (a rename's destination, a
-    // custom function's other paths) is addressed against the same mount,
-    // mirroring the Python dispatcher: a caller-supplied path built from
-    // the virtual path alone would otherwise reach the backend untranslated.
+    // custom function's other paths) is addressed against the same mount.
+    const prefix = rstripSlash(mountPrefix)
     const keyed = (value: unknown): unknown =>
-      value instanceof PathSpec ? rekeyed(value, mountPrefix) : value
+      value instanceof PathSpec
+        ? new PathSpec({
+            virtual: value.virtual,
+            directory: value.virtual.slice(0, value.virtual.lastIndexOf('/')) || '/',
+            vfsPath: mountKey(value.virtual, prefix),
+          })
+        : value
     const fullKwargs: OpKwargs = {
       ...Object.fromEntries(Object.entries(kwargs ?? {}).map(([key, v]) => [key, keyed(v)])),
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
@@ -897,7 +887,6 @@ export class Dispatcher {
         // attributes) changes under the same hold: a chain of renames
         // finishing out of order would move one name's attributes onto
         // another.
-        const prefix = rstripSlash(mountPrefix)
         const keys = [...new Set([p.virtual, ...(renameDst !== null ? [renameDst.virtual] : [])])]
           .map((virtual) => `${String(this.storeId(vfs))}:${mountKey(virtual, prefix)}`)
           .sort(compareCodePoints)

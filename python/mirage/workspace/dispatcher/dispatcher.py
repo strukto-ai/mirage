@@ -315,11 +315,9 @@ def _follow_or_loop(
 
 
 def _operands(name: str, kwargs: dict[str, Any]) -> list[tuple[str, PathSpec]]:
-    """A function's path arguments beside its path, by keyword.
+    """A custom function's other path arguments, by keyword.
 
-    A custom function can name more than one path; each is a path the
-    call reaches, so each passes the door the way ``path`` does. A
-    rename's destination has stages of its own and is not one.
+    A rename's destination is walked on its own and is not one.
 
     Args:
         name (str): the dispatched function name.
@@ -332,20 +330,6 @@ def _operands(name: str, kwargs: dict[str, Any]) -> list[tuple[str, PathSpec]]:
         for key, value in kwargs.items()
         if isinstance(value, PathSpec)
     ]
-
-
-def _rekeyed(spec: PathSpec, mount_prefix: str) -> PathSpec:
-    """``spec`` addressed against a mount: its key below the prefix.
-
-    Args:
-        spec (PathSpec): a path the call is handed.
-        mount_prefix (str): the prefix of the mount serving the call.
-    """
-    return PathSpec(
-        virtual=spec.virtual,
-        directory=spec.virtual.rsplit("/", 1)[0] or "/",
-        vfs_path=mount_key(spec.virtual, mount_prefix.rstrip("/")),
-    )
 
 
 @dataclass(slots=True)
@@ -732,13 +716,10 @@ class Dispatcher:
             _judge(call.rule_gate, call.typed, walked, call.path)
 
     async def _walk_operands(self, call: _Call) -> None:
-        """Walk and follow a function's other path arguments as its path.
+        """Walk and follow each other path argument the way the path is.
 
-        Each answers to the session's hides as typed, walked and
-        followed, its dots and trailing slash are judged as the path's
-        are, and the command's gate judges every spelling, so a second
-        path is no way around a hide, a missing directory or a rule. The
-        followed spelling replaces the argument.
+        The same hides, spelling checks and rule gate apply, so a second
+        path is no way around them; the followed spelling replaces it.
 
         Args:
             call (_Call): the followed op; its path arguments are walked.
@@ -968,9 +949,14 @@ class Dispatcher:
         # Every path argument beside the path (a rename's destination, a
         # custom function's other paths) is addressed against the same
         # mount, so the backend sees a mount-relative path.
+        prefix = mount.prefix.rstrip("/")
         for key, value in list(kwargs.items()):
             if isinstance(value, PathSpec):
-                kwargs[key] = _rekeyed(value, mount.prefix)
+                kwargs[key] = PathSpec(
+                    virtual=value.virtual,
+                    directory=value.virtual.rsplit("/", 1)[0] or "/",
+                    vfs_path=mount_key(value.virtual, prefix),
+                )
         result: Any
         try:
             if call.name == "setattr":

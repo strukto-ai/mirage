@@ -86,7 +86,7 @@ from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.call import call_effect
+from mirage.vfs.call import declared
 from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.types import Effect
 from mirage.view.types import StatPath
@@ -671,19 +671,16 @@ class MountEntry:
         Args:
             name (str): the op name.
         """
-        return call_effect(type(self.vfs), name) in WRITE_EFFECTS
+        mark = declared(type(self.vfs), name)
+        return mark is not None and mark.effect in WRITE_EFFECTS
 
     def require_writable(
         self, name: str, path: PathSpec, values: Iterable[Any]
     ) -> None:
-        """Refuse a write the mount's mode does not grant at every path.
+        """Refuse a write the mount's mode does not grant at any path.
 
-        Every path the call is handed is one it may change: a rename's
-        destination, a custom function's other paths. A rename mutates
-        everything under its endpoints in one backend call, so a
-        read-only region below either one refuses it too. Removals stay
-        per-path: the runtimes compose rmtree from unlink and rmdir, and
-        each answers for its own path.
+        A rename moves everything below its endpoints, so a read-only
+        region below either refuses it; a removal answers per path.
 
         Args:
             name (str): the function name.
@@ -691,22 +688,18 @@ class MountEntry:
             values (Iterable[Any]): the call's other arguments; each
                 PathSpec among them is a path it reaches.
         """
-        effect = call_effect(type(self.vfs), name)
-        if effect not in WRITE_EFFECTS:
+        mark = declared(type(self.vfs), name)
+        if mark is None or mark.effect not in WRITE_EFFECTS:
             return
         require_paths_writable(
             [path, *(v for v in values if isinstance(v, PathSpec))],
             self.prefix,
             self.mode,
-            subtree=effect is Effect.RENAME,
+            subtree=mark.effect is Effect.RENAME,
         )
 
     def refuse_keywords(self, name: str, kwargs: dict[str, Any]) -> None:
-        """Refuse a keyword the function ``name`` does not take.
-
-        The door asks before it answers a read from the cache, so a warm
-        read is judged by what a cold one runs, the mount's read window
-        included, and refuses the keyword a cold one would.
+        """Refuse a keyword ``name`` does not take, as a cold call would.
 
         Args:
             name (str): the function name.
@@ -1178,7 +1171,7 @@ class MountEntry:
             return [self._pwrite]
         if name == "mkdir" and vfs.supports("mkdir"):
             return [self._mkdir]
-        if call_effect(type(vfs), name) is None or not vfs.supports(name):
+        if declared(type(vfs), name) is None or not vfs.supports(name):
             return []
         return [getattr(vfs, name)]
 

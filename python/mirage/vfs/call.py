@@ -52,8 +52,11 @@ def vfs_call(
     return mark
 
 
-def _declared(cls: type, name: str) -> Declaration | None:
-    """What the first class in ``cls``'s MRO that marks ``name`` declares.
+def declared(cls: type, name: str) -> Declaration | None:
+    """What ``cls`` declares for ``name``, None when not dispatchable.
+
+    The first class in the method resolution order that marks ``name``
+    answers, so an unmarked override inherits its base's mark.
 
     Args:
         cls (type): the VFS class.
@@ -66,20 +69,6 @@ def _declared(cls: type, name: str) -> Declaration | None:
     return None
 
 
-def call_effect(cls: type, name: str) -> Effect | None:
-    """The effect ``cls`` declares for ``name``, None when not dispatchable.
-
-    The first class in the method resolution order that marks ``name``
-    answers, so an unmarked override inherits its base's mark.
-
-    Args:
-        cls (type): the VFS class.
-        name (str): the function name.
-    """
-    mark = _declared(cls, name)
-    return None if mark is None else mark.effect
-
-
 def declared_calls(cls: type) -> dict[str, Declaration]:
     """Every name ``cls`` marks dispatchable, to what it declares.
 
@@ -87,7 +76,7 @@ def declared_calls(cls: type) -> dict[str, Declaration]:
         cls (type): the VFS class.
     """
     names = sorted({name for klass in cls.__mro__ for name in vars(klass)})
-    found = {name: _declared(cls, name) for name in names}
+    found = {name: declared(cls, name) for name in names}
     return {name: mark for name, mark in found.items() if mark is not None}
 
 

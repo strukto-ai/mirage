@@ -51,8 +51,12 @@ export function vfsCall(options: { effect: Effect; target?: Target; creates?: bo
   }
 }
 
-/** What the first class up `cls`'s prototype chain that marks `name` declares. */
-function declared(cls: { readonly prototype: unknown }, name: string): Declaration | null {
+/**
+ * What `cls` declares for `name`, null when not dispatchable. The first class
+ * up the prototype chain that marks `name` answers, so an unmarked override
+ * inherits its base's mark. Mirrors Python's `declared`.
+ */
+export function declared(cls: { readonly prototype: unknown }, name: string): Declaration | null {
   let proto: unknown = cls.prototype
   while (typeof proto === 'object' && proto !== null) {
     const fn: unknown = Object.getOwnPropertyDescriptor(proto, name)?.value
@@ -61,16 +65,6 @@ function declared(cls: { readonly prototype: unknown }, name: string): Declarati
     proto = Object.getPrototypeOf(proto)
   }
   return null
-}
-
-/**
- * The effect `cls` declares for `name`, null when not dispatchable. The
- * first class up the prototype chain that marks `name` answers, so an
- * unmarked override inherits its base's mark. Mirrors Python's
- * `call_effect`.
- */
-export function callEffect(cls: { readonly prototype: unknown }, name: string): Effect | null {
-  return declared(cls, name)?.effect ?? null
 }
 
 /** Every name `cls` marks dispatchable, to what it declares. Mirrors Python's `declared_calls`. */
