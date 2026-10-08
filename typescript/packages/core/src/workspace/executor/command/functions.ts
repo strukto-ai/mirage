@@ -15,6 +15,7 @@
 import type { EvaluationContext } from '../../evaluation.ts'
 import { parseFunction } from '../../../shell/helpers.ts'
 import type { ParseScope } from '../../../shell/parse/scope.ts'
+import { NodeType as NT } from '../../../shell/types.ts'
 
 import type { ShellVar } from '../../../shell/variable.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -113,6 +114,7 @@ export async function executeShellFunction(
     // whatever `xargs` or `env` marked the line that called it.
     await runAsShell(async () => {
       for (const cmd of body) {
+        if (cmd.type === NT.COMMENT) continue
         try {
           const cmdNode = cmd
           const [rawStdout, io, execNode] = await runStatement(

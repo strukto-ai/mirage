@@ -14,16 +14,16 @@
 
 import re
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from mirage.io import IOResult
-from mirage.io.async_line_iterator import line_buffer
+from mirage.io.async_line_iterator import SharedInput, line_buffer
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
 from mirage.policy import Policies, PolicyDenied
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
-from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
@@ -35,7 +35,7 @@ from mirage.shell.errors import (
     ReturnSignal,
 )
 from mirage.shell.job_table import JobTable
-from mirage.shell.node_kind import pipeline_transparent
+from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
@@ -67,19 +67,28 @@ async def _execute_body(
     agent_id: str | None,
     handed: HandOff | None,
     decisions: Decisions | None,
+    test: bool = False,
+    bound: tuple[SharedInput | None, bool] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a list of body commands sequentially.
 
     A statement ending in ``&`` is launched as a job through
     ``run_statement`` rather than run inline; ``job_table`` and
-    ``agent_id`` are the job plane it needs.
+    ``agent_id`` are the job plane it needs. ``test`` marks an
+    ``if``/``while``/``until`` test, whose failures ``set -e`` ignores;
+    ``bound`` is ``fd0_binding`` as the construct running the list
+    started, so an ``exec <&-`` in a loop body reaches the next test.
     """
     session = context.session
     all_stdout: list[ByteSource | None] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="", exit_code=0)
-    bound = fd0_binding(session)
+    if bound is None:
+        bound = fd0_binding(session)
     for cmd in body:
+        # A comment is no statement: it leaves `$?` as it was.
+        if cmd.type == NT.COMMENT:
+            continue
         try:
             stdout, io, last_exec = await run_statement(
                 execute_node,
@@ -105,6 +114,7 @@ async def _execute_body(
         merged_io = await merged_io.merge(io)
         if (
             io.exit_code != 0
+            and not test
             and session.shell_options.get("errexit")
             and cmd.type not in ERREXIT_EXEMPT_TYPES
             and not session.errexit_immune
@@ -129,7 +139,7 @@ class ContinueSignal(Exception):
 
 
 def _chain_streams(all_stdout: list[ByteSource | None]) -> ByteSource | None:
-    non_empty = [s for s in all_stdout if s is not None]
+    non_empty = [s for s in all_stdout if s not in (None, b"")]
     return async_chain(non_empty) if non_empty else None
 
 
@@ -163,13 +173,17 @@ async def carried(
     return sig
 
 
-def ended(sig: Exception) -> IOResult:
+def ended(sig: Exception, simple: bool = False) -> IOResult:
     """What a child shell reports when one of ``UNWINDING`` ends it:
     what it wrote, its diagnostic, and its status, ``exit``'s contained
     one, ``return``'s own, or that of ``break`` or ``continue``.
 
     Args:
         sig (Exception): one of ``UNWINDING``.
+        simple (bool): the child runs one simple command, which is the
+            shell ``exit`` ends, so it reports ``exit``'s own status
+            (``: ${U?} | cat`` is 127, ``( : ${U?} ) | cat`` is 1),
+            unless the signal left text ``eval`` or ``source`` ran.
     """
     if isinstance(sig, (BreakSignal, ContinueSignal)):
         return IOResult(
@@ -181,7 +195,7 @@ def ended(sig: Exception) -> IOResult:
         stderr=sig.stderr or None,
         exit_code=(
             sig.contained_code
-            if isinstance(sig, ExitSignal)
+            if isinstance(sig, ExitSignal) and (not simple or sig.sourced)
             else sig.exit_code
         ),
     )
@@ -238,7 +252,7 @@ def _collect_loop_result(
 
 async def handle_if(
     execute_node: Callable[..., Any],
-    branches: list[tuple[TSNodeLike, list[TSNodeLike]]],
+    branches: list[tuple[list[TSNodeLike], list[TSNodeLike]]],
     else_body: list[TSNodeLike] | None,
     context: EvaluationContext,
     stdin: ByteSource | None = None,
@@ -248,52 +262,40 @@ async def handle_if(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    session = context.session
-    bound = fd0_binding(session)
-    for condition, body in branches:
-        cond_stdout, cond_io, _ = await run_statement(
-            execute_node,
-            condition,
-            context,
-            stdin,
-            bound,
-            call_stack,
-            job_table,
-            agent_id,
-            handed,
-            decisions,
-        )
-        await apply_barrier(cond_stdout, cond_io, BarrierPolicy.STATUS)
-        record_status(
-            session,
-            cond_io.exit_code,
-            transparent=pipeline_transparent(condition),
-        )
-        if cond_io.exit_code == 0:
-            return await _execute_body(
-                execute_node,
-                body,
-                context,
-                stdin,
-                call_stack,
-                job_table,
-                agent_id,
-                handed,
-                decisions,
-            )
-    if else_body is not None:
-        return await _execute_body(
-            execute_node,
-            else_body,
-            context,
-            stdin,
-            call_stack,
-            job_table,
-            agent_id,
-            handed,
-            decisions,
-        )
-    return None, IOResult(), ExecutionNode(exit_code=0)
+    run = partial(
+        _execute_body,
+        execute_node,
+        context=context,
+        stdin=stdin,
+        call_stack=call_stack,
+        job_table=job_table,
+        agent_id=agent_id,
+        handed=handed,
+        decisions=decisions,
+    )
+    # What the tests wrote stays, ahead of what the branch writes; each
+    # test reads the fd 0 the `if` started with, so an `exec <&-` in one
+    # reaches the next.
+    lead_stdout: list[ByteSource | None] = []
+    lead = IOResult()
+    bound = fd0_binding(context.session)
+    try:
+        for test, body in branches:
+            stdout, io, _ = await run(test, test=True, bound=bound)
+            lead_stdout.append(stdout)
+            lead = await lead.merge(io)
+            if io.exit_code == 0:
+                break
+        else:
+            body = else_body or []
+        stdout, io, last_exec = await run(body)
+    except UNWINDING as sig:
+        raise await carried(sig, _chain_streams(lead_stdout), lead)
+    return (
+        _chain_streams([*lead_stdout, stdout]),
+        await lead.merge(io),
+        last_exec,
+    )
 
 
 # `set -n` inside a loop body has to stop the *driver* too, not only the
@@ -372,7 +374,7 @@ async def handle_for(
 
 async def _condition_loop(
     execute_node: Callable[..., Any],
-    condition: TSNodeLike,
+    test: list[TSNodeLike],
     body: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None,
@@ -389,52 +391,39 @@ async def _condition_loop(
     all_stdout: list[ByteSource | None] = []
     hit_limit = True
     bound = fd0_binding(session)
+    run = partial(
+        _execute_body,
+        execute_node,
+        context=context,
+        stdin=stdin,
+        call_stack=call_stack,
+        job_table=job_table,
+        agent_id=agent_id,
+        handed=handed,
+        decisions=decisions,
+    )
     for _ in range(_MAX_WHILE):
         if session.shell_options.get("noexec"):
             hit_limit = False
             break
-        cond_stdout, cond_io, _ = await run_statement(
-            execute_node,
-            condition,
-            context,
-            stdin,
-            bound,
-            call_stack,
-            job_table,
-            agent_id,
-            handed,
-            decisions,
-        )
-        await apply_barrier(cond_stdout, cond_io, BarrierPolicy.STATUS)
-        record_status(
-            session,
-            cond_io.exit_code,
-            transparent=pipeline_transparent(condition),
-        )
-        if break_on_zero and cond_io.exit_code == 0:
-            hit_limit = False
-            break
-        if not break_on_zero and cond_io.exit_code != 0:
-            hit_limit = False
-            break
         try:
-            stdout, io, _ = await _execute_body(
-                execute_node,
-                body,
-                context,
-                stdin,
-                call_stack,
-                job_table,
-                agent_id,
-                handed,
-                decisions,
+            cond_stdout, cond_io, _ = await run(test, test=True, bound=bound)
+            all_stdout.append(cond_stdout)
+            merged_io = await merged_io.merge(
+                IOResult(stderr=cond_io.stderr, exit_code=merged_io.exit_code)
             )
+            if (cond_io.exit_code == 0) == break_on_zero:
+                hit_limit = False
+                break
+            stdout, io, _ = await run(body)
         except (BreakSignal, ContinueSignal) as sig:
             merged_io = await _absorbed(sig, all_stdout, merged_io)
             if isinstance(sig, BreakSignal):
                 hit_limit = False
                 break
             continue
+        except UNWINDING as sig:
+            raise await carried(sig, _chain_streams(all_stdout), merged_io)
         merged_io = await merged_io.merge(io)
         all_stdout.append(stdout)
     if hit_limit:
@@ -549,7 +538,7 @@ async def handle_cfor(
 
 async def handle_while(
     execute_node: Callable[..., Any],
-    condition: TSNodeLike,
+    test: list[TSNodeLike],
     body: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None = None,
@@ -561,7 +550,7 @@ async def handle_while(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(
         execute_node,
-        condition,
+        test,
         body,
         context,
         stdin,
@@ -577,7 +566,7 @@ async def handle_while(
 
 async def handle_until(
     execute_node: Callable[..., Any],
-    condition: TSNodeLike,
+    test: list[TSNodeLike],
     body: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None = None,
@@ -589,7 +578,7 @@ async def handle_until(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(
         execute_node,
-        condition,
+        test,
         body,
         context,
         stdin,
@@ -627,6 +616,8 @@ async def handle_case(
             continue
         ran = True
         for stmt in body:
+            if stmt.type == NT.COMMENT:
+                continue
             try:
                 stdout, io, last_exec = await run_statement(
                     execute_node,

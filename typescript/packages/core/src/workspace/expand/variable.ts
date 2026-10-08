@@ -16,7 +16,6 @@ import { substringOperands } from './substring.ts'
 
 import { badSubstitution, scanParameter } from '../../shell/parameter.ts'
 import { nextRandom } from '../session/state.ts'
-import { evaluateArith } from '../../shell/arith.ts'
 import type { ArithWrite } from '../../shell/types.ts'
 import type { RandomReader } from '../session/state.ts'
 import {
@@ -36,6 +35,7 @@ import {
   DiscardSignal,
   ExitSignal,
   named,
+  ReadonlyError,
   UnboundVariable,
 } from '../../shell/errors.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
@@ -44,7 +44,6 @@ import type { SessionView } from '../../view/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { SessionState } from '../session/session.ts'
 import { assignElement } from '../session/elements.ts'
-import { ReadonlyVariableError } from '../session/errors.ts'
 import {
   ensureVarVisible,
   visibleArrays,
@@ -54,7 +53,7 @@ import {
   namerefTarget,
   positionalParams,
   randomReader,
-  sessionElements,
+  sessionArith,
   subscriptIndex,
 } from '../session/state.ts'
 import { homeDir } from '../session/shell_dirs.ts'
@@ -751,16 +750,12 @@ class ArithOperand {
     const reader = randomReader(this.session)
     let result
     try {
-      result = evaluateArith(
-        text,
-        visibleEnv(this.session),
-        0,
-        sessionElements(this.session, reader),
-        reader.read,
-        reader.wrote,
-        this.session.shellOptions.nounset === true,
-      )
+      result = sessionArith(this.session, text, reader, this.session.shellOptions.nounset === true)
     } catch (err) {
+      if (err instanceof ReadonlyError) {
+        await landArithWrites(this.session, this.view, err.writes, reader)
+        throw err.signal()
+      }
       if (!(err instanceof ArithError)) throw err
       await landArithWrites(this.session, this.view, err.writes, reader)
       throw new ExitSignal(
@@ -960,8 +955,8 @@ function valueOp(op: string, val: string, groups: string[]): string {
  * its key already canonical. Throws ExitSignal when the name is hidden,
  * a preSession rule refuses, the subscript is bad, or the name carries
  * `-i` and the text does not evaluate (the line dies with status 1, the
- * shape `${var:?}` uses); ReadonlyVariableError when the name is
- * readonly, the same refusal a plain assignment raises through the door.
+ * shape `${var:?}` uses); a readonly name discards the line too, and ends a
+ * `( )` subshell with `contained`.
  */
 /**
  * Land an arithmetic expansion's assignments and settle its draws. Each
@@ -1007,10 +1002,13 @@ export async function landArithWrites(
   writes: readonly ArithWrite[],
   reader: RandomReader,
 ): Promise<void> {
-  for (const write of writes) {
-    await expansionWrite(session, view, write.name, write.key, write.value)
+  try {
+    for (const write of writes) {
+      await expansionWrite(session, view, write.name, write.key, write.value)
+    }
+  } finally {
+    reader.settle()
   }
-  reader.settle()
 }
 
 export async function expansionWrite(
@@ -1019,6 +1017,7 @@ export async function expansionWrite(
   name: string,
   key: string | null,
   value: string,
+  contained = 1,
 ): Promise<void> {
   guardExpansionWrite(session, name)
   let status: string
@@ -1030,7 +1029,9 @@ export async function expansionWrite(
     if (!(err instanceof PolicyDenied) && !(err instanceof ArithError)) throw err
     throw writeRefusal(err)
   }
-  if (status === 'readonly') throw new ReadonlyVariableError(name)
+  if (status === 'readonly') {
+    throw new DiscardSignal(encodeText(`bash: ${name}: readonly variable\n`), contained)
+  }
   if (status !== 'ok') {
     throw new DiscardSignal(encodeText(`bash: ${name}[${key ?? ''}]: bad array subscript\n`))
   }
@@ -1228,17 +1229,21 @@ async function expandBracesIn(
     const triggered = p.op === '=' ? !varInEnv : val === ''
     if (!triggered) return [valuePiece(val, quoted)]
     const defaultVal = chunksText(await operatorWord(p, expandChild, quoted, session, callStack))
+    // A refused default ends a `( )` subshell, or a forked compound command,
+    // with 2, unless `set -e` ends it first with 1; a line loop reads it as
+    // a discard.
+    const contained = callStack?.paren === true && session.shellOptions.errexit !== true ? 2 : 1
     if (p.varName !== null && p.subscript !== null) {
       // The default lands on the element the reference named, never on
       // element 0: `${m[k]:=v}` writes key k and `${a[3]:=v}` writes
       // index 3, as bash does. An index before the front is refused in
       // bash's words.
       if (writeKey === null) throw badSubscript(p)
-      await expansionWrite(session, view, p.varName, writeKey, defaultVal)
+      await expansionWrite(session, view, p.varName, writeKey, defaultVal, contained)
     } else if (callStack !== null && callStack.getLocal(p.varName ?? '') !== null) {
       callStack.setLocal(p.varName ?? '', defaultVal)
     } else if (p.varName !== null) {
-      await expansionWrite(session, view, p.varName, null, defaultVal)
+      await expansionWrite(session, view, p.varName, null, defaultVal, contained)
     }
     return [valuePiece(defaultVal, quoted)]
   }

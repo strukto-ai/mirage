@@ -22,6 +22,7 @@ import {
   arrayWith,
   type ShellArray,
 } from '../../shell/array.ts'
+import type { ArithWrite } from '../../shell/types.ts'
 import type { ShellValue } from '../../shell/variable.ts'
 import type { SessionState } from './session.ts'
 import {
@@ -34,6 +35,7 @@ import {
   visibleArrays,
   visibleAssocs,
   deref,
+  type RandomReader,
 } from './state.ts'
 
 const ELEMENT_REF = /^([A-Za-z_]\w*)(?:\[([\s\S]+)\])?$/
@@ -150,4 +152,27 @@ export async function assignElement(
   }
   seedVar(session, name, stored)
   return 'ok'
+}
+
+/**
+ * Land an arithmetic command's assignments in the order the expression made
+ * them, each through the door: a hidden name throws PolicyDenied and the
+ * ones after it never land, as a readonly name stopped the evaluation itself
+ * (`let 'X=5, R=3'` leaves X at 5). The draws made after a seed that landed
+ * settle either way. Mirrors Python's land_arith.
+ */
+export async function landArith(
+  session: SessionState,
+  view: SessionView | null,
+  writes: readonly ArithWrite[],
+  reader: RandomReader,
+): Promise<void> {
+  try {
+    for (const write of writes) {
+      ensureVarVisible(session, write.name)
+      await assignElement(session, view, write.name, write.key, write.value)
+    }
+  } finally {
+    reader.settle()
+  }
 }

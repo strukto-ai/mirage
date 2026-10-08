@@ -510,6 +510,74 @@
         "stdout": "in G=13\nout G=13\nin H=4\nout H=3\nin 5 2\ndeclare -i r=\"1\"\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "readonly_write_stops_an_arithmetic_command",
+      "seq": 861,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( readonly R=1; X=0; let 'X=5, R=3'; echo \"let=$? X=$X\"; X=0; (( X=6, R=3, X=7 )); echo \"cmd=$? X=$X\"; X=0; let X=1 R=2 X=9; echo \"args=$? X=$X\"; for (( X=8, R=2; ; )); do :; done; echo \"for=$? X=$X\"; [[ X=4,R=3 -eq 1 ]]; echo \"cond=$? X=$X\"; if (( R=3 )); then :; fi; echo \"if=$?\"; while (( R=3 )); do :; done; echo \"while=$?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "let=1 X=5\ncmd=1 X=6\nargs=1 X=1\nfor=1 X=8\ncond=1 X=4\nif=0\nwhile=0\n",
+        "stderr": "bash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\n"
+      }
+    },
+    {
+      "id": "integer_element_write_keeps_the_scalar",
+      "seq": 862,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( x=7; declare -i n; n='x[1]=5'; declare -p x; y=7; (( y[2]=5 )); declare -p y )",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -a x=([0]=\"7\" [1]=\"5\")\ndeclare -a y=([0]=\"7\" [2]=\"5\")\n",
+        "stderr": ""
+      }
     }
   ]
 }

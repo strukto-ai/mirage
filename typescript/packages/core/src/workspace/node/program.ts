@@ -297,6 +297,13 @@ async function runProgram(
           i = nextLine(node, children, i)
           continue
         }
+        if (err instanceof DiscardSignal) {
+          // A line loop a child shell runs ends it on a discard with the
+          // discard's own status: `( eval ': ${R:=x}' )` and
+          // `$( : ${R:=x} )` end with 1, where the `( )` around a bare
+          // `: ${R:=x}` ends with 2.
+          err.containedCode = err.exitCode
+        }
         if (inline) {
           const parts = allStdout.filter((part): part is ByteSource => part !== null)
           throw await carried(err, parts.length > 0 ? asyncChain(parts) : null, mergedIo)

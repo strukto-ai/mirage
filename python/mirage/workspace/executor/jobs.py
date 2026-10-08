@@ -55,7 +55,7 @@ from mirage.shell.constants import (
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
-from mirage.shell.node_kind import NodeKind, node_kind
+from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
 from mirage.utils.timezone import zone_from_env
@@ -209,7 +209,9 @@ async def handle_background(
     bg_session.job_output = JobOutput(output)
     # A job is a child shell outside every loop: `{ break; } &` in a
     # loop refuses, as bash's does.
-    bg_call_stack = (call_stack or CallStack()).fork(loops=False)
+    bg_call_stack = (call_stack or CallStack()).fork(
+        loops=False, paren=None if simple_command(left) else True
+    )
     job_handed = (
         decisions.split(
             session.session_id, handed, occurrence_of(left, handed)
@@ -265,15 +267,22 @@ async def handle_background(
                 )
             except ExitSignal as sig:
                 # A background job is its own shell: exit ends the job
-                # only.
+                # only, a simple command the top shell forked with the
+                # status that shell would exit with (`: ${U?} &` is 127,
+                # `{ : ${U?}; } &` and `( : ${U?} & )` are 1).
                 stdout = sig.stdout or b""
-                io = IOResult(
-                    exit_code=sig.contained_code, stderr=sig.stderr or None
+                status = (
+                    sig.exit_code
+                    if simple_command(left)
+                    and not sig.sourced
+                    and not (call_stack is not None and call_stack.subshell)
+                    else sig.contained_code
                 )
+                io = IOResult(exit_code=status, stderr=sig.stderr or None)
                 exec_node = ExecutionNode(
                     command=cmd_str_inner,
                     stderr=sig.stderr,
-                    exit_code=sig.contained_code,
+                    exit_code=status,
                 )
             except ReturnSignal as sig:
                 stdout = sig.stdout

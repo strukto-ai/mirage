@@ -17,7 +17,7 @@ import type { JobConsole } from '../../../../shell/console/index.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
-import { ReturnSignal } from '../../../../shell/errors.ts'
+import { ExitSignal, ReturnSignal } from '../../../../shell/errors.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { positionalParams, setPositionalParams } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -76,6 +76,7 @@ export async function handleSource(
       ...(sink === undefined ? {} : { sink }),
     })
   } catch (err) {
+    if (err instanceof ExitSignal) err.sourced = true
     if (!(err instanceof ReturnSignal)) throw err
     io = new IOResult({
       stdout: err.stdout,

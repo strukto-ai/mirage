@@ -315,13 +315,10 @@ function pipelineHead(stage: TSNodeLike): PipelineStages {
   return single
 }
 
-export function getWhileParts(node: TSNodeLike): [TSNodeLike, TSNodeLike[]] {
-  const nc = node.namedChildren
-  const condition = nc[0]
-  if (condition === undefined) throw new Error('while/until: missing condition')
-  const bodyNode = nc[1]
-  const body = bodyNode !== undefined ? [...bodyNode.namedChildren] : []
-  return [condition, body]
+export function getWhileParts(node: TSNodeLike): [TSNodeLike[], TSNodeLike[]] {
+  const test = [...node.namedChildren]
+  const body = test.pop()
+  return [test, body !== undefined ? [...body.namedChildren] : []]
 }
 
 /**
@@ -411,6 +408,7 @@ const TARGET_TYPES: ReadonlySet<string> = new Set([
   NT.SIMPLE_EXPANSION,
   NT.EXPANSION,
   NT.COMMAND_SUBSTITUTION,
+  NT.ARITHMETIC_EXPANSION,
   NT.STRING,
   NT.RAW_STRING,
   NT.ANSI_C_STRING,
@@ -690,35 +688,29 @@ export function getListParts(node: TSNodeLike): [TSNodeLike, string | null, TSNo
   return [left, op, right]
 }
 
+/** Split an `if` or `elif` at its `then`: the test statements before it, the rest after. */
+function testAndBody(node: TSNodeLike): [TSNodeLike[], TSNodeLike[]] {
+  const test: TSNodeLike[] = []
+  const rest: TSNodeLike[] = []
+  let part = test
+  for (const c of node.children) {
+    if (c.type === 'then') part = rest
+    else if (c.isNamed === true) part.push(c)
+  }
+  return [test, rest]
+}
+
 export function getIfBranches(
   node: TSNodeLike,
-): [[TSNodeLike, TSNodeLike[]][], TSNodeLike[] | null] {
-  const nc = node.namedChildren
-  let condition: TSNodeLike | null = nc[0] ?? null
-  let body: TSNodeLike[] = []
-  const branches: [TSNodeLike, TSNodeLike[]][] = []
+): [[TSNodeLike[], TSNodeLike[]][], TSNodeLike[] | null] {
+  const [test, rest] = testAndBody(node)
+  const branches: [TSNodeLike[], TSNodeLike[]][] = [[test, []]]
   let elseBody: TSNodeLike[] | null = null
-
-  for (let i = 1; i < nc.length; i++) {
-    const c = nc[i]
-    if (c === undefined) continue
-    if (c.type === NT.ELIF_CLAUSE) {
-      if (condition !== null) branches.push([condition, body])
-      const ec = c.namedChildren
-      condition = ec[0] ?? null
-      body = ec.slice(1)
-    } else if (c.type === NT.ELSE_CLAUSE) {
-      if (condition !== null) {
-        branches.push([condition, body])
-        condition = null
-      }
-      elseBody = [...c.namedChildren]
-    } else {
-      body.push(c)
-    }
+  for (const c of rest) {
+    if (c.type === NT.ELIF_CLAUSE) branches.push(testAndBody(c))
+    else if (c.type === NT.ELSE_CLAUSE) elseBody = [...c.namedChildren]
+    else branches[branches.length - 1]?.[1].push(c)
   }
-
-  if (condition !== null) branches.push([condition, body])
   return [branches, elseBody]
 }
 

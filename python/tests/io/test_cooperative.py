@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -222,7 +223,7 @@ async def test_pipeline_cache_lifecycle(failure):
     stream = CachableAsyncIterator(source())
 
     async def execute(cmd, session, stdin, call_stack, *, sink=None):
-        if cmd == "cat":
+        if cmd.text == "cat":
             return (
                 async_chain([stream]),
                 IOResult(reads={"/remote": stream}, cache=["/remote"]),
@@ -237,7 +238,7 @@ async def test_pipeline_cache_lifecycle(failure):
 
     run = handle_pipe(
         execute,
-        ["cat", "wc"],
+        [SimpleNamespace(type="command", text=word) for word in ("cat", "wc")],
         [],
         EvaluationContext(SessionState(session_id="test")),
     )

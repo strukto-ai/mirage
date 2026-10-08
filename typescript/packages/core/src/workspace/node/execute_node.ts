@@ -68,11 +68,10 @@ import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.t
 import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
-import { evaluateArith } from '../../shell/arith.ts'
 import type { ArithWrite } from '../../shell/types.ts'
 import { ExitSignal, ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
-import { assignElement } from '../session/elements.ts'
+import { landArith } from '../session/elements.ts'
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
 import {
   carried,
@@ -106,13 +105,7 @@ import { PolicyDenied } from '../../policy/errors.ts'
 import type { HandOff } from '../../policy/types.ts'
 import { definedAt } from './occurrence.ts'
 import type { SessionView } from '../../view/types.ts'
-import {
-  ensureVarVisible,
-  randomReader,
-  sessionElements,
-  sessionView,
-  visibleEnv,
-} from '../session/state.ts'
+import { randomReader, sessionArith, sessionView } from '../session/state.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { drained, runStatement } from '../executor/jobs.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
@@ -187,7 +180,8 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
  * ((;;))` loops, 0 for init/update). Re-raises ArithError with the
  * expression text prepended so the loop can print bash's
  * `((: expr: reason` diagnostic, and throws ReadonlyError when the
- * expression assigns to a readonly variable.
+ * expression assigns to a readonly variable, once the writes before it
+ * land (ExitSignal for one inside a subscript).
  */
 async function evalCforExpr(
   exprs: readonly TSNodeLike[],
@@ -205,41 +199,29 @@ async function evalCforExpr(
   for (const expr of exprs) parts.push(await expandArith(expr, context, executeFn, callStack, view))
   const text = parts.join(', ')
   const reader = randomReader(session)
-  let error: ArithError | null = null
+  let error: ArithError | ReadonlyError | null = null
   let writes: readonly ArithWrite[] = []
   let value = 0n
   try {
-    // Reads resolve against the visible env so a hidden name counts as
-    // unset; a hidden write refuses through the session door
-    // (ensureVarVisible), caught by the loop beside ReadonlyError.
-    const result: ArithResult = evaluateArith(
-      text,
-      visibleEnv(session),
-      0,
-      sessionElements(session, reader),
-      reader.read,
-      reader.wrote,
-    )
+    const result: ArithResult = sessionArith(session, text, reader)
     writes = result.writes
     value = result.value
   } catch (err) {
-    if (!(err instanceof ArithError)) throw err
+    if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
     // bash bound the assignments made before the error; they land
     // before the error is reported.
     error = err
     writes = err.writes
   }
-  for (const write of writes) {
-    ensureVarVisible(session, write.name)
-    if (session.readonlyVars.has(write.name)) throw new ReadonlyError(write.name)
-  }
   // Through the door, so a preSession rule governs an arithmetic assignment
-  // exactly as it governs `X=1`; in evaluation order, so a bare name and
-  // its element 0 land as the expression wrote them.
-  for (const write of writes) {
-    await assignElement(session, view ?? null, write.name, write.key, write.value)
+  // exactly as it governs `X=1` and a hidden name refuses at its own
+  // write; in evaluation order, so a bare name and its element 0 land as
+  // the expression wrote them.
+  await landArith(session, view ?? null, writes, reader)
+  if (error instanceof ReadonlyError) {
+    if (error.inSubscript) throw error.signal()
+    throw error
   }
-  reader.settle()
   if (error !== null) throw new ArithError(`${text}: ${error.message}`)
   return Number(value)
 }
@@ -1245,66 +1227,42 @@ async function executeNodeBody(
       sessionView(session, registry.policies, context.frame.diagnostics),
     )
     const reader = randomReader(session)
-    let error: ArithError | null = null
+    let error: ArithError | ReadonlyError | null = null
     let writes: readonly ArithWrite[] = []
     let value = 0n
     try {
       // Reads resolve against the visible env so a hidden name counts
-      // as unset; a hidden write refuses below, in this command's own
-      // voice like the readonly refusal.
-      const result: ArithResult = evaluateArith(
-        expr,
-        visibleEnv(session),
-        0,
-        sessionElements(session, reader),
-        reader.read,
-        reader.wrote,
-      )
+      // as unset; a hidden write refuses at its own write below, in this
+      // command's own voice like the readonly one.
+      const result: ArithResult = sessionArith(session, expr, reader)
       writes = result.writes
       value = result.value
     } catch (err) {
-      if (!(err instanceof ArithError)) throw err
+      if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
       // bash bound the assignments made before the error; they land
       // before the error is reported.
       error = err
       writes = err.writes
     }
-    for (const write of writes) {
-      const name = write.name
-      try {
-        ensureVarVisible(session, name)
-      } catch (err) {
-        if (!(err instanceof PolicyDenied)) throw err
-        const errBytes = encodeText(`bash: ${err.message}\n`)
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: errBytes }),
-          new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
-        ]
-      }
-      if (session.readonlyVars.has(name)) {
-        const errBytes = encodeText(`bash: ${name}: readonly variable\n`)
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: errBytes }),
-          new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
-        ]
-      }
-    }
     try {
-      for (const write of writes) {
-        await assignElement(
-          session,
-          sessionView(session, registry.policies, context.frame.diagnostics),
-          write.name,
-          write.key,
-          write.value,
-        )
-      }
-      reader.settle()
+      await landArith(
+        session,
+        sessionView(session, registry.policies, context.frame.diagnostics),
+        writes,
+        reader,
+      )
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
       const errBytes = encodeText(`bash: ${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: errBytes }),
+        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
+      ]
+    }
+    if (error instanceof ReadonlyError) {
+      if (error.inSubscript) throw error.signal()
+      const errBytes = encodeText(`bash: ${error.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -1488,12 +1446,12 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
-    const [condition, body] = getWhileParts(node)
+    const [test, body] = getWhileParts(node)
     if (kind === NodeKind.UNTIL) {
       return callStack.loop(() =>
         handleUntil(
           stream,
-          condition,
+          test,
           body,
           context,
           stdin,
@@ -1508,7 +1466,7 @@ async function executeNodeBody(
     return callStack.loop(() =>
       handleWhile(
         stream,
-        condition,
+        test,
         body,
         context,
         stdin,

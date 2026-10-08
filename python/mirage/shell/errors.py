@@ -35,16 +35,39 @@ class ArithError(ValueError):
     writes: tuple[ArithWrite, ...] = ()
 
 
-class ReadonlyError(ValueError):
+class ReadonlyError(Exception):
     """An arithmetic assignment to a readonly shell variable.
+
+    The evaluation stops at it, as bash's does: ``writes`` carries the
+    assignments made before it, which bind (``(( X=5, R=3 ))`` leaves X
+    at 5), and nothing after it runs.
 
     Args:
         name (str): variable that was assigned to.
+        in_subscript (bool): made while an array subscript evaluated
+            (``${a[R=3]}``, ``(( a[R=3] ))``), which ends the shell
+            wherever the subscript is.
     """
 
-    def __init__(self, name: str) -> None:
+    writes: tuple[ArithWrite, ...] = ()
+
+    def __init__(self, name: str, in_subscript: bool = False) -> None:
         self.name = name
+        self.in_subscript = in_subscript
         super().__init__(f"{name}: readonly variable")
+
+    def signal(self, fatal: bool = False) -> "ExitSignal":
+        """How the error unwinds where no status answers it: one in a
+        subscript, or in an ``-i`` value (``fatal``), ends the shell
+        with 1; any other discards the line, as ``$((R=3))`` does.
+
+        Args:
+            fatal (bool): the context ends the shell on it.
+        """
+        stderr = encode_text(f"bash: {self}\n")
+        if fatal or self.in_subscript:
+            return ExitSignal(1, stderr=stderr, contained_code=1)
+        return DiscardSignal(stderr)
 
 
 class ExitSignal(Exception):
@@ -71,7 +94,10 @@ class ExitSignal(Exception):
     expanded when it was raised. bash expands a simple command's words
     before it applies the command's redirects, so that diagnostic goes
     around them; any other goes through the redirects it was written
-    under.
+    under. ``sourced`` marks one raised in text ``eval`` or ``source``
+    ran: a forked stage or job reports its contained status even for a
+    simple command (``eval ': ${U?}' | cat`` is 1, ``: ${U?} | cat``
+    127).
     """
 
     def __init__(
@@ -88,6 +114,7 @@ class ExitSignal(Exception):
             contained_code if contained_code is not None else exit_code
         )
         self.expanding: int | None = None
+        self.sourced = False
 
 
 class DiscardSignal(ExitSignal):
@@ -101,10 +128,14 @@ class DiscardSignal(ExitSignal):
 
     Args:
         stderr (bytes): the diagnostic, in the shell's voice.
+        contained_code (int): the status a ``( )`` subshell, or a
+            compound command forked as a stage or job, ends with when
+            the error reaches it rather than a line loop: 2 for a
+            refused ``${var:=word}``, 1 for any other.
     """
 
-    def __init__(self, stderr: bytes = b"") -> None:
-        super().__init__(1, stderr=stderr, contained_code=1)
+    def __init__(self, stderr: bytes = b"", contained_code: int = 1) -> None:
+        super().__init__(1, stderr=stderr, contained_code=contained_code)
 
 
 class UnboundVariable(ExitSignal):
