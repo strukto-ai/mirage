@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "id": "stream_whole_file",
+      "seq": 950110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix",
+        "databricks",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "ssh",
+        "nextcloud",
+        "sharepoint",
+        "sharepoint-prefix",
+        "hf",
+        "hf-prefix",
+        "box",
+        "opfs"
+      ],
+      "command": "printf '0123456789\\nabc\\n' > {mount}/stream.txt",
+      "check": {
+        "read": "{mount}/stream.txt",
+        "stream": true
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "check": "0123456789\nabc\n"
+      }
+    },
+    {
+      "id": "stream_empty_file",
+      "seq": 950111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix",
+        "databricks",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "ssh",
+        "nextcloud",
+        "sharepoint",
+        "sharepoint-prefix",
+        "hf",
+        "hf-prefix",
+        "box",
+        "opfs"
+      ],
+      "command": "printf '' > {mount}/stream_empty.txt",
+      "check": {
+        "read": "{mount}/stream_empty.txt",
+        "stream": true
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "check": ""
+      }
+    }
+  ]
+}
