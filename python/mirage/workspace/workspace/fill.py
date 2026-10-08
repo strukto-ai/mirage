@@ -90,8 +90,9 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
     AND the line's own redefinition (``f; f() { :; }`` runs the stored
     body first, so neither may shadow the other), and a stored alias's
     expansion, parsed here because dispatch reparses it after this pass
-    has already run. Alias values join only under ``expand_aliases``,
-    the same gate ``alias_value`` applies at dispatch. Each name
+    has already run. Live alias values join only under
+    ``expand_aliases``, the same gate ``alias_value`` applies at
+    dispatch; the values a function's definition saved join always. Each name
     resolves once, so mutual recursion terminates; over-selection only
     ever over-fetches, under-selection is the bug.
 
@@ -118,14 +119,21 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
                 parse_function(stored, parse) if stored is not None else []
             )
             bodies.extend(defined.get(word) or ())
+            # An alias is a textual prefix: dispatch appends the
+            # invocation's rest to the value, so the value's trailing
+            # command is parsed with a dynamic rest-word. That keeps its
+            # argument list honest -- a CLI named in an alias reads as
+            # "verbs unknowable" (whole spec tree) rather than "no verb
+            # selected". A function body expands the aliases its
+            # definition saved, so those values join too.
+            values = {
+                site.aliases[word]
+                for site in session._function_sites.values()
+                if site.aliases is not None and word in site.aliases
+            }
             if expand and word in session.aliases:
-                # An alias is a textual prefix: dispatch appends the
-                # invocation's rest to the value, so the value's
-                # trailing command is parsed with a dynamic rest-word.
-                # That keeps its argument list honest -- a CLI named in
-                # an alias reads as "verbs unknowable" (whole spec
-                # tree) rather than "no verb selected".
-                bodies.append(parse(session.aliases[word] + _ALIAS_REST))
+                values.add(session.aliases[word])
+            bodies.extend(parse(value + _ALIAS_REST) for value in values)
             nodes.extend(bodies)
             frontier.extend(bodies)
     return nodes

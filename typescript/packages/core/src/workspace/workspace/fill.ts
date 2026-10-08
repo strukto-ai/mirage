@@ -42,6 +42,7 @@ import { abortable, makeAbortError } from '../abort.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { sessionEntry } from '../session/session.ts'
 import { parseFunction } from '../../shell/helpers.ts'
 import { setSessionEntry, type SessionState } from '../session/session.ts'
 import { deref } from '../session/state.ts'
@@ -92,8 +93,9 @@ function definedBodies(node: TSNodeLike): Map<string, TSNodeLike[]> {
  * the line's own redefinition (`f; f() { :; }` runs the stored body
  * first, so neither may shadow the other), and a stored alias's
  * expansion, reparsed here because dispatch reparses it after this
- * pass has already run. Alias values join only under `expand_aliases`,
- * the same gate alias expansion applies at dispatch. Each name
+ * pass has already run. Live alias values join only under
+ * `expand_aliases`, the same gate alias expansion applies at dispatch; the
+ * values a function's definition saved join always. Each name
  * resolves once, so mutual recursion terminates; over-selection only
  * ever over-fetches, under-selection is the bug.
  */
@@ -116,14 +118,20 @@ export function lineNodes(
       const stored = Object.hasOwn(session.functions, word) ? session.functions[word] : undefined
       const bodies = stored === undefined ? [] : parseFunction(stored, reparse)
       bodies.push(...(defined.get(word) ?? []))
-      const aliased = Object.hasOwn(session.aliases, word) ? session.aliases[word] : undefined
       // An alias is a textual prefix: dispatch appends the
       // invocation's rest to the value, so the value's trailing
       // command is parsed with a dynamic rest-word. That keeps its
       // argument list honest -- a CLI named in an alias reads as
       // "verbs unknowable" (whole spec tree) rather than "no verb
-      // selected".
-      if (expand && aliased !== undefined) bodies.push(reparse(aliased + ALIAS_REST))
+      // selected". A function body expands the aliases its definition
+      // saved, so those values join too.
+      const values = new Set<string>()
+      if (expand && Object.hasOwn(session.aliases, word)) values.add(session.aliases[word] ?? '')
+      for (const site of session.functionSites.values()) {
+        const saved = site.aliases == null ? undefined : sessionEntry(site.aliases, word)
+        if (saved !== undefined) values.add(saved)
+      }
+      for (const value of values) bodies.push(reparse(value + ALIAS_REST))
       nodes.push(...bodies)
       frontier.push(...bodies)
     }

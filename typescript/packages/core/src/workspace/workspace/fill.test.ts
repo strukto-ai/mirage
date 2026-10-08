@@ -474,6 +474,25 @@ describe('fillEnv through execute', () => {
     }
   })
 
+  it("a function's saved alias fills on invocation", async () => {
+    const { calls, fetch } = countingSource({ TOKEN: 't0' })
+    registerSecrets('fake-alias-saved', FakeConfig, fetch)
+    const ws = await makeWs({ TOKEN: { from: 'fake-alias-saved', ref: 'r' } })
+    try {
+      for (const line of [
+        'shopt -s expand_aliases',
+        'alias show=\'echo "a:$TOKEN"\'',
+        'f() { show; }',
+        'unalias show',
+      ])
+        expect((await ws.shell(line)).exitCode).toBe(0)
+      expect(stdoutStr(await ws.shell('f'))).toBe('a:t0\n')
+      expect(calls).toEqual(['r'])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('the alias rest word is not a managed read', async () => {
     const { calls, fetch } = countingSource({ token: 'v' })
     registerSecrets('fake-alias-rest', FakeConfig, fetch)

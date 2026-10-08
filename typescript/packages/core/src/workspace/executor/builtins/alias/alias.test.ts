@@ -106,6 +106,8 @@ describe('alias', () => {
     expect([stdoutStr(io), io.exitCode]).toEqual(['1\n[2]\n', 0])
     io = await ws.shell('unalias a; f')
     expect([stdoutStr(io), io.exitCode]).toEqual(['1\n', 0])
+    // What a read kept of the aliases it changed ends with the line.
+    expect(ws.getSession(ws.sessionManager.defaultId).aliasMarks.size).toBe(0)
   })
 
   // Checkout restores the table but not where the live definitions were

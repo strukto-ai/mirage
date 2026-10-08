@@ -108,6 +108,9 @@ async def test_unalias():
     ws = _ws()
     out, code = await _run(ws, "alias x=1\nunalias x; alias x")
     assert code == 1
+    # What a read kept of the aliases it changed ends with the line.
+    session = ws.get_session(ws.default_session_id)
+    assert session._alias_marks == {}
     _, code = await _run(ws, "unalias nope")
     assert code == 1
     _, code = await _run(ws, "unalias")
