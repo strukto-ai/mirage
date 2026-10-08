@@ -17,7 +17,9 @@ import logging
 from collections.abc import Coroutine, Iterator
 from typing import Any, TypeVar
 
+from mirage.bridge.sync import run_async_from_sync
 from mirage.concurrency.limiter import ConcurrencyLimiter
+from mirage.errors.fs import numbered
 from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
@@ -26,7 +28,6 @@ from mirage.runtime.handles import FlushStep
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, VFSEntry, VFSStat
 from mirage.types import FileStat, PathSpec
-from mirage.utils.context_scope import ContextScope
 from mirage.utils.path import norm
 from mirage.utils.stat_view import (
     DIR_MODE,
@@ -90,23 +91,22 @@ class RuntimeVFS:
     inherit the engine's own AbstractOS and a wasm encoder is a table of
     preview1 host functions.
 
-    The surface is sync on purpose: guest calls arrive on a worker
-    thread (wasm) or the binding's own thread (monty), so every op hops
-    to the workspace loop with `run_coroutine_threadsafe` and blocks
-    that caller. The hop cannot carry the launching task's contextvars:
-    what travels is the calling thread's context, and the threads guest
-    calls arrive on (monty's tokio workers, wasmtime's run thread) never
-    had the session bound. So the VFS replays the context it was built
-    in (a ``ContextScope``: the session, the op recorder, every
-    contextvar) around each dispatched op, the same bracket FUSE's
-    ``MountCore`` puts around its ops. Session mount modes are
-    then enforced inside the op exactly as they are for a shell command,
-    and a guest's file I/O lands on the typed line's ledger exactly as
-    a shell command's does.
+    The surface is sync on purpose: it serves code that cannot await,
+    and each call blocks its caller until the op is done. A guest's call
+    arrives on a worker thread (wasm) or the binding's own thread
+    (monty) and hops to the workspace loop running elsewhere; the hop
+    carries no contextvars, so a guest's door is built from a binding
+    (``of``), whose dispatch replays the launch context (the session,
+    the op recorder) around each op. A ``with ws:`` block calls from
+    the only thread there is, so its door drives the block's idle loop
+    in the caller's own context, a session bound inside the block
+    included. Either way the op runs as a shell command's would, and an
+    OSError leaves numbered as a syscall's (``numbered``).
 
     Args:
         dispatch (DispatchFn): the workspace dispatch coroutine function.
-        loop (asyncio.AbstractEventLoop): the loop dispatch belongs to.
+        loop (asyncio.AbstractEventLoop | None): the loop dispatch
+            belongs to; None runs each call on a throwaway loop.
         resolver (MountResolver | None): the workspace mount routing
             table; None means routing questions answer None.
     """
@@ -114,10 +114,10 @@ class RuntimeVFS:
     def __init__(
         self,
         dispatch: DispatchFn,
-        loop: asyncio.AbstractEventLoop,
+        loop: asyncio.AbstractEventLoop | None,
         resolver: MountResolver | None = None,
     ) -> None:
-        self._dispatch = ContextScope().wrap_async(dispatch)
+        self._dispatch = dispatch
         self._loop = loop
         self._resolver = resolver
         self._no_append: set[str] = set()
@@ -169,12 +169,13 @@ class RuntimeVFS:
                 )
 
     def _wait(self, pending: Coroutine[Any, Any, T]) -> T:
-        return asyncio.run_coroutine_threadsafe(
-            self._tracked(pending), self._loop
-        ).result()
-
-    def _raw(self, name: str, path: str, /, **kwargs: Any) -> Any:
-        return self._wait(self._call(name, path, **kwargs))
+        try:
+            return run_async_from_sync(self._tracked(pending), self._loop)
+        except OSError as exc:
+            renumbered = numbered(exc)
+            if renumbered is exc:
+                raise
+            raise renumbered from exc
 
     def call(self, name: str, path: str, /, **kwargs: Any) -> Any:
         """Run one workspace function and return its result.
@@ -183,12 +184,7 @@ class RuntimeVFS:
             name (str): the function's name (read, write, stat, ...).
             path (str): guest-absolute virtual path.
         """
-        try:
-            return self._raw(name, path, **kwargs)
-        except OperationNotSupportedError as exc:
-            # call raises this for an op the mount's VFS does
-            # not register; guests spell that ENOTSUP.
-            raise NotImplementedError(str(exc)) from exc
+        return self._wait(self._call(name, path, **kwargs))
 
     def prefixes(self) -> list[str]:
         """The workspace mount prefixes, longest first, slash-normalized.
@@ -406,10 +402,7 @@ class RuntimeVFS:
                 every row comes back unclassified, one request for the
                 listing and none per entry, as a POSIX readdir costs.
         """
-        try:
-            return self._wait(self._list(path, classify))
-        except OperationNotSupportedError as exc:
-            raise NotImplementedError(str(exc)) from exc
+        return self._wait(self._list(path, classify))
 
     async def _list(self, path: str, classify: bool) -> list[VFSEntry]:
         listing = await self._call("readdir", path)
@@ -605,7 +598,7 @@ class RuntimeVFS:
         if mount in self._no_append:
             return False
         try:
-            self._raw("append", path, data=data)
+            self.call("append", path, data=data)
         except OperationNotSupportedError:
             self._no_append.add(mount)
             return False

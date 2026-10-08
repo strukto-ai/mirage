@@ -13,11 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 from pathlib import Path
 
 import pytest
 
+from mirage import MountMode, Workspace
 from mirage.runtime.python.host.open import make_open
+from mirage.vfs.ram import RAMVFS
 
 from .conftest import make_ops_with_dir
 
@@ -77,3 +80,44 @@ class TestPatchedOpen:
         real_file.write_bytes("café".encode("utf-16"))
         with patched(real_file, "r", -1, "utf-16") as f:
             assert f.read() == "café"
+
+
+@pytest.mark.parametrize(
+    "path, mode, code",
+    [
+        ("/data/secret.txt", "r", errno.ENOENT),
+        ("/ro/new.txt", "w", errno.EROFS),
+        ("/data/sealed/f.txt", "r", errno.EACCES),
+    ],
+)
+def test_open_refuses_what_ws_vfs_refuses(path, mode, code):
+    # A hide, a read-only mount and a path rule: both doors ask the
+    # dispatcher, so the one refusal comes back through either.
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/ro/": (RAMVFS(), MountMode.READ)},
+        mode=MountMode.WRITE,
+    )
+    asyncio.run(ws.vfs.write("/data/secret.txt", b"s"))
+    asyncio.run(ws.vfs.mkdir("/data/sealed"))
+    asyncio.run(ws.vfs.write("/data/sealed/f.txt", b"f"))
+    profile = {
+        "paths": {"hide": ["/data/secret.txt"]},
+        "commands": {
+            "deny": [{"reason": "sealed", "paths": ["/data/sealed/*"]}]
+        },
+    }
+    asyncio.run(ws.set_session_profile(ws.default_session_id, profile))
+    with pytest.raises(OSError) as direct:
+        if mode == "r":
+            asyncio.run(ws.vfs.read(path))
+        else:
+            asyncio.run(ws.vfs.write(path, b"x"))
+    with ws, pytest.raises(OSError) as opened:
+        with open(path, mode) as f:
+            if mode == "r":
+                f.read()
+            else:
+                f.write("x")
+    assert direct.value.errno == code
+    assert type(opened.value) is type(direct.value)
+    assert opened.value.errno == code

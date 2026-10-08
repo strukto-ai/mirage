@@ -20,9 +20,9 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { DiskVFS } from '../vfs/disk/disk.ts'
+import { DiskVFS } from '../../../vfs/disk/disk.ts'
 import { patchNodeFs } from './os_patch.ts'
-import { Workspace } from '../workspace.ts'
+import { Workspace } from '../../../workspace.ts'
 
 type Fs = typeof fs
 
@@ -91,6 +91,51 @@ describe('patchNodeFs — mounted paths', () => {
   })
 })
 
+describe('patchNodeFs — ledger', () => {
+  it('records each call on ws.vfs.records', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+
+    await fs.promises.writeFile('/data/x.txt', 'hi')
+    await fs.promises.readFile('/data/x.txt')
+    expect(ws.vfs.records.map((r) => [r.op, r.path, r.bytes])).toEqual([
+      ['write', '/data/x.txt', 2],
+      ['read', '/data/x.txt', 2],
+    ])
+    await ws.close()
+  })
+})
+
+describe('patchNodeFs — refusals', () => {
+  // A hide, a read-only mount and a path rule: both doors ask the
+  // dispatcher, so the one refusal comes back through either.
+  it.each([
+    ['/data/secret.txt', 'read', 'ENOENT'],
+    ['/ro/new.txt', 'write', 'EROFS'],
+    ['/data/sealed/f.txt', 'read', 'EACCES'],
+  ] as const)('%s refuses %s as ws.vfs does', async (path, op, code) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS(), '/ro': [new RAMVFS(), MountMode.READ] },
+      { mode: MountMode.WRITE },
+    )
+    await ws.vfs.write('/data/secret.txt', 's')
+    await ws.vfs.mkdir('/data/sealed')
+    await ws.vfs.write('/data/sealed/f.txt', 'f')
+    await ws.setSessionProfile(ws.defaultSessionId, {
+      paths: { hide: ['/data/secret.txt'] },
+      commands: { deny: [{ reason: 'sealed', paths: ['/data/sealed/*'] }] },
+    })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const direct = op === 'read' ? ws.vfs.read(path) : ws.vfs.write(path, 'x')
+    const patched = op === 'read' ? fs.promises.readFile(path) : fs.promises.writeFile(path, 'x')
+    await expect(direct).rejects.toMatchObject({ code })
+    await expect(patched).rejects.toMatchObject({ code })
+    await ws.close()
+  })
+})
+
 describe('patchNodeFs — mirageStat adapter', () => {
   it('fs.promises.stat() returns an object with isFile()/isDirectory() methods', async () => {
     const ws = new Workspace({ '/data': new DiskVFS({ root: scratch }) }, { mode: MountMode.WRITE })
@@ -128,10 +173,10 @@ describe('patchNodeFs — fall-through to native fs', () => {
   })
 
   it('a disk root at its own prefix does not re-enter', async () => {
-    // Python needs ops/host_io for this layout: its patched os answers the
-    // disk backend's own physical path. The node backends bind
-    // node:fs/promises as ESM, which fs-monkey's swap of the CJS
-    // fs.promises getter never reaches.
+    // Python needs runtime/python/host/host_io for this layout: its
+    // patched os answers the disk backend's own physical path. The node
+    // backends bind node:fs/promises as ESM, which fs-monkey's swap of
+    // the CJS fs.promises getter never reaches.
     writeFileSync(join(scratch, 'a.txt'), 'hello')
     const ws = new Workspace(
       { [scratch]: new DiskVFS({ root: scratch }) },

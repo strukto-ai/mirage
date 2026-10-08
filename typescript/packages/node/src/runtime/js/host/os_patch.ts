@@ -14,7 +14,8 @@
 
 import { Buffer } from 'node:buffer'
 import { createRequire } from 'node:module'
-import { FileType } from '@struktoai/mirage-core/types'
+import { workspaceBridge } from '@struktoai/mirage-core/runtime/binding'
+import { RuntimeVFS } from '@struktoai/mirage-core/runtime/vfs'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 const requireCjs = createRequire(import.meta.url)
@@ -39,19 +40,18 @@ function mountedPath(ws: Workspace, p: string): boolean {
   return true
 }
 
-async function mirageStat(ws: Workspace, p: string): Promise<unknown> {
-  const s = await ws.vfs.stat(p)
-  const isDir = s.type === FileType.DIRECTORY
-  const mtime = s.modified !== null ? new Date(s.modified) : new Date(0)
+async function mirageStat(vfs: RuntimeVFS, p: string): Promise<unknown> {
+  const s = await vfs.stat(p)
+  const mtime = new Date(s.mtimeMs)
   return {
-    isFile: () => !isDir,
-    isDirectory: () => isDir,
+    isFile: () => !s.isDir,
+    isDirectory: () => s.isDir,
     isBlockDevice: () => false,
     isCharacterDevice: () => false,
     isSymbolicLink: () => false,
     isFIFO: () => false,
     isSocket: () => false,
-    size: s.size ?? 0,
+    size: s.size,
     mtime,
     mtimeMs: mtime.getTime(),
     atime: mtime,
@@ -60,7 +60,7 @@ async function mirageStat(ws: Workspace, p: string): Promise<unknown> {
     ctimeMs: mtime.getTime(),
     birthtime: mtime,
     birthtimeMs: mtime.getTime(),
-    mode: 0,
+    mode: s.mode,
     nlink: 1,
     uid: 0,
     gid: 0,
@@ -72,22 +72,35 @@ async function mirageStat(ws: Workspace, p: string): Promise<unknown> {
   }
 }
 
+/** A listing row's final segment: node's readdir answers names. */
+function leaf(entry: string): string {
+  const trimmed = entry.endsWith('/') ? entry.slice(0, -1) : entry
+  return trimmed.slice(trimmed.lastIndexOf('/') + 1)
+}
+
 /**
  * Monkey-patch Node's `fs` module so that paths under any mirage mount
  * route through the workspace. Paths NOT under a mount fall through to
  * the real native fs. CJS-friendly; for ESM code you still need to use
  * `ws.vfs.*` directly since ESM bindings are frozen.
  *
+ * The patched calls ride the runtimes' file door (`RuntimeVFS`) over
+ * `ws.vfs.dispatch`, so they run as the facade's session and land in
+ * `ws.vfs.records`, as Python's `with ws:` block does.
+ *
  * Returns a `restore()` function that undoes the patch.
  */
 export function patchNodeFs(ws: Workspace): () => void {
   const originalFs: FsLike = { ...(fs as unknown as FsLike) }
+  const vfs = new RuntimeVFS(
+    workspaceBridge((name, path, args, kwargs) => ws.vfs.dispatch(name, path, args, kwargs)),
+  )
 
   const vol: FsLike = {
     promises: {
       readFile: async (p: string, opts?: { encoding?: BufferEncoding } | BufferEncoding) => {
         if (mountedPath(ws, p)) {
-          const bytes = await ws.vfs.read(p)
+          const bytes = await vfs.read(p)
           const encoding = typeof opts === 'string' ? opts : opts?.encoding
           if (encoding !== undefined) return Buffer.from(bytes).toString(encoding)
           return Buffer.from(bytes)
@@ -100,7 +113,7 @@ export function patchNodeFs(ws: Workspace): () => void {
       },
       writeFile: async (p: string, data: Uint8Array | string): Promise<void> => {
         if (mountedPath(ws, p)) {
-          await ws.vfs.write(p, typeof data === 'string' ? data : data)
+          await vfs.write(p, typeof data === 'string' ? new TextEncoder().encode(data) : data)
           return
         }
         const native = (originalFs.promises as FsLike).writeFile as (
@@ -111,14 +124,7 @@ export function patchNodeFs(ws: Workspace): () => void {
       },
       readdir: async (p: string): Promise<string[]> => {
         if (mountedPath(ws, p)) {
-          // Workspace returns full paths; Node's fs.promises.readdir returns basenames.
-          // Strip trailing slash on directory entries before slicing so dirs
-          // don't collapse to ''.
-          const entries = await ws.vfs.readdir(p)
-          return entries.map((e) => {
-            const trimmed = e.endsWith('/') ? e.slice(0, -1) : e
-            return trimmed.slice(trimmed.lastIndexOf('/') + 1)
-          })
+          return (await vfs.readdir(p, false)).map((row) => leaf(row.path))
         }
         const native = (originalFs.promises as FsLike).readdir as (
           path: string,
@@ -126,22 +132,22 @@ export function patchNodeFs(ws: Workspace): () => void {
         return native(p)
       },
       stat: async (p: string): Promise<unknown> => {
-        if (mountedPath(ws, p)) return mirageStat(ws, p)
+        if (mountedPath(ws, p)) return mirageStat(vfs, p)
         const native = (originalFs.promises as FsLike).stat as (path: string) => Promise<unknown>
         return native(p)
       },
       unlink: async (p: string): Promise<void> => {
-        if (mountedPath(ws, p)) return ws.vfs.unlink(p)
+        if (mountedPath(ws, p)) return vfs.unlink(p)
         const native = (originalFs.promises as FsLike).unlink as (path: string) => Promise<void>
         await native(p)
       },
       mkdir: async (p: string): Promise<void> => {
-        if (mountedPath(ws, p)) return ws.vfs.mkdir(p)
+        if (mountedPath(ws, p)) return vfs.mkdir(p)
         const native = (originalFs.promises as FsLike).mkdir as (path: string) => Promise<void>
         await native(p)
       },
       rmdir: async (p: string): Promise<void> => {
-        if (mountedPath(ws, p)) return ws.vfs.rmdir(p)
+        if (mountedPath(ws, p)) return vfs.rmdir(p)
         const native = (originalFs.promises as FsLike).rmdir as (path: string) => Promise<void>
         await native(p)
       },
@@ -151,7 +157,7 @@ export function patchNodeFs(ws: Workspace): () => void {
     },
     readFile: (p: string, cb: Cb<Uint8Array>) => {
       if (mountedPath(ws, p)) {
-        ws.vfs
+        vfs
           .read(p)
           .then((data) => {
             cb(null, Buffer.from(data))
@@ -166,15 +172,12 @@ export function patchNodeFs(ws: Workspace): () => void {
     },
     readdir: (p: string, cb: Cb<string[]>) => {
       if (mountedPath(ws, p)) {
-        ws.vfs
-          .readdir(p)
-          .then((entries) => {
+        vfs
+          .readdir(p, false)
+          .then((rows) => {
             cb(
               null,
-              entries.map((e) => {
-                const trimmed = e.endsWith('/') ? e.slice(0, -1) : e
-                return trimmed.slice(trimmed.lastIndexOf('/') + 1)
-              }),
+              rows.map((row) => leaf(row.path)),
             )
           })
           .catch((err: unknown) => {

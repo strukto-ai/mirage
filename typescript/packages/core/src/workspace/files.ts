@@ -111,7 +111,7 @@ async function* recorded(
  * reaching this door from widening the view it was given.
  */
 export class Files {
-  private readonly dispatch: DispatchFn
+  private readonly door: DispatchFn
   private readonly sink: OpSink | null
   // Injected namespace seam (workspace wires it); FUSE reads `links`
   // for its symlink surface.
@@ -134,7 +134,7 @@ export class Files {
     ownerOf: OwnerOf = () => null,
     options: FilesOptions = {},
   ) {
-    this.dispatch = dispatch
+    this.door = dispatch
     this.sink = sink
     this.links = links
     this.ownerOf = ownerOf
@@ -156,7 +156,7 @@ export class Files {
    * `Files._for_session`.
    */
   forSession(sessionId: string): Files {
-    return new Files(this.dispatch, this.sink, this.links, this.ownerOf, {
+    return new Files(this.door, this.sink, this.links, this.ownerOf, {
       bind: this.bind,
       sessionId,
       records: this.records,
@@ -199,6 +199,21 @@ export class Files {
   }
 
   /**
+   * `Workspace.dispatch` as this facade runs it: as its session, and
+   * recorded on `records`. The door `RuntimeVFS` drives for node's
+   * patched `fs` (`patchNodeFs`), a facade caller like FUSE. Mirrors
+   * Python's `Files.dispatch`.
+   */
+  dispatch(
+    name: string,
+    path: string,
+    args: readonly unknown[] = [],
+    kwargs: OpKwargs = {},
+  ): Promise<unknown> {
+    return this.through(name, path, args, kwargs)
+  }
+
+  /**
    * Run one op through the workspace dispatcher and record it.
    *
    * The door owns the whole pipeline (follow, grants, gates, cache,
@@ -238,7 +253,7 @@ export class Files {
         vfsPath: spec.vfsPath,
         dotted: dottedSpelling(path),
       })
-      return this.dispatch(op, typed, args, kwargs, report)
+      return this.door(op, typed, args, kwargs, report)
     }
     let result: unknown
     let owner: MountOwner | null = null

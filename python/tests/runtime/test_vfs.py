@@ -81,7 +81,7 @@ class RecordingVFS(RuntimeVFS):
         self.calls = []
         self._declines = set(no_append)
 
-    def _raw(self, op, path, **kwargs):
+    def call(self, op, path, **kwargs):
         self.calls.append((op, path, kwargs))
         if op == "append" and self.mount_of(path) in self._declines:
             raise OperationNotSupportedError("append")
@@ -499,7 +499,7 @@ class NoAppendVFS(RuntimeVFS):
         self.files = dict(files)
         self.writes = []
 
-    def _raw(self, op, path, **kwargs):
+    def call(self, op, path, **kwargs):
         if op == "append":
             raise OperationNotSupportedError("append")
         if op == "read":
@@ -569,8 +569,8 @@ def test_symlink_sends_the_target_verbatim():
 
 def test_readlink_returns_the_stored_target():
     class LinkVFS(RecordingVFS):
-        def _raw(self, op, path, **kwargs):
-            super()._raw(op, path, **kwargs)
+        def call(self, op, path, **kwargs):
+            super().call(op, path, **kwargs)
             return "../up/t.txt"
 
     assert LinkVFS(prefixes=["/data/"]).readlink("/data/l") == "../up/t.txt"
@@ -611,11 +611,12 @@ async def test_call_hops_from_a_worker_thread_to_the_workspace_loop():
 
 
 @pytest.mark.asyncio
-async def test_an_unregistered_op_surfaces_as_not_implemented():
+async def test_an_unregistered_op_surfaces_numbered_enotsup():
     dispatch = RecordingDispatch(raises=OperationNotSupportedError("mkdir"))
     vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(OperationNotSupportedError) as caught:
         await asyncio.to_thread(vfs.mkdir, "/data/sub")
+    assert caught.value.errno == errno.ENOTSUP
 
 
 @pytest.mark.asyncio

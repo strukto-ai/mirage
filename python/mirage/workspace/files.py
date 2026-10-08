@@ -19,7 +19,7 @@ from typing import Any
 
 from mirage.context import get_current_session, session_visibility
 from mirage.errors.types import NoMountError
-from mirage.io import OpReport
+from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.observe import OpRecord
 from mirage.observe.context import OpTimer, finish_record, start_op
@@ -277,6 +277,21 @@ class Files:
             ),
             0,
         )
+
+    async def dispatch(
+        self, name: str, path: PathSpec, /, **kwargs: Any
+    ) -> tuple[Any, IOResult]:
+        """``Workspace.dispatch`` as this facade runs it: as its session,
+        and recorded on ``records``. The door ``RuntimeVFS`` drives for a
+        ``with ws:`` block, which is a facade caller like FUSE. The
+        IOResult is empty: a facade op's account is its record.
+
+        Args:
+            name (str): the function's name (read, write, stat, ...).
+            path (PathSpec): the virtual path.
+            **kwargs: the function's arguments, by its own names.
+        """
+        return await self._call(name, path.virtual, **kwargs), IOResult()
 
     async def _call(
         self, op: str, path: str, session_id: str | None = None, **kwargs
