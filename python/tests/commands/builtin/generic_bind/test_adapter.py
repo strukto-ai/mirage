@@ -28,6 +28,8 @@ from mirage.commands.builtin.generic_bind.adapter import (
     resolve_or_empty,
     with_command_guards,
     with_dir_guard,
+    with_dispatch_rule_guard,
+    with_policy_guard,
 )
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.context import (
@@ -42,6 +44,11 @@ from mirage.errors.render import format_fs_error
 from mirage.errors.types import OperationNotSupportedError
 from mirage.ops.types import NamespaceView
 from mirage.policy import Action, Deny, Policy, VfsContext
+from mirage.policy.policies import (
+    Policies,
+    reset_op_policies,
+    set_op_policies,
+)
 from mirage.types import (
     ContentType,
     FileStat,
@@ -358,10 +365,6 @@ def test_scoped_io_sets_a_content_index_aside():
 
 @pytest.mark.asyncio
 async def test_dispatch_rule_guard_marks_an_op_with_the_bound_gate():
-    from mirage.commands.builtin.generic_bind.adapter import (
-        with_dispatch_rule_guard,
-    )
-
     seen: list[tuple[str, _Gate | None]] = []
 
     async def door(op, path, **kwargs):
@@ -1150,15 +1153,6 @@ async def test_mode_guard_refuses_a_taken_name_on_a_writable_mount(
 
 @pytest.mark.asyncio
 async def test_policy_guard_admits_slots_and_leaves_stat_alone():
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import reset_mount_gate, set_mount_gate
-    from mirage.policy.policies import (
-        Policies,
-        reset_op_policies,
-        set_op_policies,
-    )
-    from mirage.types import MountMode
-
     calls: list[tuple[str, ...]] = []
     raw = _policy_probe_ops(calls)
     acc = NOOPAccessor()
@@ -1207,15 +1201,6 @@ async def test_policy_guard_admits_slots_and_leaves_stat_alone():
 async def test_policy_guard_admits_before_a_warm_serve():
     # The guard wraps outside the cache tier (`finish` in the factory),
     # so a warm reader below it never answers a refused read.
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import reset_mount_gate, set_mount_gate
-    from mirage.policy.policies import (
-        Policies,
-        reset_op_policies,
-        set_op_policies,
-    )
-    from mirage.types import MountMode
-
     calls: list[tuple[str, ...]] = []
     warm = dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
     acc = NOOPAccessor()
@@ -1237,15 +1222,6 @@ async def test_policy_guard_wrap_time_capture_covers_late_drains():
     # head/tail/wc bind lazy readers the pipeline drains after dispatch
     # has reset the context; the guard captured at wrap time still
     # answers (_live_policy_scope).
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import reset_mount_gate, set_mount_gate
-    from mirage.policy.policies import (
-        Policies,
-        reset_op_policies,
-        set_op_policies,
-    )
-    from mirage.types import MountMode
-
     calls: list[tuple[str, ...]] = []
     raw = _policy_probe_ops(calls)
     acc = NOOPAccessor()

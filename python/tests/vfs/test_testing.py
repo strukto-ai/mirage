@@ -159,6 +159,7 @@ class Rendering(Minimal):
     async def read_doc(
         self,
         path: PathSpec,
+        *,
         index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,

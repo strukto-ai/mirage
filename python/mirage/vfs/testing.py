@@ -54,7 +54,7 @@ async def _check_windows(
     offset = min(1, len(data) - 1)
     for size in (min(3, len(data) - offset), None):
         end = None if size is None else offset + size
-        actual = await read(path, store, offset, size)
+        actual = await read(path, index=store, offset=offset, size=size)
         assert actual == data[offset:end], (
             "read must use offset and byte count"
         )
@@ -81,7 +81,7 @@ async def check_read_contract(
         index if index is not None else RAMIndexCacheStore(ttl=vfs.index_ttl)
     )
     render = _renderer(vfs, fixture.file)
-    data = await (render or vfs.read)(fixture.file, store)
+    data = await (render or vfs.read)(fixture.file, index=store)
     assert data == fixture.content, "read differs from fixture content"
     info = await vfs.stat(fixture.file, store)
     assert info.type == FileType.FILE, "fixture must stat as a file"
@@ -95,7 +95,7 @@ async def check_read_contract(
         "readdir must include the child virtual path"
     )
     stored = (
-        await vfs.read(fixture.file, store)
+        await vfs.read(fixture.file, index=store)
         if render is not None and vfs.supports("read")
         else data
     )
@@ -117,7 +117,7 @@ async def check_read_contract(
         )
     for call in (vfs.stat, _renderer(vfs, fixture.missing) or vfs.read):
         try:
-            await call(fixture.missing, store)
+            await call(fixture.missing, index=store)
         except FileNotFoundError:
             continue
         raise AssertionError("missing paths must raise FileNotFoundError")
