@@ -1391,6 +1391,40 @@
         "stdout": "declare -a S=([0]=\"one\")\nT=unset U=unset\nS=x\n",
         "stderr": "bash: R: readonly variable\nbash: R: readonly variable\n"
       }
+    },
+    {
+      "id": "append_sums_each_side_and_clears_marks_first",
+      "seq": 930441,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( N='1?2:3'; declare -i N; declare N+=4; M=5; declare -i M; M+=''; declare M+=''; echo \"N=$N M=$M\"; P='1?2:3'; declare -i P; P+=4; echo P=$P; declare -ai A=(1 2); A+=3; A[1]+=4; declare -Ai H=([0]=1 [k]=2); H+=3; H[k]+=4; declare -p A H ); ( declare -i I=5; declare +i I+=x; declare -l L=ABC; declare +l L=XYZ; declare -u U=x; declare -l U=ABC; declare -i J=1; declare +i -l J+=AB; declare -p I L U J ); ( ref=prefix; suffix=right; prefixsuffix=wrong; f(){ local -n ref+=suffix; ref=changed; }; f; echo \"$suffix $prefixsuffix $ref\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "N=6 M=5\nP=6\ndeclare -ai A=([0]=\"4\" [1]=\"6\")\ndeclare -Ai H=([0]=\"4\" [k]=\"6\" )\ndeclare -- I=\"5x\"\ndeclare -- L=\"XYZ\"\ndeclare -l U=\"abc\"\ndeclare -l J=\"1ab\"\nchanged wrong prefix\n",
+        "stderr": ""
+      }
     }
   ]
 }

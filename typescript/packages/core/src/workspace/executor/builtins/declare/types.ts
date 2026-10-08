@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { VarAttr } from '../../../../shell/variable.ts'
+
 /**
  * A staged array literal, `NAME=(...)` or `NAME+=(...)`: the name, whether
  * it appends, and its expanded items. It travels as data so the builtin
@@ -28,3 +30,9 @@ export interface StagedArray {
  * `NAME=value`, an option) or a staged array literal.
  */
 export type DeclarationOperand = string | StagedArray
+
+/**
+ * The attribute letters a declaration applies, in order: each attribute and
+ * whether it goes on (`-x`) or off (`+x`).
+ */
+export type AttrMarks = readonly (readonly [VarAttr, boolean])[]

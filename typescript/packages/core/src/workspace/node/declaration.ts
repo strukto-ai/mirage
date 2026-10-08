@@ -97,22 +97,13 @@ const ATTR_LETTERS: ReadonlyMap<string, VarAttr> = new Map([
   ['x', VarAttr.Export],
   ['r', VarAttr.Readonly],
 ])
+// The attributes that shape a value as it stores.
+const SHAPING: ReadonlySet<VarAttr> = new Set([VarAttr.Integer, VarAttr.Lower, VarAttr.Upper])
 // `-l` displaces `-u` and vice versa; the record keeps one.
 const DISPLACES: ReadonlyMap<string, VarAttr> = new Map([
   ['l', VarAttr.Upper],
   ['u', VarAttr.Lower],
 ])
-
-/** The attributes the given letters name, in the order given, skipping
- * letters that name none (kinds and modes are not attributes). */
-function attrsFor(letters: string, has: (c: string) => boolean): VarAttr[] {
-  const out: VarAttr[] = []
-  for (const c of letters) {
-    const attr = ATTR_LETTERS.get(c)
-    if (attr !== undefined && has(c)) out.push(attr)
-  }
-  return out
-}
 
 /**
  * The refusal a `declare` family option cluster earns, if any.
@@ -308,10 +299,10 @@ export async function executeDeclaration(
   }
   // `-l` and `-u` cannot both hold; a cluster naming both sets neither
   // (pinned: `declare -lu s=aBc` prints `declare -- s`).
-  let shaping = new Set(attrsFor('ilu', (c) => flagChars.has(c) && !plusChars.has(c)))
-  if (shaping.has(VarAttr.Lower) && shaping.has(VarAttr.Upper)) {
-    shaping = new Set([...shaping].filter((a) => a !== VarAttr.Lower && a !== VarAttr.Upper))
-  }
+  // The value-shaping marks go on or off before a value stores, the rest
+  // once it has (`declaredMarks`).
+  const marks = declaredMarks(flagChars, plusChars)
+  const shaping = marks.filter(([attr]) => SHAPING.has(attr))
   // `-p` prints rather than declares, so it is answered before anything
   // declares (`declare -ap NAME` converts nothing); with no names, an
   // attribute letter lists the names carrying it, `-p` or not.
@@ -399,7 +390,7 @@ export async function executeDeclaration(
       cmdWord,
       kind,
       shaping,
-      declaredMarks(flagChars, plusChars),
+      marks,
       [...plusChars].sort(compareCodePoints).join(''),
       flagChars.has('n') && !plusChars.has('n'),
       flagChars.has('g'),

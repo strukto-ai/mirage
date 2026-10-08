@@ -51,7 +51,7 @@ import {
   storeStagedArrays,
 } from './declare.ts'
 import type { BuiltinCall, Result } from '../types.ts'
-import type { DeclarationOperand } from './types.ts'
+import type { AttrMarks, DeclarationOperand } from './types.ts'
 import { sessionView } from '../../../session/state.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
@@ -68,9 +68,10 @@ import { encodeText } from '../../../../shell/bytes.ts'
  *
  * `cmd` is the spelling that reached here: `declare` and `typeset` route
  * through this handler and must say their own name, not `local`. `shaping`
- * holds the value-shaping attributes (`-i -l -u`), marked on each name
- * *before* its value stores so the declaration's own value coerces exactly
- * as a later write would; `marks` the attribute letters put on or taken off
+ * holds the value-shaping marks (`-i -l -u`, `+i +l +u`), put on or taken
+ * off each name *before* its value stores so the declaration's own value
+ * coerces exactly as a later write would (`declare +i N+=x` over an integer
+ * 5 stores `5x`); `marks` the attribute letters put on or taken off
  * each operand once it lands, readonly last; `plus` the `+` letters, for the
  * two that cannot be taken off (`plusRefusal`). `nameref` (`-n`) stores a
  * value on the reference's own record, which also takes the marks; under
@@ -84,8 +85,8 @@ export async function handleLocal(
   state: SessionView | null = null,
   cmd = 'local',
   kind: VarKind | null = null,
-  shaping: ReadonlySet<VarAttr> = new Set(),
-  marks: readonly (readonly [VarAttr, boolean])[] = [],
+  shaping: AttrMarks = [],
+  marks: AttrMarks = [],
   plus = '',
   nameref = false,
   globalScope = false,
@@ -137,8 +138,8 @@ async function declareOperands(
   view: SessionView,
   cmd: string,
   kind: VarKind | null,
-  shaping: ReadonlySet<VarAttr>,
-  marks: readonly (readonly [VarAttr, boolean])[],
+  shaping: AttrMarks,
+  marks: AttrMarks,
   plus: string,
   nameref: boolean,
   locals: Map<string, ShellVar | null> | null,
@@ -217,8 +218,8 @@ async function declareOperand(
   assign: string,
   cmd: string,
   kind: VarKind | null,
-  shaping: ReadonlySet<VarAttr>,
-  marks: readonly (readonly [VarAttr, boolean])[],
+  shaping: AttrMarks,
+  marks: AttrMarks,
   plus: string,
   nameref: boolean,
   locals: Map<string, ShellVar | null> | null,
@@ -276,13 +277,11 @@ async function declareOperand(
   const conflict = kindConflict(held, kind)
   if (conflict !== null) return `bash: ${cmd}: ${key}: ${conflict}`
   const checked = nameref ? key : deref(session, key) || key
-  const integer =
-    shaping.has(VarAttr.Integer) ||
-    sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
+  await premark(view, key, shaping)
+  const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
   const [value, assigned]: [ShellValue, ReadonlySet<number | string> | null] = nameref
     ? [val, null]
     : scalarValue(held, val, kind, append, integer)
-  await premark(view, key, shaping)
   if (kind !== null && !nameref) await dropReference(session, view, key)
   await view.set(key, value, !nameref, assigned)
   await stampMarks(session, view, key, checked, marks, !nameref)

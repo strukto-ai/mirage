@@ -27,7 +27,7 @@ import {
 import { varHidden } from '../../../../utils/hidden.ts'
 import { sessionEntry, setSessionEntry } from '../../../session/session.ts'
 import type { ShellValue, ShellVar } from '../../../../shell/variable.ts'
-import { attrLetters, VarAttr, VarKind } from '../../../../shell/variable.ts'
+import { appended, attrLetters, VarAttr, VarKind } from '../../../../shell/variable.ts'
 import {
   conversionScalar,
   deref,
@@ -51,15 +51,19 @@ import {
   VISIBLE_SCOPE_BUILTINS,
 } from './constants.ts'
 import type { Result } from '../types.ts'
-import type { DeclarationOperand } from './types.ts'
+import type { AttrMarks, DeclarationOperand } from './types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
-export async function premark(
-  view: SessionView,
-  name: string,
-  shaping: ReadonlySet<VarAttr>,
-): Promise<void> {
-  for (const attr of shaping) await view.mark(name, attr, true)
+/**
+ * Put a declaration's value-shaping marks on a name before its value
+ * stores. The door coerces on write by reading the record's attributes, so
+ * for the declaration's *own* value to coerce (`declare -i n=3+4` stores
+ * `7`), the attribute has to be there first; a `+` letter comes off first
+ * too, so `declare -i N=5; declare +i N+=x` stores `5x`. Gated like every
+ * other mark, and a no-op with nothing to shape.
+ */
+export async function premark(view: SessionView, name: string, shaping: AttrMarks): Promise<void> {
+  for (const [attr, on] of shaping) await view.mark(name, attr, on)
 }
 
 /**
@@ -122,12 +126,6 @@ export function kindConflict(held: ShellValue | null, kind: VarKind | null): str
   return null
 }
 
-function joined(old: string, value: string, append: boolean, integer: boolean): string {
-  if (!append) return value
-  if (integer) return `${old || '0'} + (${value})`
-  return old + value
-}
-
 /**
  * What a declaration's `NAME=value` stores, and the elements it assigns
  * (`coerceValue`). An array keeps its kind and takes the value at element 0
@@ -136,8 +134,7 @@ function joined(old: string, value: string, append: boolean, integer: boolean): 
  * the one-element array, a held scalar converting to that element first,
  * and with neither the value stays a scalar. `NAME+=value` (`append`)
  * appends to what that slot holds (`S=x; declare -a S+=y` gives
- * `([0]="xy")`), and on an `integer` adds: the door evaluates
- * `old + (value)`.
+ * `([0]="xy")`), and on an `integer` adds (`appended`).
  */
 export function scalarValue(
   held: ShellValue | null,
@@ -151,16 +148,16 @@ export function scalarValue(
   if (map !== null || kind === VarKind.Assoc) {
     const amap: Record<string, string> = { ...map }
     if (scalar !== null) amap['0'] = scalar
-    amap['0'] = joined(amap['0'] ?? '', value, append, integer)
+    amap['0'] = append ? appended(amap['0'] ?? '', value, integer) : value
     return [amap, new Set(['0'])]
   }
   if (Array.isArray(held) || kind === VarKind.Indexed) {
     const arr: ShellArray = Array.isArray(held) ? [...held] : []
     if (scalar !== null) arr.push(scalar)
-    arraySet(arr, 0, joined(arrayGet(arr, 0), value, append, integer))
+    arraySet(arr, 0, append ? appended(arrayGet(arr, 0), value, integer) : value)
     return [arr, new Set([0])]
   }
-  return [joined(scalar ?? '', value, append, integer), null]
+  return [append ? appended(scalar ?? '', value, integer) : value, null]
 }
 
 /**
@@ -212,7 +209,7 @@ export async function stampMarks(
   view: SessionView,
   name: string,
   checked: string | null,
-  marks: readonly (readonly [VarAttr, boolean])[],
+  marks: AttrMarks,
   followRef = true,
 ): Promise<void> {
   for (const [attr, on] of marks) {
@@ -314,7 +311,7 @@ export async function storeStagedArrays(
   fatal = false,
   stored: Set<number> | null = null,
   kind: VarKind | null = null,
-  shaping: ReadonlySet<VarAttr> = new Set(),
+  shaping: AttrMarks = [],
   globalScope = false,
   inherit = false,
 ): Promise<Result | null> {

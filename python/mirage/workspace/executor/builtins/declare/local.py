@@ -35,6 +35,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     store_staged_arrays,
 )
 from mirage.workspace.executor.builtins.declare.types import (
+    AttrMarks,
     DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.shared import (
@@ -64,8 +65,8 @@ async def handle_local(
     state: SessionView | None = None,
     cmd: str = "local",
     kind: VarKind | None = None,
-    shaping: frozenset[VarAttr] = frozenset(),
-    marks: tuple[tuple[VarAttr, bool], ...] = (),
+    shaping: AttrMarks = (),
+    marks: AttrMarks = (),
     plus: str = "",
     nameref: bool = False,
     global_scope: bool = False,
@@ -91,13 +92,14 @@ async def handle_local(
             must say their own name, not ``local``.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared, so
             staged literals build that kind of array.
-        shaping (frozenset[VarAttr]): the value-shaping attributes
-            (``-i -l -u``) the declaration carries. They are marked on
-            each name *before* its value stores, after the local
-            snapshot, so the declaration's own value coerces exactly as
-            a later write would: GNU stores ``7`` for
-            ``declare -i n=3+4`` and ``hello`` for ``declare -l s=HeLLo``.
-        marks (tuple[tuple[VarAttr, bool], ...]): the attribute letters
+        shaping (AttrMarks): the value-shaping marks (``-i -l -u``,
+            ``+i +l +u``) the declaration carries. They go on or off each
+            name *before* its value stores, after the local snapshot, so
+            the declaration's own value coerces exactly as a later write
+            would: GNU stores ``7`` for ``declare -i n=3+4``, ``hello``
+            for ``declare -l s=HeLLo`` and ``5x`` for ``declare +i
+            N+=x`` over an integer 5.
+        marks (AttrMarks): the attribute letters
             to put on or take off each operand once it lands
             (``stamp_marks``), readonly last.
         plus (str): the ``+`` letters, for the two that cannot be taken
@@ -163,8 +165,8 @@ async def _declare_operands(
     view: SessionView,
     cmd: str,
     kind: VarKind | None,
-    shaping: frozenset[VarAttr],
-    marks: tuple[tuple[VarAttr, bool], ...],
+    shaping: AttrMarks,
+    marks: AttrMarks,
     plus: str,
     nameref: bool,
     local_vars: dict[str, ShellVar | None] | None,
@@ -178,8 +180,8 @@ async def _declare_operands(
         view (SessionView): the session plane's gated door.
         cmd (str): the builtin's spelling, for diagnostics.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
-        shaping (frozenset[VarAttr]): the ``-i -l -u`` attributes.
-        marks (tuple[tuple[VarAttr, bool], ...]): the attribute marks.
+        shaping (AttrMarks): the ``-i -l -u`` / ``+i +l +u`` marks.
+        marks (AttrMarks): the attribute marks.
         plus (str): the ``+`` letters.
         nameref (bool): the declaration carried ``-n``.
         local_vars (dict[str, ShellVar | None] | None): the running
@@ -251,8 +253,8 @@ async def _declare_operand(
     assign: str,
     cmd: str,
     kind: VarKind | None,
-    shaping: frozenset[VarAttr],
-    marks: tuple[tuple[VarAttr, bool], ...],
+    shaping: AttrMarks,
+    marks: AttrMarks,
     plus: str,
     nameref: bool,
     local_vars: dict[str, ShellVar | None] | None,
@@ -271,8 +273,8 @@ async def _declare_operand(
         assign (str): the operand.
         cmd (str): the builtin's spelling, for diagnostics.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
-        shaping (frozenset[VarAttr]): the ``-i -l -u`` attributes.
-        marks (tuple[tuple[VarAttr, bool], ...]): the attribute marks.
+        shaping (AttrMarks): the ``-i -l -u`` / ``+i +l +u`` marks.
+        marks (AttrMarks): the attribute marks.
         plus (str): the ``+`` letters.
         nameref (bool): the declaration carried ``-n``.
         local_vars (dict[str, ShellVar | None] | None): the running
@@ -350,16 +352,14 @@ async def _declare_operand(
     if conflict is not None:
         return f"bash: {cmd}: {key}: {conflict}"
     checked = key if nameref else deref(session, key)
+    await premark(view, key, shaping)
     target = session.vars.get(checked)
-    integer = VarAttr.INTEGER in shaping or (
-        target is not None and VarAttr.INTEGER in target.attrs
-    )
+    integer = target is not None and VarAttr.INTEGER in target.attrs
     value, assigned = (
         (val, None)
         if nameref
         else scalar_value(held, val, kind, append, integer)
     )
-    await premark(view, key, shaping)
     if kind is not None and not nameref:
         await drop_reference(session, view, key)
     await view.set(key, value, follow_ref=not nameref, assigned=assigned)

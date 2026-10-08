@@ -203,6 +203,17 @@ export function withAttr(v: ShellVar, attr: VarAttr, on = true): ShellVar {
  * `attrLetters` itself.
  */
 /**
+ * The text a `+=` stores: the old text then the added one, or on an integer
+ * the expression the door evaluates to their sum. Each side is evaluated on
+ * its own and an empty side counts as 0, as bash does: with `N='1?2:3'`
+ * under `-i`, `N+=4` stores 6, and `N+=''` keeps the old value.
+ */
+export function appended(old: string, added: string, integer: boolean): string {
+  if (!integer) return old + added
+  return `(${old.trim() || '0'}) + (${added.trim() || '0'})`
+}
+
+/**
  * Apply the value-shaping attributes to one scalar being stored.
  *
  * bash applies these at assignment, not at read: `declare -l s; s=ABC`

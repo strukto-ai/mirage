@@ -32,6 +32,7 @@ from mirage.shell.variable import (
     ShellVar,
     VarAttr,
     VarKind,
+    appended,
     attr_letters,
 )
 from mirage.utils.hidden import var_hidden
@@ -43,6 +44,7 @@ from mirage.workspace.executor.builtins.declare.constants import (
     VISIBLE_SCOPE_BUILTINS,
 )
 from mirage.workspace.executor.builtins.declare.types import (
+    AttrMarks,
     DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.shared import (
@@ -65,25 +67,25 @@ from mirage.workspace.session.state import (
 from mirage.workspace.types import ExecutionNode
 
 
-async def premark(
-    view: SessionView, name: str, shaping: frozenset[VarAttr]
-) -> None:
-    """Put a declaration's value-shaping attributes on a name before its
+async def premark(view: SessionView, name: str, shaping: AttrMarks) -> None:
+    """Put a declaration's value-shaping marks on a name before its
     value stores.
 
     The door coerces on write by reading the record's attributes, so
     for the declaration's *own* value to coerce (``declare -i n=3+4``
-    stores ``7``), the attribute has to be there first. Gated through
-    ``view.mark`` like every other mark, and a no-op with nothing to
-    shape, so a plain ``declare X=1`` costs no extra gate call.
+    stores ``7``), the attribute has to be there first; a ``+`` letter
+    comes off first too, so ``declare -i N=5; declare +i N+=x`` stores
+    ``5x``. Gated through ``view.mark`` like every other mark, and a
+    no-op with nothing to shape, so a plain ``declare X=1`` costs no
+    extra gate call.
 
     Args:
         view (SessionView): the session plane's gated door.
         name (str): the variable being declared.
-        shaping (frozenset[VarAttr]): the ``-i -l -u`` attributes set.
+        shaping (AttrMarks): the ``-i -l -u`` / ``+i +l +u`` marks.
     """
-    for attr in shaping:
-        await view.mark(name, attr, True)
+    for attr, on in shaping:
+        await view.mark(name, attr, on)
 
 
 def declared_kind(flags: set[str] | frozenset[str]) -> VarKind | None:
@@ -167,14 +169,6 @@ def kind_conflict(held: ShellValue | None, kind: VarKind | None) -> str | None:
     return None
 
 
-def _joined(old: str, value: str, append: bool, integer: bool) -> str:
-    if not append:
-        return value
-    if integer:
-        return f"{old or 0} + ({value})"
-    return old + value
-
-
 def scalar_value(
     held: ShellValue | None,
     value: str,
@@ -191,8 +185,7 @@ def scalar_value(
     and ``-a`` the one-element array, a held scalar converting to that
     element first, and with neither the value stays a scalar.
     ``NAME+=value`` appends to what that slot holds (``S=x; declare -a
-    S+=y`` gives ``([0]="xy")``), and on an integer adds: the door
-    evaluates ``old + (value)``.
+    S+=y`` gives ``([0]="xy")``), and on an integer adds (``appended``).
 
     Args:
         held (ShellValue | None): the value the declaration lands on.
@@ -206,15 +199,21 @@ def scalar_value(
         amap = dict(held) if isinstance(held, dict) else {}
         if scalar is not None:
             amap["0"] = scalar
-        amap["0"] = _joined(amap.get("0", ""), value, append, integer)
+        amap["0"] = (
+            appended(amap.get("0", ""), value, integer) if append else value
+        )
         return amap, frozenset({"0"})
     if isinstance(held, list) or kind is VarKind.INDEXED:
         arr = list(held) if isinstance(held, list) else []
         if scalar is not None:
             arr.append(scalar)
-        array_set(arr, 0, _joined(array_get(arr, 0), value, append, integer))
+        array_set(
+            arr,
+            0,
+            appended(array_get(arr, 0), value, integer) if append else value,
+        )
         return arr, frozenset({0})
-    return _joined(scalar or "", value, append, integer), None
+    return (appended(scalar or "", value, integer) if append else value), None
 
 
 def kind_listed(session: SessionState, name: str, flags: set[str]) -> bool:
@@ -272,7 +271,7 @@ async def stamp_marks(
     view: SessionView,
     name: str,
     checked: str | None,
-    marks: tuple[tuple[VarAttr, bool], ...],
+    marks: AttrMarks,
     follow_ref: bool = True,
 ) -> None:
     """Put a declaration's attribute marks on what one operand landed
@@ -289,7 +288,7 @@ async def stamp_marks(
         name (str): the operand's name.
         checked (str | None): what ``name`` resolved to before its
             write, None for a bare operand.
-        marks (tuple[tuple[VarAttr, bool], ...]): each attribute and
+        marks (AttrMarks): each attribute and
             whether it goes on or off, in order.
         follow_ref (bool): mark a reference's target, not the reference.
     """
@@ -365,7 +364,7 @@ async def store_staged_arrays(
     fatal: bool = False,
     stored: set[int] | None = None,
     kind: VarKind | None = None,
-    shaping: frozenset[VarAttr] = frozenset(),
+    shaping: AttrMarks = (),
     global_scope: bool = False,
     inherit: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode] | None:
@@ -420,8 +419,8 @@ async def store_staged_arrays(
             plain ``m+=([k]=v)`` keeps the variable's own kind. A kind
             that meets a variable of the other kind is bash's
             ``cannot convert`` assignment error.
-        shaping (frozenset[VarAttr]): the value-shaping attributes to
-            put on each name before its literal stores.
+        shaping (AttrMarks): the value-shaping marks to put on or take
+            off each name before its literal stores.
         global_scope (bool): the declaration carried ``-g``, so no
             local is started for the names, and a readonly name refuses
             a literal fatally even inside a function (a kind conflict

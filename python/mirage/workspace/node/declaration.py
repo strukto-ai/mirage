@@ -43,6 +43,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     start_local,
 )
 from mirage.workspace.executor.builtins.declare.types import (
+    AttrMarks,
     DeclarationOperand,
 )
 from mirage.workspace.expand import expand_node
@@ -112,6 +113,8 @@ _ATTR_LETTERS = {
 }
 # `-l` displaces `-u` and vice versa; the record keeps one.
 _DISPLACES = {"l": VarAttr.UPPER, "u": VarAttr.LOWER}
+# The attributes that shape a value as it stores.
+_SHAPING = frozenset({VarAttr.INTEGER, VarAttr.LOWER, VarAttr.UPPER})
 
 
 def _declare_option_refusal(
@@ -154,9 +157,7 @@ def _declare_option_refusal(
     )
 
 
-def _declared_marks(
-    flag_chars: set[str], plus_chars: set[str]
-) -> tuple[tuple[VarAttr, bool], ...]:
+def _declared_marks(flag_chars: set[str], plus_chars: set[str]) -> AttrMarks:
     """The attribute marks a declaration puts on each operand once it
     lands, in order, readonly last.
 
@@ -322,15 +323,10 @@ async def execute_declaration(
         return handle_declare_functions(
             cmd_word, session, flag_chars, words, frozenset(plus_chars)
         )
-    # `-l` and `-u` cannot both hold; a cluster naming both sets
-    # neither (pinned: `declare -lu s=aBc` prints `declare -- s`).
-    shaping = frozenset(
-        _ATTR_LETTERS[c]
-        for c in "ilu"
-        if c in flag_chars and c not in plus_chars
-    )
-    if VarAttr.LOWER in shaping and VarAttr.UPPER in shaping:
-        shaping = shaping - {VarAttr.LOWER, VarAttr.UPPER}
+    # The value-shaping marks go on or off before a value stores, the
+    # rest once it has (`_declared_marks`).
+    marks = _declared_marks(flag_chars, plus_chars)
+    shaping = tuple(mark for mark in marks if mark[0] in _SHAPING)
     # `-p` prints rather than declares, so it is answered before anything
     # declares (`declare -ap NAME` converts nothing); with no names, an
     # attribute letter lists the names carrying it, `-p` or not.
@@ -435,7 +431,7 @@ async def execute_declaration(
             cmd=cmd_word,
             kind=kind,
             shaping=shaping,
-            marks=_declared_marks(flag_chars, plus_chars),
+            marks=marks,
             plus="".join(sorted(plus_chars)),
             nameref="n" in flag_chars and "n" not in plus_chars,
             global_scope="g" in flag_chars,
