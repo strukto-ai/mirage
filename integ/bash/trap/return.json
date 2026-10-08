@@ -27,11 +27,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'echo R' RETURN; printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo end ); ( trap 'echo R' RETURN; f() { trap - RETURN; }; f; printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo end ); ( trap 'echo R' RETURN; ( printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo in ); echo out )",
+      "command": "( trap 'echo R' RETURN; printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo end ); ( trap 'echo R' RETURN; f() { trap - RETURN; }; f; printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo end ); ( trap 'echo R' RETURN; ( printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo in ); echo out ); printf 'echo in $#\\n' > /data/rt.sh; ( trap 'trap - RETURN; return 7; echo no' RETURN; . /data/rt.sh x; echo \"AFTER $?\" ); ( f() { trap 'trap - RETURN; return 7; echo no' RETURN; . /data/rt.sh x; echo \"in-f $?\"; }; f; echo \"after $?\" ); ( f() { trap 'echo \"R [${FUNCNAME[*]}] $# $1\"' RETURN; . /data/rt.sh q; }; f p ); rm /data/rt.sh",
       "expect": {
         "exit": 0,
-        "stdout": "R\nend\nR\nend\nin\nout\n",
-        "stderr": ""
+        "stdout": "R\nend\nR\nend\nin\nout\nin 1\nno\nAFTER 0\nin 1\nafter 7\nin 1\nR [f] 1 q\nR [f] 1 p\n",
+        "stderr": "bash: return: can only `return' from a function or sourced script\n"
       }
     },
     {
@@ -61,10 +61,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'echo R' RETURN; f() { trap -p RETURN; echo in; }; f; echo end ); ( f() { trap 'echo \"R $?\"' RETURN; return 3; }; f; echo \"end $?\" ); ( set -T; trap 'echo \"R ${FUNCNAME[0]}\"' RETURN; f() { g; }; g() { :; }; f; echo end ); ( set -T; helper() { echo H; }; trap helper RETURN; f() { :; }; f; echo end )",
+      "command": "( trap 'echo R' RETURN; f() { trap -p RETURN; echo in; }; f; echo end ); ( f() { trap 'echo \"R $?\"' RETURN; return 3; }; f; echo \"end $?\" ); ( set -T; trap 'echo \"R ${FUNCNAME[0]}\"' RETURN; f() { g; }; g() { :; }; f; echo end ); ( set -T; helper() { echo H; }; trap helper RETURN; f() { :; }; f; echo end ); ( f() { trap 'trap - RETURN; return 7' RETURN; :; }; f; echo \"AFTER $?\" ); ( k() { trap 'trap - RETURN; echo kr; return 4; echo no' RETURN; echo kb; }; out=$(k; echo \"st $?\"); echo \"[$out]\" )",
       "expect": {
         "exit": 0,
-        "stdout": "in\nend\nR 0\nend 3\nR g\nR f\nend\nH\nend\n",
+        "stdout": "in\nend\nR 0\nend 3\nR g\nR f\nend\nH\nend\nAFTER 7\n[kb\nkr\nst 4]\n",
         "stderr": ""
       }
     },

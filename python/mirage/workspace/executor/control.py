@@ -203,8 +203,11 @@ async def returning(
 ) -> tuple[ByteSource | None, IOResult]:
     """What a function or a sourced file gives back as it returns: its
     output and status, with what its RETURN action wrote after the
-    output. An ``exit`` or ``return`` in the action leaves with that
-    output in front of its own.
+    output. A ``return`` in a function's action returns from the
+    function with its status. A sourced file has returned by the time
+    its action runs, so a ``return`` there leaves the function around
+    it, or only complains at the top level. An ``exit``, or that
+    ``return``, leaves with the output in front of its own.
 
     Args:
         execute_fn (Callable[..., Any] | None): runs the action.
@@ -216,6 +219,10 @@ async def returning(
         sink (JobConsole | None): where it writes as it goes, if
             anywhere.
     """
+    frame = call_stack.current
+    frame.closed = frame.sourced
+    if session.function_names is not None:
+        session.function_names = call_stack.function_names()
     outputs = [stdout]
     try:
         io = await land(
@@ -225,7 +232,12 @@ async def returning(
             io,
         )
     except UNWINDING as sig:
-        raise await carried(sig, stdout, io)
+        left = await carried(sig, stdout, io)
+        if not isinstance(left, ReturnSignal) or frame.sourced:
+            raise left
+        return left.stdout, IOResult(
+            stderr=left.stderr or None, exit_code=left.exit_code
+        )
     return _chain_streams(outputs), io
 
 
@@ -260,16 +272,19 @@ def ended(sig: Exception, simple: bool = False) -> IOResult:
 def take_stdout(sig: Exception) -> bytes:
     """Take what a nested line wrote before it left (an ``exec``'d
     command, an ERR or RETURN action), for the redirects it ran under to
-    route. An EXIT action's output goes around them, and what the other
-    unwinding signals carry went through them already.
+    route. An EXIT action's output, the ``cleanup`` at its end, goes
+    around them, and what the other unwinding signals carry went through
+    them already.
 
     Args:
         sig (Exception): one of ``UNWINDING``.
     """
     if not isinstance(sig, ExitSignal) or not sig.unrouted:
         return b""
-    output, sig.stdout = sig.stdout or b"", None
-    return output
+    written = sig.stdout or b""
+    cut = len(written) - len(sig.cleanup)
+    sig.stdout = written[cut:] or None
+    return written[:cut]
 
 
 async def take_stderr(sig: Exception) -> bytes:
@@ -333,6 +348,7 @@ async def handle_if(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     run = partial(
         execute_body,
@@ -345,6 +361,7 @@ async def handle_if(
         handed=handed,
         decisions=decisions,
         execute_fn=execute_fn,
+        sink=sink,
     )
     # What the tests wrote stays, ahead of what the branch writes; each
     # test reads the fd 0 the `if` started with, so an `exec <&-` in one
@@ -392,6 +409,7 @@ async def handle_for(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     merged_io = IOResult()
@@ -435,6 +453,7 @@ async def handle_for(
                 handed,
                 decisions,
                 execute_fn=execute_fn,
+                sink=sink,
             )
         except (BreakSignal, ContinueSignal) as sig:
             merged_io = await _absorbed(sig, all_stdout, merged_io)
@@ -463,6 +482,7 @@ async def _condition_loop(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     merged_io = IOResult()
@@ -480,6 +500,7 @@ async def _condition_loop(
         handed=handed,
         decisions=decisions,
         execute_fn=execute_fn,
+        sink=sink,
     )
     for _ in range(_MAX_WHILE):
         if session.shell_options.get("noexec"):
@@ -531,6 +552,7 @@ async def handle_cfor(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run bash's C-style for: ((init; cond; update)) around a body.
 
@@ -580,6 +602,7 @@ async def handle_cfor(
                     handed,
                     decisions,
                     execute_fn=execute_fn,
+                    sink=sink,
                 )
             except (BreakSignal, ContinueSignal) as sig:
                 merged_io = await _absorbed(sig, all_stdout, merged_io)
@@ -630,6 +653,7 @@ async def handle_while(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(
         execute_node,
@@ -645,6 +669,7 @@ async def handle_while(
         handed=handed,
         decisions=decisions,
         execute_fn=execute_fn,
+        sink=sink,
     )
 
 
@@ -660,6 +685,7 @@ async def handle_until(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(
         execute_node,
@@ -675,6 +701,7 @@ async def handle_until(
         handed=handed,
         decisions=decisions,
         execute_fn=execute_fn,
+        sink=sink,
     )
 
 
@@ -690,6 +717,7 @@ async def handle_case(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run the first arm whose pattern matches ``word``, and after it
     the arms its terminator reaches: ``;&`` falls into the next arm's
@@ -714,6 +742,7 @@ async def handle_case(
                 handed,
                 decisions,
                 execute_fn,
+                sink,
             )
         except UNWINDING as sig:
             raise await carried(sig, _chain_streams(all_stdout), merged_io)
@@ -864,6 +893,7 @@ async def handle_select(
                 handed,
                 decisions,
                 execute_fn=execute_fn,
+                sink=sink,
             )
         except (BreakSignal, ContinueSignal) as sig:
             merged_io = await _absorbed(sig, all_stdout, merged_io)

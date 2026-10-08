@@ -124,9 +124,9 @@ async def program_head(
         and (layer is not Consumer.SESSION or head not in SHELL_ONLY_BUILTINS)
         for layer in layers
     )
-    # An alias is as invisible to execvp as a function, and `command`
-    # masks both for the run.
-    shadowed = Consumer.FUNCTION in layers or head in sess.aliases
+    # A function is invisible to execvp, and `command` masks it for the
+    # run; no alias rewrites a program line.
+    shadowed = Consumer.FUNCTION in layers
     return not program, shadowed
 
 

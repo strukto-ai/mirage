@@ -194,9 +194,12 @@ export async function carried(
 
 /**
  * What a function or a sourced file gives back as it returns: its output and
- * status, with what its RETURN action wrote after the output. An `exit` or
- * `return` in the action leaves with that output in front of its own.
- * Mirrors Python's returning.
+ * status, with what its RETURN action wrote after the output. A `return` in
+ * a function's action returns from the function with its status. A sourced
+ * file has returned by the time its action runs, so a `return` there leaves
+ * the function around it, or only complains at the top level. An `exit`,
+ * or that `return`, leaves with the output in front of its own. Mirrors
+ * Python's returning.
  */
 export async function returning(
   executeFn: ExecuteStringFn | null,
@@ -207,12 +210,23 @@ export async function returning(
   io: IOResult,
   sink: JobConsole | null = null,
 ): Promise<[ByteSource | null, IOResult]> {
+  const frame = callStack.current
+  frame.closed = frame.sourced
+  if (session.functionNames !== null) session.functionNames = callStack.functionNames()
   const outputs = [stdout]
   try {
     io = await land(await runReturnTrap(executeFn, session, stdin, callStack), sink, outputs, io)
   } catch (sig) {
     if (!isUnwinding(sig)) throw sig
-    throw await carried(sig, stdout, io)
+    const left = await carried(sig, stdout, io)
+    if (!(left instanceof ReturnSignal) || frame.sourced) throw left
+    return [
+      left.stdout,
+      new IOResult({
+        stderr: left.stderr.byteLength > 0 ? left.stderr : null,
+        exitCode: left.exitCode,
+      }),
+    ]
   }
   return [chainNonNull(outputs), io]
 }
@@ -240,14 +254,16 @@ export function ended(sig: Unwinding, simple = false): IOResult {
 /**
  * Take what a nested line wrote before it left (an `exec`'d command, an ERR
  * or RETURN action), for the redirects it ran under to route. An EXIT
- * action's output goes around them, and what the other unwinding signals
- * carry went through them already. Mirrors Python's take_stdout.
+ * action's output, the `cleanup` at its end, goes around them, and what the
+ * other unwinding signals carry went through them already. Mirrors Python's
+ * take_stdout.
  */
 export function takeStdout(sig: Unwinding): Uint8Array {
   if (!(sig instanceof ExitSignal) || !sig.unrouted) return new Uint8Array()
-  const output = sig.stdout ?? new Uint8Array()
-  sig.stdout = null
-  return output
+  const written = sig.stdout ?? new Uint8Array()
+  const cut = written.byteLength - sig.cleanup.byteLength
+  sig.stdout = cut < written.byteLength ? written.subarray(cut) : null
+  return written.subarray(0, cut)
 }
 
 /**
@@ -306,6 +322,7 @@ export async function handleIf(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
   executeFn: ExecuteStringFn | null = null,
+  sink: JobConsole | null = null,
 ): Promise<Result> {
   // Each test reads the fd 0 the `if` started with, so an `exec <&-` in one
   // reaches the next, and runs with `set -e` ignored.
@@ -324,7 +341,7 @@ export async function handleIf(
         handed,
         decisions,
         executeFn,
-        null,
+        sink,
         test ? bound : undefined,
       )
     return test ? ignoringErrexit(session, go) : go()
@@ -370,6 +387,7 @@ export async function handleFor(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
   executeFn: ExecuteStringFn | null = null,
+  sink: JobConsole | null = null,
 ): Promise<Result> {
   const session = context.session
   let mergedIo = new IOResult()
@@ -410,6 +428,7 @@ export async function handleFor(
         handed,
         decisions,
         executeFn,
+        sink,
       )
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
@@ -440,6 +459,7 @@ async function conditionLoop(
   label: string,
   breakOnZero: boolean,
   executeFn: ExecuteStringFn | null = null,
+  sink: JobConsole | null = null,
 ): Promise<Result> {
   const session = context.session
   let mergedIo = new IOResult()
@@ -459,7 +479,7 @@ async function conditionLoop(
         handed,
         decisions,
         executeFn,
-        null,
+        sink,
         test ? bound : undefined,
       )
     return test ? ignoringErrexit(session, go) : go()
@@ -538,6 +558,7 @@ export async function handleCfor(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
   executeFn: ExecuteStringFn | null = null,
+  sink: JobConsole | null = null,
 ): Promise<Result> {
   const session = context.session
   let mergedIo = new IOResult()
@@ -566,6 +587,7 @@ export async function handleCfor(
           handed,
           decisions,
           executeFn,
+          sink,
         )
         allStdout.push(stdout)
         mergedIo = await mergedIo.merge(io)
@@ -626,6 +648,7 @@ export function handleWhile(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
   executeFn: ExecuteStringFn | null = null,
+  sink: JobConsole | null = null,
 ): Promise<Result> {
   return conditionLoop(
     executeNode,
@@ -641,6 +664,7 @@ export function handleWhile(
     'while',
     false,
     executeFn,
+    sink,
   )
 }
 
@@ -656,6 +680,7 @@ export function handleUntil(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
   executeFn: ExecuteStringFn | null = null,
+  sink: JobConsole | null = null,
 ): Promise<Result> {
   return conditionLoop(
     executeNode,
@@ -671,6 +696,7 @@ export function handleUntil(
     'until',
     true,
     executeFn,
+    sink,
   )
 }
 
@@ -691,6 +717,7 @@ export async function handleCase(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
   executeFn: ExecuteStringFn | null = null,
+  sink: JobConsole | null = null,
 ): Promise<Result> {
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
@@ -710,6 +737,7 @@ export async function handleCase(
         handed,
         decisions,
         executeFn,
+        sink,
       )
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
@@ -839,6 +867,7 @@ export async function handleSelect(
         handed,
         decisions,
         executeFn,
+        sink ?? null,
       )
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)

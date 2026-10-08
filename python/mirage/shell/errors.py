@@ -99,10 +99,11 @@ class ExitSignal(Exception):
     nested line's (an ``exec``'d program's, or an ERR or RETURN action's
     that left), which the redirects the signal unwinds through still
     route. An EXIT action's output goes around those redirects, as bash
-    runs it once the shell has unwound. ``sourced`` marks one raised in
-    text ``eval`` or ``source`` ran: a forked stage or job reports its
-    contained status even for a simple command (``eval ': ${U?}' | cat``
-    is 1, ``: ${U?} | cat`` 127).
+    runs it once the shell has unwound: ``cleanup`` is that output, the
+    end of ``stdout``. ``sourced`` marks one raised in text ``eval`` or
+    ``source`` ran: a forked stage or job reports its contained status
+    even for a simple command (``eval ': ${U?}' | cat`` is 1,
+    ``: ${U?} | cat`` 127).
     """
 
     def __init__(
@@ -121,6 +122,7 @@ class ExitSignal(Exception):
         self.expanding: int | None = None
         self.replaced: str | None = None
         self.unrouted = False
+        self.cleanup = b""
         self.sourced = False
 
 

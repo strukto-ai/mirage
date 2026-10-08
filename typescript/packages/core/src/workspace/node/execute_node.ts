@@ -1305,7 +1305,7 @@ async function executeNodeBody(
   if (kind === NodeKind.COMPOUND) {
     return executeBody(
       stream,
-      node.namedChildren.filter((child) => child.type !== NT.COMMENT),
+      node.namedChildren,
       context,
       stdin,
       callStack,
@@ -1314,6 +1314,7 @@ async function executeNodeBody(
       deps.handed ?? null,
       registry.decisions,
       executeFn,
+      sink ?? null,
     )
   }
 
@@ -1331,6 +1332,7 @@ async function executeNodeBody(
       deps.handed ?? null,
       registry.decisions,
       executeFn,
+      sink ?? null,
     )
   }
 
@@ -1359,6 +1361,7 @@ async function executeNodeBody(
         deps.handed ?? null,
         registry.decisions,
         executeFn,
+        sink ?? null,
       ),
     )
   }
@@ -1429,6 +1432,7 @@ async function executeNodeBody(
         deps.handed ?? null,
         registry.decisions,
         executeFn,
+        sink ?? null,
       ),
     )
   }
@@ -1449,6 +1453,7 @@ async function executeNodeBody(
           deps.handed ?? null,
           registry.decisions,
           executeFn,
+          sink ?? null,
         ),
       )
     }
@@ -1465,6 +1470,7 @@ async function executeNodeBody(
         deps.handed ?? null,
         registry.decisions,
         executeFn,
+        sink ?? null,
       ),
     )
   }
@@ -1506,6 +1512,7 @@ async function executeNodeBody(
       deps.handed ?? null,
       registry.decisions,
       executeFn,
+      sink ?? null,
     )
   }
 

@@ -141,9 +141,9 @@ export async function programHead(
     (layer) =>
       layer !== Consumer.FUNCTION && (layer !== Consumer.SESSION || !SHELL_ONLY_BUILTINS.has(head)),
   )
-  // An alias is as invisible to execvp as a function, and `command` masks
-  // both for the run.
-  const shadowed = layers.includes(Consumer.FUNCTION) || head in sess.aliases
+  // A function is invisible to execvp, and `command` masks it for the run;
+  // no alias rewrites a program line.
+  const shadowed = layers.includes(Consumer.FUNCTION)
   return [!program, shadowed]
 }
 

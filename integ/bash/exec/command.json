@@ -61,10 +61,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( exec nosuchcmd; echo x ); echo \"rc=$?\"; ( f() { :; }; exec f ); echo \"rc=$?\"; ( trap 'echo X' EXIT; exec nosuchcmd ) 2>/dev/null; echo \"rc=$?\"",
+      "command": "( exec nosuchcmd; echo x ); echo \"rc=$?\"; ( f() { :; }; exec f ); echo \"rc=$?\"; ( trap 'echo X' EXIT; exec nosuchcmd ) 2>/dev/null; echo \"rc=$?\"; ( unset x; /usr/bin/printf -v x %s hi; echo \"[$x]\"; /usr/bin/[ 1 -eq; echo \"rc=$?\"; exec /usr/bin/printf -v x %s hi ) 2>&1; bash -c 'shopt -s expand_aliases; alias echo=\"echo WRONG\" env=\"echo WRONG\" command=\"echo WRONG\"\n: ; \\env echo a; printf \"b\\n\" | xargs echo; find /data -maxdepth 0 -exec echo {} \\;; (exec -c echo c); function echo { :; }; exec echo d'",
       "expect": {
         "exit": 0,
-        "stdout": "rc=127\nrc=127\nX\nrc=127\n",
+        "stdout": "rc=127\nrc=127\nX\nrc=127\n-vprintf: warning: ignoring excess arguments, starting with 'x'\n[]\n[: missing ']'\nrc=2\n-vprintf: warning: ignoring excess arguments, starting with 'x'\na\nb\n/data\nc\nd\n",
         "stderr": "bash: exec: nosuchcmd: not found\nbash: exec: f: not found\n"
       }
     },

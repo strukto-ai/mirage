@@ -1394,7 +1394,7 @@ async def _execute_node(
     if kind == NodeKind.COMPOUND:
         return await execute_body(
             stream,
-            [c for c in node.named_children if c.type != NT.COMMENT],
+            node.named_children,
             context,
             stdin,
             cs,
@@ -1403,6 +1403,7 @@ async def _execute_node(
             handed,
             registry.decisions,
             execute_fn,
+            sink,
         )
 
     # ── if ──────────────────────────────────────
@@ -1420,6 +1421,7 @@ async def _execute_node(
             handed=handed,
             decisions=registry.decisions,
             execute_fn=execute_fn,
+            sink=sink,
         )
 
     # ── C-style for (for ((init;cond;update))) ──
@@ -1446,6 +1448,7 @@ async def _execute_node(
                 handed=handed,
                 decisions=registry.decisions,
                 execute_fn=execute_fn,
+                sink=sink,
             )
 
     # ── for / select ────────────────────────────
@@ -1510,6 +1513,7 @@ async def _execute_node(
                 handed=handed,
                 decisions=registry.decisions,
                 execute_fn=execute_fn,
+                sink=sink,
             )
 
     # ── while / until ───────────────────────────
@@ -1529,6 +1533,7 @@ async def _execute_node(
                     handed=handed,
                     decisions=registry.decisions,
                     execute_fn=execute_fn,
+                    sink=sink,
                 )
         with cs.loop():
             return await handle_while(
@@ -1543,6 +1548,7 @@ async def _execute_node(
                 handed=handed,
                 decisions=registry.decisions,
                 execute_fn=execute_fn,
+                sink=sink,
             )
 
     # ── case ────────────────────────────────────
@@ -1568,6 +1574,7 @@ async def _execute_node(
             handed=handed,
             decisions=registry.decisions,
             execute_fn=execute_fn,
+            sink=sink,
         )
 
     # ── function definition ─────────────────────

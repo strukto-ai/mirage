@@ -89,6 +89,8 @@ export class ExitSignal extends Error {
   // through still route. An EXIT action's output goes around those
   // redirects, as bash runs it once the shell has unwound.
   unrouted = false
+  // That EXIT output, the end of stdout.
+  cleanup: Uint8Array = new Uint8Array()
   // Whether it was raised in text `eval` or `source` ran: a forked stage or
   // job reports its contained status even for a simple command
   // (`eval ': ${U?}' | cat` is 1, `: ${U?} | cat` 127).
