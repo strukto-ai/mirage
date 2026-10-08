@@ -251,40 +251,29 @@ async function main(): Promise<void> {
     r = await run(ws, 'grep "$(echo queue)" /gcs/data/example.jsonl | wc -l')
     console.log(`  count: ${r.stdout.trim()}`)
 
-    // ── on-the-fly maxDrainBytes (cancellable cache drain) ────────────
+    // ── maxDrainBytes: what a streamed read may buffer to fill the cache ─
+    // A read the line stops early (cat | head) keeps nothing; a read that
+    // ends fills the cache unless the file is larger than the budget.
     const target = '/gcs/data/example.jsonl'
     await ws.cache.clear()
-    console.log('\n=== max_drain_bytes=1MB then cat | head (drain cancelled) ===')
-    ws.maxDrainBytes = 1_000_000
+    console.log('\n=== cat | head (stopped early, keeps nothing) ===')
     r = await run(ws, `cat ${target} | head -n 3`)
     console.log(`  head returned ${r.stdout.split('\n').filter((l) => l !== '').length} lines`)
-    let drainKeys = [...(ws.cache.drainTasks?.keys() ?? [])]
-    console.log(`  drain tasks: ${JSON.stringify(drainKeys)}`)
-    for (const k of drainKeys) await ws.cache.drainTasks?.get(k)
-    let cached: Uint8Array | null = null
-    for (const k of drainKeys) cached = (await ws.cache.get(k)) ?? cached
-    console.log(
-      `  cache after small budget: ${
-        cached !== null
-          ? `POPULATED (${cached.byteLength} bytes)`
-          : 'EMPTY (drain cancelled, as expected)'
-      }`,
-    )
+    let cached = await ws.cache.get(target)
+    console.log(`  cache: ${cached !== null ? 'POPULATED' : 'EMPTY (as expected)'}`)
 
-    await ws.cache.clear()
-    console.log('\n=== max_drain_bytes=None then cat | head (drain completes) ===')
+    console.log('\n=== maxDrainBytes=1 then cat (larger than the budget) ===')
+    ws.maxDrainBytes = 1
+    await run(ws, `cat ${target}`)
+    cached = await ws.cache.get(target)
+    console.log(`  cache: ${cached !== null ? 'POPULATED' : 'EMPTY (as expected)'}`)
+
+    console.log('\n=== maxDrainBytes=null then cat (fills the cache) ===')
     ws.maxDrainBytes = null
-    r = await run(ws, `cat ${target} | head -n 3`)
-    console.log(`  head returned ${r.stdout.split('\n').filter((l) => l !== '').length} lines`)
-    drainKeys = [...(ws.cache.drainTasks?.keys() ?? [])]
-    console.log(`  drain tasks: ${JSON.stringify(drainKeys)}`)
-    for (const k of drainKeys) await ws.cache.drainTasks?.get(k)
-    cached = null
-    for (const k of drainKeys) cached = (await ws.cache.get(k)) ?? cached
+    await run(ws, `cat ${target}`)
+    cached = await ws.cache.get(target)
     console.log(
-      `  cache after unbounded: ${
-        cached !== null ? `POPULATED (${cached.byteLength} bytes, as expected)` : 'EMPTY'
-      }`,
+      `  cache: ${cached !== null ? `POPULATED (${cached.byteLength} bytes, as expected)` : 'EMPTY'}`,
     )
 
     // ── chunk-level streaming + multi-stage pipe backpressure ─────────
