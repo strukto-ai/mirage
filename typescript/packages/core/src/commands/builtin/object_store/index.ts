@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand, CommandIO } from '../../config.ts'
+import type { Command, CommandIO } from '../../config.ts'
 import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { withProbeAnswers, withSlashGuard } from '../generic_bind/factory.ts'
 import { makeMkdir } from './mkdir.ts'
@@ -46,7 +46,7 @@ function answered(io: CommandIO): CommandIO {
  *
  * @param vfs VFS name the commands register under
  */
-export function makeObjectStoreCommands(vfs: string): RegisteredCommand[] {
+export function makeObjectStoreCommands(vfs: string): Command[] {
   return [
     ...makeMkdir(vfs, guarded),
     ...makeRm(vfs, guarded),

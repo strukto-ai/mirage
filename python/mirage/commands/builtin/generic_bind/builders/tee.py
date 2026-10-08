@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tee import tee_generic as generic_tee
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     require_op,
@@ -52,4 +52,4 @@ async def tee(
     )
 
 
-BUILDER = Builder("tee", tee, write=True)
+BUILDER = GenericCommand("tee", tee, write=True)

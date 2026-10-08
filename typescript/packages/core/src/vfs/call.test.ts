@@ -69,7 +69,7 @@ describe('VFS functions', () => {
     expect(shelf.supports('write')).toBe(false)
     ;(shelf as unknown as Record<string, unknown>).write = (): Promise<void> => Promise.resolve()
     expect(shelf.supports('write')).toBe(true)
-    expect(new MountEntry({ prefix: '/', vfs: shelf }).hasOp('write')).toBe(true)
+    expect(new MountEntry({ prefix: '/', vfs: shelf }).answers('write')).toBe(true)
   })
 
   it('has policies judge a custom function by its effect', async () => {

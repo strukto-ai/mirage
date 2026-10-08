@@ -12,14 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.object_store import (
     OBJECT_STORE_OVERRIDES,
     make_object_store_commands,
 )
 
 COMMANDS = [
-    *make_generic_commands(
+    *generic_commands(
         "gridfs",
         overrides=OBJECT_STORE_OVERRIDES,
     ),

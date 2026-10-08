@@ -15,8 +15,8 @@
 import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { readStream } from '../../../core/dev/stream.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand, CommandIO } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import type { Command, CommandIO } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 
 function endless(io: CommandIO): CommandIO {
   return {
@@ -28,6 +28,6 @@ function endless(io: CommandIO): CommandIO {
 // /dev is a RAM mount whose read and stat know the two synthetic character
 // devices. Commands that consume a whole input read a finite stream, while
 // the two bounded streaming commands opt into the endless source.
-export const DEV_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands(VFSName.RAM, { adapt: { cat: endless, head: endless }, local: true }),
+export const DEV_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.RAM, { adapt: { cat: endless, head: endless }, local: true }),
 ]

@@ -46,12 +46,12 @@ async def test_vfs_op_honors_per_mount_timeout(monkeypatch):
     mount.command_limits["stat"] = Limit(timeout_seconds=0.05)
     override(mount.vfs, "stat", _slow_op)
     with pytest.raises(CommandTimeoutError):
-        await mount.execute_op("stat", "/data/f.txt")
+        await mount.call("stat", "/data/f.txt")
 
 
 @pytest.mark.asyncio
 async def test_vfs_op_unconfigured_is_not_timed(monkeypatch):
     mount = await _ws_mount()
     override(mount.vfs, "stat", _slowish_op)
-    result = await mount.execute_op("stat", "/data/f.txt")
+    result = await mount.call("stat", "/data/f.txt")
     assert result == "ok"

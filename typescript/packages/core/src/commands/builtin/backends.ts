@@ -47,7 +47,7 @@ import { SharePointVFS } from '../../vfs/sharepoint/sharepoint.ts'
 import { SlackVFSBase } from '../../vfs/slack/slack.ts'
 import { TrelloVFS } from '../../vfs/trello/trello.ts'
 import { WandbVFS } from '../../vfs/wandb/wandb.ts'
-import { RegisteredCommand } from '../config.ts'
+import { Command } from '../config.ts'
 import { AIRTABLE_COMMANDS } from './airtable/index.ts'
 import { BIN_COMMANDS } from './bin/index.ts'
 import { BOX_COMMANDS } from './box/index.ts'
@@ -60,7 +60,7 @@ import { DROPBOX_COMMANDS } from './dropbox/index.ts'
 import { GCAL_COMMANDS } from './gcal/index.ts'
 import { GDOCS_COMMANDS } from './gdocs/index.ts'
 import { GDRIVE_COMMANDS } from './gdrive/index.ts'
-import { makeGenericCommands } from './generic_bind/index.ts'
+import { genericCommands } from './generic_bind/index.ts'
 import { GITHUB_COMMANDS } from './github/index.ts'
 import { GMAIL_COMMANDS } from './gmail/index.ts'
 import { GSHEETS_COMMANDS } from './gsheets/index.ts'
@@ -100,23 +100,20 @@ interface VFSClass {
 const BACKENDS = Symbol.for('mirage.backendCommands')
 
 /** Serve `commands` on every mount of `cls` and its subclasses. */
-export function registerBackendCommands(
-  cls: VFSClass,
-  commands: () => readonly RegisteredCommand[],
-): void {
+export function registerBackendCommands(cls: VFSClass, commands: () => readonly Command[]): void {
   Object.defineProperty(cls, BACKENDS, { value: commands, configurable: true })
 }
 
 // The one VFS name a backend's commands were registered under, or null for
 // a set that spans several (the Hugging Face repo kinds share one table).
-function familyOf(commands: readonly RegisteredCommand[]): string | null {
+function familyOf(commands: readonly Command[]): string | null {
   const names = new Set(commands.flatMap((cmd) => (cmd.vfs === null ? [] : [cmd.vfs])))
   const [only] = names
   return names.size === 1 && only !== undefined ? only : null
 }
 
-function renamed(cmd: RegisteredCommand, vfs: string): RegisteredCommand {
-  return new RegisteredCommand({
+function renamed(cmd: Command, vfs: string): Command {
+  return new Command({
     name: cmd.name,
     spec: cmd.spec,
     vfs,
@@ -139,15 +136,14 @@ function renamed(cmd: RegisteredCommand, vfs: string): RegisteredCommand {
  * loses what the VFS overrides, and the commands the VFS was handed come
  * last, so they win. Mirrors Python's `commands_for`.
  */
-export function commandsFor(vfs: BaseVFS): RegisteredCommand[] {
-  let found: RegisteredCommand[] | null = null
+export function commandsFor(vfs: BaseVFS): Command[] {
+  let found: Command[] | null = null
   let cls: unknown = vfs.constructor
   while (typeof cls === 'function' && found === null) {
     const own: unknown = Object.hasOwn(cls, BACKENDS)
       ? (cls as unknown as Record<symbol, unknown>)[BACKENDS]
       : undefined
-    const commands =
-      typeof own === 'function' ? (own as () => readonly RegisteredCommand[])() : undefined
+    const commands = typeof own === 'function' ? (own as () => readonly Command[])() : undefined
     if (commands !== undefined) {
       const family = familyOf(commands)
       found = commands.map((cmd) =>
@@ -156,7 +152,7 @@ export function commandsFor(vfs: BaseVFS): RegisteredCommand[] {
     }
     cls = Object.getPrototypeOf(cls)
   }
-  const kept = (found ?? makeGenericCommands(vfs.name, { overrides: vfs.overrides })).filter(
+  const kept = (found ?? genericCommands(vfs.name, { overrides: vfs.overrides })).filter(
     (cmd) => !vfs.overrides.has(cmd.name),
   )
   return [...kept, ...vfs.commands()]

@@ -26,7 +26,7 @@ from typing import Any
 from pydantic import BaseModel
 
 import mirage.commands.builtin
-from mirage.commands.config import RegisteredCommand
+from mirage.commands.config import Command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import CommandSpec, Operand, Option
 from mirage.vfs.base import BaseVFS
@@ -97,8 +97,8 @@ def _walk_pkg(pkg: Any) -> list[str]:
     return failed
 
 
-def _collect_registrations() -> dict[str, list[RegisteredCommand]]:
-    out: dict[str, list[RegisteredCommand]] = {}
+def _collect_registrations() -> dict[str, list[Command]]:
+    out: dict[str, list[Command]] = {}
     seen: set[int] = set()
     for mod_name, mod in list(sys.modules.items()):
         if mod is None or not mod_name.startswith("mirage.commands."):
@@ -113,7 +113,7 @@ def _collect_registrations() -> dict[str, list[RegisteredCommand]]:
             seen.add(id(attr))
             rcs = (
                 [attr]
-                if isinstance(attr, RegisteredCommand)
+                if isinstance(attr, Command)
                 else getattr(attr, "_registered_commands", None)
             )
             if not rcs:
@@ -123,7 +123,7 @@ def _collect_registrations() -> dict[str, list[RegisteredCommand]]:
     return out
 
 
-def _by_vfs(rcs: list[RegisteredCommand]) -> dict[str, Any]:
+def _by_vfs(rcs: list[Command]) -> dict[str, Any]:
     """Per-registration metadata, keyed by VFS.
 
     The union flags below cannot say *which* VFS carries an aggregate,
@@ -132,7 +132,7 @@ def _by_vfs(rcs: list[RegisteredCommand]) -> dict[str, Any]:
     facts by VFS so the parity check sees that difference.
 
     Args:
-        rcs (list[RegisteredCommand]): every registration for one command.
+        rcs (list[Command]): every registration for one command.
     """
     out: dict[str, Any] = {}
     for rc in rcs:
@@ -151,7 +151,7 @@ def _by_vfs(rcs: list[RegisteredCommand]) -> dict[str, Any]:
     return out
 
 
-def _meta_for(rcs: list[RegisteredCommand]) -> dict[str, Any]:
+def _meta_for(rcs: list[Command]) -> dict[str, Any]:
     vfs_names = sorted({rc.vfs for rc in rcs if rc.vfs is not None})
     filetypes = sorted({rc.filetype for rc in rcs if rc.filetype is not None})
     return {
@@ -217,7 +217,7 @@ def _spec_payload(spec: Any) -> dict[str, Any]:
 
 
 def _emit_one(
-    name: str, spec: Any, rcs: list[RegisteredCommand], out: Path = OUT
+    name: str, spec: Any, rcs: list[Command], out: Path = OUT
 ) -> None:
     payload = _spec_payload(spec)
     payload["_meta"] = _meta_for(rcs)
@@ -227,7 +227,7 @@ def _emit_one(
     )
 
 
-def _emit_vfs_commands(registry: dict[str, list[RegisteredCommand]]) -> None:
+def _emit_vfs_commands(registry: dict[str, list[Command]]) -> None:
     """Dump every registered command SPECS does not declare.
 
     A backend verb (``trello card create``) carries its spec inline, so
@@ -238,7 +238,7 @@ def _emit_vfs_commands(registry: dict[str, list[RegisteredCommand]]) -> None:
     no file behind.
 
     Args:
-        registry (dict[str, list[RegisteredCommand]]): registrations keyed
+        registry (dict[str, list[Command]]): registrations keyed
             by command name, as collected for the spec dump.
     """
     names = sorted(name for name in registry if name not in SPECS)
@@ -397,7 +397,7 @@ def _configs() -> dict[str, dict[str, Any] | None]:
     return out
 
 
-def _emit_vfs_names(registry: dict[str, list[RegisteredCommand]]) -> None:
+def _emit_vfs_names(registry: dict[str, list[Command]]) -> None:
     """Dump the two VFS-name sets the parity gate compares.
 
     ``registry`` is what ``build_vfs`` can construct by name — the
@@ -409,7 +409,7 @@ def _emit_vfs_names(registry: dict[str, list[RegisteredCommand]]) -> None:
     appearing in every command's ``_meta``.
 
     Args:
-        registry (dict[str, list[RegisteredCommand]]): registrations keyed
+        registry (dict[str, list[Command]]): registrations keyed
             by command name, as collected for the spec dump.
     """
     command_vfs_names: set[str] = set()

@@ -308,7 +308,7 @@ async def _run_with_namespace_globs(
     return await fn(bound, accessor, paths, texts, opts)
 
 
-def make_generic_commands(
+def generic_commands(
     vfs: str,
     *,
     overrides: set[str] | frozenset[str] | None = None,
@@ -344,7 +344,7 @@ def make_generic_commands(
     unknown = sorted((set(skip) | set(changes)) - known)
     if unknown:
         raise ValueError(
-            f"make_generic_commands({vfs!r}): no generic "
+            f"generic_commands({vfs!r}): no generic "
             f"builder named {', '.join(unknown)}"
         )
     commands: list[Callable[..., Any]] = []

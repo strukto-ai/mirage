@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.gunzip import gunzip_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     require_op,
@@ -48,4 +48,4 @@ async def gunzip(
     )
 
 
-BUILDER = Builder("gunzip", gunzip, write=True)
+BUILDER = GenericCommand("gunzip", gunzip, write=True)

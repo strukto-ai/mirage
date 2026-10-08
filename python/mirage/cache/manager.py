@@ -482,7 +482,7 @@ class CacheManager:
         ``mount_key`` produces on the way there.
 
         Only ``virtual`` is read, and the key is rebuilt against this
-        manager's own prefix, exactly as ``Mount.execute_op`` rebuilds
+        manager's own prefix, exactly as ``Mount.call`` rebuilds
         one before handing a path to a backend. The caller's
         ``vfs_path`` is deliberately ignored: it is not a fact
         this class can trust, because ``PathSpec.from_str_path``

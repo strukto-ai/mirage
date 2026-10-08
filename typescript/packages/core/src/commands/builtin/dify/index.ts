@@ -16,13 +16,13 @@ import type { DifyAccessor } from '../../../accessor/dify.ts'
 import { stat, statLight } from '../../../core/dify/stat.ts'
 import { DIFY_TREE } from '../../../core/dify/tree.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 import { makeFind, readsTimes } from '../slug_tree/find.ts'
 import { DIFY_SEARCH } from './search.ts'
 
-export const DIFY_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands(VFSName.DIFY, {
+export const DIFY_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.DIFY, {
     overrides: new Set(['find']),
     // ls stats every listed entry, so it keeps the index-only stat instead
     // of paying one document-detail call per row, as python does.

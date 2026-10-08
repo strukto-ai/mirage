@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 
-export const NOTION_COMMANDS: readonly RegisteredCommand[] = makeGenericCommands(VFSName.NOTION)
+export const NOTION_COMMANDS: readonly Command[] = genericCommands(VFSName.NOTION)

@@ -25,7 +25,7 @@ from mirage.version import __version__ as __version__
 if TYPE_CHECKING:
     from mirage.accessor.base import Accessor
     from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
-    from mirage.commands.builtin.generic_bind import make_generic_commands
+    from mirage.commands.builtin.generic_bind import generic_commands
     from mirage.commands.cli import (
         CLIDoors,
         CLIInvocation,
@@ -198,7 +198,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.utils.ids": ("new_session_id", "new_workspace_id", "uuid7"),
     "mirage.accessor.base": ("Accessor",),
     "mirage.cache.index": ("NULL_INDEX", "IndexCacheStore", "IndexConfig"),
-    "mirage.commands.builtin.generic_bind": ("make_generic_commands",),
+    "mirage.commands.builtin.generic_bind": ("generic_commands",),
     "mirage.commands.errors": ("UsageError",),
     "mirage.commands.spec.types": ("UsageStyle",),
     "mirage.io": ("IOResult",),
@@ -350,7 +350,7 @@ __all__ = [
     "known_vfs_names",
     "known_runtimes",
     "known_sources",
-    "make_generic_commands",
+    "generic_commands",
     "make_resolve_glob",
     "register_vfs",
     "register_runtime",

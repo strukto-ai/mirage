@@ -15,7 +15,7 @@
 from dataclasses import replace
 
 from mirage.commands.builtin.dify.search import search
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.slug_tree.find import make_find, reads_times
 from mirage.commands.config import CommandIO
 from mirage.core.dify.stat import stat, stat_light
@@ -27,7 +27,7 @@ def _light_ls(io: CommandIO) -> CommandIO:
 
 
 COMMANDS = [
-    *make_generic_commands(
+    *generic_commands(
         "dify",
         overrides={"find"},
         adapt={"ls": _light_ls},

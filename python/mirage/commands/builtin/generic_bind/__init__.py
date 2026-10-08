@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mirage.commands.builtin.generic_bind.factory import (
-        make_generic_commands,
+        generic_commands,
         with_read_cache,
         with_stat_cache,
     )
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.commands.builtin.generic_bind.factory": (
-        "make_generic_commands",
+        "generic_commands",
         "with_read_cache",
         "with_stat_cache",
     ),
@@ -39,7 +39,7 @@ _MODULE_OF = {
 
 __all__ = [
     "DuOps",
-    "make_generic_commands",
+    "generic_commands",
     "make_resolve_glob",
     "with_read_cache",
     "with_stat_cache",

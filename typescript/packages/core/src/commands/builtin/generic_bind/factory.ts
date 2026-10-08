@@ -21,7 +21,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { ChildMounts, LinkView, NamespaceView } from '../../../ops/types.ts'
-import { type CommandFn, type RegisteredCommand, command, type CommandIO } from '../../config.ts'
+import { type CommandFn, type Command, command, type CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
   mountIo,
@@ -159,7 +159,7 @@ function writeWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return withSlashGuard(ops)
 }
 
-export interface MakeGenericCommandsOptions {
+export interface GenericCommandsOptions {
   /** Command names to skip: the backend ships its own wrapper for these. */
   overrides?: ReadonlySet<string>
   /**
@@ -196,12 +196,9 @@ function stampNamespace(raw: CommandIO, children?: ChildMounts, links?: LinkView
 /**
  * Generate the default command set for a backend. Each command runs over
  * the table of the mount it runs on (`opts.io`), so the set is built once
- * per backend name. Mirrors Python's `make_generic_commands`.
+ * per backend name. Mirrors Python's `generic_commands`.
  */
-export function makeGenericCommands(
-  vfs: string,
-  options: MakeGenericCommandsOptions = {},
-): RegisteredCommand[] {
+export function genericCommands(vfs: string, options: GenericCommandsOptions = {}): Command[] {
   const skip = options.overrides ?? new Set<string>()
   const changes = options.adapt ?? {}
   const table = options.table
@@ -209,15 +206,15 @@ export function makeGenericCommands(
   // the generic registered beside the bespoke one, and an override for a
   // command the table never had (mem0's `search`) read as if it displaced
   // something. Refused at registration, which is import time. Mirrors
-  // `make_generic_commands` in `generic_bind/factory.py`.
+  // `generic_commands` in `generic_bind/factory.py`.
   const known = new Set(BUILDERS.map((b) => b.name))
   const unknown = [...new Set([...skip, ...Object.keys(changes)])]
     .filter((name) => !known.has(name))
     .sort(compareCodePoints)
   if (unknown.length > 0) {
-    throw new Error(`makeGenericCommands('${vfs}'): no generic builder named ${unknown.join(', ')}`)
+    throw new Error(`genericCommands('${vfs}'): no generic builder named ${unknown.join(', ')}`)
   }
-  const commands: RegisteredCommand[] = []
+  const commands: Command[] = []
   for (const b of BUILDERS) {
     if (skip.has(b.name)) continue
     const change = changes[b.name]

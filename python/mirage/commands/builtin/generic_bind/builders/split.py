@@ -30,7 +30,7 @@ from mirage.commands.builtin.generic.split import (
     split_generic as generic_split,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     require_op,
@@ -118,4 +118,4 @@ async def split(
     )
 
 
-BUILDER = Builder("split", split, write=True)
+BUILDER = GenericCommand("split", split, write=True)

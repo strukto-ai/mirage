@@ -61,7 +61,7 @@ interface ReadReconciler {
 
 // The stat the dispatcher itself runs for a mount's VFS: its registry op,
 // behind the dispatcher's fence. A trailing-slash glob classifies a match
-// with it, the twin of python's owner.execute_op("stat").
+// with it, the twin of python's owner.call("stat").
 type OpStat = (mount: MountEntry, path: PathSpec) => Promise<unknown>
 
 export const DEV_PREFIX = '/dev/'
@@ -332,11 +332,11 @@ export class MountRegistry {
       alias === undefined ? init : { ...init, indexConfig: alias.indexConfig },
     )
     if (alias !== undefined) m.activity = alias.activity
-    // Through `registerFns`, as python's `registry.mount` does, so a
+    // Through `registerCommands`, as python's `registry.mount` does, so a
     // family table that fans out over sibling VFS names (the HF four
     // share one table) registers only this mount's entries instead of
     // letting the last sibling win on a shared key.
-    m.registerFns(commandsFor(init.vfs))
+    m.registerCommands(commandsFor(init.vfs))
     for (const cmd of GENERAL_COMMANDS) {
       m.registerGeneral(cmd)
     }

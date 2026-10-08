@@ -377,7 +377,7 @@ async def check_drift(
         return
     # Resolve backend IDs afresh without consulting the restored index.
     try:
-        stat = await mount.execute_op("stat", path, index=RAMIndexCacheStore())
+        stat = await mount.call("stat", path, index=RAMIndexCacheStore())
     except (FileNotFoundError, NotADirectoryError) as exc:
         if mount_for(path) is not mount:
             return

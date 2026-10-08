@@ -37,7 +37,7 @@ describe('BinViewVFS', () => {
       expect(names.has(name)).toBe(true)
     }
     const mount = new MountEntry({ prefix: '/', vfs })
-    for (const name of ['read', 'readdir', 'stat']) expect(mount.hasOp(name)).toBe(true)
+    for (const name of ['read', 'readdir', 'stat']) expect(mount.answers(name)).toBe(true)
     for (const name of [
       'write',
       'append',
@@ -49,7 +49,7 @@ describe('BinViewVFS', () => {
       'truncate',
       'setattr',
     ]) {
-      expect(mount.hasOp(name) && mount.writes(name)).toBe(true)
+      expect(mount.answers(name) && mount.writes(name)).toBe(true)
     }
   })
 

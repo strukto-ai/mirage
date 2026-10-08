@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.sha384sum import sha384sum_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     dir_aware_stat,
     dir_aware_stream,
     resolve_or_empty,
@@ -42,4 +42,4 @@ async def sha384sum(
     )
 
 
-BUILDER = Builder("sha384sum", sha384sum, read=True)
+BUILDER = GenericCommand("sha384sum", sha384sum, read=True)

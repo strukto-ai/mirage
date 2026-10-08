@@ -296,7 +296,7 @@ def set_mount_gate(prefix: str, mode: MountMode) -> Token[Any]:
     """Bind the executing mount's prefix and configured mode to the
     current async context, for the run of one command.
 
-    Set by ``Mount.execute_cmd`` around the handler, so the mode guard
+    Set by ``Mount.run_command`` around the handler, so the mode guard
     on the command tier's I/O can resolve ``effective_path_mode`` for
     every path a handler mutates: a path-guarded command is refused only
     at its writes, the write-command gate admits any other when a shown
@@ -414,7 +414,7 @@ _current_walk_probe: ContextVar[WalkProbe | None] = ContextVar(
 def set_walk_probe(probe: WalkProbe) -> Token[Any]:
     """Bind what a command's dot walks read, for the run of one command.
 
-    Set by ``Mount.execute_cmd`` around the handler, beside the mount
+    Set by ``Mount.run_command`` around the handler, beside the mount
     gate: the command tier reaches its backend without passing the
     dispatcher's door, so the walk guard on its I/O proves an operand's
     ``.`` and ``..`` with the door's stat and link follow through this

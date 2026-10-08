@@ -240,7 +240,7 @@ class WalkProbe:
     """What proving a running command's ``.`` and ``..`` reads.
 
     The command tier reaches its backend past the dispatcher's door, so
-    ``Mount.execute_cmd`` binds the door's facts for it. The kernel walk
+    ``Mount.run_command`` binds the door's facts for it. The kernel walk
     (``follow_paths``) rewrites an operand to its link's target before
     the handler runs; ``follow`` is how that operand is still known for
     the one its dotted spelling names.

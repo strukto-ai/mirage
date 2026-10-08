@@ -20,7 +20,7 @@ import { commandIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/
 import { RAM_COMMANDS } from '@struktoai/mirage-core/commands/builtin/ram/index'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { command, type RegisteredCommand } from '@struktoai/mirage-core/commands/config'
+import { command, type Command } from '@struktoai/mirage-core/commands/config'
 import { specOf } from '@struktoai/mirage-core/commands/spec/builtins'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { eacces } from '@struktoai/mirage-core/errors/fs'
@@ -44,7 +44,7 @@ export class CommandService extends RAMVFS {
     this.overrides = new Set([...this.dropped, 'grep', 'rg', 'rev'])
   }
 
-  override commands(): readonly RegisteredCommand[] {
+  override commands(): readonly Command[] {
     // The service's own handlers read through a plain RAM view of its store;
     // every other read reaches the refusal below.
     const view = new RAMVFS()

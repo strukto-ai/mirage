@@ -17,7 +17,7 @@ import { Accessor, NOOPAccessor } from '../accessor/base.ts'
 import { RAMAccessor } from '../accessor/ram.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import { commandsFor } from '../commands/builtin/backends.ts'
-import { command, type RegisteredCommand } from '../commands/config.ts'
+import { command, type Command } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
 import { RuntimeVFS } from '../runtime/vfs.ts'
@@ -100,7 +100,7 @@ function stat(accessor: WikiAccessor, path: PathSpec): Promise<FileStat> {
   )
 }
 
-const wikiHello: readonly RegisteredCommand[] = command({
+const wikiHello: readonly Command[] = command({
   name: 'wiki_hello',
   vfs: 'wiki',
   spec: new CommandSpec(),
@@ -188,7 +188,7 @@ const DOOR_OPS = ['read', 'readdir', 'stat', 'glob', 'write', 'unlink', 'mkdir',
 
 function served(vfs: BaseVFS): Set<string> {
   const mount = new MountEntry({ prefix: '/', vfs })
-  return new Set(DOOR_OPS.filter((op) => mount.hasOp(op)))
+  return new Set(DOOR_OPS.filter((op) => mount.answers(op)))
 }
 
 /**

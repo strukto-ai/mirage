@@ -14,7 +14,7 @@
 
 from dataclasses import replace
 
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.config import CommandIO
 
 
@@ -26,5 +26,5 @@ def _walked(io: CommandIO) -> CommandIO:
 # shared readdir/stat walker owns those. The VFS's own find and du remain
 # strict.
 COMMANDS = [
-    *make_generic_commands("ssh", table=_walked),
+    *generic_commands("ssh", table=_walked),
 ]

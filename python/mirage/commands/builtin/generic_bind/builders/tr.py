@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tr import tr_generic as generic_tr
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
@@ -41,4 +41,4 @@ async def tr(
     )
 
 
-BUILDER = Builder("tr", tr, read=True)
+BUILDER = GenericCommand("tr", tr, read=True)

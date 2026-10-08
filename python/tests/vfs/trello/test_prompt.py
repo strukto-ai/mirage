@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.trello import COMMANDS
-from mirage.commands.config import RegisteredCommand
+from mirage.commands.config import Command
 from mirage.vfs.trello.prompt import PROMPT, WRITE_PROMPT
 
 
-def _verbs() -> dict[str, RegisteredCommand]:
+def _verbs() -> dict[str, Command]:
     return {
         rc.name: rc
         for fn in COMMANDS
@@ -38,7 +38,7 @@ def _usage_lines(text: str) -> list[str]:
     return lines
 
 
-def _unmatched(line: str, verbs: dict[str, RegisteredCommand]) -> list[str]:
+def _unmatched(line: str, verbs: dict[str, Command]) -> list[str]:
     tokens = line.replace("[", " ").replace("]", " ").split()
     name = next(
         (

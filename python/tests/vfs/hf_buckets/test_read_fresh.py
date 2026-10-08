@@ -345,7 +345,7 @@ async def test_a_window_past_eof_is_empty_on_every_door():
         try:
             # The door folds a 416 for every backend; the VFS's own ranged
             # read has no fold, so the read must answer it itself.
-            via_op = await ws.mount("/m/a.txt").execute_op(
+            via_op = await ws.mount("/m/a.txt").call(
                 "read",
                 "/m/a.txt",
                 index=RAMIndexCacheStore(),

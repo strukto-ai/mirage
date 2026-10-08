@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import generic_commands
 
 # The three git-repo VFS. `hf_buckets` is deliberately absent: it is a
 # different Hugging Face product (Xet-backed mutable object storage, no
@@ -23,4 +23,4 @@ from mirage.commands.builtin.generic_bind import make_generic_commands
 # command tagged with it names a VFS the registry cannot produce.
 VFS_NAMES = ["hf_models", "hf_datasets", "hf_spaces"]
 
-COMMANDS = [fn for vfs in VFS_NAMES for fn in make_generic_commands(vfs)]
+COMMANDS = [fn for vfs in VFS_NAMES for fn in generic_commands(vfs)]

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 import { MONGODB_CAT } from './cat.ts'
 import { MONGODB_GREP } from './grep.ts'
 import { MONGODB_RG } from './rg.ts'
@@ -23,8 +23,8 @@ import { MONGODB_WC } from './wc.ts'
 
 const MONGODB_OVERRIDES = new Set(['cat', 'grep', 'rg', 'tail', 'wc'])
 
-export const MONGODB_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands(VFSName.MONGODB, {
+export const MONGODB_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.MONGODB, {
     overrides: MONGODB_OVERRIDES,
   }),
   ...MONGODB_CAT,

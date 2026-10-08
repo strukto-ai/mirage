@@ -433,7 +433,7 @@ export {
 // module so a consumer of this package needs no second dependency on
 // core to reach them (`@struktoai/mirage-core/<path>` works too).
 export { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-export { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+export { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 export { FlagView } from '@struktoai/mirage-core/commands/spec/flag_view'
 export { type FlagValue, UsageStyle } from '@struktoai/mirage-core/commands/spec/types'
 export type { CLIDoors } from '@struktoai/mirage-core/commands/cli/types'

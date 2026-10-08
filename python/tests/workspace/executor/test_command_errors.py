@@ -45,7 +45,7 @@ def failing_command(name, error, lazy=True):
 async def test_lazy_errors_remain_on_the_producer(error, tail, expected):
     bad = RAMVFS()
     ws = Workspace({"/bad": bad, "/out": RAMVFS()}, mode="exec")
-    ws.mount("/bad").register_fns([failing_command("cat", error)])
+    ws.mount("/bad").register_commands([failing_command("cat", error)])
     try:
         await ws.shell("echo data >/bad/f")
         result = await ws.shell("echo before; cat /bad/f 2>/dev/null" + tail)
@@ -75,7 +75,7 @@ async def test_nested_mount_failure_keeps_the_line(name, caplog):
     if name == "ls -R":
         override(ws.mount("/bad").vfs, "readdir", failing_readdir)
     else:
-        ws.mount("/bad").register_fns(
+        ws.mount("/bad").register_commands(
             [failing_command(name, error, lazy=False)]
         )
     try:
@@ -102,8 +102,10 @@ async def test_nested_mount_failure_keeps_the_line(name, caplog):
 async def test_lazy_timeout_still_reaches_the_timeout_handler():
     vfs = RAMVFS()
     mount = MountEntry("/bad/", vfs)
-    mount.register_fns([failing_command("cat", CommandTimeoutError("cat", 1))])
-    out, _ = await mount.execute_cmd(
+    mount.register_commands(
+        [failing_command("cat", CommandTimeoutError("cat", 1))]
+    )
+    out, _ = await mount.run_command(
         "cat", [PathSpec.from_str_path("/bad/f")], [], {}
     )
     with pytest.raises(CommandTimeoutError):

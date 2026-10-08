@@ -57,7 +57,7 @@ enum Verdict {
  * dispatcher and the file cache's own door both run, its main-op catch
  * (onOpMissing) for cross-mount and programmatic reads, and the mount
  * registry's per-command reconcile (reconcileRead) for single-mount shell
- * reads. The re-stat goes through the ops registry (not mount.executeOp,
+ * reads. The re-stat goes through the ops registry (not mount.call,
  * whose op set omits stat). Reconcile state follows each consumer's store
  * (RAM local, Redis shared across runtimes), so this is a thin coordinator
  * holding references, not config.

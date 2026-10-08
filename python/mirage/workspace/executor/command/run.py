@@ -279,7 +279,7 @@ async def run_on_mount(
     """Run one already-parsed command on the mount that owns its paths.
 
     The shared single-mount execution tail: mount resolution, session
-    mode checks, ``execute_cmd``, filesystem-error formatting, ls/find
+    mode checks, ``run_command``, filesystem-error formatting, ls/find
     post-processing,
     and read/write key prefixing. ``handle_command`` uses it for the normal
     path, and passes it (bound) to the cross-mount runners so each operand
@@ -356,7 +356,7 @@ async def run_on_mount(
     try:
         return await run_claiming(
             mount.prefix.rstrip("/"),
-            lambda: mount.execute_cmd(
+            lambda: mount.run_command(
                 cmd_name,
                 paths,
                 texts,

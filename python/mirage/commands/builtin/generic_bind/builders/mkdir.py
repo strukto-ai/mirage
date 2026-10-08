@@ -16,7 +16,7 @@ from dataclasses import replace
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     require_op,
 )
@@ -303,4 +303,4 @@ async def _enter_node(
     return None
 
 
-BUILDER = Builder("mkdir", mkdir, write=True)
+BUILDER = GenericCommand("mkdir", mkdir, write=True)

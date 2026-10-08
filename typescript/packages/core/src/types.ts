@@ -841,7 +841,7 @@ export type StatFn<Args extends unknown[] = [path: PathSpec, index?: IndexCacheS
  * What proving a running command's `.` and `..` reads.
  *
  * The command tier reaches its backend past the dispatcher's door, so
- * `Mount.executeCmd` binds the door's facts for it: `stat` is the door's
+ * `Mount.runCommand` binds the door's facts for it: `stat` is the door's
  * stat (throwing when nothing is there) and `follow` the namespace's link
  * resolution, null while it holds none. The kernel walk (`followPaths`)
  * rewrites an operand to its link's target before the handler runs;

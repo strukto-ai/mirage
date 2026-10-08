@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 )
 from mirage.commands.builtin.generic.unzip import unzip_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     require_op,
@@ -68,4 +68,4 @@ async def unzip(
     )
 
 
-BUILDER = Builder("unzip", unzip, write=True)
+BUILDER = GenericCommand("unzip", unzip, write=True)

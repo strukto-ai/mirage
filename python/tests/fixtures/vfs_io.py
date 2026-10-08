@@ -99,7 +99,7 @@ def served(vfs: BaseVFS) -> set[str]:
         vfs (BaseVFS): the VFS under test.
     """
     mount = MountEntry("/", vfs)
-    return {op for op in DOOR_OPS if mount.has_op(op)}
+    return {op for op in DOOR_OPS if mount.answers(op)}
 
 
 def override(vfs: BaseVFS, name: str, fn: Callable[..., Any]) -> BaseVFS:
@@ -192,5 +192,5 @@ def install(mount: MountEntry, fns: list[Callable[..., Any]]) -> MountEntry:
         else:
             override(mount.vfs, marked[0], fn)
     if commands:
-        mount.register_fns(commands)
+        mount.register_commands(commands)
     return mount

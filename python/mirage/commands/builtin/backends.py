@@ -15,8 +15,8 @@
 import importlib
 from dataclasses import replace
 
-from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.config import RegisteredCommand, registered_commands
+from mirage.commands.builtin.generic_bind import generic_commands
+from mirage.commands.config import Command, registered_commands
 from mirage.vfs.base import BaseVFS
 
 # The module holding each builtin VFS class's shell commands (its
@@ -74,7 +74,7 @@ _MODULES: dict[str, str] = {
 }
 
 
-def commands_for(vfs: BaseVFS) -> list[RegisteredCommand]:
+def commands_for(vfs: BaseVFS) -> list[Command]:
     """Every shell command a mount of ``vfs`` serves.
 
     A builtin's are its command module's, found through the first class
@@ -87,7 +87,7 @@ def commands_for(vfs: BaseVFS) -> list[RegisteredCommand]:
     Args:
         vfs (BaseVFS): the VFS being mounted.
     """
-    found: list[RegisteredCommand] | None = None
+    found: list[Command] | None = None
     for klass in type(vfs).__mro__:
         module = _MODULES.get(f"{klass.__module__}.{klass.__qualname__}")
         if module is None:
@@ -102,7 +102,7 @@ def commands_for(vfs: BaseVFS) -> list[RegisteredCommand]:
         break
     if found is None:
         found = registered_commands(
-            make_generic_commands(vfs.name, overrides=vfs.overrides)
+            generic_commands(vfs.name, overrides=vfs.overrides)
         )
     kept = [rc for rc in found if rc.name not in vfs.overrides]
     return [*kept, *registered_commands(vfs.commands())]

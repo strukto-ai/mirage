@@ -30,7 +30,7 @@ from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.builtin.utils.paths import dispatch_stat, link_follow
-from mirage.commands.config import CommandOpts, ExecContext, RegisteredCommand
+from mirage.commands.config import Command, CommandOpts, ExecContext
 from mirage.commands.errors import CommandTimeoutError, UsageError
 from mirage.commands.resolve import get_extension
 from mirage.commands.spec import CommandSpec
@@ -373,8 +373,8 @@ class MountEntry:
         # Empty during normal runs; populated only by the snapshot
         # loader.
         self.revisions: dict[str, str] = {}
-        self._cmds: dict[tuple[Any, ...], RegisteredCommand] = {}
-        self._general_cmds: dict[str, RegisteredCommand] = {}
+        self._cmds: dict[tuple[Any, ...], Command] = {}
+        self._general_cmds: dict[str, Command] = {}
         self._cmd_specs: dict[str, CommandSpec] = {}
         # first token -> descending token counts of multi-word command
         # names (e.g. "gws docs documents get"); backs longest-prefix
@@ -395,13 +395,13 @@ class MountEntry:
         finally:
             release()
 
-    def has_op(self, name: str) -> bool:
+    def answers(self, name: str) -> bool:
         """Whether this mount answers the op ``name``.
 
         Args:
             name (str): the op name.
         """
-        return bool(self._calls(name, None))
+        return bool(self._callers(name, None))
 
     async def expand_glob(
         self, paths: list[PathSpec], prefix: str
@@ -486,7 +486,7 @@ class MountEntry:
 
     # ── command registration ──────────────────────────
 
-    def register(self, cmd: RegisteredCommand) -> None:
+    def register(self, cmd: Command) -> None:
         """Register a VFS-specific command."""
         key = (cmd.name, cmd.filetype)
         self._cmds[key] = cmd
@@ -496,7 +496,7 @@ class MountEntry:
 
     def register_general(
         self,
-        cmd: RegisteredCommand,
+        cmd: Command,
     ) -> None:
         """Register a general command (vfs=None).
 
@@ -512,7 +512,7 @@ class MountEntry:
         self,
         cmd_name: str,
         extension: str | None = None,
-    ) -> RegisteredCommand | None:
+    ) -> Command | None:
         """Resolve command with fallback hierarchy.
 
         Lookup order:
@@ -571,10 +571,10 @@ class MountEntry:
         """Get the spec for a command name."""
         return self._cmd_specs.get(cmd_name)
 
-    def all_commands(self) -> list[RegisteredCommand]:
+    def all_commands(self) -> list[Command]:
         """All registered commands (per-mount + general), deduped by name."""
         seen: set[str] = set()
-        out: list[RegisteredCommand] = []
+        out: list[Command] = []
         for rc in self._cmds.values():
             if rc.name in seen:
                 continue
@@ -611,11 +611,11 @@ class MountEntry:
                     fns[ft] = rc.fn
         return fns
 
-    def register_fns(self, fns: Iterable[Any]) -> None:
+    def register_commands(self, fns: Iterable[Any]) -> None:
         """Register decorated functions or command definitions.
 
         Args:
-            fns (iterable): Decorated functions or RegisteredCommand
+            fns (iterable): Decorated functions or Command
                 values.
 
         Raises:
@@ -627,11 +627,11 @@ class MountEntry:
         # sibling and are simply skipped. A name whose entries name only
         # other VFS is the real mistake (a table built for the wrong
         # backend), and that still raises.
-        cmd_groups: dict[str, tuple[list[RegisteredCommand], set[str]]] = {}
+        cmd_groups: dict[str, tuple[list[Command], set[str]]] = {}
         for fn in fns:
-            rcs: list[RegisteredCommand] = (
+            rcs: list[Command] = (
                 [fn]
-                if isinstance(fn, RegisteredCommand)
+                if isinstance(fn, Command)
                 else getattr(fn, "_registered_commands", [])
             )
             for rc in rcs:
@@ -736,7 +736,7 @@ class MountEntry:
 
     # ── execution ─────────────────────────────────────
 
-    async def execute_cmd(
+    async def run_command(
         self,
         cmd_name: str,
         paths: list[PathSpec],
@@ -757,7 +757,7 @@ class MountEntry:
             flag_kwargs (dict): parsed flags from upstream.
             context (ExecContext): the invocation's execution context —
                 everything the workspace supplies beyond the parsed line
-                (the fifth argument TypeScript's ``executeCmd`` has
+                (the fifth argument TypeScript's ``runCommand`` has
                 always taken); re-boxed whole onto ``CommandOpts``
                 beside the facts only this mount can supply. A handler
                 reads the fields it wants, so no list of command names
@@ -792,7 +792,7 @@ class MountEntry:
         cmd_name: str,
         paths: list[PathSpec],
         stat_path: StatPath | None,
-    ) -> tuple[list[RegisteredCommand], str | None]:
+    ) -> tuple[list[Command], str | None]:
         """The handlers to try in order, and the extension that chose them.
 
         A filetype handler is selected from the operand's NAME, and a
@@ -903,7 +903,7 @@ class MountEntry:
         """The one typed bag a handler reads, built here and nowhere else.
 
         A handler reads the fields it wants and ignores the rest, so there
-        is no opt-in registry (mirrors Mount.executeCmd building
+        is no opt-in registry (mirrors Mount.runCommand building
         CommandOpts).
 
         Args:
@@ -993,7 +993,7 @@ class MountEntry:
     def _read_only_refusal(
         self,
         cmd_name: str,
-        cmd: RegisteredCommand,
+        cmd: Command,
         flags: dict[str, FlagValue],
     ) -> IOResult | None:
         """Refuse a write command no door would see, on a read-only mount.
@@ -1013,7 +1013,7 @@ class MountEntry:
 
         Args:
             cmd_name (str): command name.
-            cmd (RegisteredCommand): the handler about to run.
+            cmd (Command): the handler about to run.
             flags (dict[str, FlagValue]): the keyed flags.
         """
         info_only = flags.get("help") is True or (
@@ -1036,7 +1036,7 @@ class MountEntry:
     async def _run_handler(
         self,
         cmd_name: str,
-        cmd: RegisteredCommand,
+        cmd: Command,
         paths: list[PathSpec],
         texts: list[str],
         opts: CommandOpts,
@@ -1051,7 +1051,7 @@ class MountEntry:
 
         Args:
             cmd_name (str): command name.
-            cmd (RegisteredCommand): the handler to run.
+            cmd (Command): the handler to run.
             paths (list[PathSpec]): the keyed path operands.
             texts (list[str]): positional text args.
             opts (CommandOpts): the handler's options.
@@ -1078,7 +1078,7 @@ class MountEntry:
     def _wrap_output(
         self,
         cmd_name: str,
-        cmd: RegisteredCommand,
+        cmd: Command,
         paths: list[PathSpec],
         result: Any,
     ) -> tuple[ByteSource | None, IOResult]:
@@ -1086,7 +1086,7 @@ class MountEntry:
 
         Args:
             cmd_name (str): command name.
-            cmd (RegisteredCommand): the handler that answered.
+            cmd (Command): the handler that answered.
             paths (list[PathSpec]): the keyed path operands.
             result (Any): the handler's ``(stream, io)`` answer.
         """
@@ -1112,9 +1112,9 @@ class MountEntry:
             op_name (str): operation name (e.g. "setattr").
             path (str): virtual path (drives filetype-specific lookup).
         """
-        return bool(self._calls(op_name, get_extension(path)))
+        return bool(self._callers(op_name, get_extension(path)))
 
-    def _calls(
+    def _callers(
         self, op_name: str, filetype: str | None
     ) -> list[Callable[..., Any]]:
         """What answers ``op_name`` on this mount, in the order to try.
@@ -1211,7 +1211,7 @@ class MountEntry:
         await refuse_taken(self.vfs.stat, path, parents)
         await self.vfs.mkdir(path, parents=parents)
 
-    async def execute_op(
+    async def call(
         self,
         op_name: str,
         path: str,
@@ -1242,7 +1242,7 @@ class MountEntry:
                 if "filetype" in kwargs
                 else get_extension(path)
             )
-            levels = self._calls(op_name, filetype)
+            levels = self._callers(op_name, filetype)
             if not levels:
                 raise enotsup(str(self.vfs.name), op_name, path)
 

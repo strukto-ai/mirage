@@ -15,7 +15,7 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import type { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
-import type { RegisteredCommand, CommandIO } from '../../config.ts'
+import type { Command, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { statGeneric } from '../generic/stat.ts'
 import { overMountIo } from '../generic_bind/adapter.ts'
@@ -45,7 +45,7 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
 }
 
 /** The keyed-store `stat` over the running mount's table, guarded by `wrap`. */
-export function makeStat(vfs: string, wrap: (io: CommandIO) => CommandIO): RegisteredCommand[] {
+export function makeStat(vfs: string, wrap: (io: CommandIO) => CommandIO): Command[] {
   return command({
     name: 'stat',
     vfs,

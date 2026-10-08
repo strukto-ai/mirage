@@ -48,8 +48,8 @@ describe('HfModelsVFS', () => {
   it('exposes the python-parity op table and flags', () => {
     const vfs = new HfModelsVFS({ repoId: 'ns/model' })
     const mount = new MountEntry({ prefix: '/', vfs })
-    for (const op of OPS) expect(mount.hasOp(op)).toBe(true)
-    for (const op of ABSENT_OPS) expect(mount.hasOp(op)).toBe(false)
+    for (const op of OPS) expect(mount.answers(op)).toBe(true)
+    for (const op of ABSENT_OPS) expect(mount.answers(op)).toBe(false)
     expect(vfs.name).toBe('hf_models')
     expect(vfs.cachesReads).toBe(true)
     expect(vfs.supportsSnapshot).toBe(true)

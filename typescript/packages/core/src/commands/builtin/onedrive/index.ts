@@ -1,7 +1,5 @@
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 
-export const ONEDRIVE_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands(VFSName.ONEDRIVE),
-]
+export const ONEDRIVE_COMMANDS: readonly Command[] = [...genericCommands(VFSName.ONEDRIVE)]

@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.fmt import fmt_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     dir_aware_stat,
     resolve_or_empty,
@@ -42,4 +42,4 @@ async def fmt(
     )
 
 
-BUILDER = Builder("fmt", fmt, read=True)
+BUILDER = GenericCommand("fmt", fmt, read=True)

@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.gcal.rm import rm
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import generic_commands
 
 COMMANDS = [
-    *make_generic_commands(
+    *generic_commands(
         "gcal",
         overrides={"rm"},
     ),

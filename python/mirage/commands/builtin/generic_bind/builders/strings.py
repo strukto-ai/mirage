@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.strings import strings_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     dir_aware_stat,
     resolve_or_empty,
@@ -42,4 +42,4 @@ async def strings(
     )
 
 
-BUILDER = Builder("strings", strings, read=True)
+BUILDER = GenericCommand("strings", strings, read=True)

@@ -101,7 +101,7 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
     mount.vfs.caches_reads = True
     mount.renders = MagicMock(return_value=False)
     mount.writes = MagicMock(return_value=False)
-    mount.execute_op = AsyncMock(return_value=b"cold")
+    mount.call = AsyncMock(return_value=b"cold")
     namespace.try_mount_for = MagicMock(return_value=mount)
     namespace.registry.policies = policies
     cache = MagicMock()
@@ -639,14 +639,14 @@ async def test_a_link_in_a_listed_directory_costs_only_the_occupancy_probes():
     with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
         await ws.shell("mkdir /ram/d; echo hi > /ram/d/a.txt")
         mount = ws.namespace.mount_for("/ram/d")
-        execute = mount.execute_op
+        execute = mount.call
         seen: list[tuple[str, str]] = []
 
         async def spy(op, path, *args, **kwargs):
             seen.append((op, path))
             return await execute(op, path, *args, **kwargs)
 
-        mount.execute_op = spy
+        mount.call = spy
         await ws.dispatch(
             "symlink", PathSpec.from_str_path("/ram/d/x"), target="t"
         )
@@ -680,7 +680,7 @@ async def test_a_link_rename_refuses_a_landing_its_parent_cannot_hold(
 
 @pytest.mark.asyncio
 async def test_the_remnant_channel_invalidates_each_deletion():
-    # The cascade's execute_op calls run outside the cache-manager
+    # The cascade's call calls run outside the cache-manager
     # context command execution establishes, so the channel discharges
     # the dispatcher's write invalidation itself, per deletion, and
     # holds each deletion to the pre-vfs admission with its own child
@@ -690,7 +690,7 @@ async def test_the_remnant_channel_invalidates_each_deletion():
     # missing-path failure means the tree changed under the walk, and
     # the walk's own earlier listing must not survive it.
     mount = MagicMock()
-    mount.execute_op = AsyncMock(return_value=["h"])
+    mount.call = AsyncMock(return_value=["h"])
     seen: list[str] = []
     admitted: list[tuple[str, str]] = []
 
@@ -712,7 +712,7 @@ async def test_the_remnant_channel_invalidates_each_deletion():
     await channel.rmdir(_path("/data/d"))
     assert seen == ["/data/d/h", "/data/d"]
     assert admitted == [("unlink", "/data/d/h"), ("rmdir", "/data/d")]
-    mount.execute_op = AsyncMock(side_effect=FileNotFoundError("/data/d/h"))
+    mount.call = AsyncMock(side_effect=FileNotFoundError("/data/d/h"))
     with pytest.raises(FileNotFoundError):
         await channel.unlink(_path("/data/d/h"))
     assert seen == ["/data/d/h", "/data/d", "/data/d/h"]
@@ -854,14 +854,14 @@ async def test_a_non_oserror_cascade_failure_keeps_the_refusal(monkeypatch):
     io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
     assert io.exit_code == 0, io.stderr
     sess = ws.create_session("rev", profile={"paths": {"hide": ["/a/d/sec"]}})
-    real = MountEntry.execute_op
+    real = MountEntry.call
 
     async def boom(self, op, virtual, **kwargs):
         if op == "unlink" and virtual == "/a/d/sec/k":
             raise RuntimeError("api exploded")
         return await real(self, op, virtual, **kwargs)
 
-    monkeypatch.setattr(MountEntry, "execute_op", boom)
+    monkeypatch.setattr(MountEntry, "call", boom)
     token = set_current_session(sess)
     try:
         with pytest.raises(OSError) as exc:
@@ -969,7 +969,7 @@ async def test_a_backend_stat_extra_is_not_an_attribute():
     dispatcher, _ = _dispatcher(Policies())
     dispatcher._namespace.is_link = MagicMock(return_value=False)
     dispatcher._namespace.xattrs = MagicMock(return_value={"user.tag": b"t"})
-    dispatcher._namespace.try_mount_for.return_value.execute_op = AsyncMock(
+    dispatcher._namespace.try_mount_for.return_value.call = AsyncMock(
         return_value=FileStat(
             name="d", type=FileType.DIRECTORY, extra={"file_id": "1AbC"}
         )
@@ -1075,7 +1075,7 @@ async def test_shell_mutations_share_read_only_admission(command, diagnostic):
         )
         mount = ws.namespace.mount_for("/ro/file")
         mount.mode = MountMode.READ
-        execute = mount.execute_op
+        execute = mount.call
 
         async def no_content_read(op, *args, **kwargs):
             assert op not in {"read", "read_bytes"}, (
@@ -1083,12 +1083,12 @@ async def test_shell_mutations_share_read_only_admission(command, diagnostic):
             )
             return await execute(op, *args, **kwargs)
 
-        mount.execute_op = no_content_read
+        mount.call = no_content_read
         result = await ws.shell(command)
         assert result.exit_code == 1
         assert await result.stderr_str() == diagnostic
         assert not ws.namespace.is_link("/ro/link")
-        mount.execute_op = execute
+        mount.call = execute
         body, _ = await ws.dispatch("read", PathSpec.from_str_path("/ro/file"))
         assert body == b"original"
 
@@ -1122,7 +1122,7 @@ async def test_rmdir_keeps_a_link_created_while_the_backend_removes():
     with Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE) as ws:
         await ws.shell("mkdir /data/d; ln -s nowhere /data/d/old")
         mount = ws.namespace.mount_for("/data/d")
-        execute = mount.execute_op
+        execute = mount.call
 
         async def link_arrives(op, *args, **kwargs):
             if op == "rmdir":
@@ -1133,7 +1133,7 @@ async def test_rmdir_keeps_a_link_created_while_the_backend_removes():
                 )
             return await execute(op, *args, **kwargs)
 
-        mount.execute_op = link_arrives
+        mount.call = link_arrives
         session = ws.create_session(
             "remover", profile={"paths": {"hide": ["/data/d/old"]}}
         )
@@ -1444,13 +1444,13 @@ async def test_the_mark_never_reaches_the_op(monkeypatch):
     # arguments, whatever the command's dispatcher carried.
     ws = await _linked_ws()
     seen: list[dict] = []
-    real = MountEntry.execute_op
+    real = MountEntry.call
 
     async def spy(self, op, *args, **kwargs):
         seen.append(dict(kwargs))
         return await real(self, op, *args, **kwargs)
 
-    monkeypatch.setattr(MountEntry, "execute_op", spy)
+    monkeypatch.setattr(MountEntry, "call", spy)
     try:
         gate = _RefusingGate("/nothing")
         await ws.dispatch("read", _path("/data/real/secret"), rule_gate=gate)

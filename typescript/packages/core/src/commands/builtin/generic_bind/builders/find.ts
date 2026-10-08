@@ -20,9 +20,9 @@ import { findGeneric } from '../../generic/find.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { CommandFnResult, CommandOpts, CommandIO } from '../../../config.ts'
-import { type Builder, overlaidStat, resolveGlobOf } from '../adapter.ts'
+import { type GenericCommand, overlaidStat, resolveGlobOf } from '../adapter.ts'
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'find',
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined

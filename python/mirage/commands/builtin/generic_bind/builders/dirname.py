@@ -14,7 +14,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.dirname import dirname as generic_dirname
-from mirage.commands.builtin.generic_bind.adapter import Builder
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -33,4 +33,4 @@ async def dirname(
     return await generic_dirname(*texts, zero=fl.as_bool("zero"))
 
 
-BUILDER = Builder("dirname", dirname)
+BUILDER = GenericCommand("dirname", dirname)

@@ -80,8 +80,8 @@ from mirage.vfs.types import (
 logger = logging.getLogger(__name__)
 
 
-class BuilderFn(Protocol):
-    """Builder body: a CommandFn with the backend's ops bound in front."""
+class GenericCommandFn(Protocol):
+    """GenericCommand body: a CommandFn with the backend's ops bound in front."""
 
     def __call__(
         self,
@@ -164,9 +164,9 @@ class Operation(StrEnum):
 
 
 @dataclass(frozen=True)
-class Builder:
+class GenericCommand:
     name: str
-    fn: BuilderFn
+    fn: GenericCommandFn
     write: bool = False
     aggregate: AggregateFn | None = None
     read: bool = False

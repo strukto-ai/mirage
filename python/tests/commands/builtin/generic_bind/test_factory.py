@@ -24,7 +24,7 @@ from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.generic_bind.factory import (
     _run_with_namespace_globs,
-    make_generic_commands,
+    generic_commands,
     scan_io,
     with_probe_answers,
     with_read_cache,
@@ -92,7 +92,7 @@ def test_factory_registers_every_command_whatever_the_backend_lacks():
     # writes is refused at the missing op instead of the command being
     # absent.
     _CountingBackend(b"payload")
-    commands = make_generic_commands("limited")
+    commands = generic_commands("limited")
     names = {
         registered.name
         for command in commands
@@ -321,7 +321,7 @@ def test_a_name_no_builder_has_is_refused(option):
     registered beside the bespoke command, and mem0's ``search`` read as
     if it displaced something."""
     with pytest.raises(ValueError, match="no generic builder named"):
-        make_generic_commands("fake", **option)
+        generic_commands("fake", **option)
 
 
 @pytest.mark.asyncio
@@ -439,7 +439,7 @@ async def test_a_command_with_its_own_stat_never_serves_the_probe():
     table = _CountingStat(_BACKEND)
     light = _CountingStat(FileStat(name="a.txt", size=1, type=FileType.FILE))
     base = _stat_ops(table)
-    commands = make_generic_commands(
+    commands = generic_commands(
         "s3", adapt={"ls": lambda io: replace(io, stat=light)}
     )
     manager = CacheManager(RAMFileCacheStore(), None, "/s3/", True)

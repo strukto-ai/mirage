@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import * as abort from './abort.ts'
-import { RegisteredCommand } from '../commands/config.ts'
+import { Command } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMObserverStore } from '../observe/store.ts'
@@ -392,7 +392,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     // and yields past the grace, so the drain settles on a shell the
     // caller was already released from.
     const ws = await makeWs()
-    const late = new RegisteredCommand({
+    const late = new Command({
       name: 'latecmd',
       spec: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
       vfs: VFSName.RAM,

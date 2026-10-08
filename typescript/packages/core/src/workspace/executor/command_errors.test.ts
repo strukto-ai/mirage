@@ -96,6 +96,6 @@ it('does not convert a lazy timeout into a normal failure', async () => {
   const vfs = new RAMVFS()
   const mount = new MountEntry({ prefix: '/bad/', vfs })
   for (const cmd of failingCommand('cat', new CommandTimeoutError('cat', 1))) mount.register(cmd)
-  const [out] = await mount.executeCmd('cat', [PathSpec.fromStrPath('/bad/f')], [], {})
+  const [out] = await mount.runCommand('cat', [PathSpec.fromStrPath('/bad/f')], [], {})
   await expect(materialize(out)).rejects.toBeInstanceOf(CommandTimeoutError)
 })

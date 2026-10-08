@@ -6,7 +6,7 @@ from mirage.commands.builtin.generic.truncate import (
     truncate_generic as generic_truncate,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     require_op,
@@ -34,4 +34,4 @@ async def truncate(
     )
 
 
-BUILDER = Builder("truncate", truncate, write=True)
+BUILDER = GenericCommand("truncate", truncate, write=True)

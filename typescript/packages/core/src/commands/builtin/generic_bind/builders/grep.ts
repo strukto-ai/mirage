@@ -22,9 +22,9 @@ import { prefixAggregate } from '../../aggregators.ts'
 import { grepGeneric, labelled } from '../../generic/grep.ts'
 import { patternArg } from '../../grep_pattern.ts'
 import { grepNeedsEveryFile } from '../../grep_pushdown.ts'
-import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const grep: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+const grep: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   if (ops.search !== undefined) return runSearch(ops, 'grep', accessor, paths, texts, opts)
   const idx = opts.index ?? undefined
   let resolved: PathSpec[] = []
@@ -57,7 +57,7 @@ const grep: BuilderFn = async (ops, accessor, paths, texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'grep',
   read: true,
   aggregate: prefixAggregate,

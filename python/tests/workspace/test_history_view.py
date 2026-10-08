@@ -72,7 +72,7 @@ def test_history_command_per_session():
 
 def test_history_builtin_wins_over_mount_command():
     ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)})
-    ws.mount("/data").register_fns([fake_history])
+    ws.mount("/data").register_commands([fake_history])
     _exec(ws, "ls /data")
     out = _stdout(_exec(ws, "history", cwd="/data"))
     assert "FAKE" not in out

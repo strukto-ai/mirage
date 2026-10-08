@@ -39,7 +39,7 @@ class DoorOps {
 
   /** Whether the door answers `name` on this VFS. */
   has(name: string): boolean {
-    return this.mount.hasOp(name)
+    return this.mount.answers(name)
   }
 
   /** Call op `name` on `path`; `index` defaults to this instance's store. */

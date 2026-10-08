@@ -220,7 +220,7 @@ def _whole_read(kwargs: dict[str, Any]) -> dict[str, Any]:
 @dataclass(frozen=True, slots=True)
 class _MountChannel:
     """The ops plane's remnant channel: every step goes through
-    ``Mount.execute_op``, the same door a first-class op takes, so the
+    ``Mount.call``, the same door a first-class op takes, so the
     mode axis refuses a protected path exactly as normal dispatch
     would. Only the dispatcher's own visibility filter sits above that
     door, which is what lets the cascade see hidden entries.
@@ -232,7 +232,7 @@ class _MountChannel:
     exactly as it would refuse a first-class op. Each deletion also
     discharges the dispatcher's own write invalidation, the way normal
     dispatch does for its one op and the TS ``fencedCall`` does per
-    call: ``execute_op`` runs outside the cache-manager context command
+    call: ``call`` runs outside the cache-manager context command
     execution establishes, so the cores' invalidation cannot land, and
     the dispatch-level invalidation of the rmdir target covers the root
     and its ancestors, never the cascade's descendants. Invalidation
@@ -255,22 +255,22 @@ class _MountChannel:
     invalidate: Callable[[PathSpec], Awaitable[None]]
 
     async def readdir(self, spec: PathSpec) -> list[str]:
-        return await self.mount.execute_op("readdir", spec.virtual)
+        return await self.mount.call("readdir", spec.virtual)
 
     async def stat(self, spec: PathSpec) -> FileStat:
-        return await self.mount.execute_op("stat", spec.virtual)
+        return await self.mount.call("stat", spec.virtual)
 
     async def unlink(self, spec: PathSpec) -> None:
         await self.boundary.admit("unlink", spec, True, check_hidden=False)
         try:
-            await self.mount.execute_op("unlink", spec.virtual)
+            await self.mount.call("unlink", spec.virtual)
         finally:
             await self.invalidate(spec)
 
     async def rmdir(self, spec: PathSpec) -> None:
         await self.boundary.admit("rmdir", spec, True, check_hidden=False)
         try:
-            await self.mount.execute_op("rmdir", spec.virtual)
+            await self.mount.call("rmdir", spec.virtual)
         finally:
             await self.invalidate(spec)
 
@@ -881,7 +881,7 @@ class Dispatcher:
                 kept = await filler.fill(
                     call.path,
                     functools.partial(
-                        mount.execute_op,
+                        mount.call,
                         call.op,
                         call.path.virtual,
                         **_whole_read(kwargs),
@@ -896,9 +896,7 @@ class Dispatcher:
             elif call.op in SERIAL_WRITE_OPS:
                 result = await self._serial_write(call, mount)
             else:
-                result = await mount.execute_op(
-                    call.op, call.path.virtual, **kwargs
-                )
+                result = await mount.call(call.op, call.path.virtual, **kwargs)
         except (FileNotFoundError, NotADirectoryError):
             result = self._namespace_result(call.op, call.path.virtual)
             if result is None:
@@ -948,9 +946,7 @@ class Dispatcher:
         async with AsyncExitStack() as held:
             for key in sorted(keys):
                 await held.enter_async_context(self._writers.with_lock(key))
-            result = await mount.execute_op(
-                call.op, call.path.virtual, **kwargs
-            )
+            result = await mount.call(call.op, call.path.virtual, **kwargs)
             _served(call.report, result)
             await self._settle_write(mount, call.op, call.path, kwargs)
         return result
@@ -1077,7 +1073,7 @@ class Dispatcher:
         if mount is None:
             return True
         try:
-            row = await mount.execute_op("stat", path.virtual)
+            row = await mount.call("stat", path.virtual)
         except (FileNotFoundError, NotADirectoryError):
             return False
         except OSError:
@@ -1112,7 +1108,7 @@ class Dispatcher:
         if not hidden_under(vis, path.virtual):
             raise refusal
         try:
-            entries = await mount.execute_op("readdir", path.virtual)
+            entries = await mount.call("readdir", path.virtual)
         except Exception as exc:
             # A backend that cannot list (or later, remove) the
             # remnants keeps the original refusal: the door has no way
@@ -1554,7 +1550,7 @@ class Dispatcher:
         boundary = self._boundary(mount)
         await boundary.admit(op, path, False)
         try:
-            result = await mount.execute_op(op, path.virtual)
+            result = await mount.call(op, path.virtual)
             return await boundary.complete(op, path, False, result)
         except NotADirectoryError:
             # Final on every channel: a plain file above the path means
@@ -1677,7 +1673,7 @@ class Dispatcher:
         if mount is not None:
             await mount.ensure_ready()
             try:
-                stat = await mount.execute_op("stat", path.virtual)
+                stat = await mount.call("stat", path.virtual)
             except (FileNotFoundError, NotADirectoryError) as exc:
                 missing = exc
                 await self._reconciler.on_op_missing(
@@ -1719,7 +1715,7 @@ class Dispatcher:
             # would refuse a missing one: the overlay would stamp it.
             await self._xattr_target(mount, path)
             return await self._overlay_setattr(path, kwargs)
-        residual = await mount.execute_op("setattr", path.virtual, **kwargs)
+        residual = await mount.call("setattr", path.virtual, **kwargs)
         applied = [
             key
             for key, value in requested.items()

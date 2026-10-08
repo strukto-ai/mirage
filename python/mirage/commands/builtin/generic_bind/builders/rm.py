@@ -18,7 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic.rm_cmd import rm_without_operands
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     require_op,
@@ -150,4 +150,4 @@ async def rm(
     )
 
 
-BUILDER = Builder("rm", rm, write=True)
+BUILDER = GenericCommand("rm", rm, write=True)

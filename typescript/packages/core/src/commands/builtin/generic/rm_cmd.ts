@@ -21,7 +21,7 @@ import {
   command,
   type CommandFnResult,
   type CommandOpts,
-  type RegisteredCommand,
+  type Command,
   type CommandIO,
 } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
@@ -51,10 +51,7 @@ export function rmWithoutOperands(force: boolean): CommandFnResult {
  * gives the generic rm's slots, so this family enforces the session's
  * path axis like the command it stands in for.
  */
-export function makeRm<A extends Accessor>(
-  vfs: VFSName,
-  rawUnlink: UnlinkFn<A>,
-): RegisteredCommand[] {
+export function makeRm<A extends Accessor>(vfs: VFSName, rawUnlink: UnlinkFn<A>): Command[] {
   const unlink = withWriteGuards(rawUnlink)
   return command({
     name: 'rm',

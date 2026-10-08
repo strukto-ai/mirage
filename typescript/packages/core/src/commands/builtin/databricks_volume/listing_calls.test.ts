@@ -25,7 +25,7 @@ import {
 } from '../../../core/databricks_volume/_test_util.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { materialize } from '../../../io/types.ts'
-import type { RegisteredCommand } from '../../config.ts'
+import type { Command } from '../../config.ts'
 import { PathSpec } from '../../../types.ts'
 import { DATABRICKS_VOLUME_COMMANDS } from './index.ts'
 import { ioFor } from '../../../test-utils.ts'
@@ -37,7 +37,7 @@ const DAY_S = 86_400
 const AGES_DAYS = [1, 2, 3, 10, 20]
 const DEC = new TextDecoder()
 
-function cmdOf(name: string): RegisteredCommand {
+function cmdOf(name: string): Command {
   const cmd = DATABRICKS_VOLUME_COMMANDS.find((c) => c.name === name)
   if (cmd === undefined) throw new Error(`${name} not registered`)
   return cmd

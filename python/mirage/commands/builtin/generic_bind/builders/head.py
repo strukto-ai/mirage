@@ -16,7 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.head import head_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     dir_aware_stat,
     resolve_or_empty,
@@ -43,4 +43,4 @@ async def head(
     )
 
 
-BUILDER = Builder("head", head, aggregate=header_aggregate, read=True)
+BUILDER = GenericCommand("head", head, aggregate=header_aggregate, read=True)

@@ -2,7 +2,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.od import od_generic as generic_od
 from mirage.commands.builtin.generic.od import parse_count
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
@@ -44,4 +44,4 @@ async def od(
     )
 
 
-BUILDER = Builder("od", od, read=True)
+BUILDER = GenericCommand("od", od, read=True)

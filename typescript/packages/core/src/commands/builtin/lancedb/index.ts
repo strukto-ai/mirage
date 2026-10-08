@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
+import type { Command } from '../../config.ts'
 import { makeSearch } from '../generic/search.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 
-export const LANCEDB_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands(VFSName.LANCEDB),
+export const LANCEDB_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.LANCEDB),
   ...makeSearch(VFSName.LANCEDB),
 ]

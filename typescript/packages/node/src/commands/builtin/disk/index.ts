@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type { RegisteredCommand, CommandIO } from '@struktoai/mirage-core/commands/config'
+import { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import type { Command, CommandIO } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 // Shell traversals need partial results and per-directory errors; the shared
@@ -25,6 +25,6 @@ function walked(io: CommandIO): CommandIO {
   return rest
 }
 
-export const DISK_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands(VFSName.DISK, { table: walked, local: true }),
+export const DISK_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.DISK, { table: walked, local: true }),
 ]

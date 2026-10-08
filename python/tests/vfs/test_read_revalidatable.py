@@ -796,7 +796,7 @@ async def _partial_read(ws: Workspace, fake: Fake, virtual: str) -> bytes:
 async def _reconcile_stat(ws: Workspace, virtual: str) -> FileStat:
     # Reconcile stats through a fresh index (workspace/reconcile.py), so a
     # listing's index row, which carries no token, cannot answer for it.
-    return await ws.mount(virtual).execute_op(
+    return await ws.mount(virtual).call(
         "stat", virtual, index=RAMIndexCacheStore()
     )
 

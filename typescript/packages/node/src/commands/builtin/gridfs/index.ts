@@ -12,16 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import {
   makeObjectStoreCommands,
   OBJECT_STORE_OVERRIDES,
 } from '@struktoai/mirage-core/commands/builtin/object_store/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
+import type { Command } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
 
-export const GRIDFS_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands(VFSName.GRIDFS, {
+export const GRIDFS_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.GRIDFS, {
     overrides: OBJECT_STORE_OVERRIDES,
   }),
   ...makeObjectStoreCommands(VFSName.GRIDFS),

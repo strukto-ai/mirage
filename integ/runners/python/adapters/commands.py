@@ -21,8 +21,8 @@ from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
 from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.commands.config import (
+    Command,
     CommandIO,
-    RegisteredCommand,
     command,
     registered_commands,
 )
@@ -47,7 +47,7 @@ class CommandService(RAMVFS):
     def __init__(self, metadata_only: bool = False) -> None:
         super().__init__()
         calls: list[str] = []
-        handlers: list[RegisteredCommand] = []
+        handlers: list[Command] = []
         dropped = {"grep", "rg", "find", "du"} if metadata_only else set()
         # The service's own handlers read through a plain RAM view of its
         # store; every other read reaches the refusal below.
@@ -88,8 +88,8 @@ class CommandService(RAMVFS):
         )
 
     def _search(
-        self, original: RegisteredCommand, calls: list[str], own: CommandIO
-    ) -> list[RegisteredCommand]:
+        self, original: Command, calls: list[str], own: CommandIO
+    ) -> list[Command]:
         @command(original.name, vfs="ram", spec=SPECS[original.name])
         async def search(accessor, paths, texts, opts):
             calls.extend(original.name + " " + p.virtual for p in paths)
@@ -135,7 +135,7 @@ class CommandService(RAMVFS):
 
         return registered_commands([search])
 
-    def commands(self) -> list[RegisteredCommand]:
+    def commands(self) -> list[Command]:
         return self._commands
 
     async def read(

@@ -573,7 +573,7 @@ export function dirAwareStream<A extends Accessor>(
   return (p) => streamRefusingDirs(ops, accessor, opts, p)
 }
 
-export type BuilderFn<A extends Accessor = Accessor> = (
+export type GenericCommandFn<A extends Accessor = Accessor> = (
   ops: CommandIO<A>,
   accessor: A,
   paths: PathSpec[],
@@ -581,9 +581,9 @@ export type BuilderFn<A extends Accessor = Accessor> = (
   opts: CommandOpts,
 ) => Promise<CommandFnResult> | CommandFnResult
 
-export interface Builder<A extends Accessor = Accessor> {
+export interface GenericCommand<A extends Accessor = Accessor> {
   name: string
-  fn: BuilderFn<A>
+  fn: GenericCommandFn<A>
   write?: boolean
   aggregate?: AggregateFn
   read?: boolean

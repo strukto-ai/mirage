@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.patch import patch_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     dir_aware_stat,
@@ -56,4 +56,4 @@ async def patch(
     )
 
 
-BUILDER = Builder("patch", patch, write=True)
+BUILDER = GenericCommand("patch", patch, write=True)

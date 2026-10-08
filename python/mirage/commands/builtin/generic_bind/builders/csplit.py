@@ -23,7 +23,7 @@ from mirage.commands.builtin.generic.csplit import (
     csplit_generic as generic_csplit,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     require_op,
@@ -76,4 +76,4 @@ async def csplit(
     )
 
 
-BUILDER = Builder("csplit", csplit, write=True)
+BUILDER = GenericCommand("csplit", csplit, write=True)

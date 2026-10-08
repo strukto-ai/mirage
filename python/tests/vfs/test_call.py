@@ -115,15 +115,15 @@ def test_a_function_set_on_the_instance_is_supported():
 
     notes.write = write  # type: ignore[method-assign]
     assert notes.supports("write")
-    assert MountEntry("/", notes).has_op("write")
+    assert MountEntry("/", notes).answers("write")
 
 
 def test_the_door_serves_marked_functions_only():
     mount = MountEntry("/", Notes())
-    assert mount.has_op("search_abc")
-    assert mount.has_op("stamp")
-    assert not mount.has_op("helper")
-    assert not mount.has_op("write")
+    assert mount.answers("search_abc")
+    assert mount.answers("stamp")
+    assert not mount.answers("helper")
+    assert not mount.answers("write")
 
 
 @pytest.mark.asyncio

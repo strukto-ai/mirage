@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.mktemp import mktemp_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     require_op,
 )
@@ -67,4 +67,4 @@ async def mktemp(
     return await mktemp_generic(paths, list(texts), opts, mkdir, write, exists)
 
 
-BUILDER = Builder("mktemp", mktemp, write=True)
+BUILDER = GenericCommand("mktemp", mktemp, write=True)

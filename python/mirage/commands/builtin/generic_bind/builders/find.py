@@ -21,7 +21,10 @@ from mirage.commands.builtin.generic.find import (
     find_generic,
     find_walk_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import Builder, overlaid_stat
+from mirage.commands.builtin.generic_bind.adapter import (
+    GenericCommand,
+    overlaid_stat,
+)
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.namespace_view import paths_scoped
@@ -112,4 +115,4 @@ async def find(
     )
 
 
-BUILDER = Builder("find", find)
+BUILDER = GenericCommand("find", find)

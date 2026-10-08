@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.iconv import iconv_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     require_op,
@@ -45,4 +45,4 @@ async def iconv(
     )
 
 
-BUILDER = Builder("iconv", iconv, write=True)
+BUILDER = GenericCommand("iconv", iconv, write=True)

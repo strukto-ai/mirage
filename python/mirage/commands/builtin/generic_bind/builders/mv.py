@@ -19,7 +19,7 @@ from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
 from mirage.commands.builtin.generic.mv import mv_generic as generic_mv
 from mirage.commands.builtin.generic.mv import parse_flags
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     refuse_reveal,
@@ -71,4 +71,4 @@ async def mv(
     )
 
 
-BUILDER = Builder("mv", mv, write=True)
+BUILDER = GenericCommand("mv", mv, write=True)

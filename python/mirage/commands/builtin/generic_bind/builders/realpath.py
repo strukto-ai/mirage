@@ -14,7 +14,10 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.realpath import realpath_generic
-from mirage.commands.builtin.generic_bind.adapter import Builder, bound_op
+from mirage.commands.builtin.generic_bind.adapter import (
+    GenericCommand,
+    bound_op,
+)
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -33,4 +36,4 @@ async def realpath(
     )
 
 
-BUILDER = Builder("realpath", realpath)
+BUILDER = GenericCommand("realpath", realpath)

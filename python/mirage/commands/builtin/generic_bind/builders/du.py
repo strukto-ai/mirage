@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic.du import (
     ComputeSize,
     du_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import Builder
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import MountView
@@ -240,4 +240,4 @@ async def du(
     )
 
 
-BUILDER = Builder("du", du)
+BUILDER = GenericCommand("du", du)

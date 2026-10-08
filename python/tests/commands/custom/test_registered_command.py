@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.config import RegisteredCommand, command
+from mirage.commands.config import Command, command
 from mirage.commands.spec import SPECS, CommandSpec, Operand
 from mirage.io.types import IOResult
 
@@ -23,7 +23,7 @@ def test_registered_command_dataclass():
     async def dummy(backend, paths, *texts, stdin=None, **flags):
         return b"ok", IOResult()
 
-    rc = RegisteredCommand(
+    rc = Command(
         name="cat",
         spec=SPECS["cat"],
         vfs="s3",

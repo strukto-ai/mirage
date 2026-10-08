@@ -67,9 +67,9 @@ from mirage.vfs.types import (
 
 @dataclass(frozen=True, slots=True)
 class ExecContext:
-    """What the workspace hands ``Mount.execute_cmd`` for one command.
+    """What the workspace hands ``Mount.run_command`` for one command.
 
-    ``execute_cmd`` copies these fields onto ``CommandOpts``, next to
+    ``run_command`` copies these fields onto ``CommandOpts``, next to
     the facts only the mount knows (``mount_prefix``, ``index``,
     ``filetype_fns``). Each field is named as on ``CommandOpts`` and
     means the same; ``tests/commands/test_exec_context_parity.py``
@@ -77,9 +77,9 @@ class ExecContext:
 
     Args:
         limit_override (Limit | None): The caller's output limit, which
-            ``execute_cmd`` applies itself instead of forwarding.
+            ``run_command`` applies itself instead of forwarding.
         cwd (str): The working directory as a virtual path;
-            ``execute_cmd`` turns it into a PathSpec.
+            ``run_command`` turns it into a PathSpec.
     """
 
     limit_override: Limit | None = None
@@ -167,7 +167,7 @@ class CommandIO:
 class CommandOpts:
     """Everything a command handler gets besides its operands.
 
-    ``Mount.execute_cmd`` builds one per invocation and passes it as
+    ``Mount.run_command`` builds one per invocation and passes it as
     the handler's fourth argument. A handler reads the fields it needs
     and ignores the rest.
 
@@ -259,7 +259,7 @@ class CommandFn(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class RegisteredCommand:
+class Command:
     """One command as a mount registers it.
 
     Args:
@@ -288,7 +288,7 @@ class RegisteredCommand:
     limit: Limit | None = None
     path_guarded: bool = False
 
-    def with_overrides(self, *, fn: CommandFn) -> "RegisteredCommand":
+    def with_overrides(self, *, fn: CommandFn) -> "Command":
         """A copy with the handler replaced, to register a customized
         builtin on one mount.
 
@@ -352,7 +352,7 @@ def command(
     """Register the decorated handler as a command of one or more VFSes.
 
     The decorator returns the handler wrapped to answer ``--help`` and
-    ``--version``, with one ``RegisteredCommand`` per VFS in its
+    ``--version``, with one ``Command`` per VFS in its
     ``_registered_commands`` attribute.
 
     Args:
@@ -375,7 +375,7 @@ def command(
         registrations = list(getattr(wrapped, "_registered_commands", []))
         for vfs_name in vfs if isinstance(vfs, list) else [vfs]:
             registrations.append(
-                RegisteredCommand(
+                Command(
                     name=name,
                     spec=full_spec,
                     vfs=vfs_name,
@@ -393,43 +393,43 @@ def command(
     return decorator
 
 
-CommandSource: TypeAlias = RegisteredCommand | Callable[..., Any]
+CommandSource: TypeAlias = Command | Callable[..., Any]
 
 
 def registered_commands(
     items: Iterable[CommandSource],
-) -> list[RegisteredCommand]:
+) -> list[Command]:
     """The registrations of *items*, in order.
 
     Args:
-        items (Iterable[CommandSource]): ``RegisteredCommand`` values
+        items (Iterable[CommandSource]): ``Command`` values
             and ``@command``-decorated functions.
 
     Raises:
         TypeError: An item is neither.
     """
-    values: list[RegisteredCommand] = []
+    values: list[Command] = []
     for item in items:
-        if isinstance(item, RegisteredCommand):
+        if isinstance(item, Command):
             values.append(item)
             continue
         registrations = getattr(item, "_registered_commands", None)
         if registrations is None or not all(
-            isinstance(r, RegisteredCommand) for r in registrations
+            isinstance(r, Command) for r in registrations
         ):
             raise TypeError(
-                "a command catalog takes RegisteredCommand values "
+                "a command catalog takes Command values "
                 "and @command-decorated functions"
             )
         values.extend(registrations)
     return values
 
 
-class CommandCatalog(Sequence[RegisteredCommand]):
+class CommandCatalog(Sequence[Command]):
     """A fixed list of commands, looked up by name and file extension.
 
     Args:
-        items (Iterable[CommandSource]): ``RegisteredCommand`` values
+        items (Iterable[CommandSource]): ``Command`` values
             and ``@command``-decorated functions; a later one wins a
             lookup.
     """
@@ -444,27 +444,21 @@ class CommandCatalog(Sequence[RegisteredCommand]):
         return len(self._items)
 
     @overload
-    def __getitem__(self, index: int) -> RegisteredCommand: ...
+    def __getitem__(self, index: int) -> Command: ...
 
     @overload
-    def __getitem__(self, index: slice) -> Sequence[RegisteredCommand]: ...
+    def __getitem__(self, index: slice) -> Sequence[Command]: ...
 
-    def __getitem__(
-        self, index: int | slice
-    ) -> RegisteredCommand | Sequence[RegisteredCommand]:
+    def __getitem__(self, index: int | slice) -> Command | Sequence[Command]:
         return self._items[index]
 
-    def __iter__(self) -> Iterator[RegisteredCommand]:
+    def __iter__(self) -> Iterator[Command]:
         return iter(self._items)
 
-    def get(
-        self, name: str, filetype: str | None = None
-    ) -> RegisteredCommand | None:
+    def get(self, name: str, filetype: str | None = None) -> Command | None:
         return self._by_key.get((name, filetype))
 
-    def require(
-        self, name: str, filetype: str | None = None
-    ) -> RegisteredCommand:
+    def require(self, name: str, filetype: str | None = None) -> Command:
         found = self.get(name, filetype)
         if found is None:
             raise KeyError(

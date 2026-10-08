@@ -14,7 +14,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     require_op,
 )
@@ -89,4 +89,4 @@ async def unlink(
     return None, IOResult(writes={p.mount_path: b""})
 
 
-BUILDER = Builder("unlink", unlink, write=True)
+BUILDER = GenericCommand("unlink", unlink, write=True)

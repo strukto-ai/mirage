@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic.cp import parse_flags
 from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
 from mirage.commands.builtin.generic.find import parse_find_args
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     overlaid_stat,
@@ -171,4 +171,4 @@ async def cp(
     )
 
 
-BUILDER = Builder("cp", cp, write=True)
+BUILDER = GenericCommand("cp", cp, write=True)

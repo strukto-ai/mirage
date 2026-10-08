@@ -776,7 +776,7 @@ export class Dispatcher {
     }
     // Ops registered under a rendered filetype (gdocs/gsheets/gslides/
     // gmail reads) resolve by the path's extension; Python reaches them
-    // because its dispatcher routes through Mount.execute_op, which
+    // because its dispatcher routes through Mount.call, which
     // stamps the filetype. Stamp it here the same way.
     const fullKwargs: OpKwargs = {
       ...(kwargs ?? {}),
@@ -802,7 +802,7 @@ export class Dispatcher {
     // Per-op command limits bind to the executing (post-follow)
     // mount, and the timeout window covers only the backend op — cache
     // probes and post-write invalidation stay outside the budget —
-    // mirroring Python's Mount.execute_op.
+    // mirroring Python's Mount.call.
     const opOverride = mount.commandLimits.get(opName) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
     let result
@@ -1106,7 +1106,7 @@ export class Dispatcher {
 
   /**
    * The door's own channel for internal walks: the TS twin of Python's
-   * Mount.execute_op plus the dispatcher-side duties around it. The
+   * Mount.call plus the dispatcher-side duties around it. The
    * same mode fence, index stamping and mount-prefix context normal
    * dispatch applies, plus the boundary's admission and completion for
    * writes (Python's `_MountChannel` holds the same `OpBoundary`) and the
@@ -1146,7 +1146,7 @@ export class Dispatcher {
     // The fence reruns backend ops outside `dispatch`, so the revision
     // pins have to ride here as on the main path above, or a cascade
     // read answers from the wrong version of a revision-pinned mount.
-    // Python's twin gets both bindings from `Mount.execute_op`.
+    // Python's twin gets both bindings from `Mount.call`.
     await mount.ensureReady()
     try {
       const result = await mount.use(async () => {
@@ -1177,7 +1177,7 @@ export class Dispatcher {
    * path already. The path's filetype is stamped as dispatch stamps it,
    * so an op registered for one filetype answers here too. A
    * trailing-slash glob classifies a match with it, the twin of Python's
-   * `owner.execute_op("stat")`, so a trailing-slash glob and `stat` read
+   * `owner.call("stat")`, so a trailing-slash glob and `stat` read
    * the same op table.
    */
   opStat(mount: MountEntry, path: PathSpec): Promise<unknown> {
@@ -1617,7 +1617,7 @@ export class Dispatcher {
    * which registered op answers, so a probe that omitted them would ask
    * a different question than the door does and report a rendered path
    * as absent. Python needs no twin of that half: its dispatcher routes
-   * through `Mount.execute_op`, which stamps both itself.
+   * through `Mount.call`, which stamps both itself.
    *
    * Args:
    *   opName: the op to run, `stat` or `readdir`.
@@ -1799,7 +1799,7 @@ export class Dispatcher {
     p: PathSpec,
     kwargs: OpKwargs,
   ): Promise<Record<string, number | string>> {
-    if (this.namespace.isLink(p.virtual) || !mount.hasOp('setattr')) {
+    if (this.namespace.isLink(p.virtual) || !mount.answers('setattr')) {
       // No backend inode answers for the path here, so nothing would
       // refuse a missing one: the overlay would stamp it.
       await this.xattrTarget(mount, p)

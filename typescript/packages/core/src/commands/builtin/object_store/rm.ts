@@ -17,7 +17,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
-import type { RegisteredCommand, CommandIO } from '../../config.ts'
+import type { Command, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { cpWalk } from '../generic/cp.ts'
@@ -157,7 +157,7 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
 }
 
 /** The keyed-store `rm` over the running mount's table, guarded by `wrap`. */
-export function makeRm(vfs: string, wrap: (io: CommandIO) => CommandIO): RegisteredCommand[] {
+export function makeRm(vfs: string, wrap: (io: CommandIO) => CommandIO): Command[] {
   return command({
     name: 'rm',
     vfs,

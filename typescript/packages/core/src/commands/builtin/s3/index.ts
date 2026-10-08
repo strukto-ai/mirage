@@ -14,11 +14,11 @@
 
 import { VFSName } from '../../../types.ts'
 import { CommandCatalog } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 import { makeObjectStoreCommands, OBJECT_STORE_OVERRIDES } from '../object_store/index.ts'
 
 export const S3_COMMANDS = new CommandCatalog([
-  ...makeGenericCommands(VFSName.S3, {
+  ...genericCommands(VFSName.S3, {
     overrides: OBJECT_STORE_OVERRIDES,
   }),
   ...makeObjectStoreCommands(VFSName.S3),

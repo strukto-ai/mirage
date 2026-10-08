@@ -98,7 +98,7 @@ describe('Mount.resolveCommand fallback chain', () => {
   })
 })
 
-describe('Mount.executeCmd glob operands', () => {
+describe('Mount.runCommand glob operands', () => {
   // The dispatcher hands a pattern to the handler whole. Resolving is the
   // handler's job, done once through the shared adapter, which is where
   // the namespace facts (links, nested mount roots, a trailing slash) are
@@ -134,7 +134,7 @@ describe('Mount.executeCmd glob operands', () => {
     })
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
-    await m.executeCmd('cat', [pattern], [], {})
+    await m.runCommand('cat', [pattern], [], {})
     expect(got).toEqual(['/ram/*.txt'])
   })
 })
@@ -193,7 +193,7 @@ describe('Mount.unregister', () => {
   })
 })
 
-describe('Mount.executeCmd', () => {
+describe('Mount.runCommand', () => {
   it.each([
     [MountMode.READ, false, 'version'],
     [MountMode.READ, true, 'version'],
@@ -224,7 +224,7 @@ describe('Mount.executeCmd', () => {
       })
       if (cmd === undefined) throw new Error('missing command')
       m.register(cmd)
-      const [stdout, io] = await m.executeCmd('mutate', [], [], { [flag]: true })
+      const [stdout, io] = await m.runCommand('mutate', [], [], { [flag]: true })
       const output = new TextDecoder().decode(await materialize(stdout))
       if (declared && flag === 'version') {
         if (mode === MountMode.READ) {
@@ -251,7 +251,7 @@ describe('Mount.executeCmd', () => {
 
   it('returns 127 for unknown command', async () => {
     const m = makeMount()
-    const [, io] = await m.executeCmd('nope', [], [], {})
+    const [, io] = await m.runCommand('nope', [], [], {})
     expect(io.exitCode).toBe(127)
     expect(new TextDecoder().decode(io.stderr as Uint8Array)).toMatch(/command not found/)
   })
@@ -266,7 +266,7 @@ describe('Mount.executeCmd', () => {
     })
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
-    const [stdout, io] = await m.executeCmd('cat', [PathSpec.fromStrPath('/x.txt')], [], {})
+    const [stdout, io] = await m.runCommand('cat', [PathSpec.fromStrPath('/x.txt')], [], {})
     expect(io.exitCode).toBe(0)
     expect(stdout).toBeInstanceOf(Uint8Array)
   })
@@ -282,7 +282,7 @@ describe('Mount.executeCmd', () => {
     })
     if (wcmd === undefined) throw new Error('missing')
     m.register(wcmd)
-    const [, io] = await m.executeCmd('rm', [PathSpec.fromStrPath('/x')], [], {})
+    const [, io] = await m.runCommand('rm', [PathSpec.fromStrPath('/x')], [], {})
     expect(io.exitCode).toBe(1)
     expect(new TextDecoder().decode(io.stderr as Uint8Array)).toMatch(/read-only/)
   })
@@ -301,7 +301,7 @@ describe('Mount.executeCmd', () => {
     })
     if (wcmd === undefined) throw new Error('missing')
     m.register(wcmd)
-    const [, io] = await m.executeCmd('rm', [PathSpec.fromStrPath('/x')], [], {})
+    const [, io] = await m.runCommand('rm', [PathSpec.fromStrPath('/x')], [], {})
     expect(new TextDecoder().decode(io.stderr as Uint8Array)).toBe(
       `rm: read-only mount at ${m.prefix}\n`,
     )
@@ -335,7 +335,7 @@ describe('Mount.executeCmd', () => {
       })
       if (cmd === undefined) throw new Error('missing')
       m.register(cmd)
-      const [stdout, io] = await m.executeCmd('filter', [PathSpec.fromStrPath('/a')], [], {})
+      const [stdout, io] = await m.runCommand('filter', [PathSpec.fromStrPath('/a')], [], {})
       if (mode === MountMode.READ && !pathGuarded) {
         expect(io.exitCode).toBe(1)
         expect(new TextDecoder().decode(io.stderr as Uint8Array)).toBe(
@@ -362,7 +362,7 @@ describe('Mount.executeCmd', () => {
     const [cmd] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn })
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
-    await m.executeCmd('cat', [PathSpec.fromStrPath('/ram/hello.txt')], [], {})
+    await m.runCommand('cat', [PathSpec.fromStrPath('/ram/hello.txt')], [], {})
     expect(seenPrefix).toBe('/ram')
   })
 
@@ -405,11 +405,11 @@ describe('Mount.executeCmd', () => {
             }),
       )
 
-    await m.executeCmd('cat', [PathSpec.fromStrPath('/dir.tally')], [], {}, { statPath })
+    await m.runCommand('cat', [PathSpec.fromStrPath('/dir.tally')], [], {}, { statPath })
     expect(fired).toEqual([])
     expect(builtins).toEqual(['/dir.tally'])
 
-    await m.executeCmd('cat', [PathSpec.fromStrPath('/file.tally')], [], {}, { statPath })
+    await m.runCommand('cat', [PathSpec.fromStrPath('/file.tally')], [], {}, { statPath })
     expect(fired).toEqual(['/file.tally'])
   })
 
@@ -422,12 +422,12 @@ describe('Mount.executeCmd', () => {
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
     await expect(
-      m.executeCmd('cat', [PathSpec.fromStrPath('/x.txt')], [], {}, { limitOverride: null }),
+      m.runCommand('cat', [PathSpec.fromStrPath('/x.txt')], [], {}, { limitOverride: null }),
     ).rejects.toThrow(/cat: timed out after 0.05s/)
   })
 })
 
-describe('Mount.executeOp', () => {
+describe('Mount.call', () => {
   it('dispatches to the VFS function', async () => {
     class Reading extends StubVFS {
       override read(path: PathSpec): Promise<Uint8Array> {
@@ -435,13 +435,13 @@ describe('Mount.executeOp', () => {
       }
     }
     const m = makeMount(MountMode.WRITE, new Reading())
-    const result = await m.executeOp('read', '/x.txt')
+    const result = await m.call('read', '/x.txt')
     expect(result).toBeInstanceOf(Uint8Array)
   })
 
   it('throws on unknown op', async () => {
     const m = makeMount()
-    await expect(m.executeOp('nope', '/x')).rejects.toThrow(/no op/)
+    await expect(m.call('nope', '/x')).rejects.toThrow(/no op/)
   })
 
   it('rejects write ops on READ mount', async () => {
@@ -451,7 +451,7 @@ describe('Mount.executeOp', () => {
       }
     }
     const m = makeMount(MountMode.READ, new Writing())
-    await expect(m.executeOp('write', '/x')).rejects.toThrow(/read-only/)
+    await expect(m.call('write', '/x')).rejects.toThrow(/read-only/)
   })
 })
 
@@ -461,7 +461,7 @@ describe('Mount.revisions', () => {
     expect(m.revisions.size).toBe(0)
   })
 
-  it('exposes installed pins to read functions via revisionFor during executeOp', async () => {
+  it('exposes installed pins to read functions via revisionFor during call', async () => {
     let observed: string | null = '<unset>'
     class Pinned extends StubVFS {
       override read(path: PathSpec): Promise<Uint8Array> {
@@ -471,11 +471,11 @@ describe('Mount.revisions', () => {
     }
     const m = makeMount(MountMode.WRITE, new Pinned())
     m.revisions.set('/ram/x.txt', 'rev-1')
-    await m.executeOp('read', '/ram/x.txt')
+    await m.call('read', '/ram/x.txt')
     expect(observed).toBe('rev-1')
   })
 
-  it('does not leak revisions outside the executeOp scope', async () => {
+  it('does not leak revisions outside the call scope', async () => {
     class Empty extends StubVFS {
       override read(): Promise<Uint8Array> {
         return Promise.resolve(new Uint8Array())
@@ -483,18 +483,18 @@ describe('Mount.revisions', () => {
     }
     const m = makeMount(MountMode.WRITE, new Empty())
     m.revisions.set('/ram/x.txt', 'rev-1')
-    await m.executeOp('read', '/ram/x.txt')
+    await m.call('read', '/ram/x.txt')
     expect(revisionFor('/ram/x.txt')).toBeNull()
   })
 })
 
 describe('ExecContext parity with CommandOpts', () => {
   it('every line fact is spelled as CommandOpts spells it', () => {
-    // executeCmd re-boxes the bag onto CommandOpts, so a fact spelled
+    // runCommand re-boxes the bag onto CommandOpts, so a fact spelled
     // two ways across that seam is two vocabularies for one plane.
     // Checked at compile time because a TS interface has no fields to
     // enumerate at runtime. `limitOverride` is the one execution
-    // control executeCmd consumes itself rather than forwards, so it
+    // control runCommand consumes itself rather than forwards, so it
     // is the one exemption. The Python twin is
     // tests/commands/test_exec_context_parity.py.
     type Shared = { [K in keyof Omit<ExecContext, 'limitOverride'>]: CommandOpts[K] }
@@ -513,7 +513,7 @@ it('a path-guarded command is still held at its write', async () => {
   mount.register(cmd)
   // The write is refused where it happens and gzip says so in its own words
   // (the fatal write_error form), leaving the store untouched.
-  const [, io] = await mount.executeCmd('gzip', [PathSpec.fromStrPath('/ram/a')], [], {})
+  const [, io] = await mount.runCommand('gzip', [PathSpec.fromStrPath('/ram/a')], [], {})
   expect([io.exitCode, new TextDecoder().decode(io.stderr as Uint8Array)]).toEqual([
     1,
     '\ngzip: /ram/a.gz: Read-only file system\n',

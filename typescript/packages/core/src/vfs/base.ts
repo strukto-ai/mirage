@@ -15,7 +15,7 @@
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { PredNode } from '../commands/builtin/find_eval.ts'
-import type { RegisteredCommand } from '../commands/config.ts'
+import type { Command } from '../commands/config.ts'
 import { enotsup } from '../errors/fs.ts'
 import type { CapacityResult, FileStat, JsonValue, PathSpec, SetAttrFields } from '../types.ts'
 import { CapacityState, ListingVersion } from '../types.ts'
@@ -109,7 +109,7 @@ export interface VFSOptions<A extends Accessor = Accessor> {
    * Extra commands, from `command({...})`: bespoke verbs, or the
    * replacements for whatever `overrides` suppressed.
    */
-  commands?: readonly RegisteredCommand[]
+  commands?: readonly Command[]
   /** Serve repeat reads from the file cache. Read-mostly content only. */
   cachesReads?: boolean
   /**
@@ -288,7 +288,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   readonly accessor: A = NO_ACCESSOR as unknown as A
 
-  readonly #commands: readonly RegisteredCommand[]
+  readonly #commands: readonly Command[]
   #closed = false
 
   /**
@@ -329,7 +329,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /** The bespoke commands this VFS was handed. */
-  commands(): readonly RegisteredCommand[] {
+  commands(): readonly Command[] {
     return this.#commands
   }
 

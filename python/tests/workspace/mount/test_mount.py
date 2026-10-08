@@ -70,14 +70,14 @@ def test_read_only_blocks_write_ops():
     reg.mount("/ro/", RAMVFS(), MountMode.READ)
     mount = reg.mount_for("/ro/file.txt")
     with pytest.raises(ReadOnlyError, match="Read-only"):
-        _run(mount.execute_op("write", "/file.txt", data=b"x"))
+        _run(mount.call("write", "/file.txt", data=b"x"))
 
 
 def test_write_mode_allows_write_ops():
     reg = MountRegistry()
     reg.mount("/rw/", RAMVFS(), MountMode.WRITE)
     mount = reg.mount_for("/rw/file.txt")
-    _run(mount.execute_op("write", "/new.txt", data=b"hello"))
+    _run(mount.call("write", "/new.txt", data=b"hello"))
 
 
 def test_read_only_blocks_write_cmd():
@@ -90,7 +90,7 @@ def test_read_only_blocks_write_cmd():
         directory="/ro/",
         resolved=True,
     )
-    stdout, io = _run(mount.execute_cmd("mkdir", [scope], [], {}))
+    stdout, io = _run(mount.run_command("mkdir", [scope], [], {}))
     assert io.exit_code != 0
     assert io.stderr == (
         b"mkdir: cannot create directory '/ro/newdir': Read-only file system\n"
@@ -117,8 +117,8 @@ async def test_only_wrapper_responses_bypass_the_write_guard(
         accessor.store.files["/changed"] = b"changed"
         return b"custom version\n", IOResult()
 
-    mount.register_fns([mutate])
-    stdout, io = await mount.execute_cmd("mutate", [], [], {flag: True})
+    mount.register_commands([mutate])
+    stdout, io = await mount.run_command("mutate", [], [], {flag: True})
     output = await materialize(stdout)
     if declared and flag == "version":
         if mode == MountMode.READ:
@@ -149,8 +149,8 @@ async def test_the_read_only_refusal_is_newline_terminated():
     async def sync(accessor: RAMAccessor, paths, texts, opts):
         return None, IOResult()
 
-    mount.register_fns([sync])
-    _, io = await mount.execute_cmd("sync", [], [], {})
+    mount.register_commands([sync])
+    _, io = await mount.run_command("sync", [], [], {})
     assert io.stderr == b"sync: read-only mount at /ro/\n"
 
 
@@ -180,9 +180,9 @@ async def test_only_a_write_command_the_door_cannot_see_is_refused_up_front(
         calls.append(len(paths))
         return b"ran\n", IOResult()
 
-    mount.register_fns([filter_cmd])
+    mount.register_commands([filter_cmd])
     paths = [PathSpec.from_str_path("/ram/a")]
-    stdout, io = await mount.execute_cmd("filter", paths, [], {})
+    stdout, io = await mount.run_command("filter", paths, [], {})
     if mode == MountMode.READ and not path_guarded:
         assert io.exit_code == 1
         assert io.stderr == b"filter: read-only mount at /ram/\n"
@@ -203,7 +203,7 @@ def test_write_mode_allows_write_cmd():
         directory="/rw/",
         resolved=True,
     )
-    stdout, io = _run(mount.execute_cmd("mkdir", [scope], [], {}))
+    stdout, io = _run(mount.run_command("mkdir", [scope], [], {}))
     assert io.exit_code == 0
 
 
@@ -214,11 +214,11 @@ def test_read_only_allows_read_cmd():
     scope = PathSpec(
         vfs_path="ro", virtual="/ro/", directory="/ro/", resolved=False
     )
-    stdout, io = _run(mount.execute_cmd("ls", [scope], [], {}))
+    stdout, io = _run(mount.run_command("ls", [scope], [], {}))
     assert io.exit_code == 0
 
 
-# ── execute_cmd ────────────────────────────────
+# ── run_command ────────────────────────────────
 
 
 def test_execute_cmd_cat(registry):
@@ -229,14 +229,14 @@ def test_execute_cmd_cat(registry):
         directory="/data/",
         resolved=True,
     )
-    stdout, io = _run(mount.execute_cmd("cat", [scope], [], {}))
+    stdout, io = _run(mount.run_command("cat", [scope], [], {}))
     assert io.exit_code == 0
     assert stdout is not None
 
 
 def test_execute_cmd_not_found(registry):
     mount = registry.mount_for("/data/hello.txt")
-    stdout, io = _run(mount.execute_cmd("nonexistent_cmd", [], [], {}))
+    stdout, io = _run(mount.run_command("nonexistent_cmd", [], [], {}))
     assert io.exit_code == 127
     assert b"command not found" in io.stderr
 
@@ -246,7 +246,7 @@ def test_execute_cmd_ls(registry):
     scope = PathSpec(
         vfs_path="data", virtual="/data/", directory="/data/", resolved=False
     )
-    stdout, io = _run(mount.execute_cmd("ls", [scope], [], {}))
+    stdout, io = _run(mount.run_command("ls", [scope], [], {}))
     assert io.exit_code == 0
 
 
@@ -258,7 +258,7 @@ def test_execute_cmd_with_flag_kwargs(registry):
         directory="/data/",
         resolved=True,
     )
-    stdout, io = _run(mount.execute_cmd("cat", [scope], [], {"n": True}))
+    stdout, io = _run(mount.run_command("cat", [scope], [], {"n": True}))
     assert io.exit_code == 0
 
 
@@ -270,23 +270,23 @@ def test_execute_cmd_with_texts(registry):
         directory="/data/",
         resolved=True,
     )
-    stdout, io = _run(mount.execute_cmd("grep", [scope], ["hello"], {}))
+    stdout, io = _run(mount.run_command("grep", [scope], ["hello"], {}))
     assert io.exit_code == 0
 
 
-# ── execute_op ─────────────────────────────────
+# ── call ─────────────────────────────────
 
 
 def test_execute_op_stat(registry):
     mount = registry.mount_for("/data/hello.txt")
-    result = _run(mount.execute_op("stat", "/hello.txt"))
+    result = _run(mount.call("stat", "/hello.txt"))
     assert result is not None
     assert result.size > 0
 
 
 def test_execute_op_readdir(registry):
     mount = registry.mount_for("/data/")
-    result = _run(mount.execute_op("readdir", "/"))
+    result = _run(mount.call("readdir", "/"))
     assert isinstance(result, list)
     assert len(result) > 0
 
@@ -294,7 +294,7 @@ def test_execute_op_readdir(registry):
 def test_execute_op_no_such_op(registry):
     mount = registry.mount_for("/data/hello.txt")
     with pytest.raises(OperationNotSupportedError, match="no op") as exc_info:
-        _run(mount.execute_op("nonexistent_op", "/file.txt"))
+        _run(mount.call("nonexistent_op", "/file.txt"))
     assert exc_info.value.filename == "/file.txt"
     assert exc_info.value.errno == errno.ENOTSUP
 
@@ -325,7 +325,7 @@ async def test_a_path_guarded_command_is_still_held_at_its_write():
     mount.register(cmd)
     # The write is refused where it happens and gzip says so in its own
     # words (the fatal write_error form), leaving the store untouched.
-    _, io = await mount.execute_cmd(
+    _, io = await mount.run_command(
         "gzip", [PathSpec.from_str_path("/ram/a")], [], {}
     )
     assert (io.exit_code, io.stderr) == (

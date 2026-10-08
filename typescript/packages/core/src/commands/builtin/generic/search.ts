@@ -16,12 +16,7 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { JsonValue, PathSpec, VFSName } from '../../../types.ts'
 import { searchResources } from '../../../vfs/search.ts'
-import {
-  command,
-  type CommandFnResult,
-  type CommandOpts,
-  type RegisteredCommand,
-} from '../../config.ts'
+import { command, type CommandFnResult, type CommandOpts, type Command } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -54,7 +49,7 @@ export function makeSearch(
   vfs: VFSName,
   options: (fl: FlagView) => Record<string, JsonValue> = semanticOptions,
   { name = 'search' }: { name?: string } = {},
-): RegisteredCommand[] {
+): Command[] {
   async function search(
     accessor: Accessor,
     paths: PathSpec[],

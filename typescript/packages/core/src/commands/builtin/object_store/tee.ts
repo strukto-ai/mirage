@@ -15,7 +15,7 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import type { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
-import type { RegisteredCommand, CommandIO } from '../../config.ts'
+import type { Command, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { teeGeneric } from '../generic/tee.ts'
 import { requireOp, overMountIo } from '../generic_bind/adapter.ts'
@@ -52,7 +52,7 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
 }
 
 /** The keyed-store `tee` over the running mount's table, guarded by `wrap`. */
-export function makeTee(vfs: string, wrap: (io: CommandIO) => CommandIO): RegisteredCommand[] {
+export function makeTee(vfs: string, wrap: (io: CommandIO) => CommandIO): Command[] {
   return command({
     name: 'tee',
     vfs,

@@ -203,7 +203,7 @@ class MountRegistry:
         is read at call time because ``attach_file_cache`` runs before
         ``set_reconciler``, and a manager with none trusts its cache.
 
-        A retiring mount answers False rather than probing: ``execute_op``
+        A retiring mount answers False rather than probing: ``call``
         raises EBUSY once teardown has started, and ``owns_path`` cannot
         catch that on its own because it is read before several awaits.
         False sends the caller to a cold read, which is exactly where
@@ -358,7 +358,7 @@ class MountRegistry:
         )
         if alias is not None:
             m.activity = alias.activity
-        m.register_fns(commands_for(vfs))
+        m.register_commands(commands_for(vfs))
         for cmd in GENERAL_COMMANDS:
             m.register_general(cmd)
         if self._file_cache is not None:

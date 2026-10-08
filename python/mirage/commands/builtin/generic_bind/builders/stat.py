@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.stat import stat_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     overlaid_stat,
 )
@@ -48,4 +48,4 @@ async def stat(
     return await stat_generic(resolved, list(texts), opts, stat_fn)
 
 
-BUILDER = Builder("stat", stat)
+BUILDER = GenericCommand("stat", stat)

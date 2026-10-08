@@ -359,7 +359,7 @@ async def board_list(accessor, paths, texts, opts):
 async def test_native_execution_preserves_command_tokens(kind, head, expected):
     probe = kind(captures=("trello board list",))
     async with workspace({"/": RAMVFS()}, runtimes=[probe]) as ws:
-        ws.mount("/").register_fns([board_list])
+        ws.mount("/").register_commands([board_list])
         result = await ws.shell(head + " 'a b' '$(echo literal)' ''")
         assert result.exit_code == 0
         tokens = (*expected, "a b", "$(echo literal)", "")
@@ -408,7 +408,7 @@ async def test_boundary_expansion_preserves_command_tokens(
         mode=MountMode.EXEC,
         runtimes=[probe],
     ) as ws:
-        ws.mount("/").register_fns([board_list])
+        ws.mount("/").register_commands([board_list])
         # Leave the glob pending so command dispatch owns boundary expansion.
         monkeypatch.setattr(argv_module, "resolve_globs", defer_once)
         result = await ws.shell(f"{head} {pattern} 'a b' ''")
@@ -441,7 +441,7 @@ async def test_scripted_multiword_capture_sees_its_full_command(kind, source):
     async with workspace(
         {"/": RAMVFS()}, runtimes=[probe, MontyRuntime(captures=())]
     ) as ws:
-        ws.mount("/").register_fns([board_list])
+        ws.mount("/").register_commands([board_list])
         allowed = await ws.shell("echo ok | trello board list /allowed")
         assert allowed.exit_code == 0
         if isinstance(probe, ProcessProbe):
@@ -487,7 +487,7 @@ async def test_external_script_sees_first_unresolved_stage(head):
     named = ProcessProbe(captures=("python3",))
     named.name = "named"
     async with workspace({"/": RAMVFS()}, runtimes=[probe, named]) as ws:
-        ws.mount("/").register_fns([board_list])
+        ws.mount("/").register_commands([board_list])
         ws.register_cli(
             "custom-cli",
             CLISpec(name="custom-cli", fn=lambda inv: (b"ok\n", IOResult())),

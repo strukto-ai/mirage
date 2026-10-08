@@ -16,7 +16,7 @@ import pytest
 
 from mirage.cache.index.scope import command_scope, command_started
 from mirage.commands.builtin.generic.du import TRUNCATED_NOTE
-from mirage.commands.builtin.generic_bind.adapter import Builder
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
@@ -47,7 +47,7 @@ async def test_output_is_read_inside_the_running_command():
     async with command_scope():
         started = command_started()
         stdout, _ = await run_dispatch(
-            Builder("grep", fn), [], [], {}, dispatch, "/"
+            GenericCommand("grep", fn), [], [], {}, dispatch, "/"
         )
     assert (stdout, seen) == (b"hit\n", [started])
 

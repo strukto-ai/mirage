@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.md5sum import md5sum_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     dir_aware_stat,
     dir_aware_stream,
     resolve_or_empty,
@@ -42,4 +42,4 @@ async def md5sum(
     )
 
 
-BUILDER = Builder("md5sum", md5sum, read=True)
+BUILDER = GenericCommand("md5sum", md5sum, read=True)

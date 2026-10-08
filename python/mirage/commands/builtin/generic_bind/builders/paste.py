@@ -17,7 +17,7 @@ from mirage.commands.builtin.generic.paste import (
     paste_generic as generic_paste,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
@@ -47,4 +47,4 @@ async def paste(
     )
 
 
-BUILDER = Builder("paste", paste, read=True)
+BUILDER = GenericCommand("paste", paste, read=True)

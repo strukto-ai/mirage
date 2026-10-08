@@ -13,15 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 import { GSHEETS_RM } from './rm.ts'
 
 // Sheets verbs and API passthroughs live in the gws CLI
 // (commands/cli/builtin/gws), installed by name; the mount only serves
 // the filesystem surface.
-export const GSHEETS_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands(VFSName.GSHEETS, {
+export const GSHEETS_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.GSHEETS, {
     overrides: new Set(['rm']),
   }),
   ...GSHEETS_RM,

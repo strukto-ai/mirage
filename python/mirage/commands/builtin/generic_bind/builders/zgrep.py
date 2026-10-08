@@ -16,7 +16,10 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.zgrep import zgrep_generic
-from mirage.commands.builtin.generic_bind.adapter import Builder, bound_op
+from mirage.commands.builtin.generic_bind.adapter import (
+    GenericCommand,
+    bound_op,
+)
 from mirage.commands.builtin.utils.links import link_door
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
@@ -48,4 +51,4 @@ async def zgrep(
     )
 
 
-BUILDER = Builder("zgrep", zgrep, read=True)
+BUILDER = GenericCommand("zgrep", zgrep, read=True)

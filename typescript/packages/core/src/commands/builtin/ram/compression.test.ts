@@ -15,7 +15,7 @@
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
-import type { RegisteredCommand } from '../../config.ts'
+import type { Command } from '../../config.ts'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
@@ -30,7 +30,7 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runCmd(
-  reg: readonly RegisteredCommand[],
+  reg: readonly Command[],
   vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]>,

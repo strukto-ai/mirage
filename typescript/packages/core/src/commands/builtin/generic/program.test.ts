@@ -30,7 +30,7 @@ describe('program file routing', () => {
     try {
       const mount = ws.registry.mountFor('/data')
       vi.spyOn(mount, 'specFor').mockReturnValue(null)
-      const execute = vi.spyOn(mount, 'executeCmd').mockResolvedValue([null, new IOResult()])
+      const execute = vi.spyOn(mount, 'runCommand').mockResolvedValue([null, new IOResult()])
       const result = await ws.shell(`${name} ${args} /data/input`)
       expect(result.exitCode).toBe(0)
       expect(execute).toHaveBeenCalledOnce()

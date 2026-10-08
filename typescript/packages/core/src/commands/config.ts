@@ -52,13 +52,13 @@ import { helpPage, versionLine } from './spec/standard.ts'
 import type { CommandSpec, FlagValue } from './spec/types.ts'
 
 /**
- * What the workspace hands `Mount.executeCmd` for one command.
+ * What the workspace hands `Mount.runCommand` for one command.
  *
- * `executeCmd` copies these fields onto `CommandOpts`, next to the facts only
+ * `runCommand` copies these fields onto `CommandOpts`, next to the facts only
  * the mount knows (`mountPrefix`, `index`, `filetypeFns`). Each field is named
  * as on `CommandOpts` and means the same; a mapped type in
  * workspace/mount/mount.test.ts pins that. `limitOverride` is the caller's
- * output limit, which `executeCmd` applies itself instead of forwarding.
+ * output limit, which `runCommand` applies itself instead of forwarding.
  */
 export interface ExecContext {
   stdin?: ByteSource | null
@@ -138,7 +138,7 @@ export interface CommandIO<A extends Accessor = Accessor> {
 /**
  * Everything a command handler gets besides its operands.
  *
- * `Mount.executeCmd` builds one per invocation and passes it as the handler's
+ * `Mount.runCommand` builds one per invocation and passes it as the handler's
  * fourth argument. A handler reads the fields it needs and ignores the rest.
  */
 export interface CommandOpts {
@@ -216,7 +216,7 @@ export type CommandFn<A extends Accessor = Accessor> = (
 
 export type AggregateFn = (results: AggregateResult[]) => Uint8Array
 
-export interface RegisteredCommandInit {
+export interface CommandInit {
   name: string
   spec: CommandSpec
   vfs: string | null
@@ -228,7 +228,7 @@ export interface RegisteredCommandInit {
   pathGuarded?: boolean
 }
 
-export interface RegisteredCommandOverrides {
+export interface CommandOverrides {
   fn?: CommandFn
 }
 
@@ -239,7 +239,7 @@ export interface RegisteredCommandOverrides {
  * across mounts, whether it changes files, its output limit, and whether
  * mount-root policy checks its operands.
  */
-export class RegisteredCommand {
+export class Command {
   readonly name: string
   readonly spec: CommandSpec
   readonly vfs: string | null
@@ -250,7 +250,7 @@ export class RegisteredCommand {
   readonly pathGuarded: boolean
   readonly limit: Limit | null
 
-  constructor(init: RegisteredCommandInit) {
+  constructor(init: CommandInit) {
     this.name = init.name
     this.spec = init.spec
     this.vfs = init.vfs
@@ -264,8 +264,8 @@ export class RegisteredCommand {
   }
 
   /** A copy with the handler replaced. */
-  withOverrides(overrides: RegisteredCommandOverrides): RegisteredCommand {
-    return new RegisteredCommand({
+  withOverrides(overrides: CommandOverrides): Command {
+    return new Command({
       name: this.name,
       spec: this.spec,
       vfs: this.vfs,
@@ -280,12 +280,12 @@ export class RegisteredCommand {
 }
 
 /** A fixed list of commands, looked up by name and file extension. */
-export class CommandCatalog extends Array<RegisteredCommand> {
-  readonly #byKey: ReadonlyMap<string, RegisteredCommand>
+export class CommandCatalog extends Array<Command> {
+  readonly #byKey: ReadonlyMap<string, Command>
 
-  constructor(commands: readonly RegisteredCommand[]) {
+  constructor(commands: readonly Command[]) {
     super(...commands)
-    const byKey = new Map<string, RegisteredCommand>()
+    const byKey = new Map<string, Command>()
     for (const command of commands) {
       byKey.set(CommandCatalog.key(command.name, command.filetype), command)
     }
@@ -297,15 +297,15 @@ export class CommandCatalog extends Array<RegisteredCommand> {
     return this.length
   }
 
-  toArray(): readonly RegisteredCommand[] {
+  toArray(): readonly Command[] {
     return this
   }
 
-  get(name: string, filetype: string | null = null): RegisteredCommand | null {
+  get(name: string, filetype: string | null = null): Command | null {
     return this.#byKey.get(CommandCatalog.key(name, filetype)) ?? null
   }
 
-  require(name: string, filetype: string | null = null): RegisteredCommand {
+  require(name: string, filetype: string | null = null): Command {
     const found = this.get(name, filetype)
     if (found === null) {
       throw new Error(`command '${name}' with filetype ${String(filetype)} is not registered`)
@@ -364,17 +364,15 @@ function answerStandardOptions(
 
 /**
  * Register a handler as a command of one or more VFSes: one
- * `RegisteredCommand` per VFS, with the handler wrapped to answer `--help`
+ * `Command` per VFS, with the handler wrapped to answer `--help`
  * and `--version`.
  */
-export function command<A extends Accessor = Accessor>(
-  options: CommandOptions<A>,
-): RegisteredCommand[] {
+export function command<A extends Accessor = Accessor>(options: CommandOptions<A>): Command[] {
   const vfsNames = Array.isArray(options.vfs) ? options.vfs : [options.vfs]
   const { spec, fn } = answerStandardOptions(options.name, options.spec, options.fn as CommandFn)
   return vfsNames.map(
     (vfs) =>
-      new RegisteredCommand({
+      new Command({
         name: options.name,
         spec,
         vfs,

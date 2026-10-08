@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.gzip import gzip_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     require_op,
@@ -48,4 +48,4 @@ async def gzip(
     )
 
 
-BUILDER = Builder("gzip", gzip, write=True)
+BUILDER = GenericCommand("gzip", gzip, write=True)

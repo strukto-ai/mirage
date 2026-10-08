@@ -25,7 +25,7 @@ import {
   command,
   type CommandFnResult,
   type CommandOpts,
-  type RegisteredCommand,
+  type Command,
   type CommandIO,
 } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -104,7 +104,7 @@ export function makeFind<A extends Accessor>(
   stat: StatOp<A>,
   statLight: StatOp<A>,
   needsFull: (expr: FindExpr) => boolean,
-): RegisteredCommand[] {
+): Command[] {
   const findFull = makeSearchBackedFind<A>({ resolvePath: tree.resolve, stat, walk: tree.walk })
   const findLight = makeSearchBackedFind<A>({
     resolvePath: tree.resolve,

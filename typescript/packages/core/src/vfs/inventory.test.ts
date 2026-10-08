@@ -60,7 +60,7 @@ const DOOR_OPS = [
 function served(cls: { prototype: BaseVFS }): string[] {
   const probe = Object.assign(Object.create(cls.prototype) as BaseVFS, new BaseVFS())
   const mount = new MountEntry({ prefix: '/', vfs: probe })
-  return DOOR_OPS.filter((op) => mount.hasOp(op)).sort()
+  return DOOR_OPS.filter((op) => mount.answers(op)).sort()
 }
 
 const SERVED: [string, { prototype: BaseVFS }, string[]][] = [

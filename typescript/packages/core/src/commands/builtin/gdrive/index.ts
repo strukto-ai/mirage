@@ -13,12 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 
 // Drive/docs/sheets/slides verbs and API passthroughs live in the gws
 // CLI (commands/cli/builtin/gws), installed by name; the mount only
 // serves the filesystem surface.
-export const GDRIVE_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands(VFSName.GDRIVE),
-]
+export const GDRIVE_COMMANDS: readonly Command[] = [...genericCommands(VFSName.GDRIVE)]

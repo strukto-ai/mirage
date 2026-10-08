@@ -21,7 +21,10 @@ from mirage.commands.builtin.generic.rg import (
     rg_generic,
     walk_filter,
 )
-from mirage.commands.builtin.generic_bind.adapter import Builder, bound_op
+from mirage.commands.builtin.generic_bind.adapter import (
+    GenericCommand,
+    bound_op,
+)
 from mirage.commands.builtin.generic_bind.search import (
     narrow_scope,
     run_search,
@@ -83,4 +86,4 @@ async def rg(
     )
 
 
-BUILDER = Builder("rg", rg, read=True)
+BUILDER = GenericCommand("rg", rg, read=True)

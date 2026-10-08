@@ -15,13 +15,13 @@
 import { transferLinksOf } from '../../generic/crossmount/utils.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { mvGeneric, parseFlags } from '../../generic/mv.ts'
-import type { Builder, BuilderFn } from '../adapter.ts'
+import type { GenericCommand, GenericCommandFn } from '../adapter.ts'
 import { refuseReveal, requireOp, resolveGlobOf } from '../adapter.ts'
 import { overlayableStat } from './cp.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 
-const mv: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const mv: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const rename = requireOp(ops.rename, 'rename')
   const idx = opts.index ?? undefined
   const parsed = parseFlags(new FlagView(opts.flags, specOf('mv')))
@@ -41,7 +41,7 @@ const mv: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'mv',
   write: true,
   fn: mv,

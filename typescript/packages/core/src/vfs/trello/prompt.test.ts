@@ -14,12 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 import { TRELLO_COMMANDS } from '../../commands/builtin/trello/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
+import type { Command } from '../../commands/config.ts'
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 
 const TEXT = `${PROMPT}\n${WRITE_PROMPT}`
 
-function verbs(): Map<string, RegisteredCommand> {
+function verbs(): Map<string, Command> {
   return new Map(
     TRELLO_COMMANDS.filter((rc) => rc.name.startsWith('trello ')).map((rc) => [rc.name, rc]),
   )
@@ -38,7 +38,7 @@ function usageLines(text: string): string[] {
   return lines
 }
 
-function nameOf(tokens: string[], known: Map<string, RegisteredCommand>): string | null {
+function nameOf(tokens: string[], known: Map<string, Command>): string | null {
   for (const k of [3, 4]) {
     const name = tokens.slice(0, k).join(' ')
     if (known.has(name)) return name
@@ -46,7 +46,7 @@ function nameOf(tokens: string[], known: Map<string, RegisteredCommand>): string
   return null
 }
 
-function unmatched(line: string, known: Map<string, RegisteredCommand>): string[] {
+function unmatched(line: string, known: Map<string, Command>): string[] {
   const tokens = line
     .replaceAll('[', ' ')
     .replaceAll(']', ' ')

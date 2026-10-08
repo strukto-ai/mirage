@@ -18,7 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.shuf import NO_WRITE_OP, parse_flags
 from mirage.commands.builtin.generic.shuf import shuf_generic as generic_shuf
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
 )
 from mirage.commands.config import CommandIO, CommandOpts
@@ -98,4 +98,4 @@ async def _shuf(
     )
 
 
-BUILDER = Builder("shuf", shuf, read=True)
+BUILDER = GenericCommand("shuf", shuf, read=True)

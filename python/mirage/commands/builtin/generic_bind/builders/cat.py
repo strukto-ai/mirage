@@ -16,7 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic.cat import cat_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     dir_aware_stat,
     resolve_or_empty,
@@ -44,4 +44,4 @@ async def cat(
     )
 
 
-BUILDER = Builder("cat", cat, aggregate=concat_aggregate, read=True)
+BUILDER = GenericCommand("cat", cat, aggregate=concat_aggregate, read=True)

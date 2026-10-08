@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.jq import jq_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
@@ -41,4 +41,4 @@ async def jq(
     )
 
 
-BUILDER = Builder("jq", jq, read=True)
+BUILDER = GenericCommand("jq", jq, read=True)

@@ -16,7 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.awk import awk_generic as generic_awk
 from mirage.commands.builtin.generic.awk import served_here
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
@@ -85,4 +85,4 @@ async def awk(
     )
 
 
-BUILDER = Builder("awk", awk, read=True)
+BUILDER = GenericCommand("awk", awk, read=True)

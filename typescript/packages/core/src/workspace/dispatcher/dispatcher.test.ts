@@ -401,7 +401,7 @@ describe('the node table answers every verb that names a link', () => {
 describe('the fenced remnant cascade rides the mount revisions', () => {
   it('a fenced backend op reads the pinned revision', async () => {
     // fencedCall reruns backend ops outside `dispatch`, and Python's
-    // twin routes them through `Mount.execute_op`, which binds the
+    // twin routes them through `Mount.call`, which binds the
     // mount prefix AND the revision pins. A fenced readdir/stat that
     // reads unpinned answers from the wrong version of a
     // revision-pinned mount, so the binding is pinned here through the

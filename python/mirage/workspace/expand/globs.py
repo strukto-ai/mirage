@@ -534,7 +534,7 @@ async def _is_directory(
     if real.rstrip("/") == owner.prefix.rstrip("/"):
         return True
     try:
-        row = await owner.execute_op("stat", real)
+        row = await owner.call("stat", real)
     except WALK_ERRORS:
         return False
     return isinstance(row, FileStat) and row.type == FileType.DIRECTORY

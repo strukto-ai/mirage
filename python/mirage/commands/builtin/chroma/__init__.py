@@ -13,13 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.chroma.search import search
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.slug_tree.find import make_find, reads_sizes
 from mirage.core.chroma.stat import stat, stat_light
 from mirage.core.chroma.tree import CHROMA_TREE
 
 COMMANDS = [
-    *make_generic_commands("chroma", overrides={"find"}),
+    *generic_commands("chroma", overrides={"find"}),
     make_find("chroma", CHROMA_TREE, stat, stat_light, reads_sizes),
     search,
 ]

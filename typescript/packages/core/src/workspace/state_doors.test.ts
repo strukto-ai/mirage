@@ -15,7 +15,7 @@
 import { seedVar } from '../workspace/session/state.ts'
 import { VarAttr } from '../shell/variable.ts'
 import { afterEach, describe, expect, it } from 'vitest'
-import { RegisteredCommand } from '../commands/config.ts'
+import { Command } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { IOResult } from '../io/types.ts'
@@ -331,7 +331,7 @@ describe('session-state writes go through the view', () => {
     // A command's env is the process view: a child cannot write the
     // parent's environment, so a mutation must not land in the session.
     const ws = await makeWs()
-    const rc = new RegisteredCommand({
+    const rc = new Command({
       name: 'envpoke',
       spec: CMD_SPEC,
       vfs: VFSName.RAM,
@@ -351,7 +351,7 @@ describe('session-state writes go through the view', () => {
     // The LinkView pattern for the session plane: reading `sessionView`
     // off the opts is the whole opt-in, and reads answer through it.
     const ws = await makeWs()
-    const rc = new RegisteredCommand({
+    const rc = new Command({
       name: 'envread',
       spec: CMD_SPEC,
       vfs: VFSName.RAM,
@@ -2640,7 +2640,7 @@ describe('a dispatched read through a link meets the target rule', () => {
 describe('a dispatched op meets the rule on the path the door reaches', () => {
   // A host command that removes or moves a name through the dispatcher it
   // is handed, the way a custom command reaches a mount.
-  const zap = new RegisteredCommand({
+  const zap = new Command({
     name: 'zap',
     spec: CMD_SPEC,
     vfs: VFSName.RAM,

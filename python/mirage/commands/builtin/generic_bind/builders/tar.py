@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 )
 from mirage.commands.builtin.generic.tar import tar_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     bound_op,
     require_op,
@@ -85,4 +85,4 @@ async def tar(
     )
 
 
-BUILDER = Builder("tar", tar, write=True)
+BUILDER = GenericCommand("tar", tar, write=True)

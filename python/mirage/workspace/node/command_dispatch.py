@@ -714,7 +714,7 @@ def unsaid(lines: list[str], said: bytes) -> list[str]:
 
     A mount-mode refusal names the mount, not the operand, so the line
     the node table wrote for a refused link is the very line
-    ``Mount.execute_cmd`` writes for the backend operands beside it on
+    ``Mount.run_command`` writes for the backend operands beside it on
     the same mount, and ``rm dlink file`` would say it twice. The tier
     writes it without a trailing newline, so the comparison is on the
     stripped text.

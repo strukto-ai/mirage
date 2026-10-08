@@ -139,7 +139,7 @@ describe('Workspace observer wiring', () => {
 
   // Op events name the virtual path, mount prefix included, so two mounts
   // holding the same filename stay distinguishable in the recording. The
-  // write arrives through executeOp and the read through a lazy stream, so
+  // write arrives through call and the read through a lazy stream, so
   // this covers both routes the mount prefix has to survive. Mirrors
   // python's test_execute_records_op_source.
   it('records a source and a read op on every op event', async () => {

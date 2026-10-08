@@ -14,7 +14,7 @@
 
 from dataclasses import replace
 
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.config import CommandIO
 from mirage.core.dev.stream import read_stream
 
@@ -28,7 +28,7 @@ def _endless(io: CommandIO) -> CommandIO:
 # stream, while the two bounded streaming commands opt into the endless
 # source.
 COMMANDS = [
-    *make_generic_commands(
+    *generic_commands(
         "ram",
         adapt={"cat": _endless, "head": _endless},
         local=True,

@@ -20,5 +20,5 @@ from tests.fixtures.vfs_io import DOOR_OPS, vfs_over
 
 def test_the_door_serves_reads_only():
     mount = MountEntry("/", vfs_over(SlackVFS, Accessor()))
-    served = {op for op in DOOR_OPS if mount.has_op(op)}
+    served = {op for op in DOOR_OPS if mount.answers(op)}
     assert served == {"glob", "read", "readdir", "stat"}

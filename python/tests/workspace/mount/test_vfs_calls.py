@@ -54,7 +54,7 @@ def _written(write: AsyncMock) -> list[bytes]:
 @pytest.mark.asyncio
 async def test_a_whole_file_read_never_asks_for_a_range():
     mount = _mount()
-    assert await mount.execute_op("read", PATH) == b"data"
+    assert await mount.call("read", PATH) == b"data"
     assert mount.vfs.read.await_args.kwargs == {"index": mount.index}
 
 
@@ -63,8 +63,8 @@ async def test_a_vfs_without_ranges_reads_and_slices():
     # Correct everywhere, and the only meaningful answer for a backend
     # that renders its bytes rather than storing them.
     mount = _mount()
-    assert await mount.execute_op("read", PATH, offset=1, size=2) == b"at"
-    assert await mount.execute_op("read", PATH, offset=2) == b"ta"
+    assert await mount.call("read", PATH, offset=1, size=2) == b"at"
+    assert await mount.call("read", PATH, offset=2) == b"ta"
 
 
 @pytest.mark.asyncio
@@ -72,13 +72,13 @@ async def test_a_native_range_is_asked_for_the_window_only():
     # On an object store this is one ranged GET rather than fetching the
     # object and throwing most of it away.
     mount = _mount(reads_ranges=True, read=AsyncMock(return_value=b"ng"))
-    assert await mount.execute_op("read", PATH, offset=1, size=2) == b"ng"
+    assert await mount.call("read", PATH, offset=1, size=2) == b"ng"
     assert mount.vfs.read.await_args.kwargs == {
         "index": mount.index,
         "offset": 1,
         "size": 2,
     }
-    await mount.execute_op("read", PATH)
+    await mount.call("read", PATH)
     assert mount.vfs.read.await_args.kwargs == {"index": mount.index}
 
 
@@ -88,7 +88,7 @@ async def test_a_window_past_the_end_reads_empty_not_416():
     # refuses instead; normalizing here keeps the op one thing either way.
     read = AsyncMock(side_effect=_S3Error("InvalidRange", 416))
     mount = _mount(reads_ranges=True, read=read)
-    assert await mount.execute_op("read", PATH, offset=99, size=2) == b""
+    assert await mount.call("read", PATH, offset=99, size=2) == b""
     read.assert_awaited_once()
 
 
@@ -97,7 +97,7 @@ async def test_a_range_read_that_failed_for_a_real_reason_propagates():
     read = AsyncMock(side_effect=_S3Error("AccessDenied", 403))
     mount = _mount(reads_ranges=True, read=read)
     with pytest.raises(_S3Error):
-        await mount.execute_op("read", PATH, offset=1, size=2)
+        await mount.call("read", PATH, offset=1, size=2)
 
 
 @pytest.mark.asyncio
@@ -105,7 +105,7 @@ async def test_a_range_read_that_failed_for_a_real_reason_propagates():
 async def test_a_zero_length_read_asks_the_vfs_nothing(reads_ranges):
     # No store can express an empty range, and the answer is known.
     mount = _mount(reads_ranges=reads_ranges)
-    assert await mount.execute_op("read", PATH, offset=1, size=0) == b""
+    assert await mount.call("read", PATH, offset=1, size=0) == b""
     mount.vfs.read.assert_not_awaited()
 
 
@@ -113,7 +113,7 @@ async def test_a_zero_length_read_asks_the_vfs_nothing(reads_ranges):
 async def test_append_is_a_rewrite_where_the_vfs_only_writes():
     write = AsyncMock()
     mount = _mount(write=write)
-    await mount.execute_op("append", PATH, b"new")
+    await mount.call("append", PATH, b"new")
     assert _written(write) == [b"datanew"]
     assert mount.vfs.read.await_args.kwargs == {"index": mount.index}
 
@@ -123,7 +123,7 @@ async def test_a_native_append_skips_the_rewrite():
     write = AsyncMock()
     append = AsyncMock()
     mount = _mount(write=write, append=append)
-    await mount.execute_op("append", PATH, b"new")
+    await mount.call("append", PATH, b"new")
     assert append.await_args.args[1] == b"new"
     mount.vfs.read.assert_not_awaited()
     write.assert_not_awaited()
@@ -133,7 +133,7 @@ async def test_a_native_append_skips_the_rewrite():
 async def test_pwrite_is_a_rewrite_where_the_vfs_only_writes():
     write = AsyncMock()
     mount = _mount(write=write)
-    await mount.execute_op("pwrite", PATH, b"XY", 1)
+    await mount.call("pwrite", PATH, b"XY", 1)
     assert _written(write) == [b"dXYa"]
 
 
@@ -142,7 +142,7 @@ async def test_a_native_pwrite_gets_the_offset_and_index():
     write = AsyncMock()
     pwrite = AsyncMock()
     mount = _mount(write=write, pwrite=pwrite)
-    await mount.execute_op("pwrite", PATH, b"XY", 3)
+    await mount.call("pwrite", PATH, b"XY", 3)
     assert pwrite.await_args.args[1:] == (b"XY", 3)
     assert pwrite.await_args.kwargs == {"index": mount.index}
     mount.vfs.read.assert_not_awaited()
@@ -158,7 +158,7 @@ async def test_pwrite_refuses_a_negative_offset_before_any_io(native):
         fns["pwrite"] = AsyncMock()
     mount = _mount(**fns)
     with pytest.raises(OSError) as exc:
-        await mount.execute_op("pwrite", PATH, b"Z", -1)
+        await mount.call("pwrite", PATH, b"Z", -1)
     assert exc.value.errno == errno.EINVAL
     mount.vfs.read.assert_not_awaited()
     write.assert_not_awaited()
@@ -185,8 +185,8 @@ async def test_mkdir_refuses_a_taken_name_before_the_create(
     mount = _mount(mkdir=mkdir, stat=stat)
     if refused:
         with pytest.raises(FileExistsError):
-            await mount.execute_op("mkdir", PATH, parents=parents)
+            await mount.call("mkdir", PATH, parents=parents)
         mkdir.assert_not_awaited()
     else:
-        await mount.execute_op("mkdir", PATH, parents=parents)
+        await mount.call("mkdir", PATH, parents=parents)
         assert mkdir.await_args.kwargs == {"parents": True}

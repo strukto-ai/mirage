@@ -47,8 +47,8 @@ def test_workspace_mount_registers_dify_commands_and_ops():
     assert "tree" in mount.commands()
     assert "uniq" in mount.commands()
     assert "du" in mount.commands()
-    assert mount.has_op("read")
-    assert mount.has_op("stat")
+    assert mount.answers("read")
+    assert mount.answers("stat")
 
 
 @pytest.mark.asyncio

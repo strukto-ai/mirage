@@ -33,7 +33,7 @@ import type {
   CommandFnResult,
   CommandOpts,
   ExecContext,
-  RegisteredCommand,
+  Command,
   CommandIO,
 } from '../../commands/config.ts'
 import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
@@ -196,7 +196,7 @@ export interface MountInit {
 // What the command tier's walk guard proves an operand's `.` and `..` with:
 // the handler reaches its backend past the door, so the door's stat and link
 // follow are bound around it. No dispatcher (a mount driven directly) binds
-// nothing. Mirrors the Python set_walk_probe binding in Mount.execute_cmd.
+// nothing. Mirrors the Python set_walk_probe binding in Mount.run_command.
 function withWalkProbe<T>(
   prefix: string,
   dispatch: DispatchFn | undefined,
@@ -237,8 +237,8 @@ export class MountEntry {
 
   cacheManager: CacheManager | null = null
 
-  private readonly cmds = new Map<CmdKey, RegisteredCommand>()
-  private readonly generalCmds = new Map<string, RegisteredCommand>()
+  private readonly cmds = new Map<CmdKey, Command>()
+  private readonly generalCmds = new Map<string, Command>()
   private readonly cmdSpecs = new Map<string, CommandSpec>()
   readonly commandLimits = new Map<string, Limit>()
   // first token -> descending token counts of multi-word command names
@@ -282,8 +282,8 @@ export class MountEntry {
   }
 
   /** Whether this mount answers the op `name`. */
-  hasOp(name: string): boolean {
-    return this.calls(name, null).length > 0
+  answers(name: string): boolean {
+    return this.callers(name, null).length > 0
   }
 
   /**
@@ -375,19 +375,19 @@ export class MountEntry {
 
   // ── command registration ──────────────────────────
 
-  register(cmd: RegisteredCommand): void {
+  register(cmd: Command): void {
     this.cmds.set(cmdKey(cmd.name, cmd.filetype), cmd)
     this.cmdSpecs.set(cmd.name, cmd.spec)
     this.prefixIndex = null
   }
 
-  registerGeneral(cmd: RegisteredCommand): void {
+  registerGeneral(cmd: Command): void {
     this.generalCmds.set(cmd.name, cmd)
     this.cmdSpecs.set(cmd.name, cmd.spec)
     this.prefixIndex = null
   }
 
-  resolveCommand(cmdName: string, extension: string | null = null): RegisteredCommand | null {
+  resolveCommand(cmdName: string, extension: string | null = null): Command | null {
     if (extension !== null && extension !== '') {
       const specific = this.cmds.get(cmdKey(cmdName, extension))
       if (specific !== undefined) return specific
@@ -397,7 +397,7 @@ export class MountEntry {
     const general = this.generalCmds.get(cmdName)
     if (general !== undefined) return general
     // Fall back to any filetype variant so callers without an extension can
-    // still find the command; the actual handler is picked by executeCmd.
+    // still find the command; the actual handler is picked by runCommand.
     for (const rc of this.cmds.values()) {
       if (rc.name === cmdName) return rc
     }
@@ -443,9 +443,9 @@ export class MountEntry {
     return 1
   }
 
-  allCommands(): readonly RegisteredCommand[] {
+  allCommands(): readonly Command[] {
     const seen = new Set<string>()
-    const out: RegisteredCommand[] = []
+    const out: Command[] = []
     for (const rc of this.cmds.values()) {
       if (seen.has(rc.name)) continue
       seen.add(rc.name)
@@ -521,15 +521,15 @@ export class MountEntry {
   }
 
   /**
-   * Batch-register commands. Mirrors Python's `Mount.register_fns(...)`.
+   * Batch-register commands. Mirrors Python's `Mount.register_commands(...)`.
    * Commands with `vfs: null` go to the general table. Multi-VFS entries
    * (sharing the same name across mounts) are filtered to this mount's VFS
    * kind; if a name has entries but none match this mount, throw.
    */
-  registerFns(items: readonly RegisteredCommand[]): void {
+  registerCommands(items: readonly Command[]): void {
     const kind = this.vfs.name
     interface Group {
-      toRegister: RegisteredCommand[]
+      toRegister: Command[]
       attempted: Set<string>
     }
     const groups = new Map<string, Group>()
@@ -568,9 +568,9 @@ export class MountEntry {
    * whole files, `mkdir` refuses a taken name first, and `glob` walks
    * `readdir`. Only a method marked `@vfsCall` is reachable by name, and a
    * custom one is handed the scope and the op's positional arguments.
-   * Mirrors Python's `MountEntry._calls`.
+   * Mirrors Python's `MountEntry._callers`.
    */
-  calls(opName: string, filetype: string | null): OpCall[] {
+  callers(opName: string, filetype: string | null): OpCall[] {
     const vfs = this.vfs
     if (opName === 'read') {
       const levels: OpCall[] = []
@@ -687,7 +687,7 @@ export class MountEntry {
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     const filetype = kwargs.filetype === undefined ? getExtension(scope.virtual) : kwargs.filetype
-    const levels = this.calls(opName, filetype)
+    const levels = this.callers(opName, filetype)
     if (levels.length === 0) throw enotsup(this.vfs.name, opName, scope)
     for (const call of levels) {
       const result = await call(scope, args, kwargs)
@@ -716,7 +716,7 @@ export class MountEntry {
 
   // ── execution ─────────────────────────────────────
 
-  async executeCmd(
+  async runCommand(
     cmdName: string,
     paths: PathSpec[],
     texts: string[],
@@ -766,7 +766,7 @@ export class MountEntry {
     cmdName: string,
     paths: PathSpec[],
     context: ExecContext,
-  ): Promise<[RegisteredCommand[], string | null]> {
+  ): Promise<[Command[], string | null]> {
     let extension =
       paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].virtual) : null
     const first = paths[0]
@@ -924,7 +924,7 @@ export class MountEntry {
    */
   private readOnlyRefusal(
     cmdName: string,
-    cmd: RegisteredCommand,
+    cmd: Command,
     flags: Record<string, FlagValue>,
   ): IOResult | null {
     const infoOnly = flags.help === true || (flags.version === true && hasInjectedVersion(cmd.spec))
@@ -960,7 +960,7 @@ export class MountEntry {
    */
   private async runHandler(
     cmdName: string,
-    cmd: RegisteredCommand,
+    cmd: Command,
     paths: PathSpec[],
     texts: string[],
     cmdOpts: CommandOpts,
@@ -999,7 +999,7 @@ export class MountEntry {
    * Python's MountEntry._wrap_output. */
   private wrapOutput(
     cmdName: string,
-    cmd: RegisteredCommand,
+    cmd: Command,
     paths: PathSpec[],
     result: NonNullable<CommandFnResult>,
   ): [ByteSource | null, IOResult] {
@@ -1024,9 +1024,9 @@ export class MountEntry {
    * stored bytes even where the VFS renders the filetype: a
    * read-modify-write hands whatever it read straight back to `write`,
    * which always stores, so reading a rendered form would store the
-   * rendering over the file. Mirrors Python's `MountEntry.execute_op`.
+   * rendering over the file. Mirrors Python's `MountEntry.call`.
    */
-  async executeOp(
+  async call(
     opName: string,
     path: string,
     args: readonly unknown[] = [],
@@ -1034,7 +1034,7 @@ export class MountEntry {
   ): Promise<unknown> {
     return this.use(async (): Promise<unknown> => {
       const filetype = kwargs.filetype === undefined ? getExtension(path) : kwargs.filetype
-      const levels = this.calls(opName, filetype)
+      const levels = this.callers(opName, filetype)
       if (levels.length === 0) {
         throw enotsup(this.vfs.name, opName, path)
       }

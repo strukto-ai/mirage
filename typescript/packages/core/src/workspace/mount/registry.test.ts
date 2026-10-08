@@ -289,7 +289,7 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
     const mount = await reg.resolveMount('mutate', [], '/a/x')
     expect(mount).toBe(b)
     if (mount === null) throw new Error('missing mutate mount')
-    const [, io] = await mount.executeCmd('mutate', [], [], {})
+    const [, io] = await mount.runCommand('mutate', [], [], {})
     expect(io.exitCode).toBe(1)
     expect(new TextDecoder().decode(io.stderr as Uint8Array)).toContain(
       'mutate: read-only mount at /b/',

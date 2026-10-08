@@ -14,7 +14,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     Operation,
     require_op,
 )
@@ -67,4 +67,4 @@ async def touch(
     )
 
 
-BUILDER = Builder("touch", touch, write=True)
+BUILDER = GenericCommand("touch", touch, write=True)

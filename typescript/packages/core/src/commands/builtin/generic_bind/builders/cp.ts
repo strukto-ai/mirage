@@ -20,7 +20,7 @@ import type { NativeCopy, PathSpec, PrimitiveCopy, StatFn } from '../../../../ty
 import { walkFind } from '../../../../core/generic/find.ts'
 import { cpGeneric, parseFlags } from '../../generic/cp.ts'
 import { typedLink } from '../../utils/links.ts'
-import type { Builder } from '../adapter.ts'
+import type { GenericCommand } from '../adapter.ts'
 import type { CommandIO } from '../../../config.ts'
 import { requireOp, resolveGlobOf } from '../adapter.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -39,7 +39,7 @@ export function overlayableStat(
   return async (p) => statOverlay(p.virtual, await ops.stat(accessor, p, index))
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'cp',
   write: true,
   fn: async (ops, accessor, paths, _texts, opts) => {

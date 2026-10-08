@@ -17,7 +17,7 @@ from mirage.commands.builtin.generic.tsort import (
     tsort_generic as generic_tsort,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
@@ -41,4 +41,4 @@ async def tsort(
     )
 
 
-BUILDER = Builder("tsort", tsort, read=True)
+BUILDER = GenericCommand("tsort", tsort, read=True)

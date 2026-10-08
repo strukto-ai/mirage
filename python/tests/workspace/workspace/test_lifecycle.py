@@ -30,7 +30,7 @@ from mirage.cache.index.config import (
 )
 from mirage.cache.index.view import IndexView
 from mirage.commands.cli.types import CLISpec
-from mirage.commands.config import RegisteredCommand
+from mirage.commands.config import Command
 from mirage.commands.spec import CommandSpec, Operand
 from mirage.io import IOResult
 from mirage.runtime.base import Runtime
@@ -818,7 +818,7 @@ async def test_unmount_waits_for_admitted_vfs_use(
         ws.add_mount("/alias", vfs)
     override(vfs, "read", read)
     ws.mount("/data").register(
-        RegisteredCommand(
+        Command(
             name="readvalue",
             spec=CommandSpec(rest=Operand(type="path")),
             vfs="ram",

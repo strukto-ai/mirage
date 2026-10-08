@@ -189,7 +189,7 @@ describe('S3 cache consistency (mocked)', () => {
   })
 
   it('a fan-out revalidates a descendant mount', async () => {
-    // The fan-out calls mount.executeCmd per leg, bypassing the registry's
+    // The fan-out calls mount.runCommand per leg, bypassing the registry's
     // pre-command reconcile entirely, so before the gate a descendant
     // mount's cached bytes were never revalidated at all.
     mock.store.set(BUCKET, 'p.txt', ENC.encode('v1\n'))

@@ -438,7 +438,7 @@ def test_a_drift_check_offers_no_hints():
     )
     seen: list[bool] = []
 
-    async def execute_op(op, path, index):
+    async def call(op, path, index):
         assert (await restored.get("/m/a.txt")).entry is not None
         assert isinstance(index, RAMIndexCacheStore)
         seen.append(isinstance(index, ListingCheckStore))
@@ -449,7 +449,7 @@ def test_a_drift_check_offers_no_hints():
         mount_id=None,
         index=restored,
         vfs=SimpleNamespace(supports_snapshot=True),
-        execute_op=execute_op,
+        call=call,
     )
     asyncio.run(check_drift(lambda _p: mount, "/m/a.txt", "t"))
     assert seen == [False]

@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.look import look_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
@@ -40,4 +40,4 @@ async def look(
     )
 
 
-BUILDER = Builder("look", look, read=True)
+BUILDER = GenericCommand("look", look, read=True)

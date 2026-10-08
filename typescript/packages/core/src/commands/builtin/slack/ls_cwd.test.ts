@@ -29,7 +29,7 @@ const DEC = new TextDecoder()
 // after `cd /slack/...` would return [] because the cwd PathSpec was rebuilt
 // without preserving the mount prefix. TS doesn't reproduce the bug today
 // (opts.cwd is a string and opts.mountPrefix is set separately by
-// Mount.executeCmd), but this test pins the contract so a future refactor
+// Mount.runCommand), but this test pins the contract so a future refactor
 // that drops `prefix: opts.mountPrefix ?? ''` from slack/ls.ts surfaces
 // immediately.
 describe('slack ls (no args) after cd preserves mount prefix', () => {

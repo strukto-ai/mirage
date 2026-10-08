@@ -27,7 +27,7 @@ import {
 } from '@struktoai/mirage-core/commands/spec/index'
 
 import type { CommandSpec, Operand, Option } from '@struktoai/mirage-core/commands/spec/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
+import type { Command } from '@struktoai/mirage-core/commands/config'
 
 import {
   type Capabilities,
@@ -119,12 +119,12 @@ function assertGroupsReachable(pkgs: readonly string[], modules: ModuleBag[]): v
   }
 }
 
-function collectRegistrations(modules: ModuleBag[]): Record<string, RegisteredCommand[]> {
-  const out: Record<string, RegisteredCommand[]> = {}
+function collectRegistrations(modules: ModuleBag[]): Record<string, Command[]> {
+  const out: Record<string, Command[]> = {}
   for (const mod of modules) {
     for (const [key, value] of Object.entries(mod)) {
       if (!key.endsWith('_COMMANDS') || !Array.isArray(value)) continue
-      for (const rc of value as RegisteredCommand[]) {
+      for (const rc of value as Command[]) {
         ;(out[rc.name] ??= []).push(rc)
       }
     }
@@ -136,7 +136,7 @@ function collectRegistrations(modules: ModuleBag[]): Record<string, RegisteredCo
 // write flag or a filetype, so dropping one backend's aggregate while another
 // keeps it leaves every union unchanged. Key the same facts by VFS so the
 // parity check sees that difference.
-function byVfs(rcs: RegisteredCommand[]): Record<string, unknown> {
+function byVfs(rcs: Command[]): Record<string, unknown> {
   const out: Record<
     string,
     { has_aggregate: boolean; has_write: boolean; filetypes: Set<string> }
@@ -160,7 +160,7 @@ function byVfs(rcs: RegisteredCommand[]): Record<string, unknown> {
   )
 }
 
-function metaFor(rcs: RegisteredCommand[]): Record<string, unknown> {
+function metaFor(rcs: Command[]): Record<string, unknown> {
   const vfsNames = [...new Set(rcs.map((r) => r.vfs).filter((r): r is string => r !== null))].sort(
     compareCodePoints,
   )
@@ -250,7 +250,7 @@ function specFields(spec: CommandSpec): Record<string, unknown> {
   }
 }
 
-function serializeSpec(spec: CommandSpec, rcs: RegisteredCommand[]): Record<string, unknown> {
+function serializeSpec(spec: CommandSpec, rcs: Command[]): Record<string, unknown> {
   return {
     ...prune(specFields(spec), specFields(new SpecClass({}))),
     _meta: metaFor(rcs),
@@ -311,7 +311,7 @@ function sortedStringify(value: unknown): string {
 function emitVfsNames(
   name: string,
   knownVfsNames: string[],
-  registry: Record<string, RegisteredCommand[]>,
+  registry: Record<string, Command[]>,
   capabilities: Record<string, Capabilities | null>,
   configs: Record<string, ConfigFacts | null>,
 ): void {
@@ -337,7 +337,7 @@ function emitVfsNames(
 // different specs is itself a failure. The directory is rewritten whole so a
 // removed verb leaves no file behind. Mirrors `_emit_vfs_commands` in
 // scripts/gen_specs.py.
-function emitVfsCommands(name: string, registry: Record<string, RegisteredCommand[]>): void {
+function emitVfsCommands(name: string, registry: Record<string, Command[]>): void {
   const outDir = resolve(SPEC_ROOT, name, 'vfs_commands')
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
