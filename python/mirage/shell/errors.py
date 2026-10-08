@@ -94,7 +94,10 @@ class ExitSignal(Exception):
     expanded when it was raised. bash expands a simple command's words
     before it applies the command's redirects, so that diagnostic goes
     around them; any other goes through the redirects it was written
-    under.
+    under. ``sourced`` marks one raised in text ``eval`` or ``source``
+    ran: a forked stage or job reports its contained status even for a
+    simple command (``eval ': ${U?}' | cat`` is 1, ``: ${U?} | cat``
+    127).
     """
 
     def __init__(
@@ -111,6 +114,7 @@ class ExitSignal(Exception):
             contained_code if contained_code is not None else exit_code
         )
         self.expanding: int | None = None
+        self.sourced = False
 
 
 class DiscardSignal(ExitSignal):

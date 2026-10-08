@@ -543,6 +543,40 @@
         "stdout": "seed 0 X=5\nlet 1\n",
         "stderr": "bash: R: readonly variable\nbash: W: readonly variable\n"
       }
+    },
+    {
+      "id": "fatal_expansion_from_eval_or_source_in_a_fork",
+      "seq": 980125,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'eval \": \\${U?m}\" | cat; echo \"${PIPESTATUS[*]}\"; eval \": \\${U?m}\" & wait $!; echo \"bg $?\"'; printf ': ${U?m}\\n' > /data/s.sh; bash -c '. /data/s.sh | cat; echo \"${PIPESTATUS[*]}\"' 2>/dev/null; rm /data/s.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 0\nbg 1\n1 0\n",
+        "stderr": "bash: U: m\nbash: U: m\n"
+      }
     }
   ]
 }

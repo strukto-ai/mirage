@@ -233,7 +233,9 @@ export async function handleBackground(
           // `( : ${U?} & )` are 1).
           stdout = err.stdout ?? new Uint8Array()
           const status =
-            simpleCommand(left) && callStack?.subshell !== true ? err.exitCode : err.containedCode
+            simpleCommand(left) && !err.sourced && callStack?.subshell !== true
+              ? err.exitCode
+              : err.containedCode
           io = new IOResult({ exitCode: status, stderr: err.stderr })
           execNode = new ExecutionNode({
             command: cmdStrInner,

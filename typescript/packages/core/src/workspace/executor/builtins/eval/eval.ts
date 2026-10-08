@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSource } from '../../../../io/types.ts'
+import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../../shell/console/index.ts'
+import { ExitSignal } from '../../../../shell/errors.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
@@ -34,12 +35,18 @@ export async function handleEval(
   callStack: CallStack = new CallStack(),
 ): Promise<Result> {
   const script = args.join(' ')
-  const io = await executeFn(script, {
-    sessionId: session.sessionId,
-    stdin,
-    callStack,
-    ...(sink === undefined ? {} : { sink }),
-  })
+  let io: IOResult
+  try {
+    io = await executeFn(script, {
+      sessionId: session.sessionId,
+      stdin,
+      callStack,
+      ...(sink === undefined ? {} : { sink }),
+    })
+  } catch (err) {
+    if (err instanceof ExitSignal) err.sourced = true
+    throw err
+  }
   return [io.stdout, io, new ExecutionNode({ command: 'eval', exitCode: io.exitCode })]
 }
 

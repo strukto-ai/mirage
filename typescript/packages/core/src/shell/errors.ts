@@ -81,6 +81,10 @@ export class ExitSignal extends Error {
   // command's redirects, so that diagnostic goes around them; any other
   // goes through the redirects it was written under.
   expanding: number | null = null
+  // Whether it was raised in text `eval` or `source` ran: a forked stage or
+  // job reports its contained status even for a simple command
+  // (`eval ': ${U?}' | cat` is 1, `: ${U?} | cat` 127).
+  sourced = false
 
   constructor(
     exitCode = 0,

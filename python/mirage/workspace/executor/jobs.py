@@ -274,6 +274,7 @@ async def handle_background(
                 status = (
                     sig.exit_code
                     if simple_command(left)
+                    and not sig.sourced
                     and not (call_stack is not None and call_stack.subshell)
                     else sig.contained_code
                 )

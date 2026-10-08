@@ -182,7 +182,8 @@ def ended(sig: Exception, simple: bool = False) -> IOResult:
         sig (Exception): one of ``UNWINDING``.
         simple (bool): the child runs one simple command, which is the
             shell ``exit`` ends, so it reports ``exit``'s own status
-            (``: ${U?} | cat`` is 127, ``( : ${U?} ) | cat`` is 1).
+            (``: ${U?} | cat`` is 127, ``( : ${U?} ) | cat`` is 1),
+            unless the signal left text ``eval`` or ``source`` ran.
     """
     if isinstance(sig, (BreakSignal, ContinueSignal)):
         return IOResult(
@@ -194,7 +195,7 @@ def ended(sig: Exception, simple: bool = False) -> IOResult:
         stderr=sig.stderr or None,
         exit_code=(
             sig.contained_code
-            if isinstance(sig, ExitSignal) and not simple
+            if isinstance(sig, ExitSignal) and (not simple or sig.sourced)
             else sig.exit_code
         ),
     )
@@ -272,12 +273,15 @@ async def handle_if(
         handed=handed,
         decisions=decisions,
     )
-    # What the tests wrote stays, ahead of what the branch writes.
+    # What the tests wrote stays, ahead of what the branch writes; each
+    # test reads the fd 0 the `if` started with, so an `exec <&-` in one
+    # reaches the next.
     lead_stdout: list[ByteSource | None] = []
     lead = IOResult()
+    bound = fd0_binding(context.session)
     try:
         for test, body in branches:
-            stdout, io, _ = await run(test, test=True)
+            stdout, io, _ = await run(test, test=True, bound=bound)
             lead_stdout.append(stdout)
             lead = await lead.merge(io)
             if io.exit_code == 0:

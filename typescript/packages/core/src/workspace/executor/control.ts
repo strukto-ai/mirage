@@ -189,7 +189,8 @@ export async function carried(
  * diagnostic, and its status, `exit`'s contained one, `return`'s own, or that
  * of `break` or `continue`. A child running one simple command is the shell
  * `exit` ends (`simple`), so it reports `exit`'s own status (`: ${U?} | cat`
- * is 127, `( : ${U?} ) | cat` is 1). Mirrors Python's ended.
+ * is 127, `( : ${U?} ) | cat` is 1), unless the signal left text `eval` or
+ * `source` ran. Mirrors Python's ended.
  */
 export function ended(sig: Unwinding, simple = false): IOResult {
   if (sig instanceof BreakSignal || sig instanceof ContinueSignal) {
@@ -198,7 +199,8 @@ export function ended(sig: Unwinding, simple = false): IOResult {
   return new IOResult({
     stdout: sig.stdout,
     stderr: sig.stderr.byteLength > 0 ? sig.stderr : null,
-    exitCode: sig instanceof ExitSignal && !simple ? sig.containedCode : sig.exitCode,
+    exitCode:
+      sig instanceof ExitSignal && (!simple || sig.sourced) ? sig.containedCode : sig.exitCode,
   })
 }
 
@@ -258,6 +260,9 @@ export async function handleIf(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<Result> {
+  // Each test reads the fd 0 the `if` started with, so an `exec <&-` in one
+  // reaches the next.
+  const bound = fd0Binding(context.session)
   const run = (nodes: readonly TSNodeLike[], isTest = false): Promise<Result> =>
     executeBody(
       executeNode,
@@ -270,6 +275,7 @@ export async function handleIf(
       handed,
       decisions,
       isTest,
+      isTest ? bound : fd0Binding(context.session),
     )
   // What the tests wrote stays, ahead of what the branch writes.
   const leadStdout: (ByteSource | null)[] = []

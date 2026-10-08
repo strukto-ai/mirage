@@ -203,6 +203,40 @@
         "stdout": "t\nafter\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ctl_if_tests_share_closed_input",
+      "seq": 502843,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | if exec <&-; false; then :; elif read x; then echo bad; else echo good; fi; printf 'payload\\n' | if { exec <&-; false; }; then :; elif read x; then echo \"$x\"; else echo none; fi",
+      "expect": {
+        "exit": 0,
+        "stdout": "good\nnone\n",
+        "stderr": "bash: read: read error: 0: Bad file descriptor\nbash: read: read error: 0: Bad file descriptor\n"
+      }
     }
   ]
 }
