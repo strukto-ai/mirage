@@ -350,7 +350,7 @@ export async function handleConnection(
       armed,
       stdin,
       callStack,
-      rightExec.unopened,
+      rightExec,
     )
   } catch (err) {
     if (isUnwinding(err)) throw await carried(err, asyncChain(outputs), merged)
@@ -542,7 +542,7 @@ export async function handleSubshell(
         armed,
         stdin,
         callStack,
-        childExec.unopened,
+        childExec,
       )
     } catch (err) {
       if (!(err instanceof ExitSignal || err instanceof ReturnSignal)) throw err

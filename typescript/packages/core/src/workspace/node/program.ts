@@ -348,7 +348,7 @@ async function runProgram(
           armed,
           stdin,
           callStack,
-          lastExec.unopened,
+          lastExec,
         )
       } catch (err) {
         if (!isUnwinding(err)) throw err

@@ -113,7 +113,9 @@ export function errTrapArmed(session: SessionState): boolean {
  * It runs where `set -e` would act: not in a test, the left of `&&`/`||`
  * or after `!`, and not again for a group, `if`, a loop, `case` or
  * `&&`/`||` list, whose own failing command ran it already, unless the
- * statement failed to open a redirect and never ran (`unopened`). `$?` is
+ * statement failed to open a redirect and never ran (`execNode.unopened`,
+ * which this consumes, so a group returning the same node does not answer
+ * the failure again). `$?` is
  * `status` while it runs and again after it, whatever the action returns,
  * and the action does not run while it is running, nor once `set -e` is
  * ending the shell. An `exit` or `return` in it leaves as the statement's
@@ -130,9 +132,11 @@ export async function runErrTrap(
   armed: boolean,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
-  unopened = false,
+  execNode: ExecutionNode | null = null,
 ): Promise<Written[]> {
   const action = session.errTrap
+  const unopened = execNode?.unopened === true
+  if (execNode !== null) execNode.unopened = false
   const statement =
     node.type === NT.REDIRECTED_STATEMENT && node.children[0] !== undefined
       ? node.children[0]
@@ -151,6 +155,9 @@ export async function runErrTrap(
     (ERR_TRAP_EXEMPT_TYPES.has(statement.type) && !unopened && !arithmetic(statement))
   )
     return []
+  // `$?` is the failed status while the action runs; a list's right command
+  // has not recorded it yet.
+  recordStatus(session, status, true)
   session.errTrapRunning = true
   let written: Written[]
   try {
@@ -271,6 +278,10 @@ export async function runExitTrap(
   // `exit` in it keeps it, as bash's does.
   const saved = session.trapStatus
   session.trapStatus = status
+  // Its own commands answer ERR and RETURN afresh; the failure that set
+  // `-e` off was answered already.
+  const exiting = session.errexitExiting
+  session.errexitExiting = false
   let final = status
   let stdout: Uint8Array
   let stderr: Uint8Array
@@ -300,6 +311,7 @@ export async function runExitTrap(
     }
   } finally {
     session.trapStatus = saved
+    session.errexitExiting = exiting
     session.exitTrap = null
     session.exitTrapInherited = false
   }

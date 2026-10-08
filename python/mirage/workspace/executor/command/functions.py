@@ -185,7 +185,7 @@ async def run_shell_function(
                     armed,
                     stdin,
                     cs,
-                    last_exec.unopened,
+                    last_exec,
                 )
                 if trapped:
                     merged_io = await land(

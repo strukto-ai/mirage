@@ -1466,7 +1466,7 @@ async def _execute_node(
                     armed,
                     stdin,
                     cs,
-                    last_exec.unopened,
+                    last_exec,
                 )
                 if trapped:
                     merged_io = await land(

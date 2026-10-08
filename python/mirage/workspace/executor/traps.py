@@ -131,7 +131,7 @@ async def run_err_trap(
     armed: bool,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
-    unopened: bool = False,
+    exec_node: ExecutionNode | None = None,
 ) -> list[Written]:
     """Run the ERR action after a statement finished with ``status``.
 
@@ -154,13 +154,19 @@ async def run_err_trap(
         armed (bool): ``err_trap_armed`` as the statement started.
         stdin (ByteSource | None): the shell's standard input.
         call_stack (CallStack | None): the frames the action runs in.
-        unopened (bool): a redirect of the statement failed to open.
+        exec_node (ExecutionNode | None): the statement's node, whose
+            ``unopened`` mark (a redirect of it failed to open) this
+            consumes, so a group returning the same node does not answer
+            the failure again.
 
     Returns:
         list[Written]: what the action wrote, for the caller to land;
         empty when none runs.
     """
     action = session.err_trap
+    unopened = exec_node is not None and exec_node.unopened
+    if exec_node is not None:
+        exec_node.unopened = False
     if node.type == NT.REDIRECTED_STATEMENT and node.children:
         node = node.children[0]
     if (
@@ -180,6 +186,9 @@ async def run_err_trap(
         )
     ):
         return []
+    # `$?` is the failed status while the action runs; a list's right
+    # command has not recorded it yet.
+    record_status(session, status, transparent=True)
     session.err_trap_running = True
     try:
         written = await _run_action(
@@ -338,6 +347,10 @@ async def run_exit_trap(
     # `exit` in it keeps it, as bash's does.
     saved = session._trap_status
     session._trap_status = status
+    # Its own commands answer ERR and RETURN afresh; the failure that set
+    # `-e` off was answered already.
+    exiting = session.errexit_exiting
+    session.errexit_exiting = False
     final = status
     try:
         io = await execute_fn(
@@ -363,6 +376,7 @@ async def run_exit_trap(
         stderr = sig.stderr
     finally:
         session._trap_status = saved
+        session.errexit_exiting = exiting
         session.exit_trap = None
         session.exit_trap_inherited = False
     record_status(session, final)

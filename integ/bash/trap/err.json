@@ -639,10 +639,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'echo E' ERR && false; true && { false; }; echo end )",
+      "command": "( trap 'echo \"E $?\"' ERR && false; true && { false; }; echo end )",
       "expect": {
         "exit": 0,
-        "stdout": "E\nE\nend\n",
+        "stdout": "E 1\nE 1\nend\n",
         "stderr": ""
       }
     },
@@ -673,7 +673,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'echo ERR' ERR; { :; } < /data/missing; echo \"end $?\" )",
+      "command": "( trap 'echo ERR' ERR; { { :; } < /data/missing; }; echo \"end $?\" )",
       "expect": {
         "exit": 0,
         "stdout": "ERR\nend 1\n",
@@ -745,6 +745,40 @@
       "expect": {
         "exit": 0,
         "stdout": "T\nrc=5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "err_trap_child_shell_runs_its_own_action",
+      "seq": 512099,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap '(trap \"echo CHILD\" ERR; false); echo PARENT' ERR; false )",
+      "expect": {
+        "exit": 1,
+        "stdout": "CHILD\nPARENT\n",
         "stderr": ""
       }
     }

@@ -64,8 +64,6 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "return_trap",
     "err_trap_hidden",
     "return_trap_hidden",
-    "err_trap_running",
-    "return_trap_running",
     "tty",
     "job_output",
     "job_waits",
@@ -101,6 +99,8 @@ STARTUP_VALUES: dict[str, ShellVar] = {
 TRANSIENT_FIELDS: tuple[str, ...] = (
     "errexit_immune",
     "errexit_exiting",
+    "err_trap_running",
+    "return_trap_running",
     "_local_vars",
     "_local_frames",
     "_local_random",

@@ -334,7 +334,7 @@ async def handle_connection(
             armed,
             stdin,
             call_stack,
-            right_exec.unopened,
+            right_exec,
         )
     except UNWINDING as sig:
         raise await carried(sig, async_chain(outputs), merged)
@@ -538,7 +538,7 @@ async def handle_subshell(
                 armed,
                 stdin,
                 call_stack,
-                last_exec.unopened,
+                last_exec,
             )
         except (ExitSignal, ReturnSignal) as sig:
             merged_io, last_exec = await _subshell_ended(

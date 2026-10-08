@@ -159,7 +159,7 @@ export async function executeShellFunction(
             armed,
             bodyStdin,
             cs,
-            execNode.unopened,
+            execNode,
           )
           if (trapped.length > 0) {
             mergedIo = await land(trapped, sink ?? null, allStdout, mergedIo)

@@ -377,8 +377,9 @@ class SessionState:
     return_trap: str | None = None
     err_trap_hidden: bool = False
     return_trap_hidden: bool = False
-    # Whether each action is running: bash runs neither again until it
-    # finishes, whatever the action registers meanwhile.
+    # Whether each action is running in this shell: bash runs neither
+    # again until it finishes, whatever the action registers meanwhile. A
+    # child shell starts with neither running.
     err_trap_running: bool = False
     return_trap_running: bool = False
     tty: Terminal = field(default_factory=Terminal, repr=False)

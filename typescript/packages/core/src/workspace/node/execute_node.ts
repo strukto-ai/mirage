@@ -1389,7 +1389,7 @@ async function executeNodeBody(
           armed,
           stdin,
           callStack,
-          execNode.unopened,
+          execNode,
         )
         if (trapped.length > 0) {
           mergedIo = await land(trapped, null, allStdout, mergedIo)

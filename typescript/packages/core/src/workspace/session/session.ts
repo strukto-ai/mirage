@@ -416,8 +416,9 @@ export class SessionState {
   returnTrap: string | null = null
   errTrapHidden = false
   returnTrapHidden = false
-  // Whether each action is running: bash runs neither again until it
-  // finishes, whatever the action registers meanwhile.
+  // Whether each action is running in this shell: bash runs neither again
+  // until it finishes, whatever the action registers meanwhile. A child
+  // shell starts with neither running.
   errTrapRunning = false
   returnTrapRunning = false
   trapStatus: number | null = null
@@ -642,8 +643,6 @@ export class SessionState {
     forked.returnTrap = this.returnTrap
     forked.errTrapHidden = this.errTrapHidden
     forked.returnTrapHidden = this.returnTrapHidden
-    forked.errTrapRunning = this.errTrapRunning
-    forked.returnTrapRunning = this.returnTrapRunning
     forked.tty = this.tty
     forked.jobOutput = this.jobOutput
     forked.jobWaits = this.jobWaits

@@ -305,6 +305,40 @@
         "stdout": "rc=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "traps_run_in_exit_cleanup",
+      "seq": 512089,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( set -eT; trap 'echo RET' RETURN; f() { :; }; trap 'echo EXIT; f; false; echo no' EXIT; trap 'echo ERR' ERR; false ); echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "ERR\nEXIT\nRET\nERR\nrc=1\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -109,7 +109,7 @@ async def _execute_body(
                 armed,
                 stdin,
                 call_stack,
-                last_exec.unopened,
+                last_exec,
             )
             if trapped:
                 merged_io = await land(trapped, None, all_stdout, merged_io)
@@ -697,7 +697,7 @@ async def handle_case(
                     armed,
                     stdin,
                     call_stack,
-                    last_exec.unopened,
+                    last_exec,
                 )
                 if trapped:
                     merged_io = await land(

@@ -335,7 +335,7 @@ async def _run_program(
                     armed,
                     stdin,
                     call_stack,
-                    last_exec.unopened,
+                    last_exec,
                 )
             except UNWINDING as sig:
                 resumes, merged_io, last_exec = await _unwound(
