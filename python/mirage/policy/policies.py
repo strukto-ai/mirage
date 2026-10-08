@@ -579,14 +579,12 @@ class Policies:
         """Whether a post_vfs policy may read an op's result.
 
         The built-in output cap answers from the op and the mount alone;
-        any other policy at that hook may read ``ctx.result``, so a
-        streamed read reaches it read whole.
+        any other hook, a subclass's override of the cap's included, may
+        read ``ctx.result``, so a streamed read reaches it read whole.
         """
-        base = Policy.post_vfs
+        blind = (Policy.post_vfs, OutputCapPolicy.post_vfs)
         return any(
-            type(policy).post_vfs is not base
-            and not isinstance(policy, OutputCapPolicy)
-            for policy in self._policies
+            type(policy).post_vfs not in blind for policy in self._policies
         )
 
     async def wants_for(self, hook: str, session_id: str) -> bool:

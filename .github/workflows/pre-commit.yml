@@ -204,7 +204,9 @@ jobs:
       # excused edges and the type-only cycles are a ratchet like the two
       # above.
       - name: Import direction
-        run: ./python/.venv/bin/python scripts/check_import_direction.py --strict
+        run: |
+          ./python/.venv/bin/python scripts/check_import_direction.py --selftest
+          ./python/.venv/bin/python scripts/check_import_direction.py --strict
 
       # Same ratchet, applied to battery coverage: a backend that cannot pass
       # a case is normally just deleted from its `targets`, which turns a

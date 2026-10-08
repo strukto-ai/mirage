@@ -427,13 +427,15 @@ export class Policies {
 
   /**
    * Whether a postVfs policy may read an op's result. The built-in output cap
-   * answers from the op and the mount alone; any other policy at that hook may
-   * read `ctx.result`, so a streamed read reaches it read whole. Mirrors
+   * answers from the op and the mount alone; any other hook, a subclass's
+   * override of the cap's included, may read `ctx.result`, so a streamed read
+   * reaches it read whole. Mirrors
    * Python's `reads_results`.
    */
   readsResults(): boolean {
     return this.policies.some(
-      (policy) => policy.postVfs !== undefined && !(policy instanceof OutputCapPolicy),
+      (policy) =>
+        policy.postVfs !== undefined && policy.postVfs !== OutputCapPolicy.prototype.postVfs,
     )
   }
 

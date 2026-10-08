@@ -34,12 +34,27 @@ HIGH = ("commands", "workspace")
 # above all of it.
 TS_PACKAGES = ("core", "node", "browser")
 
+# A static import or re-export, a bare import run for its side effects,
+# and a dynamic import, which is a type query when `typeof` precedes it or
+# a member other than a promise method follows it.
 TS_SPEC = re.compile(
-    r"""^\s*(import|export)\s+(type\s+)?([^'"]*?)\s*from\s*['"]([^'"]+)['"]"""
-    r"""|\bimport\(\s*['"]([^'"]+)['"]\s*\)""",
+    r"""^\s*(?:import|export)\s+(?P<type>type\s+)?(?P<clause>[^'"]*?)\s*"""
+    r"""from\s*['"](?P<spec>[^'"]+)['"]"""
+    r"""|^\s*import\s+['"](?P<bare>[^'"]+)['"]"""
+    r"""|(?P<query>\btypeof\s+)?\bimport\(\s*['"](?P<dynamic>[^'"]+)['"]\s*\)"""
+    r"""(?P<member>\.(?!then\b|catch\b|finally\b)[A-Za-z_$])?""",
     re.M,
 )
 CORE_PACKAGE = "@struktoai/mirage-core/"
+
+
+def _absolute(path: Path, node: ast.ImportFrom) -> str:
+    """The module a from-import names, a relative one resolved at `path`."""
+    if node.level == 0:
+        return node.module or ""
+    parts = path.relative_to(PY_ROOT.parent).with_suffix("").parts
+    base = parts[: len(parts) - node.level]
+    return ".".join(base + ((node.module,) if node.module else ()))
 
 
 def python_edges() -> set[str]:
@@ -50,8 +65,8 @@ def python_edges() -> set[str]:
             tree = ast.parse(path.read_text())
             for node in ast.walk(tree):
                 modules: list[str] = []
-                if isinstance(node, ast.ImportFrom) and node.level == 0:
-                    modules = [node.module or ""]
+                if isinstance(node, ast.ImportFrom):
+                    modules = [_absolute(path, node)]
                 elif isinstance(node, ast.Import):
                     modules = [alias.name for alias in node.names]
                 for module in modules:
@@ -86,13 +101,13 @@ def _resolve(src: Path, path: Path, spec: str) -> Path | None:
     return None
 
 
-def _imports(path: Path) -> list[tuple[str, bool]]:
-    """Each specifier `path` imports and whether only types come of it."""
+def _imports(text: str) -> list[tuple[str, bool]]:
+    """Each specifier `text` imports and whether only types come of it."""
     found: list[tuple[str, bool]] = []
-    for match in TS_SPEC.finditer(path.read_text()):
-        spec = match.group(4) or match.group(5)
-        clause = (match.group(3) or "").strip()
-        typed = bool(match.group(2)) or (
+    for match in TS_SPEC.finditer(text):
+        spec = match["spec"] or match["bare"] or match["dynamic"]
+        clause = (match["clause"] or "").strip()
+        typed = bool(match["type"] or match["query"] or match["member"]) or (
             clause.startswith("{")
             and all(
                 name.strip().startswith("type ")
@@ -113,7 +128,7 @@ def typescript_edges() -> set[str]:
             if not (src / low).is_dir():
                 continue
             for path in _ts_files(src / low):
-                for spec, _ in _imports(path):
+                for spec, _ in _imports(path.read_text()):
                     target = _resolve(src, path, spec)
                     if target is None:
                         continue
@@ -183,7 +198,7 @@ def typescript_cycles() -> tuple[set[str], set[str]]:
         values: dict[Path, set[Path]] = defaultdict(set)
         every: dict[Path, set[Path]] = defaultdict(set)
         for path in _ts_files(src):
-            for spec, types_only in _imports(path):
+            for spec, types_only in _imports(path.read_text()):
                 if spec.startswith(CORE_PACKAGE):
                     continue
                 target = _resolve(src, path, spec)
@@ -199,6 +214,37 @@ def typescript_cycles() -> tuple[set[str], set[str]]:
     return runtime, typed
 
 
+SELFTEST_TS = [
+    ("import { a } from './a.ts'", [("./a.ts", False)]),
+    ("import type { A } from './a.ts'", [("./a.ts", True)]),
+    ("import { type A, type B } from './a.ts'", [("./a.ts", True)]),
+    ("export * from './a.ts'", [("./a.ts", False)]),
+    ("import './a.ts'", [("./a.ts", False)]),
+    ("const m = await import('./a.ts')", [("./a.ts", False)]),
+    ("import('./a.ts').then(load)", [("./a.ts", False)]),
+    ("type M = typeof import('./a.ts')", [("./a.ts", True)]),
+    ("type T = import('./a.ts').T", [("./a.ts", True)]),
+]
+
+
+def selftest() -> int:
+    """Check the import readers against each form they must tell apart."""
+    failed = 0
+    for text, want in SELFTEST_TS:
+        got = _imports(text)
+        if got != want:
+            print(f"  selftest: {text!r} read as {got}, want {want}")
+            failed += 1
+    node = ast.parse("from ...commands import x").body[0]
+    assert isinstance(node, ast.ImportFrom)
+    got_py = _absolute(PY_ROOT / "core" / "a" / "b.py", node)
+    if got_py != "mirage.commands":
+        print(f"  selftest: a relative import read as {got_py!r}")
+        failed += 1
+    print(f"selftest: {failed} failed")
+    return 1 if failed else 0
+
+
 def main() -> int:
     # A low package importing a high one predates the gate in a few
     # places, each excused with its reason in import_exceptions.json.
@@ -207,7 +253,10 @@ def main() -> int:
     # move off their baseline in either direction.
     parser = argparse.ArgumentParser()
     parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
+    if args.selftest:
+        return selftest()
     exceptions = json.loads(EXCEPTIONS.read_text())
     excused: dict[str, str] = exceptions["edges"]
     edges = python_edges() | typescript_edges()

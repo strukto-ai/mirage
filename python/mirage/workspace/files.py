@@ -38,13 +38,16 @@ async def _recorded(
     """A streamed answer, recorded once it ends.
 
     The door stamps the report with the bytes the stream carried when it
-    ends, so the record waits for that rather than counting none.
+    ends, so the record waits for that rather than counting none. The
+    caller runs it to its empty first step, inside the ``try``, so a
+    stream closed before its first pull is still closed and recorded.
 
     Args:
         stream (AsyncIterator[bytes]): the door's stream.
         record (Callable[[], None]): records the op from the report.
     """
     try:
+        yield b""
         async for chunk in stream:
             yield chunk
     finally:
@@ -376,7 +379,9 @@ class Files:
             )
 
         if hasattr(result, "__aiter__"):
-            return _recorded(result, lambda: record(None))
+            recorded = _recorded(result, lambda: record(None))
+            await recorded.__anext__()
+            return recorded
         record(result)
         return result
 

@@ -732,8 +732,11 @@ async def test_a_streamed_read_is_recorded_once_it_ends():
         stream = await ws.vfs.read_stream("/r/a.txt")
         assert len(ws.vfs.records) == before
         assert b"".join([chunk async for chunk in stream]) == b"x" * 100
+        stream = await ws.vfs.read_stream("/r/a.txt")
+        await stream.aclose()
         assert [(r.op, r.bytes) for r in ws.vfs.records[before:]] == [
-            ("read", 100)
+            ("read", 100),
+            ("read", 100),
         ]
     finally:
         await ws.close()

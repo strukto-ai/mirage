@@ -1479,6 +1479,7 @@ class Tape extends BaseVFS {
   delay = 0
   pulled = 0
   reads = 0
+  closed = false
 
   override readdir(): Promise<string[]> {
     return Promise.resolve([...this.files.keys()].map((name) => `/tape/${name}`))
@@ -1501,10 +1502,14 @@ class Tape extends BaseVFS {
   override async *readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     const data = this.files.get(path.vfsPath.replace(/^\/+/, ''))
     if (data === undefined) throw enoent(path)
-    for (let at = 0; at < data.byteLength; at += 10) {
-      await sleep(this.delay)
-      this.pulled += 1
-      yield data.subarray(at, at + 10)
+    try {
+      for (let at = 0; at < data.byteLength; at += 10) {
+        await sleep(this.delay)
+        this.pulled += 1
+        yield data.subarray(at, at + 10)
+      }
+    } finally {
+      this.closed = true
     }
   }
 }
@@ -1612,20 +1617,17 @@ describe('a streamed read', () => {
     }
   })
 
-  it('drains into the cache once abandoned', async () => {
+  it('closes and keeps nothing when closed before its first pull', async () => {
     const tape = new Tape()
     const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
     try {
       const stream = (await ws.dispatch('read', TAPE, [], {
         stream: true,
-      })) as AsyncIterable<Uint8Array>
-      const iterator = stream[Symbol.asyncIterator]()
-      const first = await iterator.next()
-      expect(DEC.decode(first.value as Uint8Array)).toBe('0123456789')
-      await iterator.return?.()
-      await Promise.all([...(ws.cache.drainTasks?.values() ?? [])])
-      expect(DEC.decode((await ws.dispatch('read', TAPE)) as Uint8Array)).toBe(WHOLE)
-      expect(tape.reads).toBe(0)
+      })) as AsyncGenerator<Uint8Array>
+      await stream.return(undefined)
+      expect([tape.pulled, tape.closed]).toEqual([1, true])
+      await ws.dispatch('read', TAPE)
+      expect(tape.reads).toBe(1)
     } finally {
       await ws.close()
     }

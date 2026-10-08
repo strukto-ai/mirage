@@ -148,8 +148,11 @@ export async function* withPullTimeout(
   } finally {
     const closing = iterator.return?.()
     if (closing !== undefined) {
-      if (pulling) void closing.catch(() => undefined)
-      else await closing
+      if (pulling) {
+        void closing.catch((err: unknown) => {
+          console.debug(`${name}: closing a timed-out stream failed: ${String(err)}`)
+        })
+      } else await closing
     }
   }
 }

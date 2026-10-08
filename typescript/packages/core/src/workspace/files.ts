@@ -57,7 +57,9 @@ function payloadBytes(result: unknown, args: readonly unknown[]): number {
 /**
  * A streamed answer, recorded once it ends: the door stamps the report with
  * the bytes the stream carried when it ends, so the record waits for that
- * rather than counting none. Mirrors Python's `Files._recorded`.
+ * rather than counting none. The caller runs it to its empty first step,
+ * inside the `try`, so a stream closed before its first pull is still closed
+ * and recorded. Mirrors Python's `_recorded`.
  */
 async function* recorded(
   stream: AsyncIterable<Uint8Array>,
@@ -65,6 +67,7 @@ async function* recorded(
 ): AsyncGenerator<Uint8Array> {
   const iterator = stream[Symbol.asyncIterator]()
   try {
+    yield new Uint8Array()
     for (;;) {
       const next = await iterator.next()
       if (next.done === true) return
@@ -281,7 +284,9 @@ export class Files {
         this.sessionFor(seen),
       )
     if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
-      return recorded(result as AsyncIterable<Uint8Array>, () => record(null))
+      const stream = recorded(result as AsyncIterable<Uint8Array>, () => record(null))
+      await stream.next()
+      return stream
     }
     await record(result)
     return result

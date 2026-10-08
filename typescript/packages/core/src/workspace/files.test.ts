@@ -983,7 +983,11 @@ describe('readStream', () => {
       let got = ''
       for await (const chunk of stream) got += DEC.decode(chunk)
       expect(got).toBe('x'.repeat(100))
-      expect(ws.records.slice(before).map((r) => [r.op, r.bytes])).toEqual([['read', 100]])
+      await (await ws.vfs.readStream('/r/a.txt'))[Symbol.asyncIterator]().return?.()
+      expect(ws.records.slice(before).map((r) => [r.op, r.bytes])).toEqual([
+        ['read', 100],
+        ['read', 100],
+      ])
     } finally {
       await ws.close()
     }

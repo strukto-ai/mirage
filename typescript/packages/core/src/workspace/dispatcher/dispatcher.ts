@@ -49,7 +49,13 @@ import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { CycleError, norm, parent, posixNormpath } from '../../utils/path.ts'
 import type { Visibility } from '../../types.ts'
 import type { EntryGate } from '../../policy/types.ts'
-import { record, runWithMountContext, runWithRevisions, startOp } from '../../observe/context.ts'
+import {
+  commandRecords,
+  record,
+  runWithMountContext,
+  runWithRevisions,
+  startOp,
+} from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
@@ -249,25 +255,27 @@ async function primed(
     await iterator.return?.()
     throw err
   }
-  return resumed(first.done === true ? [] : [first.value], iterator, report)
+  const rest = resumed(first.done === true ? [] : [first.value], iterator, report)
+  await rest.next()
+  return rest
 }
 
 /**
- * The chunks already pulled, then the rest of the stream. The stream completes
- * when its last chunk is pulled or it is closed, so that is when the caller's
- * report is stamped, with the bytes it carried.
+ * The chunks already pulled, then the rest of the stream. `primed` runs it to
+ * its empty first step, inside the `try`, so a caller that closes it before
+ * pulling still closes the stream. The stream completes when its last chunk is
+ * pulled or it is closed, so that is when the caller's report is stamped, with
+ * the bytes the store moved.
  */
 async function* resumed(
   head: readonly Uint8Array[],
   iterator: AsyncIterator<Uint8Array>,
   report: OpReport | undefined,
 ): AsyncGenerator<Uint8Array> {
-  let moved = 0
+  let moved = head.reduce((sum, chunk) => sum + chunk.byteLength, 0)
   try {
-    for (const chunk of head) {
-      moved += chunk.byteLength
-      yield chunk
-    }
+    yield new Uint8Array()
+    yield* head
     for (;;) {
       const next = await iterator.next()
       if (next.done === true) return
@@ -803,10 +811,13 @@ export class Dispatcher {
     scope: PathSpec,
     filler: CacheManager | null,
   ): Promise<AsyncIterable<Uint8Array>> {
-    let stream = mount.readStream(scope)
-    if (filler !== null) {
-      stream = filler.fillStream(call.path, stream, () => !this.rendersRead(call, mount))
-    }
+    const [opened, records] = await commandRecords((mine) =>
+      Promise.resolve([mount.readStream(scope), mine] as const),
+    )
+    const stream =
+      filler === null
+        ? opened
+        : filler.fillStream(call.path, opened, records, () => !this.rendersRead(call, mount))
     return await primed(stream, call.report)
   }
 

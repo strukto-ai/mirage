@@ -1568,6 +1568,7 @@ class Tape(BaseVFS):
         self.delay = delay
         self.pulled = 0
         self.reads = 0
+        self.closed = False
 
     async def readdir(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
@@ -1603,10 +1604,13 @@ class Tape(BaseVFS):
         if key not in self.files:
             raise FileNotFoundError(path.virtual)
         data = self.files[key]
-        for at in range(0, len(data), 10):
-            await asyncio.sleep(self.delay)
-            self.pulled += 1
-            yield data[at : at + 10]
+        try:
+            for at in range(0, len(data), 10):
+                await asyncio.sleep(self.delay)
+                self.pulled += 1
+                yield data[at : at + 10]
+        finally:
+            self.closed = True
 
 
 class ReadsResults(Policy):
@@ -1709,18 +1713,14 @@ async def test_a_capped_stream_stops_at_the_cap(on_exceed):
 
 
 @pytest.mark.asyncio
-async def test_an_abandoned_stream_drains_into_the_cache():
+async def test_a_stream_closed_before_its_first_pull_closes_and_keeps_nothing():
     tape = Tape()
     with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
         stream, _ = await ws.dispatch("read", TAPE, stream=True)
-        assert await stream.__anext__() == b"0123456789"
         await stream.aclose()
-        cache = ws.namespace.mount_for("/tape/a.txt").cache_manager
-        for task in list(cache._file_cache._drain_tasks.values()):
-            await task
-        warm, _ = await ws.dispatch("read", TAPE)
-        assert warm == b"0123456789" * 5
-        assert tape.reads == 0
+        assert (tape.pulled, tape.closed) == (1, True)
+        await ws.dispatch("read", TAPE)
+        assert tape.reads == 1
 
 
 @pytest.mark.asyncio

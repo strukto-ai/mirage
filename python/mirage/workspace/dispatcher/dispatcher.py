@@ -49,7 +49,7 @@ from mirage.errors.fs import (
 )
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly
-from mirage.observe.context import record, start_op
+from mirage.observe.context import command_records, record, start_op
 from mirage.observe.record import OpRecord
 from mirage.policy.boundary import Boundary
 from mirage.policy.errors import PolicyDenied, PolicyError
@@ -158,7 +158,9 @@ async def _primed(
     except BaseException:
         await close_quietly(iterator)
         raise
-    return _resumed(head, iterator, report)
+    resumed = _resumed(head, iterator, report)
+    await resumed.__anext__()
+    return resumed
 
 
 async def _resumed(
@@ -168,19 +170,21 @@ async def _resumed(
 ) -> AsyncIterator[bytes]:
     """The chunks already pulled, then the rest of the stream.
 
-    The stream completes when its last chunk is pulled or it is closed,
-    so that is when the caller's report is stamped, with the bytes it
-    carried.
+    ``_primed`` runs it to its empty first step, inside the ``try``, so a
+    caller that closes it before pulling still closes the stream. The
+    stream completes when its last chunk is pulled or it is closed, so
+    that is when the caller's report is stamped, with the bytes the
+    store moved.
 
     Args:
         head (list[bytes]): what was pulled before the caller asked.
         iterator (AsyncIterator[bytes]): the stream after them.
         report (OpReport | None): the caller's report.
     """
-    moved = 0
+    moved = sum(len(chunk) for chunk in head)
     try:
+        yield b""
         for chunk in head:
-            moved += len(chunk)
             yield chunk
         async for chunk in iterator:
             moved += len(chunk)
@@ -1090,10 +1094,14 @@ class Dispatcher:
             mount (MountEntry): the mount serving its path.
             filler (CacheManager | None): the manager a cold read fills.
         """
-        stream = mount.read_stream(call.path.virtual)
+        with command_records() as records:
+            stream = mount.read_stream(call.path.virtual)
         if filler is not None:
             stream = filler.fill_stream(
-                call.path, stream, keep=lambda: not call.renders_read(mount)
+                call.path,
+                stream,
+                records,
+                keep=lambda: not call.renders_read(mount),
             )
         return await _primed(stream, call.report)
 
