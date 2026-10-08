@@ -12,11 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+/** What a cache entry holds. Mirrors Python's `Holds`. */
+export enum Holds {
+  BYTES = 'bytes',
+  BYTES_AND_VERSION = 'bytes_and_version',
+  VERSION = 'version',
+}
+
 export interface CacheEntryInit {
   size: number
   cachedAt: number
   fingerprint?: string | null
   ttl?: number | null
+  holds?: Holds
 }
 
 export class CacheEntry {
@@ -24,13 +32,20 @@ export class CacheEntry {
   readonly cachedAt: number
   readonly fingerprint: string | null
   readonly ttl: number | null
+  readonly holds: Holds
 
   constructor(init: CacheEntryInit) {
     this.size = init.size
     this.cachedAt = init.cachedAt
     this.fingerprint = init.fingerprint ?? null
     this.ttl = init.ttl ?? null
+    this.holds = init.holds ?? Holds.BYTES
     Object.freeze(this)
+  }
+
+  /** Whether the entry holds the file's bytes, not only its version. */
+  get hasBytes(): boolean {
+    return this.holds !== Holds.VERSION
   }
 
   get expired(): boolean {

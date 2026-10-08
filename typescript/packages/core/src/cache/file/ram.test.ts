@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { md5Hex } from '../../utils/hash.ts'
 import { RAMFileCacheStore } from './ram.ts'
@@ -158,6 +158,15 @@ describe('RAMFileCacheStore: a writer waiting on the lock', () => {
     expect(cache.cacheSize).toBe(0)
   })
 
+  it('keepFingerprints parked when the cache is cleared keeps no version', async () => {
+    // A version read before the clear must not outlive it.
+    const cache = new RAMFileCacheStore()
+    const pending = cache.keepFingerprints({ '/large': 'v1' })
+    await cache.clear()
+    await pending
+    expect(await cache.fingerprint('/large')).toBeNull()
+  })
+
   it('a set parked when a covering prefix is evicted is discarded', async () => {
     // The fill has no entry yet, so only its registration in
     // `invalidation.enter` lets evictPrefix name it; the redis suite used
@@ -244,5 +253,83 @@ describe('isUnbounded', () => {
     expect(await cache.isUnbounded('/no-bound')).toBe(true)
     await cache.set('/bounded', new TextEncoder().encode('x'), { ttl: 30 })
     expect(await cache.isUnbounded('/bounded')).toBe(false)
+  })
+})
+
+describe('a version kept without bytes', () => {
+  it('is never read', async () => {
+    const c = new RAMFileCacheStore()
+    await c.keepFingerprints({ '/a': 'v1' })
+    expect(await c.exists('/a')).toBe(false)
+    expect(await c.get('/a')).toBeNull()
+    expect(await c.isFresh('/a', 'v1')).toBe(false)
+    expect(await c.isUnbounded('/a')).toBe(false)
+    expect(await c.fingerprint('/a')).toBe('v1')
+    await c.set('/a', encode('read'), { fingerprint: 'v1' })
+    expect(decode(await c.get('/a'))).toBe('read')
+  })
+
+  it('replaces bytes past their bound with a version', async () => {
+    // Past its bound the entry vouches for nothing; keep the version seen since.
+    const c = new RAMFileCacheStore()
+    await c.set('/a', encode('old'), { fingerprint: 'v1', ttl: 0 })
+    await c.keepFingerprints({ '/a': 'v2' })
+    expect(await c.fingerprint('/a')).toBe('v2')
+    expect(await c.get('/a')).toBeNull()
+    // The old bytes leave the store with their entry, not outside the limit.
+    expect(
+      (c as unknown as { store: { files: Map<string, Uint8Array> } }).store.files.has('/a'),
+    ).toBe(false)
+  })
+
+  it('counts a restamped version once', async () => {
+    const c = new RAMFileCacheStore()
+    for (const token of ['v1', 'v2', 'v3']) await c.keepFingerprints({ '/a': token })
+    expect(c.cacheSize).toBe('/a'.length + 'v3'.length)
+  })
+
+  it('never replaces bytes written since', async () => {
+    const c = new RAMFileCacheStore()
+    await c.set('/a', encode('theirs'), { fingerprint: 'v2' })
+    await c.keepFingerprints({ '/a': 'v1' })
+    expect(decode(await c.get('/a'))).toBe('theirs')
+    expect(await c.fingerprint('/a')).toBe('v2')
+    await c.remove('/a')
+    expect(await c.fingerprint('/a')).toBeNull()
+  })
+
+  it('keeps a version an expiry leaves within the limit', async () => {
+    vi.useFakeTimers()
+    try {
+      const c = new RAMFileCacheStore({ limit: 20 })
+      await c.set('/a-long-key', encode('x'), { fingerprint: 'v1234567890', ttl: 1 })
+      await c.keepFingerprints({ '/a-long-key': 'v1234567890' })
+      vi.setSystemTime(Date.now() + 10_000)
+      expect(await c.get('/a-long-key')).toBeNull()
+      expect(c.cacheSize).toBeLessThanOrEqual(20)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    ['kept', true],
+    ['not kept', false],
+  ] as const)('answers the version of an expired entry: %s', async (_name, kept) => {
+    // The token stays true for the bytes read, all a condition says; a
+    // version kept for a conditional mount outlives its bytes, as on redis.
+    vi.useFakeTimers()
+    try {
+      const c = new RAMFileCacheStore()
+      await c.set('/a', encode('x'), { fingerprint: 'v1', ttl: 1 })
+      if (kept) await c.keepFingerprints({ '/a': 'v1' })
+      vi.setSystemTime(Date.now() + 10_000)
+      expect(await c.exists('/a')).toBe(false)
+      expect(await c.fingerprint('/a')).toBe('v1')
+      expect(await c.get('/a')).toBeNull()
+      expect(await c.fingerprint('/a')).toBe(kept ? 'v1' : null)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

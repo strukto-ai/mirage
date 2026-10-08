@@ -17,7 +17,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Iterable
 
-from mirage.cache.file.entry import CacheEntry
+from mirage.cache.file.entry import CacheEntry, Holds
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
 from mirage.cache.file.utils import parse_limit
 from mirage.cache.invalidation import Invalidation
@@ -53,15 +53,23 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
     async def get(self, key: str) -> bytes | None:
         async with self._lock_for(key):
             entry = self._entries.get(key)
-            if entry is None:
+            if entry is None or not entry.has_bytes:
                 return None
-            if entry.expired:
-                self._cache_size -= entry.size
-                del self._entries[key]
-                self._store.files.pop(key, None)
-                return None
-            self._entries.move_to_end(key)
-            return self._store.files.get(key)
+            if not entry.expired:
+                self._entries.move_to_end(key)
+                return self._store.files.get(key)
+            self._drop_entry(key)
+            # A kept version outlives its bytes, as redis's meta key does.
+            kept = (
+                entry.fingerprint
+                if entry.holds is Holds.BYTES_AND_VERSION
+                else None
+            )
+            if kept:
+                self._put_version(key, kept)
+        if kept:
+            await self._evict()
+        return None
 
     async def set(
         self,
@@ -77,9 +85,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             async with self._lock_for(key):
                 if self._invalidation.stale(key, stamp):
                     return
-                if key in self._entries:
-                    self._cache_size -= self._entries[key].size
-                    del self._entries[key]
+                self._drop_entry(key)
                 entry = CacheEntry(
                     size=len(data),
                     cached_at=int(time.time()),
@@ -101,10 +107,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             # predate the removal. Per key: a fill of another key still
             # hashing is not this removal's business.
             self._invalidation.invalidate(key)
-            if key in self._entries:
-                self._cache_size -= self._entries[key].size
-                del self._entries[key]
-                self._store.files.pop(key, None)
+            self._drop_entry(key)
         self._discard_lock(key)
 
     async def exists(self, key: str | PathSpec) -> bool:
@@ -118,11 +121,46 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
         entry = self._entries.get(
             key if isinstance(key, str) else key.mount_path
         )
-        return entry is not None and not entry.expired
+        return entry is not None and entry.has_bytes and not entry.expired
+
+    async def fingerprint(self, key: str) -> str | None:
+        entry = self._entries.get(key)
+        return entry.fingerprint if entry is not None else None
+
+    async def keep_fingerprints(self, fingerprints: dict[str, str]) -> None:
+        for key, fingerprint in fingerprints.items():
+            await self._set_version(key, fingerprint)
+
+    async def _set_version(self, key: str, fingerprint: str) -> None:
+        stamp = self._invalidation.enter(key)
+        try:
+            async with self._lock_for(key):
+                if self._invalidation.stale(key, stamp):
+                    return
+                entry = self._entries.get(key)
+                if entry is not None and entry.has_bytes and not entry.expired:
+                    if entry.fingerprint == fingerprint:
+                        entry.holds = Holds.BYTES_AND_VERSION
+                    return
+                self._drop_entry(key)
+                self._put_version(key, fingerprint)
+        finally:
+            self._invalidation.leave(key)
+        await self._evict()
+
+    def _put_version(self, key: str, fingerprint: str) -> None:
+        version = CacheEntry(
+            size=len(key) + len(fingerprint),
+            cached_at=int(time.time()),
+            fingerprint=fingerprint,
+            holds=Holds.VERSION,
+        )
+        self._entries[key] = version
+        self._cache_size += version.size
 
     async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:
         entry = self._entries.get(key)
-        if entry is None:
+        if entry is None or not entry.has_bytes:
             return False
         # An entry that carries no token verifies against nothing, and
         # says so here rather than relying on the caller to ask only when
@@ -137,7 +175,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
 
     async def is_unbounded(self, key: str) -> bool:
         entry = self._entries.get(key)
-        return entry is not None and entry.ttl is None
+        return entry is not None and entry.has_bytes and entry.ttl is None
 
     async def clear(self) -> None:
         self._invalidation.invalidate_all()
@@ -164,10 +202,13 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
     def evict_paths(self, paths: Iterable[str]) -> None:
         for key in paths:
             self._invalidation.invalidate(key)
-            entry = self._entries.pop(key, None)
-            if entry is not None:
-                self._cache_size -= entry.size
-            self._store.files.pop(key, None)
+            self._drop_entry(key)
+
+    def _drop_entry(self, key: str) -> None:
+        entry = self._entries.pop(key, None)
+        if entry is not None:
+            self._cache_size -= entry.size
+        self._store.files.pop(key, None)
 
     async def _evict(self) -> None:
         while self._cache_size > self._cache_limit and self._entries:
@@ -175,9 +216,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             async with self._lock_for(evicted_key):
                 if evicted_key not in self._entries:
                     continue
-                evicted = self._entries.pop(evicted_key)
-                self._cache_size -= evicted.size
-                self._store.files.pop(evicted_key, None)
+                self._drop_entry(evicted_key)
             self._discard_lock(evicted_key)
 
     @property

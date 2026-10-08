@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -31,10 +32,12 @@ from mirage.cache.index.scope import command_started, tick
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
 from mirage.io.stream import close_quietly
-from mirage.observe.context import active_recorder
+from mirage.observe.context import active_recorder, line_version
 from mirage.observe.record import OpRecord
 from mirage.types import DEFAULT_READ_TTL, FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -497,6 +500,67 @@ class CacheManager:
             return None
         return self._file_cache
 
+    async def keep_version(self, path: PathSpec, version: str) -> None:
+        """Keep ``version`` for ``path`` without bytes, if this mount caches.
+
+        A refused write keeps the version it lost on, so the next write
+        without a read sends it again. A cache that refuses the entry is
+        logged, never raised: the refusal itself already stands.
+
+        Args:
+            path (PathSpec): the path refused.
+            version (str): the version the write lost on.
+        """
+        key = self._cache_key(path)
+        if self._file_cache is None or not self._owns_path(key):
+            return
+        try:
+            async with mutation_lock(self._file_cache):
+                await self._file_cache.keep_fingerprints({key: version})
+        except Exception:
+            logger.warning("version not kept for %s", key, exc_info=True)
+
+    async def read_version(self, path: PathSpec) -> str | None:
+        """The version this mount last saw for ``path``, None when none.
+
+        The running line's own records come first, newest first: a read or
+        write earlier in the line names the exact bytes it saw, and a
+        streamed read is not in the cache until the line ends. Then the
+        cached copy's backend token.
+
+        Args:
+            path (PathSpec): the path written.
+        """
+        return (await self.read_versions([path]))[0]
+
+    async def read_versions(self, paths: list[PathSpec]) -> list[str | None]:
+        """``read_version`` for many paths, asking the cache once.
+
+        Args:
+            paths (list[PathSpec]): the paths asked about.
+        """
+        out: list[str | None] = [None] * len(paths)
+        pending: list[tuple[int, str]] = []
+        recorder = active_recorder()
+        for i, path in enumerate(paths):
+            key = self._cache_key(path)
+            if recorder is not None:
+                known, version = line_version(
+                    recorder.index, recorder.lost, key
+                )
+                if known:
+                    out[i] = version
+                    continue
+            if self._file_cache is not None and self._owns_path(key):
+                pending.append((i, key))
+        if pending and self._file_cache is not None:
+            tokens = await self._file_cache.fingerprints(
+                [key for _, key in pending]
+            )
+            for (i, _), token in zip(pending, tokens):
+                out[i] = token
+        return out
+
     async def fill(
         self,
         path: PathSpec,
@@ -623,15 +687,22 @@ class CacheManager:
             keep (Callable[[], bool] | None): the last say on keeping.
             token (Callable[[], str | None]): the token labelling them.
         """
+        if len(data) > cache.cache_limit:
+            return
         async with mutation_lock(cache):
             if (
                 self._owns_path(key)
                 and generation == self._read_generation
                 and (keep is None or keep())
             ):
-                await cache.set(
-                    key, data, fingerprint=token(), ttl=self._read_ttl
-                )
+                try:
+                    await cache.set(
+                        key, data, fingerprint=token(), ttl=self._read_ttl
+                    )
+                except Exception:
+                    logger.warning(
+                        "cache fill refused for %s", key, exc_info=True
+                    )
 
     async def cached_size(self, path: PathSpec) -> int | None:
         """Return the cached render's byte length, without revalidating.

@@ -52,10 +52,10 @@ import type { EntryGate } from '../../policy/types.ts'
 import {
   activeRecords,
   commandRecords,
+  type LostPaths,
   record,
   runWithMountContext,
   runWithRecording,
-  runWithRevisions,
   startOp,
 } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
@@ -73,6 +73,7 @@ import {
   MountMode,
   PathSpec,
   VFSName,
+  WritePolicy,
 } from '../../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
@@ -171,6 +172,18 @@ function takeIssuer(
   const rest = { ...kwargs }
   delete rest.issuer
   return [issuer, rest]
+}
+
+/** The cache facts of the mount that owns a path, uncacheable without one. */
+function factsOf(mount: MountEntry | null): CacheFacts {
+  if (mount === null || mount.retiring || !mount.vfs.cachesReads) {
+    return { cacheable: false, ttl: DEFAULT_READ_TTL }
+  }
+  return {
+    cacheable: true,
+    ttl: mount.read.ttl,
+    keepsVersions: mount.write === WritePolicy.CONDITIONAL,
+  }
 }
 
 /** Ask a command's gate once about each distinct path an op reaches. */
@@ -958,7 +971,7 @@ export class Dispatcher {
         mount.use(async () => {
           const answer = await runWithMountContext(
             () =>
-              runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () => {
+              mount.runWithWriteRevisions(async () => {
                 const pending = Promise.resolve(
                   name === 'setattr'
                     ? this.applySetattr(mount, vfs, scope, p, opKwargs)
@@ -1302,7 +1315,7 @@ export class Dispatcher {
       const result = await mount.use(async () => {
         const answer = await runWithMountContext(
           () =>
-            runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
+            mount.runWithWriteRevisions(() =>
               mount.callKeyed(name, spec, [], {
                 ...this.indexKwargs(mount),
                 ...kwargs,
@@ -2062,13 +2075,7 @@ export class Dispatcher {
   // The file cache only holds paths for read-caching mounts, mirroring
   // Python's cache_facts_for gate; without it every backend's reads
   // land in the cache.
-  cacheFactsFor = (path: string): CacheFacts => {
-    const mount = this.namespace.tryMountFor(path)
-    if (mount === null || mount.retiring || !mount.vfs.cachesReads) {
-      return { cacheable: false, ttl: DEFAULT_READ_TTL }
-    }
-    return { cacheable: true, ttl: mount.read.ttl }
-  }
+  cacheFactsFor = (path: string): CacheFacts => factsOf(this.namespace.tryMountFor(path))
 
   /**
    * Bind deferred command results to the mounts that produced them.
@@ -2085,10 +2092,7 @@ export class Dispatcher {
       const prefix = ownerPrefix(mounts.keys(), path)
       const original = prefix === null ? null : mounts.get(prefix)
       const mount = this.namespace.tryMountFor(path)
-      if (mount === null || original !== mount || mount.retiring || !mount.vfs.cachesReads) {
-        return { cacheable: false, ttl: DEFAULT_READ_TTL }
-      }
-      return { cacheable: true, ttl: mount.read.ttl }
+      return factsOf(original === mount ? mount : null)
     }
   }
 
@@ -2096,7 +2100,9 @@ export class Dispatcher {
     io: IOResult,
     records?: readonly OpRecord[],
     cacheFacts: (path: string) => CacheFacts = this.cacheFactsFor,
+    lost: LostPaths | null = null,
+    nested = false,
   ): Promise<void> {
-    await applyIo(this.cache, io, cacheFacts, records)
+    await applyIo(this.cache, io, cacheFacts, records, lost, nested)
   }
 }

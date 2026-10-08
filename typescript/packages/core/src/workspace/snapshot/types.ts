@@ -28,6 +28,7 @@ export interface MountSnapshot {
   mode: string
   read: string
   ttl: number
+  write: string
   vfs_class: string
   vfs_ref: string | null
   index_config?: IndexConfigSnapshot | null
@@ -107,6 +108,8 @@ export interface CLISnapshot {
 export interface WorkspaceStateDict {
   version: number
   mirage_version: string
+  /** The workspace's default write policy, which a mount added later takes. */
+  write: string
   // Undefined when the state came from an older commit meta that
   // predates the pointer; the live default is kept in that case.
   default_session_id: string | undefined

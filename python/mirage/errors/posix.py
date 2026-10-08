@@ -45,6 +45,10 @@ POSIX: dict[FsCondition, PosixErrno] = {
     FsCondition.EROFS: PosixErrno(errno.EROFS, "Read-only file system"),
     FsCondition.EFBIG: PosixErrno(errno.EFBIG, "File too large"),
     FsCondition.NO_XATTR: _NO_XATTR,
+    FsCondition.STALE_WRITE: PosixErrno(
+        errno.ESTALE,
+        "changed since it was read; read it again before writing",
+    ),
 }
 
 # The numbers Linux gives each condition, whatever host mirage runs on: a
@@ -69,6 +73,7 @@ LINUX_ERRNO: dict[FsCondition, int] = {
     FsCondition.EROFS: 30,
     FsCondition.EFBIG: 27,
     FsCondition.NO_XATTR: 61,
+    FsCondition.STALE_WRITE: 116,
 }
 
 

@@ -534,6 +534,15 @@ describe('Workspace custom cache option', () => {
       const k = typeof key === 'string' ? key : key.mountPath
       return Promise.resolve(this.store.has(k))
     }
+    keepFingerprints(): Promise<void> {
+      return Promise.resolve()
+    }
+    fingerprints(keys: readonly string[]): Promise<(string | null)[]> {
+      return Promise.resolve(keys.map(() => null))
+    }
+    fingerprint(): Promise<string | null> {
+      return Promise.resolve(null)
+    }
     isFresh(): Promise<boolean> {
       return Promise.resolve(false)
     }

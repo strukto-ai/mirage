@@ -34,6 +34,7 @@ import {
   MountMode,
   PathSpec,
   ReadPolicy,
+  WritePolicy,
 } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
 import { effectivePathMode, strongestModeUnder } from '../../context/session_context.ts'
@@ -83,6 +84,8 @@ export class MountCommandUnsupported extends Error {
 export interface MountPlacementInit {
   index?: IndexConfig
   vfsRef?: string | null
+  /** The mount's write policy; undefined takes the workspace default. */
+  write?: WritePolicy
 }
 
 /** The placements of the mounts a registry is constructed with, keyed by raw prefix. */
@@ -90,6 +93,10 @@ export interface RegistryPlacements {
   index?: IndexConfig
   indexes?: Record<string, IndexConfig>
   refs?: Record<string, string>
+  /** The write policy a mount takes when it names none. */
+  defaultWrite?: WritePolicy
+  /** Each mount's own write policy, keyed by raw prefix. */
+  writes?: Record<string, WritePolicy>
 }
 
 export class MountRegistry {
@@ -100,6 +107,7 @@ export class MountRegistry {
   readonly retiredMounts = new WeakSet<BaseVFS>()
   private rootRef: MountEntry | null = null
   private defaultRead: ReadSpec = DEFAULT_READ_SPEC
+  private defaultWrite: WritePolicy = WritePolicy.UNCONDITIONAL
   private cacheStore: FileCache | null = null
   private reconciler: ReadReconciler | null = null
   private opStatDoor: OpStat | null = null
@@ -231,6 +239,7 @@ export class MountRegistry {
       readByPrefix[normalizePrefix(k)] = v
     }
     this.defaultRead = defaultRead
+    this.defaultWrite = placements.defaultWrite ?? WritePolicy.UNCONDITIONAL
     // Explicit at the construction site: /dev does not cache reads, so
     // its policy can only ever be bounded, and it keeps no index, since a
     // path-only index would publish one session's descriptors to another.
@@ -241,6 +250,7 @@ export class MountRegistry {
           vfs: new DevVFS(),
           mode: MountMode.WRITE,
           read: DEFAULT_READ_SPEC,
+          write: WritePolicy.UNCONDITIONAL,
           index: new DevIndex(),
         },
         list,
@@ -265,6 +275,7 @@ export class MountRegistry {
             vfs,
             mode,
             read,
+            write: placements.writes?.[rawPrefix] ?? this.defaultWrite,
             index,
             vfsRef,
             indexConfig: placements.indexes?.[rawPrefix] ?? this.indexConfig,
@@ -357,6 +368,7 @@ export class MountRegistry {
         vfs,
         mode,
         read: read ?? this.defaultRead,
+        write: placement.write ?? this.defaultWrite,
         index,
         vfsRef,
         indexConfig: placement.index ?? this.indexConfig,

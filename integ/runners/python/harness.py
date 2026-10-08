@@ -226,8 +226,8 @@ def validate_cases(root: Path, cases: list[dict]) -> None:
     (target, id), so one of the pair is dropped from the py/ts diff
     without a word. A target id that matches no manifest entry means the
     case never runs anywhere, which reads as "passing" everywhere. A
-    `mount_read` without a `read` is routed as an ordinary case, where
-    the override is never applied.
+    `mount_read` or a `write` without a `read` is routed as an ordinary
+    case, where the selector is never applied.
 
     Args:
         root (Path): the integ directory.
@@ -251,6 +251,11 @@ def validate_cases(root: Path, cases: list[dict]) -> None:
             raise ValueError(
                 f"case {case['id']}: mount_read needs read, "
                 "the policy every other mount inherits"
+            )
+        if "write" in case and "read" not in case:
+            raise ValueError(
+                f"case {case['id']}: write needs read, "
+                "which routes a case to the scenario runner"
             )
         first = seen.get(case["id"])
         if first is not None:

@@ -24,6 +24,7 @@ import {
 import { captureOpPolicies } from '../../policy/policies.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { coerceReadPolicy } from './read_policy.ts'
+import { coerceWritePolicy, writeConditions } from './write_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
@@ -64,7 +65,12 @@ import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
 import type { CommandSpec, FlagValue } from '../../commands/spec/types.ts'
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
-import { captureCacheContext, runWithCacheManager } from '../../cache/context.ts'
+import {
+  captureCacheContext,
+  runWithCacheManager,
+  runWithWriteContext,
+} from '../../cache/context.ts'
+import { type WriteContext } from '../../cache/types.ts'
 import { captureCommandScope } from '../../cache/index/scope.ts'
 import type { CacheManager } from '../../cache/manager.ts'
 import { mergeSignals } from '../abort.ts'
@@ -82,6 +88,7 @@ import {
   type ReadSpec,
   type SetAttrFields,
   DEFAULT_READ_SPEC,
+  WritePolicy,
   FileType,
   MountMode,
   PathSpec,
@@ -206,6 +213,8 @@ export interface MountInit {
   mode?: MountMode
   /** How this mount's cached bytes are revalidated. */
   read?: ReadSpec
+  /** Whether this mount's writes carry the version they were based on. */
+  write?: WritePolicy
   // The store this mount runs its driver under; the registry builds
   // one, shared with any alias of the same instance. A bare entry gets
   // a RAM store at the driver's TTL.
@@ -239,6 +248,7 @@ export class MountEntry {
   readonly io: CommandIO
   mode: MountMode
   readonly read: ReadSpec
+  readonly write: WritePolicy
   // `index` is this same store scoped by the cache manager, which is
   // what ops and commands receive.
   readonly indexStore: IndexCacheStore
@@ -259,6 +269,7 @@ export class MountEntry {
   readonly revisions = new Map<string, string>()
 
   cacheManager: CacheManager | null = null
+  private writeContextFor: { manager: CacheManager; context: WriteContext } | null = null
 
   private readonly cmds = new Map<CmdKey, Command>()
   private readonly generalCmds = new Map<string, Command>()
@@ -306,6 +317,8 @@ export class MountEntry {
     // at this same point.
     const spec = init.read ?? DEFAULT_READ_SPEC
     this.read = Object.freeze({ ...spec, policy: coerceReadPolicy(spec.policy) })
+    // Coerced so an untyped caller's bare string still matches `===`.
+    this.write = coerceWritePolicy(init.write)
     this.indexStore = init.index ?? buildIndex(undefined, init.vfs.indexTtl)
     this.indexConfig = init.indexConfig === undefined ? undefined : { ...init.indexConfig }
     this.vfsRef = init.vfsRef ?? null
@@ -795,6 +808,53 @@ export class MountEntry {
 
   // ── execution ─────────────────────────────────────
 
+  /**
+   * What a write through this mount must carry, null when its writes are
+   * unconditional. Bound by both doors whatever the policy, so an
+   * unconditional mount clears a context an outer command's mount set.
+   * Mirrors Python's `MountEntry.write_context`.
+   */
+  writeContext(): WriteContext | null {
+    const manager = this.cacheManager
+    if (this.write !== WritePolicy.CONDITIONAL || manager === null) return null
+    // One object per manager, so this mount's frames compare equal.
+    if (this.writeContextFor?.manager !== manager) {
+      const vfs = this.vfs
+      this.writeContextFor = {
+        manager,
+        context: {
+          vfs: vfs.name,
+          // Judged at each write: an S3 mount with no endpoint reads the environment.
+          get conditions() {
+            return writeConditions(vfs)
+          },
+          readVersion: (path) => manager.readVersion(path),
+          readVersions: (paths) => manager.readVersions(paths),
+          drop: (path) => manager.invalidateAfterWrite(path),
+          keep: (path, version) => manager.keepVersion(path, version),
+        },
+      }
+    }
+    return this.writeContextFor.context
+  }
+
+  /** The command door's cache manager and write context, one scope. */
+  private runWithCaches<T>(fn: () => Promise<T>): Promise<T> {
+    return runWithCacheManager(this.cacheManager, () =>
+      runWithWriteContext(this.prefix, this.writeContext(), fn),
+    )
+  }
+
+  /**
+   * The op door's revision pins and write context, one scope. Public for
+   * the dispatcher, which calls ops itself rather than through the command door.
+   */
+  runWithWriteRevisions<T>(fn: () => Promise<T>): Promise<T> {
+    return runWithWriteContext(this.prefix, this.writeContext(), () =>
+      Promise.resolve(runWithRevisions(this.revisions.size > 0 ? this.revisions : null, fn)),
+    )
+  }
+
   async runCommand(
     cmdName: string,
     paths: PathSpec[],
@@ -965,15 +1025,15 @@ export class MountEntry {
    * Run `fn` with what a handler's backend calls read bound: the mode the
    * command tier's mode guard holds each write to (its own region's mode),
    * what the command tier's walk guard proves an operand's `.` and `..`
-   * with, the recorder's mount, the mount's cache manager and the snapshot
-   * revision pins. Mirrors Python's MountEntry._command_scope.
+   * with, the recorder's mount, the mount's cache manager and write context,
+   * and the snapshot revision pins. Mirrors Python's MountEntry._command_scope.
    */
   private inCommandScope<T>(context: ExecContext, fn: () => Promise<T>): Promise<T> {
     return runWithMountGate(this.prefix, this.mode, () =>
       withWalkProbe(this.prefix, context.dispatch, context.ns?.links, () =>
         runWithMountContext(
           () =>
-            runWithCacheManager(this.cacheManager, () =>
+            this.runWithCaches(() =>
               runWithRevisions(this.revisions.size > 0 ? this.revisions : null, fn),
             ),
           this.mountId,
@@ -1125,7 +1185,7 @@ export class MountEntry {
       const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
       return runWithMountContext(
         () =>
-          runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
+          this.runWithWriteRevisions(async () => {
             const result = await runWithTimeout(
               this.callKeyed(name, scope, args, effectiveKwargs),
               opTimeout,

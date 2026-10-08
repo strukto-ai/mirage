@@ -26,8 +26,8 @@ import type { ErrnoCodes, FSHost } from './types.ts'
 export type FsErrorCode = FsCondition
 
 // Condition -> the name the interpreter's own errno table knows it by.
-// Identity except for mirage's own condition: the interpreter calls
-// "attribute not set" ENODATA.
+// Identity except for mirage's own conditions: the interpreter calls
+// "attribute not set" ENODATA and a lost conditional write ESTALE.
 const CONDITION_KEY: Record<FsCondition, keyof ErrnoCodes> = {
   EBADF: 'EBADF',
   ENOENT: 'ENOENT',
@@ -46,6 +46,7 @@ const CONDITION_KEY: Record<FsCondition, keyof ErrnoCodes> = {
   EROFS: 'EROFS',
   EFBIG: 'EFBIG',
   NO_XATTR: 'ENODATA',
+  STALE_WRITE: 'ESTALE',
 }
 
 /**

@@ -14,6 +14,7 @@
 
 import type { ByteSource } from '../io/types.ts'
 import { VFSName } from '../types.ts'
+import { underPath } from '../utils/key_prefix.ts'
 
 // Ops whose record carries a token describing the bytes it moved, split
 // by direction: the file cache stores bytes from either `IOResult.reads`
@@ -69,6 +70,11 @@ export const RETRACT_FINGERPRINT_OPS: ReadonlySet<string> = new Set([
   'rename_prefix',
   'copy',
 ])
+// Stamps name the bytes at a path; retracts mean the line no longer knows them.
+export const VERSION_OPS: ReadonlySet<string> = new Set([
+  ...STAMP_FINGERPRINT_OPS,
+  ...RETRACT_FINGERPRINT_OPS,
+])
 // The subset that moved a whole prefix, and so takes every pin beneath
 // it. Membership is what the op *did*, never what it could have done:
 // rename has two code paths and only one of them is a prefix walk, so it
@@ -76,6 +82,51 @@ export const RETRACT_FINGERPRINT_OPS: ReadonlySet<string> = new Set([
 // touched one key, and on a keyed store the keys beneath its path are
 // objects of their own.
 export const SUBTREE_RETRACT_OPS: ReadonlySet<string> = new Set(['rm_r', 'rename_prefix'])
+
+/**
+ * A line's records indexed as they arrive, for per-path version lookups.
+ * Each lookup first takes in the records appended since the last one, so a
+ * record added while a caller awaits is seen, and no record is read twice.
+ * The records are only ever appended to. Mirrors Python's `RecordIndex`.
+ */
+export class RecordIndex {
+  private readonly records: readonly OpRecord[]
+  private seen = 0
+  private readonly at = new Map<string, number>()
+  private readonly subtree: number[] = []
+
+  constructor(records: readonly OpRecord[]) {
+    this.records = records
+  }
+
+  private absorb(): void {
+    for (let i = this.seen; i < this.records.length; i++) {
+      const rec = this.records[i]
+      if (rec === undefined) continue
+      if (VERSION_OPS.has(rec.op)) this.at.set(rec.path, i)
+      if (SUBTREE_RETRACT_OPS.has(rec.op)) this.subtree.push(i)
+    }
+    this.seen = this.records.length
+  }
+
+  /**
+   * The newest record that says which version of `key` the line knows: one
+   * at the path that stamps or retracts a version, or one at an ancestor
+   * that moved the whole subtree, which took `key` with it. Mirrors
+   * Python's `RecordIndex.newest_version`.
+   */
+  newestVersion(key: string): OpRecord | null {
+    this.absorb()
+    const at = this.at.get(key) ?? -1
+    for (let j = this.subtree.length - 1; j >= 0; j--) {
+      const i = this.subtree[j] ?? -1
+      if (i <= at) break
+      const rec = this.records[i]
+      if (rec !== undefined && underPath(key, rec.path)) return rec
+    }
+    return at >= 0 ? (this.records[at] ?? null) : null
+  }
+}
 
 export interface OpRecordInit {
   op: string

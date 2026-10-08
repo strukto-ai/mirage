@@ -44,6 +44,20 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
   override readonly readsRanges: boolean = true
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
+  /**
+   * The endpoint this mount's writes go to, for its write-condition row: the
+   * config's. The node mount also reads the environment. Mirrors Python's
+   * `resolved_endpoint`.
+   */
+  get resolvedEndpoint(): string | undefined {
+    return this.accessor.config.endpoint
+  }
+
+  /** Whether requests go through presigned URLs, which carry no condition. */
+  get presigned(): boolean {
+    return this.accessor.config.presignedUrlProvider !== undefined
+  }
+
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return s3Readdir(this.accessor, path, index)
   }

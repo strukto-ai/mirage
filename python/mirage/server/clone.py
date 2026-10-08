@@ -22,6 +22,7 @@ from mirage.shell.constants import BIN_PREFIX
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.registry import build_vfs
 from mirage.workspace.mount.spec import Mount
+from mirage.workspace.mount.write_policy import coerce_write_policy
 from mirage.workspace.snapshot import requires_vfs_override, to_state_dict
 from mirage.workspace.snapshot.utils import norm_mount_prefix
 
@@ -34,7 +35,7 @@ async def build_override_mounts(
     the new workspace will run with.
 
     Shared by the clone and load doors, which both take the same
-    ``mounts: {<prefix>: {VFS, config}}`` shape. An override mount
+    ``mounts: {<prefix>: {vfs, config, write}}`` shape. An override mount
     reads a pointer the way a yaml one does: `build_vfs` is sync,
     so the credential is fetched before it. The declared sources are
     built only when an override config names one, so an override that
@@ -53,22 +54,26 @@ async def build_override_mounts(
     if not override or "mounts" not in override:
         return {}
     blocks = {
-        prefix: (block["vfs"], block.get("config") or {})
+        prefix: (block["vfs"], block.get("config") or {}, block.get("write"))
         for prefix, block in override["mounts"].items()
         if isinstance(block, dict) and block.get("vfs") is not None
     }
     sources = await resolve_sources_for(
-        declared, [config for _, config in blocks.values()]
+        declared, [config for _, config, _ in blocks.values()]
     )
     out: dict[str, Any] = {}
-    for prefix, (vfs_name, config) in blocks.items():
+    for prefix, (vfs_name, config, write) in blocks.items():
         built = build_vfs(
             vfs_name,
             await resolve_config_secrets(
                 config, sources, f"mounts.{prefix}.config"
             ),
         )
-        out[norm_mount_prefix(prefix)] = Mount(vfs=built, vfs_ref=vfs_name)
+        out[norm_mount_prefix(prefix)] = Mount(
+            vfs=built,
+            vfs_ref=vfs_name,
+            write=coerce_write_policy(write) if write is not None else None,
+        )
     return out
 
 
@@ -113,7 +118,7 @@ async def clone_workspace_with_override(
     Args:
         src_ws (Workspace): the source workspace.
         override (dict[str, Any] | None): partial workspace config
-            with ``mounts: {<prefix>: {VFS, config}}`` entries to
+            with ``mounts: {<prefix>: {vfs, config, write}}`` entries to
             swap.
 
     Returns:

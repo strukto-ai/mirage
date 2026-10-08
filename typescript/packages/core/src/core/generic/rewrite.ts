@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readVersioned, runWithOwnVersion } from '../../cache/context.ts'
+import { OwnRead } from '../../cache/types.ts'
 import { eexist, einval, eisdir, enotsup, isEnotdir, isMissingPath } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../types.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
@@ -45,24 +47,25 @@ export async function appendByRewrite(
       found = await stat(path)
     } catch (error) {
       if (!isMissingPath(error)) throw error
-      await write(path, data)
+      await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, data))
       return
     }
     if (found.type === FileType.DIRECTORY) throw eisdir(path)
     return
   }
   let existing: Uint8Array
+  let own: string | OwnRead | null
   try {
-    existing = await read(path)
+    ;[existing, own] = await readVersioned(path, () => read(path))
   } catch (error) {
     if (!isMissingPath(error)) throw error
-    await write(path, data)
+    await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, data))
     return
   }
   const joined = new Uint8Array(existing.length + data.length)
   joined.set(existing)
   joined.set(data, existing.length)
-  await write(path, joined)
+  await runWithOwnVersion(path, own, () => write(path, joined))
 }
 
 /**
@@ -90,15 +93,16 @@ export async function pwriteByRewrite(
       found = await stat(path)
     } catch (error) {
       if (!isMissingPath(error)) throw error
-      await write(path, data)
+      await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, data))
       return
     }
     if (found.type === FileType.DIRECTORY) throw eisdir(path)
     return
   }
   let existing: Uint8Array
+  let own: string | OwnRead | null = null
   try {
-    existing = await read(path)
+    ;[existing, own] = await readVersioned(path, () => read(path))
   } catch (error) {
     if (!isMissingPath(error)) throw error
     let missing: FileStat | null = null
@@ -109,8 +113,9 @@ export async function pwriteByRewrite(
     }
     if (missing !== null && missing.type === FileType.DIRECTORY) throw eisdir(path)
     existing = new Uint8Array()
+    own = OwnRead.ABSENT
   }
-  await write(path, spliceWindow(existing, offset, data))
+  await runWithOwnVersion(path, own, () => write(path, spliceWindow(existing, offset, data)))
 }
 
 /**

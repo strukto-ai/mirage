@@ -14,8 +14,9 @@
 
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
+import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide/runtime'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { normalizeCacheConfig } from '@struktoai/mirage-core/cache/file/config'
@@ -195,6 +196,50 @@ describe('configToWorkspaceArgs', () => {
     })
     const args = await configToWorkspaceArgs(cfg)
     expect(args.options.runtimes).toHaveLength(2)
+  })
+
+  it.each([1, 2, Number.MAX_SAFE_INTEGER])(
+    'wires a Pyodide concurrency limit of %s from YAML',
+    async (limit) => {
+      const dir = mkdtempSync(join(tmpdir(), 'mirage-pyodide-concurrency-'))
+      try {
+        const filename = join(dir, 'workspace.yaml')
+        writeFileSync(
+          filename,
+          'mounts:\n  /data:\n    vfs: ram\nruntimes:\n  - name: pyodide\n' +
+            `    config:\n      max_concurrency: ${String(limit)}\n  - workspace\n`,
+        )
+        const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(filename))
+        const runtime = args.options.runtimes?.[0]
+        expect(runtime).toBeInstanceOf(PyodideRuntime)
+        expect((runtime as PyodideRuntime).config).toEqual({ maxConcurrency: limit })
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '2', true, null])(
+    'rejects an invalid Pyodide concurrency limit: %j',
+    async (limit) => {
+      const cfg = loadWorkspaceConfig({
+        mounts: { '/data': { vfs: 'ram' } },
+        runtimes: [{ name: 'pyodide', config: { max_concurrency: limit } }],
+      })
+      await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(
+        'pyodide config: maxConcurrency must be a positive safe integer',
+      )
+    },
+  )
+
+  it('rejects a Pyodide concurrency limit outside its config block', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { vfs: 'ram' } },
+      runtimes: [{ name: 'pyodide', max_concurrency: 2 }],
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(
+      /unknown pyodide runtime option 'maxConcurrency'/,
+    )
   })
 
   it('rejects a flat option on a runtime entry (knobs live in config)', async () => {
@@ -1329,13 +1374,15 @@ describe('CLI to daemon round trip', () => {
 // block that is not a permission verb, then a verb each.
 const ACCEPTED_FIXTURES = ['blocks', 'allow', 'ask', 'deny'] as const
 
-function fixtureCases(name: string): { name: string; config: Record<string, unknown> }[] {
+function fixtureCases(
+  name: string,
+): { name: string; error?: string; config: Record<string, unknown> }[] {
   const path = fileURLToPath(
     new URL(`../../../../integ/fixtures/config/${name}.json`, import.meta.url),
   )
   return (
     JSON.parse(readFileSync(path, 'utf8')) as {
-      cases: { name: string; config: Record<string, unknown> }[]
+      cases: { name: string; error?: string; config: Record<string, unknown> }[]
     }
   ).cases
 }
@@ -1347,8 +1394,10 @@ describe('shared rejection fixture', () => {
     expect(cases.length).toBeGreaterThan(0)
   })
 
-  it.each(cases)('refuses $name', ({ config }) => {
-    expect(() => loadWorkspaceConfig(config)).toThrow()
+  it.each(cases)('refuses $name', ({ config, error }) => {
+    // Where a case names the phrase, both loaders must say it.
+    if (error === undefined) expect(() => loadWorkspaceConfig(config)).toThrow()
+    else expect(() => loadWorkspaceConfig(config)).toThrow(error)
   })
 })
 
@@ -1708,5 +1757,36 @@ describe('mount index block', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+// Non-default neighbours fail a door that rebuilds the mount around the key.
+describe('mount write block', () => {
+  it.each([
+    ['neither', undefined, undefined, WritePolicy.UNCONDITIONAL],
+    ['workspace', 'conditional', undefined, WritePolicy.CONDITIONAL],
+    ['block-overrides', 'conditional', 'unconditional', WritePolicy.UNCONDITIONAL],
+    ['block', undefined, 'conditional', WritePolicy.CONDITIONAL],
+  ] as const)('reaches its mount (%s)', async (_id, workspace, block, expected) => {
+    const a: Record<string, unknown> = {
+      vfs: 's3',
+      config: { bucket: 'b' },
+      mode: 'write',
+      read: 'fresh',
+      ttl: 45,
+      index: { type: 'ram', ttl: 37 },
+    }
+    if (block !== undefined) a.write = block
+    const doc: Record<string, unknown> = {
+      mounts: { '/a': a, '/b': { vfs: 'ram', write: 'unconditional' } },
+    }
+    if (workspace !== undefined) doc.write = workspace
+    const { mounts } = await configToWorkspaceArgs(loadWorkspaceConfig(doc))
+    const options = mounts['/a']?.options
+    expect(options?.write).toBe(expected)
+    expect(options?.mode).toBe(MountMode.WRITE)
+    expect(options?.read).toEqual({ policy: ReadPolicy.FRESH, ttl: 45 })
+    expect(options?.index).toEqual({ type: 'ram', ttl: 37 })
+    expect(mounts['/b']?.options.write).toBe(WritePolicy.UNCONDITIONAL)
   })
 })

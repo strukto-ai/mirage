@@ -13,10 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BaseVFS } from '../../vfs/base.ts'
-import type { PathSpec } from '../../types.ts'
-import { stripMount } from '../../utils/key_prefix.ts'
+import { enotsup } from '../../errors/fs.ts'
+import { type PathSpec, WritePolicy } from '../../types.ts'
+import { stripMount, underPath } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from './registry.ts'
+import { writeConditions } from './write_policy.ts'
 
 // A driver that knows where its bytes live (a disk root, a bucket and key
 // prefix) says so through `storageLocation`; one that does not is its own
@@ -67,5 +69,28 @@ export function makeStorageKey(registry: MountRegistry): (path: PathSpec) => str
     }
     const rel = rstripSlash(stripMount(path.virtual, rstripSlash(entry.prefix)))
     return vfsStorageLocation(entry.vfs) + rel
+  }
+}
+
+/**
+ * Refuse up front a delete a mount under the path could not condition: a
+ * move across mounts copies before it deletes, and on a conditional mount
+ * whose backend ignores delete conditions the delete would be refused after
+ * the copy landed. The owning mount counts, and so does any mount nested
+ * under the path, which the walk would cross; a mount above the owner is
+ * never touched. Mirrors Python's `make_check_unlink`.
+ */
+export function makeCheckUnlink(registry: MountRegistry): (path: PathSpec) => void {
+  return (path: PathSpec): void => {
+    const owner = registry.tryMountFor(path.virtual)
+    for (const entry of registry.allMounts()) {
+      if (
+        entry.write === WritePolicy.CONDITIONAL &&
+        (entry === owner || underPath(entry.prefix, path.virtual)) &&
+        !writeConditions(entry.vfs).includes('delete')
+      ) {
+        throw enotsup(entry.vfs.name, 'conditional delete', path)
+      }
+    }
   }
 }

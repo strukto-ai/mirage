@@ -109,6 +109,18 @@ class LoopClientCache:
             self._entries[loop] = _Entry(client=client, manager=manager)
             return client
 
+    def peek(self) -> Any:
+        """Return the running loop's open client, None without one.
+
+        Opens nothing, so a synchronous caller may ask.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+        entry = self._entries.get(loop)
+        return entry.client if entry is not None else None
+
     async def _release(self, loop: asyncio.AbstractEventLoop) -> None:
         """Release one entry, keeping it if its exit does not finish.
 

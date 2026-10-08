@@ -13,11 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+import pathlib
 
 import pytest
 import pytest_asyncio
+from redis.asyncio.client import Pipeline
 
-from mirage.cache.file.redis import DEL_BATCH, RedisFileCacheStore
+from mirage.cache.file.redis import (
+    DEL_BATCH,
+    KEY_BATCH,
+    VERSION_TTL,
+    RedisFileCacheStore,
+)
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -37,6 +44,14 @@ async def cache(redis_prefix):
     # wrote (the root directory set), and the prefix is this test's own.
     await c.accessor.store.clear()
     await c.close()
+
+
+async def _meta_ttl(cache: RedisFileCacheStore, path: str) -> int:
+    return await cache._cache_client.ttl(cache._meta_key(path))
+
+
+async def _data_ttl(cache: RedisFileCacheStore, path: str) -> int:
+    return await cache._cache_client.ttl(cache._data_key(path))
 
 
 @pytest.mark.asyncio
@@ -144,8 +159,16 @@ async def test_a_token_bearing_set_bounds_its_meta_key_too(cache):
     # false positive the tokenless delete exists to prevent, one branch
     # over.
     await cache.set("/a", b"data", fingerprint="etag-1", ttl=100)
-    assert await cache._cache_client.ttl(cache._meta_key("/a")) > 0
-    assert await cache._cache_client.ttl(cache._data_key("/a")) > 0
+    assert await _meta_ttl(cache, "/a") > 0
+    assert await _data_ttl(cache, "/a") > 0
+
+
+@pytest.mark.asyncio
+async def test_a_fill_with_no_token_writes_no_meta_key(cache):
+    await cache.set("/a", b"data")
+    assert await cache.get("/a") == b"data"
+    assert not await cache._cache_client.exists(cache._meta_key("/a"))
+    assert not await cache.is_fresh("/a", "etag-1")
 
 
 @pytest.mark.asyncio
@@ -397,3 +420,96 @@ async def test_a_prefix_drop_under_non_ascii_names(redis_prefix):
     finally:
         await accented.clear()
         await accented.close()
+
+
+@pytest.mark.asyncio
+async def test_a_version_kept_without_bytes_is_never_read(cache):
+    await cache.keep_fingerprints({"/a": "v1"})
+    assert not await cache.exists("/a")
+    assert await cache.get("/a") is None
+    assert not await cache.is_fresh("/a", "v1")
+    assert await cache.fingerprint("/a") == "v1"
+    await cache.set("/a", b"read", fingerprint="v1")
+    assert await cache.get("/a") == b"read"
+
+
+_FOREVER, _GONE = (-2, -1), (-3, -2)
+_KEPT = (60, VERSION_TTL)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fill, ttl, meta, data",
+    [
+        ("set", 60, _KEPT, (0, 60)),
+        ("set", None, _FOREVER, _FOREVER),
+        (
+            "set",
+            VERSION_TTL * 2,
+            (VERSION_TTL, 2 * VERSION_TTL),
+            (VERSION_TTL, 2 * VERSION_TTL),
+        ),
+        (None, None, _KEPT, _GONE),
+    ],
+    ids=[
+        "outlives-bytes",
+        "bytes-forever",
+        "bytes-longer",
+        "alone",
+    ],
+)
+async def test_a_version_bound_only_ever_raises(cache, fill, ttl, meta, data):
+    # Raise-only: outlives its bytes, never shortens them (-1: no expiry).
+    if fill == "set":
+        await cache.set("/a", b"x", fingerprint="v1", ttl=ttl)
+    await cache.keep_fingerprints({"/a": "v1"})
+    assert meta[0] < await _meta_ttl(cache, "/a") <= meta[1]
+    assert data[0] < await _data_ttl(cache, "/a") <= data[1]
+
+
+@pytest.mark.asyncio
+async def test_versions_go_out_in_one_round_trip(cache, monkeypatch):
+    sent = []
+    execute = Pipeline.execute
+
+    async def counted(self, *args, **kwargs):
+        sent.append(len(self.command_stack))
+        return await execute(self, *args, **kwargs)
+
+    monkeypatch.setattr(Pipeline, "execute", counted)
+    await cache.keep_fingerprints({"/a": "v1", "/b": "v2", "/c": "v3"})
+    assert sent == [3]
+    # One version is one EVALSHA; a scripted pipeline costs a SCRIPT EXISTS.
+    await cache.keep_fingerprints({"/d": "v4"})
+    assert sent == [3]
+    # Past KEY_BATCH keys the next batch is a pipeline of its own.
+    many = {f"/m{i}": "v" for i in range(KEY_BATCH + 2)}
+    await cache.keep_fingerprints(many)
+    assert sent == [3, KEY_BATCH, 2]
+    assert await cache.fingerprints(["/a", "/b", "/c"]) == ["v1", "v2", "v3"]
+
+
+@pytest.mark.asyncio
+async def test_a_version_never_replaces_bytes_written_since(cache):
+    await cache.set("/a", b"theirs", fingerprint="v2")
+    await cache.keep_fingerprints({"/a": "v1"})
+    assert await cache.get("/a") == b"theirs"
+    assert await cache.fingerprint("/a") == "v2"
+    await cache.remove("/a")
+    assert await cache.fingerprint("/a") is None
+
+
+def test_the_two_version_lua_copies_are_byte_identical():
+    root = pathlib.Path(__file__).resolve().parents[3].parent
+    py = (root / "python/mirage/cache/file/version.lua").read_bytes()
+    ts = (
+        root / "typescript/packages/node/src/cache/file/version.lua"
+    ).read_bytes()
+    assert py == ts
+
+
+@pytest.mark.asyncio
+async def test_fingerprints_answers_each_key_in_order(cache):
+    await cache.set("/a", b"x", fingerprint="v1")
+    await cache.keep_fingerprints({"/c": "v3"})
+    assert await cache.fingerprints(["/a", "/b", "/c"]) == ["v1", None, "v3"]

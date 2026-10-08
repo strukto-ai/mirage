@@ -146,9 +146,9 @@ async def test_a_failed_session_save_still_clears_and_seals_the_marks():
     applied: list[list[OpRecord]] = []
     orig_apply = ws._dispatcher.apply_io
 
-    async def keep_records(result, records=None, cache_facts=None):
+    async def keep_records(result, records=None, **kwargs):
         applied.append(records)
-        await orig_apply(result, records=records, cache_facts=cache_facts)
+        await orig_apply(result, records=records, **kwargs)
 
     async def failing_flush(session_id: str) -> None:
         raise OSError("session store down")
@@ -172,9 +172,9 @@ async def test_a_background_write_marked_during_the_session_save_is_cleared():
     orig_apply = ws._dispatcher.apply_io
     orig_flush = ws._session_mgr.flush
 
-    async def keep_records(result, records=None, cache_facts=None):
+    async def keep_records(result, records=None, **kwargs):
         applied.append(records)
-        await orig_apply(result, records=records, cache_facts=cache_facts)
+        await orig_apply(result, records=records, **kwargs)
 
     async def flush_after_the_mark(session_id: str) -> None:
         if len(applied) == 1:

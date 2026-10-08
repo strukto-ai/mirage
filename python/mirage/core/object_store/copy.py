@@ -16,6 +16,7 @@ from mirage.cache.context import (
     evict_after,
     invalidate_after_write,
     invalidate_ancestors,
+    write_condition,
 )
 from mirage.core.object_store.driver import (
     A,
@@ -23,7 +24,9 @@ from mirage.core.object_store.driver import (
     ExistsFn,
     ObjectStoreDriver,
     PairFn,
+    refused,
 )
+from mirage.core.object_store.errors import ConditionLostError
 from mirage.errors.fs import enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -85,10 +88,17 @@ def make_copy(
             # ancestors.
             await invalidate_ancestors(dst_spec)
 
+        cond = await write_condition(dst_spec, "copy")
         async with driver.connect(accessor) as conn:
-            copied = await evict_after(
-                copy_file(conn, src_key, dst_key), settle
-            )
+            if cond is None:
+                op = copy_file(conn, src_key, dst_key)
+            else:
+                assert driver.copy_if is not None
+                op = driver.copy_if(conn, src_key, dst_key, cond)
+            try:
+                copied = await evict_after(op, settle)
+            except ConditionLostError as exc:
+                raise await refused(dst_spec, exc, cond) from exc
         if not copied:
             raise enoent(src_spec.virtual)
 

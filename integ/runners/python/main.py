@@ -25,8 +25,9 @@ import adapters
 import harness
 
 from mirage.concurrency import ConcurrencyLimiter
-from mirage.types import ReadSpec
+from mirage.types import ReadSpec, WritePolicy
 from mirage.workspace.mount.read_policy import resolve_read_spec
+from mirage.workspace.mount.write_policy import coerce_write_policy
 
 HOST = "python"
 
@@ -93,6 +94,19 @@ def mount_read_of(case: dict) -> dict[str, ReadSpec]:
     }
 
 
+def write_of(case: dict) -> WritePolicy:
+    """The write policy a scenario case runs both workspaces under.
+
+    A selector like `read`, through the coercer so a typo'd name fails
+    loudly instead of running unconditional. Both workspaces take it, so
+    the shadow is a second mirage writer under the same policy.
+
+    Args:
+        case (dict): the integ case.
+    """
+    return coerce_write_policy(case.get("write"))
+
+
 async def run_consistency_case(
     target: dict,
     case: dict,
@@ -100,7 +114,9 @@ async def run_consistency_case(
     emit: list[dict] | None,
 ) -> None:
     spec = read_spec_of(case)
-    opened = await adapters.open_consistency(target, spec, mount_read_of(case))
+    opened = await adapters.open_consistency(
+        target, spec, mount_read_of(case), write_of(case)
+    )
     read_ws, mutate, remove, mutate_line, cleanup = opened
     try:
         exit_code, out, err, notes = await harness.run_scenario(

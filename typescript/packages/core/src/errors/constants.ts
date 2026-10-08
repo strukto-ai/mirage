@@ -39,6 +39,7 @@ export const CODE_ARMS: Record<string, FsCondition> = {
   EFBIG: 'EFBIG',
   ENODATA: 'NO_XATTR',
   ENOATTR: 'NO_XATTR',
+  STALE_WRITE: 'STALE_WRITE',
 }
 
 // The conditions a command reports against one operand before it moves on
@@ -59,6 +60,7 @@ export const OPERAND_CONDITIONS: ReadonlySet<FsCondition> = new Set<FsCondition>
   'ENOTSUP',
   'EXDEV',
   'EFBIG',
+  'STALE_WRITE',
 ])
 
 // The failures that happen after the open, which a command words as the

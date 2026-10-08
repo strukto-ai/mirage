@@ -14,9 +14,12 @@
 
 import logging
 import os
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
+import pytest_asyncio
 from pydantic import BaseModel, ConfigDict
 
 from mirage import (
@@ -43,6 +46,7 @@ from mirage.types import (
     ListingVersion,
     ReadPolicy,
     ReadSpec,
+    WritePolicy,
 )
 from mirage.utils.ranges import slice_window
 from mirage.vfs import registry as vfs_registry
@@ -52,6 +56,7 @@ from mirage.vfs.loader import SCRIPT_MODULE_NAME, load_backend_class
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs, register_vfs
+from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.secrets import REDACTED_SECRET
 from mirage.workspace.snapshot.keys import (
     CacheKey,
@@ -65,6 +70,7 @@ from mirage.workspace.snapshot.state import (
     requires_vfs_override,
     to_state_dict,
 )
+from mirage.workspace.workspace.types import VFSMount
 
 
 @pytest.mark.asyncio
@@ -779,16 +785,19 @@ async def test_snapshot_rejects_fresh_on_a_mount_without_caching():
 
 
 @pytest.mark.asyncio
-async def test_a_v3_snapshot_is_refused_with_the_regenerate_message():
+@pytest.mark.parametrize("version", [3, 4])
+async def test_an_older_snapshot_is_refused_with_the_regenerate_message(
+    version,
+):
     ws = Workspace({"/d/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         state = await to_state_dict(ws)
     finally:
         await ws.close()
-    state[StateKey.VERSION] = 3
+    state[StateKey.VERSION] = version
     with pytest.raises(ValueError) as exc:
         build_mount_args(state)
-    assert "v3 not supported" in str(exc.value)
+    assert f"v{version} not supported" in str(exc.value)
     assert "regenerate" in str(exc.value)
 
 
@@ -841,7 +850,8 @@ async def test_a_v4_entry_missing_the_read_key_raises_rather_than_defaulting(
 
 
 @pytest.mark.asyncio
-async def test_apply_state_dict_runs_the_version_check_too():
+@pytest.mark.parametrize("version", [3, 4])
+async def test_apply_state_dict_runs_the_version_check_too(version):
     """Both doors, or the same bytes get two answers.
 
     ``build_mount_args`` builds a workspace from the state;
@@ -855,13 +865,13 @@ async def test_apply_state_dict_runs_the_version_check_too():
         state = await to_state_dict(ws)
     finally:
         await ws.close()
-    state[StateKey.VERSION] = 3
+    state[StateKey.VERSION] = version
 
     target = Workspace({}, mode=MountMode.WRITE)
     try:
         with pytest.raises(ValueError) as exc:
             await apply_state_dict(target, state)
-        assert "v3 not supported" in str(exc.value)
+        assert f"v{version} not supported" in str(exc.value)
         assert target._registry.try_mount_for_prefix("/d/") is None
     finally:
         await target.close()
@@ -1126,3 +1136,124 @@ async def test_a_disk_state_loads_into_ram_without_following_a_link(tmp_path):
         assert await ws.vfs.read("/d/sub/f") == b"mine"
     finally:
         await ws.close()
+
+
+def _s3_conditional() -> Mount:
+    return Mount(
+        S3VFS(S3Config(bucket="b")),
+        mode=MountMode.WRITE,
+        write=WritePolicy.CONDITIONAL,
+    )
+
+
+@pytest_asyncio.fixture
+async def track() -> AsyncIterator[Callable[[Workspace], Workspace]]:
+    built: list[Workspace] = []
+
+    def keep(ws: Workspace) -> Workspace:
+        built.append(ws)
+        return ws
+
+    yield keep
+    for ws in reversed(built):
+        await ws.close()
+
+
+async def _saved_state(mounts: dict[str, VFSMount]) -> dict[str, Any]:
+    ws = Workspace(mounts, mode=MountMode.WRITE)
+    try:
+        return await to_state_dict(ws)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("door", ["state", "copy"])
+async def test_the_write_policies_survive_each_door(track, door):
+    # Two mounts with two values and a workspace default for later mounts.
+    ws = track(
+        Workspace(
+            {
+                "/s3/": S3VFS(S3Config(bucket="b")),
+                "/d/": Mount(
+                    RAMVFS(), mode=MountMode.WRITE, write="unconditional"
+                ),
+            },
+            mode=MountMode.WRITE,
+            write="conditional",
+        )
+    )
+    if door == "copy":
+        back = track(await ws.copy())
+    else:
+        state = await to_state_dict(ws)
+        back = track(
+            await Workspace.from_state(
+                state, mounts={"/s3/": S3VFS(S3Config(bucket="b"))}
+            )
+        )
+    assert back.mount("/s3/").write is WritePolicy.CONDITIONAL
+    assert back.mount("/d/").write is WritePolicy.UNCONDITIONAL
+    added = back.add_mount(
+        "/more", S3VFS(S3Config(bucket="b")), MountMode.WRITE
+    )
+    assert added.write is WritePolicy.CONDITIONAL
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "override, message",
+    [
+        (RAMVFS, "ram does not"),
+        (
+            lambda: Mount(
+                S3VFS(S3Config(bucket="b")),
+                mode=MountMode.WRITE,
+                write="unconditional",
+            ),
+            "saved write: conditional",
+        ),
+    ],
+    ids=["cannot-honour", "names-another"],
+)
+async def test_a_load_override_keeps_the_saved_write_policy(override, message):
+    # Unlike read, the saved write policy is kept: an override is refused.
+    state = await _saved_state({"/s3/": _s3_conditional()})
+    with pytest.raises(ValueError, match=message):
+        await Workspace.from_state(state, mounts={"/s3/": override()})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "level, value, message",
+    [
+        ("mount", None, "missing its write policy"),
+        ("mount", 1, "unknown write policy '1'"),
+        ("mount", "staged", "write: staged needs a staging layer"),
+        ("mount", "conditional", "ram does not"),
+        ("workspace", None, "missing its workspace write policy"),
+        ("workspace", 1, "unknown write policy '1'"),
+    ],
+)
+async def test_a_saved_write_policy_is_judged_at_load(level, value, message):
+    # A value no writer of ours would emit is refused, never cast.
+    state = await _saved_state({"/d/": RAMVFS()})
+    holder = state[StateKey.MOUNTS][0] if level == "mount" else state
+    key = MountKey.WRITE if level == "mount" else StateKey.WRITE
+    if value is None:
+        del holder[key]
+    else:
+        holder[key] = value
+    with pytest.raises(ValueError, match=message):
+        await Workspace.from_state(state)
+
+
+@pytest.mark.asyncio
+async def test_a_version_kept_without_bytes_is_not_snapshotted(track):
+    # It has no bytes to restore; captured, it would come back an empty file.
+    ws = track(Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE))
+    await ws._cache.set("/d/a", b"bytes", fingerprint="v1")
+    await ws._cache.keep_fingerprints({"/d/b": "v2"})
+    state = await to_state_dict(ws)
+    keys = [e["key"] for e in state[StateKey.CACHE][CacheKey.ENTRIES]]
+    assert keys == ["/d/a"]

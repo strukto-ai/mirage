@@ -12,12 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RedisClientType } from 'redis'
-import { DEL_BATCH, RedisFileCacheStore } from './redis.ts'
+import { DEL_BATCH, KEY_BATCH, RedisFileCacheStore, VERSION_TTL } from './redis.ts'
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
+
+function ttlClient(cache: RedisFileCacheStore): Promise<{ ttl: (k: string) => Promise<number> }> {
+  return (
+    cache as unknown as { cacheClient: () => Promise<{ ttl: (k: string) => Promise<number> }> }
+  ).cacheClient()
+}
 
 describe('RedisFileCacheStore configuration', () => {
   it('rejects maxDrainBytes above cacheLimit', () => {
@@ -60,55 +66,62 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect(await cache.get('/data/sub/nested2')).toBeNull()
   })
 
-  it('a set discards a fill invalidated while it awaited the client', async () => {
-    // This store's window is its own: `set` and `add` both
-    // `await this.cacheClient()` between `invalidation.enter` and the
-    // `stale` check. core's ram.test.ts covers the lock path, a
-    // different suspension point, so neither stands in for the other.
-    // (Python's redis store has no await there at all -- see the note in
-    // tests/cache/file/test_redis_cache.py -- so this case is one-host.)
-    //
-    // The client is gated rather than merely raced: letting the
-    // invalidation run to completion while the writer is held is what
-    // separates "the guard discarded the fill" from "the fill landed and
-    // the invalidation deleted it afterwards". Both end with the key
-    // absent, so a racy version of this test passes with the guard
-    // removed -- measured, not assumed.
-    for (const invalidate of [
-      () => cache.clear(),
-      () => cache.remove('pending'),
-      () => cache.evictPrefix('pend'),
-    ]) {
-      const real = cache.cacheClient.bind(cache)
-      let release!: () => void
-      const gate = new Promise<void>((resolve) => {
-        release = resolve
-      })
-      // One-shot: only the writer is held. `clear`, `remove` and
-      // `evictPrefix` reach for the same client, so a gate that held
-      // every call would deadlock the invalidation instead of ordering
-      // it.
-      let held = false
-      cache.cacheClient = async (): Promise<RedisClientType> => {
-        if (!held) {
-          held = true
-          await gate
+  it.each(['set', 'keepFingerprints'] as const)(
+    '%s discards a fill invalidated while it awaited the client',
+    async (method) => {
+      // This store's window is its own: `set` and `keepFingerprints` both
+      // `await this.cacheClient()` between `invalidation.enter` and the
+      // `stale` check. core's ram.test.ts covers the lock path, a
+      // different suspension point, so neither stands in for the other.
+      // (Python's redis store has no await there at all -- see the note in
+      // tests/cache/file/test_redis_cache.py -- so this case is one-host.)
+      //
+      // The client is gated rather than merely raced: letting the
+      // invalidation run to completion while the writer is held is what
+      // separates "the guard discarded the fill" from "the fill landed and
+      // the invalidation deleted it afterwards". Both end with the key
+      // absent, so a racy version of this test passes with the guard
+      // removed -- measured, not assumed.
+      for (const invalidate of [
+        () => cache.clear(),
+        () => cache.remove('pending'),
+        () => cache.evictPrefix('pend'),
+      ]) {
+        const real = cache.cacheClient.bind(cache)
+        let release!: () => void
+        const gate = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        // One-shot: only the writer is held. `clear`, `remove` and
+        // `evictPrefix` reach for the same client, so a gate that held
+        // every call would deadlock the invalidation instead of ordering
+        // it.
+        let held = false
+        cache.cacheClient = async (): Promise<RedisClientType> => {
+          if (!held) {
+            held = true
+            await gate
+          }
+          return real()
         }
-        return real()
+        // Held across the whole invalidation: the writer has taken its
+        // stamp and is parked inside the gated client, so `invalidate()`
+        // runs to completion before the writer ever reaches its stale
+        // check. Releasing first is what makes this racy and vacuous.
+        const fill =
+          method === 'keepFingerprints'
+            ? cache.keepFingerprints({ pending: 'v1' })
+            : cache[method]('pending', new Uint8Array([1, 2, 3]))
+        await invalidate()
+        release()
+        cache.cacheClient = real
+        await fill
+        expect(await cache.get('pending')).toBeNull()
+        expect(await cache.fingerprint('pending')).toBeNull()
+        await cache.remove('pending')
       }
-      // Held across the whole invalidation: the writer has taken its
-      // stamp and is parked inside the gated client, so `invalidate()`
-      // runs to completion before the writer ever reaches its stale
-      // check. Releasing first is what makes this racy and vacuous.
-      const fill = cache.set('pending', new Uint8Array([1, 2, 3]))
-      await invalidate()
-      release()
-      cache.cacheClient = real
-      await fill
-      expect(await cache.get('pending')).toBeNull()
-      await cache.remove('pending')
-    }
-  })
+    },
+  )
 
   it('a set of an unrelated key survives a prefix eviction while it awaited the client', async () => {
     // The scoped twin of the case above: the writer is held inside the
@@ -257,6 +270,98 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     await cache.clear()
     expect(await cache.exists('a')).toBe(false)
     expect(await cache.exists('b')).toBe(false)
+  })
+
+  it('never reads a version kept without bytes', async () => {
+    await cache.keepFingerprints({ '/a': 'v1' })
+    expect(await cache.exists('/a')).toBe(false)
+    expect(await cache.get('/a')).toBeNull()
+    expect(await cache.isFresh('/a', 'v1')).toBe(false)
+    expect(await cache.fingerprint('/a')).toBe('v1')
+    await cache.set('/a', new TextEncoder().encode('read'), { fingerprint: 'v1' })
+    expect(new TextDecoder().decode((await cache.get('/a')) ?? new Uint8Array())).toBe('read')
+  })
+
+  const KEPT = [60, VERSION_TTL] as const
+  const FOREVER = [-2, -1] as const
+  it.each([
+    ['outlives its bytes', 'set', 60, KEPT, [0, 60]],
+    ['bytes forever', 'set', undefined, FOREVER, FOREVER],
+    [
+      'bytes longer',
+      'set',
+      VERSION_TTL * 2,
+      [VERSION_TTL, 2 * VERSION_TTL],
+      [VERSION_TTL, 2 * VERSION_TTL],
+    ],
+    ['alone', null, undefined, KEPT, [-3, -2]],
+  ] as const)('only ever raises a version bound: %s', async (_name, fill, ttl, meta, data) => {
+    // Raise-only: outlives its bytes, never shortens them (-1: no expiry).
+    const x = new TextEncoder().encode('x')
+    if (fill === 'set')
+      await cache.set('/a', x, { fingerprint: 'v1', ...(ttl !== undefined ? { ttl } : {}) })
+    await cache.keepFingerprints({ '/a': 'v1' })
+    const c = await ttlClient(cache)
+    const metaTtl = await c.ttl(`${prefix}meta:/a`)
+    const dataTtl = await c.ttl(`${prefix}data:/a`)
+    expect(metaTtl).toBeGreaterThan(meta[0])
+    expect(metaTtl).toBeLessThanOrEqual(meta[1])
+    expect(dataTtl).toBeGreaterThan(data[0])
+    expect(dataTtl).toBeLessThanOrEqual(data[1])
+  })
+
+  it('keeps many versions in one round trip', async () => {
+    // Once the script is loaded; a cold server loads it on the first batch.
+    await cache.keepFingerprints({ '/w': 'v0' })
+    const c = await (
+      cache as unknown as { cacheClient: () => Promise<Record<string, unknown>> }
+    ).cacheClient()
+    const evalSpy = vi.spyOn(c as { eval: () => unknown }, 'eval')
+    const multiSpy = vi.spyOn(c as { multi: () => unknown }, 'multi')
+    await cache.keepFingerprints({ '/a': 'v1', '/b': 'v2', '/c': 'v3' })
+    expect([evalSpy.mock.calls.length, multiSpy.mock.calls.length]).toEqual([0, 1])
+    // Past KEY_BATCH keys the next batch is a pipeline of its own.
+    await cache.keepFingerprints(
+      Object.fromEntries(Array.from({ length: KEY_BATCH + 2 }, (_, i) => [`/m${String(i)}`, 'v'])),
+    )
+    expect(multiSpy.mock.calls.length).toBe(3)
+    evalSpy.mockRestore()
+    multiSpy.mockRestore()
+    expect(await cache.fingerprints(['/a', '/b', '/c'])).toEqual(['v1', 'v2', 'v3'])
+  })
+
+  it('sends the version script by its hash, loading it again once flushed', async () => {
+    // The body is sent once per load, not once per key.
+    const c = (await (
+      cache as unknown as { cacheClient: () => Promise<unknown> }
+    ).cacheClient()) as {
+      info: (section: string) => Promise<string>
+      scriptFlush: () => Promise<unknown>
+    }
+    const calls = async (name: string): Promise<number> => {
+      const found = new RegExp(`cmdstat_${name}:calls=(\\d+)`).exec(await c.info('commandstats'))
+      return Number(found?.[1] ?? 0)
+    }
+    await c.scriptFlush()
+    const evals = await calls('eval')
+    await cache.keepFingerprints({ '/a': 'v1', '/b': 'v2' })
+    await cache.keepFingerprints({ '/c': 'v3' })
+    expect(await calls('eval')).toBe(evals)
+    expect(await cache.fingerprints(['/a', '/b', '/c'])).toEqual(['v1', 'v2', 'v3'])
+  })
+
+  it('never replaces bytes written since with a version', async () => {
+    await cache.set('/a', new TextEncoder().encode('theirs'), { fingerprint: 'v2' })
+    await cache.keepFingerprints({ '/a': 'v1' })
+    expect(await cache.fingerprint('/a')).toBe('v2')
+    await cache.remove('/a')
+    expect(await cache.fingerprint('/a')).toBeNull()
+  })
+
+  it('answers fingerprints for each key in order', async () => {
+    await cache.set('/a', new TextEncoder().encode('x'), { fingerprint: 'v1' })
+    await cache.keepFingerprints({ '/c': 'v3' })
+    expect(await cache.fingerprints(['/a', '/b', '/c'])).toEqual(['v1', null, 'v3'])
   })
 })
 

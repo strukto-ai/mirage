@@ -38,6 +38,7 @@ import {
   listingError,
   noMount,
   readdirError,
+  staleWrite,
   walkRefusal,
 } from './fs.ts'
 import { posixPhrase } from './posix.ts'
@@ -59,6 +60,7 @@ describe('the constructors', () => {
     [enotempty, 'ENOTEMPTY'],
     [exdev, 'EXDEV'],
     [ebusy, 'EBUSY'],
+    [staleWrite, 'STALE_WRITE'],
   ] as const)('%#: stamps the code and the operand, as fsError does', (make, code) => {
     for (const err of [make({ virtual: '/data/x' }), fsError('/data/x', code)]) {
       expect(err.code).toBe(code)
@@ -82,6 +84,13 @@ describe('the constructors', () => {
     expect(fsStrerror(Object.assign(new Error('x'), { code: 'EIO' }))).toBeNull()
     expect(fsStrerror(new Error('nope'))).toBeNull()
     expect(fsStrerror(null)).toBeNull()
+  })
+
+  it('leaves a kernel ESTALE its own words', () => {
+    // A real ESTALE from disk or NFS is no lost conditional write.
+    const err = Object.assign(new Error('Stale file handle'), { code: 'ESTALE' })
+    expect(classify(err)).toBeNull()
+    expect(fsStrerror(err)).toBeNull()
   })
 
   it('carries the op and the operand for a missing op', () => {

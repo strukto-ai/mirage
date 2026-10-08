@@ -39,6 +39,7 @@ from mirage.errors.fs import (
     listing_error,
     no_mount,
     readdir_error,
+    stale_write,
     walk_refusal,
 )
 from mirage.errors.posix import posix_errno, posix_phrase
@@ -52,6 +53,7 @@ from mirage.errors.types import (
     NoMountError,
     OperationNotSupportedError,
     ReadOnlyError,
+    StaleWriteError,
 )
 from mirage.types import PathSpec
 
@@ -71,6 +73,7 @@ from mirage.types import PathSpec
         (enotempty, FsCondition.ENOTEMPTY, OSError),
         (exdev, FsCondition.EXDEV, OSError),
         (ebusy, FsCondition.EBUSY, OSError),
+        (stale_write, FsCondition.STALE_WRITE, StaleWriteError),
     ],
 )
 def test_every_constructor_stamps_the_kernel_shape(make, condition, kind):
@@ -103,6 +106,13 @@ def test_fs_strerror_reads_a_bare_class_and_nothing_else():
     )
     assert fs_strerror(ValueError("nope")) is None
     assert fs_strerror(OSError(errno.EIO, "Input/output error", "/d")) is None
+
+
+def test_a_kernel_estale_keeps_its_own_words():
+    # A real ESTALE from disk or NFS is no lost conditional write.
+    exc = OSError(errno.ESTALE, "Stale file handle", "/disk/f")
+    assert classify(exc) is None
+    assert fs_strerror(exc) is None
 
 
 def test_enotsup_carries_op_and_operand():

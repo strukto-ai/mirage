@@ -15,11 +15,19 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
-from typing import Generic, Literal, Protocol, TypeVar
+from typing import Generic, Literal, NoReturn, Protocol, TypeVar
 
 from mirage.accessor.base import Accessor
+from mirage.cache.context import (
+    drop_cached,
+    stale,
+)
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.types import KnownVersions, OwnRead, WriteCondition
+from mirage.core.object_store.errors import ConditionLostError
+from mirage.errors.types import StaleWriteError
 from mirage.types import FileStat, PathSpec
+from mirage.utils import key_prefix as kp
 
 A = TypeVar("A", bound=Accessor)
 C = TypeVar("C")
@@ -178,6 +186,79 @@ class ObjectMeta:
     extra: dict[str, str] = field(default_factory=dict)
 
 
+async def refused(
+    path: PathSpec, exc: ConditionLostError, cond: WriteCondition | None
+) -> StaleWriteError:
+    """The refusal for a one-path op whose condition lost.
+
+    Args:
+        path (PathSpec): the path the op wrote.
+        exc (ConditionLostError): the store's refusal.
+        cond (WriteCondition | None): the condition the op sent.
+    """
+    return await stale(
+        path, gone=exc.gone, version=cond.if_match if cond else None
+    )
+
+
+async def keep_all_lost(
+    root: PathSpec, key_prefix: str, exc: ConditionLostError
+) -> NoReturn:
+    """Keep every lost key's version, then raise the walk's later error.
+
+    Args:
+        root (PathSpec): the walk's operand, for addressing its keys.
+        key_prefix (str): the mount's backend key prefix.
+        exc (ConditionLostError): the refusal, carrying ``error``.
+
+    Raises:
+        Exception: ``exc.error``.
+    """
+    assert exc.error is not None
+    await keep_lost(root, key_prefix, exc, None)
+    raise exc.error
+
+
+async def keep_walk(
+    root: PathSpec, key_prefix: str, exc: ConditionLostError
+) -> str:
+    """Keep what a walk's refusal measured, and name the key it reports.
+
+    Every lost key but the named one keeps its version; a later error that
+    stopped the walk is raised instead, with every version kept.
+
+    Args:
+        root (PathSpec): the walk's operand, for addressing its keys.
+        key_prefix (str): the mount's backend key prefix.
+        exc (ConditionLostError): the store's refusal.
+
+    Returns:
+        str: the raw key the refusal names.
+    """
+    if exc.error is not None:
+        await keep_all_lost(root, key_prefix, exc)
+    key = exc.keys[0]
+    await keep_lost(root, key_prefix, exc, key)
+    return key
+
+
+async def keep_lost(
+    root: PathSpec, key_prefix: str, exc: ConditionLostError, skip: str | None
+) -> None:
+    """Keep the version of each key a walk lost on, except ``skip``.
+
+    Args:
+        root (PathSpec): the walk's operand, for addressing its keys.
+        key_prefix (str): the mount's backend key prefix.
+        exc (ConditionLostError): the store's refusal.
+        skip (str | None): the key the refusal itself names and keeps.
+    """
+    for key, version in exc.versions.items():
+        if key != skip:
+            kept = None if version is OwnRead.ABSENT else version
+            await drop_cached(kp.key_path(root, key_prefix, key), kept)
+
+
 @dataclass(frozen=True, slots=True)
 class FindHints:
     """The find predicates a driver may push into its native query.
@@ -276,6 +357,28 @@ class ObjectStoreDriver(Generic[A, C]):
             predicate push-down, returning the iterator and whether the
             query was narrowed beyond the prefix; None means find walks
             ``list_tree`` unnarrowed.
+        put_if (Callable | None): ``put`` carrying a write condition; a
+            lost one raises :class:`ConditionLostError`. None when the store
+            cannot condition a write.
+        get_versioned (Callable | None): ``get`` plus the token of the
+            bytes returned, for an op that writes back what it read; a
+            revision reads that revision.
+        copy_if (Callable | None): ``copy_file`` with the destination's
+            condition and the source's expected token.
+        delete_if (Callable | None): ``delete_file`` with a condition.
+        move_file_if (Callable | None): ``move_file`` whose copy and
+            delete are both conditioned on the source's version (the one
+            given, else the one its own lookup sees), and whose copy
+            carries the destination condition.
+        move_prefix_if (Callable | None): ``move_prefix`` moving each key
+            only if it is still the version the mount saw (``known``), else
+            the one listed, onto a destination key the mount holds a
+            version for (``dst_known``) only if it is still that version;
+            the keys that changed stay where they were and are raised in a
+            ConditionLostError.
+        delete_prefix_if (Callable | None): ``delete_prefix`` deleting
+            each key only if it is still the version the mount saw, else
+            the one listed.
     """
 
     vfs: str
@@ -299,4 +402,31 @@ class ObjectStoreDriver(Generic[A, C]):
     find_tree: (
         Callable[[C, str, FindHints], tuple[AsyncIterator[TreeEntry], bool]]
         | None
+    ) = None
+    put_if: (
+        Callable[[C, str, bytes, WriteCondition], Awaitable[ObjectMeta | None]]
+        | None
+    ) = None
+    get_versioned: (
+        Callable[
+            [C, str, str | None], Awaitable[tuple[bytes, str | None] | None]
+        ]
+        | None
+    ) = None
+    copy_if: (
+        Callable[[C, str, str, WriteCondition], Awaitable[bool]] | None
+    ) = None
+    delete_if: Callable[[C, str, WriteCondition], Awaitable[None]] | None = (
+        None
+    )
+    move_file_if: (
+        Callable[[C, str, str, WriteCondition, str | None], Awaitable[bool]]
+        | None
+    ) = None
+    move_prefix_if: (
+        Callable[[C, str, str, KnownVersions, KnownVersions], Awaitable[bool]]
+        | None
+    ) = None
+    delete_prefix_if: (
+        Callable[[C, str, KnownVersions], Awaitable[None]] | None
     ) = None

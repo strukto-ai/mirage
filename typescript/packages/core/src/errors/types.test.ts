@@ -46,6 +46,7 @@ describe('the condition vocabulary', () => {
         'EROFS',
         'EFBIG',
         'NO_XATTR',
+        'STALE_WRITE',
       ]),
     )
   })
