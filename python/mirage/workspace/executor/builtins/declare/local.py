@@ -234,7 +234,8 @@ async def _declare_operands(
                 # A literal takes its marks at its place, against the
                 # target its own write cleared, even when a policy refused
                 # a later literal; under `-n` they go on the reference,
-                # which an array cannot become.
+                # which an array cannot become, its own `-i -l -u` coming
+                # off unless asked for (`_unshaped`).
                 name = operand[0]
                 line = (
                     reference_refusal(
@@ -249,7 +250,7 @@ async def _declare_operands(
                         view,
                         name,
                         stored[position],
-                        marks,
+                        _unshaped(marks) if nameref else marks,
                         not nameref,
                     )
             else:
@@ -313,8 +314,8 @@ async def _declare_operand(
     fresh = local_vars is not None and key not in local_vars
     if nameref:
         # The reference's own `-i -l -u` come off unless asked for, as
-        # bash's do (`declare -l x=T; declare -n x=U` aims at `U`); a
-        # literal written through it leaves its target's alone.
+        # bash's do (`declare -l x=T; declare -n x=U` aims at `U`); its
+        # target's stay.
         shaping, marks = _unshaped(shaping), _unshaped(marks)
     if val is None:
         if local_vars is not None:

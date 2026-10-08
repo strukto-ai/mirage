@@ -611,6 +611,40 @@
         "stdout": "rc=0\ndeclare -ai T=([0]=\"5\")\ndeclare -al L=([0]=\"cd\")\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "nameref_literal_clears_reference_flags",
+      "seq": 940131,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( t=0; declare -nl ref=t; declare -n ref=(3); declare -p ref t; declare +n ref; ref=ABC; echo \"$ref\"; s=0; declare -nl rl=s; declare -nl rl=(3); declare -p rl s; declare -n ri=T; declare -ni ri=M; declare -nx ri=(4); declare -p ri T )",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -n ref=\"t\"\ndeclare -a t=([0]=\"3\")\nABC\ndeclare -nl rl=\"s\"\ndeclare -al s=([0]=\"3\")\ndeclare -nx ri=\"T\"\ndeclare -a T=([0]=\"4\")\n",
+        "stderr": ""
+      }
     }
   ]
 }

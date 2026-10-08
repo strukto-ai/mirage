@@ -185,14 +185,24 @@ async function declareOperands(
         // A literal takes its marks at its place, against the target its
         // own write cleared, even when a policy refused a later literal;
         // under `-n` they go on the reference, which an array cannot
-        // become.
+        // become, its own `-i -l -u` coming off unless asked for
+        // (`unshaped`).
         const checked = stored.get(position)
         if (checked === undefined) continue
         const name = operand.name
         line =
           (nameref ? referenceRefusal(cmd, name, visibleRecord(session, name), false) : null) ??
           plusRefusal(cmd, session, view, name, plus)
-        if (line === null) await stampMarks(session, view, name, checked, marks, !nameref)
+        if (line === null) {
+          await stampMarks(
+            session,
+            view,
+            name,
+            checked,
+            nameref ? unshaped(marks) : marks,
+            !nameref,
+          )
+        }
       }
       if (line !== null) errors.push(line)
     }
@@ -232,8 +242,7 @@ async function declareOperand(
   const fresh = locals !== null && !locals.has(key)
   if (nameref) {
     // The reference's own `-i -l -u` come off unless asked for, as bash's
-    // do (`declare -l x=T; declare -n x=U` aims at `U`); a literal written
-    // through it leaves its target's alone.
+    // do (`declare -l x=T; declare -n x=U` aims at `U`); its target's stay.
     shaping = unshaped(shaping)
     marks = unshaped(marks)
   }
