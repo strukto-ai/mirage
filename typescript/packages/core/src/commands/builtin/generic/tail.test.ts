@@ -14,15 +14,26 @@
 
 import { describe, expect, it } from 'vitest'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import {
+  DEFAULT_READ_TTL,
+  FileStat,
+  FileType,
+  MountMode,
+  PathSpec,
+  ReadPolicy,
+} from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { followFlags, tailGeneric } from './tail.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { runWithCacheManager } from '../../../cache/context.ts'
-import { RAMFileCacheStore } from '../../../cache/file/ram.ts'
-import { CacheManager } from '../../../cache/manager.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import { record, startOp } from '../../../observe/context.ts'
+import { Channel } from '../../../shell/console/index.ts'
+import type { Job } from '../../../shell/job_table/types.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -250,34 +261,6 @@ describe('tail -f', () => {
     abort.abort()
     await drain
     expect(Buffer.concat(chunks).toString('latin1')).toBe('==> /d/x\xff <==\nl1\n')
-  })
-
-  it('reads past the read-through cache while following', async () => {
-    // A warm cache holds the body the last one-shot read saw; a follow
-    // polls for exactly what that body does not have yet, so it reads
-    // the backend itself, from the first print on.
-    const fs = new Growing(new Map())
-    fs.set('/s3/a.txt', 'l1\n')
-    const cached = new PathSpec({
-      virtual: '/s3/a.txt',
-      directory: '/s3/',
-      resolved: true,
-      vfsPath: mountKey('/s3/a.txt', '/s3/'),
-    })
-    const cache = new RAMFileCacheStore()
-    await cache.set('/s3/a.txt', ENC.encode('stale\n'))
-    const manager = new CacheManager(cache, null, '/s3/', true)
-    const abort = new AbortController()
-    const [stream] = (await runWithCacheManager(manager, () =>
-      tailGeneric([cached], [], followOpts(abort), fs.stream, fs.stat),
-    )) as [AsyncIterable<Uint8Array>, IOResult]
-    const grower = (async () => {
-      await sleep(60)
-      fs.append('/s3/a.txt', 'l2\n')
-    })()
-    const text = await drainFor(stream, 200, abort)
-    await grower
-    expect(text).toBe('l1\nl2\n')
   })
 
   it('-F waits for a directory to be replaced by a file', async () => {
@@ -701,5 +684,87 @@ describe('tail -s reads exactly what strtod reads', () => {
   it.each(['1\r', '0xp1', 'nan'])('refuses %j', (value) => {
     const answer = followFlags(new FlagView({ sleep_interval: value }, specOf('tail')))
     expect(typeof answer).toBe('string')
+  })
+})
+
+// A RAM mount whose stat and reads carry a token that changes with the
+// content, so `fresh` revalidates the way a stamping backend does.
+class Stamped extends RAMVFS {
+  override readonly readRevalidatable: boolean = true
+
+  override async stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    const row = await super.stat(path, index)
+    return new FileStat({
+      name: row.name,
+      size: row.size,
+      type: row.type,
+      fingerprint: String(row.size),
+    })
+  }
+
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const timer = startOp()
+    const data = await super.read(path, index, offset, size)
+    const whole = await super.read(path, index)
+    record('read', path.virtual, 'ram', data.byteLength, timer, {
+      fingerprint: String(whole.byteLength),
+    })
+    return data
+  }
+
+  override async *readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    yield await this.read(path, index)
+  }
+}
+
+async function printed(job: Job | null, want: string): Promise<string> {
+  let shown = ''
+  for (let i = 0; i < 40 && shown !== want; i++) {
+    shown = DEC.decode(await job?.console.snapshot(Channel.STDOUT))
+    if (shown !== want) await sleep(50)
+  }
+  return shown
+}
+
+describe('a follow prints each append past the file cache', () => {
+  // A follow polls at the door for what the backend holds now: neither the
+  // cached body nor the stat the freshness probe kept has the bytes it
+  // waits for, under either read policy. Mirrors Python's
+  // test_follow_prints_each_append_past_the_file_cache.
+  it.each([
+    [ReadPolicy.FRESH, 'cold'],
+    [ReadPolicy.FRESH, 'warm'],
+    [ReadPolicy.BOUNDED, 'cold'],
+    [ReadPolicy.BOUNDED, 'warm'],
+  ] as const)('%s, %s', async (policy, start) => {
+    const ram = new Stamped()
+    Object.assign(ram, { cachesReads: true })
+    const ws = new Workspace(
+      { '/m': ram },
+      {
+        mode: MountMode.WRITE,
+        read: { policy, ttl: DEFAULT_READ_TTL },
+        shellParserFactory: getTestParser,
+      },
+    )
+    try {
+      ram.store.files.set('/log', ENC.encode('l1\n'))
+      if (start === 'warm') await ws.shell('cat /m/log')
+      await ws.shell('tail -f -s 0.05 /m/log &')
+      const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
+      expect(await printed(job, 'l1\n')).toBe('l1\n')
+      for (const body of ['l1\nl2\n', 'l1\nl2\nl3\n']) {
+        ram.store.files.set('/log', ENC.encode(body))
+        expect(await printed(job, body)).toBe(body)
+      }
+      expect((await ws.shell('kill %1')).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
   })
 })

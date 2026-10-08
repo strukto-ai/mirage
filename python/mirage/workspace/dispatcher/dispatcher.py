@@ -433,6 +433,8 @@ class _Call:
         write (bool): whether policy judges the op a write: its POSIX
             name, or the effect the mount's VFS declares for it.
         stream (bool): whether a read is answered as it is pulled.
+        direct (bool): whether a read skips the file cache, neither
+            served from it nor kept in it.
     """
 
     name: str
@@ -446,6 +448,7 @@ class _Call:
     no_follow: bool
     write: bool
     stream: bool = False
+    direct: bool = False
 
     @property
     def window(self) -> tuple[int, int | None]:
@@ -601,11 +604,14 @@ class Dispatcher:
     ) -> tuple[Any, IOResult]:
         # with_dispatch_rule_guard's mark, never forwarded to an op.
         rule_gate: EntryGate | None = kwargs.pop("rule_gate", None)
-        # The door's own keyword: a read answered as it is pulled.
+        # The door's own keywords: a read answered as it is pulled, and a
+        # read of what the backend holds now, past the file cache.
         stream = name == "read" and bool(kwargs.pop("stream", False))
+        direct = name == "read" and bool(kwargs.pop("direct", False))
         await self._prepare()
         call = await self._walk(name, path, kwargs, rule_gate, report)
         call.stream = stream
+        call.direct = direct
         await self._refuse_rename(call)
         if self._table_answers(name, call.path.virtual, kwargs):
             return (
@@ -924,19 +930,26 @@ class Dispatcher:
         the stored bytes, which are the rendering for a VFS with no
         ``read`` of its own. A read through a filetype renderer (whoever
         registered it) asks for a different value under the same key, so
-        it is neither served from that cache nor kept in it. The cache
-        holds the whole object, so a ranged read is answered by slicing
-        it, never by handing back the whole file: the window is what the
-        caller asked for instead of the file, and git reads pack indexes
-        this way. slice_window is the same helper the ranged read op
-        falls back to, so warm and cold agree.
+        it is neither served from that cache nor kept in it, and neither
+        is a direct read (``direct=True``), which asks for what the
+        backend holds now: a follow's poll for bytes the cached copy
+        cannot have yet. The cache holds the whole object, so a ranged
+        read is answered by slicing it, never by handing back the whole
+        file: the window is what the caller asked for instead of the
+        file, and git reads pack indexes this way. slice_window is the
+        same helper the ranged read op falls back to, so warm and cold
+        agree.
 
         Args:
             call (_Call): the admitted op.
             mount (MountEntry): the mount serving its path.
             boundary (Boundary): the boundary the op completes through.
         """
-        if not mount.vfs.caches_reads or call.name not in DISPATCH_READ_OPS:
+        if (
+            call.direct
+            or not mount.vfs.caches_reads
+            or call.name not in DISPATCH_READ_OPS
+        ):
             return None
         cached = await self._cache.get(call.path.virtual)
         if (
@@ -981,6 +994,7 @@ class Dispatcher:
         offset, size = call.window
         if (
             mount.vfs.caches_reads
+            and not call.direct
             and call.name in DISPATCH_READ_OPS
             and size != 0
             and (

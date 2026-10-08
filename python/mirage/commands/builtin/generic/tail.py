@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import inspect
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Mapping
@@ -13,6 +14,7 @@ from mirage.commands.builtin.tail_counts import (
 )
 from mirage.commands.builtin.utils.constants import STDIN_HEADER_NAME
 from mirage.commands.builtin.utils.operands import operands_io, split_opened
+from mirage.commands.builtin.utils.paths import dispatch_stat
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
     operand_label,
@@ -32,7 +34,8 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.stream import async_chain, ensure_stream
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.quote import shell_quote
@@ -367,6 +370,41 @@ async def _whole(read: Callable[..., Any], path: PathSpec) -> bytes:
     return b"".join([chunk async for chunk in _counted(read(path), [0])])
 
 
+async def _polled_window(
+    dispatch: DispatchFn,
+    path: PathSpec,
+    offset: int = 0,
+    size: int | None = None,
+) -> bytes:
+    """A follow poll's read: what the backend holds now, at the door.
+
+    A direct read, never served from the file cache nor kept in it: the
+    poll looks for exactly the bytes a cached copy does not have yet.
+
+    Args:
+        dispatch (DispatchFn): the command's dispatcher.
+        path (PathSpec): the followed file.
+        offset (int): where the window starts.
+        size (int | None): the window's length, None for the rest.
+    """
+    data, _ = await dispatch(
+        "read", path, filetype=None, offset=offset, size=size, direct=True
+    )
+    return await materialize(data) or b""
+
+
+async def _polled_file(
+    dispatch: DispatchFn, path: PathSpec
+) -> AsyncIterator[bytes]:
+    """A follow poll's whole-file read, for a stat that carries no size.
+
+    Args:
+        dispatch (DispatchFn): the command's dispatcher.
+        path (PathSpec): the followed file.
+    """
+    yield await _polled_window(dispatch, path)
+
+
 async def _catch_up(
     read: Callable[..., Any],
     read_range: ReadRange | None,
@@ -411,6 +449,7 @@ async def _follow(
     pending: list[tuple[PathSpec, str]],
     *,
     read: Callable[..., Any],
+    poll_read: Callable[..., Any],
     read_range: ReadRange | None,
     stat: StatFn,
     counts: TailCounts,
@@ -469,9 +508,11 @@ async def _follow(
         paths (list[PathSpec]): the operands that opened.
         pending (list[tuple[PathSpec, str]]): the ones ``--retry`` waits
             for, each with the notice that announces it.
-        read (Callable[..., Any]): bound whole-file reader.
-        read_range (ReadRange | None): bound byte-window reader.
-        stat (StatFn): bound stat.
+        read (Callable[..., Any]): bound whole-file reader, for the
+            first print.
+        poll_read (Callable[..., Any]): the polls' whole-file reader.
+        read_range (ReadRange | None): the polls' byte-window reader.
+        stat (StatFn): the polls' stat.
         counts (TailCounts): what the first print shows.
         show_headers (bool): the ``==> name <==`` rule.
         flags (TailFlags): the parsed flags.
@@ -556,7 +597,12 @@ async def _follow(
                     grown = None
                 else:
                     grown = await _catch_up(
-                        read, read_range, io, p, current.size, positions[slot]
+                        poll_read,
+                        read_range,
+                        io,
+                        p,
+                        current.size,
+                        positions[slot],
                     )
             except IsADirectoryError:
                 grown = None
@@ -722,15 +768,22 @@ async def tail_generic(
                 _note(io, "tail: no files remaining\n")
                 io.exit_code = 1
                 return None, io
-            # A follow reads the backend itself, never the read-through
-            # cache: what it is polling for is exactly the change the
-            # cached body does not have yet.
+            # The first print reads like any other tail; the polls ask
+            # the door for what the backend holds now, past the file
+            # cache and past the stat the command's freshness probe kept:
+            # they look for exactly the change neither has yet.
+            poll_stat, poll_read, poll_range = stat, stream, read_range
+            if opts.dispatch is not None:
+                poll_stat = functools.partial(dispatch_stat, opts.dispatch)
+                poll_read = functools.partial(_polled_file, opts.dispatch)
+                poll_range = functools.partial(_polled_window, opts.dispatch)
             return _follow(
                 opened,
                 pending,
                 read=stream,
-                read_range=read_range,
-                stat=stat,
+                poll_read=poll_read,
+                read_range=poll_range,
+                stat=poll_stat,
                 counts=counts,
                 show_headers=show_headers,
                 flags=parsed,

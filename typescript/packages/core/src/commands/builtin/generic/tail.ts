@@ -35,6 +35,8 @@ import { fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { splitOpened } from '../utils/operands.ts'
+import { dispatchStat } from '../utils/paths.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { quoteText } from '../../quote.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
@@ -174,6 +176,27 @@ async function catchUp(
   return [data, start + data.byteLength]
 }
 
+/**
+ * A follow poll's read: what the backend holds now, at the door. A direct
+ * read, never served from the file cache nor kept in it: the poll looks for
+ * exactly the bytes a cached copy does not have yet. Mirrors Python's
+ * `_polled_window`.
+ */
+async function polledWindow(
+  dispatch: DispatchFn,
+  p: PathSpec,
+  offset = 0,
+  size: number | null = null,
+): Promise<Uint8Array> {
+  const [data] = await dispatch('read', p, [], { filetype: null, offset, size, direct: true })
+  return materialize(data as ByteSource)
+}
+
+/** A follow poll's whole-file read, for a stat that carries no size. */
+async function* polledFile(dispatch: DispatchFn, p: PathSpec): AsyncIterable<Uint8Array> {
+  yield await polledWindow(dispatch, p)
+}
+
 async function window(
   stream: Stream,
   readRange: ReadRange | null,
@@ -213,6 +236,7 @@ async function* follow(
   paths: readonly PathSpec[],
   pending: readonly [PathSpec, string][],
   stream: Stream,
+  pollStream: Stream,
   stat: Stat,
   readRange: ReadRange | null,
   counts: TailCounts,
@@ -299,7 +323,7 @@ async function* follow(
         grown =
           current.type === FileType.DIRECTORY
             ? null
-            : await catchUp(stream, readRange, io, p, current.size, positions.get(slot) ?? 0)
+            : await catchUp(pollStream, readRange, io, p, current.size, positions.get(slot) ?? 0)
       } catch (err) {
         if (!isFsError(err)) throw err
         if (!isEisdir(err)) {
@@ -434,9 +458,6 @@ export async function tailGeneric(
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
   const parsed = parseFlags(opts.flags)
-  // A follow reads the backend itself, never the read-through cache:
-  // what it is polling for is exactly the change the cached body does
-  // not have yet.
   const backend = stream
   stream = stdinStream(stream, opts.stdin)
   if (typeof parsed === 'string')
@@ -477,13 +498,29 @@ export async function tailGeneric(
       io.exitCode = 1
       return [null, io]
     }
+    // The first print reads like any other tail; the polls ask the door
+    // for what the backend holds now, past the file cache and past the
+    // stat the command's freshness probe kept: they look for exactly the
+    // change neither has yet.
+    const first = stdinStream(backend, opts.stdin)
+    const dispatch = opts.dispatch
+    const polled =
+      dispatch === undefined
+        ? { stream: first, stat, readRange }
+        : {
+            stream: (p: PathSpec) => polledFile(dispatch, p),
+            stat: dispatchStat(dispatch),
+            readRange: (p: PathSpec, offset: number, size: number) =>
+              polledWindow(dispatch, p, offset, size),
+          }
     return [
       follow(
         opened,
         pending,
-        stdinStream(backend, opts.stdin),
-        stat,
-        readRange,
+        first,
+        polled.stream,
+        polled.stat,
+        polled.readRange,
         counts,
         showHeaders,
         following,

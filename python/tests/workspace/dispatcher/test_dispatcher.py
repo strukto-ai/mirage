@@ -1238,6 +1238,23 @@ async def test_a_raw_read_keeps_what_a_command_reads():
 
 
 @pytest.mark.asyncio
+async def test_a_direct_read_neither_serves_nor_keeps_the_cache():
+    # A follow's poll asks for what the backend holds now: the warm copy
+    # is not served, and the read leaves the cache as it found it.
+    ws, fetched = _counted_workspace()
+    path = PathSpec.from_str_path("/data/f.count")
+    await ws.cache.set("/data/f.count", b"WARM")
+    whole, _ = await ws.dispatch("read", path, direct=True)
+    window, _ = await ws.dispatch("read", path, offset=1, size=2, direct=True)
+    assert (whole, window) == (b"BODY", b"OD")
+    assert fetched == ["/data/f.count", "/data/f.count"]
+    assert await ws.cache.get("/data/f.count") == b"WARM"
+    await ws.cache.remove("/data/f.count")
+    await ws.dispatch("read", path, direct=True)
+    assert not await ws.cache.exists("/data/f.count")
+
+
+@pytest.mark.asyncio
 async def test_a_natively_ranged_read_keeps_nothing():
     # A store that serves a range itself moved only that range.
     ws, _ = _counted_workspace(filetype=".count")

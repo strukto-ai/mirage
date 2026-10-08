@@ -957,6 +957,23 @@ describe('a cold read keeps its bytes for the next reader', () => {
     expect(fetched).toEqual([])
   })
 
+  it('neither serves nor keeps the cache on a direct read', async () => {
+    // A follow's poll asks for what the backend holds now: the warm copy is
+    // not served, and the read leaves the cache as it found it.
+    const { ws, fetched } = counted()
+    await ws.cache.set('/data/f.count', ENC.encode('WARM'))
+    const read = async (kwargs: Record<string, unknown>): Promise<string> => {
+      const data = await ws.dispatch('read', '/data/f.count', [], { ...kwargs, direct: true })
+      return DEC.decode(data as Uint8Array)
+    }
+    expect([await read({}), await read({ offset: 1, size: 2 })]).toEqual(['BODY', 'OD'])
+    expect(fetched).toEqual(['/data/f.count', '/data/f.count'])
+    expect(await ws.cache.get('/data/f.count')).toEqual(ENC.encode('WARM'))
+    await ws.cache.remove('/data/f.count')
+    await ws.dispatch('read', '/data/f.count', [], { direct: true })
+    expect(await ws.cache.exists('/data/f.count')).toBe(false)
+  })
+
   it('keeps nothing from a natively ranged read', async () => {
     // A store that serves a range itself moved only that range.
     const { ws } = counted(false, '.count')

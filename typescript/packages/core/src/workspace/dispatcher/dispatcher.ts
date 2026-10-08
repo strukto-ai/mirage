@@ -350,6 +350,8 @@ interface Call {
   write: boolean
   /** Whether a read is answered as it is pulled. */
   stream: boolean
+  /** Whether a read skips the file cache, neither served from it nor kept in it. */
+  direct: boolean
 }
 
 /** The filetype a read is rendered as, null for none. */
@@ -432,12 +434,14 @@ export class Dispatcher {
     // withDispatchRuleGuard's mark, never forwarded to an op.
     const { ruleGate, ...unmarked } = (stripped ?? {}) as { ruleGate?: EntryGate | null }
     kwargs = ruleGate === undefined ? stripped : unmarked
-    // The door's own keyword: a read answered as it is pulled.
-    const { stream, ...unstreamed } = (kwargs ?? {}) as { stream?: unknown }
-    if (name === 'read' && stream !== undefined) kwargs = unstreamed
+    // The door's own keywords: a read answered as it is pulled, and a read
+    // of what the backend holds now, past the file cache.
+    const { stream, direct, ...own } = (kwargs ?? {}) as { stream?: unknown; direct?: unknown }
+    if (name === 'read' && (stream !== undefined || direct !== undefined)) kwargs = own
     await this.prepare()
     const call = await this.walk(name, path, args, kwargs, ruleGate ?? null, report, issuer)
     call.stream = name === 'read' && stream === true
+    call.direct = name === 'read' && direct === true
     await this.refuseRename(call)
     if (this.tableAnswers(name, call.path.virtual, call.kwargs)) {
       return [
@@ -606,6 +610,7 @@ export class Dispatcher {
       noFollow,
       write: POLICY_WRITE_OPS.has(name),
       stream: false,
+      direct: false,
     }
   }
 
@@ -844,11 +849,14 @@ export class Dispatcher {
    * stored bytes, which are the rendering for a VFS with no `read` of its
    * own. A read through a filetype renderer (whoever registered it) asks
    * for a different value under the same key, so it is neither served
-   * from that cache nor kept in it. The cache holds the whole
-   * object, so a ranged read is answered by slicing it, never by handing
-   * back the whole file: the window is what the caller asked for instead
-   * of the file, and git reads pack indexes this way. sliceWindow is the
-   * same helper the ranged read op falls back to, so warm and cold agree.
+   * from that cache nor kept in it, and neither is a direct read
+   * (`direct: true`), which asks for what the backend holds now: a
+   * follow's poll for bytes the cached copy cannot have yet. The cache
+   * holds the whole object, so a ranged read is answered by slicing it,
+   * never by handing back the whole file: the window is what the caller
+   * asked for instead of the file, and git reads pack indexes this way.
+   * sliceWindow is the same helper the ranged read op falls back to, so
+   * warm and cold agree.
    * Mirrors Python's Dispatcher._serve_cached.
    */
   private async serveCached(
@@ -857,7 +865,7 @@ export class Dispatcher {
     vfs: BaseVFS,
     boundary: Boundary,
   ): Promise<Uint8Array | null> {
-    if (!vfs.cachesReads || !DISPATCH_READ_OPS.has(call.name)) return null
+    if (call.direct || !vfs.cachesReads || !DISPATCH_READ_OPS.has(call.name)) return null
     const cached = await this.cache.get(call.path.virtual)
     if (
       cached === null ||
@@ -896,6 +904,7 @@ export class Dispatcher {
     const [offset, size] = readWindow(call.kwargs)
     const whole = offset === 0 && size === null
     return vfs.cachesReads &&
+      !call.direct &&
       DISPATCH_READ_OPS.has(call.name) &&
       size !== 0 &&
       (whole || !mount.readsRanges(call.path.virtual)) &&
