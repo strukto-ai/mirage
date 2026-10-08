@@ -896,8 +896,7 @@ export class UsageError extends GitError {
 /**
  * `remote` given a word where its subcommand would go.
  *
- * This build lists remotes and has none of git's `remote` subcommands, so
- * whatever the word is, it is refused the way git refuses one it does not
+ * An unsupported subcommand is refused the way git refuses one it does not
  * know, with the usage block after it. Pinned against git 2.50.1.
  */
 export class UnknownSubcommandError extends UsageError {

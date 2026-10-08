@@ -209,6 +209,34 @@
         "stdout": "branch 't' set up to track 'origin/topic'.\n[branch \"z\"]\n\tremote = origin\n[branch \"t\"]\n\tremote = origin\n\tmerge = refs/heads/topic\n* main 8ef2542 [origin/main] add two\n  t    225f39c [origin/topic] add docs\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_remote_url_lists_and_rewrites",
+      "seq": 567929,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cp /repo/.git/config /repo/.git/config.urls; printf '[remote \"multi\"]\\n url = alias:one\\n url = plain:two\\n[remote \"fallback\"]\\n url = first\\n url = second\\n[remote \"pushonly\"]\\n pushurl = write-only\\n[remote \"explicit\"]\\n url = plain:read\\n pushurl = alias:write1\\n pushurl = alias:write2\\n[url \"https://fetch/\"]\\n insteadOf = alias:\\n[url \"ssh://push/\"]\\n pushInsteadOf = alias:\\n' >> /repo/.git/config; git -C /repo remote get-url multi; git -C /repo remote get-url --all multi; git -C /repo remote get-url --push --all multi; git -C /repo remote get-url --push explicit; git -C /repo remote get-url --push --all explicit; git -C /repo remote get-url --push --all fallback; git -C /repo remote get-url --all --no-all fallback; git -C /repo remote get-url --push --no-push -- multi; git -C /repo remote get-url pushonly; git -C /repo remote get-url --push pushonly; git -C /repo remote get-url absent; echo missing=$?; mv /repo/.git/config.urls /repo/.git/config)",
+      "expect": {
+        "exit": 0,
+        "stdout": "https://fetch/one\nhttps://fetch/one\nplain:two\nssh://push/one\nhttps://fetch/write1\nhttps://fetch/write1\nhttps://fetch/write2\nfirst\nsecond\nfirst\nhttps://fetch/one\npushonly\nwrite-only\nmissing=2\n",
+        "stderr": "error: No such remote 'absent'\n"
+      }
+    },
+    {
+      "id": "git_rev_parse_shallow_common_directory",
+      "seq": 567930,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git -C /repo rev-parse --is-inside-work-tree --is-shallow-repository; git -C /repo rev-parse HEAD > /repo/.git/shallow; git -C /repo/docs rev-parse --is-shallow-repository --show-prefix; mkdir -p /repo/.git/worktrees/shallow /repo/shallow-linked; printf 'ref: refs/heads/main\\n' > /repo/.git/worktrees/shallow/HEAD; printf '../..\\n' > /repo/.git/worktrees/shallow/commondir; printf 'gitdir: /repo/.git/worktrees/shallow\\n' > /repo/shallow-linked/.git; git -C /repo/shallow-linked rev-parse --is-shallow-repository; rm -r /repo/.git/worktrees/shallow /repo/shallow-linked; printf '' > /repo/.git/shallow; git -C /repo rev-parse --is-shallow-repository; rm /repo/.git/shallow; git --git-dir=/repo/.git rev-parse --is-shallow-repository)",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\nfalse\ntrue\ndocs/\ntrue\ntrue\nfalse\n",
+        "stderr": ""
+      }
     }
   ]
 }

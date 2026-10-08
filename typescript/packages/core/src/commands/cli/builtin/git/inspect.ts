@@ -9,7 +9,8 @@ import { BreError, PosixSyntax, translateEre } from '../../../builtin/utils/bre.
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
-import type { FlagValue } from '../../../spec/types.ts'
+import { CommandSpec, Operand, Option, type FlagValue } from '../../../spec/types.ts'
+import { parseCommand, parseToKwargs } from '../../../spec/parser.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
 import {
@@ -25,7 +26,7 @@ import { parseFlags, refCommits, select } from './history.ts'
 import { uniqueAbbreviations } from './ref_list.ts'
 import { configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
-import { configLines } from './fs.ts'
+import { configLines, type ConfigLine } from './fs.ts'
 import { readFile, readOptional } from './io.ts'
 import { refsNamed, splitRevisions, resolveObject } from './revparse.ts'
 import {
@@ -34,12 +35,13 @@ import {
   escaped,
   fatal,
   optionOperand,
+  offending,
   startPoint,
   STDERR,
   STDOUT,
   verbUsage,
 } from './util.ts'
-import { HELP_SWITCH } from '../../refusal.ts'
+import { HELP_SWITCH, gitOptionRefusal, gitUsage } from '../../refusal.ts'
 import { isBare } from './discover.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
 
@@ -50,34 +52,120 @@ const SHOW_TOPLEVEL = '--show-toplevel'
 const GIT_DIR_OPTION = '--git-dir'
 const MIN_ABBREV = 4
 const HEX_LENGTH = 40
+const GET_URL = new CommandSpec({
+  options: [
+    new Option({ long: '--push', description: 'query push URLs rather than fetch URLs' }),
+    new Option({ long: '--all', description: 'return all URLs' }),
+    new Option({ long: '--no-push' }),
+    new Option({ long: '--no-all' }),
+  ],
+  positional: [new Operand({ type: 'str', name: 'name', required: true })],
+  rest: new Operand({ type: 'str' }),
+})
 
 export async function remote(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
-    checkOperands(inv, inv.texts)
     const [word] = inv.texts
+    if (word === 'get-url') return await remoteGetUrl(inv)
+    checkOperands(inv, inv.texts)
     if (word !== undefined) throw new UnknownSubcommandError(word, verbUsage(inv))
     const repo = await opened(fl, inv.doors ?? {})
     const rows = (await git.listRemotes(repoArgs(repo))).sort((a, b) =>
       compareCodePoints(a.remote, b.remote),
     )
+    const cfg = await configLines(
+      new TextDecoder().decode(
+        await readFile(repo.dispatch, repo.location.commondir.join('config')),
+      ),
+    )
     const lines: string[] = []
     for (const row of rows) {
       if (!fl.asBool('verbose')) lines.push(row.remote)
       else {
-        const urls = (await git.getConfigAll({
-          ...repoArgs(repo),
-          path: `remote.${row.remote}.url`,
-        })) as string[]
-        const push = (await git.getConfigAll({
-          ...repoArgs(repo),
-          path: `remote.${row.remote}.pushurl`,
-        })) as string[]
+        const [urls, push] = remoteUrls(cfg, row.remote)
         if (urls[0]) lines.push(`${row.remote}\t${urls[0]} (fetch)`)
         for (const url of push.length ? push : urls) lines.push(`${row.remote}\t${url} (push)`)
       }
     }
     return [ENC.encode(lines.length ? `${lines.join('\n')}\n` : ''), new IOResult()]
+  } catch (err) {
+    if (err instanceof GitError) return fatal(err)
+    throw err
+  }
+}
+
+/** Apply the longest matching URL prefix once, as Git does. */
+function rewriteUrl(url: string, rules: readonly [string, string][]): string {
+  let matched: [string, string] | undefined
+  for (const rule of rules) {
+    if (url.startsWith(rule[0]) && (matched === undefined || rule[0].length > matched[0].length))
+      matched = rule
+  }
+  return matched === undefined ? url : matched[1] + url.slice(matched[0].length)
+}
+
+/** Fetch and push URLs, with Git's longest-prefix config rewrites. */
+export function remoteUrls(cfg: readonly ConfigLine[], name: string): [string[], string[]] {
+  let urls = cfg
+    .filter((line) => line.path === `remote.${name}.url`)
+    .map((line) => line.value ?? '')
+  let push = cfg
+    .filter((line) => line.path === `remote.${name}.pushurl`)
+    .map((line) => line.value ?? '')
+  if (!urls.length && push.length) urls = [name]
+  const rules: [string, string][] = [],
+    pushRules: [string, string][] = []
+  for (const line of cfg) {
+    if (!line.path.startsWith('url.')) continue
+    const end = line.path.lastIndexOf('.')
+    const base = line.path.slice(4, end),
+      key = line.path.slice(end + 1)
+    if (key === 'insteadof') rules.push([line.value ?? '', base])
+    if (key === 'pushinsteadof') pushRules.push([line.value ?? '', base])
+  }
+  if (!push.length) {
+    push = urls
+      .filter((url) => pushRules.some(([prefix]) => url.startsWith(prefix)))
+      .map((url) => rewriteUrl(url, pushRules))
+    if (!push.length) push = urls
+  }
+  return [urls.map((url) => rewriteUrl(url, rules)), push.map((url) => rewriteUrl(url, rules))]
+}
+
+/** Read the get-url remainder through the shared option parser. */
+export async function remoteGetUrl(inv: CLIInvocation): Promise<CommandFnResult> {
+  try {
+    const parsed = parseCommand(
+      GET_URL,
+      [...inv.texts.slice(1)],
+      inv.cwd.virtual,
+      '',
+      undefined,
+      true,
+    )
+    const names = parsed.args.map(([word]) => word)
+    const bad = offending(names, escaped(inv.argv), new Set())
+    if (bad !== null) throw new UsageError(...gitOptionRefusal(bad, 'remote get-url', GET_URL))
+    const [name] = names
+    if (names.length !== 1 || name === undefined)
+      throw new UsageError('', gitUsage('remote get-url', GET_URL))
+    const fl = new FlagView(parseToKwargs(parsed), GET_URL)
+    const repo = await opened(new FlagView(inv.flags), inv.doors ?? {})
+    const cfg = await configLines(
+      new TextDecoder().decode(
+        await readFile(repo.dispatch, repo.location.commondir.join('config')),
+      ),
+    )
+    const [urls, push] = remoteUrls(cfg, name)
+    if (!urls.length)
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: ENC.encode(`error: No such remote '${name}'\n`) }),
+      ]
+    let selected = fl.typedOrder('push', 'no_push').at(-1) === 'push' ? push : urls
+    if (fl.typedOrder('all', 'no_all').at(-1) !== 'all') selected = selected.slice(0, 1)
+    return [ENC.encode(selected.map((url) => `${url}\n`).join('')), new IOResult()]
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err
@@ -366,6 +454,10 @@ export async function revParse(inv: CLIInvocation): Promise<CommandFnResult> {
     )
       throw new NotAWorkTreeError()
     const answers = await placeAnswers(repo, start)
+    if (fl.asBool('is_shallow_repository')) {
+      const shallow = await readOptional(repo.dispatch, repo.location.commondir.join('shallow'))
+      answers.set('--is-shallow-repository', `${String(shallow !== null)}\n`)
+    }
     const short = fl.raw('short')
     const verify = fl.asBool('verify') || short !== undefined
     const width = shortWidth(short, repo.abbrev)

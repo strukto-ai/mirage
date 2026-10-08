@@ -221,6 +221,7 @@ async def _recurse_reassociated(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     redirects: list[Any],
     processes: ProcessSupervisor | None,
     right: Any,
@@ -243,6 +244,7 @@ async def _recurse_reassociated(
         dispatch (DispatchFn): VFS op dispatcher.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
+        namespace (Namespace): namespace links for redirect pathname expansion.
         redirects (list): parsed redirects hoisted off the list.
         processes (ProcessSupervisor | None): where the stages run as
             managed processes.
@@ -266,6 +268,7 @@ async def _recurse_reassociated(
         dispatch,
         execute_fn,
         registry,
+        namespace,
         view,
         right,
         redirects,
@@ -281,6 +284,7 @@ async def _recurse_lifted(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     stages: PipelineStages,
     processes: ProcessSupervisor | None,
     right: Any,
@@ -299,6 +303,7 @@ async def _recurse_lifted(
         dispatch (DispatchFn): VFS op dispatcher.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
+        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline, its lead already taken.
         processes (ProcessSupervisor | None): where the stages run as
             managed processes.
@@ -315,6 +320,7 @@ async def _recurse_lifted(
         dispatch,
         execute_fn,
         registry,
+        namespace,
         stages,
         context,
         stdin,
@@ -328,6 +334,7 @@ async def _recurse_stage(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     stages: PipelineStages,
     targets: list[Any],
     processes: ProcessSupervisor | None,
@@ -350,6 +357,7 @@ async def _recurse_stage(
         dispatch (DispatchFn): VFS op dispatcher.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
+        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline being run.
         targets (list[Any]): the stages a ``|&`` follows.
         processes (ProcessSupervisor | None): where the stages run as
@@ -377,6 +385,7 @@ async def _recurse_stage(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             view,
             node,
             bound,
@@ -390,6 +399,7 @@ async def _recurse_stage(
         dispatch,
         execute_fn,
         registry,
+        namespace,
         targets,
         node,
         context,
@@ -404,6 +414,7 @@ async def _run_pipeline(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     stages: PipelineStages,
     context: EvaluationContext,
     stdin: Any,
@@ -422,6 +433,7 @@ async def _run_pipeline(
         dispatch (DispatchFn): VFS op dispatcher.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
+        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline's stages.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
@@ -438,6 +450,7 @@ async def _run_pipeline(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             replace(stages, lead=None),
             processes,
             right,
@@ -458,6 +471,7 @@ async def _run_pipeline(
         dispatch,
         execute_fn,
         registry,
+        namespace,
         stages,
         targets,
         processes,
@@ -491,6 +505,7 @@ async def _recurse_pipe_stderr(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     targets: list[Any],
     node: Any,
     context: EvaluationContext,
@@ -513,7 +528,13 @@ async def _recurse_pipe_stderr(
         Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
     )
     expanded, pipe_node = await expand_redirects(
-        redirects, context, execute_fn, registry, call_stack, view=view
+        redirects,
+        context,
+        execute_fn,
+        registry,
+        call_stack,
+        view=view,
+        links=namespace,
     )
     stdout, io, exec_node = await handle_redirect(
         recurse, dispatch, command, expanded, context, stdin, call_stack
@@ -571,6 +592,7 @@ async def _run_redirected(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     view: SessionView | None,
     command: Any,
     redirects: list[Redirect],
@@ -595,6 +617,7 @@ async def _run_redirected(
         dispatch (DispatchFn): VFS op dispatcher.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
+        namespace (Namespace): namespace links for redirect pathname expansion.
         view (SessionView | None): the session plane's gated door.
         command (Any): the redirected command node, None for a bare
             redirect.
@@ -628,6 +651,7 @@ async def _run_redirected(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             redirects,
             processes,
             right,
@@ -641,6 +665,7 @@ async def _run_redirected(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             get_pipeline_stages(command, redirects),
             context,
             stdin,
@@ -657,6 +682,7 @@ async def _run_redirected(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             view,
             inner,
             redirects,
@@ -675,6 +701,7 @@ async def _run_redirected(
         call_stack,
         view=view,
         forked=_forks(command, context),
+        links=namespace,
     )
     # `exec > file` with no command installs the redirects on the
     # shell for every later statement, rather than applying them to
@@ -1187,6 +1214,7 @@ async def _execute_node(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             get_pipeline_stages(node),
             context,
             stdin,
@@ -1215,6 +1243,7 @@ async def _execute_node(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             view,
             command,
             redirects,

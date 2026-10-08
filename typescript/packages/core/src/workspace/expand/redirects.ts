@@ -14,7 +14,7 @@
 
 import type { EvaluationContext } from '../evaluation.ts'
 import { childLine } from './node.ts'
-import type { SessionView } from '../../view/types.ts'
+import type { NamespaceLinks, SessionView } from '../../view/types.ts'
 import { materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
@@ -24,6 +24,8 @@ import type { MountRegistry } from '../mount/registry.ts'
 
 import { visibleEnv } from '../session/state.ts'
 import { classifyBarePath } from './classify/index.ts'
+import { globOptions, resolveGlobs } from './globs.ts'
+import { expandWords } from './parts.ts'
 import { expandNode } from './node.ts'
 import type { ExecuteFn } from './node.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -49,24 +51,22 @@ export async function expandRedirects(
   callStack: CallStack | null = null,
   view?: SessionView,
   forked = false,
+  links: NamespaceLinks | null = null,
 ): Promise<[Redirect[], TSNodeLike | null]> {
   const expanded: Redirect[] = []
   for (const [index, r] of redirects.entries()) {
+    let current: Redirect
     try {
-      expanded.push(await expandRedirect(r, context, executeFn, registry, callStack, view))
+      current = await expandRedirect(r, context, executeFn, registry, callStack, view, links)
     } catch (err) {
       if (!(err instanceof ExitSignal) || !forked) throw err
-      // The child performs no redirect after the first that fails; a
-      // pipeline the line attached to one of them still runs.
-      const later = redirects.slice(index).find((each) => each.pipeline != null)
-      expanded.push(
-        new Redirect({
-          fd: r.fd,
-          target: err,
-          kind: RedirectKind.UNEXPANDED,
-          pipeline: later?.pipeline ?? null,
-        }),
-      )
+      current = new Redirect({ fd: r.fd, target: err, kind: RedirectKind.UNEXPANDED })
+    }
+    expanded.push(current)
+    if (current.kind === RedirectKind.AMBIGUOUS || current.kind === RedirectKind.UNEXPANDED) {
+      // A failed expansion stops later redirects; its attached pipeline still runs.
+      current.pipeline =
+        redirects.slice(index).find((each) => each.pipeline != null)?.pipeline ?? null
       break
     }
   }
@@ -89,6 +89,7 @@ async function expandRedirect(
   registry: MountRegistry,
   callStack: CallStack | null,
   view: SessionView | undefined,
+  links: NamespaceLinks | null,
 ): Promise<Redirect> {
   const session = context.session
   if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) {
@@ -151,8 +152,24 @@ async function expandRedirect(
   const targetNode = r.targetNode as TSNodeLike | null
   let targetScope: unknown = r.target
   if (targetNode !== null) {
-    const targetStr = await expandNode(targetNode, context, executeFn, callStack, view)
-    targetScope = classifyBarePath(targetStr, registry, session.cwd)
+    const words = await expandWords([targetNode], context, executeFn, callStack, view)
+    const targets = await resolveGlobs(
+      words.map((word) => classifyBarePath(word, registry, session.cwd)),
+      registry,
+      session.shellOptions.noglob ?? false,
+      links,
+      globOptions(session),
+    )
+    if (targets.length !== 1) {
+      return new Redirect({
+        fd: r.fd,
+        target: r.target,
+        targetNode: r.targetNode,
+        kind: RedirectKind.AMBIGUOUS,
+        pipeline: r.pipeline,
+      })
+    }
+    targetScope = targets[0]
   }
   return new Redirect({
     fd: r.fd,

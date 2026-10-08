@@ -931,8 +931,9 @@ GIT = CLISpec(
         ),
         CLISpec(
             name="remote",
-            description="List remotes",
+            description="List remotes and inspect their URLs",
             fn=verb(remote),
+            rest=Operand(type="str", remainder=True),
             options=(
                 Option(
                     short="-v",
@@ -1077,6 +1078,10 @@ GIT = CLISpec(
                     long="--show-prefix",
                     description="Show the current directory relative to the "
                     "worktree root",
+                ),
+                Option(
+                    long="--is-shallow-repository",
+                    description="Print whether the repository is shallow",
                 ),
                 Option(
                     long="--is-inside-work-tree",

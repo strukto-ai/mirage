@@ -23,10 +23,12 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ProcessSubDirection, Redirect, RedirectKind
-from mirage.view.types import SessionView
+from mirage.view.types import NamespaceLinks, SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.classify import classify_bare_path
+from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.expand.node import child_line, expand_node
+from mirage.workspace.expand.parts import expand_words
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import visible_env
 
@@ -39,6 +41,7 @@ async def expand_redirects(
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
     forked: bool = False,
+    links: NamespaceLinks | None = None,
 ) -> tuple[list[Redirect], Any]:
     """Expand redirect targets: heredoc vars, target words, pipelines.
 
@@ -55,6 +58,7 @@ async def expand_redirects(
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
         view (SessionView | None): the session plane's gated door.
+        links (NamespaceLinks | None): namespace links for pathname expansion.
         forked (bool): the redirects belong to a program bash forks
             for, which expands them in the child: an error there is
             kept for the command to fail on (``UNEXPANDED``) rather
@@ -67,30 +71,29 @@ async def expand_redirects(
     expanded: list[Redirect] = []
     for index, r in enumerate(redirects):
         try:
-            expanded.append(
-                await _expand_redirect(
-                    r, context, execute_fn, registry, call_stack, view
-                )
+            current = await _expand_redirect(
+                r, context, execute_fn, registry, call_stack, view, links
             )
         except ExitSignal as exc:
             if not forked:
                 raise
-            # The child performs no redirect after the first that fails;
-            # a pipeline the line attached to one of them still runs.
-            expanded.append(
-                Redirect(
-                    fd=r.fd,
-                    target=exc,
-                    kind=RedirectKind.UNEXPANDED,
-                    pipeline=next(
-                        (
-                            later.pipeline
-                            for later in redirects[index:]
-                            if later.pipeline is not None
-                        ),
-                        None,
-                    ),
-                )
+            current = Redirect(
+                fd=r.fd, target=exc, kind=RedirectKind.UNEXPANDED
+            )
+        expanded.append(current)
+        if current.kind in (
+            RedirectKind.AMBIGUOUS,
+            RedirectKind.UNEXPANDED,
+        ):
+            # A failed expansion stops later redirects; its attached
+            # pipeline still runs.
+            current.pipeline = next(
+                (
+                    later.pipeline
+                    for later in redirects[index:]
+                    if later.pipeline is not None
+                ),
+                None,
             )
             break
     pipe_node = None
@@ -109,6 +112,7 @@ async def _expand_redirect(
     registry: MountRegistry,
     call_stack: CallStack | None,
     view: SessionView | None,
+    links: NamespaceLinks | None,
 ) -> Redirect:
     """Expand one redirect's body or target.
 
@@ -119,6 +123,7 @@ async def _expand_redirect(
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
         view (SessionView | None): the session plane's gated door.
+        links (NamespaceLinks | None): namespace links for pathname expansion.
     """
     session = context.session
     if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
@@ -180,14 +185,28 @@ async def _expand_redirect(
         )
     target_scope = r.target
     if r.target_node is not None:
-        target_str = await expand_node(
-            r.target_node, context, execute_fn, call_stack, view=view
+        words = await expand_words(
+            [r.target_node], context, execute_fn, call_stack, view=view
         )
-        # A redirect target is a path by definition (the operator is
-        # the context), so force classification like a PATH-kind word;
-        # classify_word alone leaves extensionless relative targets as
-        # text. Mirrors the TS classifyBarePath call.
-        target_scope = classify_bare_path(target_str, registry, session.cwd)
+        targets = await resolve_globs(
+            [
+                classify_bare_path(word, registry, session.cwd)
+                for word in words
+            ],
+            registry,
+            noglob=session.shell_options.get("noglob", False),
+            links=links,
+            options=glob_options(session),
+        )
+        if len(targets) != 1:
+            return Redirect(
+                fd=r.fd,
+                target=r.target,
+                target_node=r.target_node,
+                kind=RedirectKind.AMBIGUOUS,
+                pipeline=r.pipeline,
+            )
+        target_scope = targets[0]
     return Redirect(
         fd=r.fd,
         target=target_scope,

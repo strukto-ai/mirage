@@ -63,6 +63,8 @@ export async function runCommandTree(
       deps.registry,
       null,
       sessionView(session, deps.registry.policies, context.frame.diagnostics),
+      false,
+      deps.namespace,
     )
     // Bash's implicit read uses cat's policy identity without invoking
     // a shadowing function/alias or expanding the filename a second time.
