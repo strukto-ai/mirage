@@ -22,9 +22,9 @@ from mirage.policy import Action, Policy
 from mirage.policy.types import VfsContext
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.call import call_effect, vfs_call
+from mirage.vfs.call import call_effect, call_names, declared_calls, vfs_call
 from mirage.vfs.ram import RAMVFS
-from mirage.vfs.types import Effect
+from mirage.vfs.types import Declaration, Effect, Target
 from mirage.workspace.mount import MountEntry
 from tests.fixtures.vfs_io import served
 
@@ -91,6 +91,48 @@ def test_a_mark_names_the_effect():
     assert call_effect(Notes, "search_abc") is Effect.READ
     assert call_effect(Notes, "stamp") is Effect.WRITE
     assert call_effect(Notes, "helper") is None
+
+
+# What each built-in function declares. The TypeScript twin
+# (vfs/call.test.ts) pins this same table, so a declaration changed in
+# one language fails the other language's test.
+BUILT_INS = {
+    "append": (Effect.WRITE, Target.FILE, True),
+    "create": (Effect.WRITE, Target.FILE, True),
+    "mkdir": (Effect.CREATE, Target.DIR, False),
+    "pwrite": (Effect.WRITE, Target.FILE, True),
+    "read": (Effect.READ, Target.FILE, False),
+    "readdir": (Effect.READ, Target.DIR, False),
+    "rename": (Effect.RENAME, Target.ANY, False),
+    "rmdir": (Effect.REMOVE, Target.DIR, False),
+    "setattr": (Effect.ATTR, Target.ANY, False),
+    "stat": (Effect.METADATA, Target.ANY, False),
+    "truncate": (Effect.WRITE, Target.FILE, True),
+    "unlink": (Effect.REMOVE, Target.FILE, False),
+    "write": (Effect.WRITE, Target.FILE, True),
+}
+
+
+def test_the_built_ins_declare_what_they_do():
+    assert declared_calls(BaseVFS) == {
+        name: Declaration(*mark) for name, mark in BUILT_INS.items()
+    }
+
+
+def test_a_mark_defaults_to_any_entry_and_no_create():
+    assert declared_calls(Notes)["stamp"] == Declaration(
+        Effect.WRITE, Target.ANY, False
+    )
+
+
+def test_call_names_keeps_what_matches_every_filter():
+    calls = declared_calls(BaseVFS)
+    assert call_names(calls, effects={Effect.REMOVE}) == {"unlink", "rmdir"}
+    assert call_names(
+        calls, effects={Effect.REMOVE}, targets={Target.DIR}
+    ) == {"rmdir"}
+    assert call_names(calls, effects={Effect.WRITE}, creates=False) == set()
+    assert call_names(calls, targets={Target.LINK}) == set()
 
 
 def test_an_unmarked_override_keeps_its_bases_mark():

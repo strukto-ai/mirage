@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Effect } from './types.ts'
+import { compareCodePoints } from '../utils/sort.ts'
+import { type Declaration, type Effect, Target } from './types.ts'
 
-const EFFECT = Symbol.for('mirage.vfsCall')
+const MARK = Symbol.for('mirage.vfsCall')
 
 interface Marked {
-  [EFFECT]?: Effect
+  [MARK]?: Declaration
 }
 
 /**
@@ -28,15 +29,38 @@ interface Marked {
  * admission policies. The effect tells the door what the call does to the
  * mount, so a read-only mount refuses a write and a policy judges it as one.
  * A subclass overriding a marked method keeps the mark, so a backend writes
- * its `read` without repeating it. Mirrors Python's `vfs_call`.
+ * its `read` without repeating it.
+ *
+ * The built-in functions' marks are where the door's op classes come from:
+ * which ops follow a link, create a name, run one at a time per path or stamp
+ * an mtime is read off what they declare here. `target` is the kind of entry
+ * the path names (any when omitted) and `creates` marks a WRITE that makes a
+ * missing file, as open(2) with O_CREAT. Mirrors Python's `vfs_call`.
  */
-export function vfsCall(options: { effect: Effect }) {
-  return function mark(
+export function vfsCall(options: { effect: Effect; target?: Target; creates?: boolean }) {
+  const mark: Declaration = {
+    effect: options.effect,
+    target: options.target ?? Target.ANY,
+    creates: options.creates ?? false,
+  }
+  return function apply(
     method: (...args: never[]) => unknown,
     _context: ClassMethodDecoratorContext,
   ): void {
-    ;(method as Marked)[EFFECT] = options.effect
+    ;(method as Marked)[MARK] = mark
   }
+}
+
+/** What the first class up `cls`'s prototype chain that marks `name` declares. */
+function declared(cls: { readonly prototype: unknown }, name: string): Declaration | null {
+  let proto: unknown = cls.prototype
+  while (typeof proto === 'object' && proto !== null) {
+    const fn: unknown = Object.getOwnPropertyDescriptor(proto, name)?.value
+    const mark = typeof fn === 'function' ? (fn as Marked)[MARK] : undefined
+    if (mark !== undefined) return mark
+    proto = Object.getPrototypeOf(proto)
+  }
+  return null
 }
 
 /**
@@ -46,12 +70,45 @@ export function vfsCall(options: { effect: Effect }) {
  * `call_effect`.
  */
 export function callEffect(cls: { readonly prototype: unknown }, name: string): Effect | null {
+  return declared(cls, name)?.effect ?? null
+}
+
+/** Every name `cls` marks dispatchable, to what it declares. Mirrors Python's `declared_calls`. */
+export function declaredCalls(cls: { readonly prototype: unknown }): Map<string, Declaration> {
+  const names = new Set<string>()
   let proto: unknown = cls.prototype
   while (typeof proto === 'object' && proto !== null) {
-    const fn: unknown = Object.getOwnPropertyDescriptor(proto, name)?.value
-    const effect = typeof fn === 'function' ? (fn as Marked)[EFFECT] : undefined
-    if (effect !== undefined) return effect
+    for (const name of Object.getOwnPropertyNames(proto)) names.add(name)
     proto = Object.getPrototypeOf(proto)
   }
-  return null
+  const calls = new Map<string, Declaration>()
+  for (const name of [...names].sort(compareCodePoints)) {
+    const mark = declared(cls, name)
+    if (mark !== null) calls.set(name, mark)
+  }
+  return calls
+}
+
+/**
+ * The names in `calls` whose declaration matches every filter: the effects
+ * and targets to keep (all when omitted), and `creates` to keep only
+ * creating (true) or only non-creating (false) calls. Mirrors Python's
+ * `call_names`.
+ */
+export function callNames(
+  calls: ReadonlyMap<string, Declaration>,
+  filter: {
+    effects?: readonly Effect[]
+    targets?: readonly Target[]
+    creates?: boolean
+  } = {},
+): ReadonlySet<string> {
+  const names = new Set<string>()
+  for (const [name, mark] of calls) {
+    if (filter.effects !== undefined && !filter.effects.includes(mark.effect)) continue
+    if (filter.targets !== undefined && !filter.targets.includes(mark.target)) continue
+    if (filter.creates !== undefined && mark.creates !== filter.creates) continue
+    names.add(name)
+  }
+  return names
 }

@@ -47,6 +47,7 @@ import {
   refuseTaken,
 } from '../../core/generic/rewrite.ts'
 import { callEffect } from '../../vfs/call.ts'
+import { WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { Effect } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
@@ -103,13 +104,6 @@ type ReadFn = (
   offset?: number,
   size?: number | null,
 ) => Promise<Uint8Array>
-
-// Ops that mutate everything under their endpoints in one backend call
-// (a directory rename relocates its whole subtree), so the door also
-// refuses a read-only region below either endpoint. The removal ops
-// stay per-path: the runtimes compose rmtree from unlink/rmdir, and
-// each of those answers for its own path above.
-const SUBTREE_OPS = new Set(['rename'])
 
 function cmdKey(name: string, filetype: string | null): CmdKey {
   return `${name}\u0000${filetype ?? ''}`
@@ -503,7 +497,8 @@ export class MountEntry {
 
   /** Whether the VFS declares the function `name` a write. */
   writes(name: string): boolean {
-    return callEffect(this.vfs.constructor, name) === Effect.WRITE
+    const effect = callEffect(this.vfs.constructor, name)
+    return effect !== null && WRITE_EFFECTS.includes(effect)
   }
 
   /**
@@ -1032,7 +1027,12 @@ export class MountEntry {
         const dst = kwargs.dst
         const endpoints = [PathSpec.fromStrPath(path)]
         if (dst instanceof PathSpec) endpoints.push(dst)
-        requirePathsWritable(endpoints, this.prefix, this.mode, SUBTREE_OPS.has(name))
+        // A rename mutates everything under its endpoints in one backend
+        // call, so a read-only region below either one refuses it too.
+        // Removals stay per-path: the runtimes compose rmtree from unlink
+        // and rmdir, and each answers for its own path.
+        const subtree = callEffect(this.vfs.constructor, name) === Effect.RENAME
+        requirePathsWritable(endpoints, this.prefix, this.mode, subtree)
       }
       const mountPrefix = rstripSlash(this.prefix)
       const lastSlash = path.lastIndexOf('/')

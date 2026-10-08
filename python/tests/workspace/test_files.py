@@ -291,6 +291,14 @@ class TestCreateTruncate:
         run(ops.truncate("/data/dir/f.txt", 5))
         assert run(ops.read("/data/dir/f.txt")) == b"hello"
 
+    def test_truncate_of_a_slash_name_is_a_directory(self):
+        # truncate creates a missing file, so `x/` (only ever a
+        # directory) answers EISDIR as write does, and nothing is made.
+        ops, _ = make_ops()
+        with pytest.raises(IsADirectoryError):
+            run(ops.truncate("/data/x/", 0))
+        assert "/data/x" not in run(ops.readdir("/data"))
+
 
 class TestSetattr:
     def test_setattr_lands_where_stat_reads_it(self):

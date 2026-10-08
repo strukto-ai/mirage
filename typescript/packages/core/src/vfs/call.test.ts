@@ -20,8 +20,8 @@ import { FileStat, FileType, MountMode, type PathSpec } from '../types.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { BaseVFS } from './base.ts'
-import { vfsCall } from './call.ts'
-import { Effect } from './types.ts'
+import { callNames, declaredCalls, vfsCall } from './call.ts'
+import { Effect, Target } from './types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -62,6 +62,53 @@ class Shelf extends BaseVFS {
     return Promise.resolve(path.virtual)
   }
 }
+
+// What each built-in function declares. The Python twin
+// (tests/vfs/test_call.py) pins this same table, so a declaration changed
+// in one language fails the other language's test.
+const BUILT_INS = {
+  append: [Effect.WRITE, Target.FILE, true],
+  create: [Effect.WRITE, Target.FILE, true],
+  mkdir: [Effect.CREATE, Target.DIR, false],
+  pwrite: [Effect.WRITE, Target.FILE, true],
+  read: [Effect.READ, Target.FILE, false],
+  readdir: [Effect.READ, Target.DIR, false],
+  rename: [Effect.RENAME, Target.ANY, false],
+  rmdir: [Effect.REMOVE, Target.DIR, false],
+  setattr: [Effect.ATTR, Target.ANY, false],
+  stat: [Effect.METADATA, Target.ANY, false],
+  truncate: [Effect.WRITE, Target.FILE, true],
+  unlink: [Effect.REMOVE, Target.FILE, false],
+  write: [Effect.WRITE, Target.FILE, true],
+} as const
+
+describe('declarations', () => {
+  it('has the built-ins declare what they do', () => {
+    const expected = Object.entries(BUILT_INS).map(([name, [effect, target, creates]]) => [
+      name,
+      { effect, target, creates },
+    ])
+    expect([...declaredCalls(BaseVFS)]).toEqual(expected)
+  })
+
+  it('defaults a mark to any entry and no create', () => {
+    expect(declaredCalls(Shelf).get('shelve')).toEqual({
+      effect: Effect.WRITE,
+      target: Target.ANY,
+      creates: false,
+    })
+  })
+
+  it('keeps the names that match every filter', () => {
+    const calls = declaredCalls(BaseVFS)
+    expect([...callNames(calls, { effects: [Effect.REMOVE] })].sort()).toEqual(['rmdir', 'unlink'])
+    expect([...callNames(calls, { effects: [Effect.REMOVE], targets: [Target.DIR] })]).toEqual([
+      'rmdir',
+    ])
+    expect(callNames(calls, { effects: [Effect.WRITE], creates: false }).size).toBe(0)
+    expect(callNames(calls, { targets: [Target.LINK] }).size).toBe(0)
+  })
+})
 
 describe('VFS functions', () => {
   it('supports a function set on the instance', () => {

@@ -13,7 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.workspace.dispatcher.constants import (
+    DISPATCH_READ_OPS,
+    DISPATCH_WRITE_OPS,
+    ENTRY_CREATE_OPS,
+    FILE_CREATE_OPS,
+    HIDDEN_CREATE_OPS,
+    NAMESPACE_TABLE_OPS,
     NO_FOLLOW_OPS,
+    POLICY_WRITE_OPS,
+    SERIAL_WRITE_OPS,
     STAMP_WRITE_OPS,
 )
 
@@ -34,3 +42,53 @@ def test_removals_do_not_stamp_an_mtime():
     assert "unlink" not in STAMP_WRITE_OPS
     assert "rmdir" not in STAMP_WRITE_OPS
     assert "write" in STAMP_WRITE_OPS
+
+
+def test_the_op_classes_follow_the_declarations():
+    # Every class is read off what the functions declare; this pins the
+    # result so a declaration that moves an op between classes is seen.
+    assert DISPATCH_READ_OPS == {"read"}
+    assert DISPATCH_WRITE_OPS == {
+        "write",
+        "append",
+        "pwrite",
+        "create",
+        "truncate",
+        "mkdir",
+        "unlink",
+        "rmdir",
+        "rename",
+    }
+    assert POLICY_WRITE_OPS == DISPATCH_WRITE_OPS | {
+        "setattr",
+        "symlink",
+        "setxattr",
+        "removexattr",
+    }
+    assert NAMESPACE_TABLE_OPS == {"symlink", "readlink"}
+    assert SERIAL_WRITE_OPS == {
+        "write",
+        "append",
+        "pwrite",
+        "create",
+        "truncate",
+        "unlink",
+        "rename",
+    }
+    assert FILE_CREATE_OPS == {
+        "write",
+        "append",
+        "pwrite",
+        "create",
+        "truncate",
+    }
+    assert ENTRY_CREATE_OPS == {"mkdir", "symlink"}
+    assert HIDDEN_CREATE_OPS == FILE_CREATE_OPS | {"mkdir", "symlink"}
+    assert STAMP_WRITE_OPS == {
+        "write",
+        "append",
+        "pwrite",
+        "create",
+        "truncate",
+        "mkdir",
+    }

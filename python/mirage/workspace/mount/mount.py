@@ -88,18 +88,12 @@ from mirage.utils.key_prefix import mount_key
 from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import call_effect
+from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.types import Effect
 from mirage.workspace.mount.activity import VFSActivity
 from mirage.workspace.mount.read_policy import coerce_read_policy
 
 logger = logging.getLogger(__name__)
-
-# Ops that mutate everything under their endpoints in one backend call
-# (a directory rename relocates its whole subtree), so the door also
-# refuses a read-only region below either endpoint. The removal ops
-# stay per-path: the runtimes compose rmtree from unlink/rmdir, and
-# each of those answers for its own path above.
-_SUBTREE_OPS = frozenset({"rename"})
 
 
 async def _command_output(
@@ -675,7 +669,7 @@ class MountEntry:
         Args:
             name (str): the op name.
         """
-        return call_effect(type(self.vfs), name) is Effect.WRITE
+        return call_effect(type(self.vfs), name) in WRITE_EFFECTS
 
     def renders(self, filetype: str | None) -> bool:
         """Whether the VFS renders a read of ``filetype``.
@@ -1223,7 +1217,8 @@ class MountEntry:
             if not levels:
                 raise enotsup(str(self.vfs.name), name, path)
 
-            if call_effect(type(self.vfs), name) is Effect.WRITE:
+            effect = call_effect(type(self.vfs), name)
+            if effect in WRITE_EFFECTS:
                 dst = kwargs.get("dst")
                 endpoints = [PathSpec.from_str_path(path)]
                 if isinstance(dst, PathSpec):
@@ -1232,7 +1227,12 @@ class MountEntry:
                     endpoints,
                     self.prefix,
                     self.mode,
-                    subtree=name in _SUBTREE_OPS,
+                    # A rename mutates everything under its endpoints in
+                    # one backend call, so a read-only region below
+                    # either one refuses it too. Removals stay per-path:
+                    # the runtimes compose rmtree from unlink and rmdir,
+                    # and each answers for its own path.
+                    subtree=effect is Effect.RENAME,
                 )
 
             mount_prefix = self.prefix.rstrip("/")

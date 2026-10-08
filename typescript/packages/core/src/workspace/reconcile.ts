@@ -15,7 +15,9 @@
 import type { Evicted } from '../cache/index/config.ts'
 import { ListingCheckStore } from '../cache/index/ram.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
-import type { BaseVFS } from '../vfs/base.ts'
+import { BaseVFS } from '../vfs/base.ts'
+import { callNames, declaredCalls } from '../vfs/call.ts'
+import { Effect, Target } from '../vfs/types.ts'
 import { FileStat, ListingVersion, PathSpec, ReadPolicy } from '../types.ts'
 import { enoent, isEnoent, isEnotdir, isMissingOp } from '../errors/fs.ts'
 import { mountKey } from '../utils/key_prefix.ts'
@@ -24,7 +26,13 @@ import { ancestors } from '../utils/path.ts'
 import type { MountEntry } from './mount/mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 
-const REVALIDATE_OPS = new Set(['read', 'stat'])
+const CALLS = declaredCalls(BaseVFS)
+
+// What a FRESH read policy revalidates: a file's content and a stat.
+const REVALIDATE_OPS: ReadonlySet<string> = new Set([
+  ...callNames(CALLS, { effects: [Effect.READ], targets: [Target.FILE] }),
+  ...callNames(CALLS, { effects: [Effect.METADATA] }),
+])
 
 // The spec a backend op sees for an absolute virtual path on `mount`.
 function scopeOf(mount: MountEntry, path: string): PathSpec {

@@ -48,6 +48,14 @@ function mkFailingStat(err: unknown): Workspace {
 }
 
 describe('Files', () => {
+  it('answers EISDIR for a truncate of a slash name and creates nothing', async () => {
+    // truncate creates a missing file, so `x/` (only ever a directory)
+    // answers EISDIR as write does, and nothing is made.
+    const ws = mkWorkspace()
+    await expect(ws.vfs.truncate('/data/x/', 0)).rejects.toMatchObject({ code: 'EISDIR' })
+    expect(await ws.vfs.readdir('/data')).not.toContain('/data/x')
+  })
+
   it('writeFile + readFile round-trips bytes', async () => {
     const ws = mkWorkspace()
     await ws.vfs.write('/data/a.txt', 'hello')

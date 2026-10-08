@@ -13,7 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from './constants.ts'
+import {
+  DISPATCH_READ_OPS,
+  DISPATCH_WRITE_OPS,
+  ENTRY_CREATE_OPS,
+  FILE_CREATE_OPS,
+  HIDDEN_CREATE_OPS,
+  NAMESPACE_TABLE_OPS,
+  NO_FOLLOW_OPS,
+  POLICY_WRITE_OPS,
+  SERIAL_WRITE_OPS,
+  STAMP_WRITE_OPS,
+} from './constants.ts'
+
+const sorted = (names: ReadonlySet<string>): string[] => [...names].sort()
 
 describe('dispatcher op sets', () => {
   it('never follows a link-entry op', () => {
@@ -28,5 +41,24 @@ describe('dispatcher op sets', () => {
     expect(STAMP_WRITE_OPS.has('unlink')).toBe(false)
     expect(STAMP_WRITE_OPS.has('rmdir')).toBe(false)
     expect(STAMP_WRITE_OPS.has('write')).toBe(true)
+  })
+
+  it('follows the declarations', () => {
+    // Every class is read off what the functions declare; this pins the
+    // result so a declaration that moves an op between classes is seen.
+    const writes = ['append', 'create', 'pwrite', 'truncate', 'write']
+    expect(sorted(DISPATCH_READ_OPS)).toEqual(['read'])
+    expect(sorted(DISPATCH_WRITE_OPS)).toEqual(
+      [...writes, 'mkdir', 'rename', 'rmdir', 'unlink'].sort(),
+    )
+    expect(sorted(POLICY_WRITE_OPS)).toEqual(
+      [...DISPATCH_WRITE_OPS, 'removexattr', 'setattr', 'setxattr', 'symlink'].sort(),
+    )
+    expect(sorted(NAMESPACE_TABLE_OPS)).toEqual(['readlink', 'symlink'])
+    expect(sorted(SERIAL_WRITE_OPS)).toEqual([...writes, 'rename', 'unlink'].sort())
+    expect(sorted(FILE_CREATE_OPS)).toEqual(writes)
+    expect(sorted(ENTRY_CREATE_OPS)).toEqual(['mkdir', 'symlink'])
+    expect(sorted(HIDDEN_CREATE_OPS)).toEqual([...writes, 'mkdir', 'symlink'].sort())
+    expect(sorted(STAMP_WRITE_OPS)).toEqual([...writes, 'mkdir'].sort())
   })
 })

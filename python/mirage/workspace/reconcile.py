@@ -23,12 +23,20 @@ from mirage.errors.fs import enoent
 from mirage.errors.types import OperationNotSupportedError
 from mirage.types import FileStat, ListingVersion, PathSpec, ReadPolicy
 from mirage.utils.path import ancestors
+from mirage.vfs.base import BaseVFS
+from mirage.vfs.call import call_names, declared_calls
+from mirage.vfs.types import Effect, Target
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
 
 logger = logging.getLogger(__name__)
 
-_REVALIDATE_OPS = frozenset({"read", "stat"})
+_CALLS = declared_calls(BaseVFS)
+
+# What a FRESH read policy revalidates: a file's content and a stat.
+_REVALIDATE_OPS = call_names(
+    _CALLS, effects={Effect.READ}, targets={Target.FILE}
+) | call_names(_CALLS, effects={Effect.METADATA})
 
 
 class Verdict(Enum):

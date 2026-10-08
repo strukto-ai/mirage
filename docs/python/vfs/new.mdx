@@ -114,18 +114,28 @@ taken name first, and `glob` walks `readdir`. A function only your class
 declares is reachable by name once it is marked with what it does to the mount:
 
 ```python
-from mirage import Effect, vfs_call
+from mirage import Effect, Target, vfs_call
 
 
 class JiraVFS(BaseVFS):
     @vfs_call(effect=Effect.READ)
     async def search_issues(self, scope: PathSpec, jql: str) -> list[str]: ...
+
+    @vfs_call(effect=Effect.WRITE, target=Target.FILE)
+    async def add_comment(self, issue: PathSpec, body: str) -> None: ...
 ```
 
 `await ws.dispatch("search_issues", PathSpec.from_str_path("/jira/"), jql="project = OPS")`
 then runs through every check the door runs: hidden paths, path rules, the
 mount's mode and admission policies. A subclass overriding a marked function
 keeps the mark.
+
+The effect is one of `READ`, `METADATA`, `WRITE`, `CREATE`, `REMOVE`,
+`RENAME` and `ATTR`; every one but `READ` and `METADATA` is a write. `target=`
+names the kind of entry the path is (`Target.FILE`, `DIR`, `LINK`, or `ANY`
+by default), and `creates=True` marks a `WRITE` that makes a missing file. The
+base functions declare theirs the same way, and the door reads which ops
+follow a link, create a name or run one at a time per path off them.
 
 The driver never sees the mount it runs under. The index store and the `vfs:` reference it was built from live on the mount, built when the driver is placed and shared with any alias of the same instance.
 
@@ -358,7 +368,7 @@ reach the same functions, and one the class leaves undefined answers
 `Operation not supported`. Set `reads_ranges = True` when `read` fetches only
 the asked window. Backend semantics stay in the method body, e.g. Databricks's
 `mkdir` passes the caller's `parents` to the core. Mark a function only this
-class declares with `@vfs_call(effect=...)`, `Effect.WRITE` for a mutation, so
+class declares with `@vfs_call(effect=...)`, a write effect for a mutation, so
 `MountMode.READ` remains a real boundary; the base functions carry their marks
 already.
 
