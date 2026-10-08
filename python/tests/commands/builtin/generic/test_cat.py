@@ -94,3 +94,33 @@ async def test_cat_generic_reports_a_refused_read_and_goes_on(local):
     assert await materialize(out) == b"b1\nb2\n"
     assert io.stderr == b"cat: /a.txt: File too large\n"
     assert io.exit_code == 1
+
+
+class _Tracked:
+    """A source that remembers being closed; collection never closes it."""
+
+    def __init__(self, *chunks: bytes) -> None:
+        self.chunks = list(chunks)
+        self.closed = False
+
+    def __aiter__(self) -> "_Tracked":
+        return self
+
+    async def __anext__(self) -> bytes:
+        if not self.chunks:
+            raise StopAsyncIteration
+        return self.chunks.pop(0)
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_display_lines_closes_its_source_when_its_reader_stops():
+    # `cat -n f | head -1`: the reader stops after one line, and the read
+    # it leaves unfinished releases its mount at once.
+    src = _Tracked(b"a\nb\n", b"c\n")
+    out = display_lines(src, CatFlags(number_lines=True))
+    assert await out.__anext__() == b"     1\ta\n"
+    await out.aclose()
+    assert src.closed

@@ -28,7 +28,7 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.stream import async_chain, ensure_stream
+from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, PolymorphicReadFn, StatFn
@@ -69,65 +69,82 @@ async def head(
     c: int | None = None,
     zero_terminated: bool = False,
 ) -> AsyncIterator[bytes]:
-    if c is not None:
-        if c == 0:
+    """The first lines or bytes of ``src``, GNU head's cut.
+
+    Closes ``src`` whenever it stops, at its limit, at the end of the
+    input, or when its own reader stops, so a read it leaves unfinished
+    releases its mount at once rather than when it is collected.
+
+    Args:
+        src (bytes | AsyncIterator[bytes]): the input.
+        n (int | None): ``-n``, lines; negative for all but the last.
+        c (int | None): ``-c``, bytes; negative for all but the last.
+        zero_terminated (bool): ``-z``, NUL ends a line.
+    """
+    stream = ensure_stream(src)
+    try:
+        if c is not None:
+            if c == 0:
+                return
+            if c > 0:
+                emitted = 0
+                async for chunk in stream:
+                    remaining = c - emitted
+                    if len(chunk) >= remaining:
+                        if remaining > 0:
+                            yield chunk[:remaining]
+                        return
+                    yield chunk
+                    emitted += len(chunk)
+                return
+            keep = -c
+            buf = b""
+            async for chunk in stream:
+                buf += chunk
+                if len(buf) > keep:
+                    yield buf[:-keep]
+                    buf = buf[-keep:]
             return
-        if c > 0:
-            emitted = 0
-            async for chunk in ensure_stream(src):
-                remaining = c - emitted
-                if len(chunk) >= remaining:
-                    if remaining > 0:
-                        yield chunk[:remaining]
-                    return
-                yield chunk
-                emitted += len(chunk)
+
+        target = n if n is not None else 10
+        separator = b"\x00" if zero_terminated else b"\n"
+
+        if target >= 0:
+            if target == 0:
+                return
+            emitted_lines = 0
+            async for chunk in stream:
+                start = 0
+                while emitted_lines < target:
+                    end = chunk.find(separator, start)
+                    if end < 0:
+                        if start < len(chunk):
+                            yield chunk[start:]
+                        break
+                    yield chunk[start : end + 1]
+                    emitted_lines += 1
+                    if emitted_lines >= target:
+                        return
+                    start = end + 1
             return
-        keep = -c
+
+        keep = -target
+        recent: deque[bytes] = deque(maxlen=keep)
         buf = b""
-        async for chunk in ensure_stream(src):
+        async for chunk in stream:
             buf += chunk
-            if len(buf) > keep:
-                yield buf[:-keep]
-                buf = buf[-keep:]
-        return
-
-    target = n if n is not None else 10
-    separator = b"\x00" if zero_terminated else b"\n"
-
-    if target >= 0:
-        if target == 0:
-            return
-        emitted_lines = 0
-        async for chunk in ensure_stream(src):
-            start = 0
-            while emitted_lines < target:
-                end = chunk.find(separator, start)
-                if end < 0:
-                    if start < len(chunk):
-                        yield chunk[start:]
-                    break
-                yield chunk[start : end + 1]
-                emitted_lines += 1
-                if emitted_lines >= target:
-                    return
-                start = end + 1
-        return
-
-    keep = -target
-    recent: deque[bytes] = deque(maxlen=keep)
-    buf = b""
-    async for chunk in ensure_stream(src):
-        buf += chunk
-        while separator in buf:
-            line, buf = buf.split(separator, 1)
+            while separator in buf:
+                line, buf = buf.split(separator, 1)
+                if len(recent) == keep:
+                    yield recent[0] + separator
+                recent.append(line)
+        if buf:
             if len(recent) == keep:
                 yield recent[0] + separator
-            recent.append(line)
-    if buf:
-        if len(recent) == keep:
-            yield recent[0] + separator
-        recent.append(buf)
+            recent.append(buf)
+
+    finally:
+        await close_quietly(stream)
 
 
 def head_multi(
@@ -188,10 +205,12 @@ async def _head_multi(
         source = read(p)
         if inspect.isawaitable(source):
             source = await source
-        async for chunk in head(
-            source, n=n, c=c, zero_terminated=zero_terminated
-        ):
-            yield chunk
+        body = head(source, n=n, c=c, zero_terminated=zero_terminated)
+        try:
+            async for chunk in body:
+                yield chunk
+        finally:
+            await close_quietly(body)
 
 
 async def head_generic(
@@ -237,18 +256,21 @@ async def head_generic(
             source = read(p)
 
             async def bounded() -> AsyncIterator[bytes]:
-                if (
-                    getattr(await stat(p), "type", None)
-                    is FileType.CHAR_DEVICE
-                    and parsed.bytes_ is None
-                ):
-                    async for chunk in truncate_stream(
-                        source, io, Limit(max_bytes=CHAR_DEVICE_MAX_BYTES)
+                try:
+                    if (
+                        getattr(await stat(p), "type", None)
+                        is FileType.CHAR_DEVICE
+                        and parsed.bytes_ is None
                     ):
+                        async for chunk in truncate_stream(
+                            source, io, Limit(max_bytes=CHAR_DEVICE_MAX_BYTES)
+                        ):
+                            yield chunk
+                        return
+                    async for chunk in source:
                         yield chunk
-                    return
-                async for chunk in source:
-                    yield chunk
+                finally:
+                    await close_quietly(source)
 
             return bounded()
 

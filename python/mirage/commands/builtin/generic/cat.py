@@ -223,40 +223,48 @@ async def display_lines(
 ) -> AsyncIterator[bytes]:
     """Line-process a stream for GNU cat's display flags (-n -E -T -v -s).
 
+    Closes ``source`` when it stops, at the end or when its reader stops.
+
     Args:
         source (ByteSource): the bytes to render.
         parsed (CatFlags): the display flags.
     """
-    number_lines = parsed.number_lines and not parsed.number_nonblank
-    transform = parsed.show_tabs or parsed.show_nonprinting
-    line_no = 0
-    buf = b""
-    prev_blank = False
-    async for chunk in ensure_stream(source):
-        buf += chunk
-        while b"\n" in buf:
-            line, buf = buf.split(b"\n", 1)
-            if parsed.squeeze_blank and not line and prev_blank:
-                prev_blank = True
-                continue
-            should_number = number_lines or (
-                parsed.number_nonblank and bool(line)
-            )
+    stream = ensure_stream(source)
+    try:
+        number_lines = parsed.number_lines and not parsed.number_nonblank
+        transform = parsed.show_tabs or parsed.show_nonprinting
+        line_no = 0
+        buf = b""
+        prev_blank = False
+        async for chunk in stream:
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                if parsed.squeeze_blank and not line and prev_blank:
+                    prev_blank = True
+                    continue
+                should_number = number_lines or (
+                    parsed.number_nonblank and bool(line)
+                )
+                if should_number:
+                    line_no += 1
+                prefix = (
+                    encode_text(f"{line_no:6d}\t") if should_number else b""
+                )
+                suffix = b"$\n" if parsed.show_ends else b"\n"
+                if transform:
+                    line = _visible(
+                        line, parsed.show_tabs, parsed.show_nonprinting
+                    )
+                yield prefix + line + suffix
+                prev_blank = not line
+        if buf:
+            should_number = parsed.number_lines or parsed.number_nonblank
             if should_number:
                 line_no += 1
             prefix = encode_text(f"{line_no:6d}\t") if should_number else b""
-            suffix = b"$\n" if parsed.show_ends else b"\n"
             if transform:
-                line = _visible(
-                    line, parsed.show_tabs, parsed.show_nonprinting
-                )
-            yield prefix + line + suffix
-            prev_blank = not line
-    if buf:
-        should_number = parsed.number_lines or parsed.number_nonblank
-        if should_number:
-            line_no += 1
-        prefix = encode_text(f"{line_no:6d}\t") if should_number else b""
-        if transform:
-            buf = _visible(buf, parsed.show_tabs, parsed.show_nonprinting)
-        yield prefix + buf
+                buf = _visible(buf, parsed.show_tabs, parsed.show_nonprinting)
+            yield prefix + buf
+    finally:
+        await close_quietly(stream)
