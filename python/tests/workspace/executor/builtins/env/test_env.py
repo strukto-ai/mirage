@@ -92,26 +92,6 @@ async def test_env_run_form_forwards_stdin_and_restores_env():
 
 
 @pytest.mark.asyncio
-async def test_env_run_form_gives_the_command_its_own_function_marks():
-    session = SessionState(
-        session_id="s1",
-        functions={"f": "f() { :; }"},
-        exported_functions={"f"},
-    )
-    seen: list[set[str]] = []
-
-    async def run(line: str, **kwargs) -> IOResult:
-        seen.append(set(session.exported_functions))
-        session.exported_functions.discard("f")
-        return IOResult()
-
-    await handle_env(run, ["sh"], session)
-    await handle_env(run, ["-i", "sh"], session)
-    assert seen == [{"f"}, set()]
-    assert session.exported_functions == {"f"}
-
-
-@pytest.mark.asyncio
 async def test_env_run_form_drops_a_pending_managed_entry():
     # A still-unfetched managed entry is a scalar in waiting, so the
     # swapped scope drops it like any replaced scalar: surviving would

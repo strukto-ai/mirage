@@ -537,11 +537,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( nbf() { :; }; nbg() { :; }; export -f nbf; export -f; declare -F | grep ' nb'; export -f nbnosuch; echo rc=$? )",
+      "command": "( nbf() { :; }; nbg() { :; }; export -f nbf; export -f; declare -F | grep ' nb'; declare -pfx nbf; declare -pF nbf; export -f nbnosuch nbx=1; echo \"rc=$? [${nbx-unset}]\"; readonly -f nbg; declare +x -f nbf; declare -fx nbg nbnone; echo rc=$?; declare -F | grep ' nb' )",
       "expect": {
         "exit": 0,
-        "stdout": "nbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\ndeclare -f nbg\nrc=1\n",
-        "stderr": "bash: export: nbnosuch: not a function\n"
+        "stdout": "nbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\ndeclare -f nbg\nnbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\nrc=1 [unset]\nrc=1\ndeclare -f nbf\ndeclare -frx nbg\n",
+        "stderr": "bash: export: nbnosuch: not a function\nbash: export: nbx=1: not a function\n"
       }
     },
     {
@@ -571,112 +571,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( nbp() { :; }; declare -pfx nbp; declare -pFr nbp; bash -c 'declare -F' | grep -c nbp; nbp() { echo redefined; }; nbp )",
+      "command": "( nbp() { :; }; declare -pfx nbp; declare -pFr nbp; bash -c 'declare -F' | grep -c nbp; nbp() { echo redefined; }; nbp; declare -fp nbnosuch nbp; echo \"rc=$?\" ); env -i bash -c 'nbp() { :; }; nbq() { :; }; export -f nbp; declare +x -F; declare +r -F; declare -xF'",
       "expect": {
         "exit": 0,
-        "stdout": "nbp () \n{ \n    :\n}\ndeclare -f nbp\n0\nredefined\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "declare_p_f_shows_the_export_mark",
-      "seq": 609267,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( nbp() { :; }; export -f nbp; declare -pfx nbp; declare -pF nbp )",
-      "expect": {
-        "exit": 0,
-        "stdout": "nbp () \n{ \n    :\n}\ndeclare -fx nbp\ndeclare -fx nbp\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "declare_plus_attribute_lists_every_function",
-      "seq": 609268,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "env -i bash -c 'nbp() { :; }; nbq() { :; }; export -f nbp; declare +x -F; declare +r -F; declare -xF'",
-      "expect": {
-        "exit": 0,
-        "stdout": "declare -fx nbp\ndeclare -f nbq\ndeclare -fx nbp\ndeclare -f nbq\ndeclare -fx nbp\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "declare_p_f_missing_is_not_found",
-      "seq": 609269,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "( nbp() { :; }; declare -fp nbnosuch nbp; echo \"rc=$?\" )",
-      "expect": {
-        "exit": 0,
-        "stdout": "nbp () \n{ \n    :\n}\nrc=1\n",
+        "stdout": "nbp () \n{ \n    :\n}\ndeclare -f nbp\n0\nredefined\nnbp () \n{ \n    echo redefined\n}\nrc=1\ndeclare -fx nbp\ndeclare -f nbq\ndeclare -fx nbp\ndeclare -f nbq\ndeclare -fx nbp\n",
         "stderr": "bash: declare: nbnosuch: not found\n"
       }
     }

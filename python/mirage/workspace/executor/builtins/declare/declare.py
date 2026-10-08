@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from collections.abc import Iterable
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
@@ -440,7 +439,7 @@ def function_flags(session: SessionState, name: str) -> str:
 
 
 def function_lines(
-    session: SessionState, names: Iterable[str], bodies: bool, marks: bool
+    session: SessionState, names: list[str], bodies: bool, marks: bool
 ) -> list[str]:
     """Print functions as ``declare`` lists them.
 
@@ -451,7 +450,7 @@ def function_lines(
 
     Args:
         session (SessionState): shell session state.
-        names (Iterable[str]): defined function names, in order.
+        names (list[str]): defined function names, in order.
         bodies (bool): print each body (``-f``) rather than a line.
         marks (bool): print the attribute line (``-p``, a listing).
     """
@@ -472,7 +471,7 @@ def handle_declare_functions(
     session: SessionState,
     flags: set[str],
     names: list[str],
-    plus: frozenset[str] = frozenset(),
+    plus: frozenset[str],
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run the function half of ``declare``: ``-f`` / ``-F``.
 

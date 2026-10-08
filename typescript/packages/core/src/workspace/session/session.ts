@@ -678,7 +678,7 @@ export class SessionState {
       if (!v.attrs.has(VarAttr.Export) || name === 'IFS') continue
       if (typeof v.value !== 'string' && v.managed === undefined) continue
       vars[name] = {
-        value: STARTUP_VALUES[name] ?? v.value,
+        value: sessionEntry(STARTUP_VALUES, name) ?? v.value,
         attrs: new Set([VarAttr.Export]),
         ...(v.managed === undefined ? {} : { managed: v.managed }),
       }

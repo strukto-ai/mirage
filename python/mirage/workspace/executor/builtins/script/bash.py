@@ -29,7 +29,6 @@ from mirage.workspace.evaluation import (
     EvaluationContext,
     reset_current_evaluation,
     set_current_evaluation,
-    shell_context,
 )
 from mirage.workspace.executor.builtins.script.constants import (
     BASH_LONG_OPTIONS,
@@ -167,7 +166,9 @@ async def handle_bash(
             stdin = None
     if script is None:
         return None, IOResult(), ExecutionNode(command=name, exit_code=0)
-    context = shell_context(context)
+    context = EvaluationContext(
+        context.session.new_shell(), context.frame.fork(), context
+    )
     session = context.session
     child_token = set_current_evaluation(context)
     clear_exit_trap(session)

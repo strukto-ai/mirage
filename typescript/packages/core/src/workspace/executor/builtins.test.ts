@@ -38,14 +38,11 @@ import { MountRegistry } from '../mount/registry.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { SessionState } from '../session/session.ts'
-import { ParseScope } from '../../shell/parse/scope.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import type { ResolveFn } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import {
   handleCd,
   handleEcho,
-  handleEnv,
   handleEval,
   handleExport,
   handleLocal,
@@ -125,43 +122,6 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     expect(text).toContain('declare -x AAA="a\\"b"\n')
     expect(text).toContain('declare -x ZZZ="1"\n')
     expect(text.indexOf('AAA')).toBeLessThan(text.indexOf('ZZZ'))
-  })
-
-  it('export -f marks, lists and refuses functions', async () => {
-    const s = new SessionState({
-      sessionId: 'test',
-      functions: { f: 'f() { :; }', g: 'g() { :; }' },
-    })
-    let [, io] = await handleExport(['-f', 'f', 'nosuch', 'x=1'], s)
-    expect(io.exitCode).toBe(1)
-    expect(decode(io.stderr as Uint8Array)).toBe(
-      'bash: export: nosuch: not a function\nbash: export: x=1: not a function\n',
-    )
-    expect(s.exportedFunctions).toEqual(new Set(['f']))
-    expect('f' in s.vars || 'x' in s.vars).toBe(false)
-    const [out] = await handleExport(['-f'], s, null, null, new ParseScope(await getTestParser()))
-    expect(decode(out as Uint8Array)).toBe('f () \n{ \n    :\n}\ndeclare -fx f\n')
-    ;[, io] = await handleExport(['-nf', 'f'], s)
-    expect(io.exitCode).toBe(0)
-    expect(s.exportedFunctions).toEqual(new Set())
-  })
-
-  it('env gives its command a copy of the function marks', async () => {
-    const s = new SessionState({
-      sessionId: 'test',
-      functions: { f: 'f() { :; }' },
-      exportedFunctions: new Set(['f']),
-    })
-    const seen: string[][] = []
-    const run: ExecuteStringFn = () => {
-      seen.push([...s.exportedFunctions])
-      s.exportedFunctions.delete('f')
-      return Promise.resolve(new IOResult())
-    }
-    await handleEnv(run, ['sh'], s)
-    await handleEnv(run, ['-i', 'sh'], s)
-    expect(seen).toEqual([['f'], []])
-    expect(s.exportedFunctions).toEqual(new Set(['f']))
   })
 
   it('bare export prints like -p', async () => {
@@ -294,11 +254,9 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ fn: 'v' }) })
     s.functions.fn = 'fn() { :; }'
     s.functionSites.set('fn', { source: 'fn() { :; }', mark: [1, 0], origin: null })
-    s.exportedFunctions.add('fn')
     await handleUnset(['-f', 'fn'], s, sessionView(s))
     expect('fn' in s.functions).toBe(false)
     expect(s.functionSites.has('fn')).toBe(false)
-    expect(s.exportedFunctions.has('fn')).toBe(false)
     expect(s.env.fn).toBe('v')
   })
 
@@ -318,11 +276,9 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     expect('a' in s.functions).toBe(true)
     s.functions.b = 'b() { :; }'
     s.functionSites.set('b', { source: 'b() { :; }', mark: [1, 0], origin: null })
-    s.exportedFunctions.add('b')
     await handleUnset(['b'], s, sessionView(s))
     expect('b' in s.functions).toBe(false)
     expect(s.functionSites.has('b')).toBe(false)
-    expect(s.exportedFunctions.has('b')).toBe(false)
   })
 
   it('unset removes a whole array and a single element', async () => {

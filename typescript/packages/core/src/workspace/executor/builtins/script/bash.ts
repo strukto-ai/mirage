@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type EvaluationContext, shellContext } from '../../../evaluation.ts'
+import { EvaluationContext } from '../../../evaluation.ts'
 
 import { runAsShell } from '../../../../context/session_context.ts'
 import { materialize, IOResult } from '../../../../io/types.ts'
@@ -159,7 +159,7 @@ export async function handleBash(
   if (script === null) {
     return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
   }
-  context = shellContext(context)
+  context = new EvaluationContext(session.newShell(), context.frame.fork(), context)
   session = context.session
   clearExitTrap(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)

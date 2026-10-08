@@ -411,7 +411,7 @@ export function handleDeclareFunctions(
   session: SessionState,
   flags: ReadonlySet<string>,
   names: readonly string[],
-  plus: ReadonlySet<string> = new Set(),
+  plus: ReadonlySet<string>,
   parser?: ParseScope,
 ): Result {
   const printing = flags.has('p')
