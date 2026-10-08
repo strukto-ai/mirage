@@ -26,7 +26,13 @@ from mirage.shell.array import (
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError, DiscardSignal
 from mirage.shell.printer import stored_function_text
-from mirage.shell.variable import ShellValue, VarAttr, VarKind, attr_letters
+from mirage.shell.variable import (
+    ShellValue,
+    ShellVar,
+    VarAttr,
+    VarKind,
+    attr_letters,
+)
 from mirage.utils.hidden import var_hidden
 from mirage.workspace.executor.builtins.declare.constants import (
     ANSI_C_ESCAPES,
@@ -109,6 +115,23 @@ def held_value(
             return None if saved is None else saved.value
     var = session.vars.get(target)
     return None if var is None else var.value
+
+
+def local_attrs(var: ShellVar | None, inherit: bool) -> frozenset[VarAttr]:
+    """The attributes a new local takes from the variable it shadows:
+    the export mark alone (``local I=2+3`` over ``declare -i I`` stores
+    ``2+3``), or with ``-I`` every one but a reference, as bash's
+    ``local -I`` keeps ``-i`` and drops ``-n``.
+
+    Args:
+        var (ShellVar | None): the shadowed record.
+        inherit (bool): the declaration carried ``-I``.
+    """
+    if var is None:
+        return frozenset()
+    if inherit:
+        return var.attrs - {VarAttr.NAMEREF}
+    return var.attrs & {VarAttr.EXPORT}
 
 
 def kind_conflict(held: ShellValue | None, kind: VarKind | None) -> str | None:

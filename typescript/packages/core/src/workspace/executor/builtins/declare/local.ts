@@ -32,6 +32,7 @@ import {
   heldValue,
   identifierRefusal,
   kindConflict,
+  localAttrs,
   namerefRefusal,
   premark,
   scalarValue,
@@ -53,6 +54,7 @@ export async function handleLocal(
   shaping: ReadonlySet<VarAttr> = new Set(),
   nameref = false,
   globalScope = false,
+  inherit = false,
 ): Promise<Result> {
   const locals = globalScope ? null : session.localVars
   if (cmd === 'local' && session.localVars === null) {
@@ -116,6 +118,10 @@ export async function handleLocal(
         continue
       }
       if (locals !== null) shadowLocal(session, locals, key)
+      if (fresh) {
+        const refused = await freshLocal(session, view, cmd, key, inherit)
+        if (refused !== null) return refused
+      }
       const [value, assigned]: [ShellValue, ReadonlySet<number | string> | null] = nameref
         ? [val, null]
         : scalarValue(held, val, kind)
@@ -133,7 +139,7 @@ export async function handleLocal(
       if (locals !== null) {
         const fresh = !locals.has(assign)
         shadowLocal(session, locals, assign)
-        const refused = fresh ? await freshLocal(session, view, cmd, assign) : null
+        const refused = fresh ? await freshLocal(session, view, cmd, assign, inherit) : null
         if (refused !== null) return refused
       }
       if (
@@ -182,13 +188,19 @@ async function freshLocal(
   view: SessionView,
   cmd: string,
   name: string,
+  inherit = false,
 ): Promise<Result | null> {
   const record = sessionEntry(session.vars, name)
   if (record === undefined || inCallEnv(session, name)) return null
   if (view.isReadonly(name)) return readonlyRefusal(cmd, name)
   try {
-    await view.unset(name, false)
-    if (record.attrs.has(VarAttr.Export)) await view.mark(name, VarAttr.Export, true)
+    if (inherit) {
+      // `-I` keeps the value and attributes, a reference's aside.
+      if (record.attrs.has(VarAttr.Nameref)) await view.mark(name, VarAttr.Nameref, false)
+    } else {
+      await view.unset(name, false)
+      for (const attr of localAttrs(record, inherit)) await view.mark(name, attr, true)
+    }
   } catch (err) {
     if (err instanceof PolicyDenied) return refusal(cmd, err)
     throw err

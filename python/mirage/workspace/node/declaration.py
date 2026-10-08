@@ -40,6 +40,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     declared_kind,
     held_value,
     kind_conflict,
+    local_attrs,
 )
 from mirage.workspace.expand import expand_node
 from mirage.workspace.mount import MountRegistry
@@ -483,6 +484,16 @@ async def execute_declaration(
     )
     if VarAttr.LOWER in shaping and VarAttr.UPPER in shaping:
         shaping = shaping - {VarAttr.LOWER, VarAttr.UPPER}
+    # `-p` prints rather than declares, so it is answered before anything
+    # declares (`declare -ap NAME` converts nothing); with no names, an
+    # attribute letter lists the names carrying it, `-p` or not.
+    listing = not assignments and not staged
+    if (
+        "p" in flag_chars
+        or "p" in plus_chars
+        or (listing and flag_chars & (LISTED_ATTRIBUTES | {"a", "A"}))
+    ) and keyword in ("declare", "typeset"):
+        return await handle_declare_print(assignments, session, flag_chars)
     conversion_errors: list[str] = []
     kind = declared_kind(flag_chars)
     if kind is not None and keyword not in VISIBLE_SCOPE_BUILTINS:
@@ -511,6 +522,14 @@ async def execute_declaration(
                 and session._local_vars is not None
                 and bare not in session._local_vars
             )
+            held_var = session.vars.get(bare)
+            if (
+                fresh
+                and held_var is not None
+                and VarAttr.READONLY in held_var.attrs
+            ):
+                # `handle_local` refuses the readonly name in its voice.
+                continue
             conflict = (
                 None
                 if fresh
@@ -524,18 +543,13 @@ async def execute_declaration(
             if "g" not in flag_chars and note_local_array(session, bare):
                 # Inside a function this shadows whatever the caller
                 # had with a fresh empty array of the declared kind,
-                # which keeps only the caller's export mark, as bash's
-                # does (a reference or `-i` stays behind); `-g`
+                # which takes the attributes `local_attrs` keeps; `-g`
                 # declares at global scope instead.
                 if fresh:
-                    held_var = session.vars.pop(bare, None)
-                    if (
-                        held_var is not None
-                        and VarAttr.EXPORT in held_var.attrs
-                    ):
-                        session.vars[bare] = ShellVar(
-                            None, frozenset({VarAttr.EXPORT})
-                        )
+                    session.vars.pop(bare, None)
+                    kept = local_attrs(held_var, "I" in flag_chars)
+                    if kept:
+                        session.vars[bare] = ShellVar(None, kept)
                 seed_var(session, bare, {} if want_assoc else [])
             elif want_assoc and bare not in session.assocs:
                 # At top level an existing scalar becomes the value
@@ -571,16 +585,6 @@ async def execute_declaration(
     # rides the same path and is stamped after the value lands, so
     # `f() { local -r A=(x); }` freezes f's own A, not the caller's.
     if keyword in (NT.LOCAL, "declare", "typeset"):
-        # `-p` prints rather than declares, so it is answered before
-        # the assignment path runs at all; with no names, an attribute
-        # letter lists the names carrying it, `-p` or not.
-        listing = not assignments and not staged
-        if (
-            "p" in flag_chars
-            or "p" in plus_chars
-            or (listing and flag_chars & (LISTED_ATTRIBUTES | {"a", "A"}))
-        ) and keyword in ("declare", "typeset"):
-            return await handle_declare_print(assignments, session, flag_chars)
         decl_view = session_view(
             session,
             namespace.registry.policies,
@@ -600,6 +604,7 @@ async def execute_declaration(
             shaping=shaping,
             nameref="n" in flag_chars and "n" not in plus_chars,
             global_scope="g" in flag_chars,
+            inherit="I" in flag_chars,
         )
         plus_refused = await _plus_refusals(
             cmd_word, context, decl_view, plus_chars, assignments, staged

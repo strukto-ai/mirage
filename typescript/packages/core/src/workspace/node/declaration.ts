@@ -36,7 +36,12 @@ import {
   LISTED_ATTRIBUTES,
   VISIBLE_SCOPE_BUILTINS,
 } from '../executor/builtins/declare/constants.ts'
-import { declaredKind, heldValue, kindConflict } from '../executor/builtins/declare/declare.ts'
+import {
+  declaredKind,
+  heldValue,
+  kindConflict,
+  localAttrs,
+} from '../executor/builtins/declare/declare.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -432,6 +437,19 @@ export async function executeDeclaration(
   if (shaping.has(VarAttr.Lower) && shaping.has(VarAttr.Upper)) {
     shaping = new Set([...shaping].filter((a) => a !== VarAttr.Lower && a !== VarAttr.Upper))
   }
+  // `-p` prints rather than declares, so it is answered before anything
+  // declares (`declare -ap NAME` converts nothing); with no names, an
+  // attribute letter lists the names carrying it, `-p` or not.
+  const listing =
+    assignments.length === 0 &&
+    staged.length === 0 &&
+    [...flagChars].some((c) => LISTED_ATTRIBUTES.has(c) || c === 'a' || c === 'A')
+  if (
+    (flagChars.has('p') || plusChars.has('p') || listing) &&
+    (keyword === 'declare' || keyword === 'typeset')
+  ) {
+    return handleDeclarePrint(assignments, session, flagChars)
+  }
   const conversionErrors: string[] = []
   const kind = declaredKind(flagChars)
   if (kind !== null && !VISIBLE_SCOPE_BUILTINS.has(keyword)) {
@@ -457,6 +475,9 @@ export async function executeDeclaration(
       // its kind is free.
       const fresh =
         !flagChars.has('g') && session.localVars !== null && !session.localVars.has(bare)
+      const heldVar = sessionEntry(session.vars, bare)
+      // `handleLocal` refuses a readonly name in its voice.
+      if (fresh && heldVar?.attrs.has(VarAttr.Readonly) === true) continue
       const conflict = fresh ? null : kindConflict(heldValue(session, bare), kind)
       if (conflict !== null) {
         conversionErrors.push(`bash: ${cmdWord}: ${bare}: ${conflict}`)
@@ -464,15 +485,14 @@ export async function executeDeclaration(
       }
       if (!flagChars.has('g') && noteLocalArray(session, bare)) {
         // Inside a function this shadows whatever the caller had with
-        // a fresh empty array of the declared kind, which keeps only the
-        // caller's export mark, as bash's does (a reference or `-i` stays
-        // behind); `-g` declares at global scope instead.
+        // a fresh empty array of the declared kind, which takes the
+        // attributes `localAttrs` keeps; `-g` declares at global scope
+        // instead.
         if (fresh) {
-          const held = sessionEntry(session.vars, bare)
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete session.vars[bare]
-          if (held?.attrs.has(VarAttr.Export) === true)
-            setSessionEntry(session.vars, bare, makeVar(null, new Set([VarAttr.Export])))
+          const kept = localAttrs(heldVar, flagChars.has('I'))
+          if (kept.size > 0) setSessionEntry(session.vars, bare, makeVar(null, kept))
         }
         seedVar(session, bare, wantAssoc ? {} : [])
       } else if (wantAssoc && !Object.hasOwn(session.assocs, bare)) {
@@ -508,19 +528,6 @@ export async function executeDeclaration(
   // the same path and is stamped after the value lands, so
   // `f() { local -r A=(x); }` freezes f's own A, not the caller's.
   if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
-    // `-p` prints rather than declares, so it is answered before the
-    // assignment path runs at all; with no names, an attribute letter
-    // lists the names carrying it, `-p` or not.
-    const listing =
-      assignments.length === 0 &&
-      staged.length === 0 &&
-      [...flagChars].some((c) => LISTED_ATTRIBUTES.has(c) || c === 'a' || c === 'A')
-    if (
-      (flagChars.has('p') || plusChars.has('p') || listing) &&
-      (keyword === 'declare' || keyword === 'typeset')
-    ) {
-      return handleDeclarePrint(assignments, session, flagChars)
-    }
     const declView2 = sessionView(session, registry.policies, context.frame.diagnostics)
     const stored2: string[] = []
     const result = await handleLocal(
@@ -536,6 +543,7 @@ export async function executeDeclaration(
       shaping,
       flagChars.has('n') && !plusChars.has('n'),
       flagChars.has('g'),
+      flagChars.has('I'),
     )
     const plusRefused = plusRefusals(cmdWord, context, declView2, plusChars, assignments, staged)
     if (plusRefused !== null) return plusRefused

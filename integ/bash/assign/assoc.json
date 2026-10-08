@@ -1189,6 +1189,40 @@
         "stdout": "declare -A ref=([k]=\"v\" )\ndeclare -a A=([0]=\"outer\")\ndeclare -n ref=\"A\"\ndeclare -a I=([0]=\"1+1\")\ndeclare -ax E=([0]=\"x\")\ndeclare -i I=\"1\"\ndeclare -x E=\"1\"\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "fresh_local_keeps_export_or_inherits_with_I",
+      "seq": 930535,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( readonly R=outer; f(){ local -a R; echo \"rc=$?\"; }; f 2>/dev/null; declare -p R; declare -i I=7; g(){ declare -ap I; I=2+3; echo \"${I[0]}\"; }; g; h(){ local -Ia I; I[0]=2+3; local -I K=1+1; declare -p I K; }; declare -i K=0; h; k(){ local I=2+3; declare -p I; }; k )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ndeclare -r R=\"outer\"\ndeclare -i I=\"7\"\n5\ndeclare -ai I=([0]=\"5\")\ndeclare -i K=\"2\"\ndeclare -- I=\"2+3\"\n",
+        "stderr": ""
+      }
     }
   ]
 }

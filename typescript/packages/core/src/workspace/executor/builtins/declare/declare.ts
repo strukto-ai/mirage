@@ -25,8 +25,8 @@ import {
 } from '../../../../shell/array.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
 import { sessionEntry, setSessionEntry } from '../../../session/session.ts'
-import type { ShellValue, VarAttr } from '../../../../shell/variable.ts'
-import { attrLetters, VarKind } from '../../../../shell/variable.ts'
+import type { ShellValue, ShellVar } from '../../../../shell/variable.ts'
+import { attrLetters, VarAttr, VarKind } from '../../../../shell/variable.ts'
 import {
   conversionScalar,
   deref,
@@ -124,6 +124,17 @@ export function heldValue(
     if (frame !== undefined) return frame.get(target)?.value ?? null
   }
   return sessionEntry(session.vars, target)?.value ?? null
+}
+
+/**
+ * The attributes a new local takes from the variable it shadows: the export
+ * mark alone (`local I=2+3` over `declare -i I` stores `2+3`), or with `-I`
+ * every one but a reference, as bash's `local -I` keeps `-i` and drops `-n`.
+ */
+export function localAttrs(v: ShellVar | undefined, inherit: boolean): Set<VarAttr> {
+  if (v === undefined) return new Set()
+  if (inherit) return new Set([...v.attrs].filter((a) => a !== VarAttr.Nameref))
+  return new Set([...v.attrs].filter((a) => a === VarAttr.Export))
 }
 
 /**

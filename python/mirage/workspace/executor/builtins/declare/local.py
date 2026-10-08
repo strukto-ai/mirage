@@ -23,6 +23,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     identifier_failure,
     identifier_refusal,
     kind_conflict,
+    local_attrs,
     nameref_refusal,
     premark,
     scalar_value,
@@ -59,6 +60,7 @@ async def handle_local(
     shaping: frozenset[VarAttr] = frozenset(),
     nameref: bool = False,
     global_scope: bool = False,
+    inherit: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Declare names in the running function's scope, or globally.
 
@@ -87,6 +89,9 @@ async def handle_local(
             function the names are declared globally: no local snapshot
             is taken, and a name the function already shadows has its
             *global* record written.
+        inherit (bool): the declaration carried ``-I``, so a new local
+            keeps the shadowed variable's value and attributes but a
+            reference (``local_attrs``).
     """
     local_vars = None if global_scope else session._local_vars
     if cmd == "local" and session._local_vars is None:
@@ -147,6 +152,10 @@ async def handle_local(
                 continue
             if local_vars is not None:
                 shadow_local(session, local_vars, key)
+            if fresh:
+                refused = await _fresh_local(session, view, cmd, key, inherit)
+                if refused is not None:
+                    return refused
             value, assigned = (
                 (val, None) if nameref else scalar_value(held, val, kind)
             )
@@ -169,7 +178,7 @@ async def handle_local(
                 fresh = assign not in local_vars
                 shadow_local(session, local_vars, assign)
                 refused = (
-                    await _fresh_local(session, view, cmd, assign)
+                    await _fresh_local(session, view, cmd, assign, inherit)
                     if fresh
                     else None
                 )
@@ -204,9 +213,13 @@ async def handle_local(
 
 
 async def _fresh_local(
-    session: SessionState, view: SessionView, cmd: str, name: str
+    session: SessionState,
+    view: SessionView,
+    cmd: str,
+    name: str,
+    inherit: bool = False,
 ) -> Result | None:
-    """Start a bare ``local NAME`` unset, as bash 5.2 does.
+    """Start a new ``local NAME`` unset, as bash 5.2 does.
 
     Only a name the frame did not shadow yet: a second ``local x``, or
     the fresh array ``local -a x`` has already put in place, keeps what
@@ -215,15 +228,17 @@ async def _fresh_local(
     The caller's value and attributes stay behind except the export
     mark: GNU prints ``declare -- x`` for ``x=1; f() { local x; }`` and
     ``declare -x x`` for an exported one, and ``local x; x+=y`` stores
-    ``y``. A name the call assigned in front is the exception and keeps
-    that value (``x=1 f`` where f runs ``local x`` reads 1). A readonly
-    name refuses, as GNU's does.
+    ``y`` (``local_attrs``). With ``-I`` the value and attributes stay,
+    a reference's aside. A name the call assigned in front is the
+    exception and keeps that value (``x=1 f`` where f runs ``local x``
+    reads 1). A readonly name refuses, as GNU's does.
 
     Args:
         session (SessionState): shell session state.
         view (SessionView): the session plane's gated door.
         cmd (str): the builtin's spelling, for the diagnostic.
         name (str): the name being declared.
+        inherit (bool): the declaration carried ``-I``.
 
     Returns:
         A refusal result, else None.
@@ -234,9 +249,13 @@ async def _fresh_local(
     if view.is_readonly(name):
         return readonly_refusal(cmd, name)
     try:
-        await view.unset(name, follow_ref=False)
-        if VarAttr.EXPORT in var.attrs:
-            await view.mark(name, VarAttr.EXPORT, True)
+        if inherit:
+            if VarAttr.NAMEREF in var.attrs:
+                await view.mark(name, VarAttr.NAMEREF, False)
+        else:
+            await view.unset(name, follow_ref=False)
+            for attr in local_attrs(var, inherit):
+                await view.mark(name, attr, True)
     except PolicyDenied as exc:
         return refusal(cmd, exc)
     return None
