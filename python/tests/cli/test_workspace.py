@@ -36,6 +36,15 @@ clis:
 """
 
 
+@pytest.mark.parametrize(
+    "resolve", [workspace_cli.resolve_config, _resolve_config_arg]
+)
+def test_exponent_ttl_reaches_the_daemon_as_a_number(tmp_path, resolve):
+    path = tmp_path / "workspace.yaml"
+    path.write_text("mounts: {/d: {vfs: ram, read: bounded, ttl: 1e3}}\n")
+    assert resolve(path)["mounts"]["/d"]["ttl"] == 1000
+
+
 def test_a_load_override_rebases_relative_code_refs_onto_its_dir(
     tmp_path: Path,
 ):

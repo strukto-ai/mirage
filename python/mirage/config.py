@@ -19,7 +19,6 @@ import uuid
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -52,6 +51,7 @@ from mirage.types import (
     ReadPolicy,
     parse_mount_mode,
 )
+from mirage.utils.yaml import parse_yaml
 from mirage.vfs.loader import load_attr
 from mirage.vfs.registry import build_vfs
 from mirage.vfs.s3.config import S3Config
@@ -1034,8 +1034,7 @@ def load_config(
     """
     base: Path | None = None
     if isinstance(source, (str, Path)):
-        text = Path(source).read_text(encoding="utf-8")
-        raw = yaml.safe_load(text)
+        raw = parse_yaml(Path(source).read_text(encoding="utf-8"))
         base = Path(source).resolve().parent
     else:
         raw = dict(source)
