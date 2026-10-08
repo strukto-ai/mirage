@@ -16,7 +16,8 @@ export const EXPORT_USAGE = 'export: usage: export [-fn] [name[=value] ...] or e
 
 export const READONLY_USAGE = 'readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n'
 
-export const EXPORT_FLAGS = new Set('fnp')
+// bash takes `-a` / `-A` too, though its usage line names only `-fn`.
+export const EXPORT_FLAGS = new Set('aAfnp')
 
 export const READONLY_FLAGS = new Set('aAfp')
 

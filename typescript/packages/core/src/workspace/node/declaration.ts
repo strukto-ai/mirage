@@ -19,7 +19,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { DiscardSignal } from '../../shell/errors.ts'
 import { getDeclarationKeyword, getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { VarAttr } from '../../shell/variable.ts'
+import { VarAttr, VarKind } from '../../shell/variable.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { SessionView } from '../../ops/types.ts'
@@ -31,6 +31,8 @@ import {
   handleReadonly,
   noteLocalArray,
 } from '../executor/builtins/index.ts'
+import { VISIBLE_SCOPE_BUILTINS } from '../executor/builtins/declare/constants.ts'
+import { declaredKind, kindConflict } from '../executor/builtins/declare/declare.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -423,7 +425,9 @@ export async function executeDeclaration(
     // a missing name is exit 1 without a word.
     return handleDeclareFunctions(cmdWord, session, flagChars, assignments, plusChars, parser)
   }
-  const isReadonly = keyword === 'readonly' || flagChars.has('r')
+  // `export -r` is an invalid option for `export` to refuse, not a readonly
+  // declaration.
+  const isReadonly = keyword === 'readonly' || (keyword !== 'export' && flagChars.has('r'))
   // `-l` and `-u` cannot both hold; a cluster naming both sets neither
   // (pinned: `declare -lu s=aBc` prints `declare -- s`).
   let shaping = new Set(attrsFor('ilu', (c) => flagChars.has(c) && !plusChars.has(c)))
@@ -431,13 +435,15 @@ export async function executeDeclaration(
     shaping = new Set([...shaping].filter((a) => a !== VarAttr.Lower && a !== VarAttr.Upper))
   }
   const conversionErrors: string[] = []
-  if (flagChars.has('A') || flagChars.has('a')) {
+  const kind = declaredKind(flagChars)
+  if (kind !== null && !VISIBLE_SCOPE_BUILTINS.has(keyword)) {
     // `declare -a NAME` / `declare -A NAME` with no value declare an
     // empty array of that kind, so ${#NAME[@]} is 0 and an element
     // write leaves the other slots unassigned. GNU refuses to
     // convert between the two kinds and says so per name while the
-    // rest of the operands still declare.
-    const wantAssoc = flagChars.has('A')
+    // rest of the operands still declare. `export` and `readonly` leave
+    // a bare name's value alone.
+    const wantAssoc = kind === VarKind.Assoc
     for (const bare of assignments) {
       if (bare.includes('=')) continue
       // Both branches below write array storage raw (the top-level
@@ -449,16 +455,9 @@ export async function executeDeclaration(
         if (!(err instanceof PolicyDenied)) throw err
         throw new DiscardSignal(encodeText(`${err.message}\n`))
       }
-      if (wantAssoc && Object.hasOwn(session.arrays, bare)) {
-        conversionErrors.push(
-          `bash: ${cmdWord}: ${bare}: cannot convert indexed to associative array`,
-        )
-        continue
-      }
-      if (!wantAssoc && Object.hasOwn(session.assocs, bare)) {
-        conversionErrors.push(
-          `bash: ${cmdWord}: ${bare}: cannot convert associative to indexed array`,
-        )
+      const conflict = kindConflict(session, bare, kind)
+      if (conflict !== null) {
+        conversionErrors.push(`bash: ${cmdWord}: ${bare}: ${conflict}`)
         continue
       }
       if (!flagChars.has('g') && noteLocalArray(session, bare)) {
@@ -495,19 +494,11 @@ export async function executeDeclaration(
             declView,
             staged,
             stored,
-            flagChars.has('A'),
+            kind,
             shaping,
             parser,
           )
-        : await handleReadonly(
-            assignments,
-            session,
-            declView,
-            staged,
-            stored,
-            flagChars.has('A'),
-            shaping,
-          )
+        : await handleReadonly(assignments, session, declView, staged, stored, kind, shaping)
     // `declare -rx X=1` carries both attributes: GNU prints
     // `declare -rx X="1"`. Readonly answers first, so the export stamp
     // has to land here too, or `-r` silently ate the `-x`.
@@ -545,7 +536,7 @@ export async function executeDeclaration(
       // themselves in a diagnostic rather than say `local`.
       cmdWord,
       stored2,
-      flagChars.has('A'),
+      kind,
       shaping,
       flagChars.has('n') && !plusChars.has('n'),
       flagChars.has('g'),

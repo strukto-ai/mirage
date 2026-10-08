@@ -985,6 +985,74 @@
         "stdout": "yes\nyes\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "readonly_a_A_shape_values_only",
+      "seq": 930529,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "env -i bash -c 'S=1; readonly -a S; readonly -A Z; X=(1 2); readonly -A X; echo \"rc=$?\"; W=(1 2); readonly -A W=9; echo \"rc=$?\"; readonly -a T=1; declare -i N=1; readonly N; declare -A M=([k]=v); readonly M; readonly -A; readonly -p | grep -E \" [NSTWXZ](=|\\$)\"'",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=1\ndeclare -Ar M=([k]=\"v\" )\ndeclare -ir N=\"1\"\ndeclare -r S=\"1\"\ndeclare -ar T=([0]=\"1\")\ndeclare -ar W=([0]=\"1\" [1]=\"2\")\ndeclare -ar X=([0]=\"1\" [1]=\"2\")\ndeclare -r Z\n",
+        "stderr": "bash: readonly: W: cannot convert indexed to associative array\n"
+      }
+    },
+    {
+      "id": "array_kind_conflict_on_a_literal_is_fatal",
+      "seq": 930530,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( X=(1 2); declare -A X=([k]=v); echo not-reached ); echo \"rc=$?\"; ( declare -A M=([k]=v); readonly -a M=(1); echo not-reached ); echo \"rc=$?\"; ( f() { declare -A X=([k]=v); declare -p X; }; X=(1 2); f; declare -p X )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\ndeclare -A X=([k]=\"v\" )\ndeclare -a X=([0]=\"1\" [1]=\"2\")\n",
+        "stderr": "bash: X: cannot convert indexed to associative array\nbash: M: cannot convert associative to indexed array\n"
+      }
     }
   ]
 }

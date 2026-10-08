@@ -17,11 +17,16 @@ import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { ArithError, DiscardSignal } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { buildAssocLiteral, buildIndexedLiteral, type ShellArray } from '../../../../shell/array.ts'
+import {
+  arraySet,
+  buildAssocLiteral,
+  buildIndexedLiteral,
+  type ShellArray,
+} from '../../../../shell/array.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
 import { sessionEntry, setSessionEntry } from '../../../session/session.ts'
 import type { ShellValue, VarAttr } from '../../../../shell/variable.ts'
-import { attrLetters } from '../../../../shell/variable.ts'
+import { attrLetters, VarKind } from '../../../../shell/variable.ts'
 import { conversionScalar, setAttr, shadowLocal, subscriptIndex } from '../../../session/state.ts'
 import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
@@ -86,6 +91,68 @@ export async function premark(
  * folds them into its exit status, because GNU stores the valid
  * elements and still fails the builtin.
  */
+/**
+ * The array kind a declaration's `-a` / `-A` asks for, `-A` winning when both
+ * are given (bash's `export -aA B=(1)` builds a map), or null for neither.
+ */
+export function declaredKind(flags: ReadonlySet<string>): VarKind | null {
+  if (flags.has('A')) return VarKind.Assoc
+  if (flags.has('a')) return VarKind.Indexed
+  return null
+}
+
+/**
+ * bash's refusal when a declared array kind meets a variable of the other
+ * kind, or null when they agree.
+ */
+export function kindConflict(
+  session: SessionState,
+  name: string,
+  kind: VarKind | null,
+): string | null {
+  if (kind === VarKind.Assoc && Object.hasOwn(session.arrays, name))
+    return 'cannot convert indexed to associative array'
+  if (kind === VarKind.Indexed && Object.hasOwn(session.assocs, name))
+    return 'cannot convert associative to indexed array'
+  return null
+}
+
+/**
+ * What `export` / `readonly NAME=value` stores. An array keeps its kind and
+ * takes the value at element 0 (key `"0"` in a map), as a plain `NAME=value`
+ * does; otherwise `-A` makes the map `([0]=value)` and `-a` the one-element
+ * array, and with neither the value stays a scalar.
+ */
+export function scalarValue(
+  session: SessionState,
+  name: string,
+  value: string,
+  kind: VarKind | null,
+): ShellValue {
+  const heldMap = sessionEntry(session.assocs, name)
+  const heldArr = sessionEntry(session.arrays, name)
+  if (heldMap !== undefined || kind === VarKind.Assoc) return { ...heldMap, '0': value }
+  if (heldArr !== undefined || kind === VarKind.Indexed) {
+    const arr: ShellArray = [...(heldArr ?? [])]
+    arraySet(arr, 0, value)
+    return arr
+  }
+  return value
+}
+
+/**
+ * Whether a listing's `-a` / `-A` keep `name`: `-a` lists only indexed
+ * arrays, `-A` only associative ones, both nothing.
+ */
+export function kindListed(
+  session: SessionState,
+  name: string,
+  flags: ReadonlySet<string>,
+): boolean {
+  if (flags.has('a') && !Object.hasOwn(session.arrays, name)) return false
+  return !flags.has('A') || Object.hasOwn(session.assocs, name)
+}
+
 export async function storeStagedArrays(
   cmd: string,
   session: SessionState,
@@ -95,7 +162,7 @@ export async function storeStagedArrays(
   on = true,
   fatal = false,
   stored: string[] | null = null,
-  assoc = false,
+  kind: VarKind | null = null,
   errors: string[] | null = null,
   shaping: ReadonlySet<VarAttr> = new Set(),
   globalScope = false,
@@ -107,9 +174,19 @@ export async function storeStagedArrays(
       }
       return readonlyRefusal(cmd, name)
     }
-    // Inside a function `declare` and `local` make the name local; `export`
-    // and `readonly` assign the variable already visible.
-    if (!globalScope && !VISIBLE_SCOPE_BUILTINS.has(cmd)) noteLocalArray(session, name)
+    // Inside a function `declare` and `local` make the name local, which
+    // shadows the caller's variable so its kind is free; `export`,
+    // `readonly` and `-g` write the visible one.
+    const shadowed =
+      !globalScope && !VISIBLE_SCOPE_BUILTINS.has(cmd) && noteLocalArray(session, name)
+    const conflict = shadowed ? null : kindConflict(session, name, kind)
+    if (conflict !== null) {
+      if (fatal) throw new DiscardSignal(encodeText(`bash: ${name}: ${conflict}\n`))
+      const line = `bash: ${cmd}: ${name}: ${conflict}`
+      if (errors === null) return identifierFailure(cmd, [line])
+      errors.push(line)
+      continue
+    }
     try {
       await premark(view, name, shaping)
     } catch (err) {
@@ -121,7 +198,7 @@ export async function storeStagedArrays(
     // literal may assign (`([x=2]=v)`), and that lands through the same
     // door.
     try {
-      if (assoc || Object.hasOwn(session.assocs, name)) {
+      if (kind === VarKind.Assoc || Object.hasOwn(session.assocs, name)) {
         const { map, badWords } = buildAssocLiteral(session.assocs[name] ?? null, items, append)
         if (errors !== null) {
           for (const word of badWords) {
@@ -491,7 +568,7 @@ export async function markFunctions(
   state: SessionView | null = null,
   arrays: { name: string; append: boolean; items: string[] }[] | null = null,
   parser?: ParseScope,
-  assoc = false,
+  kind: VarKind | null = null,
 ): Promise<Result> {
   if (arrays !== null && arrays.length > 0) {
     const refused = await storeStagedArrays(
@@ -503,7 +580,7 @@ export async function markFunctions(
       true,
       true,
       null,
-      assoc,
+      kind,
     )
     if (refused !== null) return refused
     names = [...names, ...arrays.map(({ name }) => name)]

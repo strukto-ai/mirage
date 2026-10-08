@@ -166,7 +166,9 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const text = decode(out as Uint8Array)
     expect(text).toContain('declare -ar AR=([0]="a" [1]="b c")\n')
     expect(text).toContain('declare -r ONLY\n')
-    expect(text).toContain('declare -r VAL="x"\n')
+    // VAL came from the environment, so it is exported too, and the whole
+    // cluster prints, as bash's `readonly -p` does.
+    expect(text).toContain('declare -rx VAL="x"\n')
   })
 
   it('readonly -z is invalid option exit 2', async () => {

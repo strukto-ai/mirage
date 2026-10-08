@@ -17,7 +17,7 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.errors import ArithError
-from mirage.shell.variable import VarAttr
+from mirage.shell.variable import VarAttr, VarKind
 from mirage.workspace.executor.builtins.declare.declare import (
     identifier_failure,
     identifier_refusal,
@@ -52,7 +52,7 @@ async def handle_local(
     arrays: list[tuple[str, bool, list[str]]] | None = None,
     cmd: str = "local",
     stored: list[str] | None = None,
-    assoc: bool = False,
+    kind: VarKind | None = None,
     shaping: frozenset[VarAttr] = frozenset(),
     nameref: bool = False,
     global_scope: bool = False,
@@ -69,8 +69,8 @@ async def handle_local(
             ``declare`` and ``typeset`` route through this handler and
             must say their own name, not ``local``.
         stored (list[str] | None): filled with each name that stored.
-        assoc (bool): the declaration carried ``-A``, so staged
-            literals build associative maps.
+        kind (VarKind | None): the kind ``-a`` / ``-A`` declared, so
+            staged literals build that kind of array.
         shaping (frozenset[VarAttr]): the value-shaping attributes
             (``-i -l -u``) the declaration carries. They are marked on
             each name *before* its value stores, after the local
@@ -108,7 +108,7 @@ async def handle_local(
             arrays,
             fatal=session._local_vars is None,
             stored=stored,
-            assoc=assoc,
+            kind=kind,
             errors=errors,
             shaping=shaping,
             global_scope=global_scope,

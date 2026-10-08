@@ -22,7 +22,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
 from mirage.shell.types import NodeType as NT
-from mirage.shell.variable import VarAttr
+from mirage.shell.variable import VarAttr, VarKind
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     handle_declare_functions,
@@ -31,6 +31,13 @@ from mirage.workspace.executor.builtins import (
     handle_local,
     handle_readonly,
     note_local_array,
+)
+from mirage.workspace.executor.builtins.declare.constants import (
+    VISIBLE_SCOPE_BUILTINS,
+)
+from mirage.workspace.executor.builtins.declare.declare import (
+    declared_kind,
+    kind_conflict,
 )
 from mirage.workspace.expand import expand_node
 from mirage.workspace.mount import MountRegistry
@@ -468,7 +475,11 @@ async def execute_declaration(
         return handle_declare_functions(
             cmd_word, session, flag_chars, assignments, frozenset(plus_chars)
         )
-    is_readonly = keyword == "readonly" or "r" in flag_chars
+    # `export -r` is an invalid option for `export` to refuse, not a
+    # readonly declaration.
+    is_readonly = keyword == "readonly" or (
+        keyword != "export" and "r" in flag_chars
+    )
     # `-l` and `-u` cannot both hold; a cluster naming both sets
     # neither (pinned: `declare -lu s=aBc` prints `declare -- s`).
     shaping = frozenset(
@@ -479,13 +490,15 @@ async def execute_declaration(
     if VarAttr.LOWER in shaping and VarAttr.UPPER in shaping:
         shaping = shaping - {VarAttr.LOWER, VarAttr.UPPER}
     conversion_errors: list[str] = []
-    if "A" in flag_chars or "a" in flag_chars:
+    kind = declared_kind(flag_chars)
+    if kind is not None and keyword not in VISIBLE_SCOPE_BUILTINS:
         # `declare -a NAME` / `declare -A NAME` with no value declare
         # an empty array of that kind, so ${#NAME[@]} is 0 and an
         # element write leaves the other slots unassigned. GNU
         # refuses to convert between the two kinds and says so per
-        # name while the rest of the operands still declare.
-        want_assoc = "A" in flag_chars
+        # name while the rest of the operands still declare. `export`
+        # and `readonly` leave a bare name's value alone.
+        want_assoc = kind is VarKind.ASSOC
         for bare in assignments:
             if "=" in bare:
                 continue
@@ -497,16 +510,10 @@ async def execute_declaration(
                 ensure_var_visible(session, bare)
             except PolicyDenied as exc:
                 raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
-            if want_assoc and bare in session.arrays:
+            conflict = kind_conflict(session, bare, kind)
+            if conflict is not None:
                 conversion_errors.append(
-                    f"bash: {cmd_word}: {bare}: cannot convert indexed "
-                    "to associative array"
-                )
-                continue
-            if not want_assoc and bare in session.assocs:
-                conversion_errors.append(
-                    f"bash: {cmd_word}: {bare}: cannot convert "
-                    "associative to indexed array"
+                    f"bash: {cmd_word}: {bare}: {conflict}"
                 )
                 continue
             if "g" not in flag_chars and note_local_array(session, bare):
@@ -545,7 +552,7 @@ async def execute_declaration(
                 decl_view,
                 arrays=staged,
                 stored=stored,
-                assoc="A" in flag_chars,
+                kind=kind,
                 shaping=shaping,
             )
         else:
@@ -555,7 +562,7 @@ async def execute_declaration(
                 decl_view,
                 arrays=staged,
                 stored=stored,
-                assoc="A" in flag_chars,
+                kind=kind,
                 shaping=shaping,
             )
         # `declare -rx X=1` carries both attributes: GNU prints
@@ -599,7 +606,7 @@ async def execute_declaration(
             # themselves in a diagnostic rather than say `local`.
             cmd=cmd_word,
             stored=stored,
-            assoc="A" in flag_chars,
+            kind=kind,
             shaping=shaping,
             nameref="n" in flag_chars and "n" not in plus_chars,
             global_scope="g" in flag_chars,

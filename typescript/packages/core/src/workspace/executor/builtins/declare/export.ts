@@ -23,10 +23,14 @@ import { ExecutionNode } from '../../../types.ts'
 import { readonlyRefusal, refusal, requireView } from '../shared.ts'
 import { EXPORT_FLAGS, EXPORT_USAGE } from './constants.ts'
 import {
+  declaredKind,
   declareLine,
   identifierFailure,
   identifierRefusal,
+  kindConflict,
+  kindListed,
   markFunctions,
+  scalarValue,
   splitDeclFlags,
   storeStagedArrays,
 } from './declare.ts'
@@ -35,9 +39,10 @@ import { sessionView } from '../../../session/state.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import type { ParseScope } from '../../../../shell/parse/scope.ts'
 
-function exportLines(session: SessionState): string[] {
+function exportLines(session: SessionState, flags: ReadonlySet<string>): string[] {
   // The exported set, not every shell variable: `X=hello` is absent and
-  // `export Y=world` is present, which is what bash prints.
+  // `export Y=world` is present, which is what bash prints. -a / -A narrow
+  // it to exported indexed / associative arrays (`kindListed`).
   //
   // Rendering is `declareLine`'s, not a second spelling of it: GNU's
   // `export -p` prints the *whole* cluster, so a readonly exported
@@ -46,13 +51,16 @@ function exportLines(session: SessionState): string[] {
   // printed neither, and rendered an exported array as a bare
   // `declare -x AR` because it looked the value up among the scalars.
   return exportedNames(session)
+    .filter((name) => kindListed(session, name, flags))
     .map((name) => declareLine(session, name))
     .filter((line): line is string => line !== null)
 }
 
 /**
  * Export names, or print them (`export -p` / bare `export`). `-f` marks
- * functions instead, for a nested shell to inherit (`markFunctions`).
+ * functions instead, for a nested shell to inherit (`markFunctions`). `-a` /
+ * `-A` shape only an assigned value, as `readonly`'s do; bash accepts them
+ * although its usage line names only `-fn`.
  */
 export async function handleExport(
   assignments: string[],
@@ -73,6 +81,7 @@ export async function handleExport(
   // -n is the off direction, and applies to every spelling, since
   // `export -n K=v` assigns and unexports.
   const on = !flags.has('n')
+  const kind = declaredKind(flags)
   if (flags.has('f'))
     return markFunctions(
       'export',
@@ -83,13 +92,15 @@ export async function handleExport(
       state,
       arrays,
       parser,
+      kind,
     )
   if (names.length === 0 && (arrays === null || arrays.length === 0)) {
-    const lines = exportLines(session)
+    const lines = exportLines(session, flags)
     const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
   }
   const view = requireView(state)
+  const errors: string[] = []
   if (arrays !== null && arrays.length > 0) {
     // `export ARR=(a b)` marks the array as surely as it marks a scalar:
     // GNU prints `declare -ax ARR=([0]="a" [1]="b")`.
@@ -101,10 +112,11 @@ export async function handleExport(
       VarAttr.Export,
       on,
       true,
+      null,
+      kind,
     )
     if (refused !== null) return refused
   }
-  const errors: string[] = []
   for (const assign of names) {
     const badName = identifierRefusal('export', assign)
     if (badName !== null) {
@@ -112,11 +124,15 @@ export async function handleExport(
       continue
     }
     const eq = assign.indexOf('=')
-    if (eq >= 0) {
-      const key = assign.slice(0, eq)
-      if (view.isReadonly(key)) return readonlyRefusal('export', key)
+    const key = eq >= 0 ? assign.slice(0, eq) : assign
+    if (eq >= 0 && view.isReadonly(key)) return readonlyRefusal('export', key)
+    // A value of the other array kind is refused and the name is still
+    // marked, as bash does.
+    const conflict = eq >= 0 ? kindConflict(session, key, kind) : null
+    if (conflict !== null) errors.push(`bash: export: ${key}: ${conflict}`)
+    if (eq >= 0 && conflict === null) {
       try {
-        await view.set(key, assign.slice(eq + 1))
+        await view.set(key, scalarValue(session, key, assign.slice(eq + 1), kind))
       } catch (err) {
         if (err instanceof PolicyDenied) return refusal('export', err)
         throw err
@@ -131,13 +147,13 @@ export async function handleExport(
       // value. Still gated: marking a hidden or policy-refused name is a
       // session write.
       try {
-        await view.mark(assign, VarAttr.Export, on)
+        await view.mark(key, VarAttr.Export, on)
       } catch (err) {
         if (err instanceof PolicyDenied) return refusal('export', err)
         throw err
       }
     }
-    if (on) outliveCall(session, assign.split('=', 1)[0] ?? assign)
+    if (on) outliveCall(session, key)
   }
   if (errors.length > 0) return identifierFailure('export', errors)
   return [null, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]

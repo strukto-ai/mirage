@@ -15,7 +15,7 @@
 import { IOResult } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { VarAttr } from '../../../../shell/variable.ts'
+import { VarAttr, type VarKind } from '../../../../shell/variable.ts'
 import { sessionEntry, type SessionState } from '../../../session/session.ts'
 import {
   envGet,
@@ -46,7 +46,7 @@ export async function handleLocal(
   arrays: { name: string; append: boolean; items: string[] }[] | null = null,
   cmd = 'local',
   stored: string[] | null = null,
-  assoc = false,
+  kind: VarKind | null = null,
   shaping: ReadonlySet<VarAttr> = new Set(),
   nameref = false,
   globalScope = false,
@@ -77,7 +77,7 @@ export async function handleLocal(
       true,
       locals === null,
       stored,
-      assoc,
+      kind,
       errors,
       shaping,
       globalScope,

@@ -20,7 +20,8 @@ READONLY_USAGE = (
     "readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n"
 )
 
-EXPORT_FLAGS = frozenset("fnp")
+# bash takes `-a` / `-A` too, though its usage line names only `-fn`.
+EXPORT_FLAGS = frozenset("aAfnp")
 
 READONLY_FLAGS = frozenset("aAfp")
 

@@ -18,18 +18,21 @@ from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError
-from mirage.shell.variable import VarAttr
+from mirage.shell.variable import VarAttr, VarKind
 from mirage.workspace.executor.builtins.declare.constants import (
     READONLY_FLAGS,
     READONLY_USAGE,
 )
 from mirage.workspace.executor.builtins.declare.declare import (
-    assoc_body,
-    bash_declare_quote,
+    declare_line,
+    declared_kind,
     identifier_failure,
     identifier_refusal,
+    kind_conflict,
+    kind_listed,
     mark_functions,
     premark,
+    scalar_value,
     split_decl_flags,
     store_staged_arrays,
 )
@@ -44,18 +47,17 @@ from mirage.workspace.session.state import (
     env_is_readonly,
     outlive_call,
     set_attr,
-    visible_env,
 )
 from mirage.workspace.types import ExecutionNode
 
 
 def _readonly_lines(session: SessionState, flags: set[str]) -> list[str]:
-    """Build sorted ``declare -r`` family readonly lines.
+    """Build sorted readonly lines, each the name's ``declare -p`` line.
 
     ``-a`` narrows the listing to indexed arrays and ``-A`` to
-    associative ones, the way bash does. ``-f`` selects functions,
-    which mirage carries no readonly attribute for, so that form lists
-    nothing. Bare and ``-p`` list every readonly name.
+    associative ones, the way bash does (``kind_listed``). The whole
+    attribute cluster prints, ``declare -ir`` and ``declare -arx``, as
+    bash's does.
 
     Args:
         session (SessionState): shell session state.
@@ -64,37 +66,16 @@ def _readonly_lines(session: SessionState, flags: set[str]) -> list[str]:
     Returns:
         list[str]: one declaration line per selected name.
     """
-    if "f" in flags:
-        return []
-    arrays_only = "a" in flags
-    assocs_only = "A" in flags
-    env = visible_env(session)
-    lines: list[str] = []
     # env_is_readonly answers False for a hidden name, so a hidden
     # readonly never prints even its bare `declare -r NAME` row.
-    for name in sorted(
-        n for n in session.readonly_vars if env_is_readonly(session, n)
-    ):
-        arr = session.arrays.get(name)
-        amap = session.assocs.get(name)
-        if arr is not None and not assocs_only:
-            parts = [
-                f"[{i}]={bash_declare_quote(v)}"
-                for i, v in enumerate(arr)
-                if v is not None
-            ]
-            lines.append(f"declare -ar {name}=({' '.join(parts)})")
-            continue
-        if amap is not None and not arrays_only:
-            lines.append(f"declare -Ar {name}{assoc_body(amap)}")
-            continue
-        if arrays_only or assocs_only or arr is not None or amap is not None:
-            continue
-        if name in env:
-            lines.append(f"declare -r {name}={bash_declare_quote(env[name])}")
-        else:
-            lines.append(f"declare -r {name}")
-    return lines
+    lines = [
+        declare_line(session, name)
+        for name in sorted(
+            n for n in session.readonly_vars if env_is_readonly(session, n)
+        )
+        if kind_listed(session, name, flags)
+    ]
+    return [line for line in lines if line is not None]
 
 
 async def handle_readonly(
@@ -103,13 +84,15 @@ async def handle_readonly(
     state: SessionView | None = None,
     arrays: list[tuple[str, bool, list[str]]] | None = None,
     stored: list[str] | None = None,
-    assoc: bool = False,
+    kind: VarKind | None = None,
     shaping: frozenset[VarAttr] = frozenset(),
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Mark names readonly, or print them (``readonly -p`` / bare form).
 
-    With no name operands, prints every readonly name as ``declare -r``
-    (or ``declare -ar`` for arrays). Invalid options fail with status 2.
+    With no name operands, prints every readonly name as ``declare -p``
+    does. Invalid options fail with status 2. ``-a`` / ``-A`` shape only
+    an assigned value (``scalar_value``, ``store_staged_arrays``): a bare
+    ``readonly -a NAME`` marks the name and converts nothing.
 
     ``-f`` freezes *functions*: a frozen one refuses redefinition and
     ``unset -f`` with its own message, exit 1, and the old body stays
@@ -126,6 +109,7 @@ async def handle_readonly(
             IOResult(exit_code=2, stderr=err),
             ExecutionNode(command="readonly", exit_code=2, stderr=err),
         )
+    kind = kind or declared_kind(flags)
     if "f" in flags:
         return await mark_functions(
             "readonly",
@@ -135,7 +119,7 @@ async def handle_readonly(
             True,
             state,
             arrays,
-            assoc or "A" in flags,
+            kind,
         )
     if not names and not arrays:
         lines = _readonly_lines(session, flags)
@@ -152,7 +136,7 @@ async def handle_readonly(
             mark=VarAttr.READONLY,
             fatal=True,
             stored=stored,
-            assoc=assoc or "A" in flags,
+            kind=kind,
             errors=errors,
             shaping=shaping,
         )
@@ -163,13 +147,18 @@ async def handle_readonly(
         if bad_name is not None:
             errors.append(bad_name)
             continue
-        if "=" in assign:
-            key, _, val = assign.partition("=")
-            if view.is_readonly(key):
-                return readonly_refusal("readonly", key)
+        key, eq, val = assign.partition("=")
+        if eq and view.is_readonly(key):
+            return readonly_refusal("readonly", key)
+        # A value of the other array kind is refused and the name is
+        # still frozen, as bash does.
+        conflict = kind_conflict(session, key, kind) if eq else None
+        if conflict is not None:
+            errors.append(f"bash: readonly: {key}: {conflict}")
+        if eq and conflict is None:
             try:
                 await premark(view, key, shaping)
-                await view.set(key, val)
+                await view.set(key, scalar_value(session, key, val, kind))
             except PolicyDenied as exc:
                 return refusal("readonly", exc)
             except ArithError as exc:
@@ -187,12 +176,12 @@ async def handle_readonly(
             # exit 0, create the record, and freeze the name against
             # every later legitimate write.
             try:
-                await view.mark(assign, VarAttr.READONLY, True)
+                await view.mark(key, VarAttr.READONLY, True)
             except PolicyDenied as exc:
                 return refusal("readonly", exc)
             if stored is not None:
-                stored.append(assign)
-        outlive_call(session, assign.partition("=")[0])
+                stored.append(key)
+        outlive_call(session, key)
     if errors:
         return identifier_failure("readonly", errors)
     return None, IOResult(), ExecutionNode(command="readonly", exit_code=0)

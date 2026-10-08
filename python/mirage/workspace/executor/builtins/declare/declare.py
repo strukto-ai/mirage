@@ -18,11 +18,15 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
-from mirage.shell.array import build_assoc_literal, build_indexed_literal
+from mirage.shell.array import (
+    array_set,
+    build_assoc_literal,
+    build_indexed_literal,
+)
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError, DiscardSignal
 from mirage.shell.printer import stored_function_text
-from mirage.shell.variable import ShellValue, VarAttr, attr_letters
+from mirage.shell.variable import ShellValue, VarAttr, VarKind, attr_letters
 from mirage.utils.hidden import var_hidden
 from mirage.workspace.executor.builtins.declare.constants import (
     ANSI_C_ESCAPES,
@@ -68,6 +72,80 @@ async def premark(
         await view.mark(name, attr, True)
 
 
+def declared_kind(flags: set[str] | frozenset[str]) -> VarKind | None:
+    """The array kind a declaration's ``-a`` / ``-A`` asks for, ``-A``
+    winning when both are given (bash's ``export -aA B=(1)`` builds a
+    map), or None for neither.
+
+    Args:
+        flags (set[str] | frozenset[str]): the declaration's letters.
+    """
+    if "A" in flags:
+        return VarKind.ASSOC
+    if "a" in flags:
+        return VarKind.INDEXED
+    return None
+
+
+def kind_conflict(
+    session: SessionState, name: str, kind: VarKind | None
+) -> str | None:
+    """bash's refusal when a declared array kind meets a variable of the
+    other kind, or None when they agree.
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the variable being declared.
+        kind (VarKind | None): the kind ``-a`` / ``-A`` asked for.
+    """
+    if kind is VarKind.ASSOC and name in session.arrays:
+        return "cannot convert indexed to associative array"
+    if kind is VarKind.INDEXED and name in session.assocs:
+        return "cannot convert associative to indexed array"
+    return None
+
+
+def scalar_value(
+    session: SessionState, name: str, value: str, kind: VarKind | None
+) -> ShellValue:
+    """What ``export`` / ``readonly NAME=value`` stores.
+
+    An array keeps its kind and takes the value at element 0 (key
+    ``"0"`` in a map), as a plain ``NAME=value`` does; otherwise ``-A``
+    makes the map ``([0]=value)`` and ``-a`` the one-element array, and
+    with neither the value stays a scalar.
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the variable being assigned.
+        value (str): the assigned text.
+        kind (VarKind | None): the kind ``-a`` / ``-A`` asked for.
+    """
+    held_map = session.assocs.get(name)
+    held_arr = session.arrays.get(name)
+    if held_map is not None or kind is VarKind.ASSOC:
+        return {**(held_map or {}), "0": value}
+    if held_arr is not None or kind is VarKind.INDEXED:
+        arr = list(held_arr or [])
+        array_set(arr, 0, value)
+        return arr
+    return value
+
+
+def kind_listed(session: SessionState, name: str, flags: set[str]) -> bool:
+    """Whether a listing's ``-a`` / ``-A`` keep ``name``: ``-a`` lists
+    only indexed arrays, ``-A`` only associative ones, both nothing.
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the variable listed.
+        flags (set[str]): the listing's option letters.
+    """
+    if "a" in flags and name not in session.arrays:
+        return False
+    return "A" not in flags or name in session.assocs
+
+
 async def store_staged_arrays(
     cmd: str,
     session: SessionState,
@@ -77,7 +155,7 @@ async def store_staged_arrays(
     on: bool = True,
     fatal: bool = False,
     stored: list[str] | None = None,
-    assoc: bool = False,
+    kind: VarKind | None = None,
     errors: list[str] | None = None,
     shaping: frozenset[VarAttr] = frozenset(),
     global_scope: bool = False,
@@ -122,15 +200,17 @@ async def store_staged_arrays(
             stored, in order. A declaration keeps its valid operands
             when a sibling refuses, so the caller cannot read "what was
             written" off the aggregate exit status.
-        assoc (bool): the declaration carried ``-A``, so every literal
-            builds an associative map. Without it a name that already
-            holds one still builds a map, since a plain
-            ``m+=([k]=v)`` keeps the variable's own kind.
+        kind (VarKind | None): the kind ``-a`` / ``-A`` declared. ``-A``
+            builds every literal as an associative map; without it a
+            name that already holds one still builds a map, since a
+            plain ``m+=([k]=v)`` keeps the variable's own kind. A kind
+            that meets a variable of the other kind is bash's
+            ``cannot convert`` assignment error.
         errors (list[str] | None): filled with bash-voiced refusal
             lines for the plain words a keyed associative literal
-            cannot take; the caller folds them into its exit status,
-            because GNU stores the valid elements and still fails the
-            builtin.
+            cannot take, and for a kind conflict outside ``fatal``; the
+            caller folds them into its exit status, because GNU stores
+            the valid elements and still fails the builtin.
         shaping (frozenset[VarAttr]): the value-shaping attributes to
             put on each name before its literal stores.
         global_scope (bool): the declaration carried ``-g``, so no
@@ -149,8 +229,22 @@ async def store_staged_arrays(
                     encode_text(f"bash: {name}: readonly variable\n")
                 )
             return readonly_refusal(cmd, name)
-        if cmd not in VISIBLE_SCOPE_BUILTINS:
-            note_local_array(session, name)
+        # A new local shadows the caller's variable, so its kind is
+        # free; `export`, `readonly` and `-g` write the visible one.
+        shadowed = (
+            not global_scope
+            and cmd not in VISIBLE_SCOPE_BUILTINS
+            and note_local_array(session, name)
+        )
+        conflict = None if shadowed else kind_conflict(session, name, kind)
+        if conflict is not None:
+            if fatal:
+                raise DiscardSignal(encode_text(f"bash: {name}: {conflict}\n"))
+            line = f"bash: {cmd}: {name}: {conflict}"
+            if errors is None:
+                return identifier_failure(cmd, [line])
+            errors.append(line)
+            continue
         try:
             await premark(view, name, shaping)
         except PolicyDenied as exc:
@@ -160,7 +254,7 @@ async def store_staged_arrays(
         # literal may assign (`([x=2]=v)`), and that lands through the
         # same door.
         try:
-            if assoc or name in session.assocs:
+            if kind is VarKind.ASSOC or name in session.assocs:
                 built, bad_words = build_assoc_literal(
                     session.assocs.get(name), items, append
                 )
@@ -566,7 +660,7 @@ async def mark_functions(
     on: bool,
     state: SessionView | None = None,
     arrays: list[tuple[str, bool, list[str]]] | None = None,
-    assoc: bool = False,
+    kind: VarKind | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run ``readonly -f`` or ``export -f``: mark functions, or list them.
 
@@ -588,8 +682,7 @@ async def mark_functions(
             the array literals.
         arrays (list[tuple[str, bool, list[str]]] | None): staged
             ``(name, append, items)`` literals from the declaration.
-        assoc (bool): the declaration carried ``-A``, so every literal
-            builds an associative map.
+        kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
     """
     if arrays:
         refused = await store_staged_arrays(
@@ -598,7 +691,7 @@ async def mark_functions(
             require_view(state),
             arrays,
             fatal=True,
-            assoc=assoc,
+            kind=kind,
         )
         if refused is not None:
             return refused

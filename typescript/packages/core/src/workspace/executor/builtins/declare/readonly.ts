@@ -16,22 +16,24 @@ import { IOResult } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
-import { VarAttr } from '../../../../shell/variable.ts'
+import { VarAttr, type VarKind } from '../../../../shell/variable.ts'
 import { outliveCall, setAttr } from '../../../session/state.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { arithRefusal, readonlyRefusal, refusal, requireView } from '../shared.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { READONLY_FLAGS, READONLY_USAGE } from './constants.ts'
 import {
-  assocBody,
-  bashDeclareQuote,
+  declareLine,
+  declaredKind,
   identifierFailure,
   identifierRefusal,
+  kindConflict,
+  kindListed,
   markFunctions,
   premark,
+  scalarValue,
   splitDeclFlags,
   storeStagedArrays,
 } from './declare.ts'
@@ -40,51 +42,25 @@ import { encodeText } from '../../../../shell/bytes.ts'
 import type { ParseScope } from '../../../../shell/parse/scope.ts'
 
 function readonlyLines(session: SessionState, flags: Set<string>): string[] {
-  // -a narrows to indexed arrays and -A to associative ones, as bash
-  // does. -f selects functions, which mirage carries no readonly
-  // attribute for, so that form lists nothing.
-  if (flags.has('f')) return []
-  const arraysOnly = flags.has('a')
-  const assocsOnly = flags.has('A')
-  const env = visibleEnv(session)
-  const lines: string[] = []
-  // A hidden readonly never prints even its bare `declare -r NAME` row.
-  for (const name of [...session.readonlyVars]
-    .filter((name) => !varHidden(session.visibility, name))
-    .sort(compareCodePoints)) {
-    const arr = session.arrays[name]
-    const amap = session.assocs[name]
-    if (arr !== undefined && !assocsOnly) {
-      const parts: string[] = []
-      for (let i = 0; i < arr.length; i++) {
-        const v = arr[i]
-        if (v !== null && v !== undefined) {
-          parts.push(`[${String(i)}]=${bashDeclareQuote(v)}`)
-        }
-      }
-      lines.push(`declare -ar ${name}=(${parts.join(' ')})`)
-      continue
-    }
-    if (amap !== undefined && !arraysOnly) {
-      lines.push(`declare -Ar ${name}${assocBody(amap)}`)
-      continue
-    }
-    if (arraysOnly || assocsOnly || arr !== undefined || amap !== undefined) continue
-    if (name in env) {
-      lines.push(`declare -r ${name}=${bashDeclareQuote(env[name] ?? '')}`)
-    } else {
-      lines.push(`declare -r ${name}`)
-    }
-  }
-  return lines
+  // Each name's `declare -p` line, so the whole cluster prints (`declare
+  // -ir`, `declare -arx`) as bash's does; -a narrows to indexed arrays and
+  // -A to associative ones (`kindListed`). A hidden readonly never prints
+  // even its bare `declare -r NAME` row.
+  return [...session.readonlyVars]
+    .filter((name) => !varHidden(session.visibility, name) && kindListed(session, name, flags))
+    .sort(compareCodePoints)
+    .map((name) => declareLine(session, name))
+    .filter((line): line is string => line !== null)
 }
 
 /**
  * Mark names readonly, or print them (`readonly -p` / bare `readonly`).
  *
- * With no name operands, prints every readonly name as `declare -r` (or
- * `declare -ar` for arrays). Invalid options fail with status 2. `-f`
- * freezes functions instead, or lists the frozen (`markFunctions`).
+ * With no name operands, prints every readonly name as `declare -p` does.
+ * Invalid options fail with status 2. `-a` / `-A` shape only an assigned
+ * value (`scalarValue`, `storeStagedArrays`): a bare `readonly -a NAME`
+ * marks the name and converts nothing. `-f` freezes functions instead, or
+ * lists the frozen (`markFunctions`).
  */
 export async function handleReadonly(
   assignments: string[],
@@ -92,7 +68,7 @@ export async function handleReadonly(
   state: SessionView | null = null,
   arrays: { name: string; append: boolean; items: string[] }[] | null = null,
   stored: string[] | null = null,
-  assoc = false,
+  kind: VarKind | null = null,
   shaping: ReadonlySet<VarAttr> = new Set(),
   parser?: ParseScope,
 ): Promise<Result> {
@@ -105,6 +81,7 @@ export async function handleReadonly(
       new ExecutionNode({ command: 'readonly', exitCode: 2, stderr: err }),
     ]
   }
+  kind ??= declaredKind(flags)
   if (flags.has('f'))
     return markFunctions(
       'readonly',
@@ -115,7 +92,7 @@ export async function handleReadonly(
       state,
       arrays,
       parser,
-      assoc || flags.has('A'),
+      kind,
     )
   if (names.length === 0 && (arrays === null || arrays.length === 0)) {
     const lines = readonlyLines(session, flags)
@@ -134,7 +111,7 @@ export async function handleReadonly(
       true,
       true,
       stored,
-      assoc || flags.has('A'),
+      kind,
       errors,
       shaping,
     )
@@ -147,12 +124,16 @@ export async function handleReadonly(
       continue
     }
     const eq = assign.indexOf('=')
-    if (eq >= 0) {
-      const key = assign.slice(0, eq)
-      if (view.isReadonly(key)) return readonlyRefusal('readonly', key)
+    const key = eq >= 0 ? assign.slice(0, eq) : assign
+    if (eq >= 0 && view.isReadonly(key)) return readonlyRefusal('readonly', key)
+    // A value of the other array kind is refused and the name is still
+    // frozen, as bash does.
+    const conflict = eq >= 0 ? kindConflict(session, key, kind) : null
+    if (conflict !== null) errors.push(`bash: readonly: ${key}: ${conflict}`)
+    if (eq >= 0 && conflict === null) {
       try {
         await premark(view, key, shaping)
-        await view.set(key, assign.slice(eq + 1))
+        await view.set(key, scalarValue(session, key, assign.slice(eq + 1), kind))
       } catch (err) {
         if (err instanceof PolicyDenied) return refusal('readonly', err)
         if (err instanceof ArithError) return arithRefusal('readonly', err)
@@ -169,14 +150,14 @@ export async function handleReadonly(
       // refusing `AWS_*` still saw `readonly AWS_KEY` exit 0, create the
       // record, and freeze the name against every later legitimate write.
       try {
-        await view.mark(assign, VarAttr.Readonly, true)
+        await view.mark(key, VarAttr.Readonly, true)
       } catch (err) {
         if (err instanceof PolicyDenied) return refusal('readonly', err)
         throw err
       }
-      if (stored !== null) stored.push(assign)
+      if (stored !== null) stored.push(key)
     }
-    outliveCall(session, assign.split('=', 1)[0] ?? assign)
+    outliveCall(session, key)
   }
   if (errors.length > 0) return identifierFailure('readonly', errors)
   return [null, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
