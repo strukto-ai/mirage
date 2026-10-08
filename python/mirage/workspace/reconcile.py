@@ -50,7 +50,7 @@ class Reconciler:
 
     Three read paths call in: the cached-read gate (``may_serve_cached``),
     which the dispatcher and the file cache's own door both run, its main-op
-    catch (``on_op_missing``) for cross-mount and programmatic reads, and the
+    catch (``on_enoent``) for cross-mount and programmatic reads, and the
     mount registry's per-command reconcile (``reconcile_read``) for
     single-mount shell reads. Reconcile state follows each consumer's store
     (RAM local, Redis shared across runtimes), so this is a thin coordinator
@@ -339,9 +339,7 @@ class Reconciler:
             await mount.index.clear()
             logger.warning("reconcile probe failed for %s: %s", path, exc)
 
-    async def on_op_missing(
-        self, mount: MountEntry, name: str, path: str
-    ) -> None:
+    async def on_enoent(self, mount: MountEntry, name: str, path: str) -> None:
         """React to a read/stat op that the backend reported gone.
 
         Keyed on the mount's policy rather than fired unconditionally,

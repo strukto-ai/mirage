@@ -51,7 +51,7 @@ import { CycleError, norm, parent, posixNormpath } from '../../utils/path.ts'
 import type { Visibility } from '../../types.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import { record, runWithMountContext, runWithRevisions, startOp } from '../../observe/context.ts'
-import { wrapOpStream } from '../mount/mount.ts'
+import { wrapStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
@@ -349,21 +349,14 @@ export class Dispatcher {
     await this.refuseRename(call)
     if (this.tableAnswers(name, call.path.virtual, call.kwargs)) {
       return [
-        await this.namespaceTableOp(
-          name,
-          call.path,
-          call.args ?? [],
-          call.kwargs ?? {},
-          report,
-          issuer,
-        ),
+        await this.tableCall(name, call.path, call.args ?? [], call.kwargs ?? {}, report, issuer),
         new IOResult(),
       ]
     }
     this.follow(call)
     if (XATTR_OPS.has(name)) {
       return [
-        await this.xattrOp(name, call.path, call.kwargs ?? {}, report, issuer),
+        await this.answerXattr(name, call.path, call.kwargs ?? {}, report, issuer),
         new IOResult(),
       ]
     }
@@ -815,14 +808,14 @@ export class Dispatcher {
                 const pending = Promise.resolve(
                   name === 'setattr'
                     ? this.applySetattr(mount, vfs, scope, p, opKwargs)
-                    : mount.callOp(name, scope, fullArgs, opKwargs),
+                    : mount.callKeyed(name, scope, fullArgs, opKwargs),
                 )
                 onCall?.(pending)
                 return runWithTimeout(pending, opTimeout, name)
               }),
             mount.mountId,
           )
-          return wrapOpStream(answer, mount.mountId, mount.activity)
+          return wrapStream(answer, mount.mountId, mount.activity)
         })
       if (filler !== null) {
         const kept = await filler.fill(
@@ -867,7 +860,7 @@ export class Dispatcher {
         const fallback =
           isMissingPath(err) || isEnotdir(err) ? this.namespaceResult(name, p.virtual) : null
         if (fallback === null) {
-          await this.reconciler.onOpMissing(mount, name, p.virtual, err)
+          await this.reconciler.onEnoent(mount, name, p.virtual, err)
           throw err
         }
         result = fallback
@@ -1118,7 +1111,7 @@ export class Dispatcher {
    * must not survive. Only the visibility filter stays off, which is
    * what lets a remnant walk see hidden entries. Every internal
    * backend call in this class routes through here; a bare
-   * `callOp` outside dispatch is a bug.
+   * `callKeyed` outside dispatch is a bug.
    */
   private async fencedCall(
     vfs: BaseVFS,
@@ -1153,14 +1146,14 @@ export class Dispatcher {
         const answer = await runWithMountContext(
           () =>
             runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
-              mount.callOp(name, spec, [], {
+              mount.callKeyed(name, spec, [], {
                 ...this.indexKwargs(mount),
                 ...kwargs,
               }),
             ),
           mount.mountId,
         )
-        return wrapOpStream(answer, mount.mountId, mount.activity)
+        return wrapStream(answer, mount.mountId, mount.activity)
       })
       // A deletion is not completed through postVfs, which could only
       // refuse after the entry is gone and strand the cascade.
@@ -1362,7 +1355,7 @@ export class Dispatcher {
    * `stat` of a path the node table holds a link for. Mirrors Python's
    * Dispatcher._namespace_table_op.
    */
-  private async namespaceTableOp(
+  private async tableCall(
     name: string,
     path: PathSpec,
     args: readonly unknown[],
@@ -1493,7 +1486,7 @@ export class Dispatcher {
     if (normDir(mount.prefix) === normDir(path.virtual)) return [true, null]
     let listing: readonly string[] | null
     try {
-      const row = (await this.probeOp('stat', resolved, issuer)) as FileStat | null
+      const row = (await this.probeRead('stat', resolved, issuer)) as FileStat | null
       if (row !== null && row.type !== FileType.DIRECTORY) return [true, null]
       listing = await this.parentListing(path.virtual, issuer)
     } catch (err) {
@@ -1580,7 +1573,7 @@ export class Dispatcher {
     if (mount === null) return null
     if (normDir(mount.prefix) === normDir(virtual)) return FileType.DIRECTORY
     const resolved = await this.namespace.resolve(virtual, false)
-    const row = (await this.probeOp('stat', resolved, issuer)) as FileStat | null
+    const row = (await this.probeRead('stat', resolved, issuer)) as FileStat | null
     if (row !== null) return row.type
     const listing = await this.parentListing(virtual, issuer)
     return listing !== null && lists(listing, virtual) ? FileType.DIRECTORY : null
@@ -1600,7 +1593,7 @@ export class Dispatcher {
     const above = trimmed.slice(0, cut) || '/'
     if (this.namespace.tryMountFor(above) === null) return null
     const resolved = await this.namespace.resolve(above, false)
-    const entries = await this.probeOp('readdir', resolved, issuer)
+    const entries = await this.probeRead('readdir', resolved, issuer)
     return Array.isArray(entries) ? entries.map(String) : null
   }
 
@@ -1625,7 +1618,7 @@ export class Dispatcher {
    *   issuer: the mark on the op being served, carried to the probe's
    *     gate so the probe is judged as its caller's.
    */
-  private async probeOp(
+  private async probeRead(
     name: string,
     resolved: [BaseVFS, PathSpec, MountMode],
     issuer?: symbol,
@@ -1639,7 +1632,7 @@ export class Dispatcher {
     const filetype = getExtension(scope.virtual)
     try {
       const result = await mount.use(() =>
-        mount.callOp(name, scope, [], {
+        mount.callKeyed(name, scope, [], {
           ...this.indexKwargs(mount),
           ...(filetype !== null ? { filetype } : {}),
         }),
@@ -1679,7 +1672,7 @@ export class Dispatcher {
    *   report: the caller's report.
    *   issuer: the mark on the op being served.
    */
-  private async xattrOp(
+  private async answerXattr(
     name: string,
     path: PathSpec,
     kwargs: OpKwargs,
@@ -1764,7 +1757,7 @@ export class Dispatcher {
       const filetype = getExtension(scope.virtual)
       try {
         const found = await mount.use(() =>
-          mount.callOp('stat', scope, [], {
+          mount.callKeyed('stat', scope, [], {
             ...this.indexKwargs(mount),
             ...(filetype !== null ? { filetype } : {}),
           }),
@@ -1773,7 +1766,7 @@ export class Dispatcher {
       } catch (err) {
         if (!isMissingPath(err) && !isEnotdir(err)) throw err
         missing = err
-        await this.reconciler.onOpMissing(mount, 'stat', path.virtual, err)
+        await this.reconciler.onEnoent(mount, 'stat', path.virtual, err)
       }
     }
     if (stat !== null || this.namespaceResult('stat', path.virtual) instanceof FileStat) return
@@ -1805,7 +1798,7 @@ export class Dispatcher {
       await this.xattrTarget(mount, p)
       return this.overlaySetattr(p, kwargs)
     }
-    const raw = await mount.callOp('setattr', scope, [], kwargs)
+    const raw = await mount.callKeyed('setattr', scope, [], kwargs)
     const residual = raw as Record<string, number | string>
     const applied = SETATTR_KEYS.filter(
       (key) => kwargs[key] !== undefined && kwargs[key] !== null && !(key in residual),

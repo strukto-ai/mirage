@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { applyOpLimit } from '../commands/builtin/utils/limit.ts'
+import { limitResult } from '../commands/builtin/utils/limit.ts'
 import type { Decisions } from '../policy/decisions.ts'
 import type { Policies } from '../policy/policies.ts'
 import { postVfsGate, preVfsGate } from '../policy/policies.ts'
@@ -47,7 +47,7 @@ export class OpBoundary {
   }
 
   async complete(op: string, path: PathSpec, write: boolean, result: unknown): Promise<unknown> {
-    return applyOpLimit(
+    return limitResult(
       result,
       await postVfsGate(this.policies, op, path, write, this.prefix, result),
     )

@@ -99,22 +99,22 @@ describe('Reconciler', () => {
     await ws.close()
   })
 
-  it('onOpMissing GCs an orphaned overlay on a fresh mount + stat + ENOENT', async () => {
+  it('onEnoent GCs an orphaned overlay on a fresh mount + stat + ENOENT', async () => {
     const ws = await wsWithOverlay()
     const rec = new Reconciler(ws.cache, ws.namespace)
     const mount = withFresh(mountOf(ws, '/data/f.txt'))
-    await rec.onOpMissing(mount, 'stat', '/data/f.txt', enoent('/data/f.txt'))
+    await rec.onEnoent(mount, 'stat', '/data/f.txt', enoent('/data/f.txt'))
     expect(ws.namespace.metaFor('/data/f.txt')).toBeNull()
     await ws.close()
   })
 
-  it('onOpMissing keeps an authoritative symlink', async () => {
+  it('onEnoent keeps an authoritative symlink', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() })
     await ws.namespace.ensureLoaded()
     await ws.namespace.symlink('/data/link', '/data/t', 1)
     const rec = new Reconciler(ws.cache, ws.namespace)
     const mount = withFresh(mountOf(ws, '/data/link'))
-    await rec.onOpMissing(mount, 'stat', '/data/link', enoent('/data/link'))
+    await rec.onEnoent(mount, 'stat', '/data/link', enoent('/data/link'))
     expect(ws.namespace.readlink('/data/link')).toBe('/data/t')
     await ws.close()
   })
@@ -122,29 +122,29 @@ describe('Reconciler', () => {
   // A mount that declined to revalidate also declines to GC on a miss:
   // an ENOENT here is not proof the backend said so, because several
   // backends answer a miss out of a live index.
-  it('onOpMissing skips under bounded', async () => {
+  it('onEnoent skips under bounded', async () => {
     const ws = await wsWithOverlay()
     const rec = new Reconciler(ws.cache, ws.namespace)
     const mount = mountOf(ws, '/data/f.txt')
-    await rec.onOpMissing(mount, 'stat', '/data/f.txt', enoent('/data/f.txt'))
+    await rec.onEnoent(mount, 'stat', '/data/f.txt', enoent('/data/f.txt'))
     expect(ws.namespace.metaFor('/data/f.txt')).not.toBeNull()
     await ws.close()
   })
 
-  it('onOpMissing skips a non-revalidate op', async () => {
+  it('onEnoent skips a non-revalidate op', async () => {
     const ws = await wsWithOverlay()
     const rec = new Reconciler(ws.cache, ws.namespace)
     const mount = withFresh(mountOf(ws, '/data/f.txt'))
-    await rec.onOpMissing(mount, 'write', '/data/f.txt', enoent('/data/f.txt'))
+    await rec.onEnoent(mount, 'write', '/data/f.txt', enoent('/data/f.txt'))
     expect(ws.namespace.metaFor('/data/f.txt')).not.toBeNull()
     await ws.close()
   })
 
-  it('onOpMissing ignores a non-ENOENT error', async () => {
+  it('onEnoent ignores a non-ENOENT error', async () => {
     const ws = await wsWithOverlay()
     const rec = new Reconciler(ws.cache, ws.namespace)
     const mount = withFresh(mountOf(ws, '/data/f.txt'))
-    await rec.onOpMissing(mount, 'stat', '/data/f.txt', new Error('boom'))
+    await rec.onEnoent(mount, 'stat', '/data/f.txt', new Error('boom'))
     expect(ws.namespace.metaFor('/data/f.txt')).not.toBeNull()
     await ws.close()
   })
@@ -260,7 +260,7 @@ describe('Reconciler', () => {
     try {
       const mount = withFresh(mountOf(ws, '/data/f.txt'))
       expect(mount.vfs.supportsSnapshot).not.toBe(true)
-      vi.spyOn(mount, 'callOp').mockImplementation(() =>
+      vi.spyOn(mount, 'callKeyed').mockImplementation(() =>
         Promise.resolve(new FileStat({ name: 'f.txt', type: FileType.FILE, fingerprint: 'fp1' })),
       )
       await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
@@ -318,7 +318,7 @@ describe('Reconciler', () => {
       const logged = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
       try {
         const mount = withFresh(mountOf(ws, '/data/f.txt'))
-        vi.spyOn(mount, 'callOp').mockImplementation(() =>
+        vi.spyOn(mount, 'callKeyed').mockImplementation(() =>
           Promise.reject(
             failure === 'no_stat_op'
               ? enotsup('stubborn', 'stat', '/data/f.txt')
@@ -362,7 +362,7 @@ describe('Reconciler', () => {
       await ws.namespace.ensureLoaded()
       const mount = withFresh(mountOf(ws, '/data/f.txt'))
       vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-      vi.spyOn(mount, 'callOp').mockImplementation(() =>
+      vi.spyOn(mount, 'callKeyed').mockImplementation(() =>
         Promise.reject(
           failure === 'bug'
             ? new TypeError('probe bug')
@@ -391,7 +391,7 @@ describe('unverified freshness probes', () => {
         const path = '/data/f.txt'
         const mount = withFresh(mountOf(ws, path))
         Object.defineProperty(mount.vfs, 'supportsSnapshot', { value: true })
-        vi.spyOn(mount, 'callOp').mockImplementation(() => {
+        vi.spyOn(mount, 'callKeyed').mockImplementation(() => {
           if (probe === 'failed') return Promise.reject(new Error('probe unavailable'))
           if (probe === 'none') return Promise.resolve(null)
           return Promise.resolve(
@@ -456,7 +456,7 @@ it.each(['gate', 'shell'])('reconciles GitHub IDs before the %s reread', async (
     const mount = withFresh(mountOf(ws, path))
     expect((await githubStat(accessor, scope, mount.indexStore)).fingerprint).toBe('v1')
     await ws.cache.set(path, new TextEncoder().encode('v1'), { fingerprint: 'v1' })
-    vi.spyOn(mount, 'callOp').mockImplementation((_op, p, _args, kwargs) =>
+    vi.spyOn(mount, 'callKeyed').mockImplementation((_op, p, _args, kwargs) =>
       githubStat(accessor, p, kwargs?.index),
     )
     const rec = new Reconciler(ws.cache, ws.namespace)
@@ -632,7 +632,7 @@ describe('the gate reuses what routing got from the backend', () => {
     let calls = 0
     try {
       const mount = withFresh(mountOf(ws, '/data/f.txt'))
-      vi.spyOn(mount, 'callOp').mockImplementation(async () => {
+      vi.spyOn(mount, 'callKeyed').mockImplementation(async () => {
         calls += 1
         const result = new FileStat({ name: 'f.txt', size: 2, type: FileType.FILE, fingerprint })
         if (calls === 1) {
@@ -672,7 +672,7 @@ describe('the gate reuses what routing got from the backend', () => {
     const mount = withFresh(mountOf(ws, '/data/f.txt'))
     await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
     let calls = 0
-    vi.spyOn(mount, 'callOp').mockImplementation(() => {
+    vi.spyOn(mount, 'callKeyed').mockImplementation(() => {
       calls += 1
       return Promise.resolve(
         new FileStat({ name: 'f.txt', size: 2, type: FileType.FILE, fingerprint: 'fp1' }),
@@ -1045,7 +1045,7 @@ it('the probe hints the mount index row', async () => {
     expect(held).toBeDefined()
     expect((await mount.indexStore.get('/elsewhere/g.txt')).entry).toBeDefined()
     const seen: (IndexEntry | null)[] = []
-    vi.spyOn(mount, 'callOp').mockImplementation(async (_op, _p, _args, kwargs) => {
+    vi.spyOn(mount, 'callKeyed').mockImplementation(async (_op, _p, _args, kwargs) => {
       const index = kwargs?.index
       if (!(index instanceof ListingCheckStore))
         throw new Error('the probe passed no scratch index')

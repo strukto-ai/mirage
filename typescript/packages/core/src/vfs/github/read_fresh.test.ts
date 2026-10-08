@@ -390,7 +390,7 @@ describe('github cannot-see versus gone', () => {
 
   it('never reads cannot-see as gone through the dispatcher door', async () => {
     // No cached copy, so cp's own stat is the op that reaches the backend: an
-    // ENOENT there goes through onOpMissing, which drops the overlay.
+    // ENOENT there goes through onEnoent, which drops the overlay.
     const w = await ws(await vfsOf())
     try {
       await clearedWithOverlay(w)

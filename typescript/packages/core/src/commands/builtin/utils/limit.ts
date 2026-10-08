@@ -280,7 +280,7 @@ export async function guardOutput(
   return [data, io.stderr, io.exitCode]
 }
 
-export async function applyOpLimit(result: unknown, limit: Limit | null): Promise<unknown> {
+export async function limitResult(result: unknown, limit: Limit | null): Promise<unknown> {
   if (limit === null) return result
   if (limit.maxBytes === null && limit.maxLines === null) return result
   const isBytes = result instanceof Uint8Array

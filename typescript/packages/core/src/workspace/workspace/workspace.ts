@@ -405,8 +405,8 @@ export class Workspace {
     this.registry.mount(
       BIN_PREFIX,
       new BinViewVFS(
-        () => programs(this.opSession(), this.registry),
-        (name) => programNote(name, this.opSession(), this.registry),
+        () => programs(this.callSession(), this.registry),
+        (name) => programNote(name, this.callSession(), this.registry),
       ),
       MountMode.READ,
       DEFAULT_READ_SPEC,
@@ -482,7 +482,7 @@ export class Workspace {
       this.registry,
       this.vfs,
       this.sessionManager,
-      () => getCurrentSessionUnlessForeign(this.sessionManager) ?? this.opSession(),
+      () => getCurrentSessionUnlessForeign(this.sessionManager) ?? this.callSession(),
       (name) => compileProfile(this.baseProfile(name), name),
       () => this.ensureSessionsLoaded(),
       (path) => this.unmount(path),
@@ -579,7 +579,7 @@ export class Workspace {
   }
 
   /** The session an op runs under: the bound one, else the default. */
-  private opSession(): SessionState {
+  private callSession(): SessionState {
     return (
       getCurrentSessionFor(this.sessionManager) ??
       this.sessionManager.get(this.sessionManager.defaultId)
@@ -588,7 +588,8 @@ export class Workspace {
 
   /** Capture local adapter doors under this workspace's active or explicitly named session. */
   runtimeContext(sessionId?: string): RuntimeContext {
-    const session = sessionId === undefined ? this.opSession() : this.sessionManager.get(sessionId)
+    const session =
+      sessionId === undefined ? this.callSession() : this.sessionManager.get(sessionId)
     const scope = new ContextScope([
       ...captureSessionContext(session, this.sessionManager),
       ...captureOpPolicies(),
@@ -611,7 +612,7 @@ export class Workspace {
   spawn(request: SpawnRequest, sessionId?: string): ChildProcess {
     return this.spawnForSession(
       request,
-      sessionId === undefined ? this.opSession() : this.sessionManager.get(sessionId),
+      sessionId === undefined ? this.callSession() : this.sessionManager.get(sessionId),
     )
   }
 
@@ -744,12 +745,7 @@ export class Workspace {
       args: readonly unknown[] = [],
       kwargs: OpKwargs = {},
     ): Promise<unknown> =>
-      this.dispatchInternal(
-        name,
-        path,
-        args,
-        issuer === undefined ? kwargs : { ...kwargs, issuer },
-      )
+      this.dispatchInternal(name, path, args, issuer === undefined ? kwargs : { ...kwargs, issuer })
     return async (op, path, bytes, dst, attrs) => {
       switch (op) {
         case 'read': {
@@ -1534,12 +1530,7 @@ export class Workspace {
     // enforcement, per-op commandLimits on the executing mount,
     // revisions, overlay stat, and post-write invalidation. The same
     // single path Python's Workspace.dispatch delegates to.
-    const [result] = await this.dispatcher.dispatch(
-      name,
-      PathSpec.fromStrPath(path),
-      args,
-      kwargs,
-    )
+    const [result] = await this.dispatcher.dispatch(name, PathSpec.fromStrPath(path), args, kwargs)
     return result
   }
 

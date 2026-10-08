@@ -55,7 +55,7 @@ enum Verdict {
  *
  * Three read paths call in: the cached-read gate (mayServeCached), which the
  * dispatcher and the file cache's own door both run, its main-op catch
- * (onOpMissing) for cross-mount and programmatic reads, and the mount
+ * (onEnoent) for cross-mount and programmatic reads, and the mount
  * registry's per-command reconcile (reconcileRead) for single-mount shell
  * reads. The re-stat goes through the ops registry (not mount.call,
  * whose op set omits stat). Reconcile state follows each consumer's store
@@ -97,7 +97,7 @@ export class Reconciler {
       scratch = new ListingCheckStore({ hints: mount.index })
       try {
         // No cached row answers; the mount's rows ride along as hints.
-        remoteStat = await mount.callOp('stat', scope, [], { index: scratch })
+        remoteStat = await mount.callKeyed('stat', scope, [], { index: scratch })
       } catch (err) {
         if (isEnoent(err) || isEnotdir(err)) {
           await this.onMissing(path)
@@ -259,7 +259,7 @@ export class Reconciler {
   // Ask the backend for the version a listing check compares: the mount root
   // or the folder the version covers.
   private async listingFingerprint(mount: MountEntry, path: string): Promise<string | null> {
-    const remote = await mount.callOp('stat', scopeOf(mount, path), [], {
+    const remote = await mount.callKeyed('stat', scopeOf(mount, path), [], {
       index: new ListingCheckStore(),
     })
     return remote instanceof FileStat ? remote.fingerprint : null
@@ -302,7 +302,7 @@ export class Reconciler {
   //
   // `isEnoent` is load-bearing and stays: the call site is a generic
   // catch, so without it a 500, a timeout or an auth failure would GC.
-  async onOpMissing(mount: MountEntry, name: string, path: string, err: unknown): Promise<void> {
+  async onEnoent(mount: MountEntry, name: string, path: string, err: unknown): Promise<void> {
     if (
       mount.read.policy === ReadPolicy.FRESH &&
       REVALIDATE_OPS.has(name) &&

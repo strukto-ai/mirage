@@ -114,7 +114,7 @@ async def test_on_op_missing_skips_under_bounded():
     ws = await _ws_with_overlay()
     mount = ws.namespace.mount_for("/data/f.txt")
     rec = Reconciler(ws.cache, ws.namespace)
-    await rec.on_op_missing(mount, "stat", "/data/f.txt")
+    await rec.on_enoent(mount, "stat", "/data/f.txt")
     assert ws.namespace.meta_for("/data/f.txt") is not None
 
 
@@ -124,7 +124,7 @@ async def test_on_op_missing_skips_non_revalidate_op():
     mount = ws.namespace.mount_for("/data/f.txt")
     mount.read = ReadSpec(policy=ReadPolicy.FRESH)
     rec = Reconciler(ws.cache, ws.namespace)
-    await rec.on_op_missing(mount, "write", "/data/f.txt")
+    await rec.on_enoent(mount, "write", "/data/f.txt")
     assert ws.namespace.meta_for("/data/f.txt") is not None
 
 
@@ -134,7 +134,7 @@ async def test_on_op_missing_gcs_on_a_fresh_mounts_stat():
     mount = ws.namespace.mount_for("/data/f.txt")
     mount.read = ReadSpec(policy=ReadPolicy.FRESH)
     rec = Reconciler(ws.cache, ws.namespace)
-    await rec.on_op_missing(mount, "stat", "/data/f.txt")
+    await rec.on_enoent(mount, "stat", "/data/f.txt")
     assert ws.namespace.meta_for("/data/f.txt") is None
 
 

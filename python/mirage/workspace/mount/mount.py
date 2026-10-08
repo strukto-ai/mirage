@@ -184,7 +184,7 @@ def _wrap_mount_streams(
     return stream, io
 
 
-def _wrap_op_stream(result: Any, mount_id: str, activity: VFSActivity) -> Any:
+def _wrap_stream(result: Any, mount_id: str, activity: VFSActivity) -> Any:
     """Hold the host-I/O bypass around an op result that streams.
 
     An op that returns an async iterator has not run its body yet: the
@@ -1070,7 +1070,7 @@ class MountEntry:
             stream = _command_output(stream, io, cmd_name, paths)
         return stream, io
 
-    def supports_op(self, name: str, path: str) -> bool:
+    def answers_at(self, name: str, path: str) -> bool:
         """Report whether an op would resolve for a path on this mount.
 
         Args:
@@ -1253,7 +1253,7 @@ class MountEntry:
                                 result, op_timeout, name
                             )
                     if result is not None:
-                        return _wrap_op_stream(
+                        return _wrap_stream(
                             result, self.mount_id, self.activity
                         )
                 return None

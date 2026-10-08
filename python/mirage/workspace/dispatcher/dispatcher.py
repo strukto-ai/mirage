@@ -483,15 +483,13 @@ class Dispatcher:
         await self._refuse_rename(call)
         if self._table_answers(name, call.path.virtual, kwargs):
             return (
-                await self._namespace_table_op(
-                    name, call.path, kwargs, report
-                ),
+                await self._table_call(name, call.path, kwargs, report),
                 IOResult(),
             )
         self._follow(call)
         if name in XATTR_OPS:
             return (
-                await self._xattr_op(name, call.path, kwargs, report),
+                await self._answer_xattr(name, call.path, kwargs, report),
                 IOResult(),
             )
         if name == "statfs":
@@ -908,7 +906,7 @@ class Dispatcher:
         except (FileNotFoundError, NotADirectoryError):
             result = self._namespace_result(call.name, call.path.virtual)
             if result is None:
-                await self._reconciler.on_op_missing(
+                await self._reconciler.on_enoent(
                     mount, call.name, call.path.virtual
                 )
                 raise
@@ -1238,7 +1236,7 @@ class Dispatcher:
             return False
         return self._namespace.is_link(virtual)
 
-    async def _namespace_table_op(
+    async def _table_call(
         self,
         name: str,
         path: PathSpec,
@@ -1412,7 +1410,7 @@ class Dispatcher:
         if norm_dir(mount.prefix) == norm_dir(path.virtual):
             return True, None
         try:
-            row = await self._probe_op("stat", mount, path)
+            row = await self._probe_read("stat", mount, path)
             if row is not None and row.type is not FileType.DIRECTORY:
                 return True, None
             listing = await self._parent_listing(path)
@@ -1512,7 +1510,7 @@ class Dispatcher:
         if norm_dir(mount.prefix) == norm_dir(virtual):
             return FileType.DIRECTORY
         spec = PathSpec.from_str_path(virtual)
-        row = await self._probe_op("stat", mount, spec)
+        row = await self._probe_read("stat", mount, spec)
         if row is not None:
             return row.type
         listing = await self._parent_listing(spec)
@@ -1533,11 +1531,11 @@ class Dispatcher:
         mount = self._namespace.try_mount_for(above or "/")
         if not name or mount is None:
             return None
-        return await self._probe_op(
+        return await self._probe_read(
             "readdir", mount, PathSpec.from_str_path(above or "/")
         )
 
-    async def _probe_op(
+    async def _probe_read(
         self, name: str, mount: MountEntry, path: PathSpec
     ) -> Any:
         """Run one read op for a probe, or None when it found nothing.
@@ -1553,7 +1551,7 @@ class Dispatcher:
             mount (MountEntry): the mount owning the path.
             path (PathSpec): the path to probe.
         """
-        if not mount.supports_op(name, path.virtual):
+        if not mount.answers_at(name, path.virtual):
             return None
         boundary = self._boundary(mount)
         await boundary.admit(name, path, False)
@@ -1570,7 +1568,7 @@ class Dispatcher:
             # not absence on its own, so the caller tries the other.
             return None
 
-    async def _xattr_op(
+    async def _answer_xattr(
         self,
         name: str,
         path: PathSpec,
@@ -1684,9 +1682,7 @@ class Dispatcher:
                 stat = await mount.call("stat", path.virtual)
             except (FileNotFoundError, NotADirectoryError) as exc:
                 missing = exc
-                await self._reconciler.on_op_missing(
-                    mount, "stat", path.virtual
-                )
+                await self._reconciler.on_enoent(mount, "stat", path.virtual)
         if stat is not None or isinstance(
             self._namespace_result("stat", path.virtual), FileStat
         ):
@@ -1716,7 +1712,7 @@ class Dispatcher:
             kwargs (dict[str, Any]): the requested attribute fields.
         """
         requested = {key: kwargs.get(key) for key in SETATTR_KEYS}
-        if self._namespace.is_link(path.virtual) or not mount.supports_op(
+        if self._namespace.is_link(path.virtual) or not mount.answers_at(
             "setattr", path.virtual
         ):
             # No backend inode answers for the path here, so nothing

@@ -461,9 +461,9 @@ class Workspace:
         self._registry.mount(
             BIN_PREFIX,
             BinViewVFS(
-                lambda: programs(self._op_session(), self._registry),
+                lambda: programs(self._call_session(), self._registry),
                 lambda name: program_note(
-                    name, self._op_session(), self._registry
+                    name, self._call_session(), self._registry
                 ),
             ),
             MountMode.READ,
@@ -489,7 +489,7 @@ class Workspace:
             self._session_mgr,
             lambda: (
                 get_current_session_unless_foreign(self._session_mgr)
-                or self._op_session()
+                or self._call_session()
             ),
             lambda name: compile_profile(self._base_profile(name), name),
             lambda: self.ensure_sessions_loaded(),
@@ -997,7 +997,7 @@ class Workspace:
             prefixes.append(entry.prefix)
         return prefixes
 
-    def _op_session(self) -> SessionState:
+    def _call_session(self) -> SessionState:
         """The session an op runs under: the bound one, else the default."""
         return get_current_session_for(
             self._session_mgr
@@ -1012,7 +1012,7 @@ class Workspace:
         session = (
             self._session_mgr.get(session_id)
             if session_id is not None
-            else self._op_session()
+            else self._call_session()
         )
         token = set_current_session(session, self._session_mgr)
         try:
@@ -1042,7 +1042,7 @@ class Workspace:
         session = (
             self._session_mgr.get(session_id)
             if session_id is not None
-            else self._op_session()
+            else self._call_session()
         )
         return self._spawn_for_session(request, session)
 

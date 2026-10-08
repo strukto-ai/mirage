@@ -49,7 +49,7 @@ class DoorOps {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
-    return this.mount.callOp(name, path, args, { index: this.index, ...kwargs })
+    return this.mount.callKeyed(name, path, args, { index: this.index, ...kwargs })
   }
 
   read(path: PathSpec, kwargs: OpKwargs = {}): Promise<Uint8Array> {

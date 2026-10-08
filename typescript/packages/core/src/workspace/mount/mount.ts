@@ -667,7 +667,7 @@ export class MountEntry {
    * names one (null asks for the stored bytes) and by the path's extension
    * otherwise.
    */
-  async callOp(
+  async callKeyed(
     name: string,
     scope: PathSpec,
     args: readonly unknown[] = [],
@@ -1052,7 +1052,7 @@ export class MountEntry {
                 name,
               )
               if (result !== null && result !== undefined) {
-                return wrapOpStream(result, this.mountId, this.activity)
+                return wrapStream(result, this.mountId, this.activity)
               }
             }
             return null
@@ -1085,7 +1085,7 @@ async function* commandOutput(
 }
 
 /** Preserve a streaming operation's recording owner after its dispatch frame exits. */
-export function wrapOpStream(result: unknown, mountId: string, activity: VFSActivity): unknown {
+export function wrapStream(result: unknown, mountId: string, activity: VFSActivity): unknown {
   if (result instanceof CachableAsyncIterator) {
     result.wrapSource((source) => withMountContext(source, mountId))
     return activity.hold(result)
