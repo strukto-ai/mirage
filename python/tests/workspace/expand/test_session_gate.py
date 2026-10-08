@@ -173,6 +173,20 @@ async def test_a_refused_literal_leaves_the_stored_ones_marked(
 
 
 @pytest.mark.asyncio
+async def test_a_literal_mark_stays_on_the_target_its_write_cleared(guarded):
+    # The literal writes through `ref` to `T`; the plain operand then
+    # re-aims `ref` at `AWS_KEY`, and the literal's `-x` must not follow
+    # it there past the gate. Under `-n` it marks the reference itself.
+    result = await guarded.shell(
+        "T=old; declare -n ref=T; declare -nx ref=AWS_KEY ref=(one)"
+    )
+    assert result.exit_code == 0
+    shown = await guarded.shell("declare -p ref AWS_KEY")
+    assert shown.stdout == b'declare -nx ref="AWS_KEY"\n'
+    assert b"AWS_KEY: not found" in (shown.stderr or b"")
+
+
+@pytest.mark.asyncio
 async def test_a_fresh_local_assignment_asks_for_no_unset():
     # The new local's reset is the scope's bookkeeping, not a deletion
     # the line asked for; only the assignment is the gated write.

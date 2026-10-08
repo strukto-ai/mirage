@@ -186,6 +186,22 @@ describe('a refused literal leaves the stored ones marked', () => {
   }
 })
 
+it("keeps a literal's mark on the target its write cleared", async () => {
+  // The literal writes through `ref` to `T`; the plain operand then re-aims
+  // `ref` at `AWS_KEY`, and the literal's `-x` must not follow it there past
+  // the gate. Under `-n` it marks the reference itself.
+  const ws = await guarded()
+  try {
+    const result = await ws.shell('T=old; declare -n ref=T; declare -nx ref=AWS_KEY ref=(one)')
+    expect(result.exitCode).toBe(0)
+    const shown = await ws.shell('declare -p ref AWS_KEY')
+    expect(DEC.decode(shown.stdout)).toBe('declare -nx ref="AWS_KEY"\n')
+    expect(DEC.decode(shown.stderr)).toContain('AWS_KEY: not found')
+  } finally {
+    await ws.close()
+  }
+})
+
 it('asks for no unset when a fresh local is assigned', async () => {
   // The new local's reset is the scope's bookkeeping, not a deletion the
   // line asked for; only the assignment is the gated write.

@@ -235,6 +235,15 @@ export async function dropReference(
 }
 
 /**
+ * A name's own record, undefined when unset or hidden: a hidden name reads
+ * as unset, so no refusal can quote or describe its value.
+ */
+export function visibleRecord(session: SessionState, name: string): ShellVar | undefined {
+  if (varHidden(session.visibility, name)) return undefined
+  return sessionEntry(session.vars, name)
+}
+
+/**
  * The line a `+letter` earns on one operand, if any. Two letters cannot be
  * taken off: `+r` on a readonly name is `declare: R: readonly variable` and
  * the name stays frozen, as is `+n` on a frozen reference; `+a` / `+A` on an array is `cannot destroy array
@@ -249,17 +258,17 @@ export function plusRefusal(
   name: string,
   plus: string,
 ): string | null {
-  const reference = sessionEntry(session.vars, name)?.attrs.has(VarAttr.Nameref) === true
+  const own = visibleRecord(session, name)
+  const value = own?.value ?? null
+  const reference = own?.attrs.has(VarAttr.Nameref) === true
   if (
     (plus.includes('r') && view.isReadonly(name)) ||
     (plus.includes('n') && reference && view.isReadonly(name, false))
   ) {
     return readonlyLine(cmd, name)
   }
-  if (
-    (plus.includes('a') && Object.hasOwn(session.arrays, name)) ||
-    (plus.includes('A') && Object.hasOwn(session.assocs, name))
-  ) {
+  const isMap = value !== null && typeof value === 'object' && !Array.isArray(value)
+  if ((plus.includes('a') && Array.isArray(value)) || (plus.includes('A') && isMap)) {
     return `bash: ${cmd}: ${name}: cannot destroy array variables in this way`
   }
   return null
@@ -275,8 +284,9 @@ export function plusRefusal(
  * stores `(2)`, writes 1 over element 0 and freezes `R`, and a fatal literal
  * leaves every other operand undone (pinned on 5.2.37). Only the
  * value-shaping attributes go on before a literal stores (`shaping`); the
- * caller's second pass puts the rest on the literals whose positions
- * `stored` reports.
+ * caller's second pass puts the rest on the literals `stored` reports, by
+ * position, against the variable each write's gate cleared, so an operand
+ * that re-aims a reference in between cannot carry a mark past the gate.
  *
  * The builtin owns the store; readonly is the shell's rule, checked per name
  * before the door, and the door's gate covers the policy half. Names are
@@ -309,7 +319,7 @@ export async function storeStagedArrays(
   errors: string[],
   warnings: string[],
   fatal = false,
-  stored: Set<number> | null = null,
+  stored: Map<number, string> | null = null,
   kind: VarKind | null = null,
   shaping: AttrMarks = [],
   globalScope = false,
@@ -344,6 +354,7 @@ export async function storeStagedArrays(
       throw err
     }
     let base: ShellValue
+    const checked = deref(session, name) || name
     // One try around the literal and the write: a subscript in the
     // literal may assign (`([x=2]=v)`), and that lands through the same
     // door.
@@ -372,7 +383,7 @@ export async function storeStagedArrays(
       if (err instanceof ArithError) return arithRefusal(cmd, err)
       throw err
     }
-    if (stored !== null) stored.add(position)
+    if (stored !== null) stored.set(position, checked)
   }
   return null
 }
@@ -807,7 +818,7 @@ export async function markVariables(
 ): Promise<Result> {
   const errors: string[] = []
   const warnings: string[] = []
-  const stored = new Set<number>()
+  const stored = new Map<number, string>()
   const refused = await storeStagedArrays(
     cmd,
     session,
@@ -825,11 +836,11 @@ export async function markVariables(
         const line =
           refused !== null ? null : await markOperand(cmd, session, view, operand, attr, on, kind)
         if (line !== null) errors.push(line)
-      } else if (stored.has(position)) {
+      } else {
         // A literal is marked at its place, even when a policy refused a
         // later literal.
-        const name = operand.name
-        await markWritten(session, view, name, deref(session, name) || name, attr, on)
+        const checked = stored.get(position)
+        if (checked !== undefined) await markWritten(session, view, operand.name, checked, attr, on)
       }
     }
   } catch (err) {

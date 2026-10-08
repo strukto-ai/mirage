@@ -49,6 +49,7 @@ import {
   stampMarks,
   startLocal,
   storeStagedArrays,
+  visibleRecord,
 } from './declare.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import type { AttrMarks, DeclarationOperand } from './types.ts'
@@ -147,7 +148,7 @@ async function declareOperands(
 ): Promise<Result> {
   const errors: string[] = []
   const warnings: string[] = []
-  const stored = new Set<number>()
+  const stored = new Map<number, string>()
   try {
     const refused = await storeStagedArrays(
       cmd,
@@ -182,16 +183,18 @@ async function declareOperands(
                 locals,
                 inherit,
               )
-      } else if (stored.has(position)) {
-        // A literal takes its marks at its place, even when a policy
-        // refused a later literal.
-        const name = operand.name
-        line = plusRefusal(cmd, session, view, name, plus)
-        if (line === null) {
-          await stampMarks(session, view, name, deref(session, name) || name, marks)
-        }
       } else {
-        continue
+        // A literal takes its marks at its place, against the target its
+        // own write cleared, even when a policy refused a later literal;
+        // under `-n` they go on the reference, which an array cannot
+        // become.
+        const checked = stored.get(position)
+        if (checked === undefined) continue
+        const name = operand.name
+        line =
+          (nameref ? referenceRefusal(cmd, name, visibleRecord(session, name), null) : null) ??
+          plusRefusal(cmd, session, view, name, plus)
+        if (line === null) await stampMarks(session, view, name, checked, marks, !nameref)
       }
       if (line !== null) errors.push(line)
     }
@@ -237,7 +240,7 @@ async function declareOperand(
     }
     if (nameref) {
       const bad =
-        referenceRefusal(cmd, key, sessionEntry(session.vars, key), null) ??
+        referenceRefusal(cmd, key, visibleRecord(session, key), null) ??
         (view.isReadonly(key, false) ? readonlyLine(cmd, key) : null)
       if (bad !== null) return bad
     }
@@ -260,7 +263,10 @@ async function declareOperand(
   }
   let val = given
   if (nameref) {
-    const own = fresh ? undefined : sessionEntry(session.vars, key)
+    // A new local holds nothing to append to, unless `-I` inherits the
+    // caller's value or the call assigned one in front.
+    const own =
+      fresh && !inherit && !inCallEnv(session, key) ? undefined : visibleRecord(session, key)
     if (append && typeof own?.value === 'string') val = own.value + val
     const badRef = referenceRefusal(cmd, key, own, val)
     if (badRef !== null) return badRef

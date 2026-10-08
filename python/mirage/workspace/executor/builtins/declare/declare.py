@@ -319,6 +319,19 @@ async def drop_reference(
         await view.mark(target, VarAttr.NAMEREF, False)
 
 
+def visible_record(session: SessionState, name: str) -> ShellVar | None:
+    """A name's own record, None when unset or hidden: a hidden name
+    reads as unset, so no refusal can quote or describe its value.
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the variable name.
+    """
+    if var_hidden(session.visibility, name):
+        return None
+    return session.vars.get(name)
+
+
 def plus_refusal(
     cmd: str, session: SessionState, view: SessionView, name: str, plus: str
 ) -> str | None:
@@ -339,14 +352,15 @@ def plus_refusal(
         name (str): the operand's name.
         plus (str): the declaration's ``+`` letters.
     """
-    var = session.vars.get(name)
+    var = visible_record(session, name)
+    value = None if var is None else var.value
     reference = var is not None and VarAttr.NAMEREF in var.attrs
     if ("r" in plus and view.is_readonly(name)) or (
         "n" in plus and reference and view.is_readonly(name, False)
     ):
         return readonly_line(cmd, name)
-    if ("a" in plus and name in session.arrays) or (
-        "A" in plus and name in session.assocs
+    if ("a" in plus and isinstance(value, list)) or (
+        "A" in plus and isinstance(value, dict)
     ):
         return (
             f"bash: {cmd}: {name}: cannot destroy array variables in this way"
@@ -362,7 +376,7 @@ async def store_staged_arrays(
     errors: list[str],
     warnings: list[str],
     fatal: bool = False,
-    stored: set[int] | None = None,
+    stored: dict[int, str] | None = None,
     kind: VarKind | None = None,
     shaping: AttrMarks = (),
     global_scope: bool = False,
@@ -378,7 +392,9 @@ async def store_staged_arrays(
     freezes ``R``, and a fatal literal leaves every other operand
     undone (pinned on 5.2.37). Only the value-shaping attributes go on
     before a literal stores (``shaping``); the caller's second pass puts
-    the rest on the names ``stored`` reports.
+    the rest on the literals ``stored`` reports, against the target each
+    write's gate cleared, so an operand that re-aims a reference in
+    between cannot carry a mark past the gate.
 
     The builtin owns the store; readonly is the shell's rule, checked
     per name before the door, and the door's gate covers the policy
@@ -409,10 +425,11 @@ async def store_staged_arrays(
             GNU stores the valid elements and the status stays 0.
         fatal (bool): render a readonly refusal or a kind conflict as
             the fatal assignment error instead of a builtin failure.
-        stored (set[int] | None): filled with the position of each
-            literal that stored. A declaration keeps its valid operands
-            when a sibling refuses, so the caller cannot read "what was
-            written" off the aggregate exit status.
+        stored (dict[int, str] | None): filled with the position of
+            each literal that stored and the variable its write landed
+            on. A declaration keeps its valid operands when a sibling
+            refuses, so the caller cannot read "what was written" off the
+            aggregate exit status.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared. ``-A``
             builds every literal as an associative map; without it a
             name that already holds one still builds a map, since a
@@ -467,6 +484,7 @@ async def store_staged_arrays(
         except PolicyDenied as exc:
             return refusal(cmd, exc)
         base: ShellValue
+        checked = deref(session, name)
         # One try around the literal and the write: a subscript in the
         # literal may assign (`([x=2]=v)`), and that lands through the
         # same door.
@@ -498,7 +516,7 @@ async def store_staged_arrays(
         except ArithError as exc:
             return arith_refusal(cmd, exc)
         if stored is not None:
-            stored.add(position)
+            stored[position] = checked
     return None
 
 
@@ -1000,7 +1018,7 @@ async def mark_variables(
     """
     errors: list[str] = []
     warnings: list[str] = []
-    stored: set[int] = set()
+    stored: dict[int, str] = {}
     refused = await store_staged_arrays(
         cmd,
         session,
@@ -1027,9 +1045,8 @@ async def mark_variables(
             elif position in stored:
                 # A literal is marked at its place, even when a policy
                 # refused a later literal.
-                name = operand[0]
                 await mark_written(
-                    session, view, name, deref(session, name), attr, on
+                    session, view, operand[0], stored[position], attr, on
                 )
     except PolicyDenied as exc:
         return refusal(cmd, exc)

@@ -33,6 +33,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     stamp_marks,
     start_local,
     store_staged_arrays,
+    visible_record,
 )
 from mirage.workspace.executor.builtins.declare.types import (
     AttrMarks,
@@ -190,7 +191,7 @@ async def _declare_operands(
     """
     errors: list[str] = []
     warnings: list[str] = []
-    stored: set[int] = set()
+    stored: dict[int, str] = {}
     try:
         refused = await store_staged_arrays(
             cmd,
@@ -226,13 +227,26 @@ async def _declare_operands(
                     )
                 )
             elif position in stored:
-                # A literal takes its marks at its place, even when a
-                # policy refused a later literal.
+                # A literal takes its marks at its place, against the
+                # target its own write cleared, even when a policy refused
+                # a later literal; under `-n` they go on the reference,
+                # which an array cannot become.
                 name = operand[0]
-                line = plus_refusal(cmd, session, view, name, plus)
+                line = (
+                    reference_refusal(
+                        cmd, name, visible_record(session, name), None
+                    )
+                    if nameref
+                    else None
+                ) or plus_refusal(cmd, session, view, name, plus)
                 if line is None:
                     await stamp_marks(
-                        session, view, name, deref(session, name), marks
+                        session,
+                        view,
+                        name,
+                        stored[position],
+                        marks,
+                        not nameref,
                     )
             else:
                 continue
@@ -301,7 +315,9 @@ async def _declare_operand(
             if line is not None:
                 return line
         if nameref:
-            line = reference_refusal(cmd, key, session.vars.get(key), None)
+            line = reference_refusal(
+                cmd, key, visible_record(session, key), None
+            )
             if line is None and view.is_readonly(key, False):
                 line = readonly_line(cmd, key)
             if line is not None:
@@ -324,7 +340,13 @@ async def _declare_operand(
         await stamp_marks(session, view, key, None, marks, not nameref)
         return None
     if nameref:
-        own = None if fresh else session.vars.get(key)
+        # A new local holds nothing to append to, unless `-I` inherits
+        # the caller's value or the call assigned one in front.
+        own = (
+            None
+            if fresh and not inherit and not in_call_env(session, key)
+            else visible_record(session, key)
+        )
         if append and own is not None and isinstance(own.value, str):
             val = own.value + val
         bad_ref = reference_refusal(cmd, key, own, val)
