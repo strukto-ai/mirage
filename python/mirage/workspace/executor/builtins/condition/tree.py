@@ -134,13 +134,19 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
                 # RANDOM seed in it is drawn from); they land, and the
                 # reader settles, before the error reports.
                 error, writes = exc, exc.writes
-            for write in writes:
-                status = await assign_element(
-                    ctx.session, ctx.view, write.name, write.key, write.value
-                )
-                if status != "ok":
-                    raise CondError(f"{ctx.name}: {write.name}: {status}")
-            reader.settle()
+            try:
+                for write in writes:
+                    status = await assign_element(
+                        ctx.session,
+                        ctx.view,
+                        write.name,
+                        write.key,
+                        write.value,
+                    )
+                    if status != "ok":
+                        raise CondError(f"{ctx.name}: {write.name}: {status}")
+            finally:
+                reader.settle()
             if isinstance(error, ReadonlyError):
                 # bash: `R: readonly variable`, status 1, and the line
                 # goes on; in a subscript it ends the shell.

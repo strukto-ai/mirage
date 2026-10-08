@@ -837,8 +837,21 @@ def session_arith(
         read_var=reader.read,
         wrote_var=reader.wrote,
         nounset=nounset,
-        frozen=functools.partial(env_is_readonly, session),
+        frozen=functools.partial(_readonly_target, session),
     )
+
+
+def _readonly_target(session: SessionState, name: str) -> str | None:
+    """The readonly variable a write to ``name`` reaches, through a
+    ``declare -n`` reference, which the refusal names; None when the
+    write lands.
+
+    Args:
+        session (SessionState): the session holding the readonly marks.
+        name (str): the name the expression writes.
+    """
+    target = deref(session, name)
+    return target if env_is_readonly(session, target, False) else None
 
 
 class _IntegerCoercion:
@@ -855,7 +868,8 @@ class _IntegerCoercion:
     `RANDOM='x=5'`, before the error too if the expression then fails.
     A malformed expression raises ArithError with the offending text
     leading, the way every caller voices it; a write to a readonly name
-    ends the shell (``ExitSignal``), as bash's coercion does.
+    ends the shell (``ExitSignal``), as bash's coercion does, where a
+    seed (``evaluate``) reports it the way it reports a malformed one.
 
     Args:
         session (SessionState): the session the expression reads.
@@ -867,6 +881,18 @@ class _IntegerCoercion:
         self.writes: list[ArithWrite] = []
 
     def __call__(self, text: str) -> str:
+        try:
+            return self.evaluate(text)
+        except ReadonlyError as exc:
+            raise exc.signal(fatal=True) from exc
+
+    def evaluate(self, text: str) -> str:
+        """The value ``text`` evaluates to, keeping the writes it made
+        before an ``ArithError`` or a ``ReadonlyError``.
+
+        Args:
+            text (str): the expression.
+        """
         session = self.session
         # Inside a `declare -g` the expression still reads the
         # function's scope, as bash's does (`local H=2; declare -gi
@@ -874,12 +900,11 @@ class _IntegerCoercion:
         reach_again = _step_back(session)
         try:
             result = session_arith(session, text, self.reader)
-        except ArithError as exc:
+        except (ArithError, ReadonlyError) as exc:
             self.writes.extend(exc.writes)
-            raise ArithError(f"{text}: {exc}") from exc
-        except ReadonlyError as exc:
-            self.writes.extend(exc.writes)
-            raise exc.signal(fatal=True) from exc
+            if isinstance(exc, ArithError):
+                raise ArithError(f"{text}: {exc}") from exc
+            raise
         finally:
             reach_again()
         self.writes.extend(result.writes)
@@ -1116,16 +1141,23 @@ async def set_var(
         and session._random_seed != RANDOM_UNSET
         and isinstance(value, str)
     ):
+        # A seed that fails or writes a readonly name seeds nothing: its
+        # earlier writes land and the error is reported, but the line
+        # goes on, unless the write was in a subscript.
         try:
-            seed = int(coercion(value)) % RANDOM_MODULUS
+            seed = int(coercion.evaluate(value)) % RANDOM_MODULUS
         except ExitSignal:
             await _land_coercion(session, store, coercion)
             raise
-        except ArithError as exc:
+        except (ArithError, ReadonlyError) as exc:
+            await _land_coercion(session, store, coercion)
+            if isinstance(exc, ReadonlyError) and (
+                exc.in_subscript or diagnostics is None
+            ):
+                raise exc.signal() from exc
             if diagnostics is None:
                 raise
             diagnostics.append(str(exc))
-            await _land_coercion(session, store, coercion)
             return
         session._random_state = seed
         session._random_seed = value

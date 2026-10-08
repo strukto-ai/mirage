@@ -109,17 +109,20 @@ async function evalCondBinary(
         error = exc
         writes = exc.writes
       }
-      for (const write of writes) {
-        const status = await assignElement(
-          ctx.session,
-          ctx.view ?? null,
-          write.name,
-          write.key,
-          write.value,
-        )
-        if (status !== 'ok') throw new CondError(`${ctx.name}: ${write.name}: ${status}`)
+      try {
+        for (const write of writes) {
+          const status = await assignElement(
+            ctx.session,
+            ctx.view ?? null,
+            write.name,
+            write.key,
+            write.value,
+          )
+          if (status !== 'ok') throw new CondError(`${ctx.name}: ${write.name}: ${status}`)
+        }
+      } finally {
+        reader.settle()
       }
-      reader.settle()
       // bash: `R: readonly variable`, status 1, and the line goes on; in
       // a subscript it ends the shell.
       if (error instanceof ReadonlyError) {

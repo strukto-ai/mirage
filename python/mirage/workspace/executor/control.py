@@ -18,7 +18,7 @@ from functools import partial
 from typing import Any
 
 from mirage.io import IOResult
-from mirage.io.async_line_iterator import line_buffer
+from mirage.io.async_line_iterator import SharedInput, line_buffer
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
 from mirage.policy import Policies, PolicyDenied
@@ -35,6 +35,7 @@ from mirage.shell.errors import (
     ReturnSignal,
 )
 from mirage.shell.job_table import JobTable
+from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
@@ -67,20 +68,27 @@ async def _execute_body(
     handed: HandOff | None,
     decisions: Decisions | None,
     test: bool = False,
+    bound: tuple[SharedInput | None, bool] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a list of body commands sequentially.
 
     A statement ending in ``&`` is launched as a job through
     ``run_statement`` rather than run inline; ``job_table`` and
     ``agent_id`` are the job plane it needs. ``test`` marks an
-    ``if``/``while``/``until`` test, whose failures ``set -e`` ignores.
+    ``if``/``while``/``until`` test, whose failures ``set -e`` ignores;
+    ``bound`` is ``fd0_binding`` as the construct running the list
+    started, so an ``exec <&-`` in a loop body reaches the next test.
     """
     session = context.session
     all_stdout: list[ByteSource | None] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="", exit_code=0)
-    bound = fd0_binding(session)
+    if bound is None:
+        bound = fd0_binding(session)
     for cmd in body:
+        # A comment is no statement: it leaves `$?` as it was.
+        if cmd.type == NT.COMMENT:
+            continue
         try:
             stdout, io, last_exec = await run_statement(
                 execute_node,
@@ -378,6 +386,7 @@ async def _condition_loop(
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
     hit_limit = True
+    bound = fd0_binding(session)
     run = partial(
         _execute_body,
         execute_node,
@@ -394,7 +403,7 @@ async def _condition_loop(
             hit_limit = False
             break
         try:
-            cond_stdout, cond_io, _ = await run(test, test=True)
+            cond_stdout, cond_io, _ = await run(test, test=True, bound=bound)
             all_stdout.append(cond_stdout)
             merged_io = await merged_io.merge(
                 IOResult(stderr=cond_io.stderr, exit_code=merged_io.exit_code)
@@ -409,6 +418,8 @@ async def _condition_loop(
                 hit_limit = False
                 break
             continue
+        except UNWINDING as sig:
+            raise await carried(sig, _chain_streams(all_stdout), merged_io)
         merged_io = await merged_io.merge(io)
         all_stdout.append(stdout)
     if hit_limit:
@@ -601,6 +612,8 @@ async def handle_case(
             continue
         ran = True
         for stmt in body:
+            if stmt.type == NT.COMMENT:
+                continue
             try:
                 stdout, io, last_exec = await run_statement(
                     execute_node,

@@ -210,11 +210,13 @@ async def land_arith_writes(
         writes (tuple[ArithWrite, ...]): the assignments, in order.
         reader (RandomReader): the expression's ``RANDOM`` reader.
     """
-    for write in writes:
-        await expansion_write(
-            session, view, write.name, write.key, write.value
-        )
-    reader.settle()
+    try:
+        for write in writes:
+            await expansion_write(
+                session, view, write.name, write.key, write.value
+            )
+    finally:
+        reader.settle()
 
 
 async def expansion_write(

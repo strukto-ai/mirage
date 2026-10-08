@@ -826,12 +826,18 @@ describe('hidden vars across the shell tier', () => {
 
   it('arithmetic assignment of a hidden var is refused', async () => {
     // $((X=5)) and ((X=5)) write the raw env on purpose, but a hidden
-    // name is not theirs to clobber; both spellings refuse.
+    // name is not theirs to clobber; both spellings refuse. The writes
+    // before it land in order and their RANDOM draws settle.
     const ws = await makeHiddenVarsWs()
     const expansion = await ws.shell('echo "$((SLACK_TOKEN=5))"', { sessionId: 'agent' })
     expect(expansion.exitCode).not.toBe(0)
     const command = await ws.shell('((SLACK_TOKEN=7))', { sessionId: 'agent' })
     expect(command.exitCode).not.toBe(0)
+    const partial = await ws.shell(
+      "let 'X=1,SLACK_TOKEN=3,X=7'; let 'RANDOM=42,Y=RANDOM,SLACK_TOKEN=1'; echo $X $Y $RANDOM",
+      { sessionId: 'agent' },
+    )
+    expect(new TextDecoder().decode(partial.stdout)).toBe('1 17772 26794\n')
     expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
   })
 

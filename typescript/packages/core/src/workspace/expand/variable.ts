@@ -1002,10 +1002,13 @@ export async function landArithWrites(
   writes: readonly ArithWrite[],
   reader: RandomReader,
 ): Promise<void> {
-  for (const write of writes) {
-    await expansionWrite(session, view, write.name, write.key, write.value)
+  try {
+    for (const write of writes) {
+      await expansionWrite(session, view, write.name, write.key, write.value)
+    }
+  } finally {
+    reader.settle()
   }
-  reader.settle()
 }
 
 export async function expansionWrite(

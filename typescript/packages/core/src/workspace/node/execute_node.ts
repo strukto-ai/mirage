@@ -213,8 +213,7 @@ async function evalCforExpr(
   // exactly as it governs `X=1` and a hidden name refuses at its own
   // write; in evaluation order, so a bare name and its element 0 land as
   // the expression wrote them.
-  await landArith(session, view ?? null, writes)
-  reader.settle()
+  await landArith(session, view ?? null, writes, reader)
   if (error instanceof ReadonlyError) {
     if (error.inSubscript) throw error.signal()
     throw error
@@ -1246,8 +1245,8 @@ async function executeNodeBody(
         session,
         sessionView(session, registry.policies, context.frame.diagnostics),
         writes,
+        reader,
       )
-      reader.settle()
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
       const errBytes = encodeText(`bash: ${err.message}\n`)

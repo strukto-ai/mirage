@@ -191,8 +191,7 @@ async def _eval_cfor_expr(
     # assignment exactly as it governs `X=1` and a hidden name refuses
     # at its own write; in evaluation order, so a bare name and its
     # element 0 land as the expression wrote them.
-    await land_arith(session, view, writes)
-    reader.settle()
+    await land_arith(session, view, writes, reader)
     if isinstance(error, ReadonlyError):
         if error.in_subscript:
             raise error.signal()
@@ -1320,8 +1319,7 @@ async def _execute_node(
             # land before the error is reported.
             error, writes = exc, exc.writes
         try:
-            await land_arith(session, view, writes)
-            reader.settle()
+            await land_arith(session, view, writes, reader)
         except PolicyDenied as exc:
             err = encode_text(f"bash: {exc.strerror}\n")
             return (

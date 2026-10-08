@@ -78,8 +78,7 @@ async def handle_let(
             # land before the error is reported.
             error, writes = exc, exc.writes
         try:
-            await land_arith(session, view, writes)
-            reader.settle()
+            await land_arith(session, view, writes, reader)
         except PolicyDenied as exc:
             return refusal("let", exc)
         if isinstance(error, ReadonlyError):

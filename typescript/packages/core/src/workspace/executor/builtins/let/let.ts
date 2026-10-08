@@ -67,8 +67,7 @@ export async function handleLet(
       writes = err.writes
     }
     try {
-      await landArith(session, view, writes)
-      reader.settle()
+      await landArith(session, view, writes, reader)
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal('let', err)
       throw err

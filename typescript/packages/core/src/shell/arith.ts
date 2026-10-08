@@ -354,9 +354,9 @@ class ArithParser {
 // Reads resolve through `updates` first, then `env`; every write lands in
 // `updates` (or `elemUpdates` for an element lvalue) so the caller
 // decides what to apply to the session (bash arithmetic assignments are
-// real assignments). `writes` keeps the one ordered record across both
-// kinds, keyed by target and moved to the end on each write, so the
-// caller lands them in the order the expression made them. A write to a
+// real assignments). `writes` is the one ordered record across both
+// kinds, every write in turn, so the caller lands them in the order the
+// expression made them. A write to a
 // name `frozen` holds stops the evaluation there (`ReadonlyError`), noting
 // whether it was made inside an array subscript (`subscript`).
 class ArithEvaluator {
@@ -364,13 +364,13 @@ class ArithEvaluator {
     private readonly env: Readonly<Record<string, string>>,
     private readonly updates: Record<string, string>,
     private readonly elemUpdates: Map<string, string>,
-    private readonly writes: Map<string, ArithWrite>,
+    private readonly writes: ArithWrite[],
     private readonly depth: number,
     private readonly elements: ElementOps | null,
     private readonly readVar: ((name: string) => string | null) | null,
     private readonly wroteVar: ((name: string, value: string) => void) | null = null,
     private readonly nounset = false,
-    private readonly frozen: ((name: string) => boolean) | null = null,
+    private readonly frozen: ((name: string) => string | null) | null = null,
     private readonly subscript = false,
   ) {}
 
@@ -470,7 +470,8 @@ class ArithEvaluator {
 
   private writeTarget(target: ArithTarget, value: bigint, key: string | null = null): void {
     if (target.kind !== 'var') key ??= this.elemKey(target.name, target.sub)
-    if (this.frozen?.(target.name) === true) throw new ReadonlyError(target.name, this.subscript)
+    const refused = this.frozen?.(target.name) ?? null
+    if (refused !== null) throw new ReadonlyError(refused, this.subscript)
     const text = value.toString()
     if (key === null) {
       this.updates[target.name] = text
@@ -483,9 +484,7 @@ class ArithEvaluator {
   }
 
   private record(name: string, key: string | null, value: string): void {
-    const slot = key === null ? name : `${name} ${key}`
-    this.writes.delete(slot)
-    this.writes.set(slot, { name, key, value })
+    this.writes.push({ name, key, value })
   }
 
   run(node: ArithNode): bigint {
@@ -615,8 +614,9 @@ class ArithEvaluator {
  * Throws ArithError on syntax errors, division by zero, or a negative
  * exponent. `nounset` is `set -u` for the names the expression reads: one
  * that no variable holds throws UnboundVariable instead of reading 0.
- * `frozen` names the variables a write refuses (readonly): the evaluation
- * stops there with ReadonlyError, carrying the writes made before it.
+ * `frozen` names the readonly variable a write to a name reaches, through a
+ * reference, or null: the evaluation stops there with ReadonlyError, which
+ * names that variable and carries the writes made before it.
  */
 export function evaluateArith(
   expr: string,
@@ -626,14 +626,14 @@ export function evaluateArith(
   readVar: ((name: string) => string | null) | null = null,
   wroteVar: ((name: string, value: string) => void) | null = null,
   nounset = false,
-  frozen: ((name: string) => boolean) | null = null,
+  frozen: ((name: string) => string | null) | null = null,
 ): ArithResult {
   const tokens = tokenize(expr)
   if (tokens.length === 0) return { value: 0n, writes: [] }
   const node = new ArithParser(tokens).parse()
   const updates: Record<string, string> = {}
   const elemUpdates = new Map<string, string>()
-  const writes = new Map<string, ArithWrite>()
+  const writes: ArithWrite[] = []
   let value: bigint
   try {
     value = new ArithEvaluator(
@@ -649,8 +649,8 @@ export function evaluateArith(
       frozen,
     ).run(node)
   } catch (err) {
-    if (err instanceof ArithError || err instanceof ReadonlyError) err.writes = [...writes.values()]
+    if (err instanceof ArithError || err instanceof ReadonlyError) err.writes = [...writes]
     throw err
   }
-  return { value, writes: [...writes.values()] }
+  return { value, writes }
 }

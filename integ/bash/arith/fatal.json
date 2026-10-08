@@ -509,6 +509,40 @@
         "stdout": "bg=127\np=127 0\ng=1\nsub=1\n",
         "stderr": "bash: UZ: m\nbash: UZ: m\nbash: UZ: m\nbash: UZ: m\n"
       }
+    },
+    {
+      "id": "arith_readonly_seed_and_nameref",
+      "seq": 980124,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( readonly R=1; RANDOM='X=5,R=3'; echo \"seed $? X=$X\"; readonly W=1; declare -n r=W; let r=3; echo \"let $?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "seed 0 X=5\nlet 1\n",
+        "stderr": "bash: R: readonly variable\nbash: W: readonly variable\n"
+      }
     }
   ]
 }

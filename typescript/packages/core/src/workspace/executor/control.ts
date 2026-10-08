@@ -30,7 +30,7 @@ import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { readReply } from './builtins/read/index.ts'
 import type { PathSpec } from '../../types.ts'
 import { wordText } from '../../types.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
+import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 
 import { sessionView, visibleEnv } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
@@ -76,7 +76,8 @@ export class ContinueSignal extends Error {
  * A statement ending in `&` is launched as a job through `runStatement`
  * rather than run inline; `jobTable` and `agentId` are the job plane it
  * needs. `test` marks an `if`/`while`/`until` test, whose failures
- * `set -e` ignores.
+ * `set -e` ignores; `bound` is `fd0Binding` as the construct running the
+ * list started, so an `exec <&-` in a loop body reaches the next test.
  */
 async function executeBody(
   executeNode: ExecuteNodeFn,
@@ -89,13 +90,15 @@ async function executeBody(
   handed: HandOff | null,
   decisions: Decisions | null,
   test = false,
+  bound: ReturnType<typeof fd0Binding> = fd0Binding(context.session),
 ): Promise<Result> {
   const session = context.session
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: '', exitCode: 0 })
-  const bound = fd0Binding(session)
   for (const cmd of body) {
+    // A comment is no statement: it leaves `$?` as it was.
+    if (cmd.type === NT.COMMENT) continue
     try {
       const [rawStdout, io, execNode] = await runStatement(
         executeNode,
@@ -381,6 +384,7 @@ async function conditionLoop(
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
   let hitLimit = true
+  const bound = fd0Binding(session)
   const run = (nodes: readonly TSNodeLike[], isTest = false): Promise<Result> =>
     executeBody(
       executeNode,
@@ -393,6 +397,7 @@ async function conditionLoop(
       handed,
       decisions,
       isTest,
+      isTest ? bound : fd0Binding(session),
     )
   for (let i = 0; i < MAX_WHILE; i++) {
     if (session.shellOptions.noexec === true) {
@@ -413,7 +418,10 @@ async function conditionLoop(
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
     } catch (sig) {
-      if (!(sig instanceof BreakSignal || sig instanceof ContinueSignal)) throw sig
+      if (!(sig instanceof BreakSignal || sig instanceof ContinueSignal)) {
+        if (isUnwinding(sig)) throw await carried(sig, chainNonNull(allStdout), mergedIo)
+        throw sig
+      }
       mergedIo = await absorbed(sig, allStdout, mergedIo)
       if (sig instanceof BreakSignal) {
         hitLimit = false
@@ -618,6 +626,7 @@ export async function handleCase(
     if (!(fallthrough || patterns.some((p) => fnmatch(word, p)))) continue
     ran = true
     for (const stmt of body) {
+      if (stmt.type === NT.COMMENT) continue
       let result: Result
       try {
         result = await runStatement(

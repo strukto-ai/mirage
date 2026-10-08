@@ -351,12 +351,12 @@ class ArithEvaluator:
     Reads resolve through ``updates`` first, then ``env``; every write
     lands in ``updates`` (or ``elem_updates`` for an element lvalue) so
     the caller decides what to apply to the session (bash arithmetic
-    assignments are real assignments). ``writes`` keeps the one
-    ordered record across both kinds, keyed by target and moved to the
-    end on each write, so the caller lands them in the order the
-    expression made them. A write to a name ``frozen`` holds stops the
-    evaluation there (``ReadonlyError``), noting whether it was made
-    inside an array subscript (``subscript``).
+    assignments are real assignments). ``writes`` is the one ordered
+    record across both kinds, every write in turn, so the caller lands
+    them in the order the expression made them. A write to a name
+    ``frozen`` holds stops the evaluation there (``ReadonlyError``),
+    noting whether it was made inside an array subscript
+    (``subscript``).
     """
 
     def __init__(
@@ -364,13 +364,13 @@ class ArithEvaluator:
         env: Mapping[str, str],
         updates: dict[str, str],
         elem_updates: dict[tuple[str, str], str],
-        writes: dict[tuple[str, str | None], str],
+        writes: list[ArithWrite],
         depth: int,
         elements: ElementOps | None,
         read_var: Callable[[str], str | None] | None,
         wrote_var: Callable[[str, str], None] | None = None,
         nounset: bool = False,
-        frozen: Callable[[str], bool] | None = None,
+        frozen: Callable[[str], str | None] | None = None,
         subscript: bool = False,
     ) -> None:
         self.env = env
@@ -521,8 +521,9 @@ class ArithEvaluator:
         name = target[1]
         if target[0] == "elem" and key is None:
             key = self.elem_key(name, target[2])
-        if self.frozen is not None and self.frozen(name):
-            raise ReadonlyError(name, self.subscript)
+        refused = self.frozen(name) if self.frozen is not None else None
+        if refused is not None:
+            raise ReadonlyError(refused, self.subscript)
         text = str(value)
         if key is None:
             self.updates[name] = text
@@ -534,8 +535,7 @@ class ArithEvaluator:
         self._record(name, key, text)
 
     def _record(self, name: str, key: str | None, text: str) -> None:
-        self.writes.pop((name, key), None)
-        self.writes[(name, key)] = text
+        self.writes.append(ArithWrite(name, key, text))
 
     def run(self, node: tuple[Any, ...]) -> int:
         kind = node[0]
@@ -654,7 +654,7 @@ def evaluate_arith(
     read_var: Callable[[str], str | None] | None = None,
     wrote_var: Callable[[str, str], None] | None = None,
     nounset: bool = False,
-    frozen: Callable[[str], bool] | None = None,
+    frozen: Callable[[str], str | None] | None = None,
 ) -> ArithResult:
     """Evaluate a bash arithmetic expression.
 
@@ -690,8 +690,9 @@ def evaluate_arith(
         nounset (bool): ``set -u`` for the names the expression reads:
             one that no variable holds raises UnboundVariable instead of
             reading 0.
-        frozen (Callable[[str], bool] | None): the names a write
-            refuses (readonly); None refuses none.
+        frozen (Callable[[str], str | None] | None): the readonly
+            variable a write to a name reaches, through a reference, or
+            None; None refuses none.
 
     Returns:
         ArithResult: the value plus the assignments made, in order, for
@@ -709,7 +710,7 @@ def evaluate_arith(
     node = ArithParser(tokens).parse()
     updates: dict[str, str] = {}
     elem_updates: dict[tuple[str, str], str] = {}
-    writes: dict[tuple[str, str | None], str] = {}
+    writes: list[ArithWrite] = []
     try:
         value = ArithEvaluator(
             env,
@@ -724,20 +725,6 @@ def evaluate_arith(
             frozen,
         ).run(node)
     except (ArithError, ReadonlyError) as exc:
-        exc.writes = _arith_writes(writes)
+        exc.writes = tuple(writes)
         raise
-    return ArithResult(value, _arith_writes(writes))
-
-
-def _arith_writes(
-    writes: dict[tuple[str, str | None], str],
-) -> tuple[ArithWrite, ...]:
-    """The evaluator's ordered write record as ``ArithWrite`` rows.
-
-    Args:
-        writes (dict[tuple[str, str | None], str]): target to value, in
-            the order of each target's last write.
-    """
-    return tuple(
-        ArithWrite(name, key, text) for (name, key), text in writes.items()
-    )
+    return ArithResult(value, tuple(writes))
