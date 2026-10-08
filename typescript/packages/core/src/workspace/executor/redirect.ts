@@ -464,7 +464,7 @@ export async function handleRedirect(
     unwound = error
     // What the command wrote on its way out goes where it writes; an error
     // expanding its own words came before its redirects.
-    const output = takeStdout(error)
+    const output = await takeStdout(error)
     if (output.byteLength > 0) await recorder.emit(Channel.STDOUT, output)
     const own =
       error instanceof ExitSignal && error.expanding !== null && error.expanding === command?.id

@@ -18,6 +18,7 @@ export interface CallFrameInit {
   functionName?: string
   loopLevel?: number
   sourced?: boolean
+  closed?: boolean
 }
 
 export class CallFrame {
@@ -27,7 +28,7 @@ export class CallFrame {
   loopLevel: number
   sourced: boolean
   // A sourced file whose RETURN action runs: it has returned.
-  closed = false
+  closed: boolean
 
   constructor(init: CallFrameInit = {}) {
     this.positional = init.positional ?? []
@@ -35,6 +36,7 @@ export class CallFrame {
     this.functionName = init.functionName ?? ''
     this.loopLevel = init.loopLevel ?? 0
     this.sourced = init.sourced ?? false
+    this.closed = init.closed ?? false
   }
 }
 
@@ -67,6 +69,7 @@ export class CallStack {
             functionName: frame.functionName,
             loopLevel: loops ? frame.loopLevel : 0,
             sourced: frame.sourced,
+            closed: frame.closed,
           }),
       ),
     )

@@ -298,7 +298,7 @@ async def _run_action(
             stdin=stdin,
             call_stack=call_stack if call_stack is not None else CallStack(),
         )
-    except ExitSignal as sig:
+    except (ExitSignal, ReturnSignal) as sig:
         sig.unrouted = True
         raise
     finally:

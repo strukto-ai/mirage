@@ -189,7 +189,11 @@ export async function named<T>(word: string, pending: Promise<T>): Promise<T> {
 export class ReturnSignal extends Error {
   readonly exitCode: number
   stderr: Uint8Array
-  readonly stdout: ByteSource | null
+  stdout: ByteSource | null
+  // Whether stdout is an ERR or RETURN action's that left with `return`,
+  // which the redirects it unwinds through still route, as
+  // `ExitSignal.unrouted` does.
+  unrouted = false
   constructor(
     exitCode: number,
     stderr: Uint8Array = new Uint8Array(),

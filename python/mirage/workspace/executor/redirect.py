@@ -578,7 +578,7 @@ async def handle_redirect(
         unwound, io = sig, IOResult()
         # What the command wrote on its way out goes where it writes; an
         # error expanding its own words came before its redirects.
-        output = take_stdout(sig)
+        output = await take_stdout(sig)
         if output:
             await recorder.emit(Channel.STDOUT, output)
         if not (

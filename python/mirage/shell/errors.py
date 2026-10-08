@@ -222,6 +222,10 @@ class ReturnSignal(Exception):
         stderr (bytes): diagnostic already formatted for the user.
         stdout (ByteSource | None): output the constructs it left had
             produced before it.
+
+    ``unrouted`` marks ``stdout`` as an ERR or RETURN action's that left
+    with ``return``, which the redirects it unwinds through still route,
+    as ``ExitSignal.unrouted`` does.
     """
 
     def __init__(
@@ -233,6 +237,7 @@ class ReturnSignal(Exception):
         self.exit_code = exit_code
         self.stderr = stderr
         self.stdout = stdout
+        self.unrouted = False
 
 
 class PipeClosed(Exception):

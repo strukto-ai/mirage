@@ -241,7 +241,7 @@ async function runAction(
       callStack: callStack ?? new CallStack(),
     })
   } catch (err) {
-    if (err instanceof ExitSignal) err.unrouted = true
+    if (err instanceof ExitSignal || err instanceof ReturnSignal) err.unrouted = true
     throw err
   } finally {
     session.errexitImmune = immune

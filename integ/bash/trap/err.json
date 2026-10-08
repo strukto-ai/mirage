@@ -197,10 +197,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'trap \"echo NEW\" ERR; false; echo OLD' ERR; false; echo end ); ( trap 'echo TRAP; exit 7' ERR; echo BEFORE; false; echo after ); echo \"rc=$?\"; ( f() { trap 'echo T; return 5' ERR; false; echo after; }; f; echo \"rc=$?\" ); bash -c 'trap \"echo X\" EXIT; trap \"echo T; exit 7\" ERR; { echo A; false; echo no; } > /data/f'; echo \"rc=$? f[$(cat /data/f)]\"; rm -f /data/f",
+      "command": "( trap 'trap \"echo NEW\" ERR; false; echo OLD' ERR; false; echo end ); ( trap 'echo TRAP; exit 7' ERR; echo BEFORE; false; echo after ); echo \"rc=$?\"; ( f() { trap 'echo T; return 5' ERR; false; echo after; }; f; echo \"rc=$?\" ); bash -c 'trap \"echo X\" EXIT; trap \"echo T; exit 7\" ERR; { echo A; false; echo no; } > /data/f'; echo \"rc=$? f[$(cat /data/f)]\"; rm -f /data/f; ( f() { trap 'echo T; return 7' ERR; { echo A; false; echo no; } > /data/f; }; f; echo \"rc=$? f[$(cat /data/f)]\" ); rm -f /data/f",
       "expect": {
         "exit": 0,
-        "stdout": "OLD\nend\nBEFORE\nTRAP\nrc=7\nT\nrc=5\nX\nrc=7 f[A\nT]\n",
+        "stdout": "OLD\nend\nBEFORE\nTRAP\nrc=7\nT\nrc=5\nX\nrc=7 f[A\nT]\nrc=7 f[A\nT]\n",
         "stderr": ""
       }
     },

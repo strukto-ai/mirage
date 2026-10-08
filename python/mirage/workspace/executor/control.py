@@ -269,7 +269,7 @@ def ended(sig: Exception, simple: bool = False) -> IOResult:
     )
 
 
-def take_stdout(sig: Exception) -> bytes:
+async def take_stdout(sig: Exception) -> bytes:
     """Take what a nested line wrote before it left (an ``exec``'d
     command, an ERR or RETURN action), for the redirects it ran under to
     route. An EXIT action's output, the ``cleanup`` at its end, goes
@@ -279,10 +279,12 @@ def take_stdout(sig: Exception) -> bytes:
     Args:
         sig (Exception): one of ``UNWINDING``.
     """
-    if not isinstance(sig, ExitSignal) or not sig.unrouted:
+    if not isinstance(sig, (ExitSignal, ReturnSignal)) or not sig.unrouted:
         return b""
-    written = sig.stdout or b""
-    cut = len(written) - len(sig.cleanup)
+    written = await materialize(sig.stdout) or b""
+    cut = len(written) - (
+        len(sig.cleanup) if isinstance(sig, ExitSignal) else 0
+    )
     sig.stdout = written[cut:] or None
     return written[:cut]
 

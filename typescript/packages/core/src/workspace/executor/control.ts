@@ -183,12 +183,9 @@ export async function carried(
     const Signal = sig instanceof BreakSignal ? BreakSignal : ContinueSignal
     return new Signal(chainNonNull([stdout, sig.stdout]), await io.merge(sig.io), sig.levels)
   }
-  const stderr = concat([await materialize(io.stderr), sig.stderr])
-  if (sig instanceof ReturnSignal) {
-    return new ReturnSignal(sig.exitCode, stderr, chainNonNull([stdout, sig.stdout]))
-  }
-  sig.stdout = concat([await materialize(stdout), sig.stdout ?? new Uint8Array()])
-  sig.stderr = stderr
+  sig.stderr = concat([await materialize(io.stderr), sig.stderr])
+  if (sig instanceof ReturnSignal) sig.stdout = chainNonNull([stdout, sig.stdout])
+  else sig.stdout = concat([await materialize(stdout), sig.stdout ?? new Uint8Array()])
   return sig
 }
 
@@ -258,10 +255,11 @@ export function ended(sig: Unwinding, simple = false): IOResult {
  * other unwinding signals carry went through them already. Mirrors Python's
  * take_stdout.
  */
-export function takeStdout(sig: Unwinding): Uint8Array {
-  if (!(sig instanceof ExitSignal) || !sig.unrouted) return new Uint8Array()
-  const written = sig.stdout ?? new Uint8Array()
-  const cut = written.byteLength - sig.cleanup.byteLength
+export async function takeStdout(sig: Unwinding): Promise<Uint8Array> {
+  if (!(sig instanceof ExitSignal || sig instanceof ReturnSignal) || !sig.unrouted)
+    return new Uint8Array()
+  const written = await materialize(sig.stdout)
+  const cut = written.byteLength - (sig instanceof ExitSignal ? sig.cleanup.byteLength : 0)
   sig.stdout = cut < written.byteLength ? written.subarray(cut) : null
   return written.subarray(0, cut)
 }
