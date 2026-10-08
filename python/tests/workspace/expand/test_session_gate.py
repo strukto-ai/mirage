@@ -29,6 +29,15 @@ class DenyAws(Policy):
         return None
 
 
+class DenyUnset(Policy):
+    """Refuses every unset and allows every write."""
+
+    async def pre_session(self, ctx: SessionContext) -> Action | None:
+        if ctx.verb == "unset":
+            return Deny("no unsets\n")
+        return None
+
+
 @pytest.fixture
 def guarded():
     """A workspace whose policy refuses writes to ``AWS_*``."""
@@ -140,3 +149,15 @@ async def test_refused_offset_does_not_expand_length(guarded):
     assert result.refusal and "not yours to set" in result.refusal.reason
     assert await value_of(guarded, "AWS_LIMIT") == b"[]"
     assert await value_of(guarded, "OTHER") == b"[]"
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_local_assignment_asks_for_no_unset():
+    # The new local's reset is the scope's bookkeeping, not a deletion
+    # the line asked for; only the assignment is the gated write.
+    with Workspace({"/ram/": RAMVFS()}, policies=[DenyUnset()]) as ws:
+        result = await ws.shell(
+            'X=outer; f(){ local X=inner; echo "$X"; }; f; echo "$X"'
+        )
+    assert result.exit_code == 0
+    assert result.stdout == b"inner\nouter\n"

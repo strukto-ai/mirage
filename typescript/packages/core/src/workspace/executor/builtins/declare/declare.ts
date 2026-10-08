@@ -138,6 +138,20 @@ export function localAttrs(v: ShellVar | undefined, inherit: boolean): Set<VarAt
 }
 
 /**
+ * Reset a name the running function just shadowed to what a new local starts
+ * as: unset, with the attributes `localAttrs` keeps. This is the scope's own
+ * bookkeeping, not a session write: the caller's record is the frame's to
+ * put back on return, so no policy is asked to delete it. The local's value
+ * lands later through the gated door, which judges that write.
+ */
+export function startLocal(session: SessionState, name: string, inherit: boolean): void {
+  const kept = localAttrs(sessionEntry(session.vars, name), inherit)
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete session.vars[name]
+  if (kept.size > 0) setSessionEntry(session.vars, name, { value: null, attrs: kept })
+}
+
+/**
  * bash's refusal when a declared array kind meets a value of the other
  * kind, or null when they agree.
  */

@@ -30,6 +30,12 @@ class DenyAws implements Policy {
   }
 }
 
+class DenyUnset implements Policy {
+  preSession(ctx: SessionContext): Action | null {
+    return ctx.verb === 'unset' ? { kind: 'deny', reason: 'no unsets' } : null
+  }
+}
+
 async function guarded(): Promise<Workspace> {
   const parser = await getTestParser()
   return new Workspace(
@@ -150,6 +156,27 @@ it('does not expand length after a refused offset', async () => {
       const after = await ws.shell(`echo [$${name}]`)
       expect(DEC.decode(after.stdout).trim()).toBe('[]')
     }
+  } finally {
+    await ws.close()
+  }
+})
+
+it('asks for no unset when a fresh local is assigned', async () => {
+  // The new local's reset is the scope's bookkeeping, not a deletion the
+  // line asked for; only the assignment is the gated write.
+  const parser = await getTestParser()
+  const ws = new Workspace(
+    { '/ram': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      shellParserFactory: () => Promise.resolve(parser),
+      policies: [new DenyUnset()],
+    },
+  )
+  try {
+    const result = await ws.shell('X=outer; f(){ local X=inner; echo "$X"; }; f; echo "$X"')
+    expect(result.exitCode).toBe(0)
+    expect(DEC.decode(result.stdout)).toBe('inner\nouter\n')
   } finally {
     await ws.close()
   }

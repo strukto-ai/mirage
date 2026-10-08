@@ -22,7 +22,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
 from mirage.shell.types import NodeType as NT
-from mirage.shell.variable import ShellVar, VarAttr, VarKind
+from mirage.shell.variable import VarAttr, VarKind
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     handle_declare_functions,
@@ -40,7 +40,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     declared_kind,
     held_value,
     kind_conflict,
-    local_attrs,
+    start_local,
 )
 from mirage.workspace.expand import expand_node
 from mirage.workspace.mount import MountRegistry
@@ -546,10 +546,7 @@ async def execute_declaration(
                 # which takes the attributes `local_attrs` keeps; `-g`
                 # declares at global scope instead.
                 if fresh:
-                    session.vars.pop(bare, None)
-                    kept = local_attrs(held_var, "I" in flag_chars)
-                    if kept:
-                        session.vars[bare] = ShellVar(None, kept)
+                    start_local(session, bare, "I" in flag_chars)
                 seed_var(session, bare, {} if want_assoc else [])
             elif want_assoc and bare not in session.assocs:
                 # At top level an existing scalar becomes the value

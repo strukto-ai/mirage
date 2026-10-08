@@ -134,6 +134,25 @@ def local_attrs(var: ShellVar | None, inherit: bool) -> frozenset[VarAttr]:
     return var.attrs & {VarAttr.EXPORT}
 
 
+def start_local(session: SessionState, name: str, inherit: bool) -> None:
+    """Reset a name the running function just shadowed to what a new
+    local starts as: unset, with the attributes ``local_attrs`` keeps.
+
+    This is the scope's own bookkeeping, not a session write: the
+    caller's record is the frame's to put back on return, so no policy
+    is asked to delete it. The local's value lands later through the
+    gated door, which judges that write.
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the name a ``shadow_local`` just recorded.
+        inherit (bool): the declaration carried ``-I``.
+    """
+    kept = local_attrs(session.vars.pop(name, None), inherit)
+    if kept:
+        session.vars[name] = ShellVar(None, kept)
+
+
 def kind_conflict(held: ShellValue | None, kind: VarKind | None) -> str | None:
     """bash's refusal when a declared array kind meets a value of the
     other kind, or None when they agree.

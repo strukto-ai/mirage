@@ -36,6 +36,7 @@ import {
   namerefRefusal,
   premark,
   scalarValue,
+  startLocal,
   storeStagedArrays,
   writeGlobal,
 } from './declare.ts'
@@ -118,10 +119,7 @@ export async function handleLocal(
         continue
       }
       if (locals !== null) shadowLocal(session, locals, key)
-      if (fresh) {
-        const refused = await freshLocal(session, view, cmd, key, inherit)
-        if (refused !== null) return refused
-      }
+      if (fresh && !inCallEnv(session, key)) startLocal(session, key, inherit)
       const [value, assigned]: [ShellValue, ReadonlySet<number | string> | null] = nameref
         ? [val, null]
         : scalarValue(held, val, kind)

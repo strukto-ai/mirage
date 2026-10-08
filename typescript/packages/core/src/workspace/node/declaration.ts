@@ -19,8 +19,8 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { DiscardSignal } from '../../shell/errors.ts'
 import { getDeclarationKeyword, getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { makeVar, VarAttr, VarKind } from '../../shell/variable.ts'
-import { sessionEntry, setSessionEntry } from '../session/session.ts'
+import { VarAttr, VarKind } from '../../shell/variable.ts'
+import { sessionEntry } from '../session/session.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { SessionView } from '../../ops/types.ts'
@@ -40,7 +40,7 @@ import {
   declaredKind,
   heldValue,
   kindConflict,
-  localAttrs,
+  startLocal,
 } from '../executor/builtins/declare/declare.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -488,12 +488,7 @@ export async function executeDeclaration(
         // a fresh empty array of the declared kind, which takes the
         // attributes `localAttrs` keeps; `-g` declares at global scope
         // instead.
-        if (fresh) {
-          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-          delete session.vars[bare]
-          const kept = localAttrs(heldVar, flagChars.has('I'))
-          if (kept.size > 0) setSessionEntry(session.vars, bare, makeVar(null, kept))
-        }
+        if (fresh) startLocal(session, bare, flagChars.has('I'))
         seedVar(session, bare, wantAssoc ? {} : [])
       } else if (wantAssoc && !Object.hasOwn(session.assocs, bare)) {
         // At top level an existing scalar becomes the value at the

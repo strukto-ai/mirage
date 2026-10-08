@@ -27,6 +27,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     nameref_refusal,
     premark,
     scalar_value,
+    start_local,
     store_staged_arrays,
     write_global,
 )
@@ -152,10 +153,8 @@ async def handle_local(
                 continue
             if local_vars is not None:
                 shadow_local(session, local_vars, key)
-            if fresh:
-                refused = await _fresh_local(session, view, cmd, key, inherit)
-                if refused is not None:
-                    return refused
+            if fresh and not in_call_env(session, key):
+                start_local(session, key, inherit)
             value, assigned = (
                 (val, None) if nameref else scalar_value(held, val, kind)
             )
