@@ -149,6 +149,11 @@ async def handle_env(
         for name, var in saved.items()
         if not isinstance(var.value, str) and var.managed is None
     } | vars_from_env(base)
+    # The command gets its own copy of the functions `export -f` marked,
+    # empty under `-i`: they are part of bash's environment, as its
+    # `BASH_FUNC_NAME%%` entries.
+    exported = session.exported_functions
+    session.exported_functions = set() if ignore_env else set(exported)
     # env execs its command, so a builtin that is also a program answers
     # as the program.
     token = set_program_invocation(session)
@@ -159,6 +164,7 @@ async def handle_env(
     finally:
         reset_program_invocation(token)
         session.vars = saved
+        session.exported_functions = exported
     return io.stdout, io, ExecutionNode(command="env", exit_code=io.exit_code)
 
 

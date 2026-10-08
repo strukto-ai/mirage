@@ -291,6 +291,7 @@ export class SessionManager extends SessionOwner {
         dflt.vars = stored.vars
         dflt.functions = stored.functions
         dflt.readonlyFunctions = stored.readonlyFunctions
+        dflt.exportedFunctions = stored.exportedFunctions
         dflt.createdAt = stored.createdAt
         dflt.mountModes = stored.mountModes
         // The hidden shapes are durable restrictions, not scratch

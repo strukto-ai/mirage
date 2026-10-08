@@ -58,7 +58,17 @@ describe('forkForCall', () => {
       PWD: '/home',
       PATH: '/usr/bin',
       IFS: ' \t\n',
+      OPTIND: '1',
+      OPTERR: '1',
     })
-    expect(session.env).toEqual({ A: '1', B: '2', PWD: '/home', PATH: '/usr/bin', IFS: ' \t\n' })
+    expect(session.env).toEqual({
+      A: '1',
+      B: '2',
+      PWD: '/home',
+      PATH: '/usr/bin',
+      IFS: ' \t\n',
+      OPTIND: '1',
+      OPTERR: '1',
+    })
   })
 })

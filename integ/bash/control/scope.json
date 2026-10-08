@@ -216,6 +216,40 @@
         "stdout": "300000\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "local_I_keeps_arrays_and_locals_reset",
+      "seq": 502178,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gdrive",
+        "gdrive-folder",
+        "gridfs",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "( A=(old keep); declare -A M=([k]=v); S=str; f(){ local -I A=new; local -IA M; local -Ia S; declare -p A M S; }; f; declare -p A; g(){ local -a B=(1 2); local -a B; declare -p B; }; g; declare -i N; h(){ local N=(1+1); declare -p N; }; h; export E=(1); k(){ local E=(2); declare -p E; }; k )",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -a A=([0]=\"new\" [1]=\"keep\")\ndeclare -A M=([k]=\"v\" )\ndeclare -a S=()\ndeclare -a A=([0]=\"old\" [1]=\"keep\")\ndeclare -a B=([0]=\"1\" [1]=\"2\")\ndeclare -a N=([0]=\"1+1\")\ndeclare -ax E=([0]=\"2\")\n",
+        "stderr": ""
+      }
     }
   ]
 }

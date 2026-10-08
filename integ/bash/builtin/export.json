@@ -509,6 +509,142 @@
         "gdrive-folder",
         "box"
       ]
+    },
+    {
+      "id": "export_f_lists_marked_functions",
+      "seq": 609265,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( nbf() { :; }; nbg() { :; }; export -f nbf; export -f; declare -F | grep ' nb'; declare -pfx nbf; declare -pF nbf; export -f nbnosuch nbx=1; echo \"rc=$? [${nbx-unset}]\"; readonly -f nbg; declare +x -f nbf; declare -fx nbg nbnone; echo rc=$?; declare -F | grep ' nb' ); ( export -f nbarr=(a b); echo \"rc=$? ${nbarr[1]}\"; declare -p nbarr; readonly -f nbro=(c); echo \"rc=$?\"; declare -p nbro ); ( nbm() { :; }; nbrun() { export -f nbm2=(a b) 2>/dev/null; readonly -Af nbm=([alpha]=one [beta]=two); export nbpa=(c d); readonly nbpr=(e); }; nbrun; declare -p nbm2 nbm nbpa nbpr )",
+      "expect": {
+        "exit": 0,
+        "stdout": "nbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\ndeclare -f nbg\nnbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\nrc=1 [unset]\nrc=1\ndeclare -f nbf\ndeclare -frx nbg\nrc=1 b\ndeclare -a nbarr=([0]=\"a\" [1]=\"b\")\nrc=1\ndeclare -a nbro=([0]=\"c\")\ndeclare -a nbm2=([0]=\"a\" [1]=\"b\")\ndeclare -A nbm=([alpha]=\"one\" [beta]=\"two\" )\ndeclare -ax nbpa=([0]=\"c\" [1]=\"d\")\ndeclare -ar nbpr=([0]=\"e\")\n",
+        "stderr": "bash: export: nbnosuch: not a function\nbash: export: nbx=1: not a function\nbash: export: nbarr: not a function\nbash: readonly: nbro: not a function\n"
+      }
+    },
+    {
+      "id": "declare_f_p_prints_and_plus_clears",
+      "seq": 609266,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( nbp() { :; }; declare -pfx nbp; declare -pFr nbp; bash -c 'declare -F' | grep -c nbp; nbp() { echo redefined; }; nbp; declare -fp nbnosuch nbp; echo \"rc=$?\" ); env -i bash -c 'nbp() { :; }; nbq() { :; }; export -f nbp; declare +x -F; declare +r -F; declare -xF'; ( nbp() { :; }; nbq() { :; }; readonly -f nbp; export -f nbp nbq; declare -frx +rx nbp nbq; echo \"rc=$?\"; declare -F | grep ' nb' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "nbp () \n{ \n    :\n}\ndeclare -f nbp\n0\nredefined\nnbp () \n{ \n    echo redefined\n}\nrc=1\ndeclare -fx nbp\ndeclare -f nbq\ndeclare -fx nbp\ndeclare -f nbq\ndeclare -fx nbp\nrc=1\ndeclare -frx nbp\ndeclare -f nbq\n",
+        "stderr": "bash: declare: nbnosuch: not found\nbash: declare: nbp: readonly function\n"
+      }
+    },
+    {
+      "id": "export_a_A_shape_values_and_filter_listings",
+      "seq": 609267,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "env -i bash -c 'export -A M=([k]=v); export -a X=(1 2) S=1; Y=(1 2); export Y=9; export -A Y=8; echo \"rc=$?\"; export Z; export -a; echo ---; export -A; export -r; echo \"rc=$?\"; declare -p S Y Z'",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ndeclare -ax S=([0]=\"1\")\ndeclare -ax X=([0]=\"1\" [1]=\"2\")\ndeclare -ax Y=([0]=\"9\" [1]=\"2\")\n---\ndeclare -Ax M=([k]=\"v\" )\nrc=2\ndeclare -ax S=([0]=\"1\")\ndeclare -ax Y=([0]=\"9\" [1]=\"2\")\ndeclare -x Z\n",
+        "stderr": "bash: export: Y: cannot convert indexed to associative array\nbash: export: -r: invalid option\nexport: usage: export [-fn] [name[=value] ...] or export -p\n"
+      }
+    },
+    {
+      "id": "export_f_reports_operands_in_order",
+      "seq": 609268,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( export -f X=1 ARR=(a b) Y; echo rc=$?; declare -p ARR; MAP(){ :; }; export -f MAP NO1 ARR2=(x) NO2; echo rc=$? )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ndeclare -a ARR=([0]=\"a\" [1]=\"b\")\nrc=1\n",
+        "stderr": "bash: export: X=1: not a function\nbash: export: ARR: not a function\nbash: export: Y: not a function\nbash: export: NO1: not a function\nbash: export: ARR2: not a function\nbash: export: NO2: not a function\n"
+      }
     }
   ]
 }

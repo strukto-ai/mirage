@@ -161,12 +161,16 @@ def copy_var(var: ShellVar) -> ShellVar:
 
 
 def with_value(var: ShellVar, value: ShellValue | None) -> ShellVar:
-    """The variable with a new value and the same attributes.
+    """The variable with a new value and the same attributes, but a
+    reference's under an array: bash's reference cannot hold one, so
+    ``declare -n r; r=(x)`` leaves ``declare -a r``.
 
     Args:
         var (ShellVar): the variable to copy.
         value (ShellValue | None): the value to store.
     """
+    if isinstance(value, (list, dict)) and VarAttr.NAMEREF in var.attrs:
+        return replace(var, value=value, attrs=var.attrs - {VarAttr.NAMEREF})
     return replace(var, value=value)
 
 
@@ -199,6 +203,24 @@ def with_attr(var: ShellVar, attr: VarAttr, on: bool = True) -> ShellVar:
     return replace(var, attrs=frozenset(attrs))
 
 
+def appended(old: str, added: str, integer: bool) -> str:
+    """The text a ``+=`` stores: the old text then the added one, or on
+    an integer the expression the door evaluates to their sum.
+
+    Each side is evaluated on its own and an empty side counts as 0, as
+    bash does: with ``N='1?2:3'`` under ``-i``, ``N+=4`` stores 6, and
+    ``N+=''`` keeps the old value.
+
+    Args:
+        old (str): what the slot holds, "" when unset.
+        added (str): the text appended.
+        integer (bool): the variable carries ``-i``.
+    """
+    if not integer:
+        return old + added
+    return f"({old.strip() or 0}) + ({added.strip() or 0})"
+
+
 def coerce_scalar(
     text: str, attrs: frozenset[VarAttr], integer: Coercer | None
 ) -> str:
@@ -229,26 +251,47 @@ def coerce_scalar(
 
 
 def coerce_value(
-    value: ShellValue, attrs: frozenset[VarAttr], integer: Coercer | None
+    value: ShellValue,
+    attrs: frozenset[VarAttr],
+    integer: Coercer | None,
+    assigned: frozenset[int | str] | None = None,
 ) -> ShellValue:
     """`coerce_scalar` lifted over every value shape.
 
     An array applies the attribute per element, which is GNU's
-    `declare -ai a=(1+1 2*3)` giving `([0]="2" [1]="6")`.
+    `declare -ai a=(1+1 2*3)` giving `([0]="2" [1]="6")`. A write that
+    assigns some elements only (`a[1]=x`, `a=x`) names them in
+    `assigned`, and the others are carried over as stored: bash shapes
+    a value when it is assigned, so `declare -i a; a[0]=9` never
+    re-evaluates a stored `a[1]`.
 
     Args:
         value (ShellValue): the incoming value.
         attrs (frozenset[VarAttr]): the attributes on the name.
         integer (Coercer | None): the arithmetic evaluation `-i` runs.
+        assigned (frozenset[int | str] | None): the indexes or keys
+            assigned, None for the whole value.
     """
     if not (attrs & {VarAttr.INTEGER, VarAttr.LOWER, VarAttr.UPPER}):
         return value
     if isinstance(value, str):
         return coerce_scalar(value, attrs, integer)
     if isinstance(value, dict):
-        return {k: coerce_scalar(v, attrs, integer) for k, v in value.items()}
+        return {
+            k: (
+                v
+                if assigned is not None and k not in assigned
+                else coerce_scalar(v, attrs, integer)
+            )
+            for k, v in value.items()
+        }
     return [
-        None if v is None else coerce_scalar(v, attrs, integer) for v in value
+        (
+            v
+            if v is None or (assigned is not None and i not in assigned)
+            else coerce_scalar(v, attrs, integer)
+        )
+        for i, v in enumerate(value)
     ]
 
 

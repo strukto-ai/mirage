@@ -341,6 +341,7 @@ class SessionManager(SessionOwner):
                     default.vars = stored.vars
                     default.functions = stored.functions
                     default.readonly_functions = stored.readonly_functions
+                    default.exported_functions = stored.exported_functions
                     default.created_at = stored.created_at
                     default.mount_modes = stored.mount_modes
                     # The hidden shapes are durable restrictions, not

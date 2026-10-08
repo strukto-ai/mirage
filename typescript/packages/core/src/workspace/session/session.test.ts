@@ -27,7 +27,7 @@ describe('SessionState', () => {
     expect(s.cwd).toBe('/')
     // bash exports $PWD from startup, so even a session that never ran
     // `cd` has one, a PATH when the environment gives none, and IFS.
-    expect(s.env).toEqual({ PWD: '/', PATH: '/usr/bin', IFS: ' \t\n' })
+    expect(s.env).toEqual({ PWD: '/', PATH: '/usr/bin', IFS: ' \t\n', OPTIND: '1', OPTERR: '1' })
     expect(s.functions).toEqual({})
     expect(s.lastExitCode).toBe(0)
   })
@@ -46,12 +46,13 @@ describe('SessionState', () => {
     expect(json).toEqual({
       session_id: 'x',
       cwd: '/a',
-      env: { K: 'V', PWD: '/a', PATH: '/usr/bin', IFS: ' \t\n' },
+      env: { K: 'V', PWD: '/a', PATH: '/usr/bin', IFS: ' \t\n', OPTIND: '1', OPTERR: '1' },
       // The attributes ride beside the values rather than being guessed
       // on the way back in: `varsFromEnv` exports what it seeds, so both
-      // names carry `x` here, while the seeded PATH, like a plain `Y=1`,
-      // carries no entry at all and restores unexported.
-      var_attrs: { K: 'x', PWD: 'x' },
+      // names carry `x` here, the seeded OPTIND its `i`, while the seeded
+      // PATH, like a plain `Y=1`, carries no entry at all and restores
+      // unexported.
+      var_attrs: { K: 'x', PWD: 'x', OPTIND: 'i' },
       created_at: s.createdAt,
       generation: 0,
     })
@@ -71,7 +72,14 @@ describe('SessionState', () => {
     )
     expect(restored.sessionId).toBe('x')
     expect(restored.cwd).toBe('/a')
-    expect(restored.env).toEqual({ K: 'V', PWD: '/a', PATH: '/usr/bin', IFS: ' \t\n' })
+    expect(restored.env).toEqual({
+      K: 'V',
+      PWD: '/a',
+      PATH: '/usr/bin',
+      IFS: ' \t\n',
+      OPTIND: '1',
+      OPTERR: '1',
+    })
   })
 
   it('round-trips mountModes through toJSON/fromJSON', () => {
@@ -171,7 +179,14 @@ describe('SessionState.fork', () => {
     const forked = original.fork({})
     expect(forked.sessionId).toBe('orig')
     expect(forked.cwd).toBe('/disk')
-    expect(forked.env).toEqual({ FOO: 'bar', PWD: '/disk', PATH: '/usr/bin', IFS: ' \t\n' })
+    expect(forked.env).toEqual({
+      FOO: 'bar',
+      PWD: '/disk',
+      PATH: '/usr/bin',
+      IFS: ' \t\n',
+      OPTIND: '1',
+      OPTERR: '1',
+    })
     expect(forked.mountModes).toBe(original.mountModes)
     expect(forked.shellOptions).toEqual({ errexit: true })
     expect(forked.readonlyVars.has('HOME')).toBe(true)
@@ -189,9 +204,23 @@ describe('SessionState.fork', () => {
     const forked = original.fork({ cwd: '/ram', vars: varsFromEnv({ BAZ: 'qux' }) })
     expect(forked.cwd).toBe('/ram')
     // $PWD follows the caller-supplied cwd rather than staying stale.
-    expect(forked.env).toEqual({ BAZ: 'qux', PWD: '/ram', PATH: '/usr/bin', IFS: ' \t\n' })
+    expect(forked.env).toEqual({
+      BAZ: 'qux',
+      PWD: '/ram',
+      PATH: '/usr/bin',
+      IFS: ' \t\n',
+      OPTIND: '1',
+      OPTERR: '1',
+    })
     expect(original.cwd).toBe('/disk')
-    expect(original.env).toEqual({ FOO: 'bar', PWD: '/disk', PATH: '/usr/bin', IFS: ' \t\n' })
+    expect(original.env).toEqual({
+      FOO: 'bar',
+      PWD: '/disk',
+      PATH: '/usr/bin',
+      IFS: ' \t\n',
+      OPTIND: '1',
+      OPTERR: '1',
+    })
   })
 
   // A caller-supplied cwd has no typed spelling behind it, so carrying the
@@ -223,6 +252,84 @@ describe('SessionState.fork', () => {
     forked.arrays.A?.push('2')
     expect('NEW' in original.env).toBe(false)
     expect(original.arrays.A).toEqual(['1'])
+  })
+
+  it('round-trips function marks and keeps each fork its own', () => {
+    const parent = new SessionState({
+      sessionId: 's',
+      functions: { f: 'f() { echo a; }' },
+      readonlyFunctions: new Set(['f']),
+      exportedFunctions: new Set(['f']),
+    })
+    const restored = SessionState.fromJSON(
+      parent.toJSON() as Parameters<typeof SessionState.fromJSON>[0],
+    )
+    expect(restored.readonlyFunctions).toEqual(new Set(['f']))
+    expect(restored.exportedFunctions).toEqual(new Set(['f']))
+    restored.fork().exportedFunctions.clear()
+    expect(restored.exportedFunctions).toEqual(new Set(['f']))
+  })
+})
+
+describe('SessionState.fromJSON', () => {
+  it('keeps the startup vars a recorded session unset', () => {
+    const s = new SessionState({ sessionId: 's' })
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    for (const name of ['OPTIND', 'OPTERR', 'IFS']) delete s.vars[name]
+    const back = SessionState.fromJSON(s.toJSON() as Parameters<typeof SessionState.fromJSON>[0])
+    expect(['OPTIND', 'OPTERR', 'IFS'].filter((name) => name in back.vars)).toEqual([])
+    const bare = SessionState.fromJSON({ session_id: 's', env: { A: '1' } })
+    expect(bare.vars.OPTIND).toEqual(makeVar('1', new Set([VarAttr.Integer])))
+  })
+})
+
+describe('SessionState.newShell', () => {
+  it('starts from the environment', () => {
+    const exported = new Set([VarAttr.Export])
+    const token = { source: 'env', ref: '', key: 'TOKEN', eager: false }
+    const parent = new SessionState({
+      sessionId: 's',
+      cwd: '/w',
+      vars: {
+        PLAIN: makeVar('p'),
+        OUT: makeVar('o', new Set([VarAttr.Export, VarAttr.Readonly])),
+        ARR: makeVar(['a'], exported),
+        UNSET: makeVar(null, exported),
+        IFS: makeVar(',', exported),
+        TOKEN: { value: null, attrs: exported, managed: token },
+        OPTIND: makeVar('5', exported),
+        RANDOM: makeVar('42', exported),
+      },
+      functions: { f: 'f() { :; }', g: 'g() { :; }' },
+      exportedFunctions: new Set(['f']),
+      readonlyFunctions: new Set(['f']),
+      shellOptions: { errexit: true },
+      lastExitCode: 1,
+    })
+    parent.aliases = { a: 'echo' }
+    parent.umask = 0o077
+    parent.getoptsPos = 2
+    parent.getoptsOptind = 1
+    const child = parent.newShell()
+    expect(child.vars).toEqual({
+      OUT: makeVar('o', exported),
+      TOKEN: { value: null, attrs: exported, managed: token },
+      OPTIND: makeVar('1', new Set([VarAttr.Integer, VarAttr.Export])),
+      OPTERR: makeVar('1'),
+      RANDOM: makeVar('42', exported),
+      PWD: makeVar('/w', exported),
+      PATH: makeVar('/usr/bin'),
+      IFS: makeVar(' \t\n'),
+    })
+    expect(child.functions).toEqual({ f: 'f() { :; }' })
+    expect(child.exportedFunctions).toEqual(new Set(['f']))
+    expect(child.readonlyFunctions).toEqual(new Set())
+    expect([child.aliases, child.shellOptions]).toEqual([{}, {}])
+    expect([child.lastExitCode, child.cwd, child.umask]).toEqual([0, '/w', 0o077])
+    expect([child.getoptsPos, child.getoptsOptind]).toEqual([0, null])
+    expect(child.randomSeed).toBe('42')
+    expect(Object.keys(parent.functions)).toEqual(['f', 'g'])
+    expect(parent.vars.PLAIN).toEqual(makeVar('p'))
   })
 })
 
@@ -283,7 +390,10 @@ describe('a stored session keeps its attributes', () => {
     // environment, and the reload re-exported everything it held.
     const s = new SessionState({ sessionId: 's1' })
     seedVar(s, 'X', 'secret')
+    // `export -n PWD` and `unset OPTIND` clear the attributes a fresh
+    // session carries.
     setAttr(s, 'PWD', VarAttr.Export, false)
+    delete s.vars.OPTIND
     const json = s.toJSON() as { var_attrs: Record<string, string> }
     expect(json.var_attrs).toEqual({})
     const back = SessionState.fromJSON(json as never)

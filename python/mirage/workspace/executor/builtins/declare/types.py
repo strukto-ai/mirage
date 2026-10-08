@@ -12,16 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.variable import VarAttr
 
-class ReadonlyVariableError(Exception):
-    """A write to a name ``readonly`` has marked.
-
-    Raised by the session door so every writer refuses the same way;
-    each builtin catches it and renders its own bash wording. Its
-    message is bash's plain refusal, which a line that does not catch it
-    reports as it ends (``declare -i n; n='R=3'``).
-    """
-
-    def __init__(self, name: str) -> None:
-        super().__init__(f"bash: {name}: readonly variable")
-        self.name = name
+# A staged array literal, `NAME=(...)` or `NAME+=(...)`: the name, whether
+# it appends, and its expanded items. It travels as data so the builtin
+# that owns the keyword stores it through the session door.
+StagedArray = tuple[str, bool, list[str]]
+# One declaration operand in the order it was typed: a word (`NAME`,
+# `NAME=value`, an option) or a staged array literal.
+DeclarationOperand = str | StagedArray
+# The attribute letters a declaration applies, in order: each attribute
+# and whether it goes on (`-x`) or off (`+x`).
+AttrMarks = tuple[tuple[VarAttr, bool], ...]

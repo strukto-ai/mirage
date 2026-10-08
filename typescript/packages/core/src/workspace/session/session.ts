@@ -14,6 +14,7 @@
 
 import { compareCodePoints } from '../../utils/sort.ts'
 import { type FunctionSite, functionSources } from './functions.ts'
+import { STARTUP_VALUES } from './constants.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 
 import {
@@ -100,6 +101,7 @@ export interface SessionInit {
   createdAt?: number
   functions?: Record<string, string>
   readonlyFunctions?: Set<string>
+  exportedFunctions?: Set<string>
   lastExitCode?: number
   positionalArgs?: string[]
   scriptName?: string | null
@@ -366,6 +368,8 @@ export class SessionState {
   // *variable* set: `readonly -f f` and `readonly f` are two different
   // frozen things in bash, and each refuses in its own voice.
   readonlyFunctions: Set<string>
+  // The functions `export -f` marked, which a nested shell inherits.
+  exportedFunctions: Set<string>
   lastExitCode: number
   // `${PIPESTATUS[@]}`: the exit status of every segment of the last
   // pipeline, where a simple command is a one-segment pipeline. Written
@@ -475,6 +479,10 @@ export class SessionState {
   // refused (`0: Bad file descriptor`); null for the read end itself.
   execStdinIdentity: string | null = null
   localFrames: Map<string, ShellVar | null>[] = []
+  // The names a running `declare -g` has put at global scope
+  // (`reachGlobal`), each with its frame and the function's local it set
+  // aside: arithmetic in the declaration still reads that local.
+  reached: [string, Map<string, ShellVar | null>, ShellVar | null][] = []
   // The caller's `RANDOM` marker for every frame that shadows the name,
   // innermost last: a local `RANDOM` is an ordinary variable for the
   // function's extent, and the generator resumes when it returns.
@@ -505,6 +513,7 @@ export class SessionState {
     this.createdAt = init.createdAt ?? Date.now() / 1000
     this.functions = functionSources(init.functions)
     this.readonlyFunctions = new Set(init.readonlyFunctions ?? [])
+    this.exportedFunctions = new Set(init.exportedFunctions ?? [])
     this.lastExitCode = init.lastExitCode ?? 0
     this.positionalArgs = init.positionalArgs ?? []
     this.scriptName = init.scriptName ?? null
@@ -541,6 +550,11 @@ export class SessionState {
     // `${#IFS}` as 3 and `OLDIFS=$IFS ... IFS=$OLDIFS` puts the default
     // back rather than an empty IFS that splits nothing.
     if (!Object.hasOwn(this.vars, 'IFS')) this.vars.IFS = makeVar(IFS_DEFAULT, new Set())
+    // bash starts OPTIND (an integer) and OPTERR at 1 and never exports them,
+    // so `shift $((OPTIND-1))` works before any `getopts`.
+    for (const [name, start] of Object.entries(STARTUP_VALUES)) {
+      if (!Object.hasOwn(this.vars, name)) this.vars[name] = copyVar(start)
+    }
   }
 
   /**
@@ -573,6 +587,7 @@ export class SessionState {
       createdAt: overrides.createdAt ?? this.createdAt,
       functions: overrides.functions ?? { ...this.functions },
       readonlyFunctions: overrides.readonlyFunctions ?? new Set(this.readonlyFunctions),
+      exportedFunctions: overrides.exportedFunctions ?? new Set(this.exportedFunctions),
       lastExitCode: overrides.lastExitCode ?? this.lastExitCode,
       positionalArgs: overrides.positionalArgs ?? [...this.positionalArgs],
       scriptName: overrides.scriptName ?? this.scriptName,
@@ -593,6 +608,10 @@ export class SessionState {
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
+    // A fork is the same shell going on, so a startup variable the source
+    // unset stays unset (`unset IFS; ( ... )`) rather than being seeded
+    // again; a fork given new variables starts them.
+    if (overrides.vars === undefined) forked.vars = vars
     if (this.randomSeed === RANDOM_UNSET) forked.randomSeed = RANDOM_UNSET
     forked.terminalOutput = this.terminalOutput
     forked.pipeStatus = [...this.pipeStatus]
@@ -626,9 +645,9 @@ export class SessionState {
   /**
    * A child shell of this session: a fork that reads on from here. `fork`
    * copies what a session keeps; a child shell (a command substitution, a
-   * subshell, a nested `bash`) also inherits the reader's position, the
-   * aliases being expanded and the local frames, and reseeds `$RANDOM` on its
-   * first draw instead of replaying this session's seed. Mirrors Python.
+   * subshell) also inherits the reader's position, the aliases being
+   * expanded and the local frames, and reseeds `$RANDOM` on its first draw
+   * instead of replaying this session's seed. Mirrors Python.
    */
   subshell(): SessionState {
     const child = this.fork()
@@ -640,11 +659,79 @@ export class SessionState {
       frame === this.localVars && child.localVars !== null ? child.localVars : copyLocals(frame),
     )
     child.localRandom = [...this.localRandom]
-    if (child.randomSeed !== RANDOM_UNSET) {
-      const word = this.vars[RANDOM]?.value
-      child.randomSeed = typeof word === 'string' ? word : null
-    }
+    if (child.randomSeed !== RANDOM_UNSET) child.drawAfresh()
     return child
+  }
+
+  /**
+   * Start `$RANDOM` on a new sequence at its next draw, rather than seed it
+   * from the value the variable holds now.
+   */
+  private drawAfresh(): void {
+    const word = this.vars[RANDOM]?.value
+    this.randomSeed = typeof word === 'string' ? word : null
+  }
+
+  /**
+   * A new shell started from this session, as a nested `bash` is. bash runs
+   * a nested shell as a program of its own, which inherits the working
+   * directory, the umask, the open files and the environment: the exported
+   * variables, as plain exported strings (no array, no other attribute), and
+   * the functions `export -f` marked. The rest starts as a fresh shell's
+   * does: the other variables and functions, the aliases, the `set` and
+   * `shopt` options, `$?`, `$!`, `$RANDOM`'s sequence, `getopts`'s place,
+   * the call stack and the startup variables, which bash never reads from
+   * its environment: IFS is dropped and `STARTUP_VALUES` restart. A managed
+   * variable not yet fetched crosses as its pointer, which the nested shell
+   * fetches through. Mirrors Python.
+   */
+  newShell(): SessionState {
+    const vars = ownRecord<ShellVar>()
+    for (const [name, v] of Object.entries(this.vars)) {
+      if (!v.attrs.has(VarAttr.Export) || name === 'IFS') continue
+      if (typeof v.value !== 'string' && v.managed === undefined) continue
+      const start = sessionEntry(STARTUP_VALUES, name)
+      vars[name] =
+        start === undefined
+          ? {
+              value: v.value,
+              attrs: new Set([VarAttr.Export]),
+              ...(v.managed === undefined ? {} : { managed: v.managed }),
+            }
+          : makeVar(start.value, new Set([...start.attrs, VarAttr.Export]))
+    }
+    const functions = Object.fromEntries(
+      Object.entries(this.functions).filter(([name]) => this.exportedFunctions.has(name)),
+    )
+    const child = this.fork({
+      vars,
+      functions,
+      exportedFunctions: new Set(Object.keys(functions)),
+      readonlyFunctions: new Set(),
+      shellOptions: {},
+      lastExitCode: 0,
+    })
+    child.functionSites = new Map(
+      [...this.functionSites].filter(([name]) => name in child.functions),
+    )
+    child.aliases = {}
+    child.aliasMarks = new Map()
+    child.shopts = {}
+    child.pipeStatus = []
+    child.lastBgJobId = null
+    child.functionNames = []
+    child.getoptsPos = 0
+    child.getoptsOptind = null
+    child.drawAfresh()
+    return child
+  }
+
+  /** Remove a function with its definition site and export mark. */
+  removeFunction(name: string): void {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete this.functions[name]
+    this.functionSites.delete(name)
+    this.exportedFunctions.delete(name)
   }
 
   /**
@@ -763,6 +850,8 @@ export class SessionState {
     if (Object.keys(this.functions).length > 0) data.functions = { ...this.functions }
     if (this.readonlyFunctions.size > 0)
       data.readonly_functions = [...this.readonlyFunctions].sort(compareCodePoints)
+    if (this.exportedFunctions.size > 0)
+      data.exported_functions = [...this.exportedFunctions].sort(compareCodePoints)
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
     }
@@ -824,22 +913,26 @@ export class SessionState {
     generation?: number
     functions?: Record<string, string>
     readonly_functions?: string[]
+    exported_functions?: string[]
   }): SessionState {
     const commands = data.commands != null ? commandsFromJSON(data.commands) : null
     const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
-    return new SessionState({
+    const vars =
+      data.env !== undefined || data.var_attrs !== undefined || data.managed != null
+        ? restoredVars(data.env ?? {}, data.var_attrs, data.managed)
+        : undefined
+    const session = new SessionState({
       sessionId: data.session_id,
       ...(data.functions === undefined ? {} : { functions: data.functions }),
       readonlyFunctions: new Set(data.readonly_functions ?? []),
+      exportedFunctions: new Set(data.exported_functions ?? []),
       ...(data.cwd !== undefined ? { cwd: data.cwd } : {}),
       // No `var_attrs` at all means the payload is a bare process
       // environment -- an embedder's record, or one another writer
       // hand-built -- so every name in it is exported, which is what a
       // process environment means. With the key present the attributes
       // were recorded and are restored as they were written.
-      ...(data.env !== undefined || data.var_attrs !== undefined || data.managed != null
-        ? { vars: restoredVars(data.env ?? {}, data.var_attrs, data.managed) }
-        : {}),
+      ...(vars === undefined ? {} : { vars }),
       ...(data.created_at !== undefined ? { createdAt: data.created_at } : {}),
       ...(data.generation !== undefined ? { generation: data.generation } : {}),
       mountModes: data.mount_modes != null ? new Map(Object.entries(data.mount_modes)) : null,
@@ -875,5 +968,10 @@ export class SessionState {
       processes,
       decisions: data.decisions != null ? data.decisions.map(decisionFromJSON) : [],
     })
+    // A recorded session comes back as it was written, so a startup
+    // variable it had unset stays unset rather than being seeded again; a
+    // bare environment starts a new shell. The constructor seeded a copy.
+    if (data.var_attrs !== undefined && vars !== undefined) session.vars = vars
+    return session
   }
 }

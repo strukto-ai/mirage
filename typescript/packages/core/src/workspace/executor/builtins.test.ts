@@ -167,7 +167,9 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const text = decode(out as Uint8Array)
     expect(text).toContain('declare -ar AR=([0]="a" [1]="b c")\n')
     expect(text).toContain('declare -r ONLY\n')
-    expect(text).toContain('declare -r VAL="x"\n')
+    // VAL came from the environment, so it is exported too, and the whole
+    // cluster prints, as bash's `readonly -p` does.
+    expect(text).toContain('declare -rx VAL="x"\n')
   })
 
   it('readonly -z is invalid option exit 2', async () => {
@@ -1526,7 +1528,9 @@ describe('handleSet', () => {
   it('no args → print env', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ A: '1' }) })
     const [out] = handleSet([], s)
-    expect(decode(out as Uint8Array)).toBe("A=1\nIFS=$' \\t\\n'\nPATH=/usr/bin\nPWD=/\n")
+    expect(decode(out as Uint8Array)).toBe(
+      "A=1\nIFS=$' \\t\\n'\nOPTERR=1\nOPTIND=1\nPATH=/usr/bin\nPWD=/\n",
+    )
   })
 
   it.each([
@@ -1613,7 +1617,7 @@ describe('handleReturn / handleLocal', () => {
 
   it('handleLocal assigns to session.env under the declare spelling', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    await handleLocal(['X=1'], s, sessionView(s), null, 'declare')
+    await handleLocal(['X=1'], s, sessionView(s), 'declare')
     expect(s.env.X).toBe('1')
   })
 })

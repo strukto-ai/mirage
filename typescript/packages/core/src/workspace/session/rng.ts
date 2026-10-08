@@ -22,12 +22,16 @@ import {
   RANDOM_ZERO_SEED,
 } from '../../shell/constants.ts'
 
-/** A first seed for a session that was never assigned one: the clock,
- * stirred with the session id so two sessions born in one tick differ. */
+let started = 0
+
+/** A first seed for a generator never assigned one: the clock, stirred
+ * with the session id and a count of the generators started, so two
+ * started in one tick differ, as bash's mixes in each shell's own pid. */
 export function initialSeed(sessionId: string): number {
   let hash = 0
   for (const ch of sessionId) hash = (Math.imul(hash, 31) + (ch.codePointAt(0) ?? 0)) >>> 0
-  return ((Date.now() % RANDOM_MODULUS) ^ hash) >>> 0
+  started += 1
+  return ((Date.now() % RANDOM_MODULUS) ^ hash ^ Math.imul(started, 0x9e3779b1)) >>> 0
 }
 
 /** One step of bash's RANDOM generator: Park-Miller through

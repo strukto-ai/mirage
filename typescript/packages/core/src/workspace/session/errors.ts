@@ -15,14 +15,16 @@
 /**
  * A write to a name `readonly` has marked. Raised by the session door
  * so every writer refuses the same way; each builtin catches it and
- * renders its own bash wording. `varName` is the refused variable
- * (`name` stays the error-class label, per Error convention).
+ * renders its own bash wording. Its message is bash's plain refusal, which
+ * a line that does not catch it reports as it ends (`declare -i n;
+ * n='R=3'`). `varName` is the refused variable (`name` stays the
+ * error-class label, per Error convention).
  */
 export class ReadonlyVariableError extends Error {
   readonly varName: string
 
   constructor(varName: string) {
-    super(varName)
+    super(`bash: ${varName}: readonly variable`)
     this.name = 'ReadonlyVariableError'
     this.varName = varName
   }
