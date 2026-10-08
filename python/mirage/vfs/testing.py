@@ -35,6 +35,31 @@ def _renderer(
     return render
 
 
+async def _check_windows(
+    read: Callable[..., Awaitable[bytes]],
+    path: PathSpec,
+    store: IndexCacheStore,
+    data: bytes,
+) -> None:
+    """Check that ``read`` answers a byte window of ``data``.
+
+    Args:
+        read (Callable[..., Awaitable[bytes]]): the read handed a window.
+        path (PathSpec): the file.
+        store (IndexCacheStore): the store handed to the read.
+        data (bytes): the whole file as ``read`` answers it.
+    """
+    if not data:
+        return
+    offset = min(1, len(data) - 1)
+    for size in (min(3, len(data) - offset), None):
+        end = None if size is None else offset + size
+        actual = await read(path, store, offset, size)
+        assert actual == data[offset:end], (
+            "read must use offset and byte count"
+        )
+
+
 async def check_read_contract(
     vfs: BaseVFS, fixture: ReadFixture, index: IndexCacheStore | None = None
 ) -> None:
@@ -43,8 +68,8 @@ async def check_read_contract(
     A read runs the renderer of the file's filetype where the VFS renders
     one, else ``read``; a stream is compared with what ``read`` stores. A
     stream and an existence check are probed only where the VFS defines
-    them, and a byte window only where ``read`` takes one natively: the
-    caller reads whole and slices otherwise.
+    them. A renderer is always handed a byte window, ``read`` only where
+    it takes one natively: the caller reads whole and slices otherwise.
 
     Args:
         vfs (BaseVFS): the VFS being validated.
@@ -79,14 +104,10 @@ async def check_read_contract(
             [part async for part in vfs.read_stream(fixture.file, store)]
         )
         assert streamed == stored, "read_stream differs from read"
-    if vfs.reads_ranges and stored:
-        offset = min(1, len(stored) - 1)
-        for size in (min(3, len(stored) - offset), None):
-            end = None if size is None else offset + size
-            actual = await vfs.read(fixture.file, store, offset, size)
-            assert actual == stored[offset:end], (
-                "read must use offset and byte count"
-            )
+    if render is not None:
+        await _check_windows(render, fixture.file, store, data)
+    if vfs.reads_ranges and vfs.supports("read"):
+        await _check_windows(vfs.read, fixture.file, store, stored)
     if vfs.supports("exists"):
         assert await vfs.exists(fixture.file), (
             "exists rejected the fixture file"

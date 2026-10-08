@@ -124,6 +124,17 @@ class RenderedOnly(BaseVFS):
         return await ram_stat(self.accessor, path, index)
 
 
+class WholeRender(RenderedOnly):
+    async def read_doc(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        return await ram_read(self.accessor, path, index)
+
+
 class Rendering(Minimal):
     """Stores and streams bytes, and renders its doc filetype reversed."""
 
@@ -204,6 +215,17 @@ async def test_the_contract_catches_ranges_using_end_instead_of_size():
     vfs = await _seeded(EndForSize, CONTENT)
     with pytest.raises(AssertionError, match="offset and byte count"):
         await check_read_contract(vfs, FIXTURE)
+
+
+@pytest.mark.asyncio
+async def test_the_contract_catches_a_renderer_that_ignores_the_window():
+    accessor = RAMAccessor(RAMStore())
+    await ram_write(accessor, DOC, CONTENT)
+    with pytest.raises(AssertionError, match="offset and byte count"):
+        await check_read_contract(
+            WholeRender(accessor=accessor),
+            ReadFixture(DOC, DIRECTORY, DOC_MISSING, CONTENT),
+        )
 
 
 @pytest.mark.asyncio

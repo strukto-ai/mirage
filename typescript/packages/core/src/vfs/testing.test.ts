@@ -113,6 +113,12 @@ class RenderedOnly extends BaseVFS<RAMAccessor> {
   }
 }
 
+class WholeRender extends RenderedOnly {
+  override readDoc(path: PathSpec, index?: IndexCacheStore): Promise<Uint8Array> {
+    return ramRead(this.accessor, path, index)
+  }
+}
+
 /** Stores and streams bytes, and renders its doc filetype reversed. */
 class Rendering extends Minimal {
   override readonly renderers: Readonly<Record<string, string>> = {
@@ -186,6 +192,19 @@ describe('the read contract', () => {
     await expect(checkReadContract(await seeded(EndForSize, CONTENT), FIXTURE)).rejects.toThrow(
       'offset and byte count',
     )
+  })
+
+  it('catches a renderer that ignores the window', async () => {
+    const accessor = new RAMAccessor(new RAMStore())
+    await ramWrite(accessor, DOC, CONTENT)
+    await expect(
+      checkReadContract(new WholeRender({ name: 'custom', accessor }), {
+        file: DOC,
+        directory: DIRECTORY,
+        missing: DOC_MISSING,
+        content: CONTENT,
+      }),
+    ).rejects.toThrow('offset and byte count')
   })
 
   it('catches a stat that answers for a missing path', async () => {

@@ -32,14 +32,33 @@ function renderer(vfs: BaseVFS, path: PathSpec): BaseVFS['read'] | undefined {
   return render.bind(vfs)
 }
 
+// Check that `read` answers a byte window of `data`, the whole file as
+// `read` answers it. Mirrors Python's `_check_windows`.
+async function checkWindows(
+  read: BaseVFS['read'],
+  path: PathSpec,
+  store: IndexCacheStore,
+  data: Uint8Array,
+): Promise<void> {
+  if (data.length === 0) return
+  const offset = Math.min(1, data.length - 1)
+  for (const size of [Math.min(3, data.length - offset), null]) {
+    const actual = await read(path, store, offset, size)
+    check(
+      sameBytes(actual, data.slice(offset, size === null ? undefined : offset + size)),
+      'read must use offset and byte count',
+    )
+  }
+}
+
 /**
  * Verify a VFS's reads against a caller-owned fixture, mutating nothing.
  *
  * A read runs the renderer of the file's filetype where the VFS renders
  * one, else `read`; a stream is compared with what `read` stores. A stream
- * and an existence check are probed only where the VFS defines them, and a
- * byte window only where `read` takes one natively: the caller reads whole
- * and slices otherwise. `index` is the store every function is
+ * and an existence check are probed only where the VFS defines them. A
+ * renderer is always handed a byte window, `read` only where it takes one
+ * natively: the caller reads whole and slices otherwise. `index` is the store every function is
  * handed, a RAM store at the VFS's `indexTtl` by default. Mirrors Python's
  * `check_read_contract`.
  */
@@ -69,15 +88,9 @@ export async function checkReadContract(
     for await (const chunk of vfs.readStream(fixture.file, store)) chunks.push(...chunk)
     check(sameBytes(Uint8Array.from(chunks), stored), 'readStream differs from read')
   }
-  if (vfs.readsRanges && stored.length > 0) {
-    const offset = Math.min(1, stored.length - 1)
-    for (const size of [Math.min(3, stored.length - offset), null]) {
-      const actual = await vfs.read(fixture.file, store, offset, size)
-      check(
-        sameBytes(actual, stored.slice(offset, size === null ? undefined : offset + size)),
-        'read must use offset and byte count',
-      )
-    }
+  if (render !== undefined) await checkWindows(render, fixture.file, store, data)
+  if (vfs.readsRanges && vfs.supports('read')) {
+    await checkWindows(vfs.read.bind(vfs), fixture.file, store, stored)
   }
   if (vfs.supports('exists')) {
     check(await vfs.exists(fixture.file), 'exists rejected the fixture file')
