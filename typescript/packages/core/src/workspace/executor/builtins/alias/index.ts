@@ -14,10 +14,12 @@
 
 export {
   aliasCommandText,
+  aliasMark,
   aliasValue,
   aliasView,
   expandingAliases,
   handleAlias,
   handleUnalias,
+  noteExpanding,
 } from './alias.ts'
 export type { AliasMark } from './types.ts'

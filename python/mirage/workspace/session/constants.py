@@ -77,6 +77,7 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "_getopts_optind",
     "_parse_seq",
     "_alias_marks",
+    "_expand_aliases_mark",
     "_alias_view",
     "_function_sites",
 )

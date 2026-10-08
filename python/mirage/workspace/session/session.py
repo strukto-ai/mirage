@@ -424,8 +424,10 @@ class SessionState:
     # (`alias x=..; x` on one line finds no `x`; the same two statements
     # on two lines do). mirage parses a whole program before running any
     # of it, so the rule is kept as a mark: each program loop entered
-    # gets a parse id, an alias remembers the (parse, row) it was
-    # defined at, and a use on that same parse and row does not expand.
+    # gets a parse id, a read is the (parse, row) a command began on
+    # (`read_row`), and an alias changed in a read keeps the value that
+    # read began with for the commands it read (`unalias x; x` still
+    # runs `x`).
     # `_alias_expansion` tracks the text each alias inserted, so a value whose
     # first word is the alias itself (`alias ls='ls -1'`) stops there.
     # `exec` redirect-only state: where the shell's own stdout, stderr
@@ -468,8 +470,15 @@ class SessionState:
     # terminal is writing to a stream it did not open.
     terminal: StreamOwner = field(default_factory=StreamOwner, repr=False)
     _line_open: bool = field(default=False, repr=False)
-    _alias_marks: dict[str, tuple[int, int]] = field(
+    # Per alias name, the read that last changed it and its value as
+    # that read began (None: not defined), for the commands of that read.
+    _alias_marks: dict[str, tuple[tuple[int, int], str | None]] = field(
         default_factory=dict, repr=False
+    )
+    # The read that last ran `shopt` on `expand_aliases`, and the option
+    # as that read began.
+    _expand_aliases_mark: tuple[tuple[int, int], bool] | None = field(
+        default=None, repr=False
     )
     _alias_expansion: AliasExpansion | None = field(default=None, repr=False)
     # The aliases a running function's body expands, as its definition
@@ -940,6 +949,7 @@ class SessionState:
             },
             aliases={},
             _alias_marks={},
+            _expand_aliases_mark=None,
             shell_options={},
             shopts={},
             last_exit_code=0,

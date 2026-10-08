@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable
+
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import decode_text, encode_text
@@ -49,10 +51,9 @@ async def handle_alias(
     Args:
         args (list[str]): the words after `alias`.
         session (SessionState): shell session state.
-        mark (AliasMark): the parse and row this definition sits on,
-            which is what decides whether a later use on the same line
-            sees it (bash expands aliases as it reads a line, so a use
-            on the defining line does not).
+        mark (AliasMark): the read this definition sits in: bash
+            expands aliases as it reads, so the commands of that read
+            still see the value from before it.
     """
     scan = scan_options(args, "p")
     if scan.bad is not None:
@@ -80,8 +81,8 @@ async def handle_alias(
                 else:
                     errors.append(f"bash: alias: `{name}': invalid alias name")
                 continue
+            _changing(session, name, mark)
             session.aliases[name] = value
-            session._alias_marks[name] = mark
             continue
         if any(c in BAD_NAME_CHARS for c in name):
             errors.append(f"bash: alias: `{name}': invalid alias name")
@@ -103,6 +104,7 @@ async def handle_alias(
 async def handle_unalias(
     args: list[str],
     session: SessionState,
+    mark: AliasMark,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Remove aliases: the named ones, or all of them under `-a`.
 
@@ -112,6 +114,8 @@ async def handle_unalias(
     Args:
         args (list[str]): the words after `unalias`.
         session (SessionState): shell session state.
+        mark (AliasMark): the read the removal sits in, whose commands
+            still see the aliases it removes.
     """
     scan = scan_options(args, "a")
     if scan.bad is not None:
@@ -122,16 +126,17 @@ async def handle_unalias(
         )
     operands = scan.operands
     if "a" in scan.letters:
+        for name in session.aliases:
+            _changing(session, name, mark)
         session.aliases.clear()
-        session._alias_marks.clear()
         return None, IOResult(), ExecutionNode(command="unalias", exit_code=0)
     if not operands:
         return fail("unalias", f"{UNALIAS_USAGE}\n", 2)
     errors: list[str] = []
     for name in operands:
         if name in session.aliases:
+            _changing(session, name, mark)
             del session.aliases[name]
-            session._alias_marks.pop(name, None)
         else:
             errors.append(f"bash: unalias: {name}: not found")
     err = encode_text("\n".join(errors) + "\n") if errors else None
@@ -143,6 +148,68 @@ async def handle_unalias(
     )
 
 
+def _changing(session: SessionState, name: str, mark: AliasMark) -> None:
+    """Keep the value ``name`` had as the read at ``mark`` began, before
+    that read first changes it, for the commands it read (``_read_value``).
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the alias being defined or removed.
+        mark (AliasMark): the read changing it.
+    """
+    seen = session._alias_marks.get(name)
+    if seen is None or seen[0] != mark:
+        session._alias_marks[name] = (mark, session.aliases.get(name))
+
+
+def _read_value(
+    session: SessionState, name: str, mark: AliasMark
+) -> str | None:
+    seen = session._alias_marks.get(name)
+    if seen is not None and seen[0] == mark:
+        return seen[1]
+    return session.aliases.get(name)
+
+
+def _expanding(session: SessionState, mark: AliasMark) -> bool:
+    seen = session._expand_aliases_mark
+    if seen is not None and seen[0] == mark:
+        return seen[1]
+    return bool(
+        session.shopts.get("expand_aliases", SHOPT_DEFAULTS["expand_aliases"])
+    )
+
+
+def note_expanding(session: SessionState, mark: AliasMark) -> None:
+    """Keep ``expand_aliases`` as the read at ``mark`` found it, before a
+    ``shopt`` in that read changes it: the commands of that read were
+    expanded, or not, already.
+
+    Args:
+        session (SessionState): shell session state.
+        mark (AliasMark): the read running ``shopt``.
+    """
+    seen = session._expand_aliases_mark
+    if seen is None or seen[0] != mark:
+        session._expand_aliases_mark = (mark, _expanding(session, mark))
+
+
+def _guards(
+    session: SessionState, node: TSNodeLike
+) -> tuple[frozenset[str], ...]:
+    """The aliases in progress at each byte of ``node``: its slice of the
+    rewritten tree holding it, or the guards another tree inherits."""
+    scope = session._alias_expansion
+    if scope is None:
+        return (frozenset(),) * len(node.text or b"")
+    root = node
+    while root.parent is not None:
+        root = root.parent
+    if root.id == scope.root:
+        return scope.owners[node.start_byte : node.end_byte]
+    return (scope.names,) * len(node.text or b"")
+
+
 def alias_value(
     session: SessionState,
     name: str,
@@ -151,33 +218,29 @@ def alias_value(
 ) -> str | None:
     """The alias text a command word expands to, or None.
 
-    None when aliases are not being expanded (`shopt -s expand_aliases`
-    is off, bash's default outside an interactive shell), when the word
-    is not an alias, when it is the alias being expanded (bash does not
-    expand a word identical to an alias being expanded a second time),
-    or when it was defined on the very parse and row that uses it. In a
-    function's body the aliases are the ones its definition saw
-    (``alias_view``).
+    bash expands aliases as it reads a command, so the word sees the
+    aliases, and ``expand_aliases``, as the read at ``mark`` found them:
+    one the same read defines, removes or turns off has not changed yet.
+    None when they are not being expanded (``expand_aliases`` off, bash's
+    default outside an interactive shell), when the word is no alias, or
+    when it is guarded (bash does not expand a word inserted by the
+    alias being expanded). In a function's body the aliases are the ones
+    its definition saw (``alias_view``).
 
     Args:
         session (SessionState): shell session state.
         name (str): the command word.
-        mark (AliasMark): the parse and row of the use.
+        mark (AliasMark): the read of the use.
         blocked (frozenset[str]): guards at this word.
     """
+    if name in blocked:
+        return None
     view = session._alias_view
     if view is not None:
-        return None if name in blocked else view.get(name)
-    if not session.shopts.get(
-        "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
-    ):
-        return None
-    value = session.aliases.get(name)
-    if value is None or name in blocked:
-        return None
-    if session._alias_marks.get(name) == mark:
-        return None
-    return value
+        return view.get(name)
+    return (
+        _read_value(session, name, mark) if _expanding(session, mark) else None
+    )
 
 
 def expanding_aliases(session: SessionState) -> frozenset[str]:
@@ -202,30 +265,39 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
     return frozenset(session.aliases) - blocked
 
 
-def alias_view(session: SessionState, mark: AliasMark) -> dict[str, str]:
-    """The aliases a function defined at ``mark`` keeps for its body.
+def alias_view(
+    session: SessionState, node: TSNodeLike, mark: AliasMark
+) -> dict[str, str]:
+    """The aliases a function defined by ``node`` keeps for its body.
 
     bash expands a function's aliases as it reads the definition, so the
     body runs them as they were then, whatever is defined or removed
-    later: the aliases a use at ``mark`` would expand, none while
-    ``expand_aliases`` is off, and inside another function's body that
-    body's own. What is read later (``eval``, ``source``, a trap action,
+    later: the aliases a use in the read at ``mark`` would expand, none
+    while ``expand_aliases`` is off, and inside another function's body
+    that body's own, less any alias being expanded where the definition
+    stands. What is read later (``eval``, ``source``, a trap action,
     ``$( )``) reads the aliases as they are then.
 
     Args:
         session (SessionState): shell session state.
-        mark (AliasMark): the parse and row of the definition.
+        node (TSNodeLike): the definition.
+        mark (AliasMark): the read of the definition.
     """
-    if session._alias_view is not None:
-        return dict(session._alias_view)
-    if not session.shopts.get(
-        "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
-    ):
-        return {}
+    view = session._alias_view
+    names: Iterable[str] = (
+        view
+        if view is not None
+        else set(session.aliases).union(
+            name
+            for name, (at, _) in session._alias_marks.items()
+            if at == mark
+        )
+    )
+    blocked = _guards(session, node)[0]
     return {
         name: value
-        for name, value in session.aliases.items()
-        if session._alias_marks.get(name) != mark
+        for name in names
+        if (value := alias_value(session, name, mark, blocked)) is not None
     }
 
 
@@ -247,15 +319,7 @@ def alias_command_text(
         mark (AliasMark): the parse and row of the use.
     """
     source = node.text or b""
-    scope = session._alias_expansion
-    root = node
-    while root.parent is not None:
-        root = root.parent
-    inherited = (
-        scope.owners[node.start_byte : node.end_byte]
-        if scope is not None and root.id == scope.root
-        else (scope.names if scope is not None else frozenset(),) * len(source)
-    )
+    inherited = _guards(session, node)
     at, end = (
         head.start_byte - node.start_byte,
         head.end_byte - node.start_byte,
@@ -292,6 +356,17 @@ def alias_command_text(
     return decode_text(b"".join(parts)), tuple(owners)
 
 
+def alias_mark(session: SessionState, row: int) -> AliasMark:
+    """The read a command at ``row`` of the running parse belongs to
+    (``read_row``).
+
+    Args:
+        session (SessionState): shell session state.
+        row (int): the command's read row within its parse.
+    """
+    return (session._parse_current, session._parse_row + row)
+
+
 async def alias_builtin(call: BuiltinCall) -> Result:
     """The ``alias`` arm.
 
@@ -299,13 +374,9 @@ async def alias_builtin(call: BuiltinCall) -> Result:
         call (BuiltinCall): the invocation; its row marks where the
             definition was made.
     """
+    session = call.context.session
     return await handle_alias(
-        list(call.argv.args),
-        call.context.session,
-        (
-            call.context.session._parse_current,
-            call.context.session._parse_row + call.row,
-        ),
+        list(call.argv.args), session, alias_mark(session, call.row)
     )
 
 
@@ -315,4 +386,7 @@ async def unalias_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_unalias(list(call.argv.args), call.context.session)
+    session = call.context.session
+    return await handle_unalias(
+        list(call.argv.args), session, alias_mark(session, call.row)
+    )

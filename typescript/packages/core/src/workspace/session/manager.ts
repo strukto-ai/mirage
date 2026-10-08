@@ -290,6 +290,7 @@ export class SessionManager extends SessionOwner {
         setCwd(dflt, stored.cwd)
         dflt.vars = stored.vars
         dflt.functions = stored.functions
+        dflt.functionSites.clear()
         dflt.readonlyFunctions = stored.readonlyFunctions
         dflt.exportedFunctions = stored.exportedFunctions
         dflt.createdAt = stored.createdAt

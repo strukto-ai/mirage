@@ -20,6 +20,7 @@ import {
   SHOPT_UNSUPPORTED,
 } from '../../../../shell/constants.ts'
 import type { SessionState } from '../../../session/session.ts'
+import { type AliasMark, aliasMark, noteExpanding } from '../alias/index.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { fail } from '../shared.ts'
@@ -44,9 +45,14 @@ function row(name: string, on: boolean, reusable: boolean, setO: boolean): strin
  * that onto the `set -o` vocabulary. An unknown name is `invalid shell
  * option name` (or `invalid option name` under `-o`), exit 1; `-s` with
  * `-u` is refused; an unknown letter is exit 2. `shopt -s extglob` is
- * refused: the parser has no such mode.
+ * refused: the parser has no such mode. `mark` is the read running it,
+ * whose commands keep `expand_aliases` as that read began.
  */
-export function handleShopt(args: string[], session: SessionState): Result {
+export function handleShopt(
+  args: string[],
+  session: SessionState,
+  mark: AliasMark | null = null,
+): Result {
   const scan = scanOptions(args, 'pqosu')
   if (scan.bad !== null)
     return fail('shopt', `bash: shopt: ${scan.bad}: invalid option\n${USAGE}\n`, 2)
@@ -90,6 +96,7 @@ export function handleShopt(args: string[], session: SessionState): Result {
       status = 1
       continue
     }
+    if (name === 'expand_aliases' && !setO && mark !== null) noteExpanding(session, mark)
     store[name] = setting
   }
   const out = lines.length > 0 ? encodeText(lines.join('\n') + '\n') : null
@@ -105,7 +112,8 @@ export function handleShopt(args: string[], session: SessionState): Result {
   ]
 }
 
-/** The `shopt` arm. */
+/** The `shopt` arm; the row marks the read it runs in. */
 export function shoptBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleShopt([...call.argv.args], call.context.session))
+  const session = call.context.session
+  return Promise.resolve(handleShopt([...call.argv.args], session, aliasMark(session, call.row)))
 }

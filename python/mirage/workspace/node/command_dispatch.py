@@ -43,6 +43,7 @@ from mirage.shell.helpers import (
     get_process_sub_body,
     get_process_sub_direction,
     get_text,
+    read_row,
     split_env_prefix,
 )
 from mirage.shell.parse import check_syntax, syntax_error_result
@@ -79,6 +80,7 @@ from mirage.workspace.executor.builtins import (
 )
 from mirage.workspace.executor.builtins.alias import (
     alias_command_text,
+    alias_mark,
     expanding_aliases,
 )
 from mirage.workspace.executor.builtins.table import BUILTINS
@@ -159,12 +161,13 @@ async def execute_command(
     # expansion, textually, and reads the result as a fresh line: an
     # alias holding a pipe is a pipe. Only an unquoted plain word
     # qualifies (`\x` and `'x'` are never aliases), and `alias_value`
-    # applies the rest of bash's rules (expand_aliases, the same-line
-    # mark, the guards on inserted text). The rewritten line runs
-    # through the same executor with the same call stack, so `$1`
-    # inside a function still means the function's argument.
+    # applies the rest of bash's rules (the aliases and expand_aliases as
+    # the command's read found them, the guards on inserted text). The
+    # rewritten line runs through the same executor with the same call
+    # stack, so `$1` inside a function still means the function's
+    # argument.
     if (
-        (session.aliases or session._alias_view)
+        (session.aliases or session._alias_view or session._alias_marks)
         and parts
         and parts[0].type == NT.COMMAND_NAME
         and parts[0].named_children
@@ -172,11 +175,9 @@ async def execute_command(
     ):
         head_node = parts[0]
         head = get_text(head_node)
-        mark = (
-            session._parse_current,
-            session._parse_row + node.start_point[0],
+        rewrite = alias_command_text(
+            session, node, head_node, alias_mark(session, read_row(node))
         )
-        rewrite = alias_command_text(session, node, head_node, mark)
         if rewrite is not None:
             line, owners = rewrite
             offsets = tuple(
@@ -492,7 +493,7 @@ async def _dispatch_command_body(
             job_table,
             cancel,
             routing_decision,
-            row=node.start_point[0],
+            row=read_row(node),
             agent_id=agent_id,
             redirects=redirect_paths_for(node.id),
             opener=redirect_opener_for(node.id),
@@ -570,9 +571,9 @@ async def _run_argv(
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler.
 
-    ``row`` is the command's line within its parse, which only ``alias``
-    reads: a definition remembers where it was made so a use on the
-    same line does not see it, as bash's line reader would not.
+    ``row`` is the row the shell began reading the command on within its
+    parse (``read_row``), which only ``alias``, ``unalias`` and ``shopt``
+    read: the commands of one read keep the aliases it began with.
     ``agent_id`` is the agent the line is attributed to, which an
     approval request names. ``redirects`` are the statement's expanded
     redirect targets, judged with the line because their I/O runs on

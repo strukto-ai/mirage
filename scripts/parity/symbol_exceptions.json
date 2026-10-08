@@ -414,6 +414,11 @@
     "trimSpaces": "String.trim takes no character set; Python strips _SPACES with str.strip.",
     "wallOf": "The wall clock a zone shows for an instant, read off Zone.parts; Python's datetime.astimezone gives it directly."
    }
+  },
+  "workspace/executor/builtins/alias/alias": {
+   "typescript_only": {
+    "sameRead": "A read is a tuple Python compares with `==`; TypeScript's array marks need this helper to compare them by value."
+   }
   }
  }
 }

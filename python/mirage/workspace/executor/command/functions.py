@@ -110,9 +110,13 @@ async def run_shell_function(
     marked = clear_program_invocation()
     # The body is parsed again from its source, so its rows restart at
     # 0; it expands the aliases its definition saw, or reads them as a
-    # parse of its own when it came from a stored session.
+    # parse of its own when it came from a stored session. It was read
+    # apart from the alias that may have called it, whose guards do not
+    # reach it (`alias a=f` still lets `f`'s body run its own `a`).
     outer_parse = (session._parse_current, session._parse_row)
     outer_view = session._alias_view
+    outer_expansion = session._alias_expansion
+    session._alias_expansion = None
     site = session._function_sites.get(cmd_name)
     if site is not None and site.source != session.functions[cmd_name]:
         site = None
@@ -195,6 +199,7 @@ async def run_shell_function(
     finally:
         session._parse_current, session._parse_row = outer_parse
         session._alias_view = outer_view
+        session._alias_expansion = outer_expansion
         if nested is not None and decisions is not None:
             decisions.hand_up(session.session_id, nested)
         scope.release()

@@ -61,11 +61,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "shopt -s expand_aliases\nalias axb='echo hi'\naxb one two",
+      "command": "shopt -s expand_aliases\nalias axb='echo hi'\naxb one two; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nalias a=\"echo 2\"; a\nunalias a; a\n{ alias a=\"echo 3\"\na; }\na'",
       "expect": {
         "exit": 0,
-        "stdout": "hi one two\n",
-        "stderr": ""
+        "stdout": "hi one two\n1\n2\n3\n",
+        "stderr": "a: command not found\n"
       }
     },
     {
@@ -231,7 +231,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( shopt -s expand_aliases; alias axd=echo; true | axd ok; echo rc=$? )",
+      "command": "bash -c 'shopt -s expand_aliases\nalias axd=echo; true | axd ok; echo rc=$?'",
       "expect": {
         "exit": 0,
         "stdout": "rc=127\n",
@@ -1115,10 +1115,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nf() { a; }\nalias a=\"echo 2\"\nf\nunalias a; f\nshopt -u expand_aliases; f'",
+      "command": "bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nf() { a; }\nalias a=\"echo 2\"\nf\nunalias a; f\nshopt -u expand_aliases; f'; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nf() { a; }\nalias a=f\na'; bash -c 'shopt -s expand_aliases\nalias make=\"f() { make; }\"\nmake\nunalias make\nmake() { echo literal; }\nf'",
       "expect": {
         "exit": 0,
-        "stdout": "1\n1\n1\n",
+        "stdout": "1\n1\n1\n1\nliteral\n",
         "stderr": ""
       }
     },
@@ -1149,10 +1149,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"; f() { a; }\nf 2>/dev/null; echo \"rc=$?\"'",
+      "command": "bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"; f() { a; }\nf 2>/dev/null; echo \"rc=$?\"'; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nalias a=\"echo 2\"; f() { a; }\nunalias a; g() { a; }\nf; g'",
       "expect": {
         "exit": 0,
-        "stdout": "rc=127\n",
+        "stdout": "rc=127\n1\n2\n",
         "stderr": ""
       }
     },
@@ -1183,10 +1183,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "bash -c 'alias a=\"echo 1\"\nf() { a; }\nshopt -s expand_aliases\nf 2>/dev/null; echo \"rc=$?\"'",
+      "command": "bash -c 'alias a=\"echo 1\"\nf() { a; }\nshopt -s expand_aliases\nf 2>/dev/null; echo \"rc=$?\"'; bash -c 'alias a=\"echo 1\"\nshopt -s expand_aliases; a; f() { a; }\nf\na' 2>/dev/null; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nshopt -u expand_aliases; a; f() { a; }\nf\na' 2>/dev/null",
       "expect": {
-        "exit": 0,
-        "stdout": "rc=127\n",
+        "exit": 127,
+        "stdout": "rc=127\n1\n1\n1\n",
         "stderr": ""
       }
     },

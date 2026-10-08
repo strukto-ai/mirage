@@ -91,9 +91,13 @@ export async function executeShellFunction(
   const bound = fd0Binding(session)
   // The body is parsed again from its source, so its rows restart at 0;
   // it expands the aliases its definition saw, or reads them as a parse of
-  // its own when it came from a stored session.
+  // its own when it came from a stored session. It was read apart from the
+  // alias that may have called it, whose guards do not reach it (`alias a=f`
+  // still lets `f`'s body run its own `a`).
   const outerParse: [number, number] = [session.parseCurrent, session.parseRow]
   const outerView = session.aliasView
+  const outerExpansion = session.aliasExpansion
+  session.aliasExpansion = null
   let site = session.functionSites.get(cmdName)
   if (site !== undefined && site.source !== source) site = undefined
   if (site === undefined) {
@@ -170,6 +174,7 @@ export async function executeShellFunction(
   } finally {
     ;[session.parseCurrent, session.parseRow] = outerParse
     session.aliasView = outerView
+    session.aliasExpansion = outerExpansion
     if (nested !== null && decisions !== null) decisions.handUp(session.sessionId, nested)
     scope.release()
     cs.pop()

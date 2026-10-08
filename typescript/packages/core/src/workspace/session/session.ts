@@ -432,11 +432,15 @@ export class SessionState {
   // `shopt` options, kept apart from `set -o` ones (bash keeps two
   // vocabularies). Only names set away from their default are stored.
   shopts: Record<string, boolean> = {}
-  // `alias NAME=VALUE` definitions, plus the parse/row each was defined
-  // at and ownership of alias text, so a use on the defining
-  // line does not expand and a self-referential value stops.
+  // `alias NAME=VALUE` definitions. Per name, the read (the parse and the
+  // row a command began on) that last changed it and its value as that
+  // read began (null: not defined), so the commands of that read keep it;
+  // the read that last ran `shopt` on `expand_aliases` and the option as
+  // that read began; and ownership of alias text, so a self-referential
+  // value stops.
   aliases: Record<string, string> = {}
-  aliasMarks = new Map<string, [number, number]>()
+  aliasMarks = new Map<string, [[number, number], string | null]>()
+  expandAliasesMark: [[number, number], boolean] | null = null
   aliasExpansion: AliasExpansion | null = null
   // The aliases a running function's body expands, as its definition saw
   // them (`FunctionSite.aliases`); null reads the live table.
@@ -631,6 +635,7 @@ export class SessionState {
     forked.aliases = { ...this.aliases }
     forked.parseSeq = this.parseSeq
     forked.aliasMarks = new Map(this.aliasMarks)
+    forked.expandAliasesMark = this.expandAliasesMark
     forked.aliasView = this.aliasView
     forked.functionSites = new Map(this.functionSites)
     forked.umask = this.umask
@@ -721,6 +726,7 @@ export class SessionState {
     )
     child.aliases = {}
     child.aliasMarks = new Map()
+    child.expandAliasesMark = null
     child.shopts = {}
     child.pipeStatus = []
     child.lastBgJobId = null

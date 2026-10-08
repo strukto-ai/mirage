@@ -36,7 +36,9 @@ function hasBadChar(name: string): boolean {
   return false
 }
 
-/** Define or print aliases. */
+/** Define or print aliases. `mark` is the read the definition sits in:
+ * bash expands aliases as it reads, so the commands of that read still see
+ * the value from before it. */
 export function handleAlias(args: string[], session: SessionState, mark: AliasMark): Result {
   const scan = scanOptions(args, 'p')
   if (scan.bad !== null)
@@ -61,8 +63,8 @@ export function handleAlias(args: string[], session: SessionState, mark: AliasMa
         )
         continue
       }
+      changing(session, name, mark)
       setSessionEntry(session.aliases, name, word.slice(eq + 1))
-      session.aliasMarks.set(name, mark)
       continue
     }
     if (hasBadChar(word)) {
@@ -87,24 +89,25 @@ export function handleAlias(args: string[], session: SessionState, mark: AliasMa
   ]
 }
 
-/** Remove aliases: the named ones, or all under `-a`. */
-export function handleUnalias(args: string[], session: SessionState): Result {
+/** Remove aliases: the named ones, or all under `-a`. The commands of the
+ * read at `mark` still see the aliases it removes. */
+export function handleUnalias(args: string[], session: SessionState, mark: AliasMark): Result {
   const scan = scanOptions(args, 'a')
   if (scan.bad !== null)
     return fail('unalias', `bash: unalias: ${scan.bad}: invalid option\n${UNALIAS_USAGE}\n`, 2)
   const operands = scan.operands
   if (scan.letters.includes('a')) {
+    for (const name of Object.keys(session.aliases)) changing(session, name, mark)
     session.aliases = ownRecord<string>()
-    session.aliasMarks.clear()
     return [null, new IOResult(), new ExecutionNode({ command: 'unalias', exitCode: 0 })]
   }
   if (operands.length === 0) return fail('unalias', `${UNALIAS_USAGE}\n`, 2)
   const errors: string[] = []
   for (const name of operands) {
     if (sessionEntry(session.aliases, name) !== undefined) {
+      changing(session, name, mark)
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete session.aliases[name]
-      session.aliasMarks.delete(name)
     } else errors.push(`bash: unalias: ${name}: not found`)
   }
   const err = errors.length > 0 ? encodeText(errors.join('\n') + '\n') : null
@@ -124,6 +127,52 @@ function aliasesOn(session: SessionState): boolean {
   return session.shopts.expand_aliases ?? SHOPT_DEFAULTS.get('expand_aliases') ?? false
 }
 
+function sameRead(a: AliasMark, b: AliasMark): boolean {
+  return a[0] === b[0] && a[1] === b[1]
+}
+
+/** Keep the value `name` had as the read at `mark` began, before that read
+ * first changes it, for the commands it read (`readValue`). */
+function changing(session: SessionState, name: string, mark: AliasMark): void {
+  const seen = session.aliasMarks.get(name)
+  if (seen === undefined || !sameRead(seen[0], mark))
+    session.aliasMarks.set(name, [mark, sessionEntry(session.aliases, name) ?? null])
+}
+
+function readValue(session: SessionState, name: string, mark: AliasMark): string | null {
+  const seen = session.aliasMarks.get(name)
+  if (seen !== undefined && sameRead(seen[0], mark)) return seen[1]
+  return sessionEntry(session.aliases, name) ?? null
+}
+
+function expanding(session: SessionState, mark: AliasMark): boolean {
+  const seen = session.expandAliasesMark
+  return seen !== null && sameRead(seen[0], mark) ? seen[1] : aliasesOn(session)
+}
+
+/**
+ * Keep `expand_aliases` as the read at `mark` found it, before a `shopt` in
+ * that read changes it: the commands of that read were expanded, or not,
+ * already. Mirrors Python's note_expanding.
+ */
+export function noteExpanding(session: SessionState, mark: AliasMark): void {
+  const seen = session.expandAliasesMark
+  if (seen === null || !sameRead(seen[0], mark))
+    session.expandAliasesMark = [mark, expanding(session, mark)]
+}
+
+/** The aliases in progress at each code unit of `node`: its slice of the
+ * rewritten tree holding it, or the guards another tree inherits. */
+function guards(session: SessionState, node: TSNodeLike): readonly ReadonlySet<string>[] {
+  const scope = session.aliasExpansion
+  const length = getText(node).length
+  if (scope === null) return Array<ReadonlySet<string>>(length).fill(new Set())
+  let root = node
+  while (root.parent != null) root = root.parent
+  if (root.id === scope.root) return scope.owners.slice(node.startIndex ?? 0, node.endIndex)
+  return Array<ReadonlySet<string>>(length).fill(scope.names)
+}
+
 /**
  * The alias names a command word would expand as right now. bash checks a
  * word where a command starts for an alias before it checks for a reserved
@@ -133,46 +182,56 @@ function aliasesOn(session: SessionState): boolean {
 export function expandingAliases(session: SessionState): ReadonlySet<string> {
   const blocked = session.aliasExpansion?.names
   const view = session.aliasView
-  const names = view !== null ? Object.keys(view) : aliasesOn(session) ? Object.keys(session.aliases) : []
+  const names =
+    view !== null ? Object.keys(view) : aliasesOn(session) ? Object.keys(session.aliases) : []
   return new Set(names.filter((name) => blocked?.has(name) !== true))
 }
 
 /**
- * The aliases a function defined at `mark` keeps for its body. bash expands
+ * The aliases a function defined by `node` keeps for its body. bash expands
  * a function's aliases as it reads the definition, so the body runs them as
- * they were then, whatever is defined or removed later: the aliases a use
- * at `mark` would expand, none while `expand_aliases` is off, and inside
- * another function's body that body's own. What is read later (`eval`,
+ * they were then, whatever is defined or removed later: the aliases a use in
+ * the read at `mark` would expand, none while `expand_aliases` is off, and
+ * inside another function's body that body's own, less any alias being
+ * expanded where the definition stands. What is read later (`eval`,
  * `source`, a trap action, `$( )`) reads the aliases as they are then.
- * Mirrors Python.
+ * Mirrors Python's alias_view.
  */
-export function aliasView(session: SessionState, mark: AliasMark): Record<string, string> {
-  if (session.aliasView !== null) return { ...session.aliasView }
-  if (!aliasesOn(session)) return {}
-  const view: Record<string, string> = {}
-  for (const [name, value] of Object.entries(session.aliases)) {
-    const seen = session.aliasMarks.get(name)
-    if (seen?.[0] !== mark[0] || seen[1] !== mark[1]) view[name] = value
+export function aliasView(
+  session: SessionState,
+  node: TSNodeLike,
+  mark: AliasMark,
+): Record<string, string> {
+  const names = new Set(Object.keys(session.aliasView ?? session.aliases))
+  if (session.aliasView === null)
+    for (const [name, [at]] of session.aliasMarks) if (sameRead(at, mark)) names.add(name)
+  const blocked = guards(session, node)[0] ?? new Set<string>()
+  const view = ownRecord<string>()
+  for (const name of names) {
+    const value = aliasValue(session, name, mark, blocked)
+    if (value !== null) setSessionEntry(view, name, value)
   }
   return view
 }
 
-/** The alias text a command word expands to, or null. In a function's body
- * the aliases are the ones its definition saw (`aliasView`). */
+/**
+ * The alias text a command word expands to, or null. bash expands aliases
+ * as it reads a command, so the word sees the aliases, and
+ * `expand_aliases`, as the read at `mark` found them. Null when they are
+ * not being expanded, when the word is no alias, or when it is guarded. In
+ * a function's body the aliases are the ones its definition saw
+ * (`aliasView`). Mirrors Python's alias_value.
+ */
 export function aliasValue(
   session: SessionState,
   name: string,
   mark: AliasMark,
   blocked: ReadonlySet<string>,
 ): string | null {
+  if (blocked.has(name)) return null
   const view = session.aliasView
-  if (view !== null) return blocked.has(name) ? null : (sessionEntry(view, name) ?? null)
-  if (!aliasesOn(session)) return null
-  const value = sessionEntry(session.aliases, name)
-  if (value === undefined || blocked.has(name)) return null
-  const seen = session.aliasMarks.get(name)
-  if (seen?.[0] === mark[0] && seen[1] === mark[1]) return null
-  return value
+  if (view !== null) return sessionEntry(view, name) ?? null
+  return expanding(session, mark) ? readValue(session, name, mark) : null
 }
 
 /**
@@ -187,14 +246,8 @@ export function aliasCommandText(
   mark: AliasMark,
 ): [string, readonly ReadonlySet<string>[]] | null {
   const source = getText(node)
-  const scope = session.aliasExpansion
-  let root = node
-  while (root.parent != null) root = root.parent
   const base = node.startIndex ?? 0
-  const inherited =
-    scope !== null && root.id === scope.root
-      ? scope.owners.slice(base, node.endIndex)
-      : Array<ReadonlySet<string>>(source.length).fill(scope?.names ?? new Set())
+  const inherited = guards(session, node)
   let at = (head.startIndex ?? 0) - base
   let end = (head.endIndex ?? 0) - base
   let name = getText(head)
@@ -226,17 +279,20 @@ export function aliasCommandText(
   return [parts.join(''), owners]
 }
 
-/** The `alias` arm; the row marks where the definition was made. */
+/** The read a command at `row` of the running parse belongs to (`readRow`).
+ * Mirrors Python's alias_mark. */
+export function aliasMark(session: SessionState, row: number): AliasMark {
+  return [session.parseCurrent, session.parseRow + row]
+}
+
+/** The `alias` arm; the row marks the read the definition sits in. */
 export function aliasBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(
-    handleAlias([...call.argv.args], call.context.session, [
-      call.context.session.parseCurrent,
-      call.context.session.parseRow + call.row,
-    ]),
-  )
+  const session = call.context.session
+  return Promise.resolve(handleAlias([...call.argv.args], session, aliasMark(session, call.row)))
 }
 
 /** The `unalias` arm. */
 export function unaliasBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleUnalias([...call.argv.args], call.context.session))
+  const session = call.context.session
+  return Promise.resolve(handleUnalias([...call.argv.args], session, aliasMark(session, call.row)))
 }

@@ -26,7 +26,7 @@ from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.descriptors import ENCLOSING, Recorder, StreamOwner
 from mirage.shell.errors import DiscardSignal, ExitSignal
-from mirage.shell.helpers import get_text
+from mirage.shell.helpers import get_text, same_line
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import NodeType as NT
 from mirage.workspace.evaluation import EvaluationContext
@@ -427,24 +427,15 @@ async def _exit_shell(
 
 
 def _next_line(node: Any, children: list[Any], i: int) -> int:
-    """The first statement after ``children[i]`` on a later line, where
-    a discarded line resumes. The parse has joined continued lines and
-    folded each heredoc body into its statement, so a newline between
-    two statements is a line break.
+    """The first statement after ``children[i]`` on a later line
+    (``same_line``), where a discarded line resumes.
 
     Args:
         node (Any): the program.
         children (list[Any]): its children.
         i (int): the statement that discarded its line.
     """
-    text = node.text or b""
-    base = node.start_byte
-    end = children[i].end_byte
     j = i + 1
-    while (
-        j < len(children)
-        and b"\n" not in text[end - base : children[j].start_byte - base]
-    ):
-        end = children[j].end_byte
+    while j < len(children) and same_line(node, children[j - 1], children[j]):
         j += 1
     return j

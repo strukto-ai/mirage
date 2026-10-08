@@ -55,6 +55,7 @@ import {
   getNegatedCommand,
   getPipelineStages,
   getRedirects,
+  readRow,
   takeContinuation,
   getText,
   getParts,
@@ -87,7 +88,7 @@ import {
 } from '../executor/control.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { handleTest, handleUnset } from '../executor/builtins/index.ts'
-import { aliasView } from '../executor/builtins/alias/index.ts'
+import { aliasMark, aliasView } from '../executor/builtins/alias/index.ts'
 import { isValidName } from '../executor/builtins/shared.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
@@ -1542,7 +1543,7 @@ async function executeNodeBody(
       source,
       mark,
       origin: definedAt(node, deps.handed ?? null),
-      aliases: aliasView(session, mark),
+      aliases: aliasView(session, node, aliasMark(session, readRow(node))),
     })
     return [null, new IOResult(), new ExecutionNode({ command: `function ${name}`, exitCode: 0 })]
   }
