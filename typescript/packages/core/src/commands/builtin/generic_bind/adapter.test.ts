@@ -37,7 +37,16 @@ import { formatFsError } from '../../../errors/render.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import type { CommandOpts, CommandIO } from '../../config.ts'
-import { dirAwareStat, dirAwareStream, resolveGlobOf, scopedIo, withDirGuard } from './adapter.ts'
+import {
+  commandIo,
+  dirAwareStat,
+  dirAwareStream,
+  resolveGlobOf,
+  scopedIo,
+  withDirGuard,
+} from './adapter.ts'
+import { BaseVFS } from '../../../vfs/base.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { makeResolveGlob } from '../../../utils/glob_walk.ts'
 
 const accessor = {} as never
@@ -61,6 +70,43 @@ function glob(dir: string, pattern: string): PathSpec {
     resolved: false,
   })
 }
+
+// Stores bytes as RAM does and renders `.tally` reads on top of them.
+class TallyRAM extends RAMVFS {
+  override readonly renderers: Readonly<Record<string, string>> = { '.tally': 'readTally' }
+
+  readTally(): Promise<Uint8Array> {
+    return Promise.resolve(new TextEncoder().encode('RENDERED'))
+  }
+}
+
+// Renders `.tally` reads and stores nothing else, as gdocs does.
+class TallyOnly extends BaseVFS {
+  override readonly renderers: Readonly<Record<string, string>> = { '.tally': 'readTally' }
+
+  readTally(): Promise<Uint8Array> {
+    return Promise.resolve(new TextEncoder().encode('RENDERED'))
+  }
+}
+
+describe('commandIo', () => {
+  const books = new PathSpec({ virtual: '/books.tally', directory: '/', vfsPath: 'books.tally' })
+
+  // A command writes back what it read (sed -i), so it reads the stored
+  // bytes wherever the VFS stores any.
+  it('reads the stored bytes of a VFS that defines read', async () => {
+    const vfs = new TallyRAM()
+    await vfs.write(books, new TextEncoder().encode('STORED'))
+    const read = await commandIo(vfs).readBytes(vfs.accessor, books)
+    expect(new TextDecoder().decode(read)).toBe('STORED')
+  })
+
+  it('reads the rendering of a VFS that only renders', async () => {
+    const vfs = new TallyOnly()
+    const read = await commandIo(vfs).readBytes(vfs.accessor, books)
+    expect(new TextDecoder().decode(read)).toBe('RENDERED')
+  })
+})
 
 describe('resolveGlobOf', () => {
   it('lets a trailing slash ask the namespace about an owed name', async () => {

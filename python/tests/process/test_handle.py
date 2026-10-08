@@ -31,14 +31,18 @@ def _info() -> ProcessInfo:
     )
 
 
+async def _exits_3() -> int:
+    return 3
+
+
+async def _raises() -> int:
+    raise RuntimeError("boom")
+
+
 @pytest.mark.asyncio
 async def test_a_finished_runner_reports_its_code_and_its_pid():
     finished: list[int] = []
-
-    async def run() -> int:
-        return 3
-
-    info = await ProcessHandle(_info(), run, finished.append).join()
+    info = await ProcessHandle(_info(), _exits_3, finished.append).join()
     assert (info.state, info.exit_code, finished) == (
         ProcessState.EXITED,
         3,
@@ -48,10 +52,7 @@ async def test_a_finished_runner_reports_its_code_and_its_pid():
 
 @pytest.mark.asyncio
 async def test_a_failing_runner_exits_1_with_its_failure():
-    async def run() -> int:
-        raise RuntimeError("boom")
-
-    info = await ProcessHandle(_info(), run, lambda _pid: None).join()
+    info = await ProcessHandle(_info(), _raises, lambda _pid: None).join()
     assert (info.exit_code, info.failure) == (1, "boom")
 
 

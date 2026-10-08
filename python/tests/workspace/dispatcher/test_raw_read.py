@@ -79,6 +79,22 @@ async def test_raw_read_is_not_served_from_the_file_cache():
     assert await ws.vfs.read("/data/books.tally", raw=True) == b"STORED"
 
 
+@pytest.mark.asyncio
+async def test_an_in_place_edit_rewrites_the_stored_bytes():
+    # A command reads the stored bytes, so sed -i writes back an edit of
+    # them, never the rendering, and cat agrees with it.
+    ws = Workspace(
+        {"/data/": _RenderingRAM()},
+        mode=MountMode.WRITE,
+    )
+    await ws.vfs.write("/data/books.tally", b"STORED\n")
+    edited = await ws.shell("sed -i 's/STORED/changed/' /data/books.tally")
+    assert edited.exit_code == 0
+    assert await ws.vfs.read("/data/books.tally", raw=True) == b"changed\n"
+    shown = await ws.shell("cat /data/books.tally")
+    assert await shown.stdout_str() == "changed\n"
+
+
 class _RenderingRAM(_CachingRAM):
     """Stands in for a VFS that names its renderer in its class, as gdocs
     does."""

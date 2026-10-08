@@ -20,19 +20,12 @@ function sameBytes(actual: Uint8Array, expected: Uint8Array): boolean {
   return actual.length === expected.length && actual.every((byte, i) => byte === expected[i])
 }
 
-type ReadFn = (
-  path: PathSpec,
-  index?: IndexCacheStore,
-  offset?: number,
-  size?: number | null,
-) => Promise<Uint8Array>
-
 // What a read of `path` runs: the renderer of the filetype its name ends
 // with, where the VFS renders one, else `read`. Mirrors Python's `_reader`.
-function reader(vfs: BaseVFS, path: PathSpec): ReadFn {
+function reader(vfs: BaseVFS, path: PathSpec): BaseVFS['read'] {
   for (const [filetype, renderer] of Object.entries(vfs.renderers)) {
     if (!path.virtual.endsWith(filetype)) continue
-    const render = (vfs as unknown as Record<string, ReadFn | undefined>)[renderer]
+    const render = (vfs as unknown as Record<string, BaseVFS['read'] | undefined>)[renderer]
     check(render !== undefined, `renderer ${renderer} is not a method`)
     return render.bind(vfs)
   }

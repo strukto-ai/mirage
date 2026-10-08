@@ -124,9 +124,13 @@ async function existsByStat(vfs: BaseVFS, path: PathSpec): Promise<boolean> {
   }
 }
 
-// `vfs.read`, or the renderer of the path's filetype where the VFS renders
-// one, which is what a command reads. Both are looked up per call, as the
-// op door looks them up.
+// What a command reads: the stored bytes through `vfs.read`, so an in-place
+// edit (`sed -i`) writes back what it read and a byte read agrees with a
+// stream. Only a VFS with no `read` of its own (gdocs, gsheets, gslides,
+// whose stored form is the rendering) is read through the renderer of the
+// path's filetype. Both are looked up per call, as the op door looks them
+// up; the op door renders for the surfaces that show files. Mirrors
+// Python's `_reader`.
 function reader(
   vfs: BaseVFS,
 ): (
@@ -136,7 +140,9 @@ function reader(
   size?: number | null,
 ) => Promise<Uint8Array> {
   return (path, index, offset = 0, size = null) => {
-    const renderer = vfs.renderers[getExtension(path.virtual) ?? '']
+    const renderer = vfs.supports('read')
+      ? undefined
+      : vfs.renderers[getExtension(path.virtual) ?? '']
     if (renderer === undefined) return vfs.read(path, index, offset, size)
     const render = (vfs as unknown as Record<string, typeof vfs.read>)[renderer]
     if (render === undefined) throw new TypeError(`${vfs.name}: no renderer named ${renderer}`)

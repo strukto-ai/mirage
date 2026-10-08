@@ -37,6 +37,10 @@ function ignore(): void {
   return undefined
 }
 
+function raises(): Promise<number> {
+  return Promise.reject(new Error('boom'))
+}
+
 describe('ProcessHandle', () => {
   it('a finished runner reports its code and its pid', async () => {
     const finished: number[] = []
@@ -53,8 +57,7 @@ describe('ProcessHandle', () => {
   })
 
   it('a failing runner exits 1 with its failure', async () => {
-    const run = (): Promise<number> => Promise.reject(new Error('boom'))
-    const done = await new ProcessHandle(info(), run, ignore, ignore).join()
+    const done = await new ProcessHandle(info(), raises, ignore, ignore).join()
     expect([done.exitCode, done.failure]).toEqual([1, 'boom'])
   })
 

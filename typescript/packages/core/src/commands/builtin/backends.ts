@@ -97,24 +97,14 @@ interface VFSClass {
 // package registers the backends it ships (core's below, node's and the
 // browser's from their own `commands/builtin/backends.ts`). Python finds
 // the same tables by class path and imports them on first mount.
-const BACKEND_COMMANDS: unique symbol = Symbol.for('mirage.backendCommands')
-
-interface Registered {
-  readonly [BACKEND_COMMANDS]?: () => readonly RegisteredCommand[]
-}
+const BACKENDS = Symbol.for('mirage.backendCommands')
 
 /** Serve `commands` on every mount of `cls` and its subclasses. */
 export function registerBackendCommands(
   cls: VFSClass,
   commands: () => readonly RegisteredCommand[],
 ): void {
-  Object.defineProperty(cls, BACKEND_COMMANDS, { value: commands, configurable: true })
-}
-
-// The commands registered for `cls` itself, not inherited from a base.
-function registeredFor(cls: unknown): readonly RegisteredCommand[] | undefined {
-  if (typeof cls !== 'function' || !Object.hasOwn(cls, BACKEND_COMMANDS)) return undefined
-  return (cls as Registered)[BACKEND_COMMANDS]?.()
+  Object.defineProperty(cls, BACKENDS, { value: commands, configurable: true })
 }
 
 // The one VFS name a backend's commands were registered under, or null for
@@ -153,7 +143,11 @@ export function mountCommands(vfs: BaseVFS): RegisteredCommand[] {
   let found: RegisteredCommand[] | null = null
   let cls: unknown = vfs.constructor
   while (typeof cls === 'function' && found === null) {
-    const commands = registeredFor(cls)
+    const own: unknown = Object.hasOwn(cls, BACKENDS)
+      ? (cls as unknown as Record<symbol, unknown>)[BACKENDS]
+      : undefined
+    const commands =
+      typeof own === 'function' ? (own as () => readonly RegisteredCommand[])() : undefined
     if (commands !== undefined) {
       const family = familyOf(commands)
       found = commands.map((cmd) =>

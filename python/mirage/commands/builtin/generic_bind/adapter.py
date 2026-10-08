@@ -273,9 +273,14 @@ async def _exists_by_stat(
 
 
 def _reader(vfs: BaseVFS) -> Callable[..., Awaitable[bytes]]:
-    """``vfs.read``, or the renderer of the path's filetype where the VFS
-    renders one, which is what a command reads. Both are looked up per
-    call, as the op door looks them up.
+    """What a command reads: the stored bytes through ``vfs.read``.
+
+    So an in-place edit (``sed -i``) writes back what it read and a byte
+    read agrees with a stream. Only a VFS with no ``read`` of its own
+    (gdocs, gsheets, gslides, whose stored form is the rendering) is read
+    through the renderer of the path's filetype. Both are looked up per
+    call, as the op door looks them up; the op door renders for the
+    surfaces that show files.
 
     Args:
         vfs (BaseVFS): the mounted VFS.
@@ -287,7 +292,11 @@ def _reader(vfs: BaseVFS) -> Callable[..., Awaitable[bytes]]:
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
-        renderer = vfs.renderers.get(get_extension(path.virtual) or "")
+        renderer = (
+            None
+            if vfs.supports("read")
+            else vfs.renderers.get(get_extension(path.virtual) or "")
+        )
         if renderer is None:
             return await vfs.read(path, index, offset, size)
         rendered: bytes = await getattr(vfs, renderer)(
