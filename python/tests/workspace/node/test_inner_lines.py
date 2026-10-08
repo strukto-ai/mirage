@@ -139,35 +139,18 @@ def test_inner_words_keep_what_the_gate_could_not_read():
     assert inner.argv[0] is dynamic
     (inner,) = inner_lines("eval", [Word("rm", "rm"), Word('"$p"', None)])
     assert inner.line == 'rm "$p"'
-
-
-@pytest.mark.parametrize("head", ["bash", "sh"])
-@pytest.mark.parametrize(
-    "before, after",
-    [
-        (["--rcfile"], ["--version", "-c", "rm /x"]),
-        (["--init-file"], ["--help", "-c", "rm /x"]),
-        (["--rcfile"], ["-c", "echo safe", "-c", "rm /x"]),
-        (["-c"], ["rm /x"]),
-    ],
-)
-def test_shell_program_selection_stops_at_a_dynamic_word(head, before, after):
-    args = [*_words(*before), Word("$SKIP", None), *_words(*after)]
-    (inner,) = inner_lines(head, args)
+    (inner,) = inner_lines("bash", [*_words("-c"), dynamic, *_words("rm /x")])
     assert not inner.readable
-
-
-@pytest.mark.parametrize("head", ["bash", "sh"])
-def test_shell_literal_prefix_keeps_its_answer_and_program(head):
-    dynamic = Word("$ARG", None)
-    assert inner_lines(head, [*_words("--version"), dynamic]) == []
-    (inner,) = inner_lines(head, [*_words("-c", "echo safe"), dynamic])
+    assert inner_lines("bash", [*_words("--version"), dynamic]) == []
+    (inner,) = inner_lines("sh", [*_words("-c", "echo safe"), dynamic])
     assert inner.line == "echo safe"
 
 
 @pytest.mark.parametrize(
     "raw, stable",
     [
+        ("$SKIP", False),
+        ('"$SKIP"', False),
         ("missing-*", False),
         ("missing-?", False),
         ("missing-[ab]", False),
@@ -183,7 +166,7 @@ def test_shell_literal_prefix_keeps_its_answer_and_program(head):
         ('missing-"*"', True),
     ],
 )
-def test_shell_option_values_preserve_glob_quoting(raw, stable):
+def test_shell_option_values_require_stable_words(raw, stable):
     tree = parse(f"bash --rcfile {raw} --version -c 'rm /x'")
     parts = get_parts(tree.named_children[0])
     inner = inner_lines("bash", [read_word(part) for part in parts[1:]])

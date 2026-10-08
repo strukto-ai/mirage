@@ -387,17 +387,7 @@ def _walk(
         cp, length = decode(raw, at)
         if cp == CUT:
             return _Converted(bytes(out), dropped, _INCOMPLETE)
-        if cp == ILLEGAL:
-            if not omit:
-                return _Converted(
-                    bytes(out),
-                    dropped,
-                    f"illegal input sequence at position {at}",
-                )
-            dropped = True
-            at += length
-            continue
-        data = encoder.encode_char(cp)
+        data = None if cp == ILLEGAL else encoder.encode_char(cp)
         if data is None:
             if not omit:
                 return _Converted(

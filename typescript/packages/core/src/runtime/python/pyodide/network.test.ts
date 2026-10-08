@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { ErrnoCodes, FSHost } from './fs/types.ts'
 import { sealNetwork } from './network.ts'
 
 class FakeErrnoError extends Error {
@@ -22,16 +21,8 @@ class FakeErrnoError extends Error {
   }
 }
 
-const FS = { ErrnoError: FakeErrnoError } as unknown as FSHost
-const CODES: ErrnoCodes = {
-  ENOENT: 44,
-  EPERM: 63,
-  EINVAL: 28,
-  EIO: 29,
-  EXDEV: 75,
-  ENETUNREACH: 40,
-  ENETDOWN: 38,
-}
+const FS = { ErrnoError: FakeErrnoError }
+const CODES = { ENETUNREACH: 40, ENETDOWN: 38 }
 
 // What the guest reads through a running Pyodide is pinned by
 // integ/runtime/pyodide/network.json.

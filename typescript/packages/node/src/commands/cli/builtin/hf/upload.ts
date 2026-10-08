@@ -41,44 +41,30 @@ import { refuseVariadic } from './download.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
 
-interface Row {
-  name: string
-  data: Uint8Array
-}
-
 async function isDir(dispatch: DispatchFn, path: PathSpec): Promise<boolean> {
   const [stat] = await dispatch('stat', path)
   return (stat as { type?: string } | null)?.type === FileType.DIRECTORY
 }
 
 /**
- * Read a workspace file, or every file under a workspace directory.
- *
- * Read through the op dispatcher rather than any filesystem of its own: an
- * account CLI has no mount, and the path the line named is an unrelated
- * workspace file, which is exactly what the dispatcher door is for.
- *
- * Reports whether `local` was a directory, because the caller needs it:
- * upstream reads `path_in_repo` as the destination FILE for a file source and
- * as the destination FOLDER for a directory one, so a file uploaded to
- * `u.txt` must land at `u.txt` and not at `u.txt/u.txt`. A file is named by
- * where it sits under `local`, one walked level at a time, never by its own
- * absolute path: through a symlink the listing answers with the target's
- * paths, which are not under `local` at all.
+ * Read workspace files as additions relative to the source.
+ * Walk one level at a time so symlink targets outside `local` retain the
+ * names reached through the source directory. Report whether the source
+ * was a directory, which determines the destination semantics.
  */
 async function collect(
   dispatch: DispatchFn,
   local: PathSpec,
-): Promise<{ rows: Row[]; fromDir: boolean }> {
+): Promise<{ rows: Addition[]; fromDir: boolean }> {
   if (!(await isDir(dispatch, local))) {
     const [data] = await dispatch('read', local)
     const name = rstripSlash(local.virtual)
     return {
-      rows: [{ name: name.slice(name.lastIndexOf('/') + 1), data: data as Uint8Array }],
+      rows: [{ path: name.slice(name.lastIndexOf('/') + 1), data: data as Uint8Array }],
       fromDir: false,
     }
   }
-  const rows: Row[] = []
+  const rows: Addition[] = []
   const pending: [PathSpec, string][] = [[local, '']]
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     const [current, prefix] = next
@@ -92,35 +78,32 @@ async function collect(
         continue
       }
       const [data] = await dispatch('read', child)
-      rows.push({ name, data: data as Uint8Array })
+      rows.push({ path: name, data: data as Uint8Array })
     }
   }
   return {
-    rows: rows.sort((a, b) => compareCodePoints(a.name, b.name)),
+    rows: rows.sort((a, b) => compareCodePoints(a.path, b.path)),
     fromDir: true,
   }
 }
 
 /** Apply the line's --include and --exclude globs. */
-export function keep(rows: Row[], include: readonly string[], exclude: readonly string[]): Row[] {
+export function keep(
+  rows: Addition[],
+  include: readonly string[],
+  exclude: readonly string[],
+): Addition[] {
   const kept = new Set(
     filterRepoPaths(
-      rows.map((row) => row.name),
+      rows.map((row) => row.path),
       include,
       exclude,
     ),
   )
-  return rows.filter((row) => kept.has(row.name))
+  return rows.filter((row) => kept.has(row.path))
 }
 
-/**
- * The repo-relative directory an upload's third operand names.
- *
- * A Hub path is repo-relative with no leading slash and no `.` component, so
- * the operand is normalized rather than used verbatim: `hf upload repo /local .`
- * means the repository root, and taking the dot literally stored every file
- * under `./`, which is a path the resolve endpoint then could not find.
- */
+/** Normalize an upload destination; `.` means the repository root. */
 export function inRepoBase(value: string): string {
   const cleaned = value.trim()
   if (cleaned === '') return ''
@@ -159,15 +142,16 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const include = fl.asList('include')
   const exclude = fl.asList('exclude')
   const deletions = fl.asList('delete')
-  for (const [patterns, flag] of [
-    [include, '--include'],
-    [exclude, '--exclude'],
-    [deletions, '--delete'],
-  ] as [readonly string[], string][]) {
+  const patternFlags: [string, readonly string[]][] = [
+    ['--include', include],
+    ['--exclude', exclude],
+    ['--delete', deletions],
+  ]
+  for (const [flag, patterns] of patternFlags) {
     if (patterns.length > 0) refuseVariadic(operands, flag, patterns)
   }
   const inRepo = inv.texts[1] ?? ''
-  let collected: { rows: Row[]; fromDir: boolean }
+  let collected: { rows: Addition[]; fromDir: boolean }
   try {
     collected = await collect(dispatch, source)
   } catch (err) {
@@ -180,29 +164,18 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   }
   const base = inRepoBase(inRepo)
   let warnings = ''
-  // A directory source spreads under `path_in_repo`, filtered the way
-  // upload_folder filters (git and hub cache folders always left out); a file
-  // source lands AT it, and upstream ignores the filters for one, with a
-  // warning each. Appending the basename either way stored
-  // `hf upload r f.txt f.txt` at `f.txt/f.txt`, which the tree then reported
-  // as a directory and `hf download` could not find at all.
+  // Folder contents spread under path_in_repo; a single file lands at it.
+  // Upstream applies filters only to folders and warns for single files.
   let additions: Addition[]
   if (collected.fromDir) {
     additions = keep(collected.rows, include, [...exclude, ...DEFAULT_IGNORE_PATTERNS]).map(
-      (row) => ({ path: base === '' ? row.name : `${base}/${row.name}`, data: row.data }),
+      (row) => ({ path: base === '' ? row.path : `${base}/${row.path}`, data: row.data }),
     )
   } else {
-    for (const [flag, patterns] of [
-      ['--include', include],
-      ['--exclude', exclude],
-      ['--delete', deletions],
-    ] as [string, readonly string[]][]) {
+    for (const [flag, patterns] of patternFlags) {
       if (patterns.length > 0) warnings += `Ignoring ${flag} since a single file is uploaded.\n`
     }
-    const [row] = collected.rows
-    additions = [
-      { path: base === '' ? (row?.name ?? '') : base, data: row?.data ?? new Uint8Array() },
-    ]
+    additions = collected.rows.map(({ path, data }) => ({ path: base || path, data }))
   }
   const repoType = repoTypeOf(fl)
   // Upstream creates the repository if it is missing and ignores --private

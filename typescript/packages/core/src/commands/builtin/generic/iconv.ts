@@ -313,13 +313,7 @@ function walk(
   while (at < raw.length) {
     const [cp, length] = decode(raw, at)
     if (cp === CUT) return stop(INCOMPLETE)
-    if (cp === ILLEGAL) {
-      if (!omit) return stop(`illegal input sequence at position ${String(at)}`)
-      dropped = true
-      at += length
-      continue
-    }
-    const next = encoder.put(cp, out, n)
+    const next = cp === ILLEGAL ? -1 : encoder.put(cp, out, n)
     if (next < 0) {
       if (!omit) return stop(`illegal input sequence at position ${String(at)}`)
       dropped = true

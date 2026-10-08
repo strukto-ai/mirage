@@ -14,7 +14,7 @@
 
 import itertools
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -477,31 +477,18 @@ MULTIBYTE_CHARSETS: dict[str, MultibyteSpec] = {
 }
 
 
-def _sequences(blocks: tuple[Block, ...]) -> list[bytes]:
+def _sequences(blocks: tuple[Block, ...]) -> Iterator[bytes]:
     """Every sequence the blocks span, in block then byte order.
 
     Args:
         blocks (tuple[Block, ...]): per-byte ranges.
     """
-    out: list[bytes] = []
     for block in blocks:
         axes = [
             [x for low, high in ranges for x in range(low, high + 1)]
             for ranges in block
         ]
-        out.extend(bytes(combo) for combo in itertools.product(*axes))
-    return out
-
-
-def _host_decode(codec: str, seq: bytes) -> int | None:
-    """The one code point the host decoder reads ``seq`` as, or None.
-
-    Args:
-        codec (str): a python codec name.
-        seq (bytes): one whole sequence.
-    """
-    text = seq.decode(codec)
-    return ord(text) if len(text) == 1 else None
+        yield from (bytes(combo) for combo in itertools.product(*axes))
 
 
 _TABLES: dict[str, Table] = {}
@@ -525,14 +512,15 @@ def multibyte_table(spec: MultibyteSpec) -> Table:
         if any(low <= key <= high for low, high in spec.excluded):
             continue
         try:
-            cp = _host_decode(spec.codec, seq)
+            text = seq.decode(spec.codec)
         except UnicodeDecodeError as exc:
             refused += 1
             if first_error is None:
                 first_error = exc
             continue
-        if cp is None:
+        if len(text) != 1:
             continue
+        cp = ord(text)
         if not spec.private_use and PRIVATE_USE[0] <= cp <= PRIVATE_USE[1]:
             continue
         table[key] = cp

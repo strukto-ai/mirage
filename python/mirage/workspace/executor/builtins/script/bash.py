@@ -30,104 +30,69 @@ from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.console import JobConsole, JobOutput
+from mirage.shell.constants import SET_OPTION_NAMES
 from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.script.constants import (
     BASH_LONG_OPTIONS,
     BASH_START_FLAGS,
+    BASH_UNSUPPORTED_LONG_OPTIONS,
 )
 from mirage.workspace.executor.builtins.script.script import (
     read_script_file,
     script_error,
 )
-from mirage.workspace.executor.builtins.script.types import (
-    BashArgs,
-    BashLongOption,
-)
+from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.traps import clear_exit_trap, finish_shell
 from mirage.workspace.types import ExecutionNode
 
 
-def _parse_long_options(
-    args: list[str],
-) -> tuple[int, BashArgs | None, list[tuple[str, bool]]]:
-    """Read the long options bash takes before any short one.
+def parse_bash_args(args: list[str]) -> BashArgs:
+    """Read Bash startup options, then select a program and its argv.
 
-    bash's own first pass (``parse_long_options`` in shell.c): every
-    leading word that starts with a dash is looked up by its name, with
-    one dash or two, until one is not a long option. A ``--`` word that
-    names none, or a value option with no value, is refused at once; a
-    one-dash word ends the pass and is read as short options. ``--help``
-    and ``--version`` are answered only after the whole pass, so ``bash
-    --version --bogus`` is still refused, and they outrank an option
-    mirage refuses (``bash --help --restricted`` prints the help).
+    GNU Bash 5.2 reads long options (one or two dashes) before short ones.
+    Help/version return after that pass: unknown long options still fail,
+    while help outranks version and unsupported modes. A long option after
+    a short one is refused as ``--``. Unsupported short options name the
+    whole character here, rather than its first byte as GNU does.
+
+    Options after a script file or ``-c``'s program are positional; ``-``
+    and ``--`` end option parsing. ``-c`` takes the next word, never the
+    rest of its cluster: ``-cx 'echo hi'`` traces and runs ``echo hi``.
 
     Args:
         args (list[str]): words after the head word.
-
-    Returns:
-        tuple[int, BashArgs | None, list[tuple[str, bool]]]: where the
-            short options start, the parse when the pass already
-            decides it (a refusal, ``--help`` or ``--version``), and the
-            shell options it turned on.
     """
     settings: list[tuple[str, bool]] = []
     want_help = want_version = False
     unsupported: str | None = None
     i = 0
     while i < len(args) and args[i].startswith("-"):
-        word = args[i]
-        spelled_long = word.startswith("--") and len(word) > 2
-        name = word[2:] if spelled_long else word[1:]
-        kind = BASH_LONG_OPTIONS.get(name)
-        if kind is None:
+        spelling = args[i]
+        spelled_long = spelling.startswith("--") and len(spelling) > 2
+        name = spelling[2:] if spelled_long else spelling[1:]
+        takes_value = BASH_LONG_OPTIONS.get(name)
+        if takes_value is None:
             if spelled_long:
-                return i, BashArgs(invalid=word), settings
+                return BashArgs(invalid=spelling)
             break
-        if kind is BashLongOption.VALUE:
+        if takes_value:
             if i + 1 >= len(args):
-                return i, BashArgs(needs_value=name), settings
+                return BashArgs(needs_value=name)
             i += 1
-        elif kind is BashLongOption.SETTING:
+        elif name in SET_OPTION_NAMES:
             settings.append((name, True))
-        elif kind is BashLongOption.UNSUPPORTED:
-            unsupported = unsupported or word
-        want_help = want_help or kind is BashLongOption.HELP
-        want_version = want_version or kind is BashLongOption.VERSION
+        elif name in BASH_UNSUPPORTED_LONG_OPTIONS:
+            unsupported = unsupported or spelling
+        want_help = want_help or name == "help"
+        want_version = want_version or name == "version"
         i += 1
     if want_help or want_version:
-        return i, BashArgs(help=want_help, version=want_version), settings
+        return BashArgs(help=want_help, version=want_version)
     if unsupported is not None:
-        return i, BashArgs(invalid=unsupported), settings
-    return i, None, settings
-
-
-def parse_bash_args(args: list[str]) -> BashArgs:
-    """Split a ``bash``/``sh`` argument list into flags, program and argv.
-
-    Long options come first (``_parse_long_options``), then short ones,
-    as bash reads them: a long option after a short one is refused, and
-    bash names it by its second dash (``bash -x --norc`` is ``--``). A
-    refused short option is named by its whole character, where bash
-    names only the character's first byte.
-
-    Option parsing stops at the first operand, so everything after a
-    script file (or after ``-c``'s program text) is positional, even when
-    it looks like a flag: ``bash run.sh -c foo`` passes ``-c foo`` to the
-    script. ``-`` and ``--`` both end it without being operands.
-
-    ``-c`` takes the next *word*, never the rest of its cluster, which is
-    where bash's own parser departs from getopt: ``bash -cx 'echo hi'``
-    traces and runs ``echo hi`` rather than running ``x``.
-
-    Args:
-        args (list[str]): words after the head word.
-    """
-    i, decided, settings = _parse_long_options(args)
-    if decided is not None:
-        return decided
+        return BashArgs(invalid=unsupported)
     read_stdin = False
     while i < len(args):
         tok = args[i]

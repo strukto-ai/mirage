@@ -43,21 +43,22 @@ export async function deleteCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const message = fl.asStr('commit_message')
   let url: string
   let stderr = ''
-  if (deletions.length === 0) {
+  const reply = await commit(accessor, {
+    deletions,
+    message:
+      message === undefined || message === ''
+        ? `Delete files ${patterns.join(' ')} with mirage`
+        : message,
+    description: fl.asStr('commit_description') ?? '',
+    createPr: fl.asBool('create_pr'),
+  })
+  if (reply === undefined) {
     const home = repoUrl((inv.config as HfConfig).endpoint, accessor.repoType, target)
     url = `${home}/commit/${await headCommit(accessor)}`
     stderr = EMPTY_COMMIT_WARNING
   } else {
-    const reply = await commit(accessor, {
-      deletions,
-      message:
-        message === undefined || message === ''
-          ? `Delete files ${patterns.join(' ')} with mirage`
-          : message,
-      description: fl.asStr('commit_description') ?? '',
-      createPr: fl.asBool('create_pr'),
-    })
-    url = typeof reply?.commitUrl === 'string' ? reply.commitUrl : ''
+    url = typeof reply.commitUrl === 'string' ? reply.commitUrl : ''
   }
+
   return textOut(`Files correctly deleted from repo. Commit: ${url}.\n`, stderr)
 }

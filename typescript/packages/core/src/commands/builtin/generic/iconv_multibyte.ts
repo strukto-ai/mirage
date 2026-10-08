@@ -426,36 +426,23 @@ export const MULTIBYTE_CHARSETS: Readonly<Record<string, MultibyteSpec>> = {
 }
 
 /** Every sequence the blocks span, in block then byte order. */
-function sequences(blocks: readonly Block[]): Uint8Array[] {
-  const out: Uint8Array[] = []
+function* sequences(blocks: readonly Block[]): Generator<Uint8Array> {
   for (const block of blocks) {
-    const axes = block.map((ranges) => {
-      const values: number[] = []
-      for (const [low, high] of ranges) for (let x = low; x <= high; x++) values.push(x)
-      return values
-    })
-    const seq = new Uint8Array(axes.length)
-    const fill = (depth: number): void => {
-      if (depth === axes.length) {
-        out.push(seq.slice())
+    const seq = new Uint8Array(block.length)
+    function* fill(depth: number): Generator<Uint8Array> {
+      if (depth === block.length) {
+        yield seq.slice()
         return
       }
-      for (const x of axes[depth] ?? []) {
-        seq[depth] = x
-        fill(depth + 1)
+      for (const [low, high] of block[depth] ?? []) {
+        for (let byte = low; byte <= high; byte++) {
+          seq[depth] = byte
+          yield* fill(depth + 1)
+        }
       }
     }
-    fill(0)
+    yield* fill(0)
   }
-  return out
-}
-
-/** The one code point the host decoder reads `seq` as, or null. */
-function hostDecode(decoder: TextDecoder, seq: Uint8Array): number | null {
-  const text = decoder.decode(seq)
-  const cp = text.codePointAt(0)
-  if (cp === undefined) return null
-  return text.length === (cp > 0xffff ? 2 : 1) ? cp : null
 }
 
 const DECODERS = new Map<MultibyteSpec, TextDecoder | null>()
@@ -494,16 +481,17 @@ export function multibyteTable(spec: MultibyteSpec): Table {
   for (const seq of sequences(spec.blocks)) {
     const k = key(seq, 0, seq.length)
     if (spec.excluded.some(([low, high]) => low <= k && k <= high)) continue
-    let cp: number | null
+    let text: string
     try {
-      cp = hostDecode(decoder, seq)
+      text = decoder.decode(seq)
     } catch (error) {
       if (!(error instanceof TypeError)) throw error
       refused++
       firstError ??= `${toHex(seq)}: ${String(error)}`
       continue
     }
-    if (cp === null) continue
+    const cp = text.codePointAt(0)
+    if (cp === undefined || text.length !== (cp > 0xffff ? 2 : 1)) continue
     if (!spec.privateUse && cp >= PRIVATE_USE[0] && cp <= PRIVATE_USE[1]) continue
     table.set(k, cp)
   }

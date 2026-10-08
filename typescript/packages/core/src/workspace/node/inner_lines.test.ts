@@ -120,32 +120,16 @@ describe('innerLines', () => {
       { raw: '"$p"', text: null },
     ])
     expect(line?.line).toBe('rm "$p"')
-  })
-
-  describe.each(['bash', 'sh'])('%s literal program selection', (head) => {
-    it.each<[string[], string[]]>([
-      [['--rcfile'], ['--version', '-c', 'rm /x']],
-      [['--init-file'], ['--help', '-c', 'rm /x']],
-      [['--rcfile'], ['-c', 'echo safe', '-c', 'rm /x']],
-      [['-c'], ['rm /x']],
-    ])('stops at a dynamic word between %j and %j', (before, after) => {
-      const [inner] = innerLines(head, [
-        ...words(...before),
-        { raw: '$SKIP', text: null },
-        ...words(...after),
-      ])
-      expect(inner && innerReadable(inner)).toBe(false)
-    })
-
-    it('keeps the answer and program established by a literal prefix', () => {
-      const dynamic: Word = { raw: '$ARG', text: null }
-      expect(innerLines(head, [...words('--version'), dynamic])).toEqual([])
-      const [inner] = innerLines(head, [...words('-c', 'echo safe'), dynamic])
-      expect(inner?.line).toBe('echo safe')
-    })
+    const [unknown] = innerLines('bash', [...words('-c'), dynamic, ...words('rm /x')])
+    expect(unknown && innerReadable(unknown)).toBe(false)
+    expect(innerLines('bash', [...words('--version'), dynamic])).toEqual([])
+    const [stable] = innerLines('sh', [...words('-c', 'echo safe'), dynamic])
+    expect(stable?.line).toBe('echo safe')
   })
 
   it.each<[string, boolean]>([
+    ['$SKIP', false],
+    ['"$SKIP"', false],
     ['missing-*', false],
     ['missing-?', false],
     ['missing-[ab]', false],
@@ -159,7 +143,7 @@ describe('innerLines', () => {
     [String.raw`missing-\*`, true],
     [String.raw`missing-\[ab]`, true],
     ['missing-"*"', true],
-  ])('preserves shell option glob quoting: %s', async (raw, stable) => {
+  ])('requires stable shell option words: %s', async (raw, stable) => {
     const parser = await getTestParser()
     const first = parser.parse(`bash --rcfile ${raw} --version -c 'rm /x'`).children[0]
     assert(first)

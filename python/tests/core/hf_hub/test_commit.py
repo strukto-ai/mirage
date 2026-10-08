@@ -30,6 +30,22 @@ from mirage.core.hf_hub.commit import (
 from mirage.core.hf_hub.constants import COMMIT_CHUNK
 
 
+@pytest.fixture
+def mock_post():
+    with patch(
+        "mirage.core.hf_hub.commit.hub_post", return_value={"files": []}
+    ) as mock:
+        yield mock
+
+
+@pytest.fixture
+def mock_ndjson():
+    with patch(
+        "mirage.core.hf_hub.commit.hub_post_ndjson", return_value={}
+    ) as mock:
+        yield mock
+
+
 def _lines(raw: bytes):
     return [json.loads(line) for line in raw.splitlines()]
 
@@ -84,7 +100,6 @@ def test_payload_is_newline_delimited():
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post")
 async def test_preupload_sends_a_sample_not_the_content(mock_post, accessor):
     mock_post.return_value = {
         "files": [{"path": "a.txt", "uploadMode": "regular"}]
@@ -98,15 +113,12 @@ async def test_preupload_sends_a_sample_not_the_content(mock_post, accessor):
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post")
 async def test_preupload_asks_nothing_for_no_additions(mock_post, accessor):
     assert await preupload(accessor, []) == {}
     mock_post.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post_ndjson")
-@patch("mirage.core.hf_hub.commit.hub_post")
 async def test_commit_refuses_a_file_the_hub_wants_via_lfs(
     mock_post, mock_ndjson, accessor
 ):
@@ -121,8 +133,6 @@ async def test_commit_refuses_a_file_the_hub_wants_via_lfs(
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post_ndjson")
-@patch("mirage.core.hf_hub.commit.hub_post")
 async def test_commit_posts_ndjson_for_a_regular_file(
     mock_post, mock_ndjson, accessor
 ):
@@ -136,34 +146,21 @@ async def test_commit_posts_ndjson_for_a_regular_file(
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post_ndjson")
-@patch("mirage.core.hf_hub.commit.hub_post")
-async def test_commit_can_open_a_pull_request(
-    mock_post, mock_ndjson, accessor
+@pytest.mark.parametrize("create_pr", [False, True])
+async def test_delete_only_commit_skips_preupload(
+    mock_post, mock_ndjson, accessor, create_pr
 ):
-    mock_post.return_value = {"files": []}
-    mock_ndjson.return_value = {}
-    await commit(accessor, deletions=["a.txt"], create_pr=True)
-    assert mock_ndjson.await_args.args[3] == {"create_pr": "1"}
-
-
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post_ndjson")
-@patch("mirage.core.hf_hub.commit.hub_post")
-async def test_a_delete_only_commit_skips_the_preupload_probe(
-    mock_post, mock_ndjson, accessor
-):
-    mock_ndjson.return_value = {}
-    await commit(accessor, deletions=["a.txt"])
+    await commit(accessor, deletions=["a.txt"], create_pr=create_pr)
+    assert mock_ndjson.await_args.args[3] == (
+        {"create_pr": "1"} if create_pr else None
+    )
     mock_post.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post")
 async def test_preupload_encodes_a_revision_holding_a_slash(
     mock_post, accessor
 ):
-    mock_post.return_value = {"files": []}
     await preupload(accessor, [Addition("a.txt", b"x")], "feature/foo")
     assert mock_post.await_args.args[1].endswith("/preupload/feature%2Ffoo")
 
@@ -186,8 +183,6 @@ async def test_preupload_encodes_a_revision_holding_a_slash(
         ),
     ],
 )
-@patch("mirage.core.hf_hub.commit.hub_post_ndjson")
-@patch("mirage.core.hf_hub.commit.hub_post")
 async def test_unchanged_content_skips_commit(
     mock_post, mock_ndjson, accessor, mode, data, oid
 ):
@@ -199,10 +194,22 @@ async def test_unchanged_content_skips_commit(
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post_ndjson")
-@patch("mirage.core.hf_hub.commit.hub_post")
-async def test_commit_keeps_changed_files_and_deletions(
-    mock_post, mock_ndjson, accessor
+@pytest.mark.parametrize(
+    "paths,expected",
+    [
+        (
+            ("same", "changed", "new", "ignored"),
+            [
+                ("file", "changed"),
+                ("file", "new"),
+                ("deletedFile", "obsolete"),
+            ],
+        ),
+        (("same",), [("deletedFile", "obsolete")]),
+    ],
+)
+async def test_commit_keeps_only_changed_operations(
+    mock_post, mock_ndjson, accessor, paths, expected
 ):
     mock_post.return_value = {
         "files": [
@@ -216,45 +223,13 @@ async def test_commit_keeps_changed_files_and_deletions(
             {"path": "ignored", "uploadMode": "lfs", "shouldIgnore": True},
         ]
     }
-    mock_ndjson.return_value = {"commitOid": "next"}
     await commit(
         accessor,
-        additions=[
-            Addition(path, b"hi")
-            for path in ("same", "changed", "new", "ignored")
-        ],
+        additions=[Addition(path, b"hi") for path in paths],
         deletions=["obsolete"],
     )
     operations = _lines(mock_ndjson.await_args.args[2])[1:]
-    assert [(op["key"], op["value"]["path"]) for op in operations] == [
-        ("file", "changed"),
-        ("file", "new"),
-        ("deletedFile", "obsolete"),
-    ]
-
-
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post_ndjson")
-@patch("mirage.core.hf_hub.commit.hub_post")
-async def test_unchanged_additions_do_not_cancel_deletions(
-    mock_post, mock_ndjson, accessor
-):
-    mock_post.return_value = {
-        "files": [
-            {
-                "path": "same",
-                "uploadMode": "regular",
-                "oid": "32f95c0d1244a78b2be1bab8de17906fabb2c4a8",
-            }
-        ]
-    }
-    mock_ndjson.return_value = {"commitOid": "next"}
-    await commit(
-        accessor, additions=[Addition("same", b"hi")], deletions=["obsolete"]
-    )
-    assert _lines(mock_ndjson.await_args.args[2])[1:] == [
-        {"key": "deletedFile", "value": {"path": "obsolete"}}
-    ]
+    assert [(op["key"], op["value"]["path"]) for op in operations] == expected
 
 
 @pytest.mark.asyncio
@@ -266,11 +241,9 @@ async def test_unchanged_additions_do_not_cancel_deletions(
         ("sub/.gitignore", "*"),
     ],
 )
-@patch("mirage.core.hf_hub.commit.hub_post")
 async def test_preupload_sends_root_gitignore_with_every_chunk(
     mock_post, accessor, path, content
 ):
-    mock_post.return_value = {"files": []}
     additions = [Addition(f"part-{i}", b"x") for i in range(COMMIT_CHUNK)]
     additions.append(Addition(path, content.encode()))
     await preupload(accessor, additions)

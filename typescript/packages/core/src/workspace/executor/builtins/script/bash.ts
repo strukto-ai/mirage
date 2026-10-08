@@ -20,12 +20,13 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
+import { SET_OPTION_NAMES } from '../../../../shell/constants.ts'
 
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { BASH_LONG_OPTIONS, BASH_START_FLAGS } from './constants.ts'
+import { BASH_LONG_OPTIONS, BASH_START_FLAGS, BASH_UNSUPPORTED_LONG_OPTIONS } from './constants.ts'
 import { readScriptFile, scriptError } from './script.ts'
-import { BashLongOption, type BashArgs } from './types.ts'
+import type { BashArgs } from './types.ts'
 import { helpPage, versionLine } from '../../../../commands/spec/standard.ts'
 import { specOf } from '../../../../commands/spec/index.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
@@ -48,80 +49,48 @@ function bashArgs(partial: Partial<BashArgs>): BashArgs {
 }
 
 /**
- * Read the long options bash takes before any short one.
+ * Read Bash startup options, then select a program and its argv.
  *
- * bash's own first pass (`parse_long_options` in shell.c): every leading
- * word that starts with a dash is looked up by its name, with one dash or
- * two, until one is not a long option. A `--` word that names none, or a
- * value option with no value, is refused at once; a one-dash word ends the
- * pass and is read as short options. `--help` and `--version` are answered
- * only after the whole pass, so `bash --version --bogus` is still refused,
- * and they outrank an option mirage refuses (`bash --help --restricted`
- * prints the help). Returns where the short options start, the parse when
- * the pass already decides it, and the shell options it turned on.
+ * GNU Bash 5.2 reads long options (one or two dashes) before short ones.
+ * Help/version return after that pass: unknown long options still fail,
+ * while help outranks version and unsupported modes. A long option after
+ * a short one is refused as `--`. Unsupported short options name the
+ * whole character here, rather than its first byte as GNU does.
+ *
+ * Options after a script file or `-c`'s program are positional; `-` and
+ * `--` end option parsing. `-c` takes the next word, never the rest of its
+ * cluster: `-cx 'echo hi'` traces and runs `echo hi`.
  */
-function parseLongOptions(args: string[]): [number, BashArgs | null, [string, boolean][]] {
+export function parseBashArgs(args: string[]): BashArgs {
   const settings: [string, boolean][] = []
   let wantHelp = false
   let wantVersion = false
   let unsupported: string | null = null
   let i = 0
   while (i < args.length && (args[i] ?? '').startsWith('-')) {
-    const word = args[i] ?? ''
-    const spelledLong = word.startsWith('--') && word.length > 2
-    const name = spelledLong ? word.slice(2) : word.slice(1)
-    const kind = Object.hasOwn(BASH_LONG_OPTIONS, name) ? BASH_LONG_OPTIONS[name] : undefined
-    if (kind === undefined) {
-      if (spelledLong) return [i, bashArgs({ invalid: word }), settings]
+    const spelling = args[i] ?? ''
+    const spelledLong = spelling.startsWith('--') && spelling.length > 2
+    const name = spelledLong ? spelling.slice(2) : spelling.slice(1)
+    const takesValue = BASH_LONG_OPTIONS.get(name)
+    if (takesValue === undefined) {
+      if (spelledLong) return bashArgs({ invalid: spelling })
       break
     }
-    if (kind === BashLongOption.VALUE) {
-      if (i + 1 >= args.length) return [i, bashArgs({ needsValue: name }), settings]
+    if (takesValue) {
+      if (i + 1 >= args.length) return bashArgs({ needsValue: name })
       i += 1
-    } else if (kind === BashLongOption.SETTING) {
+    } else if (SET_OPTION_NAMES.has(name)) {
       settings.push([name, true])
-    } else if (kind === BashLongOption.UNSUPPORTED) {
-      unsupported ??= word
+    } else if (BASH_UNSUPPORTED_LONG_OPTIONS.has(name)) {
+      unsupported ??= spelling
     }
-    wantHelp = wantHelp || kind === BashLongOption.HELP
-    wantVersion = wantVersion || kind === BashLongOption.VERSION
+    wantHelp = wantHelp || name === 'help'
+    wantVersion = wantVersion || name === 'version'
     i += 1
   }
-  if (wantHelp || wantVersion) {
-    return [i, bashArgs({ help: wantHelp, version: wantVersion }), settings]
-  }
-  if (unsupported !== null) return [i, bashArgs({ invalid: unsupported }), settings]
-  return [i, null, settings]
-}
-
-/**
- * Split a `bash`/`sh` argument list into flags, program and argv.
- *
- * Long options come first (`parseLongOptions`), then short ones, as bash
- * reads them: a long option after a short one is refused, and bash names it
- * by its second dash (`bash -x --norc` is `--`). A refused short option is
- * named by its whole character, where bash names only the character's first
- * byte.
- *
- * Option parsing stops at the first operand, so everything after a script
- * file (or after `-c`'s program text) is positional, even when it looks
- * like a flag: `bash run.sh -c foo` passes `-c foo` to the script. `-` and
- * `--` both end it without being operands.
- *
- * `-c` takes the next *word*, never the rest of its cluster, which is where
- * bash's own parser departs from getopt: `bash -cx 'echo hi'` traces and
- * runs `echo hi` rather than running `x`.
- *
- * The two failure fields report what went wrong rather than a rendered
- * message, the way `ShellParse` does: the wording and the exit code belong
- * to the caller, which is the only thing that knows the head word the shell
- * was spelled as.
- */
-export function parseBashArgs(args: string[]): BashArgs {
-  const [start, decided, settings] = parseLongOptions(args)
-  if (decided !== null) return decided
+  if (wantHelp || wantVersion) return bashArgs({ help: wantHelp, version: wantVersion })
+  if (unsupported !== null) return bashArgs({ invalid: unsupported })
   let readStdin = false
-  let i = start
   while (i < args.length) {
     const tok = args[i] ?? ''
     if (tok === '--' || tok === '-') {

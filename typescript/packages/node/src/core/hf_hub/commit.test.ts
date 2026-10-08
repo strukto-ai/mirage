@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
 import { COMMIT_CHUNK } from './constants.ts'
@@ -31,6 +31,14 @@ function lines(raw: Uint8Array): Record<string, unknown>[] {
 }
 
 const bytes = (text: string) => new TextEncoder().encode(text)
+
+let post: MockInstance<typeof client.hubPost>
+let ndjson: MockInstance<typeof client.hubPostNdjson>
+beforeEach(() => {
+  post = vi.spyOn(client, 'hubPost').mockResolvedValue({ files: [] })
+  ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({})
+})
+afterEach(() => vi.restoreAllMocks())
 
 describe('commitUrl', () => {
   it('targets the mount revision', () => {
@@ -78,18 +86,15 @@ describe('payload', () => {
 
 describe('preupload', () => {
   it('sends a sample, not the content', async () => {
-    const spy = vi
-      .spyOn(client, 'hubPost')
-      .mockResolvedValue({ files: [{ path: 'a.txt', uploadMode: 'regular' }] })
+    post.mockResolvedValue({ files: [{ path: 'a.txt', uploadMode: 'regular' }] })
     const modes = await preupload(accessor(), [
       { path: 'a.txt', data: new Uint8Array(2000).fill(120) },
     ])
-    const body = spy.mock.calls[0]?.[2] as { files: { sample: string; size: number }[] }
+    const body = post.mock.calls[0]?.[2] as { files: { sample: string; size: number }[] }
     const first = body.files[0] as { sample: string; size: number }
     expect(Buffer.from(first.sample, 'base64').length).toBe(512)
     expect(first.size).toBe(2000)
     expect(modes.get('a.txt')).toEqual({ mode: 'regular', ignore: false })
-    spy.mockRestore()
   })
 
   it.each([
@@ -97,7 +102,6 @@ describe('preupload', () => {
     ['.gitignore', ''],
     ['sub/.gitignore', '*'],
   ])('sends root gitignore with every chunk (%s)', async (path, content) => {
-    const post = vi.spyOn(client, 'hubPost').mockResolvedValue({ files: [] })
     const additions = Array.from({ length: COMMIT_CHUNK }, (_, i) => ({
       path: `part-${String(i)}`,
       data: bytes('x'),
@@ -109,14 +113,11 @@ describe('preupload', () => {
       if (path === '.gitignore') expect(body).toHaveProperty('gitIgnore', content)
       else expect(body).not.toHaveProperty('gitIgnore')
     }
-    post.mockRestore()
   })
 
   it('asks nothing for no additions', async () => {
-    const spy = vi.spyOn(client, 'hubPost')
     expect((await preupload(accessor(), [])).size).toBe(0)
-    expect(spy).not.toHaveBeenCalled()
-    spy.mockRestore()
+    expect(post).not.toHaveBeenCalled()
   })
 })
 
@@ -124,47 +125,31 @@ describe('commit', () => {
   it('refuses a file the Hub wants through LFS', async () => {
     // Committing it anyway would reference content the Hub never received:
     // the file would appear in the tree and every read of it would fail.
-    const post = vi
-      .spyOn(client, 'hubPost')
-      .mockResolvedValue({ files: [{ path: 'big.bin', uploadMode: 'lfs' }] })
-    const ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({})
+    post.mockResolvedValue({ files: [{ path: 'big.bin', uploadMode: 'lfs' }] })
     await expect(
       commit(accessor(), { additions: [{ path: 'big.bin', data: bytes('x') }] }),
     ).rejects.toBeInstanceOf(LfsRequiredError)
     expect(ndjson).not.toHaveBeenCalled()
-    post.mockRestore()
-    ndjson.mockRestore()
   })
 
   it('posts ndjson for a regular file', async () => {
-    const post = vi
-      .spyOn(client, 'hubPost')
-      .mockResolvedValue({ files: [{ path: 'a.txt', uploadMode: 'regular' }] })
-    const ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({ commitOid: 'abc' })
+    post.mockResolvedValue({ files: [{ path: 'a.txt', uploadMode: 'regular' }] })
+    ndjson.mockResolvedValue({ commitOid: 'abc' })
     const result = await commit(accessor(), {
       additions: [{ path: 'a.txt', data: bytes('hi') }],
     })
     expect(result).toEqual({ commitOid: 'abc' })
     expect(ndjson.mock.calls[0]?.[3]).toBeUndefined()
-    post.mockRestore()
-    ndjson.mockRestore()
   })
 
-  it('can open a pull request', async () => {
-    const ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({})
-    await commit(accessor(), { deletions: ['a.txt'], createPr: true })
-    expect(ndjson.mock.calls[0]?.[3]).toEqual({ create_pr: '1' })
-    ndjson.mockRestore()
-  })
-
-  it('skips the preupload probe for a delete-only commit', async () => {
-    const post = vi.spyOn(client, 'hubPost')
-    const ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({})
-    await commit(accessor(), { deletions: ['a.txt'] })
-    expect(post).not.toHaveBeenCalled()
-    post.mockRestore()
-    ndjson.mockRestore()
-  })
+  it.each([false, true])(
+    'skips preupload for a delete-only commit (createPr=%s)',
+    async (createPr) => {
+      await commit(accessor(), { deletions: ['a.txt'], createPr })
+      expect(ndjson.mock.calls[0]?.[3]).toEqual(createPr ? { create_pr: '1' } : undefined)
+      expect(post).not.toHaveBeenCalled()
+    },
+  )
 })
 
 describe('unchanged uploads', () => {
@@ -178,18 +163,25 @@ describe('unchanged uploads', () => {
       'e3e299f367bb91e875a9717da73dc05badb1fe7e',
     ],
   ] as const)('skips a commit for identical %s content', async (mode, data, oid) => {
-    const post = vi.spyOn(client, 'hubPost').mockResolvedValue({
+    post.mockResolvedValue({
       files: [{ path: 'same', uploadMode: mode, oid }],
     })
-    const ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({})
     expect(await commit(accessor(), { additions: [{ path: 'same', data }] })).toBeUndefined()
     expect(ndjson).not.toHaveBeenCalled()
-    post.mockRestore()
-    ndjson.mockRestore()
   })
 
-  it('keeps changed files and deletions', async () => {
-    const post = vi.spyOn(client, 'hubPost').mockResolvedValue({
+  it.each([
+    {
+      paths: ['same', 'changed', 'new', 'ignored'],
+      expected: [
+        ['file', 'changed'],
+        ['file', 'new'],
+        ['deletedFile', 'obsolete'],
+      ],
+    },
+    { paths: ['same'], expected: [['deletedFile', 'obsolete']] },
+  ])('keeps only changed operations ($paths)', async ({ paths, expected }) => {
+    post.mockResolvedValue({
       files: [
         { path: 'same', uploadMode: 'regular', oid: '32f95c0d1244a78b2be1bab8de17906fabb2c4a8' },
         { path: 'changed', uploadMode: 'regular', oid: 'old' },
@@ -197,38 +189,13 @@ describe('unchanged uploads', () => {
         { path: 'ignored', uploadMode: 'lfs', shouldIgnore: true },
       ],
     })
-    const ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({ commitOid: 'next' })
     await commit(accessor(), {
-      additions: ['same', 'changed', 'new', 'ignored'].map((path) => ({ path, data: bytes('hi') })),
+      additions: paths.map((path) => ({ path, data: bytes('hi') })),
       deletions: ['obsolete'],
     })
     const body = ndjson.mock.calls[0]?.[2]
     if (body === undefined) throw new Error('Expected a commit request')
     const operations = lines(body).slice(1)
-    expect(operations.map((op) => [op.key, (op.value as { path: string }).path])).toEqual([
-      ['file', 'changed'],
-      ['file', 'new'],
-      ['deletedFile', 'obsolete'],
-    ])
-    post.mockRestore()
-    ndjson.mockRestore()
-  })
-
-  it('does not cancel deletions when every addition is unchanged', async () => {
-    const post = vi.spyOn(client, 'hubPost').mockResolvedValue({
-      files: [
-        { path: 'same', uploadMode: 'regular', oid: '32f95c0d1244a78b2be1bab8de17906fabb2c4a8' },
-      ],
-    })
-    const ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({ commitOid: 'next' })
-    await commit(accessor(), {
-      additions: [{ path: 'same', data: bytes('hi') }],
-      deletions: ['obsolete'],
-    })
-    const body = ndjson.mock.calls[0]?.[2]
-    if (body === undefined) throw new Error('Expected a commit request')
-    expect(lines(body).slice(1)).toEqual([{ key: 'deletedFile', value: { path: 'obsolete' } }])
-    post.mockRestore()
-    ndjson.mockRestore()
+    expect(operations.map((op) => [op.key, (op.value as { path: string }).path])).toEqual(expected)
   })
 })

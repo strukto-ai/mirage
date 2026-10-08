@@ -53,21 +53,22 @@ async def delete_cmd(
         deletions = deletions_for(
             repo_files(await fetch_tree(accessor)), patterns
         )
-        if not deletions:
+        reply = await commit(
+            accessor,
+            deletions=deletions,
+            message=fl.as_str("commit_message")
+            or f"Delete files {' '.join(patterns)} with mirage",
+            description=fl.as_str("commit_description") or "",
+            create_pr=bool(fl.as_bool("create_pr")),
+        )
+        if reply is None:
             home = repo_url(inv.config.endpoint, accessor.repo_type, repo_id)
             url = f"{home}/commit/{await head_commit(accessor)}"
             stderr = EMPTY_COMMIT_WARNING
         else:
-            reply = await commit(
-                accessor,
-                deletions=deletions,
-                message=fl.as_str("commit_message")
-                or f"Delete files {' '.join(patterns)} with mirage",
-                description=fl.as_str("commit_description") or "",
-                create_pr=bool(fl.as_bool("create_pr")),
-            )
-            reported = (reply or {}).get("commitUrl")
+            reported = reply.get("commitUrl")
             url = reported if isinstance(reported, str) else ""
+
     return text_out(
         f"Files correctly deleted from repo. Commit: {url}.\n", stderr
     )

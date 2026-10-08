@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
+from operator import attrgetter
 
 from mirage.commands.cli.builtin.hf.accessor import (
     hub_for,
@@ -48,36 +49,19 @@ from mirage.utils.quote import shell_quote
 
 async def collect(
     doors: CLIDoors, local: PathSpec
-) -> tuple[list[tuple[str, bytes]], bool]:
-    """Read a workspace file, or every file under a workspace directory.
+) -> tuple[list[Addition], bool]:
+    """Read workspace files as additions relative to the source.
 
-    Read through the op dispatcher rather than any filesystem of its
-    own: an account CLI has no mount, and the path the line named is an
-    unrelated workspace file, which is exactly what the dispatcher door
-    is for.
-
-    A file is named by where it sits under ``local``, one walked level
-    at a time, never by its own absolute path: through a symlink the
-    listing answers with the target's paths, which are not under
-    ``local`` at all.
+    Walk one level at a time so symlink targets outside ``local`` retain
+    the names reached through the source directory.
 
     Args:
-        doors (CLIDoors): the workspace doors.
-        local (PathSpec): the source, as the line resolved it.
+        doors (CLIDoors): the workspace dispatcher doors.
+        local (PathSpec): the resolved source file or directory.
 
     Returns:
-        tuple[list[tuple[str, bytes]], bool]: the (path relative to
-        ``local``, content) rows, and whether ``local`` was a directory.
-        The caller needs that second fact: upstream reads
-        ``path_in_repo`` as the destination FILE for a file source and as
-        the destination FOLDER for a directory one, so a file uploaded to
-        ``u.txt`` must land at ``u.txt`` and not at ``u.txt/u.txt``.
-
-    Raises:
-        UsageError: the line ran outside a workspace, where there is no
-            dispatcher to read through.
-        FileNotFoundError: the source does not exist (an empty spelling
-            included, which the parser marks as such).
+        tuple[list[Addition], bool]: sorted files and whether the source
+        was a directory, which determines the destination semantics.
     """
     dispatch = doors.dispatch
     if dispatch is None:
@@ -86,8 +70,8 @@ async def collect(
     if getattr(stat, "type", None) is not FileType.DIRECTORY:
         data, _ = await dispatch("read", local)
         name = posixpath.basename(local.virtual.rstrip("/"))
-        return [(name, bytes(data))], False
-    rows: list[tuple[str, bytes]] = []
+        return [Addition(name, bytes(data))], False
+    rows: list[Addition] = []
     pending = [(local, "")]
     while pending:
         current, prefix = pending.pop()
@@ -102,32 +86,23 @@ async def collect(
                 pending.append((child, name))
                 continue
             data, _ = await dispatch("read", child)
-            rows.append((name, bytes(data)))
-    return sorted(rows), True
+            rows.append(Addition(name, bytes(data)))
+    return sorted(rows, key=attrgetter("path")), True
 
 
 def keep(
-    rows: list[tuple[str, bytes]], include: list[str], exclude: list[str]
-) -> list[tuple[str, bytes]]:
+    rows: list[Addition], include: list[str], exclude: list[str]
+) -> list[Addition]:
     """Apply the line's --include and --exclude globs."""
-    kept = set(filter_repo_paths([name for name, _ in rows], include, exclude))
-    return [row for row in rows if row[0] in kept]
+    kept = set(filter_repo_paths([row.path for row in rows], include, exclude))
+    return [row for row in rows if row.path in kept]
 
 
 def in_repo_base(value: str) -> str:
-    """The repo-relative directory an upload's third operand names.
-
-    A Hub path is repo-relative with no leading slash and no ``.``
-    component, so the operand is normalized rather than used verbatim:
-    ``hf upload repo /local .`` means the repository root, and taking
-    the dot literally stored every file under ``./``, which is a path
-    the resolve endpoint then could not find.
+    """Normalize an upload destination; ``.`` means the repository root.
 
     Args:
-        value (str): the operand as typed.
-
-    Returns:
-        str: the base, "" for the repository root.
+        value (str): the repo-relative operand as typed.
 
     Raises:
         UsageError: the operand climbs out of the repository.
@@ -168,11 +143,12 @@ async def upload_cmd(
     include = list(fl.as_list("include"))
     exclude = list(fl.as_list("exclude"))
     deletions = list(fl.as_list("delete"))
-    for patterns, flag in (
-        (include, "--include"),
-        (exclude, "--exclude"),
-        (deletions, "--delete"),
-    ):
+    pattern_flags = (
+        ("--include", include),
+        ("--exclude", exclude),
+        ("--delete", deletions),
+    )
+    for flag, patterns in pattern_flags:
         if patterns:
             refuse_variadic(operands, flag, patterns)
     in_repo = inv.texts[1] if len(inv.texts) > 1 else ""
@@ -187,33 +163,26 @@ async def upload_cmd(
         ) from None
     base = in_repo_base(in_repo)
     warnings = ""
-    # A directory source spreads under `path_in_repo`, filtered the way
-    # upload_folder filters (git and hub cache folders always left out);
-    # a file source lands AT it, and upstream ignores the filters for
-    # one, with a warning each. Appending the basename either way stored
-    # `hf upload r f.txt f.txt` at `f.txt/f.txt`, which the tree then
-    # reported as a directory and `hf download` could not find at all.
+    # Folder contents spread under path_in_repo; a single file lands at it.
+    # Upstream applies filters only to folders and warns for single files.
     if from_dir:
         rows = keep(collected, include, [*exclude, *DEFAULT_IGNORE_PATTERNS])
         additions = [
             Addition(
-                path=posixpath.join(base, name) if base else name, data=data
+                path=posixpath.join(base, row.path) if base else row.path,
+                data=row.data,
             )
-            for name, data in rows
+            for row in rows
         ]
     else:
-        given = (
-            ("--include", include),
-            ("--exclude", exclude),
-            ("--delete", deletions),
-        )
         warnings = "".join(
             f"Ignoring {flag} since a single file is uploaded.\n"
-            for flag, patterns in given
+            for flag, patterns in pattern_flags
             if patterns
         )
-        name, data = collected[0]
-        additions = [Addition(path=base or name, data=data)]
+        additions = [
+            Addition(path=base or row.path, data=row.data) for row in collected
+        ]
     repo_type = repo_type_of(fl)
     # Upstream creates the repository if it is missing and ignores
     # --private when it already exists, so the flag picks the visibility

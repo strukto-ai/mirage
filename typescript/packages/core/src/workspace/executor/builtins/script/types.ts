@@ -12,24 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-/**
- * What one of bash's long options does in a nested shell.
- *
- * `IGNORE` configures nothing an embedded shell has (no rc file, no
- * profile, no line editor); `VALUE` is the same and also takes the next
- * word; `SETTING` turns on the shell option of the same name; `HELP` and
- * `VERSION` answer and exit; `UNSUPPORTED` is an option bash has and
- * mirage refuses.
- */
-export enum BashLongOption {
-  IGNORE = 'ignore',
-  VALUE = 'value',
-  SETTING = 'setting',
-  HELP = 'help',
-  VERSION = 'version',
-  UNSUPPORTED = 'unsupported',
-}
-
 export interface BashArgs {
   // Inline program text from `-c`.
   script: string | null

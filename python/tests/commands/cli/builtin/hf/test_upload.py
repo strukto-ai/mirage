@@ -22,6 +22,7 @@ from mirage.commands.cli.builtin.hf.upload import (
     upload_cmd,
 )
 from mirage.commands.errors import UsageError
+from mirage.core.hf_hub.commit import Addition
 from mirage.types import PathSpec
 from tests.commands.cli.builtin.hf.conftest import ANON, inv
 
@@ -30,7 +31,7 @@ from tests.commands.cli.builtin.hf.conftest import ANON, inv
 async def test_collect_reads_one_file_under_its_basename(doors):
     record, _, _, _ = doors
     assert await collect(record, PathSpec.from_str_path("/work/a.txt")) == (
-        [("a.txt", b"alpha")],
+        [Addition("a.txt", b"alpha")],
         False,
     )
 
@@ -39,7 +40,7 @@ async def test_collect_reads_one_file_under_its_basename(doors):
 async def test_collect_walks_a_directory_relative_to_it(doors):
     record, _, _, _ = doors
     assert await collect(record, PathSpec.from_str_path("/work")) == (
-        [("a.txt", b"alpha"), ("sub/b.txt", b"beta")],
+        [Addition("a.txt", b"alpha"), Addition("sub/b.txt", b"beta")],
         True,
     )
 
@@ -66,51 +67,26 @@ async def test_upload_commits_every_walked_file_at_once(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "local,in_repo,expected",
+    [
+        ("/work/a.txt", "docs", ["docs"]),
+        ("/work", "docs", ["docs/a.txt", "docs/sub/b.txt"]),
+        ("/work/a.txt", "", ["a.txt"]),
+    ],
+)
 @patch("mirage.commands.cli.builtin.hf.upload.create_repo")
 @patch("mirage.commands.cli.builtin.hf.upload.commit")
-async def test_upload_of_a_file_lands_at_path_in_repo(
-    mock_commit, mock_create, doors
+async def test_upload_destination(
+    mock_commit, mock_create, doors, local, in_repo, expected
 ):
-    """Upstream reads `path_in_repo` as the destination FILE for a file
-    source: `_resolve_upload_paths` only falls back to the basename when
-    the operand is absent. Probed against hf 0.35.3, which stores
-    `hf upload r ./a.txt docs` as a file named `docs`."""
+    """A file lands at path_in_repo; a folder spreads underneath it."""
     record, _, _, _ = doors
-    await upload_cmd(
-        inv(
-            texts=("acme/widget", "docs"), paths=("/work/a.txt",), doors=record
-        )
-    )
-    assert mock_commit.await_args.kwargs["additions"][0].path == "docs"
-
-
-@pytest.mark.asyncio
-@patch("mirage.commands.cli.builtin.hf.upload.create_repo")
-@patch("mirage.commands.cli.builtin.hf.upload.commit")
-async def test_upload_of_a_directory_spreads_under_path_in_repo(
-    mock_commit, mock_create, doors
-):
-    """A directory source is the other half of the same rule: there
-    `path_in_repo` names the destination FOLDER."""
-    record, _, _, _ = doors
-    await upload_cmd(
-        inv(texts=("acme/widget", "docs"), paths=("/work",), doors=record)
-    )
-    paths = [a.path for a in mock_commit.await_args.kwargs["additions"]]
-    assert paths == ["docs/a.txt", "docs/sub/b.txt"]
-
-
-@pytest.mark.asyncio
-@patch("mirage.commands.cli.builtin.hf.upload.create_repo")
-@patch("mirage.commands.cli.builtin.hf.upload.commit")
-async def test_upload_of_a_file_without_path_in_repo_uses_its_basename(
-    mock_commit, mock_create, doors
-):
-    record, _, _, _ = doors
-    await upload_cmd(
-        inv(texts=("acme/widget",), paths=("/work/a.txt",), doors=record)
-    )
-    assert mock_commit.await_args.kwargs["additions"][0].path == "a.txt"
+    texts = ("acme/widget", in_repo) if in_repo else ("acme/widget",)
+    await upload_cmd(inv(texts=texts, paths=(local,), doors=record))
+    assert [
+        a.path for a in mock_commit.await_args.kwargs["additions"]
+    ] == expected
 
 
 @pytest.mark.asyncio
