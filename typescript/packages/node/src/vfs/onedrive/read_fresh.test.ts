@@ -199,6 +199,26 @@ describe('onedrive under read: fresh', () => {
     }
   })
 
+  it('a streamed read stamps its cTag', async () => {
+    const graph = await graphOf(OLD)
+    const w = ws(await vfsOf(graph))
+    try {
+      // Recorded, as a command's read is: the cTag reaches the cache through
+      // the recording.
+      const [got] = await runWithRecording(async () => {
+        let text = ''
+        for await (const chunk of await w.vfs.readStream('/m/a.txt')) text += DEC.decode(chunk)
+        return text
+      })
+      expect(got).toBe(DEC.decode(OLD))
+      const before = graph.fetches()
+      expect(await out(w, CAT)).toBe(DEC.decode(OLD))
+      expect(graph.fetches()).toBe(before)
+    } finally {
+      await w.close()
+    }
+  })
+
   it('a metadata edit does not refetch', async () => {
     const graph = await graphOf(OLD)
     const w = ws(await vfsOf(graph))
