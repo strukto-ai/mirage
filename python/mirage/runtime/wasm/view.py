@@ -45,7 +45,7 @@ class WasmView:
     Args:
         config (WasmFsConfig | dict | None): the knobs, chiefly which
             build directory to serve. None means no build directory.
-        core (RuntimeFiles | None): the shared mount op vocabulary. None
+        files (RuntimeFiles | None): the shared mount op vocabulary. None
             means no workspace is attached and only the build is
             visible.
     """
@@ -53,17 +53,17 @@ class WasmView:
     def __init__(
         self,
         config: WasmFsConfig | dict[str, Any] | None = None,
-        core: RuntimeFiles | None = None,
+        files: RuntimeFiles | None = None,
     ) -> None:
         self.config = WasmFsConfig.coerce(config)
         root = self.config.host_root
         self._build = BuildDir(Path(root)) if root is not None else None
-        self._core = core
+        self._files = files
 
     async def abort(self) -> None:
         """Cancel the workspace operations owned by this guest."""
-        if self._core is not None:
-            await self._core.abort()
+        if self._files is not None:
+            await self._files.abort()
 
     def _prefixes(self) -> list[str]:
         """Mount prefixes that claim a path away from the build directory.
@@ -75,13 +75,13 @@ class WasmView:
         own build tree resolves through the workspace rather than off
         disk, and `_readdir_root` lists each prefix's first segment,
         which for `/` is the empty string. Leaving it out costs nothing:
-        `_serving_build` already falls through to the core for every
+        `_serving_build` already falls through to the file API for every
         path the build does not hold, which is how a root mount is
         served here.
         """
-        if self._core is None:
+        if self._files is None:
             return []
-        return [p for p in self._core.prefixes() if p != "/"]
+        return [p for p in self._files.prefixes() if p != "/"]
 
     def _claimed_by_mount(self, path: str) -> bool:
         return owner_prefix(self._prefixes(), path) is not None
@@ -90,10 +90,10 @@ class WasmView:
         """The build directory when it answers for `path`, else None.
 
         A mount prefix always wins. Below that: with no build there is
-        nothing local to serve; with a build but no core the build owns
+        nothing local to serve; with a build but no file API the build owns
         every path, including a missing one, so the guest gets the
         build's own ENOENT; with both, the build answers only for what
-        it holds and the core takes the rest.
+        it holds and the file API takes the rest.
 
         Args:
             path (str): guest-absolute path.
@@ -104,10 +104,10 @@ class WasmView:
         if self._claimed_by_mount(path):
             return None
         if self._build is None:
-            if self._core is None:
+            if self._files is None:
                 raise enoent(path)
             return None
-        if self._core is None:
+        if self._files is None:
             return self._build
         return self._build if self._build.has(path) else None
 
@@ -123,12 +123,12 @@ class WasmView:
         if self._serving_build(path) is not None:
             raise PermissionError(READONLY_HINT)
 
-    def _require_core(self) -> RuntimeFiles:
-        if self._core is None:
+    def _require_files(self) -> RuntimeFiles:
+        if self._files is None:
             raise FileNotFoundError("no workspace mounts are reachable")
-        return self._core
+        return self._files
 
-    def _content_core(self, path: str) -> RuntimeFiles:
+    def _files_for(self, path: str) -> RuntimeFiles:
         """The door for a content call on `path`, inside the view only.
 
         Structure is open (a stat, a listing or a readlink answers for
@@ -144,12 +144,12 @@ class WasmView:
             FileNotFoundError: no workspace is attached, or the view
                 does not serve `path`.
         """
-        if self._core is None or not self._core.serves(path):
+        if self._files is None or not self._files.serves(path):
             raise enoent(path)
-        return self._core
+        return self._files
 
     def _core_call(self, op: str, path: str, **kwargs: Any) -> Any:
-        return self._content_core(path).call(op, path, **kwargs)
+        return self._files_for(path).call(op, path, **kwargs)
 
     def stat(self, path: str) -> VFSStat:
         """Stat a guest path.
@@ -196,11 +196,11 @@ class WasmView:
             path (str): guest-absolute path.
             nofollow (bool): report a trailing symlink itself.
         """
-        if self._core is None:
+        if self._files is None:
             raise enoent(path)
-        if self._core.serves(path):
-            return self._core.stat(path, nofollow=nofollow)
-        row = self._core.view_stat(path)
+        if self._files.serves(path):
+            return self._files.stat(path, nofollow=nofollow)
+        row = self._files.view_stat(path)
         if row is None:
             raise enoent(path)
         return row
@@ -238,10 +238,10 @@ class WasmView:
             return None
         if build is not None:
             return None
-        core = self._require_core()
-        if not core.serves(path):
+        files = self._require_files()
+        if not files.serves(path):
             return None
-        return core.listing_or_none(path)
+        return files.listing_or_none(path)
 
     def read(
         self,
@@ -263,7 +263,7 @@ class WasmView:
         build = self._serving_build(path)
         if build is not None:
             return build.read(path, offset=offset, size=size)
-        return self._content_core(path).read(
+        return self._files_for(path).read(
             path, offset=offset, size=size, raw=raw
         )
 
@@ -308,8 +308,8 @@ class WasmView:
             if src_build != dst_build:
                 raise exdev(src)
             raise PermissionError(READONLY_HINT)
-        self._content_core(dst)
-        self._content_core(src).rename(src, dst)
+        self._files_for(dst)
+        self._files_for(src).rename(src, dst)
 
     def symlink(self, path: str, target: str) -> None:
         """Create a symlink at `path` pointing at `target`.
@@ -336,9 +336,9 @@ class WasmView:
         """
         if self._serving_build(path) is not None:
             raise einval(path)
-        if self._core is None:
+        if self._files is None:
             raise enoent(path)
-        return str(self._core.call("readlink", path))
+        return str(self._files.call("readlink", path))
 
     def setattr(
         self,
@@ -362,7 +362,7 @@ class WasmView:
             nofollow (bool): stamp the link itself, not its target.
         """
         self._deny_build(path)
-        self._content_core(path).setattr(
+        self._files_for(path).setattr(
             path, atime=atime, mtime=mtime, nofollow=nofollow
         )
 
@@ -374,7 +374,7 @@ class WasmView:
             steps (list[FlushStep]): the handle's ``flush_plan()``.
         """
         self._deny_build(path)
-        self._content_core(path).flush(path, steps)
+        self._files_for(path).flush(path, steps)
 
     def readdir(self, path: str) -> list[tuple[str, int]]:
         """List a guest directory as (name, preview1 filetype) pairs.
@@ -398,29 +398,29 @@ class WasmView:
         build = self._serving_build(path)
         if build is not None:
             return build.readdir(path)
-        return self._readdir_core(path)
+        return self._readdir_files(path)
 
-    def _readdir_core(self, path: str) -> list[tuple[str, int]]:
+    def _readdir_files(self, path: str) -> list[tuple[str, int]]:
         entries: dict[str, int] = {}
-        for entry in self._require_core().readdir(path):
+        for entry in self._require_files().readdir(path):
             base = entry.path.rstrip("/").rsplit("/", 1)[-1]
             if base:
                 entries[base] = filetype_of(entry)
         return sorted(entries.items())
 
     def _readdir_root(self) -> list[tuple[str, int]]:
-        """Merge the build directory's root listing with the core's.
+        """Merge the build directory's root listing with the file API's.
 
-        The core's readdir already carries mount structure (the door
+        The file API's readdir already carries mount structure (the door
         merges child mounts and links), so no prefix synthesis happens
-        here; mount entries arrive kind-resolved by the core listing,
+        here; mount entries arrive kind-resolved by the file API's listing,
         which the door also answers for structure-only directories.
         """
         entries: dict[str, int] = {}
         if self._build is not None:
             for name, kind in self._build.readdir("/"):
                 entries[name] = kind
-        if self._core is not None:
-            for name, kind in self._readdir_core("/"):
+        if self._files is not None:
+            for name, kind in self._readdir_files("/"):
                 entries.setdefault(name, kind)
         return sorted(entries.items())

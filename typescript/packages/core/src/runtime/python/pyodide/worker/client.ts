@@ -152,7 +152,7 @@ export class PyodideWorkerClient {
     signal?: AbortSignal,
   ): Promise<RunResult | EvalResult> {
     if (this.failure !== null) throw this.failure
-    const vfs = RuntimeFiles.of(context)
+    const files = RuntimeFiles.of(context)
     const { dispatch, scope } = context
     const responses = new Set<Promise<void>>()
     const processes = new GuestProcessTable(
@@ -177,7 +177,7 @@ export class PyodideWorkerClient {
         }
         if (message.kind === 'vfs') {
           const response = respond(message.buffer, () =>
-            scope.run(() => this.operation(message, vfs, dispatch, processes)),
+            scope.run(() => this.operation(message, files, dispatch, processes)),
           )
           responses.add(response)
           void response.then(() => {
@@ -237,7 +237,7 @@ export class PyodideWorkerClient {
 
   private async operation(
     request: VfsRequest,
-    vfs: RuntimeFiles,
+    files: RuntimeFiles,
     dispatch: BridgeDispatchFn,
     processes: GuestProcessTable,
   ): Promise<unknown> {
@@ -245,13 +245,13 @@ export class PyodideWorkerClient {
       case 'process':
         return processes.call(request.payload ?? '{}')
       case 'read':
-        return vfs.read(request.path)
+        return files.read(request.path)
       case 'stat':
-        return vfs.stat(request.path, true)
+        return files.stat(request.path, true)
       case 'readdir':
-        return vfs.readdir(request.path, request.classify ?? true)
+        return files.readdir(request.path, request.classify ?? true)
       case 'readlink':
-        return vfs.readlink(request.path)
+        return files.readlink(request.path)
       case 'dispatch': {
         if (request.args === undefined) throw new Error('missing bridge arguments')
         return dispatch(...request.args)
@@ -260,7 +260,7 @@ export class PyodideWorkerClient {
         const mutations = request.mutations ?? []
         for (const [index, mutation] of mutations.entries()) {
           try {
-            await applyMutation(vfs, mutation)
+            await applyMutation(files, mutation)
           } catch (error) {
             return {
               message: `python3: failed to ${mutation.kind} ${mutation.path} on mount: ${error instanceof Error ? error.message : String(error)}`,

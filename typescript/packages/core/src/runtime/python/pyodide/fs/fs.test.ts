@@ -41,7 +41,7 @@ interface Call {
 
 describe('PyodideFs', () => {
   let py: PyodideInterface
-  let vfs: RuntimeFiles
+  let files: RuntimeFiles
   let journal: MutationJournal
   const calls: Call[] = []
   const mounts: string[] = []
@@ -63,10 +63,10 @@ describe('PyodideFs', () => {
   async function mountPrefix(prefix: string): Promise<void> {
     mounts.push(prefix)
     const seed = new PyodideFsSeed()
-    await preloadInto(seed, vfs, prefix)
+    await preloadInto(seed, files, prefix)
     const mountpoint = prefix.slice(0, -1)
     const fs = new PyodideFs(py.FS, py.ERRNO_CODES, journal, mountpoint, (path) =>
-      vfs.mountOf(path),
+      files.mountOf(path),
     )
     py.FS.mkdirTree(mountpoint)
     py.FS.mount(fs.type, {}, mountpoint)
@@ -84,7 +84,7 @@ describe('PyodideFs', () => {
       py.ERRNO_CODES,
       journal,
       mountpoint,
-      (path) => vfs.mountOf(path),
+      (path) => files.mountOf(path),
       sync,
     )
     py.FS.mkdirTree(mountpoint)
@@ -120,7 +120,7 @@ describe('PyodideFs', () => {
   // The runtime's post-run drain, applied host-side where awaiting the
   // bridge needs no JSPI.
   async function drain(): Promise<void> {
-    for (const mutation of journal.takeMutations()) await applyMutation(vfs, mutation)
+    for (const mutation of journal.takeMutations()) await applyMutation(files, mutation)
   }
 
   beforeAll(async () => {
@@ -205,7 +205,7 @@ describe('PyodideFs', () => {
     }
     // The link source is the double's own name plane, which is what a
     // workspace hands its runtimes: link names per directory.
-    vfs = new RuntimeFiles(
+    files = new RuntimeFiles(
       dispatch,
       new PrefixResolver(
         () => mounts,

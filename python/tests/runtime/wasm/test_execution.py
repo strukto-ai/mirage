@@ -41,7 +41,7 @@ async def test_cancel_joins_worker_and_host_operation(monkeypatch):
         return None, None
 
     bridge = RuntimeFiles(dispatch, asyncio.get_running_loop())
-    fs = WasmView(core=bridge)
+    fs = WasmView(files=bridge)
     execution = WasmExecution(Path("unused.wasm"), "probe")
     engine = Mock()
 

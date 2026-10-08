@@ -202,33 +202,33 @@ export function createJournal(): MutationJournal {
  * Replay one recorded guest mutation against the mounts.
  *
  * Args:
- *   vfs: the runtime's mount vocabulary to apply through.
+ *   files: the runtime's mount vocabulary to apply through.
  *   mutation: the journal entry to apply.
  */
-export async function applyMutation(vfs: RuntimeFiles, mutation: MirageMutation): Promise<void> {
+export async function applyMutation(files: RuntimeFiles, mutation: MirageMutation): Promise<void> {
   switch (mutation.kind) {
     case 'create':
-      return vfs.create(mutation.path)
+      return files.create(mutation.path)
     // The journal recorded only the tail, so the whole file is not
     // available here; RuntimeFiles.append reads the base itself when the
     // mount has no append op.
     case 'append':
-      return vfs.append(mutation.path, mutation.bytes)
+      return files.append(mutation.path, mutation.bytes)
     case 'pwrite':
-      return vfs.pwrite(mutation.path, mutation.offset, mutation.bytes)
+      return files.pwrite(mutation.path, mutation.offset, mutation.bytes)
     case 'truncate':
-      return vfs.truncate(mutation.path, mutation.length)
+      return files.truncate(mutation.path, mutation.length)
     case 'mkdir':
-      return vfs.mkdir(mutation.path)
+      return files.mkdir(mutation.path)
     case 'unlink':
-      return vfs.unlink(mutation.path)
+      return files.unlink(mutation.path)
     case 'rmdir':
-      return vfs.rmdir(mutation.path)
+      return files.rmdir(mutation.path)
     case 'rename':
-      return vfs.rename(mutation.path, mutation.dst)
+      return files.rename(mutation.path, mutation.dst)
     case 'symlink':
-      return vfs.symlink(mutation.path, mutation.target)
+      return files.symlink(mutation.path, mutation.target)
     case 'setattr':
-      return vfs.setattr(mutation.path, mutation.attrs)
+      return files.setattr(mutation.path, mutation.attrs)
   }
 }

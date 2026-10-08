@@ -237,7 +237,7 @@ def test_stat_maps_filestat_fields():
         dirs={"/data/sub"},
         prefixes=["/data/"],
     )
-    fs = WasmView(core=bridge)
+    fs = WasmView(files=bridge)
     st = fs.stat("/data/f.txt")
     assert (
         st
@@ -255,7 +255,7 @@ def test_readdir_bridge_resolves_kind_from_slash_or_stat():
     bridge = FakeVFS(
         files={"/data/f.txt": b""}, dirs={"/data/sub"}, prefixes=["/data/"]
     )
-    fs = WasmView(core=bridge)
+    fs = WasmView(files=bridge)
     assert fs.readdir("/data") == [("f.txt", FT_REG), ("sub", FT_DIR)]
 
 
@@ -268,7 +268,7 @@ def test_readdir_reports_an_entry_it_could_not_stat_as_unknown():
         files={"/data/f.txt": b"", "/data/bad.txt": b""},
         prefixes=["/data/"],
     )
-    fs = WasmView(core=bridge)
+    fs = WasmView(files=bridge)
     assert fs.readdir("/data") == [("bad.txt", FT_UNKNOWN), ("f.txt", FT_REG)]
     with pytest.raises(OSError):
         fs.stat("/data/bad.txt")
@@ -284,7 +284,7 @@ def test_readdir_reports_a_link_as_a_link():
         links={"/data/l": "/data/f.txt"},
         prefixes=["/data/"],
     )
-    fs = WasmView(core=bridge)
+    fs = WasmView(files=bridge)
     assert fs.readdir("/data") == [("f.txt", FT_REG), ("l", FT_SYMLINK)]
 
 
@@ -296,7 +296,7 @@ def test_readdir_reports_a_link_to_a_directory_as_a_link():
         links={"/data/dl": "/data/sub"},
         prefixes=["/data/"],
     )
-    fs = WasmView(core=bridge)
+    fs = WasmView(files=bridge)
     assert fs.readdir("/data") == [("dl", FT_SYMLINK), ("sub", FT_DIR)]
 
 
@@ -370,8 +370,8 @@ def test_stat_reads_offsetless_stamps_as_utc():
             prefixes=["/data/"],
             modified="2026-01-02T03:04:05+00:00",
         )
-        got_naive = WasmView(core=naive).stat("/data/f.txt").mtime_ns
-        got_aware = WasmView(core=aware).stat("/data/f.txt").mtime_ns
+        got_naive = WasmView(files=naive).stat("/data/f.txt").mtime_ns
+        got_aware = WasmView(files=aware).stat("/data/f.txt").mtime_ns
         assert got_naive == got_aware
         assert got_naive == mtime_ns(
             FileStat(

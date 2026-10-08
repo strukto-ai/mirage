@@ -68,7 +68,7 @@ export function fromGuestText(ctx: QuickJSAsyncContext, handle: QuickJSHandle): 
 
 /**
  * Install the `std.open`/`os.readdir` host functions on an asyncified
- * quickjs context, backed by the runtime vfs. A null vfs (no
+ * quickjs context, backed by `RuntimeFiles`. A null `files` (no
  * workspace mounts wired) still installs the surface, but every open
  * and readdir fails cleanly — `std.open` returns null and `os.readdir`
  * reports ENOENT — so guest code sees an empty filesystem rather than a
@@ -79,11 +79,11 @@ export function fromGuestText(ctx: QuickJSAsyncContext, handle: QuickJSHandle): 
  * each file left open still owes the mount its writes.
  *
  * @param ctx - the asyncified quickjs context
- * @param vfs - the runtime's mount vocabulary, or null when no mounts are wired
+ * @param files - the runtime's mount vocabulary, or null when no mounts are wired
  */
 export function installQuickJsFs(
   ctx: QuickJSAsyncContext,
-  vfs: RuntimeFiles | null,
+  files: RuntimeFiles | null,
 ): () => Promise<string[]> {
   const table = new FileTable<FileHandle>()
   // qjs-libc's fopen opens a directory for reading, and every read of it
@@ -132,9 +132,9 @@ export function installQuickJsFs(
   defineAsync('__mirage_chdir', async (pathH) => {
     const path = absolute(pathH)
     if (path !== '/') {
-      if (path === '' || vfs === null) return ctx.newNumber(-ENOENT)
+      if (path === '' || files === null) return ctx.newNumber(-ENOENT)
       try {
-        const st = await vfs.viewStat(path)
+        const st = await files.viewStat(path)
         if (st === null) return ctx.newNumber(-ENOENT)
         if (!st.isDir) return ctx.newNumber(-WASI.ENOTDIR)
       } catch (err) {
@@ -169,7 +169,7 @@ export function installQuickJsFs(
       exclusive: first !== 'r' && spelled.includes('x'),
       binary: spelled.includes('b'),
     }
-    if (vfs?.serves(path) !== true) return ctx.newNumber(-ENOENT)
+    if (files?.serves(path) !== true) return ctx.newNumber(-ENOENT)
     // The open's effect lands through the mount at open, by the rule
     // every door shares, so write modes and a read-narrowed session
     // refuse here (the guest gets null), the ledger records the real
@@ -182,7 +182,7 @@ export function installQuickJsFs(
     try {
       let row: VFSStat | null
       try {
-        row = await applyOpen(vfs, path, mode)
+        row = await applyOpen(files, path, mode)
       } catch (err) {
         if (mode.writable || classify(err) !== 'EISDIR') throw err
         row = null
@@ -191,7 +191,7 @@ export function installQuickJsFs(
       // Nothing is read at open: the handle fetches what a read lands in.
       // A handle that writes reads the stored bytes, since its writes land
       // on them; a read-only one sees the rendering.
-      const door = vfs
+      const door = files
       handle = FileHandle.opened(
         path,
         row === null
@@ -217,11 +217,11 @@ export function installQuickJsFs(
     failed.delete(fd)
     const file = table.pop(fd)
     if (file === undefined) return ctx.undefined
-    if (file.dirty && vfs !== null) await vfs.flush(file.path, file.flushPlan())
+    if (file.dirty && files !== null) await files.flush(file.path, file.flushPlan())
     return ctx.undefined
   })
 
-  defineAsync('__mirage_readdir', (pathH) => readdir(ctx, vfs, absolute(pathH)))
+  defineAsync('__mirage_readdir', (pathH) => readdir(ctx, files, absolute(pathH)))
 
   // A file answers a read only from the bytes it holds, so the bootstrap
   // asks whether a read lacks bytes and fills until it does not; every
@@ -312,13 +312,13 @@ export function installQuickJsFs(
   // files and empty directories; os.stat answers [obj, errno].
   defineAsync('__mirage_remove', async (pathH) => {
     const path = absolute(pathH)
-    if (vfs?.serves(path) !== true) return ctx.newNumber(-ENOENT)
+    if (files?.serves(path) !== true) return ctx.newNumber(-ENOENT)
     try {
-      const st = await vfs.stat(path)
+      const st = await files.stat(path)
       if (st.isDir) {
-        await vfs.rmdir(path)
+        await files.rmdir(path)
       } else {
-        await vfs.unlink(path)
+        await files.unlink(path)
       }
       return ctx.newNumber(0)
     } catch (err) {
@@ -328,9 +328,9 @@ export function installQuickJsFs(
 
   defineAsync('__mirage_mkdir', async (pathH) => {
     const path = absolute(pathH)
-    if (vfs?.serves(path) !== true) return ctx.newNumber(-ENOENT)
+    if (files?.serves(path) !== true) return ctx.newNumber(-ENOENT)
     try {
-      await vfs.mkdir(path)
+      await files.mkdir(path)
       return ctx.newNumber(0)
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))
@@ -339,13 +339,13 @@ export function installQuickJsFs(
 
   defineAsync('__mirage_utimes', async (pathH, atimeH, mtimeH) => {
     const path = absolute(pathH)
-    if (vfs?.serves(path) !== true) return ctx.newNumber(-ENOENT)
+    if (files?.serves(path) !== true) return ctx.newNumber(-ENOENT)
     // The engine's stamps are milliseconds (qjs-libc splits them into
     // tv_sec/tv_nsec at 1000), and the op takes ISO text.
     const atime = epochToIso(ctx.getNumber(atimeH) / 1000)
     const mtime = epochToIso(ctx.getNumber(mtimeH) / 1000)
     try {
-      await vfs.setattr(path, { atime, mtime })
+      await files.setattr(path, { atime, mtime })
       return ctx.newNumber(0)
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))
@@ -355,25 +355,25 @@ export function installQuickJsFs(
   defineAsync('__mirage_rename', async (srcH, dstH) => {
     const src = absolute(srcH)
     const dst = absolute(dstH)
-    if (vfs?.serves(src) !== true || !vfs.serves(dst)) return ctx.newNumber(-ENOENT)
+    if (files?.serves(src) !== true || !files.serves(dst)) return ctx.newNumber(-ENOENT)
     // The door refuses a pair on different mounts with EXDEV, which this
     // engine numbers -75, as the real engine does.
     try {
-      await vfs.rename(src, dst)
+      await files.rename(src, dst)
       return ctx.newNumber(0)
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))
     }
   })
 
-  defineAsync('__mirage_stat', (pathH) => stat(ctx, vfs, absolute(pathH)))
+  defineAsync('__mirage_stat', (pathH) => stat(ctx, files, absolute(pathH)))
 
   return async () => {
     const failures: string[] = []
     for (const file of table.values()) {
-      if (!file.dirty || vfs === null) continue
+      if (!file.dirty || files === null) continue
       try {
-        await vfs.flush(file.path, file.flushPlan())
+        await files.flush(file.path, file.flushPlan())
       } catch (err) {
         failures.push(`${file.path}: ${err instanceof Error ? err.message : String(err)}`)
       }

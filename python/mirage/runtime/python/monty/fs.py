@@ -78,7 +78,7 @@ class MontyFs(AbstractOS):
     mode's effect on the mount (``apply_open``) and nothing else, and
     each write after it ships only its own bytes.
 
-    The door uses synchronous callbacks, so the core's hop parks the
+    The door uses synchronous callbacks, so the file API's hop parks the
     tokio worker for the whole I/O wait. That caps concurrent
     I/O-waiting runs at Monty's worker pool size, which is the core
     count by default; TOKIO_WORKER_THREADS raises it, and parked
@@ -86,18 +86,18 @@ class MontyFs(AbstractOS):
     runs finish in ~2s at 64 workers versus ~8s at 14).
 
     Args:
-        core (RuntimeFiles | None): the execution's file door, built with
+        files (RuntimeFiles | None): the execution's file API, built with
             ``RuntimeFiles.of(context)``; None outside a workspace, where
             every path is out of view.
         environ (dict[str, str]): the guest's environment.
     """
 
     def __init__(
-        self, core: RuntimeFiles | None, environ: dict[str, str]
+        self, files: RuntimeFiles | None, environ: dict[str, str]
     ) -> None:
         self.max_urandom_bytes = MAX_URANDOM_BYTES
         self._environ = dict(environ)
-        self._core = core
+        self._files = files
 
     def getenv(self, key: str, default: str | None = None) -> str | None:
         return self._environ.get(key, default)
@@ -118,10 +118,10 @@ class MontyFs(AbstractOS):
         Args:
             path (PurePosixPath): the guest path.
         """
-        core = self._core
-        if core is None or not core.serves(str(path)):
+        files = self._files
+        if files is None or not files.serves(str(path)):
             raise guest_error(FsCondition.ENOENT, str(path))
-        return core
+        return files
 
     def _structure(self, path: PurePosixPath) -> RuntimeFiles:
         """The file door for a structural question, asked of any path.
@@ -129,15 +129,15 @@ class MontyFs(AbstractOS):
         Args:
             path (PurePosixPath): the guest path.
         """
-        if self._core is None:
+        if self._files is None:
             raise guest_error(FsCondition.ENOENT, str(path))
-        return self._core
+        return self._files
 
     def _row(self, path: PurePosixPath) -> VFSStat | None:
-        if self._core is None:
+        if self._files is None:
             return None
         with _as_guest(str(path)):
-            return self._core.view_stat(str(path))
+            return self._files.view_stat(str(path))
 
     def path_exists(self, path: PurePosixPath) -> bool:
         return self._row(path) is not None
@@ -159,11 +159,11 @@ class MontyFs(AbstractOS):
         Args:
             path (PurePosixPath): the guest path to test.
         """
-        if self._core is None:
+        if self._files is None:
             return False
         with _as_guest(str(path)):
             try:
-                self._core.readlink(str(path))
+                self._files.readlink(str(path))
             except Exception as caught:
                 if classify(caught) not in NOT_A_LINK:
                     raise

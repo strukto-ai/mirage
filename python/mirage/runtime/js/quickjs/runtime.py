@@ -171,7 +171,7 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
             source = cwd_preamble(cwd) + source
         argv += ["-e", source, "--", *named, *args.args]
         fs = WasmView(
-            core=RuntimeFiles.of(context) if context is not None else None
+            files=RuntimeFiles.of(context) if context is not None else None
         )
         stdout, stderr, exit_code = await self._execution.run(
             argv=argv,

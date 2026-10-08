@@ -68,7 +68,7 @@ function applyMeta(fs: FSLike, entry: VFSEntry): void {
   if (entry.mtimeMs !== undefined) fs.utime?.(entry.path, entry.mtimeMs, entry.mtimeMs)
 }
 
-async function preloadEntry(fs: FSLike, vfs: RuntimeFiles, entry: VFSEntry): Promise<void> {
+async function preloadEntry(fs: FSLike, files: RuntimeFiles, entry: VFSEntry): Promise<void> {
   // A namespace symlink is copied as a link, never followed: stat
   // reports the target, so a directory link would copy its whole
   // subtree here and a cyclic one would never terminate. The target is
@@ -77,7 +77,7 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeFiles, entry: VFSEntry): Pro
   if (entry.isLink === true) {
     if (fs.symlink === undefined) return
     try {
-      fs.symlink(entry.path, await vfs.readlink(entry.path))
+      fs.symlink(entry.path, await files.readlink(entry.path))
     } catch (err) {
       // A link the namespace listed and then would not resolve: leaving
       // it out is the honest seed, since inventing a target would make
@@ -96,7 +96,7 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeFiles, entry: VFSEntry): Pro
     // refuses both stat and open.
     let st: VFSStat
     try {
-      st = await vfs.stat(entry.path)
+      st = await files.stat(entry.path)
     } catch (err) {
       if (isMissingPath(err)) return
       fs.markUnclassified?.(entry.path)
@@ -105,24 +105,24 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeFiles, entry: VFSEntry): Pro
       )
       return
     }
-    await preloadEntry(fs, vfs, { path: entry.path, ...st })
+    await preloadEntry(fs, files, { path: entry.path, ...st })
     return
   }
   if (entry.isDir) {
     fs.mkdirTree(entry.path)
     applyMeta(fs, entry)
     const next = entry.path.endsWith('/') ? entry.path : entry.path + '/'
-    if (vfs.mountOf(entry.path) === next) {
+    if (files.mountOf(entry.path) === next) {
       // A nested mount served through its parent keeps the failure
       // boundary it had as a top-level prefix: its root readdir failing
       // must fail the whole collection, so syncMounts keeps the
       // previous healthy snapshot instead of replacing it with one
       // where this subtree reads as empty.
-      await preloadInto(fs, vfs, next)
+      await preloadInto(fs, files, next)
       return
     }
     try {
-      await preloadInto(fs, vfs, next)
+      await preloadInto(fs, files, next)
     } catch (err) {
       console.warn(
         `mirage preload: skipping subtree ${next}: ${err instanceof Error ? err.message : String(err)}`,
@@ -136,7 +136,7 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeFiles, entry: VFSEntry): Pro
     return
   }
   try {
-    const bytes = await vfs.read(entry.path)
+    const bytes = await files.read(entry.path)
     fs.writeFile(entry.path, bytes)
     applyMeta(fs, entry)
   } catch (err) {
@@ -163,13 +163,13 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeFiles, entry: VFSEntry): Pro
  *
  * Args:
  *   fs: the tree collector to fill.
- *   vfs: the runtime's mount vocabulary to read through.
+ *   files: the runtime's mount vocabulary to read through.
  *   prefix: the mount prefix to walk.
  */
-export async function preloadInto(fs: FSLike, vfs: RuntimeFiles, prefix: string): Promise<void> {
+export async function preloadInto(fs: FSLike, files: RuntimeFiles, prefix: string): Promise<void> {
   const prefixWithSlash = prefix.endsWith('/') ? prefix : prefix + '/'
   const prefixWithoutSlash = prefixWithSlash.slice(0, -1)
   fs.mkdirTree(prefixWithoutSlash)
-  const entries = await vfs.readdir(prefixWithSlash)
-  await Promise.all(entries.map((entry) => preloadEntry(fs, vfs, entry)))
+  const entries = await files.readdir(prefixWithSlash)
+  await Promise.all(entries.map((entry) => preloadEntry(fs, files, entry)))
 }

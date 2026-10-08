@@ -167,7 +167,7 @@ export class GuestProcessTable {
     }
     if (request.op === 'resolve' || request.op === 'spawn') {
       if (request.op === 'spawn') this.context.processes?.checkSpawn()
-      const vfs = RuntimeFiles.of(this.context)
+      const files = RuntimeFiles.of(this.context)
       const head = request.argv?.[0]
       if (typeof head !== 'string' || !head)
         throw Object.assign(new Error('empty executable'), { code: 'ENOENT' })
@@ -181,7 +181,7 @@ export class GuestProcessTable {
       let denied = false
       for (const path of paths) {
         try {
-          const stat = await vfs.stat(path)
+          const stat = await files.stat(path)
           if (!stat.isDir && (stat.mode & 0o111) !== 0) {
             found = path
             break
@@ -198,7 +198,7 @@ export class GuestProcessTable {
         throw Object.assign(new Error(`executable not found: ${head}`), {
           code: denied ? 'EACCES' : 'ENOENT',
         })
-      const directory = await vfs.stat(cwd)
+      const directory = await files.stat(cwd)
       if (!directory.isDir)
         throw Object.assign(new Error(`not a directory: ${cwd}`), { code: 'ENOTDIR' })
       request.argv = [found, ...(request.argv ?? []).slice(1)]

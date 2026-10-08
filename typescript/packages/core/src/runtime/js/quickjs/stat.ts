@@ -19,16 +19,16 @@ import { WASI, errnoFor } from './errors.ts'
 
 export async function stat(
   ctx: QuickJSAsyncContext,
-  vfs: RuntimeFiles | null,
+  files: RuntimeFiles | null,
   path: string,
 ): Promise<QuickJSHandle> {
   let st: VFSStat | null = null
   let errno = 0
-  if (vfs === null) {
+  if (files === null) {
     errno = WASI.ENOENT
   } else {
     try {
-      st = await vfs.viewStat(path)
+      st = await files.viewStat(path)
       if (st === null) errno = WASI.ENOENT
     } catch (err) {
       errno = errnoFor(err)

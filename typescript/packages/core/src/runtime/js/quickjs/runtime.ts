@@ -103,8 +103,8 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     const timedOut = this.installInterrupt(runtime, args.signal, args.timeoutSeconds)
     try {
       this.installGlobals(ctx, args, out, err, exit)
-      const vfs = context !== undefined ? RuntimeFiles.of(context) : null
-      const closeAll = installQuickJsFs(ctx, vfs)
+      const files = context !== undefined ? RuntimeFiles.of(context) : null
+      const closeAll = installQuickJsFs(ctx, files)
 
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
@@ -202,8 +202,8 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       // Same filesystem surface as run(): an attached workspace serves
       // std.open/os.readdir, so a JS policy script can read mounted
       // content (the python evaluator gets this via run()'s RuntimeFiles).
-      const vfs = context !== undefined ? RuntimeFiles.of(context) : null
-      const closeAll = installQuickJsFs(ctx, vfs)
+      const files = context !== undefined ? RuntimeFiles.of(context) : null
+      const closeAll = installQuickJsFs(ctx, files)
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
         boot.error.dispose()
