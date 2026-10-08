@@ -24,6 +24,7 @@ export interface ExecutionNodeInit {
   records?: OpRecord[]
   paths?: PathSpec[]
   refused?: boolean
+  unopened?: boolean
 }
 
 export class ExecutionNode {
@@ -42,6 +43,10 @@ export class ExecutionNode {
   // where an ordinary failure still creates and truncates them as
   // bash's open-before-exec would.
   refused: boolean
+  // A redirect target could not be opened, so the command never ran.
+  // Transient: the ERR action answers a group or loop that fails this
+  // way, which its own commands would have answered otherwise.
+  unopened: boolean
 
   constructor(init: ExecutionNodeInit = {}) {
     this.command = init.command ?? null
@@ -52,6 +57,7 @@ export class ExecutionNode {
     this.records = init.records ?? []
     this.paths = init.paths ?? []
     this.refused = init.refused ?? false
+    this.unopened = init.unopened ?? false
   }
 
   toJSON(): Record<string, unknown> {

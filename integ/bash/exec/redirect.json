@@ -35,7 +35,7 @@
       }
     },
     {
-      "id": "exec_refuses_process_replacement",
+      "id": "exec_runs_its_command_and_ends_the_line",
       "seq": 940101,
       "targets": [
         "ram",
@@ -64,8 +64,8 @@
       "command": "exec echo hi; echo after",
       "expect": {
         "exit": 0,
-        "stdout": "after\n",
-        "stderr": "mirage: exec: echo: process replacement is not supported (no OS process to replace)\n"
+        "stdout": "hi\n",
+        "stderr": ""
       }
     },
     {

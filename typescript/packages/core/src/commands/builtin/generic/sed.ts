@@ -17,7 +17,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { eisdir, fsStrerror, isFsError } from '../../../errors/fs.ts'
+import { eisdir, fsStrerror, isFsError, isStaleWrite } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { dispatchStat } from '../utils/paths.ts'
 import { resolvePath } from '../../../utils/path.ts'
@@ -102,6 +102,10 @@ function lineLength(raw: string | undefined): number {
 
 function openFailure(name: string, err: unknown): string {
   return `sed: couldn't open file ${name}: ${fsStrerror(err) ?? posixPhrase('EACCES')}\n`
+}
+
+function editFailure(name: string, err: unknown): string {
+  return `sed: couldn't edit ${name}: ${fsStrerror(err) ?? String(err)}\n`
 }
 
 // Truncate the `w` files as GNU opens them when it compiles the script,
@@ -373,7 +377,14 @@ async function runInPlace(
     const out = machine.process([{ name: p.rawPath, text: byteView(data, utf8) }], false)
     if (machine.panicCode !== null) break
     const newData = fromByteView(out, utf8)
-    await write(p, newData)
+    try {
+      await write(p, newData)
+    } catch (e) {
+      if (!isStaleWrite(e)) throw e
+      err += editFailure(p.rawPath, e)
+      code = 4
+      break
+    }
     writes[p.mountPath] = newData
     edited.push(p.mountPath)
     editedVirtual.add(p.virtual)

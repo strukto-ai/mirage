@@ -13,11 +13,28 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import { evictAfter, invalidateAfterMove, invalidateAncestors } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import {
+  dropCached,
+  evictAfter,
+  invalidateAfterMove,
+  invalidateAncestors,
+  knownVersions,
+  moveCondition,
+  stale,
+} from '../../cache/context.ts'
+import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import { enoent } from '../../errors/fs.ts'
+import type { PathSpec } from '../../types.ts'
 import * as kp from '../../utils/key_prefix.ts'
-import type { ExistsFn, ObjectStoreDriver, PairFn } from './driver.ts'
+import {
+  type ExistsFn,
+  keepWalk,
+  type ObjectStoreDriver,
+  type PairFn,
+  requireHook,
+} from './driver.ts'
+import type { Measured } from '../../cache/types.ts'
+import { ConditionLostError } from './errors.ts'
 
 /**
  * Build file-or-prefix relocation over one driver.
@@ -55,7 +72,21 @@ export function makeRename<A extends Accessor, C>(
     // moveFile leaves this 'rename': the walk never ran, so nothing under
     // the prefix can have moved.
     let op = 'rename'
+    // A move is a copy then a delete, so both carry a condition.
+    const [cond, source] = await moveCondition(src, dst)
     const move = async (conn: C): Promise<boolean> => {
+      if (cond !== null) {
+        const moveFileIf = requireHook(driver.moveFileIf)
+        if (await moveFileIf(conn, srcKey, kp.apply(kpfx, dst.mountPath), cond, source)) return true
+        op = 'rename_prefix'
+        return requireHook(driver.movePrefixIf)(
+          conn,
+          kp.applyDir(kpfx, src.mountPath),
+          kp.applyDir(kpfx, dst.mountPath),
+          knownVersions(src, kpfx),
+          knownVersions(dst, kpfx),
+        )
+      }
       if (await moveFile(conn, srcKey, kp.apply(kpfx, dst.mountPath))) return true
       // A directory owns no object of its own, so a clean false here is
       // the ordinary way into the prefix walk, not an answer about it.
@@ -85,14 +116,35 @@ export function makeRename<A extends Accessor, C>(
       await invalidateAncestors(dst)
       await invalidateAncestors(src)
     }
+    // The path a refusal names and the version its write sent.
+    const named = (key: string, err: ConditionLostError): [PathSpec, Measured | null] => {
+      if (key === kp.apply(kpfx, dst.mountPath)) return [dst, cond?.ifMatch ?? null]
+      if (key === srcKey) return [src, err.versions.get(key) ?? source]
+      return [kp.keyPath(src, kpfx, key), err.versions.get(key) ?? null]
+    }
+    const upto = lostCount()
     const { conn, close } = await driver.connect(accessor)
-    const moved = await evictAfter(async () => {
-      try {
-        return await move(conn)
-      } finally {
-        await close()
-      }
-    }, settle)
+    let moved: boolean
+    try {
+      moved = await evictAfter(async () => {
+        try {
+          return await move(conn)
+        } finally {
+          await close()
+        }
+      }, settle)
+    } catch (err) {
+      if (!(err instanceof ConditionLostError)) throw err
+      const [lost, sent] = named(await keepWalk(src, kpfx, err), err)
+      // The untouched end of a refused move keeps its version.
+      if (err.landed) await dropCached(dst)
+      else if (lost === dst) {
+        if (source !== null && source !== '') await dropCached(src, source)
+      } else if (cond?.ifMatch !== undefined) await dropCached(dst, cond.ifMatch)
+      throw await stale(lost, { landed: err.landed, gone: err.gone, version: sent })
+    }
     if (!moved) throw enoent(src)
+    liftLost(src, upto, op !== 'rename')
+    liftLost(dst, upto, op !== 'rename')
   }
 }

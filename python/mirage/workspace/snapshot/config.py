@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 from mirage.cache.index.config import IndexConfig, IndexType, RedisIndexConfig
 from mirage.commands.cli.types import CLISpec
+from mirage.types import WritePolicy
 from mirage.vfs.secrets import REDACTED_SECRET, has_redacted_secret
 
 
@@ -33,6 +34,7 @@ class MountArgs:
     default_session_id: str
     default_agent_id: str | None
     clis: dict[str, tuple[str | CLISpec, dict[str, Any] | None]] | None = None
+    write_default: WritePolicy = WritePolicy.UNCONDITIONAL
 
 
 def index_config_dump(

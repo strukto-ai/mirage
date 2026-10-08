@@ -82,7 +82,7 @@ async def handle_return(
         )
     elif args:
         status = status_of(args[0])
-    if call_stack is None or call_stack.depth <= 1:
+    if call_stack is None or not call_stack.returnable:
         # bash prints the diagnostic, sets $? to 2, and carries on with
         # the rest of the line.
         err += builtin_error(
@@ -135,11 +135,13 @@ async def handle_exit(
     cleanup = await run_exit_trap(execute_fn, session, code, stdin, call_stack)
     if cleanup is None:
         raise ExitSignal(code, stderr=err)
-    raise ExitSignal(
+    leaving = ExitSignal(
         cleanup.exit_code,
         stderr=err + await cleanup.materialize_stderr(),
         stdout=await cleanup.materialize_stdout(),
     )
+    leaving.cleanup = leaving.stdout or b""
+    raise leaving
 
 
 def leave_loops(

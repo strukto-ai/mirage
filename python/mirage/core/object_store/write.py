@@ -12,8 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.context import invalidate_after_write, invalidate_ancestors
+from mirage.cache.context import (
+    invalidate_after_write,
+    invalidate_ancestors,
+    own_write_version,
+    write_condition,
+)
 from mirage.cache.index import NULL_INDEX
+from mirage.cache.types import OwnRead, WriteCondition
 from mirage.core.object_store.driver import (
     A,
     C,
@@ -24,10 +30,12 @@ from mirage.core.object_store.driver import (
     StatFn,
     TruncateFn,
     WriteFn,
+    refused,
 )
+from mirage.core.object_store.errors import ConditionLostError
 from mirage.core.object_store.stat import make_stat
 from mirage.errors.fs import eexist, enoent, enotdir, enotsup
-from mirage.observe.context import record, start_op
+from mirage.observe.context import record, revision_for, start_op
 from mirage.types import FileStat, PathSpec
 from mirage.utils import key_prefix as kp
 from mirage.utils.path import ancestors, norm, parent
@@ -40,6 +48,7 @@ async def _put(
     key: str,
     data: bytes,
     path_spec: PathSpec,
+    cond: WriteCondition | None = None,
 ) -> ObjectMeta | None:
     """Put one object, translating a missing container to ENOENT.
 
@@ -60,13 +69,24 @@ async def _put(
         key (str): the prefix-applied object key.
         data (bytes): the object body.
         path_spec (PathSpec): the operand, for the error's virtual path.
+        cond (WriteCondition | None): the condition a ``write:
+            conditional`` mount sends; None writes unconditionally.
 
     Returns:
         ObjectMeta | None: what the store's write response said about the
         object, None when it reports nothing.
+
+    Raises:
+        StaleWriteError: the store refused the condition; the object is
+            the newer one and the cached copy has been dropped.
     """
     try:
-        return await driver.put(conn, key, data)
+        if cond is None:
+            return await driver.put(conn, key, data)
+        assert driver.put_if is not None
+        return await driver.put_if(conn, key, data, cond)
+    except ConditionLostError as exc:
+        raise await refused(path_spec, exc, cond) from exc
     except Exception as exc:
         if driver.is_not_found(exc):
             raise enoent(path_spec) from exc
@@ -83,9 +103,10 @@ def make_write(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
     async def write(accessor: A, path_spec: PathSpec, data: bytes) -> None:
         path = path_spec.mount_path
         key = kp.apply(driver.key_prefix_of(accessor), path)
+        cond = await write_condition(path_spec, "put")
         timer = start_op()
         async with driver.connect(accessor) as conn:
-            meta = await _put(driver, conn, key, data, path_spec)
+            meta = await _put(driver, conn, key, data, path_spec, cond)
         record(
             "write",
             path_spec.virtual,
@@ -112,9 +133,10 @@ def make_create(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
     async def create(accessor: A, path_spec: PathSpec) -> None:
         path = path_spec.mount_path
         key = kp.apply(driver.key_prefix_of(accessor), path)
+        cond = await write_condition(path_spec, "put")
         timer = start_op()
         async with driver.connect(accessor) as conn:
-            meta = await _put(driver, conn, key, b"", path_spec)
+            meta = await _put(driver, conn, key, b"", path_spec, cond)
         record(
             "create",
             path_spec.virtual,
@@ -146,11 +168,30 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
         key = kp.apply(driver.key_prefix_of(accessor), path)
         timer = start_op()
         async with driver.connect(accessor) as conn:
-            data = await driver.get(conn, key)
-            if data is None:
-                data = b""
-            result = data[:length].ljust(length, b"\0")
-            meta = await _put(driver, conn, key, result, path_spec)
+            if length == 0:
+                # Emptying reads nothing, so it carries the agent's version.
+                result = b""
+                cond = await write_condition(path_spec, "put")
+            else:
+                own: str | OwnRead | None = None
+                if driver.get_versioned is not None:
+                    try:
+                        got = await driver.get_versioned(
+                            conn, key, revision_for(path_spec.virtual)
+                        )
+                    except FileNotFoundError as exc:
+                        raise enoent(path_spec) from exc
+                    data, own = (
+                        got if got is not None else (None, OwnRead.ABSENT)
+                    )
+                else:
+                    data = await driver.get(conn, key)
+                if data is None:
+                    data = b""
+                result = data[:length].ljust(length, b"\0")
+                with own_write_version(path_spec, own):
+                    cond = await write_condition(path_spec, "put")
+            meta = await _put(driver, conn, key, result, path_spec, cond)
         record(
             "truncate",
             path_spec.virtual,

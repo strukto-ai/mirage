@@ -19,7 +19,15 @@ import { ExitSignal } from '../../shell/errors.ts'
 import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
-import { clearExitTrap, endShell, finishShell, inheritExitTrap, runExitTrap } from './traps.ts'
+import {
+  clearTraps,
+  endShell,
+  finishShell,
+  inheritTraps,
+  liftFunctionTraps,
+  restoreFunctionTraps,
+  runExitTrap,
+} from './traps.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -50,7 +58,7 @@ describe('runExitTrap', () => {
     const { run, calls } = recorder(new IOResult())
     expect(await runExitTrap(run, makeSession(), 3)).toBeNull()
     const inherited = makeSession('echo x')
-    inheritExitTrap(inherited)
+    inheritTraps(inherited)
     expect(await runExitTrap(run, inherited, 3)).toBeNull()
     expect(await runExitTrap(run, makeSession(''), 3)).toBeNull()
     expect(calls).toEqual([])
@@ -109,13 +117,38 @@ describe('runExitTrap', () => {
 describe('child and new shells', () => {
   it('list the parent action in a child and drop it in a new shell', () => {
     const child = makeSession('echo parent')
-    inheritExitTrap(child)
+    child.errTrap = 'echo e'
+    child.returnTrap = 'echo r'
+    inheritTraps(child)
     expect(child.exitTrap).toBe('echo parent')
     expect(child.exitTrapInherited).toBe(true)
+    expect([child.errTrap, child.returnTrap]).toEqual(['echo e', 'echo r'])
+    expect([child.errTrapHidden, child.returnTrapHidden]).toEqual([true, true])
+    expect(liftFunctionTraps(child)).toEqual([null, null])
     const fresh = makeSession('echo parent')
-    clearExitTrap(fresh)
+    clearTraps(fresh)
     expect(fresh.exitTrap).toBeNull()
     expect(fresh.exitTrapInherited).toBe(false)
+  })
+})
+
+describe('liftFunctionTraps', () => {
+  type Pair = [string | null, string | null]
+  it.each<[boolean, Pair, Pair, Pair]>([
+    [false, [null, null], [null, null], ['echo e', 'echo r']],
+    [false, [null, null], ['echo f', ''], ['echo f', '']],
+    [true, ['echo e', 'echo r'], [null, null], ['echo e', 'echo r']],
+  ])('lifts ERR and RETURN unless traced (%j)', (traced, inside, body, after) => {
+    const session = makeSession()
+    session.errTrap = 'echo e'
+    session.returnTrap = 'echo r'
+    session.shellOptions.errtrace = traced
+    session.shellOptions.functrace = traced
+    const lifted = liftFunctionTraps(session)
+    expect([session.errTrap, session.returnTrap]).toEqual(inside)
+    if (!traced) [session.errTrap, session.returnTrap] = body
+    restoreFunctionTraps(session, lifted)
+    expect([session.errTrap, session.returnTrap]).toEqual(after)
   })
 })
 

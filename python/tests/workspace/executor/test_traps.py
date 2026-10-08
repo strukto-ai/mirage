@@ -18,10 +18,12 @@ from mirage.io import IOResult
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.workspace.executor.traps import (
-    clear_exit_trap,
+    clear_traps,
     end_shell,
     finish_shell,
-    inherit_exit_trap,
+    inherit_traps,
+    lift_function_traps,
+    restore_function_traps,
     run_exit_trap,
 )
 from mirage.workspace.session.session import SessionState
@@ -53,7 +55,7 @@ async def test_nothing_runs_without_an_own_action():
     run = Recorder(IOResult())
     assert await run_exit_trap(run, make_session(), 3) is None
     inherited = make_session("echo x")
-    inherit_exit_trap(inherited)
+    inherit_traps(inherited)
     assert await run_exit_trap(run, inherited, 3) is None
     assert await run_exit_trap(run, make_session(""), 3) is None
     assert run.calls == []
@@ -121,13 +123,39 @@ async def test_an_action_running_does_not_start_again():
 
 def test_child_shells_list_but_new_shells_drop_the_action():
     child = make_session("echo parent")
-    inherit_exit_trap(child)
+    child.err_trap, child.return_trap = "echo e", "echo r"
+    inherit_traps(child)
     assert child.exit_trap == "echo parent"
     assert child.exit_trap_inherited is True
+    assert (child.err_trap, child.return_trap) == ("echo e", "echo r")
+    assert child.err_trap_hidden and child.return_trap_hidden
+    assert lift_function_traps(child) == (None, None)
     fresh = make_session("echo parent")
-    clear_exit_trap(fresh)
+    clear_traps(fresh)
     assert fresh.exit_trap is None
     assert fresh.exit_trap_inherited is False
+
+
+@pytest.mark.parametrize(
+    "traced, inside, body, after",
+    [
+        (False, (None, None), (None, None), ("echo e", "echo r")),
+        (False, (None, None), ("echo f", ""), ("echo f", "")),
+        (True, ("echo e", "echo r"), (None, None), ("echo e", "echo r")),
+    ],
+)
+def test_a_function_lifts_err_and_return_unless_traced(
+    traced, inside, body, after
+):
+    session = make_session()
+    session.err_trap, session.return_trap = "echo e", "echo r"
+    session.shell_options.update(errtrace=traced, functrace=traced)
+    lifted = lift_function_traps(session)
+    assert (session.err_trap, session.return_trap) == inside
+    if not traced:
+        session.err_trap, session.return_trap = body
+    restore_function_traps(session, lifted)
+    assert (session.err_trap, session.return_trap) == after
 
 
 @pytest.mark.asyncio

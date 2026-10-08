@@ -419,6 +419,101 @@
     "trimSpaces": "String.trim takes no character set; Python strips _SPACES with str.strip.",
     "wallOf": "The wall clock a zone shows for an instant, read off Zone.parts; Python's datetime.astimezone gives it directly."
    }
+  },
+  "workspace/mount/write_policy": {
+   "typescript_only": {},
+   "python_only": {
+    "_endpoint": "Python reads the endpoint through the EndpointVFS protocol (S3VFS.resolved_endpoint); TypeScript asks `vfs instanceof S3VFSBase` and reads its resolvedEndpoint getter."
+   }
+  },
+  "workspace/workspace/mounts": {
+   "typescript_only": {
+    "WriteDefaults": "Python's normalize_mounts takes the write default, mode and caching as keyword arguments; TypeScript's positional signature takes them as one options object."
+   }
+  },
+  "cache/context": {
+   "python_only": {
+    "_write": "Python binds per-call context by setting and restoring a ContextVar (push_cache_manager and _active already do); TypeScript runs a callback in a scoped async-context store (runWithCacheManager and storage). The write context and the op's own version follow that same split.",
+    "own_write_version": "Python binds per-call context by setting and restoring a ContextVar (push_cache_manager and _active already do); TypeScript runs a callback in a scoped async-context store (runWithCacheManager and storage). The write context and the op's own version follow that same split.",
+    "push_write_context": "Python binds per-call context by setting and restoring a ContextVar (push_cache_manager and _active already do); TypeScript runs a callback in a scoped async-context store (runWithCacheManager and storage). The write context and the op's own version follow that same split.",
+    "_own_version_for": "Python keeps the op's own version in one ContextVar paired with its path and reads it here; TypeScript filters its live async-context frames by path inside ownVersion, which Python's _own_version pairs with."
+   },
+   "typescript_only": {
+    "activeWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "ownVersionStorage": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "runWithOwnVersion": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "runWithWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "writeStorage": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "agree": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree.",
+    "overlapping": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree."
+   }
+  },
+  "observe/context": {
+   "python_only": {
+    "active_lost": "The running line's lost paths ride Python's Recorder, which is still bound when apply_io runs, so the dispatcher reads them from the context. TypeScript applies a line's results after its recording scope ends, so it keys them by the line's records instead (lostPaths/lostByLine)."
+   },
+   "typescript_only": {
+    "lostByLine": "TypeScript keys a line's lost paths by its records array, because applyIo runs after runWithRecording returns; Python keeps them on the Recorder (active_lost).",
+    "recordIndex": "TypeScript keys a line's version index by its records array, as it does the line's lost paths (lostPaths); Python keeps the index on the Recorder (Recorder.index), which push_mount_context carries.",
+    "indexByLine": "The WeakMap behind recordIndex, keyed by a line's records array; Python keeps the index on the Recorder (Recorder.index)."
+   }
+  },
+  "core/s3/driver": {
+   "typescript_only": {
+    "isMissingBucket": "TypeScript's isNotFoundError counts any 404, so lostCondition excludes a missing bucket by name; Python's _key_gone reads the same rule off the botocore response."
+   }
+  },
+  "workspace/snapshot/state": {
+   "typescript_only": {
+    "savedName": "Python spells a saved policy with str() inline; TypeScript narrows the unknown JSON value before String(), which the lint requires, in one helper."
+   }
+  },
+  "errors/fs": {
+   "typescript_only": {
+    "isStaleWrite": "TypeScript errors are FsError objects tagged by code, so a stale write is read through a type guard, as isEfbig reads EFBIG; Python catches StaleWriteError by class.",
+    "isLandedMove": "TypeScript errors are FsError objects tagged by field, so a landed move is read through a type guard, as isDotWalkError reads dotWalk; Python reads StaleWriteError.landed off the class.",
+    "unnamedFsError": "TypeScript tags a code onto an Error that names no path (S3's DeleteObjects refusal names a key, not a path); Python raises the built-in PermissionError without a filename."
+   }
+  },
+  "workspace/mount/storage": {
+   "python_only": {
+    "check_unlink": "Python binds the check to a registry with functools.partial (make_check_unlink), as it does storage_key; TypeScript's makeCheckUnlink returns a closure, so the unbound function has no twin."
+   }
+  },
+  "types": {
+   "python_only": {
+    "CheckFn": "Python names the PrimitiveMove.check_unlink callable type beside MoveFn, as a forward reference to PathSpec; TypeScript types the field inline."
+   }
+  },
+  "cache/file/redis": {
+   "typescript_only": {
+    "luaBody": "node-redis EVALs add.lua's text on every fill, so TypeScript drops the Lua files' comment lines first; redis-py registers each script once and sends only its SHA.",
+    "VERSION_SHA": "node-redis has no registered-script object for a pipeline, so TypeScript hashes version.lua itself, sends EVALSHA, and loads the script again when the server answers NOSCRIPT; redis-py's register_script does both.",
+    "noScript": "node-redis has no registered-script object for a pipeline, so TypeScript hashes version.lua itself, sends EVALSHA, and loads the script again when the server answers NOSCRIPT; redis-py's register_script does both."
+   },
+   "python_only": {
+    "_text": "redis-py returns a stored version as bytes or str depending on decode_responses; node-redis returns a string, so TypeScript has nothing to decode."
+   }
+  },
+  "core/object_store/driver": {
+   "typescript_only": {
+    "requireHook": "Python narrows a conditional op's *_if hook with assert; TypeScript's lint bans the non-null assertion, so the narrowing is this helper."
+   }
+  },
+  "core/object_store/errors": {
+   "typescript_only": {
+    "LostOptions": "Python takes a refusal's landed, gone, versions and error as keyword arguments; TypeScript names them in one options object, so swapped booleans cannot type-check."
+   }
+  },
+  "vfs/types": {
+   "python_only": {
+    "EndpointVFS": "Python asks an S3 mount for its endpoint through this runtime-checkable protocol, since importing the S3 VFS would load its optional extra; TypeScript asks `vfs instanceof S3VFSBase`, which core always carries."
+   }
+  },
+  "core/s3/client": {
+   "python_only": {
+    "is_key_gone": "Python reads a conditioned request's 404 off the botocore response (status and code) beside is_not_found; TypeScript composes isNotFoundError with isMissingBucket inline in the driver's lostCondition."
+   }
   }
  }
 }

@@ -18,6 +18,7 @@ from mirage.workspace.executor.builtins.timeout.constants import SIGNAL_NAMES
 from mirage.workspace.executor.builtins.trap.constants import (
     EXIT_EVENT,
     PSEUDO_SIGNALS,
+    RUN_EVENTS,
     SIGNAL_MAX,
     USAGE,
 )
@@ -27,8 +28,8 @@ from mirage.workspace.session import SessionState
 
 
 def event_of(spec: str) -> TrapEvent | None:
-    """What a signal spec names: EXIT, another signal bash knows (which
-    mirage cannot deliver), or nothing bash would accept.
+    """What a signal spec names: EXIT, ERR or RETURN, another signal bash
+    knows (which mirage cannot deliver), or nothing bash would accept.
 
     Args:
         spec (str): the word, a name with or without ``SIG`` in any case,
@@ -40,8 +41,8 @@ def event_of(spec: str) -> TrapEvent | None:
             return TrapEvent.EXIT
         return TrapEvent.OTHER if number <= SIGNAL_MAX else None
     name = spec.upper()
-    if name == EXIT_EVENT:
-        return TrapEvent.EXIT
+    if name in {event.value for event in RUN_EVENTS}:
+        return TrapEvent(name)
     if name in PSEUDO_SIGNALS:
         return TrapEvent.OTHER
     base = name[3:] if name.startswith("SIG") else name
@@ -52,24 +53,63 @@ def event_of(spec: str) -> TrapEvent | None:
     return None
 
 
-def listing(action: str) -> str:
+def listing(action: str, event: TrapEvent) -> str:
     """One ``trap -p`` row, the action single-quoted the way bash does.
 
     Args:
         action (str): the registered action.
+        event (TrapEvent): the event it answers.
     """
     quoted = action.replace("'", "'\\''")
-    return f"trap -- '{quoted}' {EXIT_EVENT}\n"
+    return f"trap -- '{quoted}' {event.value}\n"
+
+
+def _trap_action(session: SessionState, event: TrapEvent) -> str | None:
+    """The action registered for one of the events mirage runs.
+
+    Args:
+        session (SessionState): the shell whose action this is.
+        event (TrapEvent): EXIT, ERR or RETURN.
+    """
+    if event is TrapEvent.EXIT:
+        return session.exit_trap
+    if event is TrapEvent.ERR:
+        return session.err_trap
+    return session.return_trap
+
+
+def _set_trap(session: SessionState, event: TrapEvent, action: str) -> None:
+    """Set (or with ``-`` reset) one event's action in this scope.
+
+    Args:
+        session (SessionState): the shell whose action this is.
+        event (TrapEvent): EXIT, ERR or RETURN.
+        action (str): the action, ``-`` to reset it.
+    """
+    value = None if action == "-" else action
+    if event is TrapEvent.EXIT:
+        session.exit_trap = value
+        session.exit_trap_inherited = False
+    elif event is TrapEvent.ERR:
+        session.err_trap = value
+        session.err_trap_hidden = False
+    else:
+        session.return_trap = value
+        session.return_trap_hidden = False
 
 
 async def handle_trap(args: list[str], session: SessionState) -> Result:
-    """Register, reset or list the shell's ``EXIT`` action.
+    """Register, reset or list the shell's ``EXIT``, ``ERR`` and
+    ``RETURN`` actions.
 
-    The action runs where the shell ends: at ``exit`` (in the frame that
+    EXIT runs where the shell ends: at ``exit`` (in the frame that
     called it), at the end of a child shell, or when an error ends the
     shell. A line of a persistent session is not the end of its shell,
-    so it runs nothing there. Mirage delivers no signals, so any other
-    event bash knows is refused rather than accepted and never run.
+    so it runs nothing there. ERR runs after a command fails where
+    ``set -e`` would act, RETURN after a function or a sourced file
+    returns (``executor/traps.py``). Mirage delivers no signals, so any
+    other event bash knows is refused rather than accepted and never
+    run.
 
     Args:
         args (list[str]): the words after ``trap``.
@@ -98,7 +138,7 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
     errors: list[str] = []
     if printing or not words:
         out: list[str] = []
-        for spec in words or [EXIT_EVENT]:
+        for spec in words or [event.value for event in RUN_EVENTS]:
             event = event_of(spec)
             if event is None:
                 errors.append(
@@ -108,8 +148,10 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
                         )
                     )
                 )
-            elif event is TrapEvent.EXIT and session.exit_trap is not None:
-                out.append(listing(session.exit_trap))
+            elif event is not TrapEvent.OTHER:
+                action = _trap_action(session, event)
+                if action is not None:
+                    out.append(listing(action, event))
         return result(
             "trap",
             out=encode_text("".join(out)) or None,
@@ -132,9 +174,8 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
                     )
                 )
             )
-        elif event is TrapEvent.EXIT:
-            session.exit_trap = None if action == "-" else action
-            session.exit_trap_inherited = False
+        elif event is not TrapEvent.OTHER:
+            _set_trap(session, event, action)
         elif action != "-":
             errors.append(f"mirage: trap: {spec}: not supported\n")
     return result(

@@ -370,6 +370,19 @@ class SessionState:
     script_name: str | None = None
     exit_trap: str | None = None
     exit_trap_inherited: bool = False
+    # The `trap ... ERR` and `trap ... RETURN` actions, "" for an ignored
+    # one, and whether the running scope hides each: a child shell lists
+    # but runs neither unless `set -E` / `set -T`, and a scope that sets
+    # one sees it. Live shell state, like the EXIT action.
+    err_trap: str | None = None
+    return_trap: str | None = None
+    err_trap_hidden: bool = False
+    return_trap_hidden: bool = False
+    # Whether each action is running in this shell: bash runs neither
+    # again until it finishes, whatever the action registers meanwhile. A
+    # child shell starts with neither running.
+    err_trap_running: bool = False
+    return_trap_running: bool = False
     tty: Terminal = field(default_factory=Terminal, repr=False)
     job_output: JobOutput | None = field(default=None, repr=False)
     job_waits: JobWaits | None = field(default=None, repr=False)
@@ -377,6 +390,14 @@ class SessionState:
     # came from a short-circuited &&/|| branch or a `!`-negated command,
     # which bash exempts from errexit. Reset on every node execution.
     errexit_immune: bool = field(default=False, repr=False)
+    # Whether the running command is in a context where bash ignores
+    # `set -e`: an `if`/`while`/`until` test, the left of `&&`/`||`, or
+    # after `!`. Everything run there, a function or a subshell included,
+    # ignores it (`ignoring_errexit`); a child shell keeps the context.
+    errexit_ignored: bool = field(default=False, repr=False)
+    # Whether `set -e` is ending the shell: its statements unwind
+    # without running ERR or RETURN again, as bash's exit leaves at once.
+    errexit_exiting: bool = field(default=False, repr=False)
     # Variables shadowed by `local` / `declare` in the running function;
     # a None value means the caller had no variable of that name. One
     # stack, not one per container: a local shadows the whole record, so
@@ -899,10 +920,12 @@ class SessionState:
         marked. The rest starts as a fresh shell's does: the other
         variables and functions, the aliases, the ``set`` and ``shopt``
         options, ``$?``, ``$!``, ``$RANDOM``'s sequence, ``getopts``'s
-        place, the call stack and the startup variables, which bash never
-        reads from its environment: IFS is dropped and ``STARTUP_VALUES``
-        restart. A managed variable not yet fetched crosses as its
-        pointer, which the nested shell fetches through.
+        place, the call stack, any test its caller is in (``if bash -ec
+        'false; ...'`` still ends at ``false``) and the startup
+        variables, which bash never reads from its environment: IFS is
+        dropped and ``STARTUP_VALUES`` restart. A managed variable not
+        yet fetched crosses as its pointer, which the nested shell
+        fetches through.
 
         Args:
             None
@@ -945,6 +968,7 @@ class SessionState:
             function_names=(),
             _getopts_pos=0,
             _getopts_optind=None,
+            errexit_ignored=False,
         )
         child._draw_afresh()
         return child

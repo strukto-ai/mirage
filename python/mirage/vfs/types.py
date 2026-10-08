@@ -7,7 +7,7 @@ from collections.abc import (
 )
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, NamedTuple, Protocol
+from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 from mirage.cache.index import IndexCacheStore
 from mirage.types import FileStat, JsonValue, PathSpec
@@ -347,3 +347,10 @@ class SearchOps:
     search: SearchOp
     search_many: SearchManyOp | None = None
     meta: Mapping[str, JsonValue] = field(default_factory=dict)
+
+
+@runtime_checkable
+class EndpointVFS(Protocol):
+    """A backend that declares the endpoint its writes go to."""
+
+    def resolved_endpoint(self) -> str | None: ...

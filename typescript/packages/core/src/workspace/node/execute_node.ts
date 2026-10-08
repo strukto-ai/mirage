@@ -30,19 +30,13 @@ import type { ProcessSupervisor } from '../../process/supervisor.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
-import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import { makeAbortError, mergeSignals } from '../abort.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { literalText } from '../../shell/parse/names.ts'
 import { BASH_BUILTINS } from '../lookup/constants.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
-import {
-  assignmentStatus,
-  fd0Binding,
-  finishStatement,
-  recordStatus,
-} from '../executor/statement.ts'
+import { assignmentStatus, ignoringErrexit, recordStatus } from '../executor/statement.ts'
 import {
   getCaseItems,
   getCaseWord,
@@ -62,7 +56,7 @@ import {
   getWhileParts,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import { ERREXIT_EXEMPT_TYPES, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
+import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
@@ -74,8 +68,8 @@ import { expandAndClassify } from '../expand/parts.ts'
 import { landArith } from '../session/elements.ts'
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
 import {
-  carried,
   type CforEval,
+  executeBody,
   handleCase,
   handleCfor,
   handleFor,
@@ -83,7 +77,6 @@ import {
   handleSelect,
   handleUntil,
   handleWhile,
-  isUnwinding,
 } from '../executor/control.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { handleTest, handleUnset } from '../executor/builtins/index.ts'
@@ -107,7 +100,7 @@ import { definedAt } from './occurrence.ts'
 import type { SessionView } from '../../view/types.ts'
 import { randomReader, sessionArith, sessionView } from '../session/state.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
-import { drained, runStatement } from '../executor/jobs.ts'
+import { drained } from '../executor/jobs.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { endShell } from '../executor/traps.ts'
 import { concat } from '../../io/cachable_iterator.ts'
@@ -392,7 +385,7 @@ async function runPipeline(
       signal,
       processes,
     )
-    return handleConnection(wrapped, left, op, right, context, stdin, callStack)
+    return handleConnection(wrapped, left, op, right, context, stdin, callStack, executeFn)
   }
   const targets = stages.commands.filter((_, i) => stages.stderrFlags[i] === true)
   const pipeRecurse = recurseStage.bind(
@@ -406,17 +399,21 @@ async function runPipeline(
     signal,
     processes,
   )
-  const [stdout, io, execNode] = await handlePipe(
-    pipeRecurse,
-    stages.commands,
-    stages.stderrFlags,
-    context,
-    stdin,
-    callStack,
-    signal,
-    processes,
-    executeFn,
-  )
+  const piped = (): Promise<Result> =>
+    handlePipe(
+      pipeRecurse,
+      stages.commands,
+      stages.stderrFlags,
+      context,
+      stdin,
+      callStack,
+      signal,
+      processes,
+      executeFn,
+    )
+  const [stdout, io, execNode] = stages.negated
+    ? await ignoringErrexit(context.session, piped)
+    : await piped()
   if (!stages.negated) return [stdout, io, execNode]
   const flipped = new IOResult({
     exitCode: io.exitCode !== 0 ? 0 : 1,
@@ -517,7 +514,7 @@ async function runRedirected(
       signal,
       processes,
     )
-    return handleConnection(wrapped, left, op, right, context, stdin, callStack)
+    return handleConnection(wrapped, left, op, right, context, stdin, callStack, executeFn)
   }
   if (command !== null && command.type === NT.PIPELINE) {
     return runPipeline(
@@ -538,19 +535,21 @@ async function runRedirected(
     // redirect is the command's: bash negates what `cmd < f` returns, a
     // redirect that failed to open included.
     const inner = getNegatedCommand(command)
-    const [stdout, io, execNode] = await runRedirected(
-      recurse,
-      dispatch,
-      executeFn,
-      registry,
-      inner,
-      redirects,
-      signal,
-      processes,
-      sink,
-      context,
-      stdin,
-      callStack,
+    const [stdout, io, execNode] = await ignoringErrexit(context.session, () =>
+      runRedirected(
+        recurse,
+        dispatch,
+        executeFn,
+        registry,
+        inner,
+        redirects,
+        signal,
+        processes,
+        sink,
+        context,
+        stdin,
+        callStack,
+      ),
     )
     return negated(stdout, io, execNode, context, inner)
   }
@@ -639,12 +638,20 @@ async function runContinuation(
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
+  executeFn: ExecuteFn | null = null,
 ): Promise<Result> {
   const last = steps[steps.length - 1]
   if (last === undefined) return runLeft(context, stdin, callStack)
   const [op, right] = last
-  const wrapped = recurseContinuation.bind(null, recurse, runLeft, left, steps.slice(0, -1))
-  return handleConnection(wrapped, left, op, right, context, stdin, callStack)
+  const wrapped = recurseContinuation.bind(
+    null,
+    recurse,
+    runLeft,
+    left,
+    steps.slice(0, -1),
+    executeFn,
+  )
+  return handleConnection(wrapped, left, op, right, context, stdin, callStack, executeFn)
 }
 
 async function recurseContinuation(
@@ -652,13 +659,14 @@ async function recurseContinuation(
   runLeft: RunLeft,
   left: TSNodeLike,
   steps: readonly (readonly [string, TSNodeLike])[],
+  executeFn: ExecuteFn | null,
   node: TSNodeLike,
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Result> {
   if (node === left)
-    return runContinuation(recurse, runLeft, left, steps, context, stdin, callStack)
+    return runContinuation(recurse, runLeft, left, steps, context, stdin, callStack, executeFn)
   return recurse(node, context, stdin, callStack)
 }
 
@@ -1106,7 +1114,7 @@ async function executeNodeBody(
 
   if (kind === NodeKind.LIST) {
     const [left, op, right] = getListParts(node)
-    return handleConnection(stream, left, op, right, context, stdin, callStack)
+    return handleConnection(stream, left, op, right, context, stdin, callStack, executeFn)
   }
 
   if (kind === NodeKind.REDIRECT) {
@@ -1131,7 +1139,16 @@ async function executeNodeBody(
     const result =
       continuation.length === 0
         ? await runLeft(context, stdin, callStack)
-        : await runContinuation(recurse, runLeft, node, continuation, context, stdin, callStack)
+        : await runContinuation(
+            recurse,
+            runLeft,
+            node,
+            continuation,
+            context,
+            stdin,
+            callStack,
+            executeFn,
+          )
     return sink === undefined ? result : drained(sink, ...result)
   }
 
@@ -1286,51 +1303,19 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.COMPOUND) {
-    const allStdout: ByteSource[] = []
-    let mergedIo = new IOResult()
-    let lastExec = new ExecutionNode({ command: '{}', exitCode: 0 })
-    const bound = fd0Binding(session)
-    for (const child of node.namedChildren) {
-      if (child.type === NT.COMMENT) continue
-      let result: Result
-      try {
-        result = await runStatement(
-          stream,
-          child,
-          context,
-          stdin,
-          bound,
-          callStack,
-          jobTable,
-          agentId,
-          deps.handed ?? null,
-          registry.decisions,
-        )
-      } catch (sig) {
-        if (!isUnwinding(sig)) throw sig
-        throw await carried(sig, allStdout.length > 0 ? asyncChain(allStdout) : null, mergedIo)
-      }
-      const [rawStdout, io, execNode] = result
-      lastExec = execNode
-      const stdout = await finishStatement(rawStdout, io, session, child)
-      if (stdout !== null) allStdout.push(stdout)
-      mergedIo = await mergedIo.merge(io)
-      if (
-        io.exitCode !== 0 &&
-        session.shellOptions.errexit === true &&
-        !ERREXIT_EXEMPT_TYPES.has(child.type) &&
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- recurse() mutates it
-        !session.errexitImmune
-      ) {
-        mergedIo.exitCode = io.exitCode
-        break
-      }
-    }
-    if (allStdout.length === 1 && allStdout[0] !== undefined) {
-      return [allStdout[0], mergedIo, lastExec]
-    }
-    const combined = allStdout.length > 0 ? asyncChain(allStdout) : null
-    return [combined, mergedIo, lastExec]
+    return executeBody(
+      stream,
+      node.namedChildren,
+      context,
+      stdin,
+      callStack,
+      jobTable,
+      agentId,
+      deps.handed ?? null,
+      registry.decisions,
+      executeFn,
+      sink ?? null,
+    )
   }
 
   if (kind === NodeKind.IF) {
@@ -1346,6 +1331,8 @@ async function executeNodeBody(
       agentId,
       deps.handed ?? null,
       registry.decisions,
+      executeFn,
+      sink ?? null,
     )
   }
 
@@ -1373,6 +1360,8 @@ async function executeNodeBody(
         agentId,
         deps.handed ?? null,
         registry.decisions,
+        executeFn,
+        sink ?? null,
       ),
     )
   }
@@ -1424,6 +1413,7 @@ async function executeNodeBody(
           registry.decisions,
           mergeSignals(deps.signal, context.frame.abortSignal),
           sink,
+          executeFn,
         ),
       )
     }
@@ -1441,6 +1431,8 @@ async function executeNodeBody(
         agentId,
         deps.handed ?? null,
         registry.decisions,
+        executeFn,
+        sink ?? null,
       ),
     )
   }
@@ -1460,6 +1452,8 @@ async function executeNodeBody(
           agentId,
           deps.handed ?? null,
           registry.decisions,
+          executeFn,
+          sink ?? null,
         ),
       )
     }
@@ -1475,6 +1469,8 @@ async function executeNodeBody(
         agentId,
         deps.handed ?? null,
         registry.decisions,
+        executeFn,
+        sink ?? null,
       ),
     )
   }
@@ -1515,6 +1511,8 @@ async function executeNodeBody(
       agentId,
       deps.handed ?? null,
       registry.decisions,
+      executeFn,
+      sink ?? null,
     )
   }
 
@@ -1601,7 +1599,9 @@ async function executeNodeBody(
 
   if (kind === NodeKind.NEGATED) {
     const inner = getNegatedCommand(node)
-    const [stdout, io, execNode] = await stream(inner, context, stdin, callStack)
+    const [stdout, io, execNode] = await ignoringErrexit(context.session, () =>
+      stream(inner, context, stdin, callStack),
+    )
     return negated(stdout, io, execNode, context, inner)
   }
 

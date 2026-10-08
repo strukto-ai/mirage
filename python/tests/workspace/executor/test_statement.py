@@ -15,10 +15,13 @@
 import pytest
 
 from mirage.io import IOResult
+from mirage.shell.parse import parse
 from mirage.workspace.abort import StatusWriter
 from mirage.workspace.executor.statement import (
     assignment_status,
+    errexit_acts,
     finish_statement,
+    ignoring_errexit,
     restore_status,
     snapshot_status,
 )
@@ -110,3 +113,29 @@ def test_restore_status_declines_over_a_status_another_line_stamped():
 
     restore_status(session, before, theirs)
     assert session.last_exit_code == 1
+
+
+@pytest.mark.parametrize(
+    ("line", "status", "errexit", "acts"),
+    [
+        ("false", 1, True, True),
+        ("false", 0, True, False),
+        ("false", 1, False, False),
+        ("! true", 1, True, False),
+    ],
+)
+def test_errexit_acts_where_set_e_ends_the_shell(line, status, errexit, acts):
+    session = SessionState(session_id="s", shell_options={"errexit": errexit})
+    node = parse(line).children[0]
+    assert errexit_acts(node, status, session) is acts
+
+
+def test_ignoring_errexit_scopes_the_context():
+    session = SessionState(session_id="s", shell_options={"errexit": True})
+    node = parse("false").children[0]
+    with ignoring_errexit(session):
+        assert not errexit_acts(node, 1, session)
+        with ignoring_errexit(session):
+            pass
+        assert session.errexit_ignored
+    assert errexit_acts(node, 1, session)

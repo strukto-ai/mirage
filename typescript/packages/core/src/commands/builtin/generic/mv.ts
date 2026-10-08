@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rekey } from '../../../utils/key_prefix.ts'
+import { rekey, underPath } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import {
@@ -33,7 +33,16 @@ import {
   pathExists,
   type BackendKeyFn,
 } from '../utils/copy.ts'
-import { fsStrerror, isFsError } from '../../../errors/fs.ts'
+import {
+  errorVirtualPath,
+  fsStrerror,
+  innerSuffix,
+  isFsError,
+  isLandedMove,
+  isStaleWrite,
+  virtualOf,
+  withInner,
+} from '../../../errors/fs.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import {
   type TransferLinks,
@@ -481,6 +490,18 @@ export async function mvGeneric(
       }
     }
     const sourceLink = copies !== undefined && copies.links.statAt(src.virtual) !== null
+    // Refuse an undeletable source before a backup moves the target aside.
+    if (isPrimitiveMove(strategy) && !sourceLink) {
+      try {
+        strategy.checkUnlink?.(src)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        errors.push(
+          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${String(fsStrerror(err))}`,
+        )
+        continue
+      }
+    }
     const backupStrategy =
       copies !== undefined
         ? { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) }
@@ -539,13 +560,27 @@ export async function mvGeneric(
         await strategy.rename(src, target)
       } catch (err) {
         if (!isFsError(err)) throw err
+        // A stale key inside a walk is named; other refusals, the operand.
+        const stale = isStaleWrite(err)
+        const inner = stale ? innerSuffix(src, err) || innerSuffix(target, err) : ''
+        const from = withInner(src.rawPath, inner)
+        if (isLandedMove(err)) {
+          // Copy landed, source delete lost: GNU's cross-device unlink failure.
+          errors.push(`mv: cannot remove '${from}': ${String(fsStrerror(err))}`)
+          writes[target.mountPath] = new Uint8Array()
+          if (!srcIsDir) created.add(keyOf(target))
+          continue
+        }
         // A backend rename that refuses (e.g. a destination whose parent
         // chain is not all directories) is one failed operand, not an
         // aborted command: GNU reports it and keeps going with the
         // remaining sources.
-        errors.push(
-          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${String(fsStrerror(err))}`,
-        )
+        const to = withInner(target.rawPath, inner)
+        // A refused write names the end that changed; its path is spelt as typed or resolved.
+        const lost = errorVirtualPath(err)
+        const atTarget = underPath(lost, target.virtual) || underPath(lost, virtualOf(target))
+        const changed = !stale ? '' : `'${atTarget ? to : from}' `
+        errors.push(`mv: cannot move '${from}' to '${to}': ${changed}${String(fsStrerror(err))}`)
         continue
       }
       writes[src.mountPath] = new Uint8Array()

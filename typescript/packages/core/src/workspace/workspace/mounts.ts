@@ -15,7 +15,7 @@
 import { BIN_PREFIX } from '../../shell/constants.ts'
 import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
-import type { Limit, MountMode, ReadSpec } from '../../types.ts'
+import { type Limit, type ReadSpec, MountMode, WritePolicy } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { MountSpec } from './types.ts'
@@ -26,6 +26,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { withCacheMutation } from '../../cache/file/io.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
+import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
 
 /**
  * The `mounts` mapping in resolved form: every accepted spelling
@@ -40,12 +41,28 @@ export interface NormalizedMounts {
   refs: Record<string, string>
   indexes: Record<string, IndexConfig>
   read: Record<string, ReadSpec>
+  write: Record<string, WritePolicy>
+}
+
+/** What the write verdict needs beyond the mounts themselves. */
+export interface WriteDefaults {
+  /** The mode a mount takes when it names none. */
+  mode: MountMode
+  /** The write policy a mount takes when it names none. */
+  write: WritePolicy
+  /** Whether the workspace's file cache keeps anything. */
+  caching: boolean
 }
 
 export function normalizeMounts(
   mounts: Record<string, MountSpec>,
   defaultRead: ReadSpec,
   index?: IndexConfig,
+  defaults: WriteDefaults = {
+    mode: MountMode.READ,
+    write: WritePolicy.UNCONDITIONAL,
+    caching: true,
+  },
 ): NormalizedMounts {
   const bare: Record<string, BaseVFS> = {}
   const modes: Record<string, MountMode> = {}
@@ -53,6 +70,7 @@ export function normalizeMounts(
   const refs: Record<string, string> = {}
   const indexes: Record<string, IndexConfig> = {}
   const read: Record<string, ReadSpec> = {}
+  const write: Record<string, WritePolicy> = {}
   for (const [prefix, spec] of Object.entries(mounts)) {
     if (spec instanceof Mount) {
       bare[prefix] = spec.vfs
@@ -65,6 +83,7 @@ export function normalizeMounts(
       if (spec.options.index !== undefined)
         indexes[prefix] = normalizeIndexConfig(spec.options.index)
       if (spec.options.read !== undefined) read[prefix] = spec.options.read
+      if (spec.options.write !== undefined) write[prefix] = coerceWritePolicy(spec.options.write)
     } else if (Array.isArray(spec)) {
       const [vfs, mode, mountCommandLimits] = spec as readonly [
         BaseVFS,
@@ -85,8 +104,15 @@ export function normalizeMounts(
   for (const [prefix, vfs] of Object.entries(bare)) {
     if (!effectiveIndexes.has(vfs)) effectiveIndexes.set(vfs, indexes[prefix] ?? index)
     checkReadCapability(prefix, vfs, read[prefix] ?? defaultRead, effectiveIndexes.get(vfs))
+    checkWriteCapability(
+      prefix,
+      vfs,
+      write[prefix] ?? defaults.write,
+      modes[prefix] ?? defaults.mode,
+      defaults.caching && vfs.cachesReads,
+    )
   }
-  return { bare, modes, commandLimits, refs, indexes, read }
+  return { bare, modes, commandLimits, refs, indexes, read, write }
 }
 
 /** Drop mount cache state atomically with deferred file-cache fills. */
