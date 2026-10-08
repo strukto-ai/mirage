@@ -311,6 +311,18 @@ describe('a version kept without bytes', () => {
     ).toBe(false)
   })
 
+  it.each([
+    ['same', 'v1', 'v1'],
+    ['other', 'v2', null],
+  ] as const)('keeps it under a fill that matches: %s', async (_n, token, kept) => {
+    // A drain landing after the line keeps the version the line kept.
+    const c = new RAMFileCacheStore()
+    await c.keepFingerprints({ '/a': 'v1' })
+    await c.add('/a', encode('x'), { fingerprint: token, ttl: 0 })
+    expect(await c.get('/a')).toBeNull()
+    expect(await c.fingerprint('/a')).toBe(kept)
+  })
+
   it('counts a restamped version once', async () => {
     const c = new RAMFileCacheStore()
     for (const token of ['v1', 'v2', 'v3']) await c.keepFingerprints({ '/a': token })

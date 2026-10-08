@@ -35,7 +35,7 @@ from mirage.core.object_store.driver import (
 from mirage.core.object_store.errors import ConditionLostError
 from mirage.core.object_store.stat import make_stat
 from mirage.errors.fs import eexist, enoent, enotdir, enotsup
-from mirage.observe.context import record, start_op
+from mirage.observe.context import record, revision_for, start_op
 from mirage.types import FileStat, PathSpec
 from mirage.utils import key_prefix as kp
 from mirage.utils.path import ancestors, norm, parent
@@ -175,7 +175,9 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
             else:
                 own: str | OwnRead | None = None
                 if driver.get_versioned is not None:
-                    got = await driver.get_versioned(conn, key)
+                    got = await driver.get_versioned(
+                        conn, key, revision_for(path_spec.virtual)
+                    )
                     data, own = (
                         got if got is not None else (None, OwnRead.ABSENT)
                     )

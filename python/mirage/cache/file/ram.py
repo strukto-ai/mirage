@@ -120,12 +120,20 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                     return False
                 if self._invalidation.stale(key, stamp):
                     return False
+                # A version kept for these bytes stays kept, as add.lua does.
+                kept = (
+                    existing is not None
+                    and existing.holds is not Holds.BYTES
+                    and bool(fingerprint)
+                    and existing.fingerprint == fingerprint
+                )
                 self._drop_entry(key)
                 entry = CacheEntry(
                     size=len(data),
                     cached_at=int(time.time()),
                     fingerprint=fingerprint or None,
                     ttl=ttl,
+                    holds=Holds.BYTES_AND_VERSION if kept else Holds.BYTES,
                 )
                 self._entries[key] = entry
                 self._store.files[key] = data

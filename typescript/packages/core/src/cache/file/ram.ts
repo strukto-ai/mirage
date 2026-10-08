@@ -148,12 +148,20 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
           return Promise.resolve(false)
         }
         if (this.invalidation.stale(key, stamp)) return false
+        // A version kept for these bytes stays kept, as add.lua does.
+        const fingerprint = tokenOrNull(options.fingerprint)
+        const kept =
+          existing !== undefined &&
+          existing.holds !== Holds.BYTES &&
+          fingerprint !== null &&
+          existing.fingerprint === fingerprint
         this.dropEntry(key)
         const entry = new CacheEntry({
           size: data.byteLength,
           cachedAt: Math.floor(Date.now() / 1000),
-          fingerprint: tokenOrNull(options.fingerprint),
+          fingerprint,
           ttl: options.ttl ?? null,
+          holds: kept ? Holds.BYTES_AND_VERSION : Holds.BYTES,
         })
         this.entries.set(key, entry)
         this.store.files.set(key, data)

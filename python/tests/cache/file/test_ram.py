@@ -486,3 +486,19 @@ async def test_an_expired_entry_still_answers_its_version(kept):
     assert await cache.get("/a") is None
     assert await cache.fingerprint("/a") == ("v1" if kept else None)
     assert "/a" not in cache._store.files
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "token, kept", [("v1", "v1"), ("v2", None)], ids=["same", "other"]
+)
+async def test_a_fill_over_a_kept_version_keeps_it_when_it_matches(
+    token, kept
+):
+    # A drain landing after the line keeps the version the line kept.
+    cache = RAMFileCacheStore()
+    await cache.keep_fingerprints({"/a": "v1"})
+    await cache.add("/a", b"x", fingerprint=token, ttl=1)
+    cache._entries["/a"].cached_at -= 10
+    assert await cache.get("/a") is None
+    assert await cache.fingerprint("/a") == kept

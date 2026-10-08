@@ -176,7 +176,7 @@ async function head(conn: S3Conn, key: string): Promise<ObjectMeta | null> {
 }
 
 async function get(conn: S3Conn, key: string): Promise<Uint8Array | null> {
-  return (await getVersioned(conn, key))?.[0] ?? null
+  return (await getVersioned(conn, key, null))?.[0] ?? null
 }
 
 function put(conn: S3Conn, key: string, data: Uint8Array): Promise<ObjectMeta | null> {
@@ -276,11 +276,16 @@ async function putIf(
 async function getVersioned(
   conn: S3Conn,
   key: string,
+  revision: string | null,
 ): Promise<[Uint8Array, string | null] | null> {
   let resp: { Body?: unknown; ETag?: string }
   try {
     resp = (await conn.send(
-      new conn.mod.GetObjectCommand({ Bucket: conn.config.bucket, Key: key }),
+      new conn.mod.GetObjectCommand({
+        Bucket: conn.config.bucket,
+        Key: key,
+        ...(revision !== null ? { VersionId: revision } : {}),
+      }),
     )) as typeof resp
   } catch (err) {
     if (isNotFoundError(err)) return null
@@ -479,11 +484,15 @@ async function deleteBatch(
  * ConditionLostError), or the failure itself when none were. Mirrors Python's
  * `_raise_lost_before`.
  */
-function raiseLostBefore(lost: readonly [string, Measured][], err: unknown): never {
+function raiseLostBefore(
+  lost: readonly [string, Measured][],
+  err: unknown,
+  untouched: ReadonlyMap<string, Measured>,
+): never {
   if (lost.length > 0) {
     throw new ConditionLostError(
       lost.map(([key]) => key),
-      { versions: new Map(lost), error: err },
+      { versions: new Map([...untouched, ...lost]), error: err },
     )
   }
   throw err
@@ -494,11 +503,18 @@ function raiseLostBefore(lost: readonly [string, Measured][], err: unknown): nev
  * measured on; a key the store refused for another reason is the error
  * reported, the lost keys carried with it. Mirrors Python's `_raise_kept`.
  */
-function raiseKept(lost: readonly [string, Measured][], failed: readonly string[]): void {
+function raiseKept(
+  lost: readonly [string, Measured][],
+  failed: readonly string[],
+  untouched: ReadonlyMap<string, Measured>,
+): void {
   if (lost.length > 0) {
     throw new ConditionLostError(
       lost.map(([key]) => key),
-      { versions: new Map(lost), error: failed.length > 0 ? deleteRefused(failed) : null },
+      {
+        versions: new Map([...untouched, ...lost]),
+        error: failed.length > 0 ? deleteRefused(failed) : null,
+      },
     )
   }
   if (failed.length > 0) throw deleteRefused(failed)
@@ -514,9 +530,9 @@ async function deletePrefixIf(conn: S3Conn, pfx: string, known: KnownVersions): 
       failed.push(...pageFailed)
     }
   } catch (err) {
-    raiseLostBefore(lost, err)
+    raiseLostBefore(lost, err, new Map())
   }
-  raiseKept(lost, failed)
+  raiseKept(lost, failed, new Map())
 }
 
 async function movePrefixIf(
@@ -530,6 +546,7 @@ async function movePrefixIf(
   const lost: [string, Measured][] = []
   const failed: string[] = []
   const moved: [string, string][] = []
+  const untouched = new Map<string, Measured>()
   try {
     for await (const listed of knownPages(conn, srcPfx, known)) {
       found = true
@@ -545,7 +562,11 @@ async function movePrefixIf(
         } catch (err) {
           if (!lostCondition(err, true)) throw err
           if (cond.ifMatch !== undefined) {
-            lost.push(await copyLoser(conn, key, dstKey, cond, token))
+            const loser = await copyLoser(conn, key, dstKey, cond, token)
+            lost.push(loser)
+            // The end left alone keeps its version, as a file mv's.
+            if (loser[0] === key) untouched.set(dstKey, quoted(cond.ifMatch))
+            else untouched.set(key, quoted(token))
           } else {
             // A source gone (404) keeps no version: nothing newer to guard.
             lost.push([key, isConditionLost(err) ? token : OwnRead.ABSENT])
@@ -565,9 +586,9 @@ async function movePrefixIf(
       failed.push(...batchFailed)
     }
   } catch (err) {
-    raiseLostBefore(lost, err)
+    raiseLostBefore(lost, err, untouched)
   }
-  raiseKept(lost, failed)
+  raiseKept(lost, failed, untouched)
   return found
 }
 

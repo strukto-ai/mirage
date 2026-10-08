@@ -540,6 +540,37 @@ describe('conditional writes on an S3 mount', () => {
     expect(err.startsWith("mv: cannot move '/s3/d/a' to '/s3/e/a': '/s3/e/a' "), err).toBe(true)
   })
 
+  it.each([
+    ['destination gone', null, 'd/a'],
+    ['destination changed', 'dst', 'd/a'],
+    ['source changed', 'src', 'e/a'],
+  ] as const)(
+    'keeps the untouched end of a refused directory mv: %s',
+    async (_n, beforeCopy, untouched) => {
+      // The end a refused copy left alone keeps its version, as a file mv's does.
+      const ws = workspace()
+      mock.store.set('b', 'e/a', ENC.encode('ea\n'))
+      await run(ws, 'cat /s3/d/a /s3/e/a')
+      mock.store.delete('b', 'e/a')
+      if (beforeCopy === 'dst') {
+        mock.before('CopyObject', () => {
+          theirs('e/a')
+        })
+      } else if (beforeCopy === 'src') {
+        mock.before('CopyObject', () => {
+          mock.store.set('b', 'e/a', ENC.encode('ea\n'))
+          theirs('d/a')
+        })
+      }
+      const [code, , err] = await run(ws, 'mv -T /s3/d /s3/e')
+      expect([code, err.includes(STALE)], err).toEqual([1, true])
+      mock.store.set('b', untouched, ENC.encode('newest\n'))
+      const [again, , againErr] = await run(ws, `echo z > /s3/${untouched}`)
+      expect([again, againErr.includes(STALE)], againErr).toEqual([1, true])
+      expect(object(untouched)).toBe('newest\n')
+    },
+  )
+
   it('holds each destination key a directory rename read', async () => {
     // Every changed destination key is refused and keeps its version.
     const ws = workspace()

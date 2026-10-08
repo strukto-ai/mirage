@@ -181,7 +181,7 @@ async def _head(conn: S3Conn, key: str) -> ObjectMeta | None:
 
 
 async def _get(conn: S3Conn, key: str) -> bytes | None:
-    got = await _get_versioned(conn, key)
+    got = await _get_versioned(conn, key, None)
     return got[0] if got is not None else None
 
 
@@ -285,10 +285,13 @@ async def _put_if(
 
 
 async def _get_versioned(
-    conn: S3Conn, key: str
+    conn: S3Conn, key: str, revision: str | None
 ) -> tuple[bytes, str | None] | None:
+    kwargs = {"Bucket": conn.config.bucket, "Key": key}
+    if revision is not None:
+        kwargs["VersionId"] = revision
     try:
-        resp = await conn.client.get_object(Bucket=conn.config.bucket, Key=key)
+        resp = await conn.client.get_object(**kwargs)
     except Exception as exc:
         if is_not_found(exc):
             return None
@@ -500,7 +503,9 @@ async def _delete_batch(
 
 
 def _raise_lost_before(
-    lost: list[tuple[str, Measured]], exc: Exception
+    lost: list[tuple[str, Measured]],
+    exc: Exception,
+    untouched: dict[str, Measured],
 ) -> NoReturn:
     """Raise a walk's later failure, carrying the keys it lost before it.
 
@@ -508,6 +513,8 @@ def _raise_lost_before(
         lost (list[tuple[str, Measured]]): keys lost so far, each with the
             version it was measured on.
         exc (Exception): the failure that stopped the walk.
+        untouched (dict[str, Measured]): the other end of each refused
+            copy, which keeps its version without being named.
 
     Raises:
         ConditionLostError: some keys were lost before ``exc``.
@@ -515,12 +522,18 @@ def _raise_lost_before(
     """
     if lost:
         raise ConditionLostError(
-            [key for key, _ in lost], versions=dict(lost), error=exc
+            [key for key, _ in lost],
+            versions={**untouched, **dict(lost)},
+            error=exc,
         ) from exc
     raise exc
 
 
-def _raise_kept(lost: list[tuple[str, Measured]], failed: list[str]) -> None:
+def _raise_kept(
+    lost: list[tuple[str, Measured]],
+    failed: list[str],
+    untouched: dict[str, Measured],
+) -> None:
     """Raise for the keys a prefix op kept.
 
     Lost keys keep the versions they were measured on; a key the store
@@ -531,6 +544,8 @@ def _raise_kept(lost: list[tuple[str, Measured]], failed: list[str]) -> None:
         lost (list[tuple[str, Measured]]): keys a newer write changed, each
             with the version it was measured on.
         failed (list[str]): keys the store refused for another reason.
+        untouched (dict[str, Measured]): the other end of each refused
+            copy, which keeps its version without being named.
 
     Raises:
         ConditionLostError: some keys were lost.
@@ -539,7 +554,9 @@ def _raise_kept(lost: list[tuple[str, Measured]], failed: list[str]) -> None:
     refusal = _delete_refused(failed) if failed else None
     if lost:
         raise ConditionLostError(
-            [key for key, _ in lost], versions=dict(lost), error=refusal
+            [key for key, _ in lost],
+            versions={**untouched, **dict(lost)},
+            error=refusal,
         )
     if refusal is not None:
         raise refusal
@@ -556,8 +573,8 @@ async def _delete_prefix_if(
             lost += page_lost
             failed += page_failed
     except Exception as exc:
-        _raise_lost_before(lost, exc)
-    _raise_kept(lost, failed)
+        _raise_lost_before(lost, exc, {})
+    _raise_kept(lost, failed, {})
 
 
 async def _move_prefix_if(
@@ -571,6 +588,7 @@ async def _move_prefix_if(
     lost: list[tuple[str, Measured]] = []
     failed: list[str] = []
     moved: list[tuple[str, str]] = []
+    untouched: dict[str, Measured] = {}
     try:
         async for listed in _known_pages(conn, src_pfx, known):
             found = True
@@ -588,9 +606,15 @@ async def _move_prefix_if(
                     if not _lost_condition(exc, matched=True):
                         raise
                     if held_version:
-                        lost.append(
-                            await _copy_loser(conn, key, dst_key, cond, token)
+                        loser = await _copy_loser(
+                            conn, key, dst_key, cond, token
                         )
+                        lost.append(loser)
+                        # The end left alone keeps its version, as a file mv's.
+                        if loser[0] == key:
+                            untouched[dst_key] = _quoted(held_version)
+                        else:
+                            untouched[key] = _quoted(token)
                     else:
                         # A source gone (404) keeps no version: nothing newer to guard.
                         lost.append(
@@ -611,8 +635,8 @@ async def _move_prefix_if(
             lost += batch_lost
             failed += batch_failed
     except Exception as exc:
-        _raise_lost_before(lost, exc)
-    _raise_kept(lost, failed)
+        _raise_lost_before(lost, exc, untouched)
+    _raise_kept(lost, failed, untouched)
     return found
 
 

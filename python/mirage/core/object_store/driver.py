@@ -361,7 +361,8 @@ class ObjectStoreDriver(Generic[A, C]):
             lost one raises :class:`ConditionLostError`. None when the store
             cannot condition a write.
         get_versioned (Callable | None): ``get`` plus the token of the
-            bytes returned, for an op that writes back what it read.
+            bytes returned, for an op that writes back what it read; a
+            revision reads that revision.
         copy_if (Callable | None): ``copy_file`` with the destination's
             condition and the source's expected token.
         delete_if (Callable | None): ``delete_file`` with a condition.
@@ -407,7 +408,10 @@ class ObjectStoreDriver(Generic[A, C]):
         | None
     ) = None
     get_versioned: (
-        Callable[[C, str], Awaitable[tuple[bytes, str | None] | None]] | None
+        Callable[
+            [C, str, str | None], Awaitable[tuple[bytes, str | None] | None]
+        ]
+        | None
     ) = None
     copy_if: (
         Callable[[C, str, str, WriteCondition], Awaitable[bool]] | None

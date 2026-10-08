@@ -20,7 +20,7 @@ import {
   writeCondition,
 } from '../../cache/context.ts'
 import { OwnRead, type WriteCondition } from '../../cache/types.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { record, revisionFor, startOp } from '../../observe/context.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, enotsup, isMissingPath } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
@@ -132,7 +132,7 @@ export function makeTruncate<A extends Accessor, C>(
         let existing: Uint8Array | null
         let own: string | OwnRead | null = null
         if (driver.getVersioned !== undefined) {
-          const got = await driver.getVersioned(conn, key)
+          const got = await driver.getVersioned(conn, key, revisionFor(path.virtual))
           existing = got?.[0] ?? null
           own = got === null ? OwnRead.ABSENT : got[1]
         } else {

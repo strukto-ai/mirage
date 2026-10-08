@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { runWithCacheManager } from '../../cache/context.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { errorVirtualPath } from '../../errors/fs.ts'
 import type { ObjectStoreDriver } from './driver.ts'
@@ -241,6 +241,26 @@ describe('object store write records the put token', () => {
       makeTruncate(makeDriver(store))(accessor, spec('/a/cut.txt'), 2),
     )
     expect(records.map((r) => [r.op, r.fingerprint])).toEqual([['truncate', 'fp-a/cut.txt']])
+  })
+
+  it('truncate reads the revision a restore pinned', async () => {
+    const store = new FakeStore()
+    store.objects.set('a/cut.txt', ENC.encode('hello'))
+    const asked: (string | null | undefined)[] = []
+    const driver: ObjectStoreDriver<FakeAccessor, Store> = {
+      ...makeDriver(store),
+      getVersioned: (_conn, key, revision) => {
+        asked.push(revision)
+        const data = store.objects.get(key)
+        return Promise.resolve(data === undefined ? null : [data, 'v1'])
+      },
+    }
+    await managed(() =>
+      runWithRevisions(new Map([['/mnt/a/cut.txt', 'rev-1']]), () =>
+        makeTruncate(driver)(accessor, spec('/a/cut.txt'), 2),
+      ),
+    )
+    expect(asked).toEqual(['rev-1'])
   })
 
   it('records no token when the store reports none', async () => {

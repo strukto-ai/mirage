@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import hashlib
+import io
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
@@ -724,6 +725,39 @@ async def test_a_directory_mv_names_a_refused_destination_file(
     ), err
 
 
+def _dst_back_changed(fake: MultiBucketS3Client) -> None:
+    _theirs(fake, "e/a")
+
+
+def _src_changed(fake: MultiBucketS3Client) -> None:
+    fake.buckets["b"]["e/a"] = b"ea\n"
+    _theirs(fake, "d/a")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "before_copy, untouched",
+    [(None, "d/a"), (_dst_back_changed, "d/a"), (_src_changed, "e/a")],
+    ids=["destination gone", "destination changed", "source changed"],
+)
+async def test_a_refused_directory_mv_keeps_the_untouched_end(
+    fake, workspaces, before_copy, untouched
+):
+    # The end a refused copy left alone keeps its version, as a file mv's does.
+    ws = workspaces()
+    fake.buckets["b"]["e/a"] = b"ea\n"
+    await _run(ws, "cat /s3/d/a /s3/e/a")
+    _gone(fake, "e/a")
+    if before_copy is not None:
+        fake.before(COPY, lambda: before_copy(fake))
+    code, _, err = await _run(ws, "mv -T /s3/d /s3/e")
+    assert (code, STALE in err) == (1, True), err
+    fake.buckets["b"][untouched] = b"newest\n"
+    code, _, err = await _run(ws, f"echo z > /s3/{untouched}")
+    assert (code, STALE in err) == (1, True), err
+    assert fake.buckets["b"][untouched] == b"newest\n"
+
+
 @pytest.mark.asyncio
 async def test_a_directory_rename_holds_each_destination_key_it_read(
     fake, workspaces
@@ -765,6 +799,31 @@ async def test_a_directory_rename_onto_a_key_it_holds_no_version_of(
     else:
         await ws.vfs.rename("/s3/d", "/s3/e")
         assert fake.buckets["b"]["e/a"] == b"a\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["truncate -s 1 /s3/f", "echo x > /s3/f"], ids=["truncate", ">"]
+)
+async def test_a_restored_pin_refuses_a_write_over_a_newer_file(line):
+    # The pin serves the saved revision, so a write sends its version.
+    session = MultiBucketSession({"b": dict(SEED)}, versioned={"b"})
+    fake = session._client
+    with patch_s3_session(session):
+        src = _workspace()
+        await _run(src, "cat /s3/f")
+        snap = io.BytesIO()
+        await src.snapshot(snap)
+        await src.close()
+        _theirs(fake)
+        await fake.head_object(Bucket="b", Key="f")
+        ws = await Workspace.load(io.BytesIO(snap.getvalue()))
+        try:
+            code, _, err = await _run(ws, line)
+        finally:
+            await ws.close()
+    assert (code, STALE in err, _sent(fake, PUT)) == (1, True, [ONE]), err
+    assert fake.buckets["b"]["f"] == b"theirs\n"
 
 
 @pytest.mark.asyncio

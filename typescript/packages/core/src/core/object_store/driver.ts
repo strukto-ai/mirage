@@ -262,8 +262,12 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
     data: Uint8Array,
     cond: WriteCondition,
   ) => Promise<ObjectMeta | null>
-  /** `get` plus the token of the bytes returned, for an op that writes back what it read. */
-  getVersioned?: (conn: C, key: string) => Promise<[Uint8Array, string | null] | null>
+  /** `get` plus the token of the bytes returned, for an op that writes back what it read; a revision reads that revision. */
+  getVersioned?: (
+    conn: C,
+    key: string,
+    revision: string | null,
+  ) => Promise<[Uint8Array, string | null] | null>
   /** `copyFile` with the destination's condition. */
   copyIf?: (conn: C, srcKey: string, dstKey: string, cond: WriteCondition) => Promise<boolean>
   /** `deleteFile` with a condition. */
