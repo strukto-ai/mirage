@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { underPath } from '@struktoai/mirage-core/utils/key_prefix'
-import { readFileSync } from 'node:fs'
 import { CacheType } from '@struktoai/mirage-core/cache/file/config'
 import { Invalidation } from '@struktoai/mirage-core/cache/invalidation'
 import { validateMaxDrainBytes } from '@struktoai/mirage-core/cache/file/mixin'
@@ -23,10 +22,6 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { registerFileCacheStore } from '@struktoai/mirage-core/workspace/workspace/cache'
 import type { RedisClientType } from 'redis'
 import { RedisVFS, type RedisVFSOptions } from '../../vfs/redis/redis.ts'
-
-// Shipped next to this module in src and copied beside the bundle in
-// dist (tsup onSuccess); byte-identical to the Python add.lua.
-const ADD_LUA = readFileSync(new URL('./add.lua', import.meta.url), 'utf8')
 
 // Hash slots one SCAN call visits. A prefix drop walks the whole server,
 // so this sets both the round trips (dbsize / SCAN_COUNT) and how long
@@ -63,7 +58,6 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
   private maxDrainBytesValue: number | null = null
   // Local invalidation also discards fills paused in cooperative hashing.
   private readonly invalidation = new Invalidation()
-  readonly drainTasks = new Map<string, Promise<void>>()
 
   constructor(options: RedisFileCacheOptions = {}) {
     super({
@@ -171,38 +165,8 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     }
   }
 
-  async add(
-    key: string,
-    data: Uint8Array,
-    options: { fingerprint?: string | null; ttl?: number | null } = {},
-  ): Promise<boolean> {
-    const stamp = this.invalidation.enter(key)
-    try {
-      const c = await this.cacheClient()
-      if (this.invalidation.stale(key, stamp)) return false
-      // A background drain is insert-only: an older drain finishing late must
-      // not overwrite a newer cache fill. add.lua keeps the check, bytes,
-      // fingerprint and TTL in one execution so writers cannot interleave.
-      const inserted = await c.eval(ADD_LUA, {
-        keys: [this.dataKey(key), this.metaKey(key)],
-        arguments: [
-          toBuffer(data),
-          tokenOrNull(options.fingerprint) ?? '',
-          options.ttl === null || options.ttl === undefined ? '' : String(options.ttl),
-        ],
-      })
-      return inserted === 1
-    } finally {
-      this.invalidation.leave(key)
-    }
-  }
-
   async remove(key: string): Promise<void> {
     this.invalidation.invalidate(key)
-    // Promises cannot be cancelled: dropping the map entry makes the
-    // pending backgroundDrain skip its cache fill, mirroring the RAM
-    // store's task cancel.
-    this.drainTasks.delete(key)
     const c = await this.cacheClient()
     const pipe = c.multi()
     pipe.del(this.dataKey(key))
@@ -225,10 +189,6 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
 
   async evictPrefix(prefix: string, excluded: readonly string[] = []): Promise<void> {
     this.invalidation.invalidatePrefix(prefix, excluded)
-    for (const key of [...this.drainTasks.keys()]) {
-      if (key.startsWith(prefix) && !excluded.some((boundary) => underPath(key, boundary)))
-        this.drainTasks.delete(key)
-    }
     await this.dropMatching(prefix, excluded)
   }
 
@@ -300,7 +260,6 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
 
   async clear(): Promise<void> {
     this.invalidation.invalidateAll()
-    this.drainTasks.clear()
     await this.dropMatching('')
   }
 

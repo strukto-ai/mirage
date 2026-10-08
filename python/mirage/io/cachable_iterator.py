@@ -100,34 +100,6 @@ class CachableAsyncIterator:
             self._exhausted = True
         return b"".join(self._buffer)
 
-    async def drain_bounded(self, max_bytes: int) -> bytes | None:
-        """Drain remaining chunks but stop if buffer exceeds max_bytes.
-
-        Returns the accumulated bytes when fully drained. When the
-        budget is exceeded, closes the source, releases the partial
-        buffer, and returns None.
-        """
-        if self._discarded:
-            return None
-        total = sum(len(c) for c in self._buffer)
-        try:
-            if total > max_bytes:
-                await self.discard()
-                return None
-            async for chunk in self._source:
-                await self._budget.run()
-                self._buffer.append(chunk)
-                total += len(chunk)
-                if total > max_bytes:
-                    await self.discard()
-                    return None
-        except BaseException:
-            await self.discard()
-            raise
-        finally:
-            self._exhausted = True
-        return b"".join(self._buffer)
-
     async def discard(self) -> None:
         """Discard failed content, leaving normal early exits drainable."""
         if self._discarded:

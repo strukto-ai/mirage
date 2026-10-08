@@ -28,9 +28,6 @@ import type * as GoogleClientModule from '@struktoai/mirage-core/core/google/cli
 import type * as JsonRenderModule from '@struktoai/mirage-core/core/render/json'
 import type { Accessor } from '@struktoai/mirage-core/accessor/base'
 import type { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
-import { applyIo } from '@struktoai/mirage-core/cache/file/io'
-import { CachableAsyncIterator } from '@struktoai/mirage-core/io/cachable_iterator'
-import { IOResult } from '@struktoai/mirage-core/io/types'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import type { SharePointAccessor } from '@struktoai/mirage-core/accessor/sharepoint'
@@ -40,7 +37,7 @@ import { commandIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/
 import type { GDriveAccessor } from '@struktoai/mirage-core/accessor/gdrive'
 import type { GitHubAccessor } from '@struktoai/mirage-core/accessor/github'
 import { DRIVER as S3_DRIVER } from '@struktoai/mirage-core/core/s3/driver'
-import { recordingActive, runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { recordingActive } from '@struktoai/mirage-core/observe/context'
 import { type FileStat, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
@@ -581,25 +578,25 @@ const ENC = new TextEncoder()
 const SEED = ENC.encode('name,age\nalice,30\n')
 const CHANGED = ENC.encode('name,age\nalice,31\n')
 const DECOY = ENC.encode('decoy at the unprefixed key\n')
-// Several download chunks, so the background drain has bytes left to pull
-// after the first chunk is consumed.
+// Several download chunks, so a read stopped after the first chunk has bytes
+// left it never pulls.
 const BIG = ENC.encode(('x'.repeat(1023) + '\n').repeat(300))
 
-type Row = 'bytes' | 'stream' | 'drain'
+type Row = 'bytes' | 'stream' | 'partial'
 
 const COMMANDS: Record<Row, (v: string) => string> = {
   bytes: (v) => `cp ${v} /r/a.txt`,
   stream: (v) => `cat ${v}`,
-  drain: (v) => `cat ${v}`,
+  partial: (v) => `cat ${v} | head -c 1`,
 }
-const SLOTS: Record<Row, string> = { bytes: 'bytes', stream: 'stream', drain: 'stream' }
+const SLOTS: Record<Row, string> = { bytes: 'bytes', stream: 'stream', partial: 'stream' }
 
 const ALL_SHAPES: Shape[] = ['root', 'nested', 'prefixed']
-const ALL_ROWS: Row[] = ['bytes', 'stream', 'drain']
+const ALL_ROWS: Row[] = ['bytes', 'stream', 'partial']
 
 // What each family can run, fixed when the rows are built. github and gdrive
 // have no key_prefix, and their stream is their read handed over whole, one
-// chunk, so a drain row would pass without draining. The GAPPS mounts also
+// chunk, so a partial row would read the whole file. The GAPPS mounts also
 // have one flat listing, so only one shape.
 const FAMILY_SHAPES: Partial<Record<Family, Shape[]>> = {
   github: ['root', 'nested'],
@@ -1102,7 +1099,7 @@ function cases(rows: readonly Row[]): Case[] {
 }
 
 const A_CASES = [
-  ...cases(['bytes', 'stream', 'drain']),
+  ...cases(['bytes', 'stream']),
   ...['s3', ...Object.keys(GRAPH)].map((name) => ({
     name,
     shape: 'listed' as const,
@@ -1182,24 +1179,6 @@ async function line(ws: Workspace, command: string): Promise<Uint8Array> {
   const result = await ws.shell(command)
   expect([result.exitCode, new TextDecoder().decode(result.stderr)], command).toEqual([0, ''])
   return result.stdout
-}
-
-async function partialRead(ws: Workspace, fake: Fake, virtual: string): Promise<Uint8Array> {
-  // Exercise the cache handoff directly, independent of pipe cancellation.
-  const [[source, first], records] = await runWithRecording(async () => {
-    const source = new CachableAsyncIterator(fake.readStream(specFor(virtual, fake.key)))
-    const first = await source.next()
-    if (first.done === true) throw new Error('Expected a nonempty backend stream')
-    expect(source.exhausted).toBe(false)
-    return [source, first.value.subarray(0, 1)] as const
-  })
-  await applyIo(
-    ws.cache,
-    new IOResult({ reads: { [virtual]: source }, cache: [virtual] }),
-    undefined,
-    records,
-  )
-  return first
 }
 
 // Reconcile stats through a fresh index (workspace/reconcile.ts), so a
@@ -1308,13 +1287,13 @@ describe('the read-token contract', () => {
 
   it('each family runs exactly its rows', () => {
     // The per-family table filters the rows as they are built, so a filter
-    // bug drops a row silently or hands a whole-read stream a drain row that
-    // passes without draining. Pin the ids outright rather than the count.
+    // bug drops a row silently or hands a whole-read stream a partial row that
+    // reads the whole file. Pin the ids outright rather than the count.
     const aliases = [...S3_FAMILY.filter((n) => n !== 's3'), 'hf_datasets', 'hf_spaces']
     // Literals, not ALL_SHAPES / ALL_ROWS: the expectation must not move with
     // the tables it checks.
     const shapes = ['root', 'nested', 'prefixed']
-    const rows = ['bytes', 'stream', 'drain']
+    const rows = ['bytes', 'stream']
     const expectedA = new Set<string>([
       's3-listed-stream',
       'onedrive-listed-stream',
@@ -1340,10 +1319,10 @@ describe('the read-token contract', () => {
     const ids = (cs: Case[]): Set<string> => new Set(cs.map((c) => `${c.name}-${c.shape}-${c.row}`))
     expect(ids(A_CASES)).toEqual(expectedA)
     expect(ids(B_CASES)).toEqual(
-      new Set([...expectedA].filter((i) => !i.endsWith('-drain') && !i.endsWith('-listed-stream'))),
+      new Set([...expectedA].filter((i) => !i.endsWith('-listed-stream'))),
     )
     const whole = ['github', 'gdrive', 'gdocs', 'gsheets', 'gslides']
-    expect(cases(['drain']).some((c) => whole.includes(c.name))).toBe(false)
+    expect(cases(['partial']).some((c) => whole.includes(c.name))).toBe(false)
     const expectedWrite = new Set<string>()
     for (const family of [
       's3',
@@ -1425,24 +1404,19 @@ describe('the read-token contract', () => {
 
   for (const { name, shape, row } of A_CASES) {
     it(`a read leaves an entry reconcile calls fresh: ${name}-${shape}-${row}`, async () => {
-      const data = row === 'drain' ? BIG : SEED
+      const data = SEED
       const fake = await makeFake(name, shape, data)
       const virtual = `/m/${fake.key}`
       const command = COMMANDS[row](virtual)
       const ws = freshWorkspace(fake.vfs)
-      const add = vi.spyOn(ws.cache, 'add')
       try {
         if (shape === 'listed') await line(ws, 'ls /m')
         expect(await ws.cache.exists(virtual)).toBe(false)
-        let first = await (row === 'drain' ? partialRead(ws, fake, virtual) : line(ws, command))
-        await Promise.all([...(ws.cache.drainTasks?.values() ?? [])])
-        // Only the background drain fills through `add`; the synchronous
-        // fills use `set`.
-        expect(add).toHaveBeenCalledTimes(row === 'drain' ? 1 : 0)
+        let first = await line(ws, command)
         expect(readsOnMount()).toEqual([[slotOf(fake, row), virtual]])
         expect(fake.fetches()).toBe(1)
         if (row === 'bytes') first = await line(ws, 'cat /r/a.txt')
-        expect(first).toEqual(row === 'drain' ? data.slice(0, 1) : data)
+        expect(first).toEqual(data)
 
         // A cp of a rendered Google file reads through the dispatcher, where a
         // filetype read op always renders and keeps nothing, so its second cp
@@ -1453,8 +1427,6 @@ describe('the read-token contract', () => {
         expect(stat.fingerprint).not.toBeNull()
         expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(!renders)
 
-        // The drain row's second run reads the whole entry back, so a drain
-        // that cached a truncated buffer cannot pass.
         let second = await line(ws, command)
         if (row === 'bytes') second = await line(ws, 'cat /r/a.txt')
         expect(fake.fetches()).toBe(renders ? 2 : 1)
@@ -1466,20 +1438,18 @@ describe('the read-token contract', () => {
     })
   }
 
-  for (const { name, shape, row } of cases(['drain'])) {
-    it(`an early pipe exit never caches a prefix: ${name}-${shape}`, async () => {
+  for (const { name, shape, row } of cases(['partial'])) {
+    it(`an early pipe exit keeps nothing: ${name}-${shape}`, async () => {
       const fake = await makeFake(name, shape, BIG)
       const virtual = `/m/${fake.key}`
       const ws = freshWorkspace(fake.vfs)
       try {
-        expect(await line(ws, `cat ${virtual} | head -c 1`)).toEqual(BIG.slice(0, 1))
-        await Promise.all([...(ws.cache.drainTasks?.values() ?? [])])
+        expect(await line(ws, COMMANDS[row](virtual))).toEqual(BIG.slice(0, 1))
         expect(readsOnMount()).toEqual([[slotOf(fake, row), virtual]])
         expect(fake.fetches()).toBe(1)
-        const cached = await ws.cache.get(virtual)
-        if (cached !== null) expect(cached).toEqual(BIG)
+        expect(await ws.cache.get(virtual)).toBeNull()
         expect(await line(ws, `cat ${virtual}`)).toEqual(BIG)
-        expect(fake.fetches()).toBe(cached === null ? 2 : 1)
+        expect(fake.fetches()).toBe(2)
         expect(H.reach).toEqual([])
       } finally {
         await ws.close()

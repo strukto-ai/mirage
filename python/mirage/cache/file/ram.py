@@ -16,7 +16,6 @@ import asyncio
 import time
 from collections import OrderedDict
 from collections.abc import Iterable
-from typing import Any
 
 from mirage.cache.file.entry import CacheEntry
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
@@ -48,7 +47,6 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
         self._cache_size: int = 0
         self._invalidation = Invalidation()
         self._entries: OrderedDict[str, CacheEntry] = OrderedDict()
-        self._drain_tasks: dict[str, asyncio.Task[Any]] = {}
         self._clear_lock: asyncio.Lock = asyncio.Lock()
         self.max_drain_bytes: int | None = max_drain_bytes
 
@@ -95,38 +93,6 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             self._invalidation.leave(key)
         await self._evict()
 
-    async def add(
-        self,
-        key: str,
-        data: bytes,
-        fingerprint: str | None = None,
-        ttl: int | None = None,
-    ) -> bool:
-        stamp = self._invalidation.enter(key)
-        try:
-            async with self._lock_for(key):
-                existing = self._entries.get(key)
-                if existing is not None and not existing.expired:
-                    return False
-                if self._invalidation.stale(key, stamp):
-                    return False
-                if key in self._entries:
-                    self._cache_size -= self._entries[key].size
-                    del self._entries[key]
-                entry = CacheEntry(
-                    size=len(data),
-                    cached_at=int(time.time()),
-                    fingerprint=fingerprint or None,
-                    ttl=ttl,
-                )
-                self._entries[key] = entry
-                self._store.files[key] = data
-                self._cache_size += entry.size
-        finally:
-            self._invalidation.leave(key)
-        await self._evict()
-        return True
-
     async def remove(self, key: str) -> None:
         async with self._lock_for(key):
             # Advanced here, when the removal takes effect, not when it
@@ -135,9 +101,6 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             # predate the removal. Per key: a fill of another key still
             # hashing is not this removal's business.
             self._invalidation.invalidate(key)
-            task = self._drain_tasks.pop(key, None)
-            if task:
-                task.cancel()
             if key in self._entries:
                 self._cache_size -= self._entries[key].size
                 del self._entries[key]
@@ -179,9 +142,6 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
     async def clear(self) -> None:
         self._invalidation.invalidate_all()
         async with self._clear_lock:
-            for task in self._drain_tasks.values():
-                task.cancel()
-            self._drain_tasks.clear()
             self._entries.clear()
             self._store.files.clear()
             self._cache_size = 0
@@ -193,11 +153,9 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
         # Before the removals below: a fill in flight under the prefix has
         # no entry yet, so only its registration can name it.
         self._invalidation.invalidate_prefix(prefix, excluded)
-        # A pending fill may not have installed an entry yet.
-        keys = self._entries.keys() | self._drain_tasks.keys()
         for key in [
             k
-            for k in keys
+            for k in list(self._entries)
             if k.startswith(prefix)
             and not any(under_path(k, p) for p in excluded)
         ]:

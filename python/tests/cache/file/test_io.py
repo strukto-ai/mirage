@@ -12,14 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 
 import pytest
 
 from mirage.cache.file import io as cache_io
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.io import CachableAsyncIterator, IOResult
-from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.observe.record import OpRecord
 from mirage.types import CacheFacts
@@ -97,27 +95,26 @@ async def test_apply_io_drops_a_path_read_and_written(cache):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("writes", "cached"), [({}, b"abc"), ({"/f": b"z"}, None)]
-)
-async def test_apply_io_leaves_a_read_to_its_live_drain(cache, writes, cached):
-    """The outer line of an `eval` gets the read its inner line drains; a
-    write there cancels the drain, and the read is closed instead."""
+async def test_apply_io_closes_an_unfinished_read_and_keeps_nothing(cache):
+    closed: list[str] = []
 
     async def source():
-        for chunk in (b"a", b"b", b"c"):
-            await asyncio.sleep(0)
-            yield chunk
+        try:
+            for chunk in (b"a", b"b", b"c"):
+                yield chunk
+        finally:
+            closed.append("/f")
 
     stream = CachableAsyncIterator(source())
     assert await stream.__anext__() == b"a"
     await cache_io.apply_io(
         cache, IOResult(reads={"/f": stream}, cache=["/f"])
     )
-    outer = IOResult(reads={"/f": stream}, writes=writes, cache=["/f"])
-    await cache_io.apply_io(cache, outer)
-    await asyncio.gather(*list(cache._drain_tasks.values()))
-    assert (await cache.get("/f"), stream.exhausted) == (cached, True)
+    assert (await cache.get("/f"), stream.exhausted, closed) == (
+        None,
+        True,
+        ["/f"],
+    )
 
 
 @pytest.mark.asyncio
@@ -260,26 +257,6 @@ async def test_apply_io_tokenless_read_keeps_the_entry_it_found(cache):
     assert await cache.is_fresh("/s3/f.txt", "etag-3")
 
 
-@pytest.mark.asyncio
-async def test_apply_io_drain_uses_fingerprint_recorded_during_drain():
-    """Streaming backends set the record fingerprint lazily when the GET
-    response arrives, i.e. during the background drain. The drained
-    entry must pick it up."""
-    cache = RAMFileCacheStore()
-    records: list[OpRecord] = []
-
-    async def _gen():
-        records.append(_read_record("/s3/f.txt", "etag-multipart-2"))
-        yield b"hello"
-
-    stream = CachableAsyncIterator(_gen())
-    io = IOResult(reads={"/s3/f.txt": stream}, cache=["/s3/f.txt"])
-    await cache_io.apply_io(cache, io, records=records)
-    await asyncio.sleep(0.05)
-    assert await cache.get("/s3/f.txt") == b"hello"
-    assert await cache.is_fresh("/s3/f.txt", "etag-multipart-2")
-
-
 # ── cache invalidation ──────────────────────────────────────────────────
 
 
@@ -310,202 +287,11 @@ async def test_apply_io_empty_io(cache):
     await cache_io.apply_io(cache, io)
 
 
-# ── background drain ────────────────────────────────────────────────────
-
-
 def _make_stream(data: bytes) -> CachableAsyncIterator:
     async def _gen():
         yield data
 
     return CachableAsyncIterator(_gen())
-
-
-@pytest.mark.asyncio
-async def test_no_duplicate_drain():
-    """If a drain is already running for a path, a second apply_io
-    should not start another drain. The first drain finishes and
-    caches the data; the second stream is ignored."""
-    cache = RAMFileCacheStore()
-    stream1 = _make_stream(b"first")
-    stream2 = _make_stream(b"second")
-    io1 = IOResult(reads={"/f.txt": stream1}, cache=["/f.txt"])
-    await cache_io.apply_io(cache, io1)
-    assert "/f.txt" in cache._drain_tasks
-    io2 = IOResult(reads={"/f.txt": stream2}, cache=["/f.txt"])
-    await cache_io.apply_io(cache, io2)
-    assert len([k for k in cache._drain_tasks if k == "/f.txt"]) == 1
-    await asyncio.sleep(0.05)
-    assert await cache.get("/f.txt") == b"first"
-
-
-@pytest.mark.asyncio
-async def test_no_drain_if_already_cached():
-    """If the path is already in cache, don't start a drain even if
-    apply_io receives an unconsumed stream for it. Existing cached
-    data is preserved."""
-    cache = RAMFileCacheStore()
-    await cache.set("/f.txt", b"cached")
-    stream = _make_stream(b"new")
-    io = IOResult(reads={"/f.txt": stream}, cache=["/f.txt"])
-    await cache_io.apply_io(cache, io)
-    assert "/f.txt" not in cache._drain_tasks
-    assert await cache.get("/f.txt") == b"cached"
-
-
-@pytest.mark.asyncio
-async def test_prefix_eviction_retires_a_fill_before_a_replacement_starts():
-    cache = RAMFileCacheStore()
-    started = asyncio.Event()
-    release_old = asyncio.Event()
-    release_new = asyncio.Event()
-
-    async def old_stream():
-        started.set()
-        try:
-            await release_old.wait()
-        except asyncio.CancelledError:
-            await release_old.wait()
-        yield b"old account"
-
-    async def new_stream():
-        await release_new.wait()
-        yield b"new account"
-
-    path = "/data/file"
-    await cache_io.apply_io(
-        cache,
-        IOResult(
-            reads={path: CachableAsyncIterator(old_stream())}, cache=[path]
-        ),
-    )
-    old = cache._drain_tasks[path]
-    await started.wait()
-    await cache.evict_prefix("/data/")
-    assert path not in cache._drain_tasks
-    await cache_io.apply_io(
-        cache,
-        IOResult(
-            reads={path: CachableAsyncIterator(new_stream())}, cache=[path]
-        ),
-    )
-    new = cache._drain_tasks[path]
-    try:
-        release_old.set()
-        await old
-        await asyncio.sleep(0)
-        assert await cache.get(path) is None
-        assert cache._drain_tasks[path] is new
-        release_new.set()
-        await new
-        assert await cache.get(path) == b"new account"
-    finally:
-        release_old.set()
-        release_new.set()
-        await asyncio.gather(old, new, return_exceptions=True)
-
-
-# ── max_drain_bytes (cancellable cache drain) ───────────────────────────
-
-
-def _make_chunked_stream(chunks: list[bytes]) -> CachableAsyncIterator:
-    async def _gen():
-        for c in chunks:
-            yield c
-
-    return CachableAsyncIterator(_gen())
-
-
-@pytest.mark.asyncio
-async def test_drain_survives_pipeline_close_quietly():
-    """SIGPIPE-style teardown must not starve the background drain.
-
-    `cat big.json | head -n 5` consumes one chunk, then pipes.py calls
-    close_quietly on the upstream stream. The drain must still pull the
-    remainder and cache the FULL file — a partial entry would poison
-    every later read of the path (integ regression: 8192-byte cache).
-    """
-    cache = RAMFileCacheStore()
-    chunks = [b"a" * 100 for _ in range(10)]
-    stream = _make_chunked_stream(chunks)
-    await stream.__anext__()
-    await close_quietly(stream)
-    io = IOResult(reads={"/big.json": stream}, cache=["/big.json"])
-    await cache_io.apply_io(cache, io)
-    await asyncio.sleep(0.05)
-    cached = await cache.get("/big.json")
-    assert cached is not None and len(cached) == 1000
-
-
-@pytest.mark.asyncio
-async def test_drain_default_budget_is_cache_limit():
-    """Default: drains up to cache_limit, never unbounded."""
-    cache = RAMFileCacheStore(cache_limit=500)  # max_drain_bytes=None
-    small = _make_chunked_stream([b"a" * 100 for _ in range(3)])
-    huge = _make_chunked_stream([b"b" * 100 for _ in range(10)])
-    io_small = IOResult(reads={"/small.txt": small}, cache=["/small.txt"])
-    io_huge = IOResult(reads={"/huge.txt": huge}, cache=["/huge.txt"])
-    await cache_io.apply_io(cache, io_small)
-    await cache_io.apply_io(cache, io_huge)
-    await asyncio.sleep(0.05)
-    cached = await cache.get("/small.txt")
-    assert cached is not None and len(cached) == 300
-    # 1000 bytes exceeds the 500-byte cache_limit: the drain stops
-    # instead of buffering a file the cache could never hold.
-    assert await cache.get("/huge.txt") is None
-
-
-@pytest.mark.asyncio
-async def test_drain_over_budget_releases_buffer_and_preserves_cache():
-    cache = RAMFileCacheStore(cache_limit=500, max_drain_bytes=300)
-    await cache.set("/warm.txt", b"w" * 200)
-    stream = _make_chunked_stream([b"c" * 100 for _ in range(10)])
-    io = IOResult(reads={"/big.txt": stream}, cache=["/big.txt"])
-    await cache_io.apply_io(cache, io)
-    await asyncio.sleep(0.05)
-    assert await cache.get("/warm.txt") == b"w" * 200
-    assert await cache.get("/big.txt") is None
-    assert stream.buffered_chunks == []
-
-
-@pytest.mark.asyncio
-async def test_drain_completes_below_threshold():
-    """Source is smaller than threshold → full drain, cache populated."""
-    cache = RAMFileCacheStore(max_drain_bytes=10000)
-    chunks = [b"x" * 100 for _ in range(5)]  # 500 bytes total
-    stream = _make_chunked_stream(chunks)
-    io = IOResult(reads={"/small.txt": stream}, cache=["/small.txt"])
-    await cache_io.apply_io(cache, io)
-    await asyncio.sleep(0.05)
-    cached = await cache.get("/small.txt")
-    assert cached is not None and len(cached) == 500
-
-
-@pytest.mark.asyncio
-async def test_drain_cancelled_above_threshold():
-    """Source exceeds threshold → drain stops, partial buffer NOT cached."""
-    cache = RAMFileCacheStore(max_drain_bytes=300)
-    chunks = [b"z" * 100 for _ in range(20)]  # 2000 bytes total
-    stream = _make_chunked_stream(chunks)
-    io = IOResult(reads={"/huge.txt": stream}, cache=["/huge.txt"])
-    await cache_io.apply_io(cache, io)
-    await asyncio.sleep(0.05)
-    assert await cache.get("/huge.txt") is None
-
-
-@pytest.mark.asyncio
-async def test_drain_threshold_per_task_not_shared():
-    """Each drain task has its own counter, not a shared workspace pool."""
-    cache = RAMFileCacheStore(max_drain_bytes=300)
-    s1 = _make_chunked_stream([b"a" * 100, b"a" * 100])  # 200 < 300
-    s2 = _make_chunked_stream([b"b" * 100, b"b" * 100])  # 200 < 300
-    io1 = IOResult(reads={"/a.txt": s1}, cache=["/a.txt"])
-    io2 = IOResult(reads={"/b.txt": s2}, cache=["/b.txt"])
-    await cache_io.apply_io(cache, io1)
-    await cache_io.apply_io(cache, io2)
-    await asyncio.sleep(0.05)
-    # Both fit individually under the per-task budget → both cached.
-    assert await cache.get("/a.txt") is not None
-    assert await cache.get("/b.txt") is not None
 
 
 # ── the token describes the bytes stored, not the other direction ────────
@@ -665,7 +451,6 @@ async def test_a_claimed_written_stream_left_open_evicts_the_entry(
     io = IOResult(writes={"/s3/f.txt": stream}, cache=["/s3/f.txt"])
     rec = _record("write", "/s3/f.txt", "etag-put-2", 3, stream)
     await cache_io.apply_io(cache, io, records=[rec])
-    assert cache._drain_tasks == {}
     assert not await cache.exists("/s3/f.txt")
 
 
@@ -708,28 +493,6 @@ async def test_apply_io_stamps_the_bound_on_a_plain_read():
     io = IOResult(reads={"/s3/f.txt": b"hello"}, cache=["/s3/f.txt"])
     await cache_io.apply_io(cache, io, _facts(45))
     assert cache._entries["/s3/f.txt"].ttl == 45
-
-
-@pytest.mark.asyncio
-async def test_apply_io_stamps_the_bound_on_a_background_drain():
-    """The large-object path stamps too.
-
-    A stream the command never exhausted is filled by the background
-    drain, which writes through ``add`` rather than ``set``. Missing it
-    would leave streamed reads -- the ones a staleness bound matters most
-    for -- as the only entries `bounded` never expires.
-    """
-    cache = RAMFileCacheStore()
-
-    async def _gen():
-        yield b"hello"
-
-    stream = CachableAsyncIterator(_gen())
-    io = IOResult(reads={"/s3/big.txt": stream}, cache=["/s3/big.txt"])
-    await cache_io.apply_io(cache, io, _facts(30))
-    await asyncio.sleep(0.05)
-    assert await cache.get("/s3/big.txt") == b"hello"
-    assert cache._entries["/s3/big.txt"].ttl == 30
 
 
 @pytest.mark.asyncio

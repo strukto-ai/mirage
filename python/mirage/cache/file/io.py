@@ -14,8 +14,7 @@
 
 import asyncio
 import logging
-from functools import partial
-from typing import Any, Callable
+from typing import Callable
 from weakref import WeakKeyDictionary
 
 from mirage.cache.file.mixin import FileCacheMixin
@@ -34,9 +33,6 @@ _mutation_locks: WeakKeyDictionary[FileCacheMixin, asyncio.Lock] = (
 )
 
 # The drain each read went to; a nested line hands its outer line them too.
-_draining: WeakKeyDictionary[CachableAsyncIterator, asyncio.Task[Any]] = (
-    WeakKeyDictionary()
-)
 
 
 def mutation_lock(cache: FileCacheMixin) -> asyncio.Lock:
@@ -202,19 +198,9 @@ async def _set_cached_locked(
         # bytes came out of this entry, so re-setting would drop the
         # backend fingerprint and force a ``fresh`` mount to refetch,
         # while fetching the blob back to compare it with itself is the
-        # file over the wire twice. Only `cp`'s
-        # guarded walk reads the backend raw with an entry standing,
-        # and only under ``bounded``, which already calls that entry
-        # trusted.
+        # file over the wire twice.
         return
     await cache.set(path, data, fingerprint=fingerprint, ttl=ttl)
-
-
-def _drop_drain_task(
-    cache: FileCacheMixin, path: str, task: asyncio.Task[Any]
-) -> None:
-    if cache._drain_tasks.get(path) is task:
-        cache._drain_tasks.pop(path, None)
 
 
 async def apply_io(
@@ -258,87 +244,13 @@ async def apply_io(
                     records,
                     cache_facts,
                 )
-            else:
-                if (
-                    hasattr(cache, "_drain_tasks")
-                    and path not in cache._drain_tasks
-                    and not await cache.exists(path)
-                ):
-                    task = asyncio.create_task(
-                        _background_drain(
-                            cache,
-                            path,
-                            data,
-                            cache.drain_budget,
-                            records,
-                            cache_facts,
-                        )
-                    )
-                    cache._drain_tasks[path] = task
-                    task.add_done_callback(
-                        partial(_drop_drain_task, cache, path)
-                    )
-                    _draining[data] = task
     for path in io.writes:
         if path in cache_set:
             continue
         if cache_facts is not None and not cache_facts(path).cacheable:
             continue
         await cache.remove(path)
-    # An unfinished read no drain owns is closed; unmount waits on it.
-    drains = getattr(cache, "_drain_tasks", {})
-    for path, data in io.reads.items():
-        if not isinstance(data, CachableAsyncIterator) or data.exhausted:
-            continue
-        owner = _draining.get(data)
-        if owner is None or drains.get(path) is not owner:
+    # An unfinished read keeps nothing and is closed; unmount waits on it.
+    for data in io.reads.values():
+        if isinstance(data, CachableAsyncIterator) and not data.exhausted:
             await data.discard()
-
-
-async def _background_drain(
-    cache: FileCacheMixin,
-    path: str,
-    it: CachableAsyncIterator,
-    max_bytes: int,
-    records: list[OpRecord] | None = None,
-    cache_facts: Callable[[str], CacheFacts] | None = None,
-) -> None:
-    """Drain an unconsumed read stream and write to cache.
-
-    Cancelled by workspace.close() if the stream is still draining at
-    shutdown. If the drain exceeds max_bytes (the cache's drain_budget)
-    without exhausting the source, the partial buffer is discarded and
-    the path is not cached (next read will fetch fresh from the
-    VFS). The fingerprint is looked up after the drain: streaming
-    backends stamp their read record lazily, once the GET response
-    arrives.
-    """
-    try:
-        materialized = await it.drain_bounded(max_bytes)
-        if materialized is not None:
-            fingerprint = latest_fingerprint(records, path)
-            async with mutation_lock(cache):
-                facts = cache_facts(path) if cache_facts is not None else None
-                # The large-object path stamps the bound too, or a
-                # streamed read would be the one thing `bounded` never
-                # expires.
-                if cache._drain_tasks.get(path) is asyncio.current_task() and (
-                    facts is None or facts.cacheable
-                ):
-                    await cache.add(
-                        path,
-                        materialized,
-                        fingerprint=fingerprint,
-                        ttl=facts.ttl if facts else None,
-                    )
-        else:
-            logger.info(
-                "cache drain budget exceeded for %s "
-                "(>%d bytes), skipping cache fill",
-                path,
-                max_bytes,
-            )
-    except asyncio.CancelledError:
-        logger.warning("background drain cancelled for %s", path)
-    except Exception:
-        logger.warning("background drain failed for %s", path, exc_info=True)

@@ -24,22 +24,10 @@ import { RAMFileCacheStore } from './ram.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 function makeStream(data: string): CachableAsyncIterator {
   async function* gen(): AsyncGenerator<Uint8Array> {
     await Promise.resolve()
     yield ENC.encode(data)
-  }
-  return new CachableAsyncIterator(gen())
-}
-
-function makeChunkedStream(chunks: Uint8Array[]): CachableAsyncIterator {
-  async function* gen(): AsyncGenerator<Uint8Array> {
-    await Promise.resolve()
-    for (const c of chunks) yield c
   }
   return new CachableAsyncIterator(gen())
 }
@@ -80,27 +68,24 @@ describe('cache population via applyIo', () => {
     expect(await cache.get('/f.txt')).toBeNull()
   })
 
-  it.each([
-    [{}, 'abc'],
-    [{ '/f': ENC.encode('z') }, null],
-  ])('leaves a read to its live drain (writes %j)', async (writes, cached) => {
-    // The outer line of an `eval` gets the read its inner line drains; a write
-    // there drops the drain, and the read is closed instead. Mirrors Python's
-    // test_apply_io_leaves_a_read_to_its_live_drain.
+  it('closes an unfinished read and keeps nothing', async () => {
+    // Mirrors Python's test_apply_io_closes_an_unfinished_read_and_keeps_nothing.
+    const closed: string[] = []
     async function* source(): AsyncGenerator<Uint8Array> {
-      for (const chunk of ['a', 'b', 'c']) {
-        await sleep(1)
-        yield ENC.encode(chunk)
+      try {
+        for (const chunk of ['a', 'b', 'c']) {
+          await Promise.resolve()
+          yield ENC.encode(chunk)
+        }
+      } finally {
+        closed.push('/f')
       }
     }
     const cache = new RAMFileCacheStore()
     const stream = new CachableAsyncIterator(source())
     expect(DEC.decode((await stream.next()).value as Uint8Array)).toBe('a')
     await applyIo(cache, new IOResult({ reads: { '/f': stream }, cache: ['/f'] }))
-    await applyIo(cache, new IOResult({ reads: { '/f': stream }, writes, cache: ['/f'] }))
-    await Promise.all([...cache.drainTasks.values()])
-    const entry = await cache.get('/f')
-    expect([entry === null ? null : DEC.decode(entry), stream.exhausted]).toEqual([cached, true])
+    expect([await cache.get('/f'), stream.exhausted, closed]).toEqual([null, true, ['/f']])
   })
 
   it('stores all paths in the cache list', async () => {
@@ -219,22 +204,6 @@ describe('backend fingerprint threading', () => {
     expect(await cache.isFresh('/s3/f.txt', 'etag-3')).toBe(false)
   })
 
-  it('picks up a fingerprint recorded during the background drain', async () => {
-    const cache = new RAMFileCacheStore()
-    const records: OpRecord[] = []
-    async function* gen(): AsyncGenerator<Uint8Array> {
-      await Promise.resolve()
-      records.push(readRecord('/s3/f.txt', 'etag-multipart-2'))
-      yield ENC.encode('hello')
-    }
-    const stream = new CachableAsyncIterator(gen())
-    const io = new IOResult({ reads: { '/s3/f.txt': stream }, cache: ['/s3/f.txt'] })
-    await applyIo(cache, io, undefined, records)
-    await sleep(50)
-    expect(DEC.decode((await cache.get('/s3/f.txt')) ?? undefined)).toBe('hello')
-    expect(await cache.isFresh('/s3/f.txt', 'etag-multipart-2')).toBe(true)
-  })
-
   it('does not refetch the blob on a warm re-apply', async () => {
     // A warm re-apply asks whether the entry exists, never for its bytes.
     // The read-through already served them out of that entry, so fetching
@@ -328,139 +297,6 @@ describe('edge cases', () => {
   it('empty IOResult is a no-op', async () => {
     const cache = new RAMFileCacheStore()
     await applyIo(cache, new IOResult())
-  })
-})
-
-describe('background drain', () => {
-  it('retires an evicted fill before a replacement starts at the same path', async () => {
-    const cache = new RAMFileCacheStore()
-    let releaseOld = (): void => undefined
-    let releaseNew = (): void => undefined
-    const oldGate = new Promise<void>((resolve) => {
-      releaseOld = resolve
-    })
-    const newGate = new Promise<void>((resolve) => {
-      releaseNew = resolve
-    })
-    async function* stream(gate: Promise<void>, data: string) {
-      await gate
-      yield ENC.encode(data)
-    }
-    const path = '/data/file'
-    await applyIo(
-      cache,
-      new IOResult({
-        reads: { [path]: new CachableAsyncIterator(stream(oldGate, 'old account')) },
-        cache: [path],
-      }),
-    )
-    const old = cache.drainTasks.get(path)
-    await cache.evictPrefix('/data/')
-    expect(cache.drainTasks.has(path)).toBe(false)
-    await applyIo(
-      cache,
-      new IOResult({
-        reads: { [path]: new CachableAsyncIterator(stream(newGate, 'new account')) },
-        cache: [path],
-      }),
-    )
-    const fresh = cache.drainTasks.get(path)
-    try {
-      releaseOld()
-      await old
-      expect(await cache.get(path)).toBeNull()
-      expect(cache.drainTasks.get(path)).toBe(fresh)
-      releaseNew()
-      await fresh
-      expect(DEC.decode((await cache.get(path)) ?? undefined)).toBe('new account')
-    } finally {
-      releaseOld()
-      releaseNew()
-      await Promise.allSettled([old, fresh])
-    }
-  })
-
-  it('does not start a duplicate drain for the same path', async () => {
-    const cache = new RAMFileCacheStore()
-    const io1 = new IOResult({ reads: { '/f.txt': makeStream('first') }, cache: ['/f.txt'] })
-    await applyIo(cache, io1)
-    expect(cache.drainTasks.has('/f.txt')).toBe(true)
-    const io2 = new IOResult({ reads: { '/f.txt': makeStream('second') }, cache: ['/f.txt'] })
-    await applyIo(cache, io2)
-    expect([...cache.drainTasks.keys()].filter((k) => k === '/f.txt')).toHaveLength(1)
-    await sleep(50)
-    expect(DEC.decode((await cache.get('/f.txt')) ?? undefined)).toBe('first')
-  })
-
-  it('does not drain when the path is already cached', async () => {
-    const cache = new RAMFileCacheStore()
-    await cache.set('/f.txt', ENC.encode('cached'))
-    const io = new IOResult({ reads: { '/f.txt': makeStream('new') }, cache: ['/f.txt'] })
-    await applyIo(cache, io)
-    expect(cache.drainTasks.has('/f.txt')).toBe(false)
-    expect(DEC.decode((await cache.get('/f.txt')) ?? undefined)).toBe('cached')
-  })
-})
-
-describe('maxDrainBytes (cancellable cache drain)', () => {
-  it('defaults the budget to cacheLimit, never unbounded', async () => {
-    const cache = new RAMFileCacheStore({ limit: 500 })
-    const small = makeChunkedStream(Array.from({ length: 3 }, () => new Uint8Array(100).fill(97)))
-    const huge = makeChunkedStream(Array.from({ length: 10 }, () => new Uint8Array(100).fill(98)))
-    await applyIo(cache, new IOResult({ reads: { '/small.txt': small }, cache: ['/small.txt'] }))
-    await applyIo(cache, new IOResult({ reads: { '/huge.txt': huge }, cache: ['/huge.txt'] }))
-    await sleep(50)
-    expect((await cache.get('/small.txt'))?.byteLength).toBe(300)
-    expect(await cache.get('/huge.txt')).toBeNull()
-  })
-
-  it('releases an over-budget buffer without evicting warm data', async () => {
-    const cache = new RAMFileCacheStore({ limit: 500, maxDrainBytes: 300 })
-    await cache.set('/warm.txt', new Uint8Array(200).fill(119))
-    const stream = makeChunkedStream(Array.from({ length: 10 }, () => new Uint8Array(100).fill(99)))
-    const io = new IOResult({ reads: { '/big.txt': stream }, cache: ['/big.txt'] })
-    await applyIo(cache, io)
-    await sleep(50)
-    expect((await cache.get('/warm.txt'))?.byteLength).toBe(200)
-    expect(await cache.get('/big.txt')).toBeNull()
-    expect(stream.bufferedChunks).toHaveLength(0)
-  })
-
-  it('drain completes below threshold', async () => {
-    const cache = new RAMFileCacheStore({ maxDrainBytes: 10000 })
-    const chunks = Array.from({ length: 5 }, () => new Uint8Array(100).fill(120))
-    const io = new IOResult({
-      reads: { '/small.txt': makeChunkedStream(chunks) },
-      cache: ['/small.txt'],
-    })
-    await applyIo(cache, io)
-    await sleep(50)
-    const cached = await cache.get('/small.txt')
-    expect(cached).not.toBeNull()
-    expect(cached?.byteLength).toBe(500)
-  })
-
-  it('drain stops above threshold and skips the cache fill', async () => {
-    const cache = new RAMFileCacheStore({ maxDrainBytes: 300 })
-    const chunks = Array.from({ length: 20 }, () => new Uint8Array(100).fill(122))
-    const io = new IOResult({
-      reads: { '/huge.txt': makeChunkedStream(chunks) },
-      cache: ['/huge.txt'],
-    })
-    await applyIo(cache, io)
-    await sleep(50)
-    expect(await cache.get('/huge.txt')).toBeNull()
-  })
-
-  it('threshold is per drain task, not shared', async () => {
-    const cache = new RAMFileCacheStore({ maxDrainBytes: 300 })
-    const s1 = makeChunkedStream([new Uint8Array(100).fill(97), new Uint8Array(100).fill(97)])
-    const s2 = makeChunkedStream([new Uint8Array(100).fill(98), new Uint8Array(100).fill(98)])
-    await applyIo(cache, new IOResult({ reads: { '/a.txt': s1 }, cache: ['/a.txt'] }))
-    await applyIo(cache, new IOResult({ reads: { '/b.txt': s2 }, cache: ['/b.txt'] }))
-    await sleep(50)
-    expect(await cache.get('/a.txt')).not.toBeNull()
-    expect(await cache.get('/b.txt')).not.toBeNull()
   })
 })
 
@@ -570,7 +406,6 @@ describe('writtenVerdict', () => {
     if (discard) await stream.discard()
     const io = new IOResult({ writes: { '/s3/f.txt': stream }, cache: ['/s3/f.txt'] })
     await applyIo(cache, io, undefined, [opRecord('write', '/s3/f.txt', 'etag-put-2', 3, stream)])
-    expect(cache.drainTasks.size).toBe(0)
     expect(await cache.exists('/s3/f.txt')).toBe(false)
   })
 
@@ -623,24 +458,6 @@ describe('applyIo bound stamping', () => {
     await applyIo(cache, io, facts(45))
     expect(boundOf(cache, '/s3/f.txt')).toBe(45)
     expect(await cache.isUnbounded('/s3/f.txt')).toBe(false)
-  })
-
-  // The large-object path stamps too. A stream the command never
-  // exhausted is filled by the background drain, which writes through
-  // `add` rather than `set`; missing it would leave streamed reads -- the
-  // ones a staleness bound matters most for -- as the only entries
-  // `bounded` never expires.
-  it('stamps the bound on a background drain', async () => {
-    const cache = new RAMFileCacheStore()
-    const io = new IOResult({
-      reads: { '/s3/big.txt': makeStream('hello') },
-      cache: ['/s3/big.txt'],
-    })
-    await applyIo(cache, io, facts(30))
-    await sleep(50)
-    expect(DEC.decode((await cache.get('/s3/big.txt')) ?? undefined)).toBe('hello')
-    expect(boundOf(cache, '/s3/big.txt')).toBe(30)
-    expect(await cache.isUnbounded('/s3/big.txt')).toBe(false)
   })
 
   // `cacheable` is read first and short-circuits, so the bound is never
