@@ -182,13 +182,13 @@ async def _run_records(
         io = await ws.shell(line)
         await io.stdout_str()
         assert io.exit_code == 0, (line, await io.stderr_str())
-    ws._ops.records.clear()
+    ws._files.records.clear()
     for line in script:
         io = await ws.shell(line)
         await io.stdout_str()
         # A loud failure trips the exit code; a silent no-op, the exact ledger.
         assert io.exit_code == 0, (line, await io.stderr_str())
-    records = list(ws._ops.records)
+    records = list(ws._files.records)
     # touch records write, so only the op door reaches create.
     scope = RecordingScope()
     try:
@@ -292,12 +292,12 @@ async def _cat_mount_ids() -> tuple[list[str | None], str | None]:
     try:
         io = await ws.shell("mkdir -p /m/m && echo x > /m/m/k.txt")
         assert io.exit_code == 0
-        ws._ops.records.clear()
+        ws._files.records.clear()
         io = await ws.shell("cat /m/m/k.txt")
         assert await io.stdout_str() == "x\n"
         ids = [
             r.mount_id
-            for r in ws._ops.records
+            for r in ws._files.records
             if (r.op, r.path) == ("read", K)
         ]
         return ids, ws.mount("/m").mount_id

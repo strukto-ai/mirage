@@ -50,7 +50,7 @@ class FuseManager:
 
     def setup(
         self,
-        ops: Files,
+        files: Files,
         prefix: str = "/",
         mountpoint: str | None = None,
         session: SessionState | None = None,
@@ -59,7 +59,7 @@ class FuseManager:
         """Mount the ops tree and return the live mountpoint.
 
         Args:
-            ops (Files): the op facade to serve.
+            files (Files): the op facade to serve.
             prefix (str): mount root; non-empty scopes the tree.
             mountpoint (str | None): where to mount; None picks a temporary
                 directory appropriate for the backend.
@@ -103,7 +103,7 @@ class FuseManager:
             else self._mountpoint
         )
         self._thread = mount_background(
-            ops,
+            files,
             self._kernel_mountpoint,
             root_prefix=prefix,
             session=session,

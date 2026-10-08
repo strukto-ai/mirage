@@ -398,11 +398,11 @@ async def test_timeout_preserves_partial_records_and_logs(
     sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.1)
     ws = _ws()
     await ws.shell("echo hello > /data/f.txt")
-    before = len(ws._ops.records)
+    before = len(ws._files.records)
     with caplog.at_level(logging.DEBUG, logger="mirage.workspace.workspace"):
         r = await ws.shell("cat /data/f.txt; sleep 5")
     assert r.exit_code == 124
-    assert len(ws._ops.records) > before
+    assert len(ws._files.records) > before
     assert any("timed out" in m for m in caplog.messages)
 
 

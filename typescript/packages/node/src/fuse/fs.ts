@@ -54,8 +54,8 @@ export interface MirageFSOptions {
 export class MirageFS {
   readonly core: MountCore
 
-  constructor(ops: Files, options: MirageFSOptions = {}) {
-    this.core = new MountCore(ops, options)
+  constructor(files: Files, options: MirageFSOptions = {}) {
+    this.core = new MountCore(files, options)
   }
 
   /** Drain and return accumulated op records (mirrors Python's drainOps). */

@@ -89,7 +89,7 @@ export interface MountCoreOptions {
  * record; reaching a backend directly would skip the door.
  */
 export class MountCore {
-  readonly ops: Files
+  readonly files: Files
   readonly session: SessionState | null
   private readonly now: Date
   private readonly root: string
@@ -112,8 +112,8 @@ export class MountCore {
   private readonly uid: number
   private readonly gid: number
 
-  constructor(ops: Files, options: MountCoreOptions = {}) {
-    this.ops = ops
+  constructor(files: Files, options: MountCoreOptions = {}) {
+    this.files = files
     this.now = new Date()
     this.root = options.rootPrefix !== undefined ? rstripSlash(options.rootPrefix) : ''
     this.uid = typeof process.getuid === 'function' ? process.getuid() : 0
@@ -209,7 +209,7 @@ export class MountCore {
    * resolve them against the host root and escape the mountpoint.
    */
   linkTarget(path: string): string | null {
-    const links = this.ops.links
+    const links = this.files.links
     if (links === null) return null
     const target = links.readlink(this.resolve(path))
     if (target === null) return null
@@ -244,7 +244,7 @@ export class MountCore {
    */
   linkStat(target: string, virtual: string): FuseAttr {
     const entry = this.fileStat(new TextEncoder().encode(target).byteLength)
-    const row = this.ops.links?.linkStatAt(virtual) ?? null
+    const row = this.files.links?.linkStatAt(virtual) ?? null
     if (row !== null) this.applyStatAttrs(entry, row)
     entry.mode = 0o120777
     return entry
@@ -282,7 +282,7 @@ export class MountCore {
       try {
         for (;;) {
           const gen = this.prefetchGen.get(key) ?? 0
-          const data = await this.op(() => this.ops.read(this.resolve(path)))
+          const data = await this.op(() => this.files.read(this.resolve(path)))
           // The file changed while this read was out: what came back is
           // stale, so read again rather than install it.
           if ((this.prefetchGen.get(key) ?? 0) !== gen) continue
@@ -327,7 +327,7 @@ export class MountCore {
 
   /** Whether `path` names a link entry: removing it takes the link, never its target's bytes. */
   private namesLink(path: string): boolean {
-    return this.ops.links?.isLink(this.resolve(path)) === true
+    return this.files.links?.isLink(this.resolve(path)) === true
   }
 
   /**
@@ -354,13 +354,13 @@ export class MountCore {
 
   /** Drain and return accumulated op records (mirrors Python's drainOps). */
   drainOps(): OpRecord[] {
-    const records = [...this.ops.records]
-    this.ops.records.length = 0
+    const records = [...this.files.records]
+    this.files.records.length = 0
     return records
   }
 
   private async writeFile(path: string, data: Uint8Array): Promise<void> {
-    await this.op(() => this.ops.write(this.resolve(path), data))
+    await this.op(() => this.files.write(this.resolve(path), data))
   }
 
   /**
@@ -378,7 +378,7 @@ export class MountCore {
     let landed = 0
     try {
       for (const [offset, data] of runs) {
-        await this.op(() => this.ops.pwrite(target, data, offset))
+        await this.op(() => this.files.pwrite(target, data, offset))
         landed += 1
       }
     } finally {
@@ -401,7 +401,7 @@ export class MountCore {
     // namespace links, so stat on a link path reports the target.
     const target = this.linkTarget(path)
     if (target !== null) return this.linkStat(target, this.resolve(path))
-    const s = await this.op(() => this.ops.stat(this.resolve(path)))
+    const s = await this.op(() => this.files.stat(this.resolve(path)))
     if (s.type === FileType.DIRECTORY) {
       return this.applyStatAttrs(this.dirStat(), s)
     }
@@ -431,7 +431,7 @@ export class MountCore {
     // itself, so the core only normalizes entry shapes and drops macOS
     // metadata names.
     const names = new Set<string>()
-    const entries = await this.op(() => this.ops.readdir(this.resolve(path)))
+    const entries = await this.op(() => this.files.readdir(this.resolve(path)))
     for (const e of entries) {
       const part = rstripSlash(e).split('/').pop() ?? ''
       if (part !== '' && !isMacosMetadata(part)) names.add(part)
@@ -442,7 +442,7 @@ export class MountCore {
   async read(path: string, fd: number, pos: number, len: number): Promise<Uint8Array> {
     const ctx = this.handles.get(fd)
     if (ctx?.live === true)
-      return this.op(() => this.ops.read(this.resolve(ctx.path), { offset: pos, size: len }))
+      return this.op(() => this.files.read(this.resolve(ctx.path), { offset: pos, size: len }))
     // Filetype-aware read: no `raw: true`, so an extension with a
     // registered renderer surfaces as rendered text. Mirage registers
     // none by default, so this reads raw bytes until a mount adds one.
@@ -451,10 +451,12 @@ export class MountCore {
     if (ctx?.chunked !== undefined && ctx.data === undefined) return ctx.chunked.pread(pos, len)
     if (ctx !== undefined && ctx.data === undefined) {
       const cached = this.cachedData(path)
-      ctx.data = cached ?? (await this.op(() => this.ops.read(this.resolve(path))))
+      ctx.data = cached ?? (await this.op(() => this.files.read(this.resolve(path))))
     }
     const data =
-      ctx?.data ?? this.cachedData(path) ?? (await this.op(() => this.ops.read(this.resolve(path))))
+      ctx?.data ??
+      this.cachedData(path) ??
+      (await this.op(() => this.files.read(this.resolve(path))))
     return data.subarray(pos, pos + len)
   }
 
@@ -476,7 +478,7 @@ export class MountCore {
       // "create empty" from "write bytes" get the right code path. Falls back
       // to writeFile(empty) when the VFS doesn't expose `create`.
       try {
-        await this.op(() => this.ops.create(this.resolve(path)))
+        await this.op(() => this.files.create(this.resolve(path)))
       } catch (dispatchErr) {
         if (!isMissingOp(dispatchErr, 'create')) throw dispatchErr
         await this.writeFile(path, new Uint8Array(0))
@@ -487,7 +489,7 @@ export class MountCore {
   }
 
   async mkdir(path: string): Promise<void> {
-    await this.op(() => this.ops.mkdir(this.resolve(path)))
+    await this.op(() => this.files.mkdir(this.resolve(path)))
   }
 
   readlink(path: string): string {
@@ -507,9 +509,9 @@ export class MountCore {
     // The write routes through the op door like every other FUSE op, so
     // session grants and admission policies refuse a scoped kernel
     // mount exactly like a scoped shell.
-    if (this.ops.links === null) throw errnoError('EROFS', 'workspace has no namespace links')
+    if (this.files.links === null) throw errnoError('EROFS', 'workspace has no namespace links')
     const stored = src.startsWith('/') ? this.resolve(src) : src
-    await this.op(() => this.ops.symlink(this.resolve(dest), stored))
+    await this.op(() => this.files.symlink(this.resolve(dest), stored))
   }
 
   /**
@@ -526,7 +528,7 @@ export class MountCore {
     await this.mutate(this.identity(path), async () => {
       await this.removing(path, async () => {
         await this.hold(path)
-        await this.op(() => this.ops.unlink(this.resolve(path)))
+        await this.op(() => this.files.unlink(this.resolve(path)))
       })
       await this.changed(path, false)
     })
@@ -563,7 +565,7 @@ export class MountCore {
     if (hydrated.length === 0) return
     let data: Uint8Array
     try {
-      data = await this.op(() => this.ops.read(this.resolve(path)))
+      data = await this.op(() => this.files.read(this.resolve(path)))
     } catch (err) {
       // The mutation has already landed, so a refresh that fails must not
       // report it as failed: an O_TRUNC open would fail after the old
@@ -588,7 +590,7 @@ export class MountCore {
       const target = this.resolve(dst)
       await this.removing(dst, async () => {
         await this.hold(dst)
-        await this.op(() => this.ops.rename(source, target))
+        await this.op(() => this.files.rename(source, target))
       })
       for (const ctx of this.handles.values()) {
         if (ctx.key === source || ctx.key.startsWith(`${source}/`)) {
@@ -606,7 +608,7 @@ export class MountCore {
   // first was one extra round trip per call on an API-backed mount, and the
   // catch that wrapped it swallowed whatever readdir raised.
   async rmdir(path: string): Promise<void> {
-    await this.op(() => this.ops.rmdir(this.resolve(path)))
+    await this.op(() => this.files.rmdir(this.resolve(path)))
   }
 
   /**
@@ -616,7 +618,7 @@ export class MountCore {
    */
   identity(path: string): string {
     const virtual = this.resolve(path)
-    const links = this.ops.links
+    const links = this.files.links
     return links === null ? virtual : links.follow(virtual)
   }
 
@@ -660,10 +662,10 @@ export class MountCore {
       // backends). Fall back to read/resize/write for mounts that don't
       // expose one.
       try {
-        await this.op(() => this.ops.truncate(this.resolve(path), size))
+        await this.op(() => this.files.truncate(this.resolve(path), size))
       } catch (dispatchErr) {
         if (!isMissingOp(dispatchErr, 'truncate')) throw dispatchErr
-        const data = await this.op(() => this.ops.read(this.resolve(path), { raw: true }))
+        const data = await this.op(() => this.files.read(this.resolve(path), { raw: true }))
         const out = new Uint8Array(size)
         out.set(data.subarray(0, Math.min(data.byteLength, size)), 0)
         await this.writeFile(path, out)
@@ -701,25 +703,25 @@ export class MountCore {
     value: Uint8Array,
     opts: { create?: boolean; replace?: boolean } = {},
   ): Promise<void> {
-    await this.op(() => this.ops.setxattr(this.resolve(path), name, Uint8Array.from(value), opts))
+    await this.op(() => this.files.setxattr(this.resolve(path), name, Uint8Array.from(value), opts))
   }
 
   /** One attribute, the backend's own facts included; ENODATA when unset. */
   async getxattr(path: string, name: string): Promise<Uint8Array> {
-    return this.op(() => this.ops.getxattr(this.resolve(path), name))
+    return this.op(() => this.files.getxattr(this.resolve(path), name))
   }
 
   async listxattr(path: string): Promise<string[]> {
-    return this.op(() => this.ops.listxattr(this.resolve(path)))
+    return this.op(() => this.files.listxattr(this.resolve(path)))
   }
 
   async removexattr(path: string, name: string): Promise<void> {
-    await this.op(() => this.ops.removexattr(this.resolve(path), name))
+    await this.op(() => this.files.removexattr(this.resolve(path), name))
   }
 
   async open(path: string, flags = 0): Promise<number> {
     await this.removals.get(this.identity(path))
-    const s = await this.op(() => this.ops.stat(this.resolve(path)))
+    const s = await this.op(() => this.files.stat(this.resolve(path)))
     const ctx: Handle = { path, key: this.identity(path), live: s.extra['mirage.live'] === true }
     if (s.type === FileType.DIRECTORY) return this.handles.add(ctx)
     if ((flags & fsConstants.O_TRUNC) !== 0) {
@@ -745,7 +747,7 @@ export class MountCore {
       // moved all of it to answer a `head`. Mirrors Python's MountCore.open.
       // The fetch reads the handle's path as it is then: a rename moves it.
       ctx.chunked = new ChunkedHandle(path, s.size, (offset, size) =>
-        this.op(() => this.ops.read(this.resolve(ctx.path), { offset, size })),
+        this.op(() => this.files.read(this.resolve(ctx.path), { offset, size })),
       )
     }
     return this.handles.add(ctx)
@@ -770,7 +772,7 @@ export class MountCore {
     if (held.length === 0) return
     let data: Uint8Array
     try {
-      data = await this.op(() => this.ops.read(this.resolve(path)))
+      data = await this.op(() => this.files.read(this.resolve(path)))
     } catch (err) {
       console.warn(`fuse: holding ${path} before it goes failed: ${String(err)}`)
       return

@@ -331,7 +331,7 @@ async def test_o_trunc_open_hydrates_through_the_renderer():
     await ws.shell("tee /data/books.tally", stdin=b"0123456789")
     core = MountCore(_Sizeless(ws.vfs))
     fh = core.open("/data/books.tally", os.O_WRONLY | os.O_TRUNC)
-    assert core._run(core._ops.read("/data/books.tally", raw=True)) == b""
+    assert core._run(core._files.read("/data/books.tally", raw=True)) == b""
     rendered = b"RENDERED-AND-MUCH-LONGER"
     assert core.getattr("/data/books.tally", fh)["st_size"] == len(rendered)
     assert core.read("/data/books.tally", 100, 0, fh) == rendered
@@ -447,7 +447,7 @@ async def test_buffered_write_flush_lands_in_the_stored_bytes():
     fh = core.open("/data/books.tally")
     core.write("/data/books.tally", b"XY", 4, fh)
     core.release(fh)
-    stored = core._run(core._ops.read("/data/books.tally", raw=True))
+    stored = core._run(core._files.read("/data/books.tally", raw=True))
     assert stored == b"0123XY6789"
 
 

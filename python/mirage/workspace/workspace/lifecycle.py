@@ -86,7 +86,7 @@ class CloseDeps:
 
 
 def patch_process(
-    ops: Files,
+    files: Files,
     loop: asyncio.AbstractEventLoop,
 ) -> list[Patched]:
     """Point ``open`` and ``os`` at the workspace for a ``with`` block.
@@ -110,14 +110,14 @@ def patch_process(
     is the one that shows it; any pooled async client would).
 
     Args:
-        ops (Files): the workspace's op facade.
+        files (Files): the workspace's op facade.
         loop (asyncio.AbstractEventLoop): the block's loop.
 
     Returns:
         list[Patched]: what the block replaced, for ``unpatch_process``.
     """
-    opener = cast(Any, make_open(ops, loop))
-    routing = os_routing(ops, loop)
+    opener = cast(Any, make_open(files, loop))
+    routing = os_routing(files, loop)
     patched: list[Patched] = [
         (builtins, "open", builtins.open),
         (io, "open", io.open),

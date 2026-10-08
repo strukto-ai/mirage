@@ -212,7 +212,7 @@ def _await_ready(
 
 
 def mount_background(
-    ops: Files,
+    files: Files,
     mountpoint: str,
     root_prefix: str = "",
     session: SessionState | None = None,
@@ -221,7 +221,7 @@ def mount_background(
     """Mount in a background thread and return once the tree is live.
 
     Args:
-        ops (Files): the op facade to serve.
+        files (Files): the op facade to serve.
         mountpoint (str): where to mount.
         root_prefix (str): mount root; non-empty scopes the tree.
         session (SessionState | None): bind ops to this session's mount grants.
@@ -231,10 +231,10 @@ def mount_background(
         threading.Thread: the thread serving the mount.
     """
     resolved = prepare_backend(
-        backend, ops=ops, mountpoint=mountpoint, root_prefix=root_prefix
+        backend, files=files, mountpoint=mountpoint, root_prefix=root_prefix
     )
     fuse = load_fuse()
-    fs = MirageFS(ops, root_prefix=root_prefix, session=session)
+    fs = MirageFS(files, root_prefix=root_prefix, session=session)
     _prepare_mountpoint(mountpoint)
     t = threading.Thread(
         target=_run_fuse,
@@ -247,7 +247,7 @@ def mount_background(
 
 
 def mount(
-    ops: Files | None = None,
+    files: Files | None = None,
     mountpoint: str = "",
     foreground: bool = True,
     fs: MirageFS | None = None,
@@ -255,11 +255,11 @@ def mount(
     post_fork=None,
     backend: str | MountBackend = MountBackend.FUSE,
 ) -> None:
-    resolved = prepare_backend(backend, ops=ops, mountpoint=mountpoint)
+    resolved = prepare_backend(backend, files=files, mountpoint=mountpoint)
     if fs is None:
-        if ops is None:
+        if files is None:
             raise ValueError("mount requires either ops or a prebuilt fs")
-        fs = MirageFS(ops)
+        fs = MirageFS(files)
     fuse = load_fuse()
     _prepare_mountpoint(mountpoint)
     if daemon:

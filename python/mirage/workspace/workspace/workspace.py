@@ -474,7 +474,7 @@ class Workspace:
         # and the policy gates fire exactly once, at that door. It runs
         # as the default session, as a bare ``shell`` does, so the
         # default profile confines it too.
-        self._ops = Files(
+        self._files = Files(
             self._registry.mount_rows(),
             observer=self.observer,
             agent_id=agent_id or "",
@@ -482,10 +482,10 @@ class Workspace:
             dispatch=self._dispatcher.dispatch,
             bind=self._bind_session,
         )
-        self._kernel_mounts = KernelMounts(self._ops, self._session_mgr)
+        self._kernel_mounts = KernelMounts(self._files, self._session_mgr)
         self._documents = Documents(
             self._registry,
-            self._ops,
+            self._files,
             self._session_mgr,
             lambda: (
                 get_current_session_unless_foreign(self._session_mgr)
@@ -702,7 +702,7 @@ class Workspace:
         Named as TypeScript names it (`ws.vfs`), so one host API reads the
         same in both languages.
         """
-        return self._ops
+        return self._files
 
     @property
     def tools(self) -> MirageToolOperations:
@@ -871,7 +871,7 @@ class Workspace:
             vfs_ref=vfs_ref,
         )
         prepare_added_mount(self._registry, entry, previous)
-        self._ops.set_mounts(self._registry.mount_rows())
+        self._files.set_mounts(self._registry.mount_rows())
         return entry
 
     async def unmount(self, prefix: str) -> None:
@@ -879,7 +879,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         await unmount_prefix(
             self._registry,
-            self._ops,
+            self._files,
             prefix,
             lambda: self._shutting_down,
             self._shared_mounts,
@@ -897,7 +897,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         mode = parse_mount_mode(mode)
         self._registry.mount_for_prefix(prefix).mode = mode
-        self._ops.set_mounts(self._registry.mount_rows())
+        self._files.set_mounts(self._registry.mount_rows())
 
     def add_fuse_mount(
         self,
@@ -1247,7 +1247,7 @@ class Workspace:
 
     def __enter__(self) -> "Workspace":
         self._vfs_loop = asyncio.new_event_loop()
-        self._patched = patch_process(self._ops, self._vfs_loop)
+        self._patched = patch_process(self._files, self._vfs_loop)
         return self
 
     def __exit__(
@@ -2189,7 +2189,7 @@ class Workspace:
             registry=self._registry,
             dispatcher=self._dispatcher,
             observer=self.observer,
-            records=self._ops.records,
+            records=self._files.records,
             job_table=self.job_table,
             agent_id=self._default_agent_id,
             runtimes=self._runtimes,

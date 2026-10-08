@@ -44,7 +44,7 @@ class MirageFS:
     File Provider adapter can reuse them unchanged.
 
     Args:
-        ops (Files): the workspace op facade every callback routes to.
+        files (Files): the workspace op facade every callback routes to.
         root_prefix (str): mount root; non-empty scopes the tree to one mount.
         session (SessionState | None): bind every op to this
             session's mount grants.
@@ -54,11 +54,11 @@ class MirageFS:
 
     def __init__(
         self,
-        ops: Files,
+        files: Files,
         root_prefix: str = "",
         session: SessionState | None = None,
     ) -> None:
-        self.core = MountCore(ops, root_prefix=root_prefix, session=session)
+        self.core = MountCore(files, root_prefix=root_prefix, session=session)
 
     def _call(self, fn: Callable[..., Any], *args: Any) -> Any:
         """Run a core call, translating failures into FUSE error codes.

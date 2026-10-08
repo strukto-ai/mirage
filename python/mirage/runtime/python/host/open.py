@@ -28,9 +28,9 @@ OpenResult: TypeAlias = IO[str] | IO[bytes] | MirageFile
 
 class MountedOpen:
     def __init__(
-        self, ops: Files, loop: asyncio.AbstractEventLoop | None = None
+        self, files: Files, loop: asyncio.AbstractEventLoop | None = None
     ) -> None:
-        self._ops = ops
+        self._files = files
         self._loop = loop
         self._original = builtins.open
 
@@ -53,7 +53,7 @@ class MountedOpen:
         if (
             isinstance(path, str)
             and not in_host_io()
-            and self._ops.is_mounted(path)
+            and self._files.is_mounted(path)
         ):
             if not closefd:
                 raise ValueError("Cannot use closefd=False with file name")
@@ -64,7 +64,7 @@ class MountedOpen:
             if buffering == 0 and "b" not in mode:
                 raise ValueError("can't have unbuffered text I/O")
             return MirageFile(
-                self._ops,
+                self._files,
                 path,
                 mode,
                 loop=self._loop,
@@ -88,15 +88,15 @@ class MountedOpen:
 
 
 def make_open(
-    ops: Files, loop: asyncio.AbstractEventLoop | None = None
+    files: Files, loop: asyncio.AbstractEventLoop | None = None
 ) -> MountedOpen:
     """Create a patched open() that routes mounted paths through ops.
 
     Args:
-        ops (Files): The ops instance with mount table.
+        files (Files): The facade with the mount table.
         loop (asyncio.AbstractEventLoop | None): Shared event loop.
 
     Returns:
         Callable: A patched open function.
     """
-    return MountedOpen(ops, loop)
+    return MountedOpen(files, loop)

@@ -623,9 +623,9 @@ describe('listDir cancellation', () => {
     // so the only deterministic window is the moment the listing lands.
     // Aborting as `readdir` returns puts the signal exactly there: with
     // the walk unguarded it would classify every child regardless.
-    const ops = ws.vfs
-    const inner = ops.readdir.bind(ops)
-    ops.readdir = async (path: string): Promise<string[]> => {
+    const files = ws.vfs
+    const inner = files.readdir.bind(files)
+    files.readdir = async (path: string): Promise<string[]> => {
       const listing = await inner(path)
       controller.abort()
       return listing

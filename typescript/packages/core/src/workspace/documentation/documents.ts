@@ -33,7 +33,7 @@ export class Documents {
 
   constructor(
     private readonly registry: MountRegistry,
-    private readonly ops: Files,
+    private readonly files: Files,
     private readonly manager: SessionManager,
     private readonly session: () => SessionState,
     private readonly profile: (name: string) => CompiledProfile,
@@ -108,7 +108,7 @@ export class Documents {
   }
 
   async expose(kind: 'vfs' | 'skill', path: string, session: SessionState | null): Promise<void> {
-    const directory = await this.ops.stat(parent(path))
+    const directory = await this.files.stat(parent(path))
     if (directory.type !== FileType.DIRECTORY) throw enotdir(parent(path))
     let view = this.views.get(path)
     if (view !== undefined && view.kind !== kind) throw eexist(path)
@@ -119,7 +119,7 @@ export class Documents {
         new SessionState({ sessionId: '' }),
         async () => {
           try {
-            await this.ops.stat(path, undefined, { nofollow: true })
+            await this.files.stat(path, undefined, { nofollow: true })
           } catch (error) {
             if (isEnoent(error)) return
             throw error

@@ -40,7 +40,7 @@ class Documents:
 
     Args:
         registry (MountRegistry): the workspace's mounts.
-        ops (Files): the workspace's op facade.
+        files (Files): the workspace's op facade.
         manager (SessionManager): the workspace's sessions.
         session (Callable[[], SessionState]): the session a call runs as.
         profile (Callable[[str], CompiledProfile]): a named profile,
@@ -55,7 +55,7 @@ class Documents:
     def __init__(
         self,
         registry: MountRegistry,
-        ops: Files,
+        files: Files,
         manager: SessionManager,
         session: Callable[[], SessionState],
         profile: Callable[[str], CompiledProfile],
@@ -66,7 +66,7 @@ class Documents:
         self.views: dict[str, DocumentVFS] = {}
         self.lock = asyncio.Lock()
         self._registry = registry
-        self._ops = ops
+        self._files = files
         self._manager = manager
         self._session = session
         self._profile = profile
@@ -153,7 +153,7 @@ class Documents:
         path: str,
         session: SessionState | None,
     ) -> None:
-        directory = await self._ops.stat(parent(path))
+        directory = await self._files.stat(parent(path))
         if directory.type != FileType.DIRECTORY:
             raise enotdir(parent(path))
         view = self.views.get(path)
@@ -167,7 +167,7 @@ class Documents:
             )
             try:
                 try:
-                    await self._ops.stat(path, nofollow=True)
+                    await self._files.stat(path, nofollow=True)
                 except FileNotFoundError:
                     pass
                 else:
@@ -186,7 +186,7 @@ class Documents:
                 == self._session().created_at
             )
             self.views[path] = view
-            self._ops.set_mounts(self._registry.mount_rows())
+            self._files.set_mounts(self._registry.mount_rows())
         if session is None:
             view.global_view = True
         else:

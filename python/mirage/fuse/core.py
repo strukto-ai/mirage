@@ -76,7 +76,7 @@ class MountCore:
     error codes with ``mirage.fuse.errors.classify_error``.
 
     Args:
-        ops (Files): the workspace op facade every filesystem call routes to.
+        files (Files): the workspace op facade every filesystem call routes to.
         root_prefix (str): mount root; non-empty scopes the tree to one mount.
         session (SessionState | None): bind every op to this session's mount
             grants, exactly as a shell command in that session would run.
@@ -90,12 +90,12 @@ class MountCore:
 
     def __init__(
         self,
-        ops: Files,
+        files: Files,
         root_prefix: str = "",
         session: SessionState | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
-        self._ops = ops
+        self._files = files
         self._session = session
         skipped = (
             skipped_at_op_doors(session.commands)
@@ -128,8 +128,8 @@ class MountCore:
         self._loop = loop
 
     @property
-    def ops(self) -> Files:
-        return self._ops
+    def files(self) -> Files:
+        return self._files
 
     @property
     def handles(self) -> FileTable[Handle]:
@@ -255,7 +255,7 @@ class MountCore:
         Returns:
             str | None: displayable target, or None when not a link.
         """
-        links = self._ops.links
+        links = self._files.links
         if links is None:
             return None
         target = links.readlink(self.resolve(path))
@@ -292,7 +292,7 @@ class MountCore:
             virtual (str): the link's virtual path, for the node row.
         """
         entry = self.file_stat(len(target.encode()))
-        links = self._ops.links
+        links = self._files.links
         row = None if links is None else links.link_stat_at(virtual)
         if row is not None:
             entry = self._apply_stat_attrs(entry, row)
@@ -300,8 +300,8 @@ class MountCore:
         return entry
 
     def drain_ops(self) -> list[dict[str, Any]]:
-        records = [r.to_dict() for r in self._ops.records]
-        self._ops.records.clear()
+        records = [r.to_dict() for r in self._files.records]
+        self._files.records.clear()
         return records
 
     def cached_data(self, path: str) -> bytes | None:
@@ -356,7 +356,7 @@ class MountCore:
         if data is not None:
             return data
         try:
-            data = self._run(self._ops.read(self.resolve(path)))
+            data = self._run(self._files.read(self.resolve(path)))
         except Exception as err:
             logger.debug(
                 "fuse: hydration read of %s failed, deferring to read(): %r",
@@ -407,7 +407,7 @@ class MountCore:
         target = self.link_target(path)
         if target is not None:
             return self.link_stat(target, self.resolve(path))
-        s = self._run(self._ops.stat(self.resolve(path)))
+        s = self._run(self._files.stat(self.resolve(path)))
         if s.type == FileType.DIRECTORY:
             return self._apply_stat_attrs(self.dir_stat(), s)
         size = s.size
@@ -440,7 +440,7 @@ class MountCore:
         # itself, so the core only normalizes entry shapes and drops
         # macOS metadata names.
         names = set()
-        entries = self._run(self._ops.readdir(self.resolve(path)))
+        entries = self._run(self._files.readdir(self.resolve(path)))
         for e in entries:
             part = e.rstrip("/").rsplit("/", 1)[-1]
             if part and not is_macos_metadata(part):
@@ -462,7 +462,7 @@ class MountCore:
         ctx = self._ctx(fh)
         if ctx is not None and ctx.live:
             return self._run(
-                self._ops.read(self.resolve(ctx.path), offset, size)
+                self._files.read(self.resolve(ctx.path), offset, size)
             )
         if ctx is not None and ctx.data is not None:
             return ctx.data[offset : offset + size]
@@ -472,7 +472,7 @@ class MountCore:
             path = ctx.path
         data = self.cached_data(path)
         if data is None:
-            data = self._run(self._ops.read(self.resolve(path)))
+            data = self._run(self._files.read(self.resolve(path)))
         if ctx is not None:
             ctx.data = data
         return data[offset : offset + size]
@@ -498,7 +498,7 @@ class MountCore:
         landed = 0
         try:
             for offset, data in runs:
-                self._run(self._ops.pwrite(target, data, offset))
+                self._run(self._files.pwrite(target, data, offset))
                 landed += 1
         finally:
             del runs[:landed]
@@ -534,12 +534,12 @@ class MountCore:
         Returns:
             int: the new handle id.
         """
-        self._run(self._ops.create(self.resolve(path)))
+        self._run(self._files.create(self.resolve(path)))
         self._changed(path)
         return self._handles.add(Handle(path=path, key=self.identity(path)))
 
     def mkdir(self, path: str) -> None:
-        self._run(self._ops.mkdir(self.resolve(path)))
+        self._run(self._files.mkdir(self.resolve(path)))
 
     def readlink(self, path: str) -> str:
         """The stored target of a namespace link.
@@ -575,10 +575,10 @@ class MountCore:
         Raises:
             OSError: EROFS when the workspace has no namespace links.
         """
-        if self._ops.links is None:
+        if self._files.links is None:
             raise erofs(target)
         stored = self.resolve(source) if source.startswith("/") else source
-        self._run(self._ops.symlink(self.resolve(target), stored))
+        self._run(self._files.symlink(self.resolve(target), stored))
 
     def unlink(self, path: str) -> None:
         """Remove the entry at ``path``, a link entry like any other.
@@ -594,13 +594,13 @@ class MountCore:
             path (str): mount path of the entry to remove.
         """
         self._hold(path)
-        self._run(self._ops.unlink(self.resolve(path)))
+        self._run(self._files.unlink(self.resolve(path)))
         self._forget(path)
 
     def rename(self, old: str, new: str) -> None:
         source, target = self.resolve(old), self.resolve(new)
         self._hold(new)
-        self._run(self._ops.rename(source, target))
+        self._run(self._files.rename(source, target))
         for ctx in self._handles.values():
             if ctx.key == source or ctx.key.startswith(source + "/"):
                 ctx.key = target + ctx.key[len(source) :]
@@ -609,7 +609,7 @@ class MountCore:
         self._changed(new, rehydrate=False)
 
     def rmdir(self, path: str) -> None:
-        self._run(self._ops.rmdir(self.resolve(path)))
+        self._run(self._files.rmdir(self.resolve(path)))
 
     def statfs(self) -> dict[str, Any]:
         return {
@@ -649,7 +649,7 @@ class MountCore:
             replace (bool): refuse when it is not set yet.
         """
         self._run(
-            self._ops.setxattr(
+            self._files.setxattr(
                 self.resolve(path),
                 name,
                 bytes(value),
@@ -671,13 +671,13 @@ class MountCore:
         Raises:
             OSError: ENOATTR/ENODATA when the attribute is not set.
         """
-        return bytes(self._run(self._ops.getxattr(self.resolve(path), name)))
+        return bytes(self._run(self._files.getxattr(self.resolve(path), name)))
 
     def listxattr(self, path: str) -> list[str]:
-        return list(self._run(self._ops.listxattr(self.resolve(path))))
+        return list(self._run(self._files.listxattr(self.resolve(path))))
 
     def removexattr(self, path: str, name: str) -> None:
-        self._run(self._ops.removexattr(self.resolve(path), name))
+        self._run(self._files.removexattr(self.resolve(path), name))
 
     def flush(self, path: str, fh: int | None) -> None:
         """Merge a handle's buffered writes and persist them.
@@ -706,7 +706,7 @@ class MountCore:
         Raises:
             FileNotFoundError: no such entry.
         """
-        s = self._run(self._ops.stat(self.resolve(path)))
+        s = self._run(self._files.stat(self.resolve(path)))
         ctx = Handle(
             path=path,
             key=self.identity(path),
@@ -745,7 +745,9 @@ class MountCore:
 
     def _read_chunk(self, ctx: Handle, offset: int, size: int) -> bytes:
         # The handle's path as it is now: a rename moves it.
-        return self._run(self._ops.read(self.resolve(ctx.path), offset, size))
+        return self._run(
+            self._files.read(self.resolve(ctx.path), offset, size)
+        )
 
     def _hold(self, path: str) -> None:
         """Read the rest of the chunked handles on ``path`` before it goes.
@@ -761,7 +763,7 @@ class MountCore:
         Args:
             path (str): mount path about to be removed or replaced.
         """
-        links = self._ops.links
+        links = self._files.links
         if links is not None and links.is_link(self.resolve(path)):
             # Removing a link entry takes the link, never its target's
             # bytes.
@@ -775,7 +777,7 @@ class MountCore:
         if not held:
             return
         try:
-            data = self._run(self._ops.read(self.resolve(path)))
+            data = self._run(self._files.read(self.resolve(path)))
         except Exception as err:
             logger.debug(
                 "fuse: holding %s before it goes failed: %r", path, err
@@ -804,7 +806,7 @@ class MountCore:
             path (str): mount path to identify.
         """
         virtual = self.resolve(path)
-        links = self._ops.links
+        links = self._files.links
         return virtual if links is None else links.follow(virtual)
 
     def truncate(self, path: str, length: int) -> None:
@@ -828,7 +830,7 @@ class MountCore:
             if ctx.key == key and ctx.write_buf:
                 ctx.write_buf = write_runs(ctx.write_buf)
                 self._apply_writes(ctx.path, ctx.write_buf)
-        self._run(self._ops.truncate(self.resolve(path), length))
+        self._run(self._files.truncate(self.resolve(path), length))
         self._changed(path)
 
     def _changed(self, path: str, rehydrate: bool = True) -> None:
@@ -865,7 +867,7 @@ class MountCore:
         if not hydrated:
             return
         try:
-            data = self._run(self._ops.read(self.resolve(path)))
+            data = self._run(self._files.read(self.resolve(path)))
         except Exception as err:
             # The mutation has already landed, so a refresh that fails must
             # not report it as failed: an O_TRUNC open would fail after the

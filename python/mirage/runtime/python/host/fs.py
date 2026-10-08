@@ -84,16 +84,16 @@ class HostFs:
     explicit chmod, where the guest asked for exactly that.
 
     Args:
-        ops (Files): the workspace door.
+        files (Files): the workspace door.
         loop (asyncio.AbstractEventLoop | None): the loop the door's
             coroutines run on; None gives each call a throwaway loop.
     """
 
     def __init__(
-        self, ops: Files, loop: asyncio.AbstractEventLoop | None
+        self, files: Files, loop: asyncio.AbstractEventLoop | None
     ) -> None:
-        self._ops = ops
-        self._door = HostVFS(ops, loop)
+        self._files = files
+        self._door = HostVFS(files, loop)
         # The host functions as they were when this router was built.
         # `patch_process` installs these wrappers onto the real os
         # module itself, so a wrapper that read `os.listdir` at call
@@ -126,7 +126,7 @@ class HostFs:
         spelled = _spelled(path)
         if spelled is None or in_host_io():
             return None
-        return spelled if self._ops.is_mounted(spelled) else None
+        return spelled if self._files.is_mounted(spelled) else None
 
     def _writable(self, virtual: str) -> bool:
         """Whether the mount owning `virtual` takes writes.
@@ -139,11 +139,11 @@ class HostFs:
         Args:
             virtual (str): the mounted virtual path.
         """
-        owner = owner_prefix(self._ops.mount_prefixes(), virtual)
+        owner = owner_prefix(self._files.mount_prefixes(), virtual)
         if owner is None:
             return False
         return any(
-            prefix == owner for prefix, _ in self._ops.writable_mounts()
+            prefix == owner for prefix, _ in self._files.writable_mounts()
         )
 
     def _result(
@@ -173,7 +173,7 @@ class HostFs:
         stamp = self._now if mtime is None else mtime
         return stat_result(
             virtual,
-            owner_prefix(self._ops.mount_prefixes(), virtual) or "/",
+            owner_prefix(self._files.mount_prefixes(), virtual) or "/",
             mode,
             size,
             nlink,
@@ -202,7 +202,7 @@ class HostFs:
             virtual (str): the path to probe.
         """
         try:
-            return str(self._door.run(self._ops.readlink(virtual)))
+            return str(self._door.run(self._files.readlink(virtual)))
         except OSError as exc:
             # EINVAL is the door's "there, but not a link". A missing
             # path raises ENOENT instead, exactly as readlink(2) does,
@@ -214,14 +214,14 @@ class HostFs:
 
     def _exists(self, virtual: str) -> bool:
         try:
-            self._door.run(self._ops.stat(virtual))
+            self._door.run(self._files.stat(virtual))
             return True
         except (OSError, ValueError):
             return False
 
     def _isdir(self, virtual: str) -> bool:
         try:
-            return is_dir(self._door.run(self._ops.stat(virtual)))
+            return is_dir(self._door.run(self._files.stat(virtual)))
         except (OSError, ValueError):
             return False
 
@@ -238,7 +238,8 @@ class HostFs:
         if virtual is None:
             return cast(list[str] | list[bytes], self._host.listdir(path))
         return [
-            leaf(entry) for entry in self._door.run(self._ops.readdir(virtual))
+            leaf(entry)
+            for entry in self._door.run(self._files.readdir(virtual))
         ]
 
     def scandir(self, path: Any = None) -> Any:
@@ -256,7 +257,7 @@ class HostFs:
             return self._host.scandir(path)
         entries = [
             MountDirEntry(self, entry.rstrip("/"), entry.endswith("/"))
-            for entry in self._door.run(self._ops.readdir(virtual))
+            for entry in self._door.run(self._files.readdir(virtual))
         ]
         return MountScandir(entries)
 
@@ -345,7 +346,9 @@ class HostFs:
             )
         if not follow_symlinks:
             return self.lstat(virtual)
-        return self._stat_of(virtual, self._door.run(self._ops.stat(virtual)))
+        return self._stat_of(
+            virtual, self._door.run(self._files.stat(virtual))
+        )
 
     def lstat(
         self, path: Any, *, dir_fd: int | None = None
@@ -373,9 +376,9 @@ class HostFs:
         target = self._link_target(virtual)
         if target is None:
             return self._stat_of(
-                virtual, self._door.run(self._ops.stat(virtual))
+                virtual, self._door.run(self._files.stat(virtual))
             )
-        links = self._ops.links
+        links = self._files.links
         row = None if links is None else links.link_stat_at(virtual)
         if row is None:
             # A facade built without a link table: the target string is
@@ -454,7 +457,9 @@ class HostFs:
             )
             return
         self._door.run(
-            self._ops.setattr(virtual, mode=mode, nofollow=not follow_symlinks)
+            self._files.setattr(
+                virtual, mode=mode, nofollow=not follow_symlinks
+            )
         )
 
     def chown(
@@ -475,7 +480,7 @@ class HostFs:
         # -1 is POSIX's "leave this one alone", which the door spells
         # None; passing it through would store an id of -1.
         self._door.run(
-            self._ops.setattr(
+            self._files.setattr(
                 virtual,
                 uid=None if uid == -1 else uid,
                 gid=None if gid == -1 else gid,
@@ -500,7 +505,7 @@ class HostFs:
             )
         return bytes(
             self._door.run(
-                self._ops.getxattr(
+                self._files.getxattr(
                     virtual,
                     _real_os.fsdecode(attribute),
                     nofollow=not follow_symlinks,
@@ -519,7 +524,7 @@ class HostFs:
             )
         return list(
             self._door.run(
-                self._ops.listxattr(virtual, nofollow=not follow_symlinks)
+                self._files.listxattr(virtual, nofollow=not follow_symlinks)
             )
         )
 
@@ -539,7 +544,7 @@ class HostFs:
             )
             return
         self._door.run(
-            self._ops.setxattr(
+            self._files.setxattr(
                 virtual,
                 _real_os.fsdecode(attribute),
                 bytes(value),
@@ -563,7 +568,7 @@ class HostFs:
             )
             return
         self._door.run(
-            self._ops.removexattr(
+            self._files.removexattr(
                 virtual,
                 _real_os.fsdecode(attribute),
                 nofollow=not follow_symlinks,
@@ -626,7 +631,7 @@ class HostFs:
         else:
             access = stamp = time.time()
         self._door.run(
-            self._ops.setattr(
+            self._files.setattr(
                 virtual,
                 atime=timestamp_iso(access),
                 mtime=timestamp_iso(stamp),
@@ -641,7 +646,7 @@ class HostFs:
         if virtual is None:
             self._host.mkdir(path, mode, dir_fd=dir_fd)
             return
-        self._door.run(self._ops.mkdir(virtual))
+        self._door.run(self._files.mkdir(virtual))
 
     def makedirs(
         self, name: Any, mode: int = 0o777, exist_ok: bool = False
@@ -668,7 +673,7 @@ class HostFs:
         # (EBUSY), so a backend that does not stat its own root would
         # otherwise turn makedirs into that refusal.
         root = (
-            owner_prefix(self._ops.mount_prefixes(), virtual) or "/"
+            owner_prefix(self._files.mount_prefixes(), virtual) or "/"
         ).rstrip("/")
         missing: list[str] = []
         probe = virtual.rstrip("/")
@@ -685,14 +690,14 @@ class HostFs:
                 return
             raise eexist(virtual)
         for path in reversed(missing):
-            self._door.run(self._ops.mkdir(path))
+            self._door.run(self._files.mkdir(path))
 
     def rmdir(self, path: Any, *, dir_fd: int | None = None) -> None:
         virtual = self._virtual(path)
         if virtual is None:
             self._host.rmdir(path, dir_fd=dir_fd)
             return
-        self._door.run(self._ops.rmdir(virtual))
+        self._door.run(self._files.rmdir(virtual))
 
     def removedirs(self, name: Any) -> None:
         """Remove a directory, then every parent that empties.
@@ -721,7 +726,7 @@ class HostFs:
         if virtual is None:
             self._host.remove(path, dir_fd=dir_fd)
             return
-        self._door.run(self._ops.unlink(virtual))
+        self._door.run(self._files.unlink(virtual))
 
     def unlink(self, path: Any, *, dir_fd: int | None = None) -> None:
         self.remove(path, dir_fd=dir_fd)
@@ -784,7 +789,7 @@ class HostFs:
                 None,
                 _spelled(dst),
             )
-        self._door.run(self._ops.rename(source, dest))
+        self._door.run(self._files.rename(source, dest))
 
     def renames(self, old: Any, new: Any) -> None:
         """Rename, creating the destination's parents and pruning the
@@ -837,7 +842,7 @@ class HostFs:
         if virtual is None:
             self._host.symlink(src, dst, target_is_directory, dir_fd=dir_fd)
             return
-        self._door.run(self._ops.symlink(virtual, _real_os.fsdecode(src)))
+        self._door.run(self._files.symlink(virtual, _real_os.fsdecode(src)))
 
     def readlink(self, path: Any, *, dir_fd: int | None = None) -> str | bytes:
         """The target a link holds, as the caller spelled the path.
@@ -855,14 +860,14 @@ class HostFs:
         virtual = self._virtual(path)
         if virtual is None:
             return cast(str | bytes, self._host.readlink(path, dir_fd=dir_fd))
-        return str(self._door.run(self._ops.readlink(virtual)))
+        return str(self._door.run(self._files.readlink(virtual)))
 
     def truncate(self, path: Any, length: int) -> None:
         virtual = self._virtual(path)
         if virtual is None:
             self._host.truncate(path, length)
             return
-        self._door.run(self._ops.truncate(virtual, length))
+        self._door.run(self._files.truncate(virtual, length))
 
 
 def _refusal(
@@ -930,7 +935,7 @@ def _rebind(
 
 
 def os_routing(
-    ops: Files, loop: asyncio.AbstractEventLoop | None = None
+    files: Files, loop: asyncio.AbstractEventLoop | None = None
 ) -> dict[str, Callable[..., Any]]:
     """Every `os` name that must not answer from the host, and what does.
 
@@ -948,13 +953,13 @@ def os_routing(
     of the module answering about paths it has never had.
 
     Args:
-        ops (Files): the workspace door.
+        files (Files): the workspace door.
         loop (asyncio.AbstractEventLoop | None): shared event loop.
 
     Returns:
         dict[str, Callable[..., Any]]: os name to replacement function.
     """
-    router = HostFs(ops, loop)
+    router = HostFs(files, loop)
     table: dict[str, Callable[..., Any]] = {}
     for verb in ROUTED_CALLS:
         if hasattr(_real_os, verb):
@@ -966,7 +971,7 @@ def os_routing(
 
 
 def make_os_module(
-    ops: Files, loop: asyncio.AbstractEventLoop | None = None
+    files: Files, loop: asyncio.AbstractEventLoop | None = None
 ) -> types.ModuleType:
     """A standalone copy of `os` that routes mounted paths.
 
@@ -981,7 +986,7 @@ def make_os_module(
     this copy.
 
     Args:
-        ops (Files): The ops instance with mount table.
+        files (Files): The facade with the mount table.
         loop (asyncio.AbstractEventLoop | None): Shared event loop.
 
     Returns:
@@ -989,7 +994,7 @@ def make_os_module(
     """
     patched = types.ModuleType("os")
     patched.__dict__.update(_real_os.__dict__)
-    patched.__dict__.update(os_routing(ops, loop))
+    patched.__dict__.update(os_routing(files, loop))
     generic = _rebind(genericpath, {"os": patched})
     shared = {name: generic.__dict__[name] for name in genericpath.__all__}
     patched.__dict__["path"] = _rebind(posixpath, {"os": patched, **shared})

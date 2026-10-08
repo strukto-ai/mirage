@@ -401,7 +401,7 @@ async def test_snapshot_fingerprints_keep_read_mount_ownership(
             entries = {e["path"]: e for e in state["fingerprints"]}
             new_read = next(
                 r
-                for r in ws._ops.records
+                for r in ws._files.records
                 if r.path == "/data/file"
                 and r.mount_id == ws.mount("/data").mount_id
                 and r.fingerprint
@@ -459,7 +459,7 @@ async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
         ws.add_mount("/data", replacement)
         async for chunk in stream:
             assert chunk == payload
-        ws._ops.records.extend(scope.records)
+        ws._files.records.extend(scope.records)
         await removing
         assert scope.records[0].mount_id == old_id
         assert (await to_state_dict(ws))["fingerprints"] == []

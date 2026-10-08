@@ -28,8 +28,8 @@ class KernelMounts:
     same subtree can be exposed both unbound and bound to a session.
     """
 
-    def __init__(self, ops: Files, sessions: SessionManager) -> None:
-        self._ops = ops
+    def __init__(self, files: Files, sessions: SessionManager) -> None:
+        self._files = files
         self._sessions = sessions
         self._mountpoints: dict[str, str] = {}
         self._managers: dict[str, FuseManager] = {}
@@ -68,7 +68,11 @@ class KernelMounts:
         self._managers[key] = manager
         try:
             resolved = manager.setup(
-                self._ops, prefix, mountpoint, session=session, backend=backend
+                self._files,
+                prefix,
+                mountpoint,
+                session=session,
+                backend=backend,
             )
         except Exception:
             # The mount never came up; drop the manager and any

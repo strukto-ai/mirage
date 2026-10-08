@@ -211,7 +211,7 @@ export class MirageFileSystem extends FileSystem {
   // until its first op loads both. This adapter reads the session and
   // the links outside the door, so it hydrates before either is
   // consulted, or a persisted hide would be judged by the wrong session.
-  private async ops(signal?: AbortSignal, operation = 'ready'): Promise<Files> {
+  private async files(signal?: AbortSignal, operation = 'ready'): Promise<Files> {
     if (this.fsOps === null) {
       const host = await this.ctx.mirage.ready
       await host.ensureSessionsLoaded()
@@ -309,7 +309,7 @@ export class MirageFileSystem extends FileSystem {
     if (cwd === undefined || posix.isAbsolute(path)) return this.cwd
     // Probed as the session this adapter reads as: a directory only the
     // named session can see is a base here, and one it cannot see is not.
-    return (await (await this.ops()).isDir(cwd)) ? cwd : this.cwd
+    return (await (await this.files()).isDir(cwd)) ? cwd : this.cwd
   }
 
   private normalize(path: string, base: string): string {
@@ -345,7 +345,7 @@ export class MirageFileSystem extends FileSystem {
 
   async resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
     assertNotAborted(opts?.signal, 'resolve')
-    await this.ops(opts?.signal, 'resolve')
+    await this.files(opts?.signal, 'resolve')
     const followed = this.follow(this.normalize(path, await this.resolveBase(path, opts?.cwd)))
     return { targetKey: FsTargetKey(followed), displayPath: followed }
   }
@@ -418,7 +418,7 @@ export class MirageFileSystem extends FileSystem {
     const key = String(target.targetKey)
     let stat: FileStat
     try {
-      stat = await (await this.ops(signal, 'stat')).stat(key)
+      stat = await (await this.files(signal, 'stat')).stat(key)
     } catch (err) {
       if (isMissingPath(err)) return undefined
       throw mapMirageError(err, 'stat', target.displayPath)
@@ -436,7 +436,7 @@ export class MirageFileSystem extends FileSystem {
     signal?: AbortSignal,
   ): Promise<FsPathInfo | undefined> {
     assertNotAborted(signal, 'lstat')
-    await this.ops(signal, 'lstat')
+    await this.files(signal, 'lstat')
     const normalized = this.normalize(path, await this.resolveBase(path, opts?.cwd))
     // Follow every component except the last: the probe is about the path
     // entry itself, so a link at the leaf must report as one.
@@ -458,7 +458,7 @@ export class MirageFileSystem extends FileSystem {
     }
     let stat: FileStat
     try {
-      stat = await (await this.ops(signal, 'lstat')).stat(parentFollowed)
+      stat = await (await this.files(signal, 'lstat')).stat(parentFollowed)
     } catch (err) {
       if (isMissingPath(err)) return undefined
       throw mapMirageError(err, 'lstat', normalized)
@@ -475,7 +475,7 @@ export class MirageFileSystem extends FileSystem {
     const key = String(target.targetKey)
     let bytes: Uint8Array
     try {
-      bytes = await (await this.ops(signal, 'read')).read(key)
+      bytes = await (await this.files(signal, 'read')).read(key)
     } catch (err) {
       throw mapMirageError(err, 'read', target.displayPath)
     }
@@ -530,7 +530,7 @@ export class MirageFileSystem extends FileSystem {
     const key = String(target.targetKey)
     let bytes: Uint8Array
     try {
-      bytes = await (await this.ops(signal, 'read')).read(key, { size: maxBytes + 1 })
+      bytes = await (await this.files(signal, 'read')).read(key, { size: maxBytes + 1 })
     } catch (err) {
       throw mapMirageError(err, 'read', target.displayPath)
     }
@@ -556,7 +556,7 @@ export class MirageFileSystem extends FileSystem {
     // way, so every mount answers this the same.
     try {
       return await (
-        await this.ops(signal, 'read')
+        await this.files(signal, 'read')
       ).read(String(target.targetKey), { offset: range.offset, size: range.length })
     } catch (err) {
       throw mapMirageError(err, 'read', target.displayPath)
@@ -578,7 +578,7 @@ export class MirageFileSystem extends FileSystem {
     }
     let children: string[]
     try {
-      children = await (await this.ops(signal, 'list')).readdir(key)
+      children = await (await this.files(signal, 'list')).readdir(key)
     } catch (err) {
       throw mapMirageError(err, 'list', target.displayPath)
     }
@@ -633,7 +633,7 @@ export class MirageFileSystem extends FileSystem {
     const target: FsTarget = { targetKey: FsTargetKey(followed), displayPath: childPath }
     let stat: FileStat
     try {
-      stat = await (await this.ops(signal, 'list')).stat(followed)
+      stat = await (await this.files(signal, 'list')).stat(followed)
     } catch (err) {
       // An abort is the caller withdrawing, not a child this listing
       // failed to classify, so it ends the walk instead of landing as
@@ -688,7 +688,7 @@ export class MirageFileSystem extends FileSystem {
       const crlf = before !== null && detectsCrlf(before)
       try {
         await (
-          await this.ops(signal, 'write')
+          await this.files(signal, 'write')
         ).write(key, restoreLineEndings(normalizeLineEndings(content), crlf))
       } catch (err) {
         throw mapMirageError(err, 'write', target.displayPath)
@@ -709,7 +709,7 @@ export class MirageFileSystem extends FileSystem {
     if (Buffer.byteLength(content, 'utf8') >= this.diffBasisMaxBytes) return null
     let bytes: Uint8Array
     try {
-      bytes = await (await this.ops()).read(String(target.targetKey))
+      bytes = await (await this.files()).read(String(target.targetKey))
     } catch {
       return null
     }
@@ -760,7 +760,7 @@ export class MirageFileSystem extends FileSystem {
       }
       let bytes: Uint8Array
       try {
-        bytes = await (await this.ops(signal, 'edit')).read(key)
+        bytes = await (await this.files(signal, 'edit')).read(key)
       } catch (err) {
         throw mapMirageError(err, 'edit', target.displayPath)
       }
@@ -775,7 +775,7 @@ export class MirageFileSystem extends FileSystem {
       )
       try {
         await (
-          await this.ops(signal, 'edit')
+          await this.files(signal, 'edit')
         ).write(key, restoreLineEndings(edited, detectsCrlf(raw)))
       } catch (err) {
         throw mapMirageError(err, 'edit', target.displayPath)

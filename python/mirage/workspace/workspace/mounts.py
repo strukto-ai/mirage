@@ -251,7 +251,7 @@ def prepare_added_mount(
 
 async def unmount(
     registry: MountRegistry,
-    ops: Files,
+    files: Files,
     prefix: str,
     is_shutting_down: Callable[[], bool],
     shared_mounts: set[int],
@@ -267,7 +267,7 @@ async def unmount(
 
     Args:
         registry (MountRegistry): the workspace's mount table.
-        ops (Files): the ops facade to detach the prefix from.
+        files (Files): the facade to detach the prefix from.
         prefix (str): the mount's virtual prefix.
         is_shutting_down: live admission check after asynchronous cleanup.
         shared_mounts: instances owned by another workspace.
@@ -304,7 +304,7 @@ async def unmount(
     except BaseException:
         entry.retiring = False
         raise
-    ops.unmount(prefix)
+    files.unmount(prefix)
     remaining = registry.mounts()
     still_instance = any(m.vfs is removed.vfs for m in remaining)
     # The mount owns its op table, so dropping the mount drops the ops

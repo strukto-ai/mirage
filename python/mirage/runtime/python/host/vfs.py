@@ -38,15 +38,15 @@ class HostVFS:
     It also answers the questions an open asks (``runtime/open``).
 
     Args:
-        ops (Files): the facade every call goes through.
+        files (Files): the facade every call goes through.
         loop (asyncio.AbstractEventLoop | None): the block's loop; None
             gives each call a throwaway loop.
     """
 
     def __init__(
-        self, ops: Files, loop: asyncio.AbstractEventLoop | None
+        self, files: Files, loop: asyncio.AbstractEventLoop | None
     ) -> None:
-        self.ops = ops
+        self.files = files
         self._loop = loop
 
     def run(self, coro: Awaitable[T]) -> T:
@@ -67,14 +67,14 @@ class HostVFS:
         self, path: str, *, nofollow: bool = False
     ) -> VFSStat | None:
         try:
-            row = self.run(self.ops.stat(path, nofollow=nofollow))
+            row = self.run(self.files.stat(path, nofollow=nofollow))
         except ABSENT_PATH:
             return None
         return stat_row(row)
 
     def listing_or_none(self, path: str) -> list[VFSEntry] | None:
         try:
-            names = self.run(self.ops.readdir(path))
+            names = self.run(self.files.readdir(path))
         except ABSENT_PATH:
             return None
         return [
@@ -83,7 +83,7 @@ class HostVFS:
         ]
 
     def create(self, path: str) -> None:
-        self.run(self.ops.create(path))
+        self.run(self.files.create(path))
 
     def truncate(self, path: str) -> None:
-        self.run(self.ops.truncate(path, 0))
+        self.run(self.files.truncate(path, 0))

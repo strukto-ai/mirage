@@ -94,7 +94,7 @@ def test_double_unmount_is_idempotent(monkeypatch):
     _fake_mount(monkeypatch)
     ws = Workspace({"/a/": RAMVFS()}, mode=MountMode.WRITE)
     fm = FuseManager()
-    fm.setup(ws._ops, "/a/", mountpoint="/tmp/idem-a")
+    fm.setup(ws._files, "/a/", mountpoint="/tmp/idem-a")
     fm.unmount()
     fm.unmount()  # must not raise
     assert fm.mountpoint is None
@@ -234,7 +234,7 @@ def test_fskit_auto_mountpoint_is_named_not_created(monkeypatch):
     )
     fm = FuseManager()
     mp = fm.setup(
-        Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)._ops,
+        Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)._files,
         "/",
         backend=MountBackend.FSKIT,
     )
@@ -250,7 +250,7 @@ def test_fskit_pinned_mountpoint_is_not_created(monkeypatch):
     monkeypatch.setattr(os, "makedirs", lambda *a, **k: calls.append(a))
     fm = FuseManager()
     fm.setup(
-        Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)._ops,
+        Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)._files,
         "/",
         mountpoint="/Volumes/pinned-vol",
         backend=MountBackend.FSKIT,
@@ -262,7 +262,7 @@ def test_fskit_pinned_mountpoint_is_not_created(monkeypatch):
 def test_fuse_auto_mountpoint_still_uses_tempdir(monkeypatch):
     _capture_mount(monkeypatch)
     fm = FuseManager()
-    mp = fm.setup(Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)._ops, "/")
+    mp = fm.setup(Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)._files, "/")
     assert not mp.startswith("/Volumes/")
     assert os.path.isdir(mp)
     os.rmdir(mp)
@@ -276,7 +276,7 @@ def test_unmount_never_rmdirs_a_volumes_entry(monkeypatch):
     monkeypatch.setattr(os, "rmdir", lambda p: removed.append(p))
     fm = FuseManager()
     fm.setup(
-        Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)._ops,
+        Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)._files,
         "/",
         backend=MountBackend.FSKIT,
     )
