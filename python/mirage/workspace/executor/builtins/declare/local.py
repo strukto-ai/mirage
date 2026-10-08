@@ -234,13 +234,12 @@ async def _declare_operands(
                 # A literal takes its marks at its place, against the
                 # target its own write cleared, even when a policy refused
                 # a later literal; under `-n` they go on the reference,
-                # which an array cannot become, its own `-i -l -u` coming
-                # off unless asked for (`_unshaped`).
+                # which an array cannot become and a frozen one refuses,
+                # its own `-i -l -u` coming off unless asked for
+                # (`_unshaped`).
                 name = operand[0]
                 line = (
-                    reference_refusal(
-                        cmd, name, visible_record(session, name), False
-                    )
+                    _literal_reference_refusal(session, view, cmd, name)
                     if nameref
                     else None
                 ) or plus_refusal(cmd, session, view, name, plus)
@@ -264,6 +263,26 @@ async def _declare_operands(
     except ArithError as exc:
         return arith_refusal(cmd, exc)
     return declaration_result(cmd, errors, warnings)
+
+
+def _literal_reference_refusal(
+    session: SessionState, view: SessionView, cmd: str, name: str
+) -> str | None:
+    """The line a ``-n`` array literal earns on the reference it was
+    written through: an array cannot become one, and a frozen one keeps
+    every mark (``declare -nr r=t; declare -n r=(3)`` writes ``t`` and
+    refuses ``r``), as bash's does.
+
+    Args:
+        session (SessionState): shell session state.
+        view (SessionView): the session plane's gated door.
+        cmd (str): the builtin's spelling, for diagnostics.
+        name (str): the literal's name.
+    """
+    line = reference_refusal(cmd, name, visible_record(session, name), False)
+    if line is None and view.is_readonly(name, False):
+        return readonly_line(cmd, name)
+    return line
 
 
 async def _declare_operand(

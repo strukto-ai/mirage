@@ -645,6 +645,40 @@
         "stdout": "declare -n ref=\"t\"\ndeclare -a t=([0]=\"3\")\nABC\ndeclare -nl rl=\"s\"\ndeclare -al s=([0]=\"3\")\ndeclare -nx ri=\"T\"\ndeclare -a T=([0]=\"4\")\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "nameref_literal_on_frozen_reference_refuses",
+      "seq": 940132,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( unset X; t=0; declare -nrl ref=t; declare -nx ref=(3) X=1; echo rc=$?; declare -p ref t X )",
+      "expect": {
+        "exit": 1,
+        "stdout": "rc=1\ndeclare -nrl ref=\"t\"\ndeclare -a t=([0]=\"3\")\n",
+        "stderr": "bash: declare: ref: readonly variable\nbash: declare: `1': invalid variable name for name reference\nbash: declare: X: not found\n"
+      }
     }
   ]
 }

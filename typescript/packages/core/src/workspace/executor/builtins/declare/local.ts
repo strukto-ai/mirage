@@ -185,13 +185,13 @@ async function declareOperands(
         // A literal takes its marks at its place, against the target its
         // own write cleared, even when a policy refused a later literal;
         // under `-n` they go on the reference, which an array cannot
-        // become, its own `-i -l -u` coming off unless asked for
-        // (`unshaped`).
+        // become and a frozen one refuses, its own `-i -l -u` coming off
+        // unless asked for (`unshaped`).
         const checked = stored.get(position)
         if (checked === undefined) continue
         const name = operand.name
         line =
-          (nameref ? referenceRefusal(cmd, name, visibleRecord(session, name), false) : null) ??
+          (nameref ? literalReferenceRefusal(session, view, cmd, name) : null) ??
           plusRefusal(cmd, session, view, name, plus)
         if (line === null) {
           await stampMarks(
@@ -213,6 +213,23 @@ async function declareOperands(
     throw err
   }
   return declarationResult(cmd, errors, warnings)
+}
+
+/**
+ * The line a `-n` array literal earns on the reference it was written
+ * through: an array cannot become one, and a frozen one keeps every mark
+ * (`declare -nr r=t; declare -n r=(3)` writes `t` and refuses `r`), as
+ * bash's does.
+ */
+function literalReferenceRefusal(
+  session: SessionState,
+  view: SessionView,
+  cmd: string,
+  name: string,
+): string | null {
+  const line = referenceRefusal(cmd, name, visibleRecord(session, name), false)
+  if (line === null && view.isReadonly(name, false)) return readonlyLine(cmd, name)
+  return line
 }
 
 /**
