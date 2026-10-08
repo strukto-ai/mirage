@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountCommands } from '../../commands/builtin/backends.ts'
+import { commandsFor } from '../../commands/builtin/backends.ts'
 import type { ProcessView } from '../../process/view.ts'
 import type { SessionState } from '../session/session.ts'
 import { isNoMount, noMount } from '../../errors/fs.ts'
@@ -336,7 +336,7 @@ export class MountRegistry {
     // family table that fans out over sibling VFS names (the HF four
     // share one table) registers only this mount's entries instead of
     // letting the last sibling win on a shared key.
-    m.registerFns(mountCommands(init.vfs))
+    m.registerFns(commandsFor(init.vfs))
     for (const cmd of GENERAL_COMMANDS) {
       m.registerGeneral(cmd)
     }

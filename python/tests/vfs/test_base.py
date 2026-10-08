@@ -20,7 +20,7 @@ from mirage import MountMode, Workspace
 from mirage.accessor.base import Accessor
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.commands.cli import CLISpec
 from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec, Operand
@@ -172,7 +172,7 @@ def ram_without(store: RAMStore, *names: str, name: str = "custom") -> RAMVFS:
 
 
 def command_names(vfs: BaseVFS) -> set[str]:
-    return {rc.name for rc in mount_commands(vfs)}
+    return {rc.name for rc in commands_for(vfs)}
 
 
 class Marker:

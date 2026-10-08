@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.vfs.lancedb import LanceDBConfig, LanceDBVFS
 from mirage.vfs.registry import REGISTRY, build_vfs
 from tests.fixtures.vfs_io import served
@@ -56,7 +56,7 @@ def test_vfs_registers_commands():
         "tree",
         "wc",
     }
-    assert expected <= {c.name for c in mount_commands(res)}
+    assert expected <= {c.name for c in commands_for(res)}
 
 
 @pytest.mark.asyncio

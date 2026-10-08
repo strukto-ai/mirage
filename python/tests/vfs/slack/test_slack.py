@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
 from mirage.vfs.slack.config import SlackConfig
 from mirage.vfs.slack.slack import SlackVFS
@@ -47,4 +47,4 @@ def test_vfs_commands_registered(config):
     # ENOTSUP at the op Slack lacks, + bespoke grep/rg +
     # md5sum/sha1sum/sha384sum/sha512sum); acting on Slack moved to the
     # slack CLI
-    assert len(mount_commands(vfs)) == 71
+    assert len(commands_for(vfs)) == 71

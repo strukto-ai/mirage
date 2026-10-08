@@ -17,7 +17,7 @@ import errno
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.types import PathSpec
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.ram import RAMVFS
@@ -26,7 +26,7 @@ from tests.fixtures.vfs_io import DOOR_OPS, served
 
 def test_view_registers_reads_and_refuses_every_write_op():
     vfs = BinViewVFS(lambda: ["ls"], lambda n: "ls" if n == "ls" else None)
-    names = {cmd.name for cmd in mount_commands(vfs)}
+    names = {cmd.name for cmd in commands_for(vfs)}
     # Every generic command registers, the writers included: `gzip -c`
     # reads the view like any reader, and a line that writes is refused
     # at the op the view does not have.

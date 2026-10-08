@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Accessor, NOOPAccessor } from '../accessor/base.ts'
 import { RAMAccessor } from '../accessor/ram.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import { mountCommands } from '../commands/builtin/backends.ts'
+import { commandsFor } from '../commands/builtin/backends.ts'
 import { command, type RegisteredCommand } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
@@ -181,7 +181,7 @@ function writableVfs(): [WritableWiki, WikiAccessor] {
 }
 
 function commandNames(vfs: BaseVFS): Set<string> {
-  return new Set(mountCommands(vfs).map((rc) => rc.name))
+  return new Set(commandsFor(vfs).map((rc) => rc.name))
 }
 
 const DOOR_OPS = ['read', 'readdir', 'stat', 'glob', 'write', 'unlink', 'mkdir', 'rename']

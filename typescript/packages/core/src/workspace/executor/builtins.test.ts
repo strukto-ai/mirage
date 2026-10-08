@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountCommands } from '../../commands/builtin/backends.ts'
+import { commandsFor } from '../../commands/builtin/backends.ts'
 import { EvaluationContext } from '../evaluation.ts'
 import { helpPage, versionLine } from '../../commands/spec/standard.ts'
 import { HELP as PRINTF_HELP } from './builtins/printf/printf.ts'
@@ -68,7 +68,7 @@ import { parseDuration, parseSignal, signalName } from './builtins/timeout/timeo
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 
 function wireMount(mount: MountEntry): void {
-  for (const cmd of mountCommands(mount.vfs)) {
+  for (const cmd of commandsFor(mount.vfs)) {
     if (cmd.filetype !== null) mount.register(cmd)
     else if (cmd.vfs === null) mount.registerGeneral(cmd)
     else mount.register(cmd)

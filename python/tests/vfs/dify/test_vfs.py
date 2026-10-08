@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
 from mirage.vfs.dify import DifyConfig
 from mirage.vfs.registry import REGISTRY, build_vfs
@@ -94,7 +94,7 @@ async def test_dify_vfs_registers_expected_commands_and_ops():
         },
     )
 
-    commands = {item.name for item in mount_commands(vfs)}
+    commands = {item.name for item in commands_for(vfs)}
     ops = served(vfs)
 
     assert {"cat", "ls", "grep", "find", "head", "tail", "wc"}.issubset(

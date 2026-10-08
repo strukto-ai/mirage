@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
 from mirage.vfs.gdrive.config import GoogleDriveConfig
 from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
@@ -55,4 +55,4 @@ def test_vfs_commands_registered(config):
         "mirage.core.google.client.refresh_access_token",
     ):
         vfs = GoogleDriveVFS(config)
-        assert len(mount_commands(vfs)) >= 50
+        assert len(commands_for(vfs)) >= 50

@@ -137,9 +137,9 @@ function renamed(cmd: RegisteredCommand, vfs: string): RegisteredCommand {
  * registered under the VFS's own instead, so an S3-compatible alias serves
  * S3's commands as itself. Any other VFS serves the generic set. Either set
  * loses what the VFS overrides, and the commands the VFS was handed come
- * last, so they win. Mirrors Python's `mount_commands`.
+ * last, so they win. Mirrors Python's `commands_for`.
  */
-export function mountCommands(vfs: BaseVFS): RegisteredCommand[] {
+export function commandsFor(vfs: BaseVFS): RegisteredCommand[] {
   let found: RegisteredCommand[] | null = null
   let cls: unknown = vfs.constructor
   while (typeof cls === 'function' && found === null) {

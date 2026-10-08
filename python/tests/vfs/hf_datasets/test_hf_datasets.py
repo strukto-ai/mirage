@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
 from mirage.vfs.hf_datasets import HfDatasetsConfig, HfDatasetsVFS
 from tests.fixtures.vfs_io import served
@@ -46,5 +46,5 @@ def test_vfs_registers_no_mutation_ops():
 
 def test_vfs_registers_commands():
     r = HfDatasetsVFS(HfDatasetsConfig(repo_id="org/dataset"))
-    cmd_names = {c.name for c in mount_commands(r)}
+    cmd_names = {c.name for c in commands_for(r)}
     assert {"cat", "ls", "grep", "stat", "gzip", "tar"} <= cmd_names

@@ -74,7 +74,7 @@ _MODULES: dict[str, str] = {
 }
 
 
-def mount_commands(vfs: BaseVFS) -> list[RegisteredCommand]:
+def commands_for(vfs: BaseVFS) -> list[RegisteredCommand]:
     """Every shell command a mount of ``vfs`` serves.
 
     A builtin's are its command module's, found through the first class

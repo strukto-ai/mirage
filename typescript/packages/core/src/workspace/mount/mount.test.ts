@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountCommands } from '../../commands/builtin/backends.ts'
+import { commandsFor } from '../../commands/builtin/backends.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import {
@@ -507,7 +507,7 @@ it('a path-guarded command is still held at its write', async () => {
   const vfs = new RAMVFS()
   vfs.store.files.set('/a', new TextEncoder().encode('original'))
   const mount = new MountEntry({ prefix: '/ram/', vfs, mode: MountMode.READ })
-  const cmd = mountCommands(vfs).find((cmd) => cmd.name === 'gzip')
+  const cmd = commandsFor(vfs).find((cmd) => cmd.name === 'gzip')
   if (cmd === undefined) throw new Error('missing gzip')
   expect(cmd.pathGuarded).toBe(true)
   mount.register(cmd)

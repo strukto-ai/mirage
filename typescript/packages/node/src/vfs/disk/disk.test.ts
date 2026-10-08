@@ -18,7 +18,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DISK_COMMANDS } from '../../commands/builtin/disk/index.ts'
 import '../../commands/builtin/backends.ts'
-import { mountCommands } from '@struktoai/mirage-core/commands/builtin/backends'
+import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { CapacityState, FileType, PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { ops } from '@struktoai/mirage-core/test-utils'
@@ -52,7 +52,7 @@ describe('DiskVFS — identity', () => {
   })
 
   it('serves DISK_COMMANDS', () => {
-    expect(mountCommands(res)).toEqual(DISK_COMMANDS)
+    expect(commandsFor(res)).toEqual(DISK_COMMANDS)
   })
 
   it('capacity reports a real quota (df numbers, not fabricated)', async () => {

@@ -15,7 +15,7 @@
 import pytest
 from pydantic import SecretStr
 
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.vfs.aliyun.config import AliyunConfig
 from mirage.vfs.backblaze.config import BackblazeConfig
 from mirage.vfs.ceph.config import CephConfig
@@ -286,7 +286,7 @@ def test_an_alias_carries_its_own_name(name):
     assert vfs.name == name
     assert isinstance(vfs.config, S3Config)
     assert {"read", "readdir", "stat", "write"} <= served(vfs)
-    assert {rc.vfs for rc in mount_commands(vfs)} == {name}
+    assert {rc.vfs for rc in commands_for(vfs)} == {name}
     assert vfs.storage_location() == f"s3:{vfs.config.endpoint_url}:b"
     state = vfs.get_state()
     assert state["type"] == name

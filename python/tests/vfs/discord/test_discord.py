@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
 from mirage.vfs.discord.config import DiscordConfig
 from mirage.vfs.discord.discord import DiscordVFS
@@ -47,4 +47,4 @@ def test_vfs_commands(config):
     # ENOTSUP at the op Discord lacks, + bespoke grep/rg/head +
     # md5sum/sha1sum/sha384sum/sha512sum); acting on Discord moved to the
     # discord CLI
-    assert len(mount_commands(vfs)) == 71
+    assert len(commands_for(vfs)) == 71

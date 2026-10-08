@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { mountCommands } from '@struktoai/mirage-core/commands/builtin/backends'
+import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { normalizeDatabricksVolumeConfig, redactDatabricksVolumeConfig } from './config.ts'
 import { DatabricksVolumeVFS } from './databricks_volume.ts'
@@ -75,7 +75,7 @@ describe('DatabricksVolumeVFS', () => {
     const vfs = await DatabricksVolumeVFS.create(normalizeDatabricksVolumeConfig(BASE_CONFIG))
     expect(vfs.name).toBe(VFSName.DATABRICKS_VOLUME)
     expect(vfs.cachesReads).toBe(true)
-    expect(mountCommands(vfs).length).toBeGreaterThan(20)
+    expect(commandsFor(vfs).length).toBeGreaterThan(20)
     expect(vfs.supports('write')).toBe(true)
     const state = await vfs.getState()
     expect(state.config.token).toBe('<REDACTED>')

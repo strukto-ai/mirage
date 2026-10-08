@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import '../../commands/builtin/backends.ts'
-import { mountCommands } from '@struktoai/mirage-core/commands/builtin/backends'
+import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { SSH_COMMANDS } from '../../commands/builtin/ssh/index.ts'
@@ -57,7 +57,7 @@ describe('SSHVFS — identity', () => {
 
   it('serves SSH_COMMANDS', () => {
     const res = makeVfs(state)
-    expect(mountCommands(res)).toEqual(SSH_COMMANDS)
+    expect(commandsFor(res)).toEqual(SSH_COMMANDS)
     expect(SSH_COMMANDS.length).toBe(71)
   })
 })

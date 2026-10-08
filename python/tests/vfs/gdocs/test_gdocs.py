@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
 from mirage.vfs.gdocs.config import GDocsConfig
 from mirage.vfs.gdocs.gdocs import GDocsVFS
@@ -44,5 +44,5 @@ def test_vfs_accessor(config):
 
 def test_vfs_commands_registered(config):
     vfs = GDocsVFS(config=config)
-    cmds = mount_commands(vfs)
+    cmds = commands_for(vfs)
     assert len(cmds) > 15

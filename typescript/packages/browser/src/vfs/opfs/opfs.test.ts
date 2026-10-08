@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { OPFS_COMMANDS } from '../../commands/builtin/opfs/index.ts'
 import '../../commands/builtin/backends.ts'
-import { mountCommands } from '@struktoai/mirage-core/commands/builtin/backends'
+import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { FileType, VFSName } from '@struktoai/mirage-core/types'
 import { copy as copyCore } from '../../core/opfs/copy.ts'
@@ -47,7 +47,7 @@ describe('OPFSVFS — identity', () => {
     expect(res.rootName).toBe('')
   })
   it('serves OPFS_COMMANDS', () => {
-    expect(mountCommands(res)).toEqual(OPFS_COMMANDS)
+    expect(commandsFor(res)).toEqual(OPFS_COMMANDS)
   })
 })
 

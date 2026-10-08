@@ -18,7 +18,7 @@ import errno
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Option
@@ -320,7 +320,7 @@ async def test_a_path_guarded_command_is_still_held_at_its_write():
     vfs = RAMVFS()
     vfs._store.files["/a"] = b"original"
     mount = MountEntry("/ram/", vfs, MountMode.READ)
-    cmd = next(cmd for cmd in mount_commands(vfs) if cmd.name == "gzip")
+    cmd = next(cmd for cmd in commands_for(vfs) if cmd.name == "gzip")
     assert cmd.path_guarded
     mount.register(cmd)
     # The write is refused where it happens and gzip says so in its own

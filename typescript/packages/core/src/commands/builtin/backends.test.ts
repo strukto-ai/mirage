@@ -18,21 +18,21 @@ import { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { command } from '../config.ts'
 import { specOf } from '../spec/builtins.ts'
-import { mountCommands } from './backends.ts'
+import { commandsFor } from './backends.ts'
 import { RAM_COMMANDS } from './ram/index.ts'
 
-describe('mountCommands', () => {
+describe('commandsFor', () => {
   it('serves a builtin its own command module', () => {
-    expect(mountCommands(new RAMVFS())).toEqual([...RAM_COMMANDS])
+    expect(commandsFor(new RAMVFS())).toEqual([...RAM_COMMANDS])
   })
 
   it("serves a subclass its base's commands", () => {
     class Versioned extends RAMVFS {}
-    expect(mountCommands(new Versioned())).toEqual(mountCommands(new RAMVFS()))
+    expect(commandsFor(new Versioned())).toEqual(commandsFor(new RAMVFS()))
   })
 
   it('serves any other VFS the generic set under its name', () => {
-    const served = mountCommands(new BaseVFS({ name: 'custom' }))
+    const served = commandsFor(new BaseVFS({ name: 'custom' }))
     const names = new Set(served.map((cmd) => cmd.name))
     for (const name of ['cat', 'ls', 'grep', 'find']) expect(names.has(name)).toBe(true)
     expect(new Set(served.map((cmd) => cmd.vfs))).toEqual(new Set(['custom']))
@@ -42,7 +42,7 @@ describe('mountCommands', () => {
     class SlackVFS extends BaseVFS {
       override readonly name: string = 'mychat'
     }
-    const served = mountCommands(new SlackVFS())
+    const served = commandsFor(new SlackVFS())
     expect(served.some((cmd) => cmd.name === 'cat')).toBe(true)
     expect(new Set(served.map((cmd) => cmd.vfs))).toEqual(new Set(['mychat']))
   })
@@ -52,9 +52,9 @@ describe('mountCommands', () => {
     const copy = await import('../../vfs/ram/ram.ts')
     const copyBackends = await import('./backends.ts')
     class Foreign extends copy.RAMVFS {}
-    const served = mountCommands(new Foreign())
-    expect(served).toEqual(copyBackends.mountCommands(new Foreign()))
-    expect(served).not.toEqual(mountCommands(new RAMVFS()))
+    const served = commandsFor(new Foreign())
+    expect(served).toEqual(copyBackends.commandsFor(new Foreign()))
+    expect(served).not.toEqual(commandsFor(new RAMVFS()))
   })
 
   it('puts handed commands after the generic set they override', () => {
@@ -65,14 +65,14 @@ describe('mountCommands', () => {
       fn: () => [new TextEncoder().encode('custom'), new IOResult()],
     })
     const vfs = new BaseVFS({ name: 'custom', overrides: new Set(['cat']), commands: cat })
-    expect(mountCommands(vfs).filter((cmd) => cmd.name === 'cat')).toEqual(cat)
+    expect(commandsFor(vfs).filter((cmd) => cmd.name === 'cat')).toEqual(cat)
   })
 
   it('drops what a builtin overrides', () => {
     class Searchless extends RAMVFS {
       override readonly overrides: ReadonlySet<string> = new Set(['grep', 'rg'])
     }
-    const names = new Set(mountCommands(new Searchless()).map((cmd) => cmd.name))
+    const names = new Set(commandsFor(new Searchless()).map((cmd) => cmd.name))
     expect(names.has('cat')).toBe(true)
     expect(names.has('grep') || names.has('rg')).toBe(false)
   })

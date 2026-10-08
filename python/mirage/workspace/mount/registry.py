@@ -23,7 +23,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
 from mirage.cache.index.config import Evicted
 from mirage.cache.index.factory import build_index
 from mirage.cache.manager import CacheManager
-from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.backends import commands_for
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.context import (
     effective_path_mode,
@@ -358,7 +358,7 @@ class MountRegistry:
         )
         if alias is not None:
             m.activity = alias.activity
-        m.register_fns(mount_commands(vfs))
+        m.register_fns(commands_for(vfs))
         for cmd in GENERAL_COMMANDS:
             m.register_general(cmd)
         if self._file_cache is not None:
