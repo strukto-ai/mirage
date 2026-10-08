@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from types import MappingProxyType
 from unittest.mock import AsyncMock
 
@@ -37,6 +38,14 @@ MISSING = PathSpec(
 )
 CONTENT = "é: hello\n".encode()
 FIXTURE = ReadFixture(FILE, DIRECTORY, MISSING, CONTENT)
+DOC = PathSpec(
+    virtual="/data/a.gdoc.json", directory="/data", vfs_path="a.gdoc.json"
+)
+DOC_MISSING = PathSpec(
+    virtual="/data/missing.gdoc.json",
+    directory="/data",
+    vfs_path="missing.gdoc.json",
+)
 
 
 class Minimal(BaseVFS):
@@ -115,6 +124,38 @@ class RenderedOnly(BaseVFS):
         return await ram_stat(self.accessor, path, index)
 
 
+class Rendering(Minimal):
+    """Stores and streams bytes, and renders its doc filetype reversed."""
+
+    renderers = MappingProxyType(
+        {".json": "read_json", ".gdoc.json": "read_doc"}
+    )
+
+    async def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        yield await ram_read(self.accessor, path, index)
+
+    async def read_json(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        raise AssertionError("a .gdoc.json file renders as a doc")
+
+    async def read_doc(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await ram_read(self.accessor, path, index)
+        return slice_window(data[::-1], offset, size)
+
+
 async def _seeded(cls: type[BaseVFS], content: bytes) -> BaseVFS:
     store = RAMStore()
     accessor = RAMAccessor(store)
@@ -140,19 +181,21 @@ async def test_a_builtin_meets_the_contract():
 
 @pytest.mark.asyncio
 async def test_a_rendered_filetype_meets_the_contract_through_its_renderer():
-    doc = PathSpec(
-        virtual="/data/a.gdoc.json", directory="/data", vfs_path="a.gdoc.json"
-    )
-    missing = PathSpec(
-        virtual="/data/missing.gdoc.json",
-        directory="/data",
-        vfs_path="missing.gdoc.json",
-    )
     accessor = RAMAccessor(RAMStore())
-    await ram_write(accessor, doc, CONTENT)
+    await ram_write(accessor, DOC, CONTENT)
     await check_read_contract(
         RenderedOnly(accessor=accessor),
-        ReadFixture(doc, DIRECTORY, missing, CONTENT),
+        ReadFixture(DOC, DIRECTORY, DOC_MISSING, CONTENT),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_render_is_checked_apart_from_the_stored_stream():
+    accessor = RAMAccessor(RAMStore())
+    await ram_write(accessor, DOC, CONTENT)
+    await check_read_contract(
+        Rendering(accessor=accessor),
+        ReadFixture(DOC, DIRECTORY, DOC_MISSING, CONTENT[::-1]),
     )
 
 

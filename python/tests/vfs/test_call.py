@@ -107,13 +107,13 @@ def test_a_vfs_supports_what_it_defines():
     assert {"read", "write", "stat"} <= served(RAMVFS())
 
 
+async def _write(path: PathSpec, data: bytes) -> None:
+    return None
+
+
 def test_a_function_set_on_the_instance_is_supported():
     notes = Notes()
-
-    async def write(path: PathSpec, data: bytes) -> None:
-        return None
-
-    notes.write = write  # type: ignore[method-assign]
+    notes.write = _write  # type: ignore[method-assign]
     assert notes.supports("write")
     assert MountEntry("/", notes).answers("write")
 

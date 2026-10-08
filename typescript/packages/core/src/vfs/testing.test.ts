@@ -37,6 +37,16 @@ const FIXTURE: ReadFixture = {
   missing: MISSING,
   content: CONTENT,
 }
+const DOC = new PathSpec({
+  virtual: '/data/a.gdoc.json',
+  directory: '/data',
+  vfsPath: 'a.gdoc.json',
+})
+const DOC_MISSING = new PathSpec({
+  virtual: '/data/missing.gdoc.json',
+  directory: '/data',
+  vfsPath: 'missing.gdoc.json',
+})
 
 /** The three required reads over a RAM store, whole reads sliced. */
 class Minimal extends BaseVFS<RAMAccessor> {
@@ -103,6 +113,32 @@ class RenderedOnly extends BaseVFS<RAMAccessor> {
   }
 }
 
+/** Stores and streams bytes, and renders its doc filetype reversed. */
+class Rendering extends Minimal {
+  override readonly renderers: Readonly<Record<string, string>> = {
+    '.json': 'readJson',
+    '.gdoc.json': 'readDoc',
+  }
+
+  override async *readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    yield await ramRead(this.accessor, path, index)
+  }
+
+  readJson(): Promise<Uint8Array> {
+    throw new Error('a .gdoc.json file renders as a doc')
+  }
+
+  async readDoc(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await ramRead(this.accessor, path, index)
+    return sliceWindow(data.slice().reverse(), offset, size)
+  }
+}
+
 async function seeded<V extends BaseVFS<RAMAccessor>>(
   cls: new (options: { name: string; accessor: RAMAccessor }) => V,
   content: Uint8Array,
@@ -125,23 +161,24 @@ describe('the read contract', () => {
   })
 
   it('a rendered filetype meets it through its renderer', async () => {
-    const doc = new PathSpec({
-      virtual: '/data/a.gdoc.json',
-      directory: '/data',
-      vfsPath: 'a.gdoc.json',
-    })
-    const missing = new PathSpec({
-      virtual: '/data/missing.gdoc.json',
-      directory: '/data',
-      vfsPath: 'missing.gdoc.json',
-    })
     const accessor = new RAMAccessor(new RAMStore())
-    await ramWrite(accessor, doc, CONTENT)
+    await ramWrite(accessor, DOC, CONTENT)
     await checkReadContract(new RenderedOnly({ name: 'custom', accessor }), {
-      file: doc,
+      file: DOC,
       directory: DIRECTORY,
-      missing,
+      missing: DOC_MISSING,
       content: CONTENT,
+    })
+  })
+
+  it('checks a render apart from the stored stream', async () => {
+    const accessor = new RAMAccessor(new RAMStore())
+    await ramWrite(accessor, DOC, CONTENT)
+    await checkReadContract(new Rendering({ name: 'custom', accessor }), {
+      file: DOC,
+      directory: DIRECTORY,
+      missing: DOC_MISSING,
+      content: CONTENT.slice().reverse(),
     })
   })
 
