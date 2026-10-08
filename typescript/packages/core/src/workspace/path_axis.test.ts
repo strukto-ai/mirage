@@ -218,7 +218,7 @@ describe('the path axis end to end', () => {
         })
         expect(await door.cat('/data/vault/secret')).toBe('top\n')
       },
-      other.sessionManager,
+      { owner: other.sessionManager },
     )
     await runWithSession(wide, async () => {
       expect(await ws.vfs.cat('/data/vault/secret')).toBe('top\n')

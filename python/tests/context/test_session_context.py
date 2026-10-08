@@ -19,6 +19,7 @@ import pytest
 from mirage.context import (
     effective_mount_mode,
     effective_path_mode,
+    get_current_evaluation,
     get_current_session,
     get_current_session_for,
     get_current_session_unless_foreign,
@@ -30,6 +31,7 @@ from mirage.context import (
     reset_mount_gate,
     reset_program_invocation,
     session_visibility,
+    set_current_evaluation,
     set_current_session,
     set_mount_gate,
     set_program_invocation,
@@ -45,6 +47,7 @@ from mirage.types import (
     weaker_mode,
 )
 from mirage.utils.hidden import hidden_under, path_visible
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.session import SessionManager, SessionState
 
 
@@ -463,9 +466,10 @@ def test_a_program_run_covers_the_child_evaluations_under_it():
     parent = SessionState(session_id="parent")
     child = parent.fork()
     other = SessionState(session_id="other")
+    evaluation = EvaluationContext(child, parent=EvaluationContext(parent))
     mark = set_program_invocation(parent)
     try:
-        token = set_current_session(child, ancestors=(parent,))
+        token = set_current_session(child, evaluation=evaluation)
         try:
             assert program_invocation(parent)
             assert program_invocation(child)
@@ -476,3 +480,21 @@ def test_a_program_run_covers_the_child_evaluations_under_it():
     finally:
         reset_program_invocation(mark)
     assert not program_invocation(parent)
+
+
+def test_an_evaluation_binds_with_its_own_session_only():
+    session = SessionState(session_id="s")
+    other = SessionState(session_id="o")
+    evaluation = EvaluationContext(session)
+    token = set_current_evaluation(evaluation)
+    try:
+        assert get_current_evaluation() is evaluation
+        for rebound, expected in ((session, evaluation), (other, None)):
+            inner = set_current_session(rebound)
+            try:
+                assert get_current_evaluation() is expected
+            finally:
+                reset_current_session(inner)
+    finally:
+        reset_current_session(token)
+    assert get_current_evaluation() is None

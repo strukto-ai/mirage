@@ -715,7 +715,7 @@ describe('the session the adapter reads as', () => {
         names: (await fs.listDir(await fs.resolve('/data'))).map((e) => e.name),
         stat: await fs.stat(await fs.resolve('/data/vault/lk')),
       }),
-      ws.sessionManager,
+      { owner: ws.sessionManager },
     )
     expect(asAgent).toEqual({ key: '/data/vault/lk', names: ['public.txt'], stat: undefined })
   })

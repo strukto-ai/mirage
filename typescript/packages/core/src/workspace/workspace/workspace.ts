@@ -1477,7 +1477,7 @@ export class Workspace {
     // unrestricted default instead.
     await this.ensureSessionsLoaded()
     const session = this.sessionManager.get(sessionId ?? this.sessionManager.defaultId)
-    return runWithSession(session, run, this.sessionManager)
+    return runWithSession(session, run, { owner: this.sessionManager })
   }
 
   /** The ambient session the op door keeps for a facade, or null. */

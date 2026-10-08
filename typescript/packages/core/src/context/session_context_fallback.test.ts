@@ -12,11 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  EvaluationContext,
-  getCurrentEvaluation,
-  runWithEvaluation,
-} from '../workspace/evaluation.ts'
+import { EvaluationContext } from '../workspace/evaluation.ts'
 import { describe, expect, it, vi } from 'vitest'
 import {
   captureSessionContext,
@@ -35,6 +31,8 @@ import {
   runWithRedirectPaths,
   runWithSession,
   sessionUmask,
+  getCurrentEvaluation,
+  runWithEvaluation,
 } from './session_context.ts'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
@@ -80,6 +78,31 @@ function gate(): [Promise<void>, () => void] {
   })
   return [held, release]
 }
+
+describe('the bound evaluation on the fallback storage', () => {
+  it('a bind without an evaluation does not hide a running line', async () => {
+    // A line waits (its write's turn) while a held op door binds another
+    // session with no evaluation: that frame is the newest, and must not
+    // answer the line with none, or its abort check is skipped.
+    const line = new SessionState({ sessionId: 'line', cwd: '/' })
+    const other = new SessionState({ sessionId: 'other', cwd: '/' })
+    const evaluation = new EvaluationContext(line)
+    const [holdLine, releaseLine] = gate()
+    const [holdDoor, releaseDoor] = gate()
+    let seen: EvaluationContext | null = null
+    const running = runWithEvaluation(evaluation, async () => {
+      await holdLine
+      seen = getCurrentEvaluation()
+      releaseDoor()
+    })
+    const door = runWithSession(other, async () => {
+      releaseLine()
+      await holdDoor
+    })
+    await Promise.all([running, door])
+    expect(seen).toBe(evaluation)
+  })
+})
 
 describe('the mount gate on the fallback storage', () => {
   it('overlapping commands each answer with their own mounts gate', async () => {
@@ -296,7 +319,7 @@ describe('session predicates on the fallback storage', () => {
       async () => {
         await hold
       },
-      ownerA,
+      { owner: ownerA },
     )
     const runB = runWithSession(
       sessB,
@@ -308,7 +331,7 @@ describe('session predicates on the fallback storage', () => {
         release()
         return Promise.resolve()
       },
-      ownerB,
+      { owner: ownerB },
     )
     await Promise.all([runA, runB])
     expect(forA).toBe(sessA)
@@ -478,7 +501,7 @@ describe('a named facade session on the fallback storage', () => {
       await wide.mkdir('/data/vault')
       await wide.write('/data/vault/secret', 'top\n')
       const [held, release] = gate()
-      const holding = runWithSession(host, () => held, ws.sessionManager)
+      const holding = runWithSession(host, () => held, { owner: ws.sessionManager })
       const named = new Session(ws, ws.defaultSessionId).vfs
       await expect(named.read('/data/vault/secret')).rejects.toMatchObject({ code: 'ENOENT' })
       expect(await ws.vfs.cat('/data/vault/secret')).toBe('top\n')
