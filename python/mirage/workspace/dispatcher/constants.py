@@ -15,7 +15,7 @@
 # The content reads the warm file cache may answer: a cached whole-file
 # value can serve them (sliced for ranged reads) without touching the
 # backend, subject to the reconciler's consistency check.
-DISPATCH_READ_OPS = frozenset({"read", "read_bytes"})
+DISPATCH_READ_OPS = frozenset({"read"})
 
 # Backend mutations that run the dispatcher's post-write bookkeeping:
 # file-cache eviction, parent index invalidation, and overlay time

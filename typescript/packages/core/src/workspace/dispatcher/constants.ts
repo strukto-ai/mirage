@@ -15,7 +15,7 @@
 // The content reads the warm file cache may answer: a cached whole-file
 // value can serve them (sliced for ranged reads) without touching the
 // backend, subject to the reconciler's consistency check.
-export const DISPATCH_READ_OPS: ReadonlySet<string> = new Set(['read', 'read_bytes'])
+export const DISPATCH_READ_OPS: ReadonlySet<string> = new Set(['read'])
 
 // Backend mutations that run the dispatcher's post-write bookkeeping:
 // file-cache eviction, parent index invalidation, and overlay time

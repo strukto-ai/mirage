@@ -24,7 +24,7 @@ import { ancestors } from '../utils/path.ts'
 import type { MountEntry } from './mount/mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 
-const REVALIDATE_OPS = new Set(['read', 'read_bytes', 'stat'])
+const REVALIDATE_OPS = new Set(['read', 'stat'])
 
 // The spec a backend op sees for an absolute virtual path on `mount`.
 function scopeOf(mount: MountEntry, path: string): PathSpec {

@@ -28,7 +28,7 @@ from mirage.workspace.mount.namespace import Namespace
 
 logger = logging.getLogger(__name__)
 
-_REVALIDATE_OPS = frozenset({"read", "read_bytes", "stat"})
+_REVALIDATE_OPS = frozenset({"read", "stat"})
 
 
 class Verdict(Enum):
