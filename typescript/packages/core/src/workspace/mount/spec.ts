@@ -14,9 +14,9 @@
 
 import type { IndexConfig } from '../../cache/index/config.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
-import type { Limit, MountBackend, MountMode, ReadSpec } from '../../types.ts'
+import type { Limit, MountBackend, MountMode, ReadSpec, WritePolicy } from '../../types.ts'
 
-/** Placement settings; index and read fall back to the workspace defaults. */
+/** Placement settings; index, read and write fall back to the workspace defaults. */
 export interface MountSpecOptions {
   mode?: MountMode
   backend?: MountBackend
@@ -26,6 +26,8 @@ export interface MountSpecOptions {
   vfsRef?: string | null
   index?: IndexConfig
   read?: ReadSpec
+  /** Whether this mount's writes carry the version they were based on. */
+  write?: WritePolicy
 }
 
 export class Mount {

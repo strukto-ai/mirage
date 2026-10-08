@@ -16,8 +16,10 @@ from enum import Enum
 
 
 class TrapEvent(Enum):
-    """What a ``trap`` signal spec names: the shell's EXIT, or another
-    signal bash knows and mirage never delivers."""
+    """What a ``trap`` signal spec names: the shell's EXIT, ERR or
+    RETURN, or another signal bash knows and mirage never delivers."""
 
-    EXIT = "exit"
+    EXIT = "EXIT"
+    ERR = "ERR"
+    RETURN = "RETURN"
     OTHER = "other"

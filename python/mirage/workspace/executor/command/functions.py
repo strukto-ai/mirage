@@ -12,31 +12,31 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
 from functools import partial
 from typing import Any
 
 from mirage.context import clear_program_invocation, reset_program_invocation
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
-from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
-from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
-from mirage.shell.errors import ReturnSignal
+from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import parse_function
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse.scope import ParseScope
-from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import ShellVar
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.types import ExecuteNodeFn
-from mirage.workspace.executor.control import UNWINDING, carried
-from mirage.workspace.executor.jobs import run_statement
-from mirage.workspace.executor.statement import fd0_binding, finish_statement
+from mirage.workspace.executor.control import execute_body, returning
+from mirage.workspace.executor.traps import (
+    lift_function_traps,
+    restore_function_traps,
+)
 from mirage.workspace.session.state import restore_locals
 from mirage.workspace.types import ExecutionNode
 
@@ -53,13 +53,17 @@ async def run_shell_function(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     sink: JobConsole | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a user-defined shell function's body statement by statement.
 
     Locals declared with ``local``/``declare`` shadow and restore on
     exit, ``return`` stops the body via :class:`ReturnSignal`, ``$?``
     tracks each inner statement, and ``set -e`` aborts the body on the
-    first failing statement exactly as it does at top level.
+    first failing statement exactly as it does at top level. The body
+    sees no inherited ERR or RETURN action unless ``set -E`` / ``set
+    -T``; one it sets itself it sees, and the RETURN action runs as it
+    returns.
 
     Args:
         execute_node (ExecuteNodeFn): the executor's statement runner.
@@ -77,6 +81,8 @@ async def run_shell_function(
         decisions (Decisions | None): ledger that holds those claims.
         sink (JobConsole | None): where each statement writes as it
             finishes, None to return the body's output.
+        execute_fn (Callable[..., Any] | None): runs a trap action as a
+            line of the shell; None where nothing can run one.
     """
     session = context.session
     scope = ParseScope()
@@ -93,6 +99,7 @@ async def run_shell_function(
     # Positional args carry the word as typed ($1 stays sub/a.txt).
     text_args = [word_text(p) for p in parts[1:]]
     cs.push(text_args, function_name=cmd_name)
+    lifted = lift_function_traps(session)
     outer_names = session.function_names
     if outer_names is not None:
         session.function_names = cs.function_names()
@@ -134,58 +141,37 @@ async def run_shell_function(
     if nested is not None:
         execute_node = partial(execute_node, handed=nested)
     try:
-        all_stdout: list[Any] = []
-        merged_io = IOResult()
-        last_exec = ExecutionNode(command=cmd_name, exit_code=0)
-        bound = fd0_binding(session)
-        for cmd in func_body:
-            if cmd.type == NT.COMMENT:
-                continue
-            try:
-                stdout, io, last_exec = await run_statement(
-                    execute_node,
-                    cmd,
-                    context,
-                    stdin,
-                    bound,
-                    cs,
-                    job_table,
-                    agent_id,
-                    body_handed,
-                    decisions,
-                )
-            except ReturnSignal as sig:
-                if sig.stdout is not None:
-                    all_stdout.append(sig.stdout)
-                if sig.stderr:
-                    merged_io = await merged_io.merge(
-                        IOResult(stderr=sig.stderr)
-                    )
-                merged_io.exit_code = sig.exit_code
-                break
-            except UNWINDING as sig:
-                raise await carried(
-                    sig,
-                    async_chain(all_stdout) if all_stdout else None,
-                    merged_io,
-                )
-            # $? tracks each statement inside the body, so a bare
-            # `return` (and mid-function $?) sees the last command.
-            stdout = await finish_statement(stdout, io, session, cmd)
-            if stdout is not None:
-                all_stdout.append(stdout)
-            merged_io = await merged_io.merge(io)
-            if (
-                io.exit_code != 0
-                and session.shell_options.get("errexit")
-                and cmd.type not in ERREXIT_EXEMPT_TYPES
-                and not session.errexit_immune
-            ):
-                merged_io.exit_code = io.exit_code
-                break
-        combined = async_chain(all_stdout) if all_stdout else None
+        try:
+            stdout, merged_io, last_exec = await execute_body(
+                execute_node,
+                func_body,
+                context,
+                stdin,
+                cs,
+                job_table,
+                agent_id,
+                body_handed,
+                decisions,
+                execute_fn,
+                sink,
+            )
+        except ReturnSignal as sig:
+            stdout = sig.stdout
+            merged_io = IOResult(
+                stderr=sig.stderr or None, exit_code=sig.exit_code
+            )
+            last_exec = ExecutionNode(command=cmd_name)
+        stdout, merged_io = await returning(
+            execute_fn, session, stdin, cs, stdout, merged_io, sink
+        )
         last_exec.exit_code = merged_io.exit_code
-        return combined, merged_io, last_exec
+        return stdout, merged_io, last_exec
+    except ExitSignal as sig:
+        # An `exec` replaced the shell: the actions went with it, so the
+        # ones the body took from its caller do not come back.
+        if sig.replaced is not None:
+            lifted = (None, None)
+        raise
     finally:
         session._parse_current, session._parse_row = outer_parse
         if nested is not None and decisions is not None:
@@ -195,6 +181,7 @@ async def run_shell_function(
         cs.pop()
         if session.function_names is not None:
             session.function_names = outer_names
+        restore_function_traps(session, lifted)
         restore_locals(session, saved_locals)
         session._local_frames.pop()
         session._local_vars = outer_locals

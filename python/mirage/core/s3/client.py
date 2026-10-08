@@ -19,6 +19,7 @@ from typing import Any
 import aioboto3
 from botocore.config import Config
 
+from mirage.core.s3.constants import CONDITION_LOST_CODES
 from mirage.utils import key_prefix as kp
 from mirage.vfs.s3.config import S3Config
 from mirage.vfs.secrets import reveal_secret
@@ -33,6 +34,39 @@ def is_not_found(exc: Exception) -> bool:
     if hasattr(exc, "response"):
         code = exc.response.get("Error", {}).get("Code")
         return code in ("404", "NoSuchKey")
+    return False
+
+
+def is_key_gone(exc: Exception) -> bool:
+    """Whether a conditioned request found its key gone.
+
+    Any 404 but a missing bucket, whatever its code (``NoSuchKey``, a
+    bodiless 404, ``NoSuchVersion``). Mirrors TS ``isNotFoundError`` with
+    ``isMissingBucket``.
+
+    Args:
+        exc (Exception): the error the request raised.
+    """
+    response = getattr(exc, "response", None)
+    if not isinstance(response, dict):
+        return False
+    code = response.get("Error", {}).get("Code")
+    status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return code != "NoSuchBucket" and (status == 404 or is_not_found(exc))
+
+
+def is_condition_lost(exc: Exception) -> bool:
+    """Whether a conditional request lost: the object changed since the
+    version sent (412), or another conditional write is in flight (409).
+
+    Auth, missing-key and transport failures keep their own meaning.
+
+    Args:
+        exc (Exception): Error raised by a botocore call.
+    """
+    if hasattr(exc, "response"):
+        code = exc.response.get("Error", {}).get("Code")
+        return code in CONDITION_LOST_CODES
     return False
 
 

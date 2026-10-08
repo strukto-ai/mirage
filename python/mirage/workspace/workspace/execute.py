@@ -64,7 +64,7 @@ from mirage.workspace.executor.statement import (
     record_status,
     snapshot_status,
 )
-from mirage.workspace.executor.traps import finish_shell, inherit_exit_trap
+from mirage.workspace.executor.traps import finish_shell, inherit_traps
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.admission import (
@@ -308,7 +308,14 @@ async def recurse(
     rest = session.job_output or session.tty.jobs
     if substitution:
         session.terminal_output = False
-        inherit_exit_trap(session)
+        inherit_traps(session)
+        # bash runs a substitution without `set -e` unless
+        # `shopt -s inherit_errexit` (or POSIX mode) passes it on.
+        if not (
+            session.shopts.get("inherit_errexit")
+            or session.shell_options.get("posix")
+        ):
+            session.shell_options["errexit"] = False
         # A substitution reads its pipe until every writer has closed
         # it, so what a job it started writes is part of its value,
         # and it ends when its jobs do. They are its own jobs.
@@ -998,8 +1005,9 @@ async def run_prepared_line(
                     if r.op not in READ_FINGERPRINT_OPS
                 ]
             )
+        # The line's own end keeps the versions its nested lines saw.
         await ws.dispatcher.apply_io(
-            io, records=applied, cache_facts=cache_facts
+            io, records=applied, cache_facts=cache_facts, nested=not is_line
         )
         return io
     except CommandTimeoutError as exc:

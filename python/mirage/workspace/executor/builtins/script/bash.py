@@ -45,7 +45,7 @@ from mirage.workspace.executor.builtins.script.script import (
 )
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.executor.traps import clear_exit_trap, finish_shell
+from mirage.workspace.executor.traps import clear_traps, finish_shell
 from mirage.workspace.types import ExecutionNode
 
 
@@ -216,7 +216,7 @@ async def handle_bash(
     )
     session = context.session
     child_token = set_current_evaluation(context)
-    clear_exit_trap(session)
+    clear_traps(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session.positional_args = positional
     session.script_name = script_name

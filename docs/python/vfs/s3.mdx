@@ -71,6 +71,10 @@ The S3 VFS uses `IndexCacheStore` with `index_ttl = 600` (10 minutes).
 Directory listings are cached for up to 600 seconds before being refreshed
 from S3. This reduces API calls for repeated directory traversals.
 
+## Conditional writes
+
+Under [`write: conditional`](/home/yaml#the-write-policy) a write carries the version of the file mirage read, and S3 refuses it when the file has changed since. The endpoint decides which writes can be conditioned: AWS's conditions every write, copy and delete; any other `endpoint_url` (or `AWS_ENDPOINT_URL_S3`/`AWS_ENDPOINT_URL`) only a write, so mirage refuses what would copy or delete there. An endpoint set only in an AWS profile is not read: give a non-AWS server its `endpoint_url`.
+
 ## Example
 
 ```python

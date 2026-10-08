@@ -16,10 +16,22 @@ import asyncio
 
 import pytest
 
+from mirage import Workspace
 from mirage.cache.index import IndexConfig, RedisIndexConfig
 from mirage.cache.index.redis import RedisIndexCacheStore
-from mirage.types import Limit, MountBackend, MountMode, ReadPolicy, ReadSpec
+from mirage.shell.constants import BIN_PREFIX
+from mirage.types import (
+    Limit,
+    MountBackend,
+    MountMode,
+    ReadPolicy,
+    ReadSpec,
+    WritePolicy,
+)
+from mirage.vfs.gridfs import GridFSConfig, GridFSVFS
+from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.workspace.mounts import (
@@ -210,3 +222,61 @@ def test_install_mounts_applies_a_workspace_index_to_every_vfs():
         ReadSpec(),
     )
     assert registry.mount_for("/a/").index_store.ttl == 5
+
+
+def _s3() -> S3VFS:
+    return S3VFS(S3Config(bucket="b"))
+
+
+def _gridfs() -> GridFSVFS:
+    return GridFSVFS(GridFSConfig(uri="mongodb://x", database="d"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "options, vfs, write, expected",
+    [
+        ({}, _s3, "conditional", WritePolicy.CONDITIONAL),
+        ({}, _gridfs, "conditional", "gridfs does not"),
+        ({"write": "conditional"}, _s3, None, WritePolicy.CONDITIONAL),
+        ({"cache_limit": 0}, _s3, "conditional", "caches reads"),
+    ],
+    ids=["names", "cannot-honour", "inherits", "keeps-nothing"],
+)
+async def test_an_added_mount_is_judged_on_its_write_policy(
+    options, vfs, write, expected
+):
+    # The wire string, not the enum: the programmatic door coerces first.
+    ws = Workspace({}, mode=MountMode.WRITE, **options)
+    try:
+        if isinstance(expected, WritePolicy):
+            entry = ws.add_mount("/m", vfs(), MountMode.WRITE, write=write)
+            assert entry.write is expected
+        else:
+            with pytest.raises(ValueError, match=expected):
+                ws.add_mount("/m", vfs(), MountMode.WRITE, write=write)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_host_built_mounts_stay_unconditional_under_a_conditional_default():
+    ws = Workspace({"/s3": _s3()}, mode=MountMode.WRITE, write="conditional")
+    try:
+        assert ws.mount("/s3/").write is WritePolicy.CONDITIONAL
+        for prefix in ("/dev/", "/", HISTORY_PREFIX + "/", BIN_PREFIX + "/"):
+            assert ws.mount(prefix).write is WritePolicy.UNCONDITIONAL, prefix
+        r = await ws.shell("echo x > /dev/null")
+        assert r.exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_conditional_mount_needs_a_cache_that_keeps_reads():
+    # A zero cache limit keeps nothing, so no write would have a version.
+    with pytest.raises(ValueError, match="caches reads"):
+        Workspace(
+            {"/s3": Mount(_s3(), mode=MountMode.WRITE, write="conditional")},
+            cache_limit=0,
+        )

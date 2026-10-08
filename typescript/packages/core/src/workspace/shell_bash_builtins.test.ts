@@ -365,13 +365,7 @@ const CASES: [string, string, string, string, number][] = [
 
   // ── exec ──────────────────────────────────────────────────
   ['exec_bare_is_a_noop', 'exec; echo ok', 'ok\n', '', 0],
-  [
-    'exec_command_form_refused',
-    'exec echo hi; echo after',
-    'after\n',
-    'mirage: exec: echo: process replacement is not supported (no OS process to replace)\n',
-    0,
-  ],
+  ['exec_command_form_runs_and_ends_the_line', 'exec echo hi; echo after', 'hi\n', '', 0],
   [
     'exec_redirect_diverts_stdout',
     '( exec > /data/o.txt; echo a; echo b ); cat /data/o.txt',

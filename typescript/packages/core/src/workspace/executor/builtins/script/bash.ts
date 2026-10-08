@@ -31,7 +31,7 @@ import { helpPage, versionLine } from '../../../../commands/spec/standard.ts'
 import { specOf } from '../../../../commands/spec/index.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { clearExitTrap, finishShell } from '../../traps.ts'
+import { clearTraps, finishShell } from '../../traps.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
 function bashArgs(partial: Partial<BashArgs>): BashArgs {
@@ -192,7 +192,7 @@ export async function handleBash(
   }
   context = new EvaluationContext(session.newShell(), context.frame.fork(), context)
   session = context.session
-  clearExitTrap(session)
+  clearTraps(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.positionalArgs = positional
   session.scriptName = scriptName

@@ -23,12 +23,12 @@ from mirage.policy.types import HandOff
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
-from mirage.shell.descriptors import ENCLOSING, Recorder, StreamOwner
-from mirage.shell.errors import DiscardSignal, ExitSignal
+from mirage.shell.descriptors import Recorder, StreamOwner
+from mirage.shell.errors import DiscardSignal, ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import NodeType as NT
+from mirage.shell.types import TSNodeLike
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.control import (
@@ -39,14 +39,21 @@ from mirage.workspace.executor.control import (
 )
 from mirage.workspace.executor.jobs import handle_background
 from mirage.workspace.executor.statement import (
+    as_written,
+    errexit_acts,
     failed_read,
     fd0_binding,
     land,
     record_status,
+    recording,
     statement_output,
     statement_stdin,
 )
-from mirage.workspace.executor.traps import run_exit_trap
+from mirage.workspace.executor.traps import (
+    err_trap_armed,
+    run_err_trap,
+    run_exit_trap,
+)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -116,6 +123,7 @@ async def execute_program(
         session._parse_current, session._parse_row = outer_parse
         if root:
             session._line_open = False
+            session.errexit_exiting = False
 
 
 async def _run_program(
@@ -196,9 +204,7 @@ async def _run_program(
             echoed_row = last
 
         # Check for background: named node followed by & token
-        is_bg = i + 1 < len(children) and children[i + 1].type == NT.BACKGROUND
-
-        if is_bg:
+        if i + 1 < len(children) and children[i + 1].type == NT.BACKGROUND:
             try:
                 stdout, io, last_exec = await handle_background(
                     recurse,
@@ -231,115 +237,40 @@ async def _run_program(
             # Launching a job is itself a statement: bash sets $? to 0
             # (the launch status), so `false; cmd & echo $?` prints 0.
             record_status(session, io.exit_code)
+            if stdout is not None:
+                all_stdout.append(stdout)
+            merged_io = await merged_io.merge(io)
             i += 2
-        else:
-            # `exec < file` feeds the shell's stdin: a later `read` or
-            # `while read` sees it, and each statement reads on from
-            # where the one before it stopped.
-            child_stdin = statement_stdin(session, stdin, bound)
-            # Each statement writes to a recorder rather than straight
-            # to the program's output, so what it wrote to the terminal
-            # through a copy (`exec 3>&1`) keeps its place, past an
-            # `exec` diversion, and what it wrote to an enclosing level's
-            # stream goes on there.
-            recorder = Recorder()
-            enclosing = ENCLOSING.set(recorder)
-            # A job this shell started writes into the statement while it
-            # runs, among what the statement writes.
-            jobs = session.job_output or session.tty.jobs
-            held = jobs.recorder
-            try:
-                jobs.recorder = recorder
-                try:
-                    stdout, io, last_exec = await recurse(
-                        child, context, child_stdin, call_stack, sink=recorder
-                    )
-                finally:
-                    jobs.recorder = held
-            except UNWINDING as sig:
-                merged_io = await land(
-                    await statement_output(
-                        recorder, None, IOResult(), own, sink
-                    ),
-                    sink,
-                    all_stdout,
-                    merged_io,
-                )
-                if (
-                    isinstance(sig, DiscardSignal)
-                    and not (call_stack is not None and call_stack.subshell)
-                    and not session.shell_options.get("errexit")
-                ):
-                    # bash's DISCARD: the rest of this line goes, and the
-                    # loop resumes at the next line with `$?` at 1.
-                    merged_io = await land(
-                        [
-                            (channel, data, False)
-                            for channel, data in (
-                                (Channel.STDOUT, sig.stdout or b""),
-                                (Channel.STDERR, sig.stderr),
-                            )
-                            if data
-                        ],
-                        sink,
-                        all_stdout,
-                        merged_io,
-                    )
-                    merged_io.exit_code = sig.exit_code
-                    record_status(session, sig.exit_code)
-                    last_exec = ExecutionNode(
-                        command=get_text(child),
-                        exit_code=sig.exit_code,
-                        stderr=sig.stderr,
-                    )
-                    i = _next_line(node, children, i)
-                    continue
-                if isinstance(sig, DiscardSignal):
-                    # A line loop a child shell runs ends it on a discard
-                    # with the discard's own status: `( eval ': ${R:=x}' )`
-                    # and `$( : ${R:=x} )` end with 1, where the `( )`
-                    # around a bare `: ${R:=x}` ends with 2.
-                    sig.contained_code = sig.exit_code
-                if inline:
-                    raise await carried(
-                        sig,
-                        async_chain(all_stdout) if all_stdout else None,
-                        merged_io,
-                    )
-                # Anything else ends this shell: `exit`, or an error bash
-                # treats as one, keeping what earlier statements wrote.
-                if sig.stdout:
-                    all_stdout.append(sig.stdout)
-                if isinstance(sig, (BreakSignal, ContinueSignal)):
-                    code, stderr = sig.io.exit_code, sig.io.stderr
-                else:
-                    code, stderr = sig.exit_code, sig.stderr
-                merged_io = await merged_io.merge(
-                    IOResult(exit_code=code, stderr=stderr or None)
-                )
-                merged_io = await _exit_shell(
-                    execute_fn,
+            continue
+
+        at = i
+        i += 1
+        armed = err_trap_armed(session)
+        # Each statement writes to a recorder rather than straight to the
+        # program's output, so what it wrote to the terminal through a
+        # copy (`exec 3>&1`) keeps its place, past an `exec` diversion,
+        # and what it wrote to an enclosing level's stream goes on there.
+        recorder = Recorder()
+        try:
+            with recording(session, recorder):
+                # `exec < file` feeds the shell's stdin: a later `read` or
+                # `while read` sees it, and each statement reads on from
+                # where the one before it stopped.
+                stdout, io, last_exec = await recurse(
+                    child,
                     context,
-                    code,
-                    stdin,
+                    statement_stdin(session, stdin, bound),
                     call_stack,
-                    all_stdout,
-                    merged_io,
+                    sink=recorder,
                 )
-                record_status(session, merged_io.exit_code)
-                last_exec = ExecutionNode(
-                    command="exit", exit_code=merged_io.exit_code
-                )
-                break
-            finally:
-                ENCLOSING.reset(enclosing)
             # Materialize stdout so lazy exit codes (e.g. from
             # exit_on_empty in grep) are finalized before $? is set.
             try:
                 stdout = await materialize(stdout)
             except OSError as exc:
-                # Lazy reads (head/tail opening the stream mid-pipeline) can
-                # fail on the first pull, which is the command's failure.
+                # Lazy reads (head/tail opening the stream mid-pipeline)
+                # can fail on the first pull, which is the command's
+                # failure.
                 await failed_read(io, exc, last_exec)
                 stdout = None
             except Exception as exc:
@@ -350,7 +281,6 @@ async def _run_program(
             record_status(
                 session, io.exit_code, transparent=pipeline_transparent(child)
             )
-            i += 1
             # An `exec` redirect sends the shell's own output to a file:
             # every statement after the `exec` diverts here, so nothing
             # bubbles to the terminal and stderr lands in its own target.
@@ -362,20 +292,49 @@ async def _run_program(
                 child,
                 last_exec.command or "",
             )
-            stdout = None
             merged_io = await land(written, sink, all_stdout, merged_io)
-        if stdout is not None:
-            all_stdout.append(stdout)
-        merged_io = await merged_io.merge(io)
-
-        if (
-            io.exit_code != 0
-            and session.shell_options.get("errexit")
-            and not is_bg
-            and child.type not in ERREXIT_EXEMPT_TYPES
-            and not session.errexit_immune
-        ):
-            merged_io.exit_code = io.exit_code
+            merged_io = await merged_io.merge(io)
+            merged_io = await land(
+                await run_err_trap(
+                    execute_fn,
+                    child,
+                    io.exit_code,
+                    session,
+                    armed,
+                    stdin,
+                    call_stack,
+                    last_exec,
+                ),
+                sink,
+                all_stdout,
+                merged_io,
+            )
+        except UNWINDING as sig:
+            # What it wrote before it left; the ERR action answering it
+            # left after that was landed.
+            merged_io = await land(
+                await statement_output(recorder, None, IOResult(), own, sink),
+                sink,
+                all_stdout,
+                merged_io,
+            )
+            resumes, merged_io, last_exec = await _unwound(
+                sig,
+                child,
+                context,
+                stdin,
+                call_stack,
+                sink,
+                inline,
+                execute_fn,
+                all_stdout,
+                merged_io,
+            )
+            if resumes:
+                i = _next_line(node, children, at)
+                continue
+            break
+        if errexit_acts(child, io.exit_code, session):
             if not inline:
                 merged_io = await _exit_shell(
                     execute_fn,
@@ -392,6 +351,104 @@ async def _run_program(
         return all_stdout[0], merged_io, last_exec
     combined = async_chain(all_stdout) if all_stdout else None
     return combined, merged_io, last_exec
+
+
+async def _unwound(
+    sig: BreakSignal | ContinueSignal | ReturnSignal | ExitSignal,
+    child: TSNodeLike,
+    context: EvaluationContext,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    sink: JobConsole | None,
+    inline: bool,
+    execute_fn: Callable[..., Any] | None,
+    all_stdout: list[Any],
+    merged_io: IOResult,
+) -> tuple[bool, IOResult, ExecutionNode]:
+    """Settle a signal that unwound out of a statement, or out of the ERR
+    action that answered it.
+
+    bash's DISCARD resumes the loop at the next line with ``$?`` at 1. An
+    inline program carries anything else on into its caller, after what
+    it wrote; any other program ends its shell there: ``exit``, or an
+    error bash treats as one.
+
+    Args:
+        sig (BreakSignal | ContinueSignal | ReturnSignal | ExitSignal):
+            one of ``UNWINDING``.
+        child (TSNodeLike): the statement it left.
+        context (EvaluationContext): the shell.
+        stdin (ByteSource | None): its standard input.
+        call_stack (CallStack | None): its frames.
+        sink (JobConsole | None): where its output goes as it is written.
+        inline (bool): the program runs on its caller's frames.
+        execute_fn (Callable[..., Any] | None): runs the EXIT action.
+        all_stdout (list[Any]): what the program wrote so far.
+        merged_io (IOResult): its result so far.
+
+    Returns:
+        tuple[bool, IOResult, ExecutionNode]: whether the loop resumes,
+        the result, and the statement's node.
+    """
+    session = context.session
+    if (
+        isinstance(sig, DiscardSignal)
+        and not (call_stack is not None and call_stack.subshell)
+        and not session.shell_options.get("errexit")
+    ):
+        merged_io = await land(
+            as_written(sig.stdout, sig.stderr),
+            sink,
+            all_stdout,
+            merged_io,
+        )
+        merged_io.exit_code = sig.exit_code
+        record_status(session, sig.exit_code)
+        return (
+            True,
+            merged_io,
+            ExecutionNode(
+                command=get_text(child),
+                exit_code=sig.exit_code,
+                stderr=sig.stderr,
+            ),
+        )
+    if isinstance(sig, DiscardSignal):
+        # A line loop a child shell runs ends it on a discard with the
+        # discard's own status: `( eval ': ${R:=x}' )` and
+        # `$( : ${R:=x} )` end with 1, where the `( )` around a bare
+        # `: ${R:=x}` ends with 2.
+        sig.contained_code = sig.exit_code
+    if inline:
+        raise await carried(
+            sig,
+            async_chain(all_stdout) if all_stdout else None,
+            merged_io,
+        )
+    if sig.stdout:
+        all_stdout.append(sig.stdout)
+    if isinstance(sig, (BreakSignal, ContinueSignal)):
+        code, stderr = sig.io.exit_code, sig.io.stderr
+    else:
+        code, stderr = sig.exit_code, sig.stderr
+    merged_io = await merged_io.merge(
+        IOResult(exit_code=code, stderr=stderr or None)
+    )
+    merged_io = await _exit_shell(
+        execute_fn,
+        context,
+        code,
+        stdin,
+        call_stack,
+        all_stdout,
+        merged_io,
+    )
+    record_status(session, merged_io.exit_code)
+    return (
+        False,
+        merged_io,
+        ExecutionNode(command="exit", exit_code=merged_io.exit_code),
+    )
 
 
 async def _exit_shell(

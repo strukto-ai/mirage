@@ -31,6 +31,7 @@ from mirage.workspace.executor.builtins.script.script import (
     script_error,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.executor.control import returning
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     positional_params,
@@ -105,22 +106,27 @@ async def handle_source(
     if outer_names is not None:
         session.function_names = cs.function_names()
     try:
-        io = await execute_fn(
-            script,
-            session_id=session.session_id,
-            stdin=stdin,
-            sink=sink,
-            call_stack=cs,
+        try:
+            io = await execute_fn(
+                script,
+                session_id=session.session_id,
+                stdin=stdin,
+                sink=sink,
+                call_stack=cs,
+            )
+        except ReturnSignal as sig:
+            io = IOResult(
+                stdout=sig.stdout,
+                stderr=sig.stderr or None,
+                exit_code=sig.exit_code,
+            )
+        # The RETURN action runs as the file returns, in its frame.
+        stdout, io = await returning(
+            execute_fn, session, stdin, cs, io.stdout, io
         )
     except ExitSignal as sig:
         sig.sourced = True
         raise
-    except ReturnSignal as sig:
-        io = IOResult(
-            stdout=sig.stdout,
-            stderr=sig.stderr or None,
-            exit_code=sig.exit_code,
-        )
     finally:
         frame = cs.pop()
         if session.function_names is not None:
@@ -128,7 +134,7 @@ async def handle_source(
         if not args:
             set_positional_params(session, cs, frame.positional)
     return (
-        io.stdout,
+        stdout,
         io,
         ExecutionNode(command=f"source {raw}", exit_code=io.exit_code),
     )

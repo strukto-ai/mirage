@@ -14,6 +14,11 @@
 
 from collections.abc import Awaitable, Callable
 
+from mirage.cache.context import (
+    own_write_version,
+    read_versioned,
+)
+from mirage.cache.types import OwnRead
 from mirage.errors.fs import eexist, einval, eisdir, enotsup
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.ranges import splice_window
@@ -46,17 +51,20 @@ async def append_by_rewrite(
         try:
             found = await stat(path)
         except FileNotFoundError:
-            await write(path, data)
+            with own_write_version(path, OwnRead.ABSENT):
+                await write(path, data)
             return
         if found.type == FileType.DIRECTORY:
             raise eisdir(path.virtual)
         return
     try:
-        existing = await read(path)
+        existing, own = await read_versioned(path, lambda: read(path))
     except FileNotFoundError:
-        await write(path, data)
+        with own_write_version(path, OwnRead.ABSENT):
+            await write(path, data)
         return
-    await write(path, existing + data)
+    with own_write_version(path, own):
+        await write(path, existing + data)
 
 
 async def pwrite_by_rewrite(
@@ -89,13 +97,15 @@ async def pwrite_by_rewrite(
         try:
             found = await stat(path)
         except FileNotFoundError:
-            await write(path, data)
+            with own_write_version(path, OwnRead.ABSENT):
+                await write(path, data)
             return
         if found.type == FileType.DIRECTORY:
             raise eisdir(path.virtual)
         return
+    own: str | OwnRead | None = None
     try:
-        existing = await read(path)
+        existing, own = await read_versioned(path, lambda: read(path))
     except FileNotFoundError:
         try:
             missing: FileStat | None = await stat(path)
@@ -103,8 +113,9 @@ async def pwrite_by_rewrite(
             missing = None
         if missing is not None and missing.type == FileType.DIRECTORY:
             raise eisdir(path.virtual)
-        existing = b""
-    await write(path, splice_window(existing, offset, data))
+        existing, own = b"", OwnRead.ABSENT
+    with own_write_version(path, own):
+        await write(path, splice_window(existing, offset, data))
 
 
 async def truncate_by_rewrite(

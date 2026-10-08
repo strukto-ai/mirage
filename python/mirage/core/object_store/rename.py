@@ -13,19 +13,26 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.cache.context import (
+    drop_cached,
     evict_after,
     invalidate_after_move,
     invalidate_ancestors,
+    known_versions,
+    move_condition,
+    stale,
 )
+from mirage.cache.types import Measured
 from mirage.core.object_store.driver import (
     A,
     C,
     ExistsFn,
     ObjectStoreDriver,
     PairFn,
+    keep_walk,
 )
+from mirage.core.object_store.errors import ConditionLostError
 from mirage.errors.fs import enoent
-from mirage.observe.context import record, start_op
+from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
 
@@ -75,9 +82,27 @@ def make_rename(
         # move_file leaves this "rename": the walk never ran, so nothing
         # under the prefix can have moved.
         op = "rename"
+        # A move is a copy then a delete, so both carry a condition.
+        cond, source = await move_condition(src_spec, dst_spec)
 
         async def move(conn: C) -> bool:
             nonlocal op
+            if cond is not None:
+                move_file_if = driver.move_file_if
+                move_prefix_if = driver.move_prefix_if
+                assert move_file_if is not None and move_prefix_if is not None
+                if await move_file_if(
+                    conn, src_key, kp.apply(kpfx, dst), cond, source
+                ):
+                    return True
+                op = "rename_prefix"
+                return await move_prefix_if(
+                    conn,
+                    kp.apply_dir(kpfx, src),
+                    kp.apply_dir(kpfx, dst),
+                    known_versions(src_spec, kpfx),
+                    known_versions(dst_spec, kpfx),
+                )
             if await move_file(conn, src_key, kp.apply(kpfx, dst)):
                 return True
             # A directory owns no object of its own, so a clean False
@@ -113,9 +138,36 @@ def make_rename(
             await invalidate_ancestors(dst_spec)
             await invalidate_ancestors(src_spec)
 
+        def named(
+            key: str, exc: ConditionLostError
+        ) -> tuple[PathSpec, Measured | None]:
+            # The path the refusal names and the version its write sent.
+            if key == kp.apply(kpfx, dst):
+                return dst_spec, cond.if_match if cond is not None else None
+            if key == src_key:
+                return src_spec, exc.versions.get(key, source)
+            return kp.key_path(src_spec, kpfx, key), exc.versions.get(key)
+
+        upto = lost_count()
         async with driver.connect(accessor) as conn:
-            moved = await evict_after(move(conn), settle)
+            try:
+                moved = await evict_after(move(conn), settle)
+            except ConditionLostError as exc:
+                lost, sent = named(await keep_walk(src_spec, kpfx, exc), exc)
+                # The untouched end of a refused move keeps its version.
+                if exc.landed:
+                    await drop_cached(dst_spec)
+                elif lost is dst_spec:
+                    if source:
+                        await drop_cached(src_spec, source)
+                elif cond is not None and cond.if_match:
+                    await drop_cached(dst_spec, cond.if_match)
+                raise await stale(
+                    lost, landed=exc.landed, gone=exc.gone, version=sent
+                ) from exc
         if not moved:
             raise enoent(src_spec.virtual)
+        lift_lost(src_spec, upto, subtree=op != "rename")
+        lift_lost(dst_spec, upto, subtree=op != "rename")
 
     return rename

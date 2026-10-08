@@ -14,7 +14,13 @@
 
 import { CODE_ARMS, OPERAND_CONDITIONS } from './constants.ts'
 import { posixPhrase } from './posix.ts'
-import type { DotWalkError, FsError, MissingOpError, NoMountError } from './types.ts'
+import type {
+  DotWalkError,
+  FsError,
+  MissingOpError,
+  NoMountError,
+  StaleWriteError,
+} from './types.ts'
 import { stripSlash } from '../utils/slash.ts'
 
 // Accepts a PathSpec (reads .rawPath, the word's spelling, which defaults
@@ -42,6 +48,12 @@ export function fsError(
   return err
 }
 
+// An error for a code with no path to name, so a command names its operand.
+// Python raises the built-in (PermissionError) without a filename.
+export function unnamedFsError(code: string, message: string): Error {
+  return Object.assign(new Error(message), { code })
+}
+
 // Mirrors Python's enoent. The strerror suffix ("No such file or directory")
 // is appended once at the command chokepoints.
 export function enoent(path: string | { virtual: string }): FsError {
@@ -59,6 +71,40 @@ export function ebadf(path: string | { virtual: string }): FsError {
  * so a read-family command reports it and moves on. */
 export function efbig(path: string | { virtual: string }): FsError {
   return fsError(path, 'EFBIG')
+}
+
+/** A conditional write the backend refused: the file changed since it was
+ * read. Per-operand, so a command reports it and moves on; never a read
+ * failure. Python's StaleWriteError. */
+export function staleWrite(path: string | { virtual: string }, landed = false): StaleWriteError {
+  return Object.assign(fsError(path, 'STALE_WRITE'), { landed })
+}
+
+/**
+ * The part of a failure's path below `operand`, '' when it is the operand: a
+ * recursive command that fails on a file inside its operand names that
+ * file, as GNU does (`rm: cannot remove 'd/s/b'`). Mirrors Python's
+ * `inner_suffix`.
+ */
+export function innerSuffix(operand: { virtual: string }, err: unknown): string {
+  const name = (err as { virtualPath?: unknown }).virtualPath
+  const base = operand.virtual.replace(/\/+$/, '')
+  if (typeof name !== 'string' || !name.startsWith(`${base}/`)) return ''
+  return name.slice(base.length)
+}
+
+/** An operand as typed, or naming the file inside it that failed. Mirrors Python's `with_inner`. */
+export function withInner(raw: string, inner: string): string {
+  return inner === '' ? raw : raw.replace(/\/+$/, '') + inner
+}
+
+// Python's twin is `except StaleWriteError`.
+export function isStaleWrite(err: unknown): err is StaleWriteError {
+  return hasCode(err, 'STALE_WRITE')
+}
+
+export function isLandedMove(err: unknown): err is StaleWriteError {
+  return isStaleWrite(err) && (err as { landed?: unknown }).landed === true
 }
 
 export function ebusy(path: string | { virtual: string }): FsError {

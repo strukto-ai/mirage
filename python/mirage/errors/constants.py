@@ -23,6 +23,7 @@ from mirage.errors.types import (
     NoMountError,
     OperationNotSupportedError,
     ReadOnlyError,
+    StaleWriteError,
 )
 from mirage.runtime.errors import CrossMountError
 from mirage.utils.path import CycleError
@@ -41,6 +42,7 @@ CLASS_ARMS: tuple[tuple[type[BaseException], FsCondition], ...] = (
     (NotImplementedError, FsCondition.ENOTSUP),
     (BadDescriptorError, FsCondition.EBADF),
     (FileTooLargeError, FsCondition.EFBIG),
+    (StaleWriteError, FsCondition.STALE_WRITE),
     (NotADirectoryError, FsCondition.ENOTDIR),
     (IsADirectoryError, FsCondition.EISDIR),
     (FileExistsError, FsCondition.EEXIST),
@@ -97,6 +99,7 @@ OPERAND_CONDITIONS: frozenset[FsCondition] = frozenset(
         FsCondition.ENOTSUP,
         FsCondition.EXDEV,
         FsCondition.EFBIG,
+        FsCondition.STALE_WRITE,
     }
 )
 
@@ -109,6 +112,7 @@ CONDITION_CLASS: dict[FsCondition, type[OSError]] = {
     FsCondition.EROFS: ReadOnlyError,
     FsCondition.ENOTSUP: OperationNotSupportedError,
     FsCondition.EFBIG: FileTooLargeError,
+    FsCondition.STALE_WRITE: StaleWriteError,
 }
 
 # The per-operand errors a catch site names by class: every one that
@@ -125,6 +129,7 @@ FS_ERRORS: tuple[type[OSError], ...] = (
     PermissionError,
     OperationNotSupportedError,
     FileTooLargeError,
+    StaleWriteError,
 )
 
 # What a tree walk over a user operand tolerates: every recoverable

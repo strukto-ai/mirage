@@ -62,6 +62,7 @@ export async function handleCrossMount(
   cwd = '/',
   argv: readonly string[] = [],
   aggregate: AggregateFn | null = null,
+  checkUnlink?: (path: PathSpec) => void,
 ): Promise<CrossResult> {
   const native = runSingle
   const input = resolveSource(stdin)
@@ -111,6 +112,7 @@ export async function handleCrossMount(
         stdin,
         cwd,
         argv,
+        checkUnlink,
       )
     }
     if (strategy === Strategy.STREAM) {

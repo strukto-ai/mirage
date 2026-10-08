@@ -13,22 +13,31 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import {
+  runWithOwnVersion,
+  invalidateAfterWrite,
+  invalidateAncestors,
+  writeCondition,
+} from '../../cache/context.ts'
+import { OwnRead, type WriteCondition } from '../../cache/types.ts'
+import { record, revisionFor, startOp } from '../../observe/context.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, enotsup, isMissingPath } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { ancestors, norm, parent } from '../../utils/path.ts'
 import { isDir } from '../../utils/stat_view.ts'
-import type {
-  MkdirFn,
-  ObjectMeta,
-  ObjectStoreDriver,
-  PathFn,
-  StatFn,
-  TruncateFn,
-  WriteFn,
+import {
+  type MkdirFn,
+  type ObjectMeta,
+  type ObjectStoreDriver,
+  type PathFn,
+  type StatFn,
+  type TruncateFn,
+  type WriteFn,
+  refused,
+  requireHook,
 } from './driver.ts'
+import { ConditionLostError } from './errors.ts'
 import { makeStat } from './stat.ts'
 
 // Put one object, translating a missing container to ENOENT. The driver
@@ -47,10 +56,13 @@ async function put<A extends Accessor, C>(
   key: string,
   data: Uint8Array,
   path: PathSpec,
+  cond: WriteCondition | null = null,
 ): Promise<ObjectMeta | null> {
   try {
-    return await driver.put(conn, key, data)
+    if (cond === null) return await driver.put(conn, key, data)
+    return await requireHook(driver.putIf)(conn, key, data, cond)
   } catch (err) {
+    if (err instanceof ConditionLostError) throw await refused(path, err, cond)
     if (driver.isNotFound(err)) throw enoent(path)
     throw err
   }
@@ -60,11 +72,12 @@ async function put<A extends Accessor, C>(
 export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): WriteFn<A> {
   return async function write(accessor, path, data) {
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
+    const cond = await writeCondition(path, 'put')
     const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
     let meta: ObjectMeta | null
     try {
-      meta = await put(driver, conn, key, data, path)
+      meta = await put(driver, conn, key, data, path, cond)
     } finally {
       await close()
     }
@@ -82,11 +95,12 @@ export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
 export function makeCreate<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): PathFn<A> {
   return async function create(accessor, path) {
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
+    const cond = await writeCondition(path, 'put')
     const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
     let meta: ObjectMeta | null
     try {
-      meta = await put(driver, conn, key, new Uint8Array(0), path)
+      meta = await put(driver, conn, key, new Uint8Array(0), path, cond)
     } finally {
       await close()
     }
@@ -110,12 +124,33 @@ export function makeTruncate<A extends Accessor, C>(
     const { conn, close } = await driver.connect(accessor)
     let meta: ObjectMeta | null
     try {
-      const existing = await driver.get(conn, key)
-      const data = existing ?? new Uint8Array(0)
-      const result = new Uint8Array(length)
-      result.set(data.subarray(0, Math.min(data.byteLength, length)), 0)
-      // Remaining bytes are already zero-filled (Uint8Array default).
-      meta = await put(driver, conn, key, result, path)
+      if (length === 0) {
+        // Emptying reads nothing, so it carries the agent's version.
+        const cond = await writeCondition(path, 'put')
+        meta = await put(driver, conn, key, new Uint8Array(0), path, cond)
+      } else {
+        let existing: Uint8Array | null
+        let own: string | OwnRead | null = null
+        if (driver.getVersioned !== undefined) {
+          let got: [Uint8Array, string | null] | null
+          try {
+            got = await driver.getVersioned(conn, key, revisionFor(path.virtual))
+          } catch (err) {
+            if (isMissingPath(err)) throw enoent(path)
+            throw err
+          }
+          existing = got?.[0] ?? null
+          own = got === null ? OwnRead.ABSENT : got[1]
+        } else {
+          existing = await driver.get(conn, key)
+        }
+        const data = existing ?? new Uint8Array(0)
+        const result = new Uint8Array(length)
+        result.set(data.subarray(0, Math.min(data.byteLength, length)), 0)
+        // Remaining bytes are already zero-filled (Uint8Array default).
+        const cond = await runWithOwnVersion(path, own, () => writeCondition(path, 'put'))
+        meta = await put(driver, conn, key, result, path, cond)
+      }
     } finally {
       await close()
     }

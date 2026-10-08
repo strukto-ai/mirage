@@ -45,6 +45,7 @@ from mirage.errors.types import FsCondition
         (FsCondition.EBUSY, errno.EBUSY),
         (FsCondition.EROFS, errno.EROFS),
         (FsCondition.EFBIG, errno.EFBIG),
+        (FsCondition.STALE_WRITE, errno.ESTALE),
     ],
 )
 def test_numbers_come_from_the_host_errno_module(cond, number):
@@ -76,6 +77,10 @@ def test_xattr_miss_resolves_per_platform():
         (FsCondition.EBUSY, "Device or resource busy"),
         (FsCondition.EROFS, "Read-only file system"),
         (FsCondition.EFBIG, "File too large"),
+        (
+            FsCondition.STALE_WRITE,
+            "changed since it was read; read it again before writing",
+        ),
     ],
 )
 def test_phrases_are_the_strerror_text(cond, phrase):

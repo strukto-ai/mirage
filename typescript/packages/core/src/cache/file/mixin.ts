@@ -45,6 +45,23 @@ export interface FileCache {
    */
   evictPaths(paths: Iterable<string>): void
   exists(key: string | PathSpec): Promise<boolean>
+  /**
+   * The backend token the cached copy of `key` was stored with: the version
+   * a conditional write sends. An entry past its bound still answers where
+   * the store keeps it, since the token stays true for the bytes read.
+   */
+  fingerprint(key: string): Promise<string | null>
+  /** `fingerprint` for many keys, in key order. */
+  fingerprints(keys: readonly string[]): Promise<(string | null)[]>
+  /**
+   * Keep each key's version where its bytes are not kept. With no entry the
+   * store keeps the version alone (reads treat it as absent, a conditional
+   * write sends it); with bytes carrying the same token it keeps them and
+   * lets the version outlive their bound; live bytes carrying another token
+   * were written by someone else since, and are left alone (expired ones are
+   * replaced).
+   */
+  keepFingerprints(fingerprints: Readonly<Record<string, string>>): Promise<void>
   isFresh(key: string, remoteFingerprint: string): Promise<boolean>
   /**
    * Whether an entry exists for `key` and carries no staleness bound.

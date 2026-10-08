@@ -89,10 +89,10 @@ wasi     = ["wasmtime>=46"]
 quickjs  = ["wasmtime>=46"]
 
 # --- storage / object stores ---
-s3       = ["aioboto3>=13.0"]
-r2       = ["aioboto3>=13.0"]
-gcs      = ["aioboto3>=13.0"]
-oci      = ["aioboto3>=13.0"]
+s3       = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
+r2       = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
+gcs      = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
+oci      = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
 databricks = ["databricks-sdk>=0.72.0"]
 
 # --- network / remote ---
@@ -126,7 +126,7 @@ email    = ["aioimaplib>=2.0.1", "aiosmtplib>=5.1.0"]
 
 # --- secrets sources ---
 dotenv   = ["python-dotenv>=1.2.2"]
-aws-sm   = ["aioboto3>=13.0"]
+aws-sm   = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
 1password = ["onepassword-sdk>=0.4.1"]
 
 # --- data ---

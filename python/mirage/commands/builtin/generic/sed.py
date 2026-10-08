@@ -40,7 +40,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eacces, eisdir, fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
-from mirage.errors.types import FsCondition
+from mirage.errors.types import FsCondition, StaleWriteError
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import (
@@ -129,6 +129,11 @@ def _line_length(raw: str | None) -> int:
 def _open_failure(name: str, exc: BaseException) -> str:
     strerror = fs_strerror(exc) or posix_phrase(FsCondition.EACCES)
     return f"sed: couldn't open file {name}: {strerror}\n"
+
+
+def _edit_failure(name: str, exc: BaseException) -> str:
+    strerror = fs_strerror(exc) or str(exc)
+    return f"sed: couldn't edit {name}: {strerror}\n"
 
 
 async def _open_write_files(names: Sequence[str], doors: _Doors) -> str | None:
@@ -384,7 +389,12 @@ async def _run_in_place(
         if machine.panic_code is not None:
             break
         new_data = from_byte_view(out, utf8)
-        await write_bytes(p, new_data)
+        try:
+            await write_bytes(p, new_data)
+        except StaleWriteError as exc:
+            err += _edit_failure(p.raw_path, exc)
+            code = 4
+            break
         writes[p.mount_path] = new_data
         edited.append(p)
     write_err = await _flush_write_files(

@@ -23,7 +23,7 @@ import type { ProcessHandle } from '../../process/handle.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../io/cachable_iterator.ts'
-import { activeRecords, runWithRecording } from '../../observe/context.ts'
+import { activeRecords, lostPaths, runWithRecording } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
 import { READ_FINGERPRINT_OPS, type OpRecord } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
@@ -85,7 +85,7 @@ import { ExecutionNode } from '../types.ts'
 import { abortable, joinOrAbort } from '../abort.ts'
 import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
-import { finishShell, inheritExitTrap } from '../executor/traps.ts'
+import { finishShell, inheritTraps } from '../executor/traps.ts'
 import { expandingAliases } from '../executor/builtins/alias/index.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
@@ -616,7 +616,11 @@ async function runPreparedLine(
             const rest = session.jobOutput ?? session.tty.jobs
             if (substitution) {
               session.terminalOutput = false
-              inheritExitTrap(session)
+              inheritTraps(session)
+              // bash runs a substitution without `set -e` unless
+              // `shopt -s inherit_errexit` (or POSIX mode) passes it on.
+              if (session.shopts.inherit_errexit !== true && session.shellOptions.posix !== true)
+                session.shellOptions.errexit = false
               // A substitution reads its pipe until every writer has closed
               // it, so what a job it started writes is part of its value,
               // and it ends when its jobs do. They are its own jobs.
@@ -1087,7 +1091,9 @@ async function runParsedLine(
           : activeRecords()
               ?.slice(nestedStart)
               .filter((r) => !READ_FINGERPRINT_OPS.has(r.op))
-        await abortable(env.dispatcher.applyIo(io, applied, cacheFacts), killed)
+        const lost = lostPaths(isLine ? opRecords : activeRecords())
+        // The line's own end keeps the versions its nested lines saw.
+        await abortable(env.dispatcher.applyIo(io, applied, cacheFacts, lost, !isLine), killed)
       }
       stdoutBytes =
         materialized === null

@@ -36,6 +36,7 @@ import {
 } from '@struktoai/mirage-node'
 import { makeBrief, makeDetail } from '../summary.ts'
 import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from '../multipart.ts'
+import { WritePolicyError } from '@struktoai/mirage-core/workspace/mount/errors'
 
 export interface WorkspaceRoutesDeps {
   registry: WorkspaceRegistry
@@ -493,7 +494,12 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         try {
           newWs = await cloneWorkspaceWithOverride(src, body.override ?? null)
         } catch (e) {
-          if (e instanceof SecretsError || e instanceof z.ZodError || e instanceof VFSConfigError) {
+          if (
+            e instanceof SecretsError ||
+            e instanceof z.ZodError ||
+            e instanceof VFSConfigError ||
+            e instanceof WritePolicyError
+          ) {
             // An override naming a source the host cannot resolve, or a
             // block the schema refuses, is the caller's mistake -- the
             // answer create, load and the historical clone already give.

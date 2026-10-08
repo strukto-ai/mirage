@@ -35,7 +35,7 @@ from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
@@ -135,6 +135,7 @@ def _build(io: CommandIO) -> Callable[..., Any]:
         except FS_ERRORS as exc:
             # A refused removal (a read-only region) is GNU's line for
             # the operand, and rm goes on to the rest.
+            label = with_inner(label, inner_suffix(path, exc))
             return f"rm: cannot remove '{label}': {fs_strerror(exc)}", []
         return None, [f"removed '{label}'"] if verbose else []
 

@@ -58,7 +58,7 @@ from mirage.runtime.types import ScriptSource
 from mirage.shell.console import JobConsole
 from mirage.shell.console.redis import RedisConsoleStore
 from mirage.shell.job_table import ConsoleFactory
-from mirage.types import ReadSpec
+from mirage.types import ReadSpec, WritePolicy
 from mirage.vfs.airtable import AirtableConfig, AirtableVFS
 from mirage.vfs.aliyun import AliyunConfig, AliyunVFS
 from mirage.vfs.backblaze import BackblazeConfig, BackblazeVFS
@@ -3338,7 +3338,10 @@ def apply_mount_read(
 
 
 async def open_consistency(
-    target: dict, read: ReadSpec, mount_read: dict[str, ReadSpec]
+    target: dict,
+    read: ReadSpec,
+    mount_read: dict[str, ReadSpec],
+    write: WritePolicy,
 ) -> tuple[
     Workspace,
     Callable[[str, bytes], Awaitable[None]],
@@ -3364,11 +3367,12 @@ async def open_consistency(
             apply_mount_read(read_mounts, mount_read),
             mode=MountMode.WRITE,
             read=read,
+            write=write,
         )
     except Exception:
         await teardown_target([], [*read_cleanups, *shadow_cleanups], service)
         raise
-    shadow_ws = Workspace(shadow_mounts, mode=MountMode.WRITE)
+    shadow_ws = Workspace(shadow_mounts, mode=MountMode.WRITE, write=write)
     # Same rule as open_target: a target's declared environment reaches
     # every workspace a case can run against, or a consistency scenario
     # would silently run under a different one.

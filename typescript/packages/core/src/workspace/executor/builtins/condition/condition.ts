@@ -92,8 +92,9 @@ export async function testBuiltin(call: BuiltinCall): Promise<Result> {
     if (last !== undefined && wordText(last) === ']') {
       testArgs = testArgs.slice(0, -1)
     } else {
-      const voice = isProgramInvocation(call.context.session) ? '' : 'bash: '
-      const err = encodeText(`${voice}[: missing \`]'\n`)
+      const err = encodeText(
+        isProgramInvocation(call.context.session) ? "[: missing ']'\n" : "bash: [: missing `]'\n",
+      )
       return [
         null,
         new IOResult({ exitCode: 2, stderr: err }),

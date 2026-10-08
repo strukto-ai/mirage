@@ -36,7 +36,14 @@ from mirage.policy import Decisions, MountRootPolicy, OutputCapPolicy, Policies
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.workspace import WorkspaceRuntime
-from mirage.types import Limit, MountMode, PathSpec, ReadPolicy, ReadSpec
+from mirage.types import (
+    Limit,
+    MountMode,
+    PathSpec,
+    ReadPolicy,
+    ReadSpec,
+    WritePolicy,
+)
 from mirage.utils.path import owner_prefix
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dev import DevVFS
@@ -148,6 +155,7 @@ class MountRegistry:
         # runtime door (`Workspace.add_mount`) has something to resolve
         # an unset policy against.
         self._default_read: ReadSpec = ReadSpec()
+        self._default_write: WritePolicy = WritePolicy.UNCONDITIONAL
         self._file_cache: FileCacheMixin | None = None
         self._reconciler: ReadReconciler | None = None
         # Explicit at the construction site: /dev does not cache reads,
@@ -155,7 +163,12 @@ class MountRegistry:
         # since a path-only index would expose one session's descriptors
         # to another.
         self.mount(
-            DEV_PREFIX, DevVFS(), MountMode.WRITE, ReadSpec(), store=NULL_INDEX
+            DEV_PREFIX,
+            DevVFS(),
+            MountMode.WRITE,
+            ReadSpec(),
+            write=WritePolicy.UNCONDITIONAL,
+            store=NULL_INDEX,
         )
 
     async def invalidate_after_external(self) -> None:
@@ -176,6 +189,14 @@ class MountRegistry:
             read (ReadSpec): the default for mounts that declare none.
         """
         self._default_read = read
+
+    def set_default_write(self, write: WritePolicy) -> None:
+        """Install the workspace-level write policy a mount overrides.
+
+        Args:
+            write (WritePolicy): the default for mounts that declare none.
+        """
+        self._default_write = write
 
     def set_reconciler(self, reconciler: ReadReconciler) -> None:
         self._reconciler = reconciler
@@ -308,6 +329,7 @@ class MountRegistry:
         mode: MountMode = MountMode.READ,
         read: ReadSpec | None = None,
         *,
+        write: WritePolicy | None = None,
         index: IndexConfig | None = None,
         vfs_ref: str | None = None,
         store: IndexCacheStore | None = None,
@@ -326,6 +348,8 @@ class MountRegistry:
             mode (MountMode): the mount's ceiling.
             read (ReadSpec | None): the mount's read policy; None takes
                 the workspace default.
+            write (WritePolicy | None): the mount's write policy; None
+                takes the workspace default.
             index (IndexConfig | None): the index store to build; None
                 takes a RAM store at the driver's ``index_ttl``.
             vfs_ref (str | None): the ``vfs:`` value the driver was
@@ -355,6 +379,7 @@ class MountRegistry:
             store,
             vfs_ref,
             index,
+            write if write is not None else self._default_write,
         )
         if alias is not None:
             m.activity = alias.activity

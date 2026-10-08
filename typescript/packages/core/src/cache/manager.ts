@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { captureRead } from './context.ts'
-import { activeRecords } from '../observe/context.ts'
+import { activeRecords, lineVersion, lostPaths, recordIndex } from '../observe/context.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
 import { mountKey } from '../utils/key_prefix.ts'
@@ -437,6 +437,8 @@ export class CacheManager {
    * a fetch.
    */
   async cachedBytes(path: PathSpec): Promise<Uint8Array | null> {
+    // The key drops a trailing slash; only the backend answers its ENOTDIR.
+    if (path.dotted?.endsWith('/') === true) return null
     const key = this.cacheKey(path)
     const cache = this.readableCache(key)
     if (cache === null) return null
@@ -444,6 +446,62 @@ export class CacheManager {
     if (!(await this.mayServeCached(key))) return null
     const cached = await cache.get(key)
     return this.ownsPath(key) ? cached : null
+  }
+
+  /**
+   * Keep `version` for `path` without bytes, if this mount caches: a refused
+   * write keeps the version it lost on, so the next write without a read
+   * sends it again. A cache that refuses the entry is logged, never thrown:
+   * the refusal itself already stands. Mirrors Python's `keep_version`.
+   */
+  async keepVersion(path: PathSpec, version: string): Promise<void> {
+    const key = this.cacheKey(path)
+    const cache = this.fileCache
+    if (cache === null || !this.ownsPath(key)) return
+    try {
+      await withCacheMutation(cache, () => cache.keepFingerprints({ [key]: version }))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.warn(`version not kept for ${key}: ${msg}`)
+    }
+  }
+
+  /**
+   * The version this mount last saw for `path`, null when none. The running
+   * line's own records come first, newest first: a read or write earlier in
+   * the line names the exact bytes it saw, and a streamed read is not in the
+   * cache until the line ends. Then the cached copy's backend token. Mirrors
+   * Python's `CacheManager.read_version`.
+   */
+  async readVersion(path: PathSpec): Promise<string | null> {
+    return (await this.readVersions([path]))[0] ?? null
+  }
+
+  /** `readVersion` for many paths, asking the cache once. */
+  async readVersions(paths: readonly PathSpec[]): Promise<(string | null)[]> {
+    const out: (string | null)[] = paths.map(() => null)
+    const pending: [number, string][] = []
+    const records = activeRecords()
+    const lost = lostPaths(records)
+    const index = records !== undefined ? recordIndex(records) : undefined
+    paths.forEach((path, i) => {
+      const key = this.cacheKey(path)
+      if (index !== undefined) {
+        const [known, version] = lineVersion(index, lost, key)
+        if (known) {
+          out[i] = version
+          return
+        }
+      }
+      if (this.fileCache !== null && this.ownsPath(key)) pending.push([i, key])
+    })
+    if (pending.length > 0 && this.fileCache !== null) {
+      const tokens = await this.fileCache.fingerprints(pending.map(([, key]) => key))
+      pending.forEach(([i], j) => {
+        out[i] = tokens[j] ?? null
+      })
+    }
+    return out
   }
 
   /** Cache a complete backend read before a consumer transforms it. */
@@ -543,13 +601,19 @@ export class CacheManager {
     keep: (() => boolean) | undefined,
     token: () => string | null,
   ): Promise<void> {
+    if (data.byteLength > cache.cacheLimit) return
     await withCacheMutation(cache, async () => {
       if (
         this.ownsPath(key) &&
         generation === this.readGeneration &&
         (keep === undefined || keep())
       ) {
-        await cache.set(key, data, { fingerprint: token(), ttl: this.readTtl })
+        try {
+          await cache.set(key, data, { fingerprint: token(), ttl: this.readTtl })
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.warn(`cache fill refused for ${key}: ${msg}`)
+        }
       }
     })
   }

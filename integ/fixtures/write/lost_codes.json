@@ -1,0 +1,80 @@
+{
+  "_note": "Which S3 error codes read as a lost condition (a stale write), for both hosts' is_condition_lost / isConditionLost. code is the error's Code (python) and name (typescript); a bodiless reply carries its status as the code. 412 means the object changed since the version sent, 409 ConditionalRequestConflict that another conditional write is in flight; any other 409 or 412 keeps its own meaning.",
+  "cases": [
+    {
+      "name": "412",
+      "code": "PreconditionFailed",
+      "status": 412,
+      "lost": true
+    },
+    {
+      "name": "412-bodiless",
+      "code": "412",
+      "status": 412,
+      "lost": true
+    },
+    {
+      "name": "409",
+      "code": "ConditionalRequestConflict",
+      "status": 409,
+      "lost": true
+    },
+    {
+      "name": "409-bodiless",
+      "code": "409",
+      "status": 409,
+      "lost": true
+    },
+    {
+      "name": "409-other",
+      "code": "OperationAborted",
+      "status": 409,
+      "lost": false
+    },
+    {
+      "name": "403",
+      "code": "AccessDenied",
+      "status": 403,
+      "lost": false
+    },
+    {
+      "name": "404",
+      "code": "NoSuchKey",
+      "status": 404,
+      "lost": false
+    },
+    {
+      "name": "no-bucket",
+      "code": "NoSuchBucket",
+      "status": 404,
+      "lost": false
+    }
+  ],
+  "_matched_note": "Which 404s on a request carrying If-Match read as a lost condition: AWS answers 404 for a key deleted since the version was read, so any 404 about the key is lost, whatever its code; a missing bucket is not about the key, and keeps its own meaning.",
+  "matched": [
+    {
+      "name": "no-key",
+      "code": "NoSuchKey",
+      "status": 404,
+      "lost": true
+    },
+    {
+      "name": "404-bodiless",
+      "code": "404",
+      "status": 404,
+      "lost": true
+    },
+    {
+      "name": "404-other",
+      "code": "NoSuchVersion",
+      "status": 404,
+      "lost": true
+    },
+    {
+      "name": "no-bucket",
+      "code": "NoSuchBucket",
+      "status": 404,
+      "lost": false
+    }
+  ]
+}
