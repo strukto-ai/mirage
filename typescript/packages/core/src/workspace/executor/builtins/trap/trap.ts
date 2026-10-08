@@ -16,14 +16,14 @@ import type { SessionState } from '../../../session/session.ts'
 import { builtinError, result } from '../shared.ts'
 import { SIGNAL_NAMES } from '../timeout/constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
-import { EXIT_EVENT, PSEUDO_SIGNALS, SIGNAL_MAX, USAGE } from './constants.ts'
+import { EXIT_EVENT, PSEUDO_SIGNALS, RUN_EVENTS, SIGNAL_MAX, USAGE } from './constants.ts'
 import { TrapEvent } from './types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
 /**
- * What a signal spec names: EXIT, another signal bash knows (which mirage
- * cannot deliver), or nothing bash would accept. A name may carry `SIG`
- * and any case; a number is one too.
+ * What a signal spec names: EXIT, ERR or RETURN, another signal bash knows
+ * (which mirage cannot deliver), or nothing bash would accept. A name may
+ * carry `SIG` and any case; a number is one too.
  */
 export function eventOf(spec: string): TrapEvent | null {
   if (/^[0-9]+$/.test(spec)) {
@@ -32,7 +32,7 @@ export function eventOf(spec: string): TrapEvent | null {
     return number <= SIGNAL_MAX ? TrapEvent.Other : null
   }
   const name = spec.toUpperCase()
-  if (name === EXIT_EVENT) return TrapEvent.Exit
+  if ((RUN_EVENTS as readonly string[]).includes(name)) return name as TrapEvent
   if (PSEUDO_SIGNALS.has(name)) return TrapEvent.Other
   const base = name.startsWith('SIG') ? name.slice(3) : name
   if (base !== EXIT_EVENT && SIGNAL_NAMES.some(([known]) => known === base)) {
@@ -43,18 +43,42 @@ export function eventOf(spec: string): TrapEvent | null {
 }
 
 /** One `trap -p` row, the action single-quoted the way bash does. */
-export function listing(action: string): string {
-  return `trap -- '${action.replaceAll("'", "'\\''")}' ${EXIT_EVENT}\n`
+export function listing(action: string, event: TrapEvent): string {
+  return `trap -- '${action.replaceAll("'", "'\\''")}' ${event}\n`
+}
+
+/** The action registered for one of the events mirage runs. */
+function trapAction(session: SessionState, event: TrapEvent): string | null {
+  if (event === TrapEvent.Exit) return session.exitTrap
+  if (event === TrapEvent.Err) return session.errTrap
+  return session.returnTrap
+}
+
+/** Set (or with `-` reset) one event's action in this scope. */
+function setTrap(session: SessionState, event: TrapEvent, action: string): void {
+  const value = action === '-' ? null : action
+  if (event === TrapEvent.Exit) {
+    session.exitTrap = value
+    session.exitTrapInherited = false
+  } else if (event === TrapEvent.Err) {
+    session.errTrap = value
+    session.errTrapHidden = false
+  } else {
+    session.returnTrap = value
+    session.returnTrapHidden = false
+  }
 }
 
 /**
- * Register, reset or list the shell's `EXIT` action.
+ * Register, reset or list the shell's `EXIT`, `ERR` and `RETURN` actions.
  *
- * The action runs where the shell ends: at `exit` (in the frame that
- * called it), at the end of a child shell, or when an error ends the
- * shell. A line of a persistent session is not the end of its shell, so
- * it runs nothing there. Mirage delivers no signals, so any other event
- * bash knows is refused rather than accepted and never run.
+ * EXIT runs where the shell ends: at `exit` (in the frame that called it),
+ * at the end of a child shell, or when an error ends the shell. A line of a
+ * persistent session is not the end of its shell, so it runs nothing there.
+ * ERR runs after a command fails where `set -e` would act, RETURN after a
+ * function or a sourced file returns (`executor/traps.ts`). Mirage delivers
+ * no signals, so any other event bash knows is refused rather than accepted
+ * and never run.
  */
 export function handleTrap(args: readonly string[], session: SessionState): Result {
   const words = [...args]
@@ -75,12 +99,13 @@ export function handleTrap(args: readonly string[], session: SessionState): Resu
   const errors: string[] = []
   if (printing || words.length === 0) {
     const out: string[] = []
-    for (const spec of words.length > 0 ? words : [EXIT_EVENT]) {
+    for (const spec of words.length > 0 ? words : RUN_EVENTS) {
       const event = eventOf(spec)
       if (event === null) {
         errors.push(decodeText(builtinError('trap', `${spec}: invalid signal specification`)))
-      } else if (event === TrapEvent.Exit && session.exitTrap !== null) {
-        out.push(listing(session.exitTrap))
+      } else if (event !== TrapEvent.Other) {
+        const action = trapAction(session, event)
+        if (action !== null) out.push(listing(action, event))
       }
     }
     const text = out.join('')
@@ -100,9 +125,8 @@ export function handleTrap(args: readonly string[], session: SessionState): Resu
     const event = eventOf(spec)
     if (event === null) {
       errors.push(decodeText(builtinError('trap', `${spec}: invalid signal specification`)))
-    } else if (event === TrapEvent.Exit) {
-      session.exitTrap = action === '-' ? null : action
-      session.exitTrapInherited = false
+    } else if (event !== TrapEvent.Other) {
+      setTrap(session, event, action)
     } else if (action !== '-') {
       errors.push(`mirage: trap: ${spec}: not supported\n`)
     }

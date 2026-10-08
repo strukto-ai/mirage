@@ -12,12 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.workspace.executor.builtins.trap.types import TrapEvent
+
 USAGE = "trap: usage: trap [-lp] [[arg] signal_spec ...]\n"
 
 EXIT_EVENT = "EXIT"
 
-# bash's pseudo-signals besides EXIT: names it accepts, mirage runs none.
-PSEUDO_SIGNALS = frozenset({"DEBUG", "ERR", "RETURN"})
+# bash's pseudo-signals besides EXIT, ERR and RETURN: names it accepts,
+# mirage runs none.
+PSEUDO_SIGNALS = frozenset({"DEBUG"})
+
+# The events mirage runs, in the order `trap -p` lists them: bash's
+# signal numbers put EXIT (0) first and its pseudo-signals last.
+RUN_EVENTS = (TrapEvent.EXIT, TrapEvent.ERR, TrapEvent.RETURN)
 
 # The highest signal number bash lists.
 SIGNAL_MAX = 64

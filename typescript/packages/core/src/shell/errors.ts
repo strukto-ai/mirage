@@ -69,7 +69,7 @@ export class ReadonlyError extends Error {
 // the top-level program loop stops the remaining statements. Mirrors
 // Python's mirage.shell.errors.ExitSignal.
 export class ExitSignal extends Error {
-  readonly exitCode: number
+  exitCode: number
   stderr: Uint8Array
   stdout: Uint8Array | null
   // Status a containing boundary reports instead of exitCode. GNU bash
@@ -81,6 +81,16 @@ export class ExitSignal extends Error {
   // command's redirects, so that diagnostic goes around them; any other
   // goes through the redirects it was written under.
   expanding: number | null = null
+  // The program an `exec` replaced the shell with, whose actions went with
+  // it.
+  replaced: string | null = null
+  // Whether stdout is a nested line's (an `exec`'d program's, or an ERR or
+  // RETURN action's that left), which the redirects the signal unwinds
+  // through still route. An EXIT action's output goes around those
+  // redirects, as bash runs it once the shell has unwound.
+  unrouted = false
+  // That EXIT output, the end of stdout.
+  cleanup: Uint8Array = new Uint8Array()
   // Whether it was raised in text `eval` or `source` ran: a forked stage or
   // job reports its contained status even for a simple command
   // (`eval ': ${U?}' | cat` is 1, `: ${U?} | cat` 127).
@@ -179,7 +189,11 @@ export async function named<T>(word: string, pending: Promise<T>): Promise<T> {
 export class ReturnSignal extends Error {
   readonly exitCode: number
   stderr: Uint8Array
-  readonly stdout: ByteSource | null
+  stdout: ByteSource | null
+  // Whether stdout is an ERR or RETURN action's that left with `return`,
+  // which the redirects it unwinds through still route, as
+  // `ExitSignal.unrouted` does.
+  unrouted = false
   constructor(
     exitCode: number,
     stderr: Uint8Array = new Uint8Array(),

@@ -14,6 +14,7 @@
 
 import { type ByteSource, IOResult } from '../../../../io/types.ts'
 import type { JobConsole } from '../../../../shell/console/index.ts'
+import { returning } from '../../control.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
@@ -68,27 +69,34 @@ export async function handleSource(
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()
   let io: IOResult
+  let stdout: ByteSource | null
   try {
-    io = await executeFn(script, {
-      sessionId: session.sessionId,
-      stdin,
-      callStack: cs,
-      ...(sink === undefined ? {} : { sink }),
-    })
+    try {
+      io = await executeFn(script, {
+        sessionId: session.sessionId,
+        stdin,
+        callStack: cs,
+        ...(sink === undefined ? {} : { sink }),
+      })
+    } catch (err) {
+      if (!(err instanceof ReturnSignal)) throw err
+      io = new IOResult({
+        stdout: err.stdout,
+        stderr: err.stderr.byteLength > 0 ? err.stderr : null,
+        exitCode: err.exitCode,
+      })
+    }
+    // The RETURN action runs as the file returns, in its frame.
+    ;[stdout, io] = await returning(executeFn, session, stdin, cs, io.stdout, io)
   } catch (err) {
     if (err instanceof ExitSignal) err.sourced = true
-    if (!(err instanceof ReturnSignal)) throw err
-    io = new IOResult({
-      stdout: err.stdout,
-      stderr: err.stderr.byteLength > 0 ? err.stderr : null,
-      exitCode: err.exitCode,
-    })
+    throw err
   } finally {
     const frame = cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
     if (args.length === 0) setPositionalParams(session, cs, frame.positional)
   }
-  return [io.stdout, io, new ExecutionNode({ command: `source ${raw}`, exitCode: io.exitCode })]
+  return [stdout, io, new ExecutionNode({ command: `source ${raw}`, exitCode: io.exitCode })]
 }
 
 /**

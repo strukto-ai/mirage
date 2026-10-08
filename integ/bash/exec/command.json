@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "ctl_until_counts_up",
-      "seq": 502104,
+      "id": "exec_command_ends_its_shell",
+      "seq": 962410,
       "targets": [
         "ram",
         "disk",
@@ -27,16 +27,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cn=0; until [ $cn -ge 3 ]; do echo $cn; cn=$((cn+1)); done",
+      "command": "( exec echo hi; echo x ); echo \"after $?\"; ( exec false; echo x ); echo \"rc=$?\"; ( exec echo a b > /data/ex.txt; echo x ); cat /data/ex.txt; rm /data/ex.txt; echo \"[$(exec echo inner; echo x)]\"; bash -c 'exec echo hi; echo x'; echo \"after $?\"",
       "expect": {
         "exit": 0,
-        "stdout": "0\n1\n2\n",
+        "stdout": "hi\nafter 0\nrc=1\na b\n[inner]\nhi\nafter 0\n",
         "stderr": ""
       }
     },
     {
-      "id": "ctl_until_true_never_runs",
-      "seq": 502105,
+      "id": "exec_command_needs_a_program",
+      "seq": 962411,
       "targets": [
         "ram",
         "disk",
@@ -61,16 +61,50 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "until true; do echo x; done; echo done",
+      "command": "( exec nosuchcmd; echo x ); echo \"rc=$?\"; ( f() { :; }; exec f ); echo \"rc=$?\"; ( trap 'echo X' EXIT; exec nosuchcmd ) 2>/dev/null; echo \"rc=$?\"; ( unset x; /usr/bin/printf -v x %s hi; echo \"[$x]\"; /usr/bin/[ 1 -eq; echo \"rc=$?\"; exec /usr/bin/printf -v x %s hi ) 2>&1; bash -c 'shopt -s expand_aliases; alias echo=\"echo WRONG\" env=\"echo WRONG\" command=\"echo WRONG\"\n: ; \\env echo a; printf \"b\\n\" | xargs echo; find /data -maxdepth 0 -exec echo {} \\;; (exec -c echo c); function echo { :; }; exec echo d'",
       "expect": {
         "exit": 0,
-        "stdout": "done\n",
+        "stdout": "rc=127\nrc=127\nX\nrc=127\n-vprintf: warning: ignoring excess arguments, starting with 'x'\n[]\n[: missing ']'\nrc=2\n-vprintf: warning: ignoring excess arguments, starting with 'x'\na\nb\n/data\nc\nd\n",
+        "stderr": "bash: exec: nosuchcmd: not found\nbash: exec: f: not found\n"
+      }
+    },
+    {
+      "id": "exec_command_drops_the_shells_actions",
+      "seq": 962412,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo X' EXIT; exec echo hi ); ( trap 'echo ERR' ERR; exec false ); echo \"rc=$?\"; ( set -e; trap 'echo X' EXIT; exec false ); echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nrc=1\nrc=1\n",
         "stderr": ""
       }
     },
     {
-      "id": "ctl_until_break_ends",
-      "seq": 502106,
+      "id": "exec_command_clears_and_writes",
+      "seq": 962416,
       "targets": [
         "ram",
         "disk",
@@ -95,16 +129,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cb=0; until false; do cb=$((cb+1)); echo $cb; if [ $cb = 2 ]; then break; fi; done",
+      "command": "( exec echo hi >&- ); echo \"rc=$?\"; ( X=1; export X; exec -c env ) | grep -c '^X='",
       "expect": {
-        "exit": 0,
-        "stdout": "1\n2\n",
-        "stderr": ""
+        "exit": 1,
+        "stdout": "rc=1\n0\n",
+        "stderr": "echo: write error: Bad file descriptor\n"
       }
     },
     {
-      "id": "ctl_while_test_list_decides_by_its_last_statement",
-      "seq": 502834,
+      "id": "exec_redirects_govern_nested_lines",
+      "seq": 962420,
       "targets": [
         "ram",
         "disk",
@@ -129,45 +163,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cw=0; while echo w$cw; [ $cw -lt 2 ]; do cw=$((cw+1)); done; until echo u; true; do echo x; done; for cw in 1 2; do while echo c$cw; break; do echo body; done; done; unset cw",
+      "command": "( exec > /data/old; exec echo hi > /data/new ); echo \"old[$(cat /data/old)] new[$(cat /data/new)]\"; rm -f /data/old /data/new; ( exec > /data/old; exec echo hi ); echo \"old[$(cat /data/old)]\"; rm -f /data/old; ( exec > /data/old; eval 'echo hi' > /data/new ); echo \"old[$(cat /data/old)] new[$(cat /data/new)]\"; rm -f /data/old /data/new; ( exec > /data/old; bash -c 'echo hi' > /data/new ); echo \"old[$(cat /data/old)] new[$(cat /data/new)]\"; rm -f /data/old /data/new",
       "expect": {
         "exit": 0,
-        "stdout": "w0\nw1\nw2\nu\nc1\nc2\n",
+        "stdout": "old[] new[hi]\nold[hi]\nold[] new[hi]\nold[] new[hi]\n",
         "stderr": ""
-      }
-    },
-    {
-      "id": "ctl_comments_and_closed_input_in_loops",
-      "seq": 502842,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "if false # c\nthen echo bad; else false # c\nfi; echo \"if $?\"; f() { false # c\n}; f; echo \"f $?\"; case x in x) false # c\n;; esac; echo \"case $?\"; printf 'a\\nb\\n' | while read x; do echo \"$x\"; exec <&-; done; ( readonly R=1; until (( R=1 )); do exit 0; done ); echo \"until $?\"; printf 'a\\nb\\n' > /data/fd0; printf 'x\\ny\\n' | for i in 1 2; do [ $i = 1 ] && exec < /data/fd0; read l; echo \"for [$l]\"; done; printf 'x\\ny\\n' | for ((i=1; i<=2; i++)); do [ $i = 1 ] && exec < /data/fd0; read l; echo \"cfor [$l]\"; done; printf 'x\\ny\\n' | { n=0; while [ $n -lt 2 ]; do n=$((n+1)); [ $n = 1 ] && exec < /data/fd0; read l; echo \"while [$l]\"; done; }; rm /data/fd0",
-      "expect": {
-        "exit": 0,
-        "stdout": "if 1\nf 1\ncase 1\na\nuntil 0\nfor [a]\nfor [b]\ncfor [a]\ncfor [b]\nwhile [a]\nwhile [b]\n",
-        "stderr": "bash: read: read error: 0: Bad file descriptor\nbash: R: readonly variable\n"
       }
     }
   ]

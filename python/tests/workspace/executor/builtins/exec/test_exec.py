@@ -100,12 +100,15 @@ async def test_bare_exec_is_a_noop():
 
 
 @pytest.mark.asyncio
-async def test_exec_command_is_refused():
+async def test_exec_command_runs_and_ends_the_line():
     ws = _ws()
     io = await ws.shell("exec echo hi; echo after", session_id="reader")
-    assert io.exit_code == 0
-    assert (await io.stdout_str()) == "after\n"
-    assert b"process replacement is not supported" in (io.stderr or b"")
+    assert (io.exit_code, await io.stdout_str()) == (0, "hi\n")
+    io = await ws.shell("exec nosuchcmd; echo after", session_id="reader")
+    assert (io.exit_code, await io.stdout_str()) == (127, "")
+    assert io.stderr == b"bash: exec: nosuchcmd: not found\n"
+    io = await ws.shell("echo survived", session_id="reader")
+    assert await io.stdout_str() == "survived\n"
     await ws.close()
 
 
