@@ -142,11 +142,12 @@ names the kind of entry the path is (`Target.FILE`, `DIR`, `LINK`, or `ANY`
 by default), and `creates=True` marks a `WRITE` that makes a missing file. The
 base functions declare theirs the same way, and the door reads which ops
 follow a link, create a name or run one at a time per path off them.
-`REMOVE` belongs to `unlink` and `rmdir`, and `RENAME` to `rename`: the door
-removes a link instead of following it, and moves the hides, links and cache
-below a renamed directory, only for those names. A custom function declaring
-either is refused when its class is defined; a VFS that deletes or moves
-defines those functions.
+`REMOVE` belongs to `unlink` and `rmdir`, and `RENAME` to `rename`: only for
+those names does the door remove a link instead of following it, refuse a
+rename that would bring hidden entries into view (hidden-path rules stay where
+they are written), and move the links and cache below a renamed directory. A
+custom function declaring either is refused when its class is defined; a VFS
+that deletes or moves defines those functions.
 
 The driver never sees the mount it runs under. The index store and the `vfs:` reference it was built from live on the mount, built when the driver is placed and shared with any alias of the same instance.
 

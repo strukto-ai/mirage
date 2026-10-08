@@ -42,9 +42,9 @@ interface Marked {
  * which ops follow a link, create a name, run one at a time per path or stamp
  * an mtime is read off what they declare here. REMOVE belongs to `unlink` and
  * `rmdir` and RENAME to `rename`: what the door does around them (a link
- * removed rather than followed, the hides, links and cache below a moved
- * directory) is keyed on those names, so another function declaring either is
- * refused. A VFS that deletes or moves defines those functions. `target` is the
+ * removed rather than followed, a rename refused when it would bring hidden
+ * entries into view, the links and cache below a moved directory) is keyed on
+ * those names, so another function declaring either is refused. A VFS that deletes or moves defines those functions. `target` is the
  * kind of entry the
  * path names (any when omitted) and `creates` marks a WRITE that makes a
  * missing file, as open(2) with O_CREAT. Mirrors Python's `vfs_call`.

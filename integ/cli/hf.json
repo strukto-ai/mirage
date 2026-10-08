@@ -311,6 +311,32 @@
         "stdout": "http://127.0.0.1:5086/integ/repo-cli/tree/main/pathspec.txt\n/scratch/hf-pathspec-back\npathspec",
         "stderr": ""
       }
+    },
+    {
+      "id": "hf_upload_reads_a_relative_file_in_cwd_whatever_pwd_says",
+      "seq": 960148,
+      "targets": [
+        "cli-hf"
+      ],
+      "command": "(cd /scratch && export PWD=/nowhere && printf cwd > hf-pwd.txt && hf upload integ/repo-cli hf-pwd.txt pwd.txt --quiet && hf download integ/repo-cli pwd.txt --local-dir hf-pwd-back --quiet > /dev/null && cat hf-pwd-back/pwd.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "http://127.0.0.1:5086/integ/repo-cli/tree/main/pwd.txt\ncwd",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hf_a_relative_hub_cache_lands_in_cwd_whatever_pwd_says",
+      "seq": 960149,
+      "targets": [
+        "cli-hf"
+      ],
+      "command": "(cd /scratch && export PWD=/nowhere && HF_HUB_CACHE=hf-pwd-cache hf download integ/repo-cli one_byte.txt --revision main --quiet > /dev/null && head -c 8 /scratch/hf-pwd-cache/models--integ--repo-cli/refs/main)",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000",
+        "stderr": ""
+      }
     }
   ]
 }
