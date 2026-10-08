@@ -36,7 +36,7 @@ from mirage.core.object_store.driver import (
 )
 from mirage.core.object_store.stat import make_stat
 from mirage.errors.fs import eisdir, enoent, enotempty
-from mirage.observe.context import lift_lost, record, start_op
+from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
 from mirage.utils.stat_view import is_dir
@@ -89,11 +89,12 @@ def make_unlink(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
             else:
                 assert driver.delete_if is not None
                 op = driver.delete_if(conn, key, cond)
+            upto = lost_count()
             try:
                 await evict_after(op, settle)
             except ConditionLost as exc:
                 raise await refused(path_spec, exc, cond) from exc
-        lift_lost(path_spec.virtual)
+        lift_lost(path_spec.virtual, upto)
 
     return unlink
 
@@ -138,6 +139,7 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
                 )
             else:
                 op = driver.delete_prefix(conn, pfx)
+            upto = lost_count()
             try:
                 await evict_after(op, settle)
             except ConditionLost as exc:
@@ -149,7 +151,7 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
                     kp.key_path(path_spec, kpfx, key),
                     version=exc.versions.get(key),
                 ) from exc
-        lift_lost(path_spec.virtual, subtree=True)
+        lift_lost(path_spec.virtual, upto, subtree=True)
 
     return remove_prefix
 

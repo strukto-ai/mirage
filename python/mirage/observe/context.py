@@ -37,11 +37,15 @@ class LostPaths:
         marks (dict[str, int]): each lost path and where in ``sink`` it
             was lost.
         versions (dict[str, str]): each lost path's refused version.
+        order (dict[str, int]): each lost path's mark, numbered in order.
+        count (int): the marks made so far.
     """
 
     sink: list[OpRecord]
     marks: dict[str, int] = field(default_factory=dict)
     versions: dict[str, str] = field(default_factory=dict)
+    order: dict[str, int] = field(default_factory=dict)
+    count: int = 0
 
     def mark(self, key: str, version: str | None = None) -> None:
         """Record that a conditional write to ``key`` lost.
@@ -51,23 +55,33 @@ class LostPaths:
             version (str | None): the version it lost on, if any.
         """
         self.marks[key] = len(self.sink)
+        self.count += 1
+        self.order[key] = self.count
         if version:
             self.versions[key] = version
         else:
             self.versions.pop(key, None)
 
-    def lift(self, key: str, subtree: bool = False) -> None:
+    def lift(self, key: str, upto: int, subtree: bool = False) -> None:
         """Lift the marks a removal or move of ``key`` made stale.
+
+        Only marks made by the time it began: a refusal another command of
+        the line made while it ran is newer than it, and stays.
 
         Args:
             key (str): the virtual path removed or moved.
+            upto (int): ``count`` when the removal or move began.
             subtree (bool): the paths below it went too.
         """
         for marked in [
-            k for k in self.marks if k == key or subtree and under_path(k, key)
+            k
+            for k in self.marks
+            if (k == key or subtree and under_path(k, key))
+            and self.order[k] <= upto
         ]:
             del self.marks[marked]
             self.versions.pop(marked, None)
+            del self.order[marked]
 
     def version(self, key: str) -> str | None:
         """The version a write to ``key`` lost on, while it is still lost.
@@ -240,16 +254,23 @@ def mark_lost(key: str, version: str | None = None) -> None:
         lost.mark(key, version)
 
 
-def lift_lost(key: str, subtree: bool = False) -> None:
+def lost_count() -> int:
+    """The running line's marks so far, for a later :func:`lift_lost`."""
+    lost = active_lost()
+    return lost.count if lost is not None else 0
+
+
+def lift_lost(key: str, upto: int, subtree: bool = False) -> None:
     """Lift the running line's marks a removal or move of ``key`` ended.
 
     Args:
         key (str): the virtual path removed or moved.
+        upto (int): :func:`lost_count` when the removal or move began.
         subtree (bool): the paths below it went too.
     """
     lost = active_lost()
     if lost is not None:
-        lost.lift(key, subtree)
+        lost.lift(key, upto, subtree)
 
 
 def active_recorder() -> Recorder | None:

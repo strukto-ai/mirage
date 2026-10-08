@@ -325,6 +325,20 @@ describe('a version kept without bytes', () => {
     expect(await c.fingerprints(['/a', '/b', '/c'])).toEqual(['v1', null, 'v3'])
   })
 
+  it('keeps a version an expiry leaves within the limit', async () => {
+    vi.useFakeTimers()
+    try {
+      const c = new RAMFileCacheStore({ limit: 20 })
+      await c.set('/a-long-key', encode('x'), { fingerprint: 'v1234567890', ttl: 1 })
+      await c.setVersions({ '/a-long-key': 'v1234567890' })
+      vi.setSystemTime(Date.now() + 10_000)
+      expect(await c.get('/a-long-key')).toBeNull()
+      expect(c.cacheSize).toBeLessThanOrEqual(20)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each([
     ['kept', true],
     ['not kept', false],

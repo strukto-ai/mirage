@@ -23,7 +23,7 @@ import {
   stale,
   writeCondition,
 } from '../../cache/context.ts'
-import { liftLost, record, startOp } from '../../observe/context.ts'
+import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import { eisdir, enoent, enotempty } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -70,6 +70,7 @@ export function makeUnlink<A extends Accessor, C>(driver: ObjectStoreDriver<A, C
     // The connect is outside, because a connection that never opened
     // removed nothing.
     const { conn, close } = await driver.connect(accessor)
+    const upto = lostCount()
     try {
       await evictAfter(async () => {
         try {
@@ -83,7 +84,7 @@ export function makeUnlink<A extends Accessor, C>(driver: ObjectStoreDriver<A, C
       if (err instanceof ConditionLost) throw await refused(path, err, cond)
       throw err
     }
-    liftLost(path.virtual)
+    liftLost(path.virtual, upto)
   }
 }
 
@@ -117,6 +118,7 @@ export function makeRemovePrefix<A extends Accessor, C>(
       await invalidateAncestors(path)
     }
     const { conn, close } = await driver.connect(accessor)
+    const upto = lostCount()
     try {
       await evictAfter(async () => {
         try {
@@ -134,7 +136,7 @@ export function makeRemovePrefix<A extends Accessor, C>(
       await keepLost(path, kpfx, err, key)
       throw await stale(kp.keyPath(path, kpfx, key), false, false, err.versions.get(key) ?? null)
     }
-    liftLost(path.virtual, true)
+    liftLost(path.virtual, upto, true)
   }
 }
 

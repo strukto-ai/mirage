@@ -69,24 +69,31 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
     this.size += entry.size
   }
 
-  get(key: string): Promise<Uint8Array | null> {
-    return this.lock.withLock(key, () => {
-      const entry = this.entries.get(key)
-      if (entry === undefined || entry.versionOnly) return Promise.resolve(null)
-      if (entry.expired) {
-        this.size -= entry.size
-        this.entries.delete(key)
-        this.store.files.delete(key)
-        // A kept version outlives its bytes, as redis's meta key does.
-        if (entry.keepsVersion && entry.fingerprint !== null && entry.fingerprint !== '') {
-          this.putVersion(key, entry.fingerprint)
+  async get(key: string): Promise<Uint8Array | null> {
+    // The data, and whether an expiry left a version to evict around.
+    const [data, kept] = await this.lock.withLock(
+      key,
+      (): Promise<[Uint8Array | null, boolean]> => {
+        const entry = this.entries.get(key)
+        if (entry === undefined || entry.versionOnly) return Promise.resolve([null, false])
+        if (entry.expired) {
+          this.size -= entry.size
+          this.entries.delete(key)
+          this.store.files.delete(key)
+          // A kept version outlives its bytes, as redis's meta key does.
+          if (entry.keepsVersion && entry.fingerprint !== null && entry.fingerprint !== '') {
+            this.putVersion(key, entry.fingerprint)
+            return Promise.resolve([null, true])
+          }
+          return Promise.resolve([null, false])
         }
-        return Promise.resolve(null)
-      }
-      this.entries.delete(key)
-      this.entries.set(key, entry)
-      return Promise.resolve(this.store.files.get(key) ?? null)
-    })
+        this.entries.delete(key)
+        this.entries.set(key, entry)
+        return Promise.resolve([this.store.files.get(key) ?? null, false])
+      },
+    )
+    if (kept) await this.evict()
+    return data
   }
 
   // The cache's own key test, part of `FileCache` and not a driver verb:

@@ -22,7 +22,7 @@ import {
   stale,
   writeCondition,
 } from '../../cache/context.ts'
-import { liftLost, record, startOp } from '../../observe/context.ts'
+import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import { enoent } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import * as kp from '../../utils/key_prefix.ts'
@@ -118,6 +118,7 @@ export function makeRename<A extends Accessor, C>(
       await invalidateAncestors(src)
     }
     const { conn, close } = await driver.connect(accessor)
+    const upto = lostCount()
     let moved: boolean
     try {
       moved = await evictAfter(async () => {
@@ -154,7 +155,7 @@ export function makeRename<A extends Accessor, C>(
       throw await stale(lost, err.landed, err.gone, sent)
     }
     if (!moved) throw enoent(src)
-    liftLost(src.virtual, op !== 'rename')
-    liftLost(dst.virtual, op !== 'rename')
+    liftLost(src.virtual, upto, op !== 'rename')
+    liftLost(dst.virtual, upto, op !== 'rename')
   }
 }

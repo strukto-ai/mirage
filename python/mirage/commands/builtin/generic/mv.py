@@ -657,7 +657,7 @@ async def mv_generic(
             except FS_ERRORS as exc:
                 # A stale key inside a walk is named; other refusals, the operand.
                 inner = (
-                    inner_suffix(src, exc)
+                    inner_suffix(src, exc) or inner_suffix(target, exc)
                     if isinstance(exc, StaleWriteError)
                     else ""
                 )

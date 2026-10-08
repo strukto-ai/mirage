@@ -553,7 +553,7 @@ export async function mvGeneric(
         if (!isFsError(err)) throw err
         // A stale key inside a walk is named; other refusals, the operand.
         const stale = (err as { code?: unknown } | null)?.code === 'STALE_WRITE'
-        const inner = stale ? innerSuffix(src, err) : ''
+        const inner = stale ? innerSuffix(src, err) || innerSuffix(target, err) : ''
         const from = withInner(src.rawPath, inner)
         if (isLandedMove(err)) {
           // Copy landed, source delete lost: GNU's cross-device unlink failure.

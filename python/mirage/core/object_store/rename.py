@@ -32,7 +32,7 @@ from mirage.core.object_store.driver import (
     keep_lost,
 )
 from mirage.errors.fs import enoent
-from mirage.observe.context import lift_lost, record, start_op
+from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
 
@@ -144,6 +144,7 @@ def make_rename(
 
         async with driver.connect(accessor) as conn:
             try:
+                upto = lost_count()
                 moved = await evict_after(move(conn), settle)
             except ConditionLost as exc:
                 if exc.error is not None:
@@ -173,7 +174,7 @@ def make_rename(
                 ) from exc
         if not moved:
             raise enoent(src_spec.virtual)
-        lift_lost(src_spec.virtual, subtree=op != "rename")
-        lift_lost(dst_spec.virtual, subtree=op != "rename")
+        lift_lost(src_spec.virtual, upto, subtree=op != "rename")
+        lift_lost(dst_spec.virtual, upto, subtree=op != "rename")
 
     return rename

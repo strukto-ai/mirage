@@ -76,21 +76,33 @@ export async function commandRecords<T>(fn: (records: OpRecord[]) => Promise<T>)
 export class LostPaths {
   readonly marks = new Map<string, number>()
   readonly versions = new Map<string, string>()
+  /** Each lost path's mark, numbered in order. */
+  readonly order = new Map<string, number>()
+  /** The marks made so far. */
+  count = 0
 
   constructor(private readonly records: readonly OpRecord[]) {}
 
   mark(key: string, version: string | null = null): void {
     this.marks.set(key, this.records.length)
+    this.count += 1
+    this.order.set(key, this.count)
     if (version !== null && version !== '') this.versions.set(key, version)
     else this.versions.delete(key)
   }
 
-  /** Lift the marks a removal or move of `key` (and, with `subtree`, below it) ended. */
-  lift(key: string, subtree = false): void {
+  /**
+   * Lift the marks a removal or move of `key` (and, with `subtree`, below it)
+   * ended: only those made by the time it began (`upto`, the `count` then), so
+   * a refusal another command of the line made while it ran stays.
+   */
+  lift(key: string, upto: number, subtree = false): void {
     for (const marked of [...this.marks.keys()]) {
-      if (marked === key || (subtree && underPath(marked, key))) {
+      const covered = marked === key || (subtree && underPath(marked, key))
+      if (covered && (this.order.get(marked) ?? 0) <= upto) {
         this.marks.delete(marked)
         this.versions.delete(marked)
+        this.order.delete(marked)
       }
     }
   }
@@ -156,9 +168,14 @@ export function markLost(key: string, version: string | null = null): void {
   lostPaths(storage.getStore()?.records)?.mark(key, version)
 }
 
+/** The running line's marks so far, for a later `liftLost`. Mirrors python's `lost_count`. */
+export function lostCount(): number {
+  return lostPaths(storage.getStore()?.records)?.count ?? 0
+}
+
 /** Lift the running line's marks a removal or move of `key` ended. Mirrors python's `lift_lost`. */
-export function liftLost(key: string, subtree = false): void {
-  lostPaths(storage.getStore()?.records)?.lift(key, subtree)
+export function liftLost(key: string, upto: number, subtree = false): void {
+  lostPaths(storage.getStore()?.records)?.lift(key, upto, subtree)
 }
 
 export function activeRecords(): readonly OpRecord[] | undefined {

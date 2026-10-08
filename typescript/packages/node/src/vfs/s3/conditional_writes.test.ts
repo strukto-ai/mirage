@@ -14,6 +14,7 @@
 
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
+import { markLost } from '@struktoai/mirage-core/observe/context'
 import { MountMode, WritePolicy } from '@struktoai/mirage-core/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -460,6 +461,35 @@ describe('conditional writes on an S3 mount', () => {
       expect(object(key)).toBe('new\n')
     },
   )
+
+  it.each([
+    ['rm', 'DeleteObject', 'rm /s3/g', 'g', 'gee\n'],
+    ['rm -r', 'DeleteObjects', 'rm -r /s3/d', 'd/a', 'a\n'],
+    ['mv', 'CopyObject', 'mv /s3/g /s3/h', 'g', 'gee\n'],
+  ] as const)(
+    'lifts no mark a refusal made while a removal ran: %s',
+    async (_name, op, line, key, bytes) => {
+      // A refusal another command of the line makes during the op stays.
+      const ws = workspace()
+      await run(ws, `cat /s3/${key}`)
+      mock.before(op, () => {
+        markLost(`/s3/${key}`, etag(bytes))
+      })
+      const [code, , err] = await run(ws, `${line}; echo z > /s3/${key}`)
+      expect(code === 1 && err.includes(STALE), err).toBe(true)
+      expect(mock.store.get('b', key)).toBeUndefined()
+    },
+  )
+
+  it('names a refused destination file of a directory mv', async () => {
+    const ws = workspace()
+    mock.store.set('b', 'e/a', ENC.encode('ea\n'))
+    await run(ws, 'cat /s3/e/a')
+    mock.store.delete('b', 'e/a')
+    const [code, , err] = await run(ws, 'mv -T /s3/d /s3/e')
+    expect(code).toBe(1)
+    expect(err.startsWith("mv: cannot move '/s3/d/a' to '/s3/e/a': "), err).toBe(true)
+  })
 
   it('holds each destination key a directory rename read', async () => {
     // Every changed destination key is refused and keeps its version.

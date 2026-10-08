@@ -22,6 +22,7 @@ import pytest_asyncio
 from mirage import Mount, MountMode, Workspace, WritePolicy
 from mirage.errors.types import StaleWriteError
 from mirage.fuse.core import MountCore
+from mirage.observe.context import mark_lost
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
@@ -597,6 +598,41 @@ async def test_a_removal_lifts_a_kept_version(
     code, _, err = await _run(ws, f"{line}; echo new > /s3/{key}")
     assert code == 0, err
     assert fake.buckets["b"][key] == b"new\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "op, line, key",
+    [
+        ("delete_object", "rm /s3/g", "g"),
+        ("delete_objects", "rm -r /s3/d", "d/a"),
+        (COPY, "mv /s3/g /s3/h", "g"),
+    ],
+    ids=["rm", "rm -r", "mv"],
+)
+async def test_a_removal_lifts_no_mark_made_while_it_ran(
+    fake, workspaces, op, line, key
+):
+    # A refusal another command of the line makes during the op stays.
+    ws = workspaces()
+    await _run(ws, f"cat /s3/{key}")
+    fake.before(op, lambda: mark_lost(f"/s3/{key}", etag(SEED[key])))
+    code, _, err = await _run(ws, f"{line}; echo z > /s3/{key}")
+    assert code == 1 and STALE in err, err
+    assert key not in fake.buckets["b"]
+
+
+@pytest.mark.asyncio
+async def test_a_directory_mv_names_a_refused_destination_file(
+    fake, workspaces
+):
+    ws = workspaces()
+    fake.buckets["b"]["e/a"] = b"ea\n"
+    await _run(ws, "cat /s3/e/a")
+    del fake.buckets["b"]["e/a"]
+    code, _, err = await _run(ws, "mv -T /s3/d /s3/e")
+    assert code == 1
+    assert err.startswith("mv: cannot move '/s3/d/a' to '/s3/e/a': "), err
 
 
 @pytest.mark.asyncio

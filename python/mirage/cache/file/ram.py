@@ -57,16 +57,19 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             entry = self._entries.get(key)
             if entry is None or entry.version_only:
                 return None
-            if entry.expired:
-                self._cache_size -= entry.size
-                del self._entries[key]
-                self._store.files.pop(key, None)
-                # A kept version outlives its bytes, as redis's meta key does.
-                if entry.keeps_version and entry.fingerprint:
-                    self._put_version(key, entry.fingerprint)
-                return None
-            self._entries.move_to_end(key)
-            return self._store.files.get(key)
+            if not entry.expired:
+                self._entries.move_to_end(key)
+                return self._store.files.get(key)
+            self._cache_size -= entry.size
+            del self._entries[key]
+            self._store.files.pop(key, None)
+            # A kept version outlives its bytes, as redis's meta key does.
+            kept = entry.fingerprint if entry.keeps_version else None
+            if kept:
+                self._put_version(key, kept)
+        if kept:
+            await self._evict()
+        return None
 
     async def set(
         self,

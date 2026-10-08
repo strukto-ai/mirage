@@ -460,6 +460,16 @@ async def test_fingerprints_answers_each_key_in_order():
 
 
 @pytest.mark.asyncio
+async def test_a_version_an_expiry_leaves_stays_within_the_limit():
+    cache = RAMFileCacheStore(cache_limit=20)
+    await cache.set("/a-long-key", b"x", fingerprint="v1234567890", ttl=1)
+    await cache.set_versions({"/a-long-key": "v1234567890"})
+    cache._entries["/a-long-key"].cached_at -= 10
+    assert await cache.get("/a-long-key") is None
+    assert cache.cache_size <= 20
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kept", [True, False], ids=["kept", "not kept"])
 async def test_an_expired_entry_still_answers_its_version(kept):
     # The token stays true for the bytes read, all a condition says; a
