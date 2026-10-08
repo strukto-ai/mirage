@@ -36,7 +36,6 @@ async function run(kind: string, flags: Record<string, boolean> = {}) {
   const result = await cmd.fn(accessor, [p], ['needle'], {
     stdin: null,
     flags,
-    filetypeFns: null,
     io: ioFor(GDriveVFS, accessor),
     cwd: '/',
     index,

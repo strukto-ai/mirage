@@ -62,7 +62,6 @@ from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore
-from mirage.ops import Ops
 from mirage.policy import (
     AskHandler,
     Decisions,
@@ -125,12 +124,13 @@ from mirage.vfs.history import HISTORY_PREFIX, HistoryViewVFS
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.abort import MirageAbortError, run_cancellable
 from mirage.workspace.cli import CLIInstall
-from mirage.workspace.dispatcher import Dispatcher
+from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.documentation.documents import Documents
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.statement import restore_status
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.globs import GlobOptions, resolve_globs
+from mirage.workspace.files import Files
 from mirage.workspace.lookup import lookup, program, program_note, programs
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountEntry, MountRegistry
@@ -461,9 +461,9 @@ class Workspace:
         self._registry.mount(
             BIN_PREFIX,
             BinViewVFS(
-                lambda: programs(self._op_session(), self._registry),
+                lambda: programs(self._call_session(), self._registry),
                 lambda name: program_note(
-                    name, self._op_session(), self._registry
+                    name, self._call_session(), self._registry
                 ),
             ),
             MountMode.READ,
@@ -474,22 +474,22 @@ class Workspace:
         # and the policy gates fire exactly once, at that door. It runs
         # as the default session, as a bare ``shell`` does, so the
         # default profile confines it too.
-        self._ops = Ops(
-            self._registry.ops_mounts(),
+        self._files = Files(
+            self._registry.mount_rows(),
             observer=self.observer,
             agent_id=agent_id or "",
             links=self._namespace,
             dispatch=self._dispatcher.dispatch,
             bind=self._bind_session,
         )
-        self._kernel_mounts = KernelMounts(self._ops, self._session_mgr)
+        self._kernel_mounts = KernelMounts(self._files, self._session_mgr)
         self._documents = Documents(
             self._registry,
-            self._ops,
+            self._files,
             self._session_mgr,
             lambda: (
                 get_current_session_unless_foreign(self._session_mgr)
-                or self._op_session()
+                or self._call_session()
             ),
             lambda name: compile_profile(self._base_profile(name), name),
             lambda: self.ensure_sessions_loaded(),
@@ -696,14 +696,13 @@ class Workspace:
         return self._session_mgr.has_managed_env
 
     @property
-    def vfs(self) -> Ops:
-        """The op facade: read/write/stat/readdir/... against the mounts.
+    def vfs(self) -> Files:
+        """The file API: read/write/stat/readdir/... against the mounts.
 
         Named as TypeScript names it (`ws.vfs`), so one host API reads the
-        same in both languages; the `Ops` class name stays, since it is
-        the op vocabulary the dispatcher speaks, not a filesystem.
+        same in both languages.
         """
-        return self._ops
+        return self._files
 
     @property
     def tools(self) -> MirageToolOperations:
@@ -872,7 +871,7 @@ class Workspace:
             vfs_ref=vfs_ref,
         )
         prepare_added_mount(self._registry, entry, previous)
-        self._ops.set_mounts(self._registry.ops_mounts())
+        self._files.set_mounts(self._registry.mount_rows())
         return entry
 
     async def unmount(self, prefix: str) -> None:
@@ -880,7 +879,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         await unmount_prefix(
             self._registry,
-            self._ops,
+            self._files,
             prefix,
             lambda: self._shutting_down,
             self._shared_mounts,
@@ -898,7 +897,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         mode = parse_mount_mode(mode)
         self._registry.mount_for_prefix(prefix).mode = mode
-        self._ops.set_mounts(self._registry.ops_mounts())
+        self._files.set_mounts(self._registry.mount_rows())
 
     def add_fuse_mount(
         self,
@@ -997,7 +996,7 @@ class Workspace:
             prefixes.append(entry.prefix)
         return prefixes
 
-    def _op_session(self) -> SessionState:
+    def _call_session(self) -> SessionState:
         """The session an op runs under: the bound one, else the default."""
         return get_current_session_for(
             self._session_mgr
@@ -1012,7 +1011,7 @@ class Workspace:
         session = (
             self._session_mgr.get(session_id)
             if session_id is not None
-            else self._op_session()
+            else self._call_session()
         )
         token = set_current_session(session, self._session_mgr)
         try:
@@ -1042,7 +1041,7 @@ class Workspace:
         session = (
             self._session_mgr.get(session_id)
             if session_id is not None
-            else self._op_session()
+            else self._call_session()
         )
         return self._spawn_for_session(request, session)
 
@@ -1248,7 +1247,7 @@ class Workspace:
 
     def __enter__(self) -> "Workspace":
         self._vfs_loop = asyncio.new_event_loop()
-        self._patched = patch_process(self._ops, self._vfs_loop)
+        self._patched = patch_process(self._files, self._vfs_loop)
         return self
 
     def __exit__(
@@ -1307,7 +1306,7 @@ class Workspace:
         inside child directories. The default watch runtime attaches
         lazily on first use; call ``attach_watch_runtime`` beforehand
         only to customize it. The str tolerance lives only
-        here, at the consumer boundary (mirroring ``Ops``); the
+        here, at the consumer boundary (mirroring ``Files``); the
         runtime below is PathSpec-only.
 
         Args:
@@ -2113,13 +2112,13 @@ class Workspace:
             reset_current_session(token)
 
     async def dispatch(
-        self, op: str, path: PathSpec, **kwargs: Any
+        self, name: str, path: PathSpec, /, **kwargs: Any
     ) -> tuple[Any, IOResult]:
         # The door owns pre-dispatch initialization (namespace load,
-        # pending drift checks), so FUSE and the ops facade get it too.
+        # pending drift checks), so FUSE and `ws.vfs` get it too.
         # Runs as the default session unless one is bound, like ws.vfs.
         return await self._bind_session(
-            None, partial(self._dispatcher.dispatch, op, path, **kwargs)
+            None, partial(self._dispatcher.dispatch, name, path, **kwargs)
         )
 
     async def stat(self, path: str) -> FileStat:
@@ -2190,7 +2189,7 @@ class Workspace:
             registry=self._registry,
             dispatcher=self._dispatcher,
             observer=self.observer,
-            records=self._ops.records,
+            records=self._files.records,
             job_table=self.job_table,
             agent_id=self._default_agent_id,
             runtimes=self._runtimes,
@@ -2409,7 +2408,7 @@ class Workspace:
 class Session:
     """One session's doors, bound together.
 
-    ``shell`` runs a line as the session, ``vfs`` is the op facade run
+    ``shell`` runs a line as the session, ``vfs`` is the file API run
     as it, ``tools`` the agent tools over both and ``explain`` the same
     doors as a dry run, so a host holds one
     object per agent and every door answers under the same profile:
@@ -2448,8 +2447,8 @@ class Session:
         return self._ws.mounts()
 
     @property
-    def vfs(self) -> Ops:
-        """The op facade run as this session."""
+    def vfs(self) -> Files:
+        """The file API run as this session."""
         if self._id is None:
             return self._ws.vfs
         return self._ws.vfs._for_session(self._id)

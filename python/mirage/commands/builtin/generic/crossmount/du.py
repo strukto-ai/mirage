@@ -35,9 +35,9 @@ from mirage.concurrency.limiter import bounded_map
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, SizedRun
-from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.view.types import NamespaceView
 
 # The flags that shape only the rendering: every mount measures without
 # them, and the line renders once.

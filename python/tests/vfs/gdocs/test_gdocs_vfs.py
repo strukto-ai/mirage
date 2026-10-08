@@ -18,11 +18,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.ops import Ops
 from mirage.vfs.gdocs import GDocsConfig, GDocsVFS
+from mirage.workspace.files import Files
 
 
-def _make_gdocs_ops() -> Ops:
+def _make_gdocs_ops() -> Files:
     vfs = GDocsVFS(config=GDocsConfig(client_id="x", refresh_token="y"))
     return Workspace({"/gdocs/": vfs}, mode=MountMode.READ).vfs
 

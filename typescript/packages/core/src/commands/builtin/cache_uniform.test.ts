@@ -79,7 +79,6 @@ function opts(flags: Record<string, string | boolean | number | string[]> = {}):
   return {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
   }
 }

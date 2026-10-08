@@ -39,7 +39,6 @@ async function runGrep(
   const result = await cmd.fn(vfs.accessor, paths, texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
     ...(options.index !== undefined ? { index: options.index } : {}),
@@ -124,7 +123,6 @@ describe('discord grep on a time-scoped mount', () => {
       {
         stdin: null,
         flags: { w: true, r: true },
-        filetypeFns: null,
         io: ioFor(DiscordVFSBase, accessor),
         cwd: '/',
         index: idx,

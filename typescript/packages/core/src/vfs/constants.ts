@@ -12,4 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Effect } from './types.ts'
+
 export const DEFAULT_MAX_DU_ENTRIES = 10000
+
+// Every effect that changes the mount: a read-only mount refuses these and
+// admission judges them as writes.
+export const WRITE_EFFECTS: readonly Effect[] = [
+  Effect.WRITE,
+  Effect.CREATE,
+  Effect.REMOVE,
+  Effect.RENAME,
+  Effect.ATTR,
+]

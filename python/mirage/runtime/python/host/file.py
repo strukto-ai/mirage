@@ -22,11 +22,11 @@ from typing import TYPE_CHECKING, Self
 
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.ops import Ops
 from mirage.runtime.handles import FileHandle
 from mirage.runtime.handles.mode import parse_mode
 from mirage.runtime.open import apply_open
 from mirage.runtime.python.host.vfs import HostVFS
+from mirage.workspace.files import Files
 
 if TYPE_CHECKING:
     from _typeshed import ReadableBuffer, WriteableBuffer
@@ -97,7 +97,7 @@ class _HandleRaw(io.RawIOBase):
 class MirageFile:
     def __init__(
         self,
-        ops: Ops,
+        files: Files,
         path: str,
         mode: str = "r",
         loop: asyncio.AbstractEventLoop | None = None,
@@ -106,7 +106,7 @@ class MirageFile:
         newline: str | None = None,
     ) -> None:
         self._closed = True
-        self._door = HostVFS(ops, loop)
+        self._door = HostVFS(files, loop)
         self._path = path
         self._mode = mode
         self._facts = parse_mode(mode)
@@ -169,7 +169,7 @@ class MirageFile:
         # A handle that writes reads the stored bytes, since its writes
         # land on them; a read-only one sees the rendering.
         return self._door.run(
-            self._door.ops.read(self._path, offset, size, raw=self._writable)
+            self._door.files.read(self._path, offset, size, raw=self._writable)
         )
 
     def _check_closed(self) -> None:
@@ -247,15 +247,15 @@ class MirageFile:
             return
         for step in steps:
             if step.kind == "write":
-                coro = self._door.ops.write(self._path, step.data)
+                coro = self._door.files.write(self._path, step.data)
             elif step.kind == "append":
-                coro = self._door.ops.append(self._path, step.data)
+                coro = self._door.files.append(self._path, step.data)
             elif step.kind == "pwrite":
-                coro = self._door.ops.pwrite(
+                coro = self._door.files.pwrite(
                     self._path, step.data, step.offset
                 )
             else:
-                coro = self._door.ops.truncate(self._path, step.length)
+                coro = self._door.files.truncate(self._path, step.length)
             self._door.run(coro)
         self._handle.settle(self._read_range)
 

@@ -14,7 +14,7 @@
 
 import { UsageError } from '../../../errors.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { LinkView } from '../../../../ops/types.ts'
+import type { LinkView } from '../../../../view/types.ts'
 import { FileType, type PathSpec } from '../../../../types.ts'
 import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { mountPrefixOf, mountedPath, respelled } from '../../../../utils/key_prefix.ts'

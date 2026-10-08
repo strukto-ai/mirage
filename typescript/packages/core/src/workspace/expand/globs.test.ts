@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { NamespaceLinks } from '../../ops/config.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'

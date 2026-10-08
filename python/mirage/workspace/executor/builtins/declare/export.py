@@ -14,9 +14,9 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.shell.bytes import encode_text
 from mirage.shell.variable import VarAttr
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.constants import (
     EXPORT_FLAGS,
     EXPORT_USAGE,

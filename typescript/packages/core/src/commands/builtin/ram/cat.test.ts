@@ -31,7 +31,6 @@ describe('cat', () => {
     const result = await cmd.fn(vfs.accessor, [PathSpec.fromStrPath('/tmp/f.bin')], [], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       io: commandIo(vfs),
       cwd: '/',
     })

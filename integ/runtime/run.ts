@@ -727,7 +727,7 @@ function checkOps(expect: Expect, seen: string[]): string[] {
   return problems
 }
 
-// One facade step: call a typed Ops convenience (`ws.vfs`) and check its
+// One facade step: call a typed Files convenience (`ws.vfs`) and check its
 // value. The JSON carries the python facade spelling (`is_dir`,
 // `list_files`); snakeToCamel maps it onto the TS method.
 async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promise<string[]> {
@@ -816,7 +816,7 @@ async function runStep(
   sessionId?: string,
 ): Promise<string[]> {
   const expect = step.expect ?? {}
-  // The ledger slice this step adds: ws.records delegates to the Ops
+  // The ledger slice this step adds: ws.records delegates to the Files
   // facade's account, so the step's own ops are the tail.
   const ledgerBefore = ws.records.length
   if (step.facade !== undefined) {

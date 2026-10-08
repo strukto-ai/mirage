@@ -26,7 +26,6 @@ async function stderrOf(flags: CommandOpts['flags']): Promise<[string, number]> 
   const opts = {
     stdin: new TextEncoder().encode('b\na\n'),
     flags,
-    filetypeFns: null,
     cwd: '/',
     vfs: { kind: 'ram' } as never,
   } as CommandOpts
@@ -99,7 +98,6 @@ async function run(r: Run): Promise<[string, string, number]> {
   const opts = {
     stdin: r.stdin ?? null,
     flags: r.flags ?? {},
-    filetypeFns: null,
     cwd: '/',
     vfs: { kind: 'ram' } as never,
   } as CommandOpts

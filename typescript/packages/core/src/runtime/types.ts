@@ -48,8 +48,9 @@ export type RuntimeLanguage = 'python' | 'js'
 export type RuntimeReach = 'workspace' | 'process' | 'remote'
 
 /**
- * The workspace op dispatch: run `op` against the mount owning `path`
- * and return its result with the accounting IOResult. Defined here, on
+ * The workspace dispatch: run the function `name` against the mount
+ * owning `path` and return its result with the accounting IOResult.
+ * Defined here, on
  * the consumer side, because runtimes receive it through a binding while the
  * workspace provides it, and the runtime package imports no workspace
  * module — the home of Python's DispatchFn protocol (runtime/types).
@@ -58,7 +59,7 @@ export type RuntimeReach = 'workspace' | 'process' | 'remote'
  * step throws the result away; runtimes and combiners never pass it.
  */
 export type DispatchFn = (
-  op: string,
+  name: string,
   path: PathSpec,
   args?: readonly unknown[],
   kwargs?: Record<string, unknown>,

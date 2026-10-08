@@ -21,11 +21,11 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import line_buffer
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import ShellArray, array_set
 from mirage.shell.bytes import decode_text
 from mirage.utils.quote import single_quote
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.shared import (
     fail,
     record_delimiter,

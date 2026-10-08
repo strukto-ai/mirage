@@ -33,7 +33,6 @@ async function runReadlink(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin: null,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
   })

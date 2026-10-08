@@ -124,6 +124,7 @@ if TYPE_CHECKING:
     from mirage.vfs.types import (
         Effect,
         SearchQuery,
+        Target,
     )
     from mirage.workspace import (
         ExecutionNode,
@@ -212,6 +213,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.vfs.types": (
         "Effect",
         "SearchQuery",
+        "Target",
     ),
     "mirage.vfs.registry": ("build_vfs", "known_vfs_names", "register_vfs"),
     "mirage.runtime.base": ("Runtime",),
@@ -304,6 +306,7 @@ __all__ = [
     "FlagView",
     "SearchQuery",
     "Effect",
+    "Target",
     "vfs_call",
     "IOResult",
     "IndexCacheStore",

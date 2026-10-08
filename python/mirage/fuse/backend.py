@@ -16,8 +16,8 @@ import logging
 import posixpath
 import sys
 
-from mirage.ops import Ops
 from mirage.types import KERNEL_BACKENDS, MountBackend
+from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ def check_mountpoint(backend: MountBackend, mountpoint: str) -> None:
 
 
 def check_sizes(
-    backend: MountBackend, ops: Ops, root_prefix: str = ""
+    backend: MountBackend, files: Files, root_prefix: str = ""
 ) -> None:
     """Warn when an fskit mount will serve size-unknown files as empty.
 
@@ -133,12 +133,12 @@ def check_sizes(
 
     Args:
         backend (MountBackend): the requested backend.
-        ops (Ops): the op facade whose mounts are being served.
+        files (Files): ``ws.vfs`` whose mounts are being served.
         root_prefix (str): mount root, when the tree is scoped to one mount.
     """
     if backend is not MountBackend.FSKIT:
         return
-    offenders = ops.unsized_mounts(root_prefix)
+    offenders = files.unsized_mounts(root_prefix)
     if not offenders:
         return
     listed = ", ".join(f"{prefix} ({name})" for prefix, name in offenders)
@@ -153,7 +153,7 @@ def check_sizes(
 
 
 def check_writes(
-    backend: MountBackend, ops: Ops, root_prefix: str = ""
+    backend: MountBackend, files: Files, root_prefix: str = ""
 ) -> None:
     """Warn when an fskit mount accepts writes the shim may corrupt.
 
@@ -167,7 +167,7 @@ def check_writes(
 
     Args:
         backend (MountBackend): the requested backend.
-        ops (Ops): the op facade whose mounts are being served.
+        files (Files): ``ws.vfs`` whose mounts are being served.
         root_prefix (str): mount root, when the tree is scoped to one mount.
     """
     if backend is not MountBackend.FSKIT:
@@ -176,7 +176,7 @@ def check_writes(
     # cannot corrupt a discard/byte-source device, so it never warns.
     offenders = [
         (prefix, name)
-        for prefix, name in ops.writable_mounts(root_prefix)
+        for prefix, name in files.writable_mounts(root_prefix)
         if prefix.rstrip("/") != "/dev"
     ]
     if not offenders:
@@ -193,7 +193,7 @@ def check_writes(
 
 def prepare_backend(
     value: "str | MountBackend | None",
-    ops: Ops | None = None,
+    files: Files | None = None,
     mountpoint: str | None = None,
     root_prefix: str = "",
 ) -> MountBackend:
@@ -205,7 +205,7 @@ def prepare_backend(
 
     Args:
         value (str | MountBackend | None): the requested backend.
-        ops (Ops | None): op facade to size-check, when one is available.
+        files (Files | None): the file API to size-check, when one is available.
         mountpoint (str | None): intended mountpoint, when already known.
         root_prefix (str): mount root, for scoping the size check.
 
@@ -217,7 +217,7 @@ def prepare_backend(
     check_platform(backend)
     if mountpoint is not None:
         check_mountpoint(backend, mountpoint)
-    if ops is not None:
-        check_sizes(backend, ops, root_prefix)
-        check_writes(backend, ops, root_prefix)
+    if files is not None:
+        check_sizes(backend, files, root_prefix)
+        check_writes(backend, files, root_prefix)
     return backend

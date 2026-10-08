@@ -40,7 +40,7 @@ from mirage.agents.langchain.convert import (
 )
 from mirage.bridge.sync import run_async_from_sync
 from mirage.io.types import IOResult
-from mirage.ops.ops import Ops
+from mirage.workspace.files import Files
 from mirage.workspace.tools.io_text import replace_text, with_refusal
 from mirage.workspace.workspace import Session, Workspace
 
@@ -126,7 +126,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
     """Deep Agents backend backed by a Mirage Workspace.
 
     File operations (read, write, edit, ls, upload, download) go through the
-    Ops layer directly. Shell operations (execute, grep, glob) go through
+    Files facade directly. Shell operations (execute, grep, glob) go through
     Workspace.shell() for pipe and flag support. Both run as the session,
     so its profile judges every call.
 
@@ -151,8 +151,8 @@ class LangchainWorkspace(SandboxBackendProtocol):
         return run_async_from_sync(coro)
 
     @property
-    def _vfs(self) -> Ops:
-        """The op facade run as this backend's session."""
+    def _vfs(self) -> Files:
+        """The file API run as this backend's session."""
         if self._session_id is None:
             return self._ws.vfs
         return Session(self._ws, self._session_id).vfs

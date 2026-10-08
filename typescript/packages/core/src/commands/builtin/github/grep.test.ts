@@ -63,7 +63,7 @@ async function exactFileSet(flags: CommandOpts['flags']): Promise<unknown> {
   const cmd = GITHUB_GREP[0]
   if (cmd === undefined) throw new Error('grep not registered')
   const root = new PathSpec({ virtual: '/', directory: '/', vfsPath: '' })
-  const opts: CommandOpts = { stdin: null, flags, filetypeFns: null, cwd: '/', index: null }
+  const opts: CommandOpts = { stdin: null, flags, cwd: '/', index: null }
   await cmd.fn(makeAccessor(), [root], ['import'], opts)
   return narrow.mock.calls[0]?.[7]
 }

@@ -68,7 +68,6 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
       {
         stdin: null,
         flags: {},
-        filetypeFns: null,
         io: commandIo(vfs),
         cwd: '/slack/channels',
         mountPrefix: '/slack',
@@ -80,7 +79,6 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
     const out = await cmd.fn(vfs.accessor, [], [], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       io: commandIo(vfs),
       cwd: '/slack/channels/general__C1',
       mountPrefix: '/slack',

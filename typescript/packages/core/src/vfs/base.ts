@@ -23,7 +23,7 @@ import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
 import type { DeltaHook } from '../watch/base.ts'
 import { vfsCall } from './call.ts'
 import { DEFAULT_MAX_DU_ENTRIES } from './constants.ts'
-import { type DuEntries, Effect, type SearchQuery } from './types.ts'
+import { type DuEntries, Effect, type SearchQuery, Target } from './types.ts'
 
 export interface FindOptions {
   name?: string | null
@@ -334,7 +334,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /** List the children of a directory. */
-  @vfsCall({ effect: Effect.READ })
+  @vfsCall({ effect: Effect.READ, target: Target.DIR })
   readdir(path: PathSpec, _index?: IndexCacheStore): Promise<string[]> {
     return Promise.reject(enotsup(this.name, 'readdir', path))
   }
@@ -344,7 +344,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * when `readsRanges` is set: the caller otherwise reads the whole file
    * and slices it.
    */
-  @vfsCall({ effect: Effect.READ })
+  @vfsCall({ effect: Effect.READ, target: Target.FILE })
   read(
     path: PathSpec,
     _index?: IndexCacheStore,
@@ -355,7 +355,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /** Describe a path; rejects with ENOENT when nothing is there. */
-  @vfsCall({ effect: Effect.READ })
+  @vfsCall({ effect: Effect.METADATA })
   stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
     return Promise.reject(enotsup(this.name, 'stat', path))
   }
@@ -399,7 +399,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /** Replace a file's bytes, creating it when missing. */
-  @vfsCall({ effect: Effect.WRITE })
+  @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
   write(path: PathSpec, _data: Uint8Array): Promise<void> {
     return Promise.reject(enotsup(this.name, 'write', path))
   }
@@ -409,7 +409,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * defines `write` and not this is appended to by reading the file and
    * writing it back.
    */
-  @vfsCall({ effect: Effect.WRITE })
+  @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
   append(path: PathSpec, _data: Uint8Array, _index?: IndexCacheStore): Promise<void> {
     return Promise.reject(enotsup(this.name, 'append', path))
   }
@@ -420,7 +420,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * is created. A VFS that defines `write` and not this is written by
    * reading the file and writing it back.
    */
-  @vfsCall({ effect: Effect.WRITE })
+  @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
   pwrite(
     path: PathSpec,
     _data: Uint8Array,
@@ -431,19 +431,19 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /** Create an empty file, leaving an existing one as it is. */
-  @vfsCall({ effect: Effect.WRITE })
+  @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
   create(path: PathSpec): Promise<void> {
     return Promise.reject(enotsup(this.name, 'create', path))
   }
 
   /** Make a directory; `parents` makes missing parents too, as `mkdir -p`. */
-  @vfsCall({ effect: Effect.WRITE })
+  @vfsCall({ effect: Effect.CREATE, target: Target.DIR })
   mkdir(path: PathSpec, _parents = false): Promise<void> {
     return Promise.reject(enotsup(this.name, 'mkdir', path))
   }
 
   /** Remove a file. */
-  @vfsCall({ effect: Effect.WRITE })
+  @vfsCall({ effect: Effect.REMOVE, target: Target.FILE })
   unlink(path: PathSpec): Promise<void> {
     return Promise.reject(enotsup(this.name, 'unlink', path))
   }
@@ -452,7 +452,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * Remove an empty directory. The index is the mount's, which a refused
    * rmdir's hidden-remnant walk lists through.
    */
-  @vfsCall({ effect: Effect.WRITE })
+  @vfsCall({ effect: Effect.REMOVE, target: Target.DIR })
   rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
     return Promise.reject(enotsup(this.name, 'rmdir', path))
   }
@@ -463,7 +463,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /** Move a name within this VFS. */
-  @vfsCall({ effect: Effect.WRITE })
+  @vfsCall({ effect: Effect.RENAME })
   rename(src: PathSpec, _dst: PathSpec): Promise<void> {
     return Promise.reject(enotsup(this.name, 'rename', src))
   }
@@ -483,7 +483,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * refuses a missing file instead of creating it; a VFS that cannot hold
    * that atomically rejects with ENOTSUP before writing.
    */
-  @vfsCall({ effect: Effect.WRITE })
+  @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
   truncate(path: PathSpec, _length: number, _noCreate = false): Promise<void> {
     return Promise.reject(enotsup(this.name, 'truncate', path))
   }
@@ -492,7 +492,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * Store metadata fields the backend keeps itself. Resolves to the fields
    * it stored; the rest land in the namespace's attribute overlay.
    */
-  @vfsCall({ effect: Effect.WRITE })
+  @vfsCall({ effect: Effect.ATTR })
   setattr(path: PathSpec, _fields: SetAttrFields): Promise<Record<string, number | string>> {
     return Promise.reject(enotsup(this.name, 'setattr', path))
   }

@@ -1,6 +1,6 @@
 # facade
 
-The SDK op facade, with no runtime in the way. A case with a `backends` list also runs over RAM, disk, ssh, S3 and redis.
+The SDK file API (`ws.vfs`), with no runtime in the way. A case with a `backends` list also runs over RAM, disk, ssh, S3 and redis.
 
 | File            | Pins                                                                                                                                                                                    |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

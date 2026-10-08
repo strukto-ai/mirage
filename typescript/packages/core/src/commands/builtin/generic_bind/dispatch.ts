@@ -20,7 +20,7 @@ import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { LinkView, MountView, NamespaceView } from '../../../ops/types.ts'
+import type { LinkView, MountView, NamespaceView } from '../../../view/types.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -156,7 +156,6 @@ export async function runDispatch(
     {
       stdin,
       flags: rebased,
-      filetypeFns: null,
       mountPrefix: '',
       cwd,
       dispatch,

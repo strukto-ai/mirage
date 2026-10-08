@@ -34,7 +34,7 @@ const ARCHIVE = decodeBase64(
 )
 
 function opts(flags: Record<string, boolean>): CommandOpts {
-  return { stdin: null, flags, filetypeFns: null, cwd: '/', vfs: {} } as unknown as CommandOpts
+  return { stdin: null, flags, cwd: '/', vfs: {} } as unknown as CommandOpts
 }
 
 async function run(

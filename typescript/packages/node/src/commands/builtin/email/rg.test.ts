@@ -56,7 +56,6 @@ async function run(texts: string[], flags: Record<string, FlagValue>) {
   return cmd.fn(ACCESSOR, [FOLDER], texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     io: ioFor(EmailVFS, ACCESSOR),
     cwd: '/',
   })

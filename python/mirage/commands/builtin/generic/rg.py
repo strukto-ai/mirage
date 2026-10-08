@@ -67,10 +67,10 @@ from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import walk_refusal
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountView
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
+from mirage.view.types import MountView
 
 logger = logging.getLogger(__name__)
 

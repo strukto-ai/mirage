@@ -35,11 +35,11 @@ from mirage.errors.render import format_fs_error
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView, SessionView
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
 from mirage.utils.hidden import path_visible
+from mirage.view.types import NamespaceView, SessionView
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,

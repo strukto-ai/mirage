@@ -84,12 +84,6 @@ export class MountCommandUnsupported extends Error {
   }
 }
 
-export interface OpsMountInfo {
-  prefix: string
-  resourceType: string
-  mode: MountMode
-}
-
 /** What a placement adds to a driver: the store config and the reference it came from. */
 export interface MountPlacementInit {
   index?: IndexConfig
@@ -481,14 +475,6 @@ export class MountRegistry {
 
   mountPrefixes(): string[] {
     return this.visibleMounts().map((m) => m.prefix)
-  }
-
-  opsMounts(): OpsMountInfo[] {
-    return this.mountList.map((m) => ({
-      prefix: m.prefix,
-      resourceType: m.vfs.name,
-      mode: m.mode,
-    }))
   }
 
   findVfsByName(vfsName: string | null): BaseVFS | null {

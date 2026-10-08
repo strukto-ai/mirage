@@ -14,7 +14,7 @@
 
 import { tool, type Plugin, type ToolContext, type ToolDefinition } from '@opencode-ai/plugin'
 import type { Workspace } from '@struktoai/mirage-node'
-import type { Ops } from '@struktoai/mirage-core/ops/ops'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { encodeBase64 } from '@struktoai/mirage-core/utils/base64'
 import { gnuDirname } from '@struktoai/mirage-core/utils/path'
 import { FileVersionTracker } from '@struktoai/mirage-core/workspace/tools/file_version'
@@ -46,7 +46,7 @@ async function resolveWs(ws: WsLike, ctx: ToolContext): Promise<Workspace> {
   return isResolver(ws) ? ws(ctx) : ws
 }
 
-async function ensureParent(vfs: Ops, path: string): Promise<void> {
+async function ensureParent(vfs: Files, path: string): Promise<void> {
   const parent = gnuDirname(path)
   if (parent === '/' || parent === '' || parent === '.') return
   if (await vfs.exists(parent)) return

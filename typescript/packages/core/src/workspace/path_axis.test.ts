@@ -569,7 +569,7 @@ describe('subtree mutations against hides', () => {
   })
 
   it('a mounted child keeps the command plane refusal', async () => {
-    // Command-plane twin of the ops door's merged emptiness: the
+    // Command-plane twin of `ws.vfs`'s merged emptiness: the
     // backend listing holds only hidden entries, but the namespace
     // owes the directory a visible mounted child no backend can list.
     // The stamped children join the guard's emptiness judgment, so the
@@ -596,7 +596,7 @@ describe('subtree mutations against hides', () => {
   })
 })
 
-describe('the ops door against hides', () => {
+describe('ws.vfs against hides', () => {
   it('leaves a read-only hidden remnant intact and keeps the refusal', async () => {
     // The dispatcher's cascade routes every deletion through the same
     // mode fence normal dispatch applies, so FUSE and ws.vfs callers

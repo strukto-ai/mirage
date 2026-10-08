@@ -14,7 +14,7 @@
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
-import { pathsScoped } from '../../../../ops/namespace_view.ts'
+import { pathsScoped } from '../../../../view/namespace_view.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
 import type { PathSpec } from '../../../../types.ts'

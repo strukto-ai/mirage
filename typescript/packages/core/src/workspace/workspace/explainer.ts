@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runExplaining } from '../../context/session_context.ts'
-import type { Ops } from '../../ops/ops.ts'
+import type { Files } from '../files.ts'
 import { Explained } from '../../policy/errors.ts'
 import { Outcome, type ShellExplanation, type VfsExplanation } from '../../policy/types.ts'
 import type { SetAttrFields } from '../../types.ts'
@@ -37,7 +37,7 @@ export class Explainer {
   constructor(
     private readonly explain: (line: string, sessionId: string) => Promise<ShellExplanation>,
     private readonly sessionId: string | null,
-    private readonly ops: Ops,
+    private readonly files: Files,
   ) {}
 
   /**
@@ -50,7 +50,7 @@ export class Explainer {
 
   /** The session's VFS calls, explained. */
   get vfs(): VfsExplainer {
-    return new VfsExplainer(this.ops)
+    return new VfsExplainer(this.files)
   }
 }
 
@@ -77,54 +77,54 @@ export class Explainer {
  * Mirrors the Python `VfsExplainer`.
  */
 export class VfsExplainer {
-  constructor(private readonly ops: Ops) {}
+  constructor(private readonly files: Files) {}
 
   /** Explain `session.vfs.read`. */
   read(
     path: string,
     options: { offset?: number; size?: number | null } = {},
   ): Promise<VfsExplanation> {
-    return dry('read', [path], () => this.ops.read(path, options))
+    return dry('read', [path], () => this.files.read(path, options))
   }
 
   /** Explain `session.vfs.write`. */
   write(path: string, data: Uint8Array | string): Promise<VfsExplanation> {
-    return dry('write', [path], () => this.ops.write(path, data))
+    return dry('write', [path], () => this.files.write(path, data))
   }
 
   /** Explain `session.vfs.append`. */
   append(path: string, data: Uint8Array): Promise<VfsExplanation> {
-    return dry('append', [path], () => this.ops.append(path, data))
+    return dry('append', [path], () => this.files.append(path, data))
   }
 
   /** Explain `session.vfs.stat`; `nofollow` stats a link itself, not its target. */
   stat(path: string, opts: { nofollow?: boolean } = {}): Promise<VfsExplanation> {
-    return dry('stat', [path], () => this.ops.stat(path, undefined, opts))
+    return dry('stat', [path], () => this.files.stat(path, undefined, opts))
   }
 
   /** Explain `session.vfs.readdir`. */
   readdir(path: string): Promise<VfsExplanation> {
-    return dry('readdir', [path], () => this.ops.readdir(path))
+    return dry('readdir', [path], () => this.files.readdir(path))
   }
 
   /** Explain `session.vfs.exists`, judged as the stat it makes. */
   exists(path: string): Promise<VfsExplanation> {
-    return dry('exists', [path], () => this.ops.stat(path))
+    return dry('exists', [path], () => this.files.stat(path))
   }
 
   /** Explain `session.vfs.isDir`, judged as the stat it makes. */
   isDir(path: string): Promise<VfsExplanation> {
-    return dry('isDir', [path], () => this.ops.stat(path))
+    return dry('isDir', [path], () => this.files.stat(path))
   }
 
   /** Explain `session.vfs.isFile`, judged as the stat it makes. */
   isFile(path: string): Promise<VfsExplanation> {
-    return dry('isFile', [path], () => this.ops.stat(path))
+    return dry('isFile', [path], () => this.files.stat(path))
   }
 
   /** Explain `session.vfs.cat`, judged as the read it makes. */
   cat(path: string): Promise<VfsExplanation> {
-    return dry('cat', [path], () => this.ops.read(path))
+    return dry('cat', [path], () => this.files.read(path))
   }
 
   /**
@@ -133,42 +133,42 @@ export class VfsExplainer {
    * does not make.
    */
   listFiles(path: string): Promise<VfsExplanation> {
-    return dry('listFiles', [path], () => this.ops.readdir(path))
+    return dry('listFiles', [path], () => this.files.readdir(path))
   }
 
   /** Explain `session.vfs.pwrite`. */
   pwrite(path: string, data: Uint8Array, offset: number): Promise<VfsExplanation> {
-    return dry('pwrite', [path], () => this.ops.pwrite(path, data, offset))
+    return dry('pwrite', [path], () => this.files.pwrite(path, data, offset))
   }
 
   /** Explain `session.vfs.create`. */
   create(path: string): Promise<VfsExplanation> {
-    return dry('create', [path], () => this.ops.create(path))
+    return dry('create', [path], () => this.files.create(path))
   }
 
   /** Explain `session.vfs.symlink`: a link at `path` pointing to `target`. */
   symlink(path: string, target: string): Promise<VfsExplanation> {
-    return dry('symlink', [path], () => this.ops.symlink(path, target))
+    return dry('symlink', [path], () => this.files.symlink(path, target))
   }
 
   /** Explain `session.vfs.readlink`. */
   readlink(path: string): Promise<VfsExplanation> {
-    return dry('readlink', [path], () => this.ops.readlink(path))
+    return dry('readlink', [path], () => this.files.readlink(path))
   }
 
   /** Explain `session.vfs.setattr`. */
   setattr(path: string, attrs: SetAttrFields = {}): Promise<VfsExplanation> {
-    return dry('setattr', [path], () => this.ops.setattr(path, attrs))
+    return dry('setattr', [path], () => this.files.setattr(path, attrs))
   }
 
   /** Explain `session.vfs.getxattr`. */
   getxattr(path: string, name: string, opts: { nofollow?: boolean } = {}): Promise<VfsExplanation> {
-    return dry('getxattr', [path], () => this.ops.getxattr(path, name, opts))
+    return dry('getxattr', [path], () => this.files.getxattr(path, name, opts))
   }
 
   /** Explain `session.vfs.listxattr`. */
   listxattr(path: string, opts: { nofollow?: boolean } = {}): Promise<VfsExplanation> {
-    return dry('listxattr', [path], () => this.ops.listxattr(path, opts))
+    return dry('listxattr', [path], () => this.files.listxattr(path, opts))
   }
 
   /** Explain `session.vfs.setxattr`. */
@@ -178,7 +178,7 @@ export class VfsExplainer {
     value: Uint8Array,
     opts: { create?: boolean; replace?: boolean; nofollow?: boolean } = {},
   ): Promise<VfsExplanation> {
-    return dry('setxattr', [path], () => this.ops.setxattr(path, name, value, opts))
+    return dry('setxattr', [path], () => this.files.setxattr(path, name, value, opts))
   }
 
   /** Explain `session.vfs.removexattr`. */
@@ -187,32 +187,32 @@ export class VfsExplainer {
     name: string,
     opts: { nofollow?: boolean } = {},
   ): Promise<VfsExplanation> {
-    return dry('removexattr', [path], () => this.ops.removexattr(path, name, opts))
+    return dry('removexattr', [path], () => this.files.removexattr(path, name, opts))
   }
 
   /** Explain `session.vfs.mkdir`. */
   mkdir(path: string): Promise<VfsExplanation> {
-    return dry('mkdir', [path], () => this.ops.mkdir(path))
+    return dry('mkdir', [path], () => this.files.mkdir(path))
   }
 
   /** Explain `session.vfs.rmdir`. */
   rmdir(path: string): Promise<VfsExplanation> {
-    return dry('rmdir', [path], () => this.ops.rmdir(path))
+    return dry('rmdir', [path], () => this.files.rmdir(path))
   }
 
   /** Explain `session.vfs.unlink`. */
   unlink(path: string): Promise<VfsExplanation> {
-    return dry('unlink', [path], () => this.ops.unlink(path))
+    return dry('unlink', [path], () => this.files.unlink(path))
   }
 
   /** Explain `session.vfs.rename`. */
   rename(src: string, dst: string): Promise<VfsExplanation> {
-    return dry('rename', [src, dst], () => this.ops.rename(src, dst))
+    return dry('rename', [src, dst], () => this.files.rename(src, dst))
   }
 
   /** Explain `session.vfs.truncate`. */
   truncate(path: string, length: number): Promise<VfsExplanation> {
-    return dry('truncate', [path], () => this.ops.truncate(path, length))
+    return dry('truncate', [path], () => this.files.truncate(path, length))
   }
 }
 

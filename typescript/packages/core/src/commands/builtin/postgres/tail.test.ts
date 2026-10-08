@@ -76,7 +76,6 @@ async function run(
   const result = await cmd.fn(accessor, [ROWS], [], {
     stdin: null,
     flags,
-    filetypeFns: null,
     io: ioFor(PostgresVFSBase, accessor),
     cwd: '/',
     ...(signal === undefined ? {} : { signal }),

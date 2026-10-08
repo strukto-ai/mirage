@@ -15,7 +15,6 @@
 from typing import Any, Callable
 
 from mirage.io import IOResult
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -23,6 +22,7 @@ from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import VarAttr, VarKind
+from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     handle_declare_functions,

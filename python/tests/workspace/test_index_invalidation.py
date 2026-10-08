@@ -23,7 +23,7 @@ from mirage.vfs.disk import DiskVFS
 # The ops factory forwards the index cache store into read/readdir/stat for
 # every backend. Disk carries a 60s index TTL, so a cached listing would hide
 # a mutation for a full minute unless something evicts it. Both surfaces do,
-# and for one reason: ``dispatch`` and the VFS/FUSE ``Ops`` facade are the
+# and for one reason: ``dispatch`` and the VFS/FUSE ``Files`` facade are the
 # same door, so every write goes through Dispatcher.invalidate_after_write.
 # TS mirrors this file, and now the whole of it, in
 # packages/node/src/ops/index_invalidation.test.ts.

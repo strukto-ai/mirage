@@ -16,7 +16,6 @@ import functools
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
     array_get,
@@ -36,6 +35,7 @@ from mirage.shell.variable import (
     attr_letters,
 )
 from mirage.utils.hidden import var_hidden
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.constants import (
     ANSI_C_ESCAPES,
     BARE_KEY_RE,

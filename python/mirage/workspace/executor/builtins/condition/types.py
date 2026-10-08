@@ -15,8 +15,8 @@
 from dataclasses import dataclass
 from typing import Union
 
-from mirage.ops.types import SessionView
 from mirage.runtime.types import DispatchFn
+from mirage.view.types import SessionView
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
 

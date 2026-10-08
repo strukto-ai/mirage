@@ -15,8 +15,7 @@
 import { normDir, rstripSlash } from '../utils/slash.ts'
 import { FileStat, FileType, type PathSpec, type Visibility } from '../types.ts'
 import { pathVisible } from '../utils/hidden.ts'
-import type { NamespaceLinks } from './config.ts'
-import type { NamespaceView } from './types.ts'
+import type { NamespaceLinks, NamespaceView } from './types.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 
 /**

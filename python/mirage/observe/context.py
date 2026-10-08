@@ -231,7 +231,7 @@ def finish_record(
     """Close ``timer`` and build the finished record.
 
     The one place an op's duration and wall-clock stamp are read, shared
-    by the recorder sink (:func:`record`) and by the ``Ops`` facade's own
+    by the recorder sink (:func:`record`) and by the ``Files`` facade's own
     ledger, so the two cannot disagree about what a duration measures.
 
     Args:

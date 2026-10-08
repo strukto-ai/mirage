@@ -26,7 +26,7 @@ import { FuseManager } from '../fuse.ts'
  * both unbound and bound to a session.
  *
  * Twin of python's `workspace/workspace/kernel_mounts.py`. Python takes
- * `(ops, sessions)` because its FuseManager mounts the ops facade; the
+ * `(files, sessions)` because its FuseManager mounts `ws.vfs`; the
  * node one mounts the workspace itself, so that is what is held here.
  */
 export class KernelMounts {

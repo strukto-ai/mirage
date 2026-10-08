@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { JsonSchemaType } from '@modelcontextprotocol/server'
-import type { Ops } from '@struktoai/mirage-core/ops/ops'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { VfsExplainer } from '@struktoai/mirage-core/workspace/workspace/explainer'
 
@@ -47,7 +47,7 @@ export interface VfsCall {
   /** The key its result is answered under; null for a call that answers nothing. */
   readonly answer: string | null
   /** The call on `session.vfs`, or on `session.explain.vfs`. */
-  readonly run: (target: Ops | VfsExplainer, a: Args) => Promise<unknown>
+  readonly run: (target: Files | VfsExplainer, a: Args) => Promise<unknown>
 }
 
 function row(

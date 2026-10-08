@@ -14,7 +14,6 @@
 
 import logging
 import os
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -1080,9 +1079,6 @@ async def test_a_saved_non_boolean_knob_is_refused(tmp_path):
 
 class NotesRAM(RAMVFS):
     name = "notes"
-
-    def ops(self):
-        return [replace(op, vfs=self.name) for op in super().ops()]
 
     def commands(self):
         return []

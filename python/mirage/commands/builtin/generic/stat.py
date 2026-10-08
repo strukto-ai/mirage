@@ -25,7 +25,6 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -46,6 +45,7 @@ from mirage.utils.stat_view import (
     is_dir,
     posix_mode,
 )
+from mirage.view.types import LinkView, MountView, StatPath
 
 _STR_DIRECTIVES = frozenset("nNF")
 

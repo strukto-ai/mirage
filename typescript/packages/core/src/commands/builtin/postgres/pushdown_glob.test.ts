@@ -142,7 +142,6 @@ describe('postgres grep push-down and globs', () => {
       // `-l` onto `args_l` in both languages, so the dispatcher never emits
       // `l` and a spec-bound FlagView refuses to read one.
       flags: { args_l: true },
-      filetypeFns: null,
       io: ioFor(PostgresVFSBase, accessor),
       cwd: '/',
     })
@@ -163,7 +162,6 @@ describe('postgres grep push-down and globs', () => {
     await cmd.fn(accessor, [concretePath()], ['a.b'], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       io: ioFor(PostgresVFSBase, accessor),
       cwd: '/',
     })
@@ -190,7 +188,6 @@ describe('postgres rg push-down and globs', () => {
     await cmd.fn(accessor, [globPath()], ['ada'], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       io: ioFor(PostgresVFSBase, accessor),
       cwd: '/',
     })

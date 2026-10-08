@@ -71,7 +71,6 @@ async function head(n: number, maxReadRows?: number): Promise<[string[], number,
   const result = await cmd.fn(accessor, [ROWS], [], {
     stdin: null,
     flags: { lines: String(n) },
-    filetypeFns: null,
     io: ioFor(PostgresVFSBase, accessor),
     cwd: '/',
   })

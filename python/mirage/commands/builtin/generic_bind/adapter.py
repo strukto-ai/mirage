@@ -55,12 +55,6 @@ from mirage.errors.fs import (
 )
 from mirage.errors.types import DotWalkError
 from mirage.io import IOResult
-from mirage.ops.namespace_view import paths_scoped
-from mirage.ops.types import (
-    ChildMounts,
-    NamespaceView,
-    StatOverlay,
-)
 from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, get_op_policies, pre_vfs_gate
 from mirage.runtime.types import DispatchFn
@@ -75,6 +69,12 @@ from mirage.vfs.types import (
     OperationFn,
     SearchOps,
     StatOp,
+)
+from mirage.view.namespace_view import paths_scoped
+from mirage.view.types import (
+    ChildMounts,
+    NamespaceView,
+    StatOverlay,
 )
 
 logger = logging.getLogger(__name__)
@@ -1468,12 +1468,12 @@ def with_dispatch_rule_guard(dispatch: DispatchFn) -> DispatchFn:
     """
 
     async def guarded(
-        op: str, path: PathSpec, **options: Any
+        name: str, path: PathSpec, /, **options: Any
     ) -> tuple[Any, IOResult]:
         gate = get_admission()
-        if gate is not None and op not in METADATA_OPS:
+        if gate is not None and name not in METADATA_OPS:
             options = {**options, "rule_gate": gate}
-        return await dispatch(op, path, **options)
+        return await dispatch(name, path, **options)
 
     return guarded
 

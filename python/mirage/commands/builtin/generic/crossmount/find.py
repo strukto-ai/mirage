@@ -38,10 +38,10 @@ from mirage.concurrency.limiter import bounded_map
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.path import respell_one
+from mirage.view.types import NamespaceView
 
 # The tests whose verdict on one entry decides what the walk reads below
 # it, or that read a listing a mount boundary splits: no mount's own find

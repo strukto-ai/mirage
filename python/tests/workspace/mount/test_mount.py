@@ -14,17 +14,18 @@
 
 import asyncio
 import errno
+from types import MappingProxyType
 
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.commands.builtin.backends import commands_for
-from mirage.commands.config import command
+from mirage.commands.config import ExecContext, command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Option
-from mirage.errors.types import OperationNotSupportedError, ReadOnlyError
+from mirage.errors.types import OperationNotSupportedError
 from mirage.io.types import IOResult, materialize
-from mirage.types import MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
@@ -62,22 +63,16 @@ def test_mount_valid_prefix():
     assert m.prefix == "/data/"
 
 
+class MisnamedRenderer(RAMVFS):
+    renderers = MappingProxyType({".doc": "render_doc"})
+
+
+def test_mount_rejects_a_renderer_that_names_no_method():
+    with pytest.raises(TypeError, match="'render_doc', which is not a method"):
+        MountEntry("/data/", MisnamedRenderer())
+
+
 # ── read-only enforcement ──────────────────────
-
-
-def test_read_only_blocks_write_ops():
-    reg = MountRegistry()
-    reg.mount("/ro/", RAMVFS(), MountMode.READ)
-    mount = reg.mount_for("/ro/file.txt")
-    with pytest.raises(ReadOnlyError, match="Read-only"):
-        _run(mount.call("write", "/file.txt", data=b"x"))
-
-
-def test_write_mode_allows_write_ops():
-    reg = MountRegistry()
-    reg.mount("/rw/", RAMVFS(), MountMode.WRITE)
-    mount = reg.mount_for("/rw/file.txt")
-    _run(mount.call("write", "/new.txt", data=b"hello"))
 
 
 def test_read_only_blocks_write_cmd():
@@ -191,6 +186,48 @@ async def test_only_a_write_command_the_door_cannot_see_is_refused_up_front(
         assert io.exit_code == 0
         assert await materialize(stdout) == b"ran\n"
         assert calls == [1]
+
+
+async def _stat_tally(p: str | PathSpec) -> FileStat:
+    name = p if isinstance(p, str) else p.virtual
+    if name.endswith("dir.tally"):
+        return FileStat(name=name, type=FileType.DIRECTORY)
+    return FileStat(name=name, type=FileType.FILE, size=4)
+
+
+@pytest.mark.asyncio
+async def test_a_directory_does_not_route_to_a_filetype_handler():
+    # A filetype handler is chosen from the operand's NAME, and a
+    # directory can carry any extension, so without a type check `cat`
+    # on a directory named `dir.tally` runs the renderer, which reads
+    # bytes that are not there and reports ENOENT: registering a
+    # renderer made the command worse than the built-in it replaced.
+    mount = MountEntry("/", RAMVFS(), MountMode.WRITE)
+    fired: list[str] = []
+    builtins: list[str] = []
+
+    @command("cat", vfs="ram", spec=CommandSpec())
+    async def plain(accessor: RAMAccessor, paths, texts, opts):
+        builtins.append(paths[0].virtual)
+        return None, IOResult()
+
+    @command("cat", vfs="ram", spec=CommandSpec(), filetype=".tally")
+    async def typed(accessor: RAMAccessor, paths, texts, opts):
+        fired.append(paths[0].virtual)
+        return b"rendered\n", IOResult()
+
+    mount.register_commands([plain, typed])
+    context = ExecContext(stat_path=_stat_tally)
+    await mount.run_command(
+        "cat", [PathSpec.from_str_path("/dir.tally")], [], {}, context
+    )
+    assert fired == []
+    assert builtins == ["/dir.tally"]
+
+    await mount.run_command(
+        "cat", [PathSpec.from_str_path("/file.tally")], [], {}, context
+    )
+    assert fired == ["/file.tally"]
 
 
 def test_write_mode_allows_write_cmd():

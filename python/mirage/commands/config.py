@@ -27,14 +27,6 @@ from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import (
-    ChildMounts,
-    LinkTargetStat,
-    NamespaceView,
-    ReaddirPath,
-    SessionView,
-    StatPath,
-)
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn, ExecPathFn, ShellFn
@@ -63,6 +55,14 @@ from mirage.vfs.types import (
     TruncateOp,
     WriteOp,
 )
+from mirage.view.types import (
+    ChildMounts,
+    LinkTargetStat,
+    NamespaceView,
+    ReaddirPath,
+    SessionView,
+    StatPath,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,8 +70,8 @@ class ExecContext:
     """What the workspace hands ``Mount.run_command`` for one command.
 
     ``run_command`` copies these fields onto ``CommandOpts``, next to
-    the facts only the mount knows (``mount_prefix``, ``index``,
-    ``filetype_fns``). Each field is named as on ``CommandOpts`` and
+    the facts only the mount knows (``mount_prefix``, ``index``). Each
+    field is named as on ``CommandOpts`` and
     means the same; ``tests/commands/test_exec_context_parity.py``
     pins that.
 
@@ -177,9 +177,6 @@ class CommandOpts:
             through a spec-bound ``FlagView``.
         cwd (PathSpec): The working directory.
         mount_prefix (str): The prefix of the mount running the command.
-        filetype_fns (Mapping[str, CommandFn] | None): Handlers of the
-            same command for one file extension, so a generic can hand
-            an operand to one; None inside such a handler.
         command (str | None): The command name the mount runs.
         index (IndexCacheStore): The mount's index cache.
         io (CommandIO | None): The mount's backend table, built from its
@@ -218,7 +215,6 @@ class CommandOpts:
     flags: Mapping[str, FlagValue] = field(default_factory=dict)
     cwd: PathSpec = ROOT_CWD
     mount_prefix: str = ""
-    filetype_fns: Mapping[str, "CommandFn"] | None = None
     command: str | None = None
     index: IndexCacheStore = NULL_INDEX
     io: CommandIO | None = None

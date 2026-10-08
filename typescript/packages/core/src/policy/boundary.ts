@@ -12,18 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { applyOpLimit } from '../commands/builtin/utils/limit.ts'
-import type { Decisions } from '../policy/decisions.ts'
-import type { Policies } from '../policy/policies.ts'
-import { postVfsGate, preVfsGate } from '../policy/policies.ts'
+import { limitResult } from '../commands/builtin/utils/limit.ts'
+import type { Decisions } from './decisions.ts'
+import type { Policies } from './policies.ts'
+import { postVfsGate, preVfsGate } from './policies.ts'
 import type { MountMode, PathSpec } from '../types.ts'
 
 /** The POSIX policy boundary for dispatched filesystem operations: the
  * ordered builtin and user policies, the owning mount prefix, its
  * configured mode (the authorization ceiling), the session whose grants
  * govern the op, and the approval ledger a path rule that asks is put to
- * where no line is running. Mirrors Python's OpBoundary. */
-export class OpBoundary {
+ * where no line is running. Mirrors Python's Boundary. */
+export class Boundary {
   constructor(
     readonly policies: Policies,
     readonly prefix = '',
@@ -47,7 +47,7 @@ export class OpBoundary {
   }
 
   async complete(op: string, path: PathSpec, write: boolean, result: unknown): Promise<unknown> {
-    return applyOpLimit(
+    return limitResult(
       result,
       await postVfsGate(this.policies, op, path, write, this.prefix, result),
     )

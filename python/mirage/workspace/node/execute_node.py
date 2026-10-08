@@ -30,7 +30,6 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.routing import RouteDecision
@@ -70,6 +69,7 @@ from mirage.shell.parse.names import literal_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import PipelineStages, Redirect, RedirectKind
 from mirage.types import PathSpec
+from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins import handle_test, handle_unset

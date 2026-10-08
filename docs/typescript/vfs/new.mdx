@@ -77,6 +77,10 @@ sets `readsRanges` true; then `read(path, index, offset, size)` receives the
 window (`size === null` means through EOF) and fetches only that. A derived
 stream still fetches the entire file; define `readStream` for large files.
 
+`readdir` returns each child's full virtual path (the directory's
+`path.virtual` joined with the child's name), and `stat` sets `FileStat.name`
+to the base name alone. `ls`, `find` and `grep` print what these two return.
+
 Every other function is optional, and each stands alone:
 
 | Functions | Purpose |
@@ -113,17 +117,36 @@ taken name first, and `glob` walks `readdir`. A function only your class
 declares is reachable by name once it is marked with what it does to the mount:
 
 ```ts
-import { Effect, vfsCall } from '@struktoai/mirage-node'
+import { Effect, Target, vfsCall } from '@struktoai/mirage-node'
 
 class JiraVFS extends BaseVFS<JiraAccessor> {
   @vfsCall({ effect: Effect.READ })
   searchIssues(scope: PathSpec, jql: string): Promise<string[]> { ... }
+
+  @vfsCall({ effect: Effect.WRITE, target: Target.FILE })
+  addComment(issue: PathSpec, body: string): Promise<void> { ... }
 }
 ```
 
 `await ws.dispatch('searchIssues', '/jira/', ['project = OPS'])` then runs
 through every check the door runs: hidden paths, path rules, the mount's mode
-and admission policies. A subclass overriding a marked function keeps the mark.
+and admission policies. A subclass overriding a marked function keeps the
+mark. Every other `PathSpec` argument passes the same checks and must be on
+the function's own mount (EXDEV otherwise); the backend receives it
+mount-relative.
+
+The effect is one of `READ`, `METADATA`, `WRITE`, `CREATE`, `REMOVE`,
+`RENAME` and `ATTR`; every one but `READ` and `METADATA` is a write. `target`
+names the kind of entry the path is (`Target.FILE`, `DIR`, `LINK`, or `ANY`
+by default), and `creates: true` marks a `WRITE` that makes a missing file.
+The base functions declare theirs the same way, and the door reads which ops
+follow a link, create a name or run one at a time per path off them.
+`REMOVE` belongs to `unlink` and `rmdir`, and `RENAME` to `rename`: only for
+those names does the door remove a link instead of following it, refuse a
+rename that would bring hidden entries into view (hidden-path rules stay where
+they are written), and move the links and cache below a renamed directory. A
+custom function declaring either is refused when its class is defined; a VFS
+that deletes or moves defines those functions.
 
 ### How the driver connects to a workspace
 
@@ -314,7 +337,7 @@ reach the same functions, and one the class leaves undefined answers
 `Operation not supported`. Set `readsRanges` true when `read` fetches only the
 asked window. Backend semantics stay in the method body, e.g. Databricks's
 `mkdir` passes the caller's `parents` to the core. Mark a function only this
-class declares with `@vfsCall({ effect })`, `Effect.WRITE` for a mutation, so
+class declares with `@vfsCall({ effect })`, a write effect for a mutation, so
 a read-only mount remains a real boundary; the base functions carry their
 marks already.
 

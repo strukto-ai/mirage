@@ -56,7 +56,9 @@ export const WILDCARD = '*'
  * them on the directory that holds its scope or on any ancestor: moving
  * or removing `/x` takes `/x/locked/*` along. `rename` is the
  * dispatcher's; `rmdir` removes the scope's own directory; `rm_r` is the
- * command tier's recursive remove.
+ * command tier's recursive remove. The VFS ops here are pinned to what the
+ * functions declare by constants.test.ts: policy sits below vfs (the Pyodide
+ * worker loads it), so it cannot read the declarations itself.
  */
 export const SUBTREE_OPS: ReadonlySet<string> = new Set(['rename', 'rmdir', 'rm_r'])
 
@@ -76,6 +78,7 @@ export const SUBTREE_COMMANDS: ReadonlySet<string> = new Set(['rm', 'rmdir', 'mv
  * not absent, so a listing shows the entry's name and size and the read
  * of it is what fails, as GNU reports an unreadable file. The command
  * tier's guard leaves its `stat` slot unwrapped for the same reason; a
- * hidden path is the hide arm's, and stays ENOENT.
+ * hidden path is the hide arm's, and stays ENOENT. `exists` is the command
+ * tier's probe; `stat` is pinned like SUBTREE_OPS's VFS ops.
  */
 export const METADATA_OPS: ReadonlySet<string> = new Set(['stat', 'exists'])

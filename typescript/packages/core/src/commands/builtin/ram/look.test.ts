@@ -35,7 +35,6 @@ async function runLook(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
     stdin,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
   })

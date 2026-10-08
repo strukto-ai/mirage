@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../../../io/types.ts'
-import type { NamespaceView } from '../../../../../ops/types.ts'
+import type { NamespaceView } from '../../../../../view/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../../types.ts'
 import { enotdir } from '../../../../../errors/fs.ts'
 import { mountKey } from '../../../../../utils/key_prefix.ts'

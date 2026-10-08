@@ -211,7 +211,7 @@ async def pre_vfs_gate(
 ) -> None:
     """Fire pre_vfs at an op door; a Deny becomes EACCES.
 
-    The one seam helper both doors (the ops facade and the dispatcher)
+    The one seam helper both doors (``ws.vfs`` and the dispatcher)
     call, so a refusal is byte-identical however the mount is reached:
     PermissionError with errno EACCES and the virtual path as filename,
     which the shell renders as "<cmd>: <path>: Permission denied" and

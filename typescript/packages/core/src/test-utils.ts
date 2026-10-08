@@ -14,7 +14,7 @@
 
 import { RAMIndexCacheStore } from './cache/index/ram.ts'
 import type { IndexCacheStore } from './cache/index/store.ts'
-import type { OpKwargs } from './ops/types.ts'
+import type { OpKwargs } from './view/types.ts'
 import { type FileStat, MountMode, type PathSpec } from './types.ts'
 import { BaseVFS } from './vfs/base.ts'
 import type { Accessor } from './accessor/base.ts'
@@ -49,7 +49,7 @@ class DoorOps {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
-    return this.mount.callOp(name, path, args, { index: this.index, ...kwargs })
+    return this.mount.callKeyed(name, path, args, { index: this.index, ...kwargs })
   }
 
   read(path: PathSpec, kwargs: OpKwargs = {}): Promise<Uint8Array> {
@@ -93,7 +93,7 @@ class DoorOps {
   }
 
   async rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    await this.call('rename', src, [dst], { dst })
+    await this.call('rename', src, [dst])
   }
 
   async truncate(path: PathSpec, length: number): Promise<void> {

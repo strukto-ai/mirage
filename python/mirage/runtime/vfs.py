@@ -136,10 +136,10 @@ class RuntimeVFS:
             context.dispatch, asyncio.get_running_loop(), context.resolver
         )
 
-    async def _op(self, op: str, path: str, **kwargs: Any) -> Any:
+    async def _call(self, name: str, path: str, /, **kwargs: Any) -> Any:
         async with self._limiter.acquire():
             result, _ = await self._dispatch(
-                op, PathSpec.from_str_path(path), **kwargs
+                name, PathSpec.from_str_path(path), **kwargs
             )
         return result
 
@@ -173,18 +173,18 @@ class RuntimeVFS:
             self._tracked(pending), self._loop
         ).result()
 
-    def _raw(self, op: str, path: str, **kwargs: Any) -> Any:
-        return self._wait(self._op(op, path, **kwargs))
+    def _raw(self, name: str, path: str, /, **kwargs: Any) -> Any:
+        return self._wait(self._call(name, path, **kwargs))
 
-    def call(self, op: str, path: str, **kwargs: Any) -> Any:
-        """Run one workspace op and return its result.
+    def call(self, name: str, path: str, /, **kwargs: Any) -> Any:
+        """Run one workspace function and return its result.
 
         Args:
-            op (str): dispatch op name (read, write, stat, ...).
+            name (str): the function's name (read, write, stat, ...).
             path (str): guest-absolute virtual path.
         """
         try:
-            return self._raw(op, path, **kwargs)
+            return self._raw(name, path, **kwargs)
         except OperationNotSupportedError as exc:
             # call raises this for an op the mount's VFS does
             # not register; guests spell that ENOTSUP.
@@ -412,7 +412,7 @@ class RuntimeVFS:
             raise NotImplementedError(str(exc)) from exc
 
     async def _list(self, path: str, classify: bool) -> list[VFSEntry]:
-        listing = await self._op("readdir", path)
+        listing = await self._call("readdir", path)
         # After the listing, not before: a directory that will not list
         # (ENOENT, or a link cycle the namespace refuses to resolve)
         # must fail as readdir, not as the mark read.
@@ -447,7 +447,7 @@ class RuntimeVFS:
     async def _classified(self, directory: str, row: VFSEntry) -> VFSEntry:
         try:
             st = stat_row(
-                await self._op("stat", row.path, nofollow=row.is_link)
+                await self._call("stat", row.path, nofollow=row.is_link)
             )
         except ABSENT_PATH as exc:
             logger.debug(

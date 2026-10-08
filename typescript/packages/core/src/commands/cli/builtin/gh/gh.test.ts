@@ -32,6 +32,7 @@ import { PartialOutputError } from '../../../errors.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import { api } from './api.ts'
 import { deleteCmd, editCmd, fork, listCmd, rename, summary, view } from './repo.ts'
+import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
 
 const DEC = new TextDecoder()
 
@@ -92,16 +93,7 @@ function inv(
   config: unknown = { token: 't' },
   extra: Partial<Pick<CLIInvocation, 'stdin' | 'doors' | 'argv'>> = {},
 ): CLIInvocation {
-  return {
-    config,
-    argv: extra.argv ?? [],
-    paths: [],
-    texts,
-    flags,
-    stdin: extra.stdin ?? null,
-    env: {},
-    ...(extra.doors === undefined ? {} : { doors: extra.doors }),
-  }
+  return cliInvocation({ config, texts, flags, ...extra })
 }
 
 function text(result: CommandFnResult): string {
