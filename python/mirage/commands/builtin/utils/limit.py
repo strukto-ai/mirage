@@ -52,6 +52,34 @@ async def with_timeout(
         await close_quietly(stream)
 
 
+async def with_pull_timeout(
+    src: AsyncIterator[bytes], seconds: float | None, name: str
+) -> AsyncIterator[bytes]:
+    """Give each pull of a streamed op its own timeout.
+
+    An op's timeout bounds a backend call, and a streamed op calls the
+    backend once per pull, so each pull gets the whole budget and a
+    consumer that pauses between pulls spends none of it.
+
+    Args:
+        src (AsyncIterator[bytes]): the op's stream.
+        seconds (float | None): the budget per pull, None for none.
+        name (str): the op name for the timeout message.
+    """
+    iterator = src.__aiter__()
+    try:
+        while True:
+            try:
+                chunk = await run_with_timeout(
+                    iterator.__anext__(), seconds, name
+                )
+            except StopAsyncIteration:
+                return
+            yield chunk
+    finally:
+        await close_quietly(iterator)
+
+
 def maybe_with_timeout(
     stream: ByteSource | None,
     limit: Limit | None,
@@ -315,13 +343,35 @@ async def guard_output(
     return data, io.stderr, io.exit_code
 
 
+async def _capped(src: ByteSource, limit: Limit) -> AsyncIterator[bytes]:
+    """A streamed op result cut at its cap as it is pulled.
+
+    Nothing past the cap is pulled from ``src``. TRUNCATE ends the
+    stream there; ERROR raises LimitExceededError at the pull that
+    crossed it.
+
+    Args:
+        src (ByteSource): the op's stream.
+        limit (Limit): resolved op limit.
+    """
+    io = IOResult()
+    async for chunk in _bounded_stream(src, io, limit):
+        yield chunk
+    if io.stderr:
+        message = (await io.stderr_str()).strip()
+        if io.exit_code != 0:
+            raise LimitExceededError(message)
+        logger.debug("vfs op output truncated: %s", message)
+
+
 async def limit_result(result, limit: Limit | None):
     """Apply byte/line caps to a byte-producing VFS op result.
 
     VFS ops have no stderr/exit envelope, so on TRUNCATE the capped bytes
     are returned (and the notice logged) and on ERROR a
-    LimitExceededError is raised. Non-byte results (stat, listings)
-    and unconfigured guards pass through untouched.
+    LimitExceededError is raised. A stream is capped as it is pulled.
+    Non-byte results (stat, listings) and unconfigured guards pass
+    through untouched.
 
     Args:
         result: the op result (capped only when bytes or a byte stream).
@@ -331,11 +381,11 @@ async def limit_result(result, limit: Limit | None):
         return result
     if limit.max_bytes is None and limit.max_lines is None:
         return result
-    if not isinstance(result, (bytes, bytearray)) and not hasattr(
-        result, "__aiter__"
-    ):
+    if hasattr(result, "__aiter__"):
+        return _capped(result, limit)
+    if not isinstance(result, (bytes, bytearray)):
         return result
-    data, sg_io = await apply_limit(result, limit)
+    data, sg_io = await apply_limit(bytes(result), limit)
     if sg_io.exit_code != 0:
         message = (
             await sg_io.stderr_str() if sg_io.stderr else "limit exceeded"

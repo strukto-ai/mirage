@@ -13,12 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from typing import Any
 
 from mirage.context import get_current_session, session_visibility
 from mirage.errors.types import NoMountError
 from mirage.io import OpReport
+from mirage.io.stream import close_quietly, ensure_stream
 from mirage.observe import OpRecord
 from mirage.observe.context import OpTimer, finish_record, start_op
 from mirage.runtime.types import DispatchFn
@@ -28,6 +30,26 @@ from mirage.utils.path import dotted_spelling, owner_prefix
 from mirage.view.types import NamespaceLinks, SessionBind
 from mirage.workspace.dispatcher.constants import NO_FOLLOW_OPS
 from mirage.workspace.types import MountRow
+
+
+async def _recorded(
+    stream: AsyncIterator[bytes], record: Callable[[], None]
+) -> AsyncIterator[bytes]:
+    """A streamed answer, recorded once it ends.
+
+    The door stamps the report with the bytes the stream carried when it
+    ends, so the record waits for that rather than counting none.
+
+    Args:
+        stream (AsyncIterator[bytes]): the door's stream.
+        record (Callable[[], None]): records the op from the report.
+    """
+    try:
+        async for chunk in stream:
+            yield chunk
+    finally:
+        await close_quietly(stream)
+        record()
 
 
 class Files:
@@ -337,18 +359,25 @@ class Files:
                 )
             raise
         owner = self._owner(resolved[0])
-        if owner is not None:
+        if owner is None:
+            return result
+
+        def record(answer: Any) -> None:
             self._record_op(
                 op,
                 resolved[0],
                 owner,
                 report.source,
                 report.bytes,
-                result,
+                answer,
                 kwargs,
                 timer,
                 self._session_for(seen),
             )
+
+        if hasattr(result, "__aiter__"):
+            return _recorded(result, lambda: record(None))
+        record(result)
         return result
 
     def _session_for(self, seen: list[str]) -> str:
@@ -437,6 +466,32 @@ class Files:
                 "read", path, session_id, offset=offset, size=size, **kwargs
             )
         return await self._call("read", path, session_id, **kwargs)
+
+    async def read_stream(
+        self,
+        path: str,
+        raw: bool = False,
+        *,
+        session_id: str | None = None,
+    ) -> AsyncIterator[bytes]:
+        """Read file content as the caller pulls it.
+
+        The first chunk is read before this returns, so a missing file
+        fails here rather than at the first pull. A cold read fills the
+        cache as it is pulled, and the read is recorded once the stream
+        ends. A read the door answers whole (a warm copy, a rendering, a
+        backend with no stream) arrives as one chunk.
+
+        Args:
+            path (str): Virtual path.
+            raw (bool): Read stored bytes rather than a rendered form.
+            session_id (str | None): Session to run as outside a line.
+        """
+        kwargs: dict[str, Any] = {"filetype": None} if raw else {}
+        result = await self._call(
+            "read", path, session_id, stream=True, **kwargs
+        )
+        return ensure_stream(result)
 
     async def write(
         self, path: str, data: bytes, *, session_id: str | None = None

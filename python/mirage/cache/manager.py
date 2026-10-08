@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -30,11 +31,14 @@ from mirage.cache.index.constants import (
 from mirage.cache.index.scope import command_started, tick
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
+from mirage.io.stream import close_quietly
 from mirage.observe.context import active_recorder
 from mirage.types import DEFAULT_READ_TTL, FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
 
 T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> float:
@@ -590,26 +594,192 @@ class CacheManager:
             return data
         cache = self._readable_cache(key)
         if cache is not None:
-            async with mutation_lock(cache):
-                if (
-                    self._owns_path(key)
-                    and generation == self._read_generation
-                    and (keep is None or keep())
-                ):
-                    records = (
-                        recorder.sink[start:] if recorder is not None else None
-                    )
-                    fingerprint = latest_fingerprint(records, key)
-                    if facts:
-                        fingerprint = (
-                            facts[0]
-                            if all(fp == facts[0] for fp in facts)
-                            else None
-                        )
-                    await cache.set(
-                        key, data, fingerprint=fingerprint, ttl=self._read_ttl
-                    )
+
+            def token() -> str | None:
+                if facts:
+                    same = all(fp == facts[0] for fp in facts)
+                    return facts[0] if same else None
+                records = (
+                    recorder.sink[start:] if recorder is not None else None
+                )
+                return latest_fingerprint(records, key)
+
+            await self._keep_read(cache, key, data, generation, keep, token)
         return data
+
+    def fill_stream(
+        self,
+        path: PathSpec,
+        source: AsyncIterator[bytes],
+        keep: Callable[[], bool] | None = None,
+    ) -> AsyncIterator[bytes]:
+        """Pass a cold streamed read through and keep its bytes for the next.
+
+        The streamed twin of ``fill``: the bytes are kept once the last
+        chunk is pulled, under the same rules (a write that lands while
+        the stream runs retires the generation, ``keep`` has the last
+        say, and the token the backend recorded for them labels them).
+        A file larger than the cache's drain budget passes through and
+        none of it is kept, so a stream never holds more than the cache
+        could. A caller that stops early leaves the rest to a background
+        drain within that budget, as a command's abandoned read gets.
+
+        Args:
+            path (PathSpec): file being read.
+            source (AsyncIterator[bytes]): the cold stream.
+            keep (Callable[[], bool] | None): whether the bytes may still
+                be kept once read; None keeps them.
+        """
+        key = self._cache_key(path)
+        cache = self._readable_cache(key)
+        if cache is None:
+            return source
+        return self._filling(cache, key, source, keep)
+
+    async def _filling(
+        self,
+        cache: FileCacheMixin,
+        key: str,
+        source: AsyncIterator[bytes],
+        keep: Callable[[], bool] | None,
+    ) -> AsyncIterator[bytes]:
+        generation = self._read_generation
+        recorder = active_recorder()
+        start = len(recorder.sink) if recorder is not None else 0
+
+        def token() -> str | None:
+            records = recorder.sink[start:] if recorder is not None else None
+            return latest_fingerprint(records, key)
+
+        budget = cache.drain_budget
+        chunks: list[bytes] | None = []
+        size = 0
+        iterator = source.__aiter__()
+        ended = stopped = False
+        try:
+            while True:
+                try:
+                    chunk = await iterator.__anext__()
+                except StopAsyncIteration:
+                    ended = True
+                    break
+                if chunks is not None:
+                    size += len(chunk)
+                    chunks = chunks if size <= budget else None
+                    if chunks is not None:
+                        chunks.append(chunk)
+                yield chunk
+        except GeneratorExit:
+            stopped = True
+            raise
+        finally:
+            if ended and chunks is not None:
+                await self._keep_read(
+                    cache, key, b"".join(chunks), generation, keep, token
+                )
+            elif (
+                stopped
+                and chunks is not None
+                and key not in cache._drain_tasks
+            ):
+                task = asyncio.create_task(
+                    self._drain(
+                        cache,
+                        key,
+                        iterator,
+                        chunks,
+                        size,
+                        generation,
+                        keep,
+                        token,
+                    )
+                )
+                cache._drain_tasks[key] = task
+            elif not ended:
+                await close_quietly(iterator)
+
+    async def _drain(
+        self,
+        cache: FileCacheMixin,
+        key: str,
+        iterator: AsyncIterator[bytes],
+        chunks: list[bytes],
+        size: int,
+        generation: int,
+        keep: Callable[[], bool] | None,
+        token: Callable[[], str | None],
+    ) -> None:
+        """Read the rest of an abandoned stream and keep it, within budget.
+
+        A write to the path drops and cancels this drain, and a drain no
+        longer registered for the path keeps nothing.
+
+        Args:
+            cache (FileCacheMixin): the cache to fill.
+            key (str): the path's cache key.
+            iterator (AsyncIterator[bytes]): the rest of the stream.
+            chunks (list[bytes]): what the caller already pulled.
+            size (int): their length.
+            generation (int): the read generation the stream began in.
+            keep (Callable[[], bool] | None): the last say on keeping.
+            token (Callable[[], str | None]): the recorded token.
+        """
+        try:
+            async for chunk in iterator:
+                size += len(chunk)
+                if size > cache.drain_budget:
+                    logger.debug(
+                        "cache drain budget exceeded for %s, not kept", key
+                    )
+                    return
+                chunks.append(chunk)
+            task = asyncio.current_task()
+            await self._keep_read(
+                cache,
+                key,
+                b"".join(chunks),
+                generation,
+                lambda: (
+                    cache._drain_tasks.get(key) is task
+                    and (keep is None or keep())
+                ),
+                token,
+            )
+        except Exception:
+            logger.debug("background drain failed for %s", key, exc_info=True)
+        finally:
+            await close_quietly(iterator)
+            if cache._drain_tasks.get(key) is asyncio.current_task():
+                cache._drain_tasks.pop(key, None)
+
+    async def _keep_read(
+        self,
+        cache: FileCacheMixin,
+        key: str,
+        data: bytes,
+        generation: int,
+        keep: Callable[[], bool] | None,
+        token: Callable[[], str | None],
+    ) -> None:
+        """Store a cold read's bytes unless something since made them stale.
+
+        Args:
+            cache (FileCacheMixin): the cache to fill.
+            key (str): the path's cache key.
+            data (bytes): the bytes read.
+            generation (int): the read generation the read began in.
+            keep (Callable[[], bool] | None): the last say on keeping.
+            token (Callable[[], str | None]): the token labelling them.
+        """
+        async with mutation_lock(cache):
+            if (
+                self._owns_path(key)
+                and generation == self._read_generation
+                and (keep is None or keep())
+            ):
+                await cache.set(
+                    key, data, fingerprint=token(), ttl=self._read_ttl
+                )
 
     async def cached_size(self, path: PathSpec) -> int | None:
         """Return the cached render's byte length, without revalidating.

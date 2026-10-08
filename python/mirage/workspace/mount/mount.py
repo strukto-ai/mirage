@@ -19,7 +19,7 @@ import inspect
 import logging
 from collections.abc import AsyncIterator, Awaitable, Iterable, Iterator
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from mirage.cache.context import push_cache_manager
 from mirage.cache.index import NULL_INDEX
@@ -28,7 +28,10 @@ from mirage.cache.index.factory import build_index
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.builtin.utils.limit import run_with_timeout
+from mirage.commands.builtin.utils.limit import (
+    run_with_timeout,
+    with_pull_timeout,
+)
 from mirage.commands.builtin.utils.paths import dispatch_stat, link_follow
 from mirage.commands.config import Command, CommandOpts, ExecContext
 from mirage.commands.errors import UsageError
@@ -1299,3 +1302,42 @@ class MountEntry:
             finally:
                 reset_revisions(revs_token)
                 reset_active_recorder(recording_token)
+
+    def read_stream(self, path: str) -> AsyncIterator[bytes]:
+        """The VFS's streamed read of ``path``, framed for later pulls.
+
+        The backend runs on each pull, after this frame is gone, so every
+        pull gets what ``call`` sets up around one call: the caller's
+        context (session, recorder), the mount's recording context, its
+        revision pins, the host-I/O bypass, and the read's timeout, which
+        bounds each pull rather than the whole stream. The mount is held
+        until the stream ends or is closed.
+
+        Args:
+            path (str): virtual path.
+        """
+        if self.retiring:
+            raise ebusy(self.prefix)
+        scope = PathSpec(
+            virtual=path,
+            directory=path.rsplit("/", 1)[0] or "/",
+            vfs_path=mount_key(path, self.prefix.rstrip("/")),
+        )
+        reader = self.vfs.read_stream
+        source = reader(
+            scope, **_taken("read_stream", reader, {"index": self.index})
+        )
+        limit = self.command_limits.get("read")
+        stream = with_pull_timeout(
+            source,
+            limit.timeout_seconds if limit is not None else None,
+            "read",
+        )
+        stream = with_revisions(
+            self.revisions or None,
+            with_mount_context(stream, self.mount_id),
+        )
+        return cast(
+            AsyncIterator[bytes],
+            self.activity.hold(ContextScope().stream(with_host_io(stream))),
+        )
