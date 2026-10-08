@@ -19,7 +19,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
-from mirage.io.stream import async_chain, ensure_stream
+from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -60,6 +60,31 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CatFlags:
     )
 
 
+async def _reported(
+    source: AsyncIterator[bytes], io: IOResult, path: PathSpec
+) -> AsyncIterator[bytes]:
+    """One operand of a multi-operand cat, reported if its read fails.
+
+    A read that fails once the stat passed is reported like a missing
+    operand, and the next operand still prints. Mirrors TypeScript's
+    ``reported``.
+
+    Args:
+        source (AsyncIterator[bytes]): the operand's bytes.
+        io (IOResult): the result its failure is reported on.
+        path (PathSpec): the operand.
+    """
+    try:
+        async for chunk in source:
+            yield chunk
+    except FS_ERRORS as exc:
+        existing = io.stderr if isinstance(io.stderr, bytes) else b""
+        io.stderr = existing + encode_text(fs_error_line("cat", path, exc))
+        io.exit_code = 1
+    finally:
+        await close_quietly(source)
+
+
 def _wants_display(parsed: CatFlags) -> bool:
     return any(
         (
@@ -88,8 +113,8 @@ async def cat_generic(
     flag parsing, the per-operand report-and-continue split, and the stdin
     fallback. A single operand (and every operand on a local backend)
     streams as the consumer reads; multiple operands on a non-local
-    backend are read one by one, so a read that fails after its stat is
-    reported and the next operand still prints.
+    backend are read one by one. Either way a read that fails after its
+    stat is reported and the next operand still prints.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
@@ -128,7 +153,9 @@ async def cat_generic(
         if len(readable) == 1:
             source: ByteSource = await source_for(readable[0])
         elif local:
-            source = async_chain([await source_for(p) for p in readable])
+            source = async_chain(
+                [_reported(await source_for(p), io, p) for p in readable]
+            )
         else:
             parts: list[bytes] = []
             for p in readable:
