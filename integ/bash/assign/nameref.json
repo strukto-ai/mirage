@@ -407,6 +407,40 @@
         "stdout": "rc=1\ndeclare -a A=([0]=\"inner\" [1]=\"keep\")\ndeclare -a A=([0]=\"outer\" [1]=\"keep\")\nrc=1\ndeclare -a B=([0]=\"o\" [1]=\"k\")\nrc=1\nx=in\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "nameref_integer_value_runs_then_refuses",
+      "seq": 940125,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( X=old; M='X=5'; declare -ni q=M; echo \"rc=$? X=$X\"; declare -p q 2>/dev/null || echo unset; T=old; U=new; declare -n r=T; declare -nirx r=M; echo rc=$?; declare -p r; declare -n +i r=U; echo rc=$?; declare -p r )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1 X=5\nunset\nrc=1\ndeclare -inrx r=\"T\"\nrc=1\ndeclare -inrx r=\"T\"\n",
+        "stderr": "bash: declare: r: readonly variable\n"
+      }
     }
   ]
 }

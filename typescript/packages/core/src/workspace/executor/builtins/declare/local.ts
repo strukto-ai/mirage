@@ -37,6 +37,7 @@ import { arithRefusal, readonlyLine, refusal, requireView } from '../shared.ts'
 import {
   declarationResult,
   dropReference,
+  evaluateValue,
   heldValue,
   identifierRefusal,
   kindConflict,
@@ -292,10 +293,16 @@ async function declareOperand(
   if (conflict !== null) return `bash: ${cmd}: ${key}: ${conflict}`
   const checked = nameref ? key : deref(session, key) || key
   if (nameref && integerReference(session, key, shaping)) {
-    // bash coerces the value as arithmetic, which never names a variable:
-    // the operand fails without a word, and only a reference that already
-    // exists keeps the new attributes.
-    if (sessionEntry(session.vars, key) !== undefined) await premark(view, key, shaping, false)
+    // bash evaluates the value as arithmetic, landing what it assigns, and
+    // a number never names a variable: the operand fails without a word,
+    // and a reference that already exists keeps the declaration's marks,
+    // readonly included.
+    const line = await evaluateValue(session, view, cmd, val)
+    if (line !== null) return line
+    if (sessionEntry(session.vars, key) !== undefined) {
+      await premark(view, key, shaping, false)
+      await stampMarks(session, view, key, null, marks, false)
+    }
     return ''
   }
   await premark(view, key, shaping, !nameref)

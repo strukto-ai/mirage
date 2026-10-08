@@ -21,6 +21,7 @@ from mirage.shell.variable import ShellVar, VarAttr, VarKind
 from mirage.workspace.executor.builtins.declare.declare import (
     declaration_result,
     drop_reference,
+    evaluate_value,
     held_value,
     identifier_refusal,
     kind_conflict,
@@ -385,11 +386,16 @@ async def _declare_operand(
         return f"bash: {cmd}: {key}: {conflict}"
     checked = key if nameref else deref(session, key)
     if nameref and _integer_reference(session, key, shaping):
-        # bash coerces the value as arithmetic, which never names a
-        # variable: the operand fails without a word, and only a
-        # reference that already exists keeps the new attributes.
+        # bash evaluates the value as arithmetic, landing what it
+        # assigns, and a number never names a variable: the operand
+        # fails without a word, and a reference that already exists
+        # keeps the declaration's marks, readonly included.
+        line = await evaluate_value(session, view, cmd, val)
+        if line is not None:
+            return line
         if key in session.vars:
             await premark(view, key, shaping, False)
+            await stamp_marks(session, view, key, None, marks, False)
         return ""
     await premark(view, key, shaping, not nameref)
     target = session.vars.get(checked)

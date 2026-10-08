@@ -18,6 +18,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
+from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (
     array_get,
     array_set,
@@ -55,14 +56,18 @@ from mirage.workspace.executor.builtins.shared import (
     require_view,
 )
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import (
     conversion_scalar,
     deref,
     in_call_env,
     outlive_call,
+    random_reader,
+    session_elements,
     set_attr,
     shadow_local,
     subscript_index,
+    visible_env,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -321,6 +326,52 @@ async def drop_reference(
     var = session.vars.get(target)
     if var is not None and VarAttr.NAMEREF in var.attrs:
         await view.mark(target, VarAttr.NAMEREF, False)
+
+
+async def evaluate_value(
+    session: SessionState, view: SessionView, cmd: str, text: str
+) -> str | None:
+    """Evaluate a value as arithmetic the way an ``-i`` write coerces it,
+    landing the assignments it makes, without storing a result: what
+    bash does with a ``-n`` value under ``-i`` before refusing it
+    (``M='X=5'; declare -ni r=M`` sets ``X``).
+
+    Args:
+        session (SessionState): shell session state.
+        view (SessionView): the session plane's gated door.
+        cmd (str): the builtin's spelling, for a readonly refusal.
+        text (str): the value.
+
+    Returns:
+        The readonly refusal line when an assignment meets a frozen
+        name, else None.
+
+    Raises:
+        PolicyDenied: the gate refused an assignment.
+        ArithError: the value is malformed; the assignments it made
+            before the error have landed.
+    """
+    reader = random_reader(session)
+    error: ArithError | None = None
+    try:
+        result = evaluate_arith(
+            text,
+            visible_env(session),
+            elements=session_elements(session, reader),
+            read_var=reader.read,
+            wrote_var=reader.wrote,
+        )
+        writes = result.writes
+    except ArithError as exc:
+        error, writes = exc, exc.writes
+    for write in writes:
+        if view.is_readonly(write.name):
+            return readonly_line(cmd, write.name)
+        await assign_element(session, view, write.name, write.key, write.value)
+    reader.settle()
+    if error is not None:
+        raise ArithError(f"{text}: {error}") from error
+    return None
 
 
 def visible_record(session: SessionState, name: str) -> ShellVar | None:
