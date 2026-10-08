@@ -15,7 +15,7 @@
 import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { VarAttr } from '../../../../shell/variable.ts'
-import { deref, outliveCall, setAttr } from '../../../session/state.ts'
+import { deref, outliveCall } from '../../../session/state.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { exportedNames } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
@@ -31,6 +31,7 @@ import {
   kindConflict,
   kindListed,
   markFunctions,
+  markWritten,
   scalarValue,
   splitDeclFlags,
   storeStagedArrays,
@@ -134,13 +135,14 @@ export async function handleExport(
     if (conflict !== null) errors.push(`bash: export: ${key}: ${conflict}`)
     if (eq >= 0 && conflict === null) {
       const [value, assigned] = scalarValue(held, assign.slice(eq + 1), kind)
+      const checked = deref(session, key) || key
       try {
         await view.set(key, value, true, assigned)
+        await markWritten(session, view, key, checked, VarAttr.Export, on)
       } catch (err) {
         if (err instanceof PolicyDenied) return refusal('export', err)
         throw err
       }
-      setAttr(session, deref(session, key) || key, VarAttr.Export, on)
     } else {
       // The bare form writes no value, so it marks through the plane's
       // no-value door rather than inventing an empty string. On a name

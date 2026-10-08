@@ -19,7 +19,8 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { DiscardSignal } from '../../shell/errors.ts'
 import { getDeclarationKeyword, getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { VarAttr, VarKind } from '../../shell/variable.ts'
+import { makeVar, VarAttr, VarKind } from '../../shell/variable.ts'
+import { sessionEntry, setSessionEntry } from '../session/session.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { SessionView } from '../../ops/types.ts'
@@ -452,15 +453,27 @@ export async function executeDeclaration(
         if (!(err instanceof PolicyDenied)) throw err
         throw new DiscardSignal(encodeText(`${err.message}\n`))
       }
-      const conflict = kindConflict(heldValue(session, bare), kind)
+      // A new local shadows the caller's variable (and its reference), so
+      // its kind is free.
+      const fresh =
+        !flagChars.has('g') && session.localVars !== null && !session.localVars.has(bare)
+      const conflict = fresh ? null : kindConflict(heldValue(session, bare), kind)
       if (conflict !== null) {
         conversionErrors.push(`bash: ${cmdWord}: ${bare}: ${conflict}`)
         continue
       }
       if (!flagChars.has('g') && noteLocalArray(session, bare)) {
         // Inside a function this shadows whatever the caller had with
-        // a fresh empty array of the declared kind; `-g` declares at
-        // global scope instead.
+        // a fresh empty array of the declared kind, which keeps only the
+        // caller's export mark, as bash's does (a reference or `-i` stays
+        // behind); `-g` declares at global scope instead.
+        if (fresh) {
+          const held = sessionEntry(session.vars, bare)
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete session.vars[bare]
+          if (held?.attrs.has(VarAttr.Export) === true)
+            setSessionEntry(session.vars, bare, makeVar(null, new Set([VarAttr.Export])))
+        }
         seedVar(session, bare, wantAssoc ? {} : [])
       } else if (wantAssoc && !Object.hasOwn(session.assocs, bare)) {
         // At top level an existing scalar becomes the value at the

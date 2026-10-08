@@ -32,6 +32,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     kind_conflict,
     kind_listed,
     mark_functions,
+    mark_written,
     scalar_value,
     split_decl_flags,
     store_staged_arrays,
@@ -47,7 +48,6 @@ from mirage.workspace.session.state import (
     deref,
     env_is_readonly,
     outlive_call,
-    set_attr,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -155,15 +155,18 @@ async def handle_readonly(
             errors.append(f"bash: readonly: {key}: {conflict}")
         if eq and conflict is None:
             value, assigned = scalar_value(held, val, kind)
+            checked = deref(session, key)
             try:
                 await view.set(key, value, assigned=assigned)
+                # Rides on the gate the `view.set` above passed, unless
+                # the write re-aimed a reference (`mark_written`).
+                await mark_written(
+                    session, view, key, checked, VarAttr.READONLY
+                )
             except PolicyDenied as exc:
                 return refusal("readonly", exc)
             except ArithError as exc:
                 return arith_refusal("readonly", exc)
-            # Ungated: the `view.set` above already put this name
-            # through the gate, so the mark rides on that decision.
-            set_attr(session, deref(session, key), VarAttr.READONLY)
         else:
             # Gated, exactly as `export NAME` is. The bare form writes no
             # value, so it has no `view.set` to ride on, and marking

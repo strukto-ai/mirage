@@ -173,6 +173,26 @@ export function kindListed(
   return !flags.has('A') || Object.hasOwn(session.assocs, name)
 }
 
+/**
+ * Put `attr` on the variable a write to `name` landed on. The write's gate
+ * covered `checked`, the target before it, so the mark rides on that
+ * decision; a write that re-aimed an unset `declare -n` reference
+ * (`declare -n r; export r=X`) landed on a target no gate has seen, so that
+ * mark goes through the gated door.
+ */
+export async function markWritten(
+  session: SessionState,
+  view: SessionView,
+  name: string,
+  checked: string,
+  attr: VarAttr,
+  on = true,
+): Promise<void> {
+  const target = deref(session, name) || name
+  if (target === checked) setAttr(session, target, attr, on)
+  else await view.mark(name, attr, on)
+}
+
 export async function storeStagedArrays(
   cmd: string,
   session: SessionState,
@@ -188,6 +208,7 @@ export async function storeStagedArrays(
   globalScope = false,
 ): Promise<Result | null> {
   for (const { name, append, items } of arrays) {
+    const checked = deref(session, name) || name
     if (view.isReadonly(name)) {
       if (fatal) {
         throw new DiscardSignal(encodeText(`bash: ${name}: readonly variable\n`))
@@ -246,10 +267,16 @@ export async function storeStagedArrays(
       throw err
     }
     if (stored !== null) stored.push(name)
-    // Ungated on purpose: the `view.set` immediately above put this same
-    // name through the gate, so re-asking would show a policy two writes
-    // for one operand.
-    if (mark !== null) setAttr(session, deref(session, name) || name, mark, on)
+    // Ungated when it lands where the `view.set` above was gated, so a
+    // policy does not see two writes for one operand.
+    if (mark !== null) {
+      try {
+        await markWritten(session, view, name, checked, mark, on)
+      } catch (err) {
+        if (err instanceof PolicyDenied) return refusal(cmd, err)
+        throw err
+      }
+    }
   }
   return null
 }

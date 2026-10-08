@@ -33,15 +33,10 @@ const SRC = dirname(dirname(fileURLToPath(import.meta.url)))
 // write covers it, or routes it through `view.mark` instead. This is
 // the mirror of `tests/workspace/test_ungated_attr_writes.py`.
 const ALLOWED: Record<string, string> = {
-  'workspace/executor/builtins/declare/declare.ts::storeStagedArrays':
-    'the `await view.set(name, base)` immediately above stores this ' +
-    'same name through the gate',
-  'workspace/executor/builtins/declare/export.ts::handleExport':
-    'the `=` branch only; `await view.set(key, val)` runs first and ' +
-    'the bare form uses `view.mark`',
-  'workspace/executor/builtins/declare/readonly.ts::handleReadonly':
-    'the `=` branch only; `await view.set(key, val)` runs first and ' +
-    'the bare form uses `view.mark`',
+  'workspace/executor/builtins/declare/declare.ts::markWritten':
+    "only when the name resolves where it did before the caller's " +
+    '`view.set` gated it; a write that re-aimed a `declare -n` ' +
+    'reference marks its new target through `view.mark`',
   'workspace/node/declaration.ts::stampExport':
     'the `covered` branch only, which is the names that carried a ' +
     'value or a staged array literal; a bare name has no gated write ' +

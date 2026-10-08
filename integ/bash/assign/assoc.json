@@ -1155,6 +1155,40 @@
         "stdout": "declare -- G=\"new\"\nrc=1\ndeclare -ax A=([0]=\"new\" [1]=\"keep\")\nx=4\ndeclare -aix N=([0]=\"8\" [1]=\"x++\")\ndeclare -r R=\"1\"\ndeclare -ax A=([0]=\"new\" [1]=\"keep\")\ndeclare -aix N=([0]=\"8\" [1]=\"x++\")\n0\n",
         "stderr": "bash: export: ref: cannot convert indexed to associative array\n"
       }
+    },
+    {
+      "id": "local_array_shadows_the_callers_reference_and_attributes",
+      "seq": 930534,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( A=(outer); declare -n ref=A; f(){ local -A ref; ref[k]=v; declare -p ref; }; f; declare -p A ref; declare -i I=1; export E=1; g(){ local -a I E; I[0]=1+1; E[0]=x; declare -p I E; }; g; declare -p I E )",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -A ref=([k]=\"v\" )\ndeclare -a A=([0]=\"outer\")\ndeclare -n ref=\"A\"\ndeclare -a I=([0]=\"1+1\")\ndeclare -ax E=([0]=\"x\")\ndeclare -i I=\"1\"\ndeclare -x E=\"1\"\n",
+        "stderr": ""
+      }
     }
   ]
 }

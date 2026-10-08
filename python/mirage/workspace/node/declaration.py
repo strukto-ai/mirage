@@ -22,7 +22,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
 from mirage.shell.types import NodeType as NT
-from mirage.shell.variable import VarAttr, VarKind
+from mirage.shell.variable import ShellVar, VarAttr, VarKind
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     handle_declare_functions,
@@ -504,7 +504,18 @@ async def execute_declaration(
                 ensure_var_visible(session, bare)
             except PolicyDenied as exc:
                 raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
-            conflict = kind_conflict(held_value(session, bare), kind)
+            # A new local shadows the caller's variable (and its
+            # reference), so its kind is free.
+            fresh = (
+                "g" not in flag_chars
+                and session._local_vars is not None
+                and bare not in session._local_vars
+            )
+            conflict = (
+                None
+                if fresh
+                else kind_conflict(held_value(session, bare), kind)
+            )
             if conflict is not None:
                 conversion_errors.append(
                     f"bash: {cmd_word}: {bare}: {conflict}"
@@ -512,8 +523,19 @@ async def execute_declaration(
                 continue
             if "g" not in flag_chars and note_local_array(session, bare):
                 # Inside a function this shadows whatever the caller
-                # had with a fresh empty array of the declared kind;
-                # `-g` declares at global scope instead.
+                # had with a fresh empty array of the declared kind,
+                # which keeps only the caller's export mark, as bash's
+                # does (a reference or `-i` stays behind); `-g`
+                # declares at global scope instead.
+                if fresh:
+                    held_var = session.vars.pop(bare, None)
+                    if (
+                        held_var is not None
+                        and VarAttr.EXPORT in held_var.attrs
+                    ):
+                        session.vars[bare] = ShellVar(
+                            None, frozenset({VarAttr.EXPORT})
+                        )
                 seed_var(session, bare, {} if want_assoc else [])
             elif want_assoc and bare not in session.assocs:
                 # At top level an existing scalar becomes the value

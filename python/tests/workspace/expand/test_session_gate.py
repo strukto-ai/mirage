@@ -63,6 +63,10 @@ async def value_of(ws, name: str) -> bytes:
         ("((AWS_LIMIT=5))", "AWS_LIMIT"),
         ("printf -v AWS_KEY %s x", "AWS_KEY"),
         ("for ((AWS_I=0; AWS_I<1; AWS_I++)); do :; done", "AWS_I"),
+        # The write re-aims an unset reference, so the mark lands on a
+        # name the assignment's own gate never saw.
+        ("declare -n ref; export ref=AWS_KEY", "AWS_KEY"),
+        ("declare -n ref; readonly ref=AWS_KEY", "AWS_KEY"),
     ],
 )
 async def test_every_session_writer_clears_the_gate(

@@ -33,19 +33,10 @@ _DECLARE = "mirage/workspace/executor/builtins/declare"
 ALLOWED = {
     (
         f"{_DECLARE}/declare.py",
-        "store_staged_arrays",
-    ): "the `await view.set(name, base)` immediately above stores this "
-    "same name through the gate",
-    (
-        f"{_DECLARE}/export.py",
-        "handle_export",
-    ): "the `=` branch only; `await view.set(key, val)` runs first and "
-    "the bare form uses `view.mark`",
-    (
-        f"{_DECLARE}/readonly.py",
-        "handle_readonly",
-    ): "the `=` branch only; `await view.set(key, val)` runs first and "
-    "the bare form uses `view.mark`",
+        "mark_written",
+    ): "only when the name resolves where it did before the caller's "
+    "`view.set` gated it; a write that re-aimed a `declare -n` "
+    "reference marks its new target through `view.mark`",
     (
         "mirage/workspace/node/declaration.py",
         "_stamp_export",

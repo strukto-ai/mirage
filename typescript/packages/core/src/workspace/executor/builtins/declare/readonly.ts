@@ -17,7 +17,7 @@ import { ArithError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
 import { VarAttr, type VarKind } from '../../../../shell/variable.ts'
-import { deref, outliveCall, setAttr } from '../../../session/state.ts'
+import { deref, outliveCall } from '../../../session/state.ts'
 import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -33,6 +33,7 @@ import {
   kindConflict,
   kindListed,
   markFunctions,
+  markWritten,
   scalarValue,
   splitDeclFlags,
   storeStagedArrays,
@@ -130,16 +131,17 @@ export async function handleReadonly(
     if (conflict !== null) errors.push(`bash: readonly: ${key}: ${conflict}`)
     if (eq >= 0 && conflict === null) {
       const [value, assigned] = scalarValue(held, assign.slice(eq + 1), kind)
+      const checked = deref(session, key) || key
       try {
         await view.set(key, value, true, assigned)
+        // Rides on the gate the `view.set` above passed, unless the write
+        // re-aimed a reference (`markWritten`).
+        await markWritten(session, view, key, checked, VarAttr.Readonly)
       } catch (err) {
         if (err instanceof PolicyDenied) return refusal('readonly', err)
         if (err instanceof ArithError) return arithRefusal('readonly', err)
         throw err
       }
-      // Ungated: the `view.set` above already put this name through the
-      // gate, so the mark rides on that decision.
-      setAttr(session, deref(session, key) || key, VarAttr.Readonly)
     } else {
       // Gated, exactly as `export NAME` is. The bare form writes no
       // value, so it has no `view.set` to ride on, and marking through

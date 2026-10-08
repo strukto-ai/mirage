@@ -168,6 +168,36 @@ def kind_listed(session: SessionState, name: str, flags: set[str]) -> bool:
     return "A" not in flags or name in session.assocs
 
 
+async def mark_written(
+    session: SessionState,
+    view: SessionView,
+    name: str,
+    checked: str,
+    attr: VarAttr,
+    on: bool = True,
+) -> None:
+    """Put ``attr`` on the variable a write to ``name`` landed on.
+
+    The write's gate covered ``checked``, the target before it, so the
+    mark rides on that decision; a write that re-aimed an unset
+    ``declare -n`` reference (``declare -n r; export r=X``) landed on a
+    target no gate has seen, so that mark goes through the gated door.
+
+    Args:
+        session (SessionState): shell session state.
+        view (SessionView): the session plane's gated door.
+        name (str): the name written.
+        checked (str): what ``name`` resolved to before the write.
+        attr (VarAttr): the attribute to set or clear.
+        on (bool): set rather than clear.
+    """
+    target = deref(session, name)
+    if target == checked:
+        set_attr(session, target, attr, on)
+    else:
+        await view.mark(name, attr, on)
+
+
 async def store_staged_arrays(
     cmd: str,
     session: SessionState,
@@ -245,6 +275,7 @@ async def store_staged_arrays(
         ExitSignal: a readonly refusal under ``fatal``.
     """
     for name, append, items in arrays:
+        checked = deref(session, name)
         if view.is_readonly(name):
             if fatal:
                 raise DiscardSignal(
@@ -313,10 +344,12 @@ async def store_staged_arrays(
         if stored is not None:
             stored.append(name)
         if mark is not None:
-            # Ungated on purpose: the `view.set` immediately above put
-            # this same name through the gate, so re-asking would show a
-            # policy two writes for one operand.
-            set_attr(session, deref(session, name), mark, on)
+            # Ungated when it lands where the `view.set` above was gated,
+            # so a policy does not see two writes for one operand.
+            try:
+                await mark_written(session, view, name, checked, mark, on)
+            except PolicyDenied as exc:
+                return refusal(cmd, exc)
     return None
 
 

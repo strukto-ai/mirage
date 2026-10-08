@@ -31,6 +31,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     kind_conflict,
     kind_listed,
     mark_functions,
+    mark_written,
     scalar_value,
     split_decl_flags,
     store_staged_arrays,
@@ -47,7 +48,6 @@ from mirage.workspace.session.state import (
     exported_names,
     outlive_call,
     session_view,
-    set_attr,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -162,11 +162,14 @@ async def handle_export(
             errors.append(f"bash: export: {key}: {conflict}")
         if eq and conflict is None:
             value, assigned = scalar_value(held, val, kind)
+            checked = deref(session, key)
             try:
                 await view.set(key, value, assigned=assigned)
+                await mark_written(
+                    session, view, key, checked, VarAttr.EXPORT, on
+                )
             except PolicyDenied as exc:
                 return refusal("export", exc)
-            set_attr(session, deref(session, key), VarAttr.EXPORT, on)
         else:
             # The bare form writes no value, so it marks through the
             # plane's no-value door rather than inventing an empty
