@@ -38,6 +38,7 @@ from mirage.types import (
     MountMode,
     ReadPolicy,
     ReadSpec,
+    WritePolicy,
 )
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount.spec import Mount
@@ -181,7 +182,10 @@ def selftest_mount_read() -> None:
         *raises(
             lambda: asyncio.run(
                 runner_main.adapters.open_consistency(
-                    target, ReadSpec(), {"/nope": bound}
+                    target,
+                    ReadSpec(),
+                    {"/nope": bound},
+                    WritePolicy.UNCONDITIONAL,
                 )
             ),
             "t: mount_read names no mount: /nope",
@@ -204,6 +208,7 @@ def selftest_mount_read() -> None:
                     target,
                     ReadSpec(),
                     {"/data": ReadSpec(policy=ReadPolicy.FRESH)},
+                    WritePolicy.UNCONDITIONAL,
                 )
             ),
             "read: fresh",
@@ -285,7 +290,9 @@ def selftest_delete_refused() -> None:
             remove,
             mutate_line,
             cleanup,
-        ) = await runner_main.adapters.open_consistency(target, ReadSpec(), {})
+        ) = await runner_main.adapters.open_consistency(
+            target, ReadSpec(), {}, WritePolicy.UNCONDITIONAL
+        )
         try:
             try:
                 await harness.run_scenario(
@@ -1241,7 +1248,7 @@ MOUNT_READ_PROBE = (
     "  const t = { id: 't', hosts: [],\n"
     "    mounts: [{ path: '/data', vfs: 'ram' }] }\n"
     "  try {\n"
-    "    await a.openConsistency(t, bound, { '/nope': bound })\n"
+    "    await a.openConsistency(t, bound, { '/nope': bound }, 'unconditional')\n"
     "    out.nope = 'opened'\n"
     "  } catch (e) { out.nope = String(e.message) }\n"
     "  const bare = new n.RAMVFS()\n"
@@ -1334,7 +1341,7 @@ DELETE_PROBE = (
     "  const t = { id: 't', hosts: [],\n"
     "    mounts: [{ path: '/data', vfs: 'disk' }] }\n"
     "  const read = { policy: 'bounded', ttl: 45 }\n"
-    "  const o = await a.openConsistency(t, read, {})\n"
+    "  const o = await a.openConsistency(t, read, {}, 'unconditional')\n"
     "  if (o === null) {\n"
     "    const out = { refused: 'no shadow', absent: false }\n"
     "    console.log(JSON.stringify(out))\n"
