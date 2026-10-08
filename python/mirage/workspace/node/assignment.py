@@ -17,8 +17,8 @@ from collections.abc import Awaitable
 from typing import Any, Callable
 
 from mirage.cache.index.scope import command_scope
+from mirage.doors.types import SessionView
 from mirage.io import IOResult
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
     ShellArray,

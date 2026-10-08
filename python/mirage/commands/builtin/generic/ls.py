@@ -24,11 +24,11 @@ from mirage.commands.spec.usage import (
     argmatch_line,
     usage_hint,
 )
+from mirage.doors.types import ChildMounts, LinkView, MountView, StatPath
 from mirage.errors.classify import failure_text
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import DotWalkError, DotWalkLoop
 from mirage.io.types import IOResult
-from mirage.ops.types import ChildMounts, LinkView, MountView, StatPath
 from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,

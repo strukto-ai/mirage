@@ -32,13 +32,13 @@ from mirage.context import (
     reset_program_invocation,
     set_program_invocation,
 )
+from mirage.doors.types import NamespaceView, StatPath
 from mirage.errors.classify import failure_text
 from mirage.errors.fs import enoent
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.stream import SharedStdin, materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join

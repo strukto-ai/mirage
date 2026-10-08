@@ -25,7 +25,7 @@ from mirage.commands.cli.builtin.git.io import (
     read_optional,
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
-from mirage.ops.types import LinkView, StatPath
+from mirage.doors.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 

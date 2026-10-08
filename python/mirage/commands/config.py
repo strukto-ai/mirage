@@ -25,9 +25,7 @@ from mirage.commands.spec.builtins import is_builtin_grammar, registered_spec
 from mirage.commands.spec.constants import OWN_OPTION_LOOP
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
-from mirage.io.stream import yield_bytes
-from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import (
+from mirage.doors.types import (
     ChildMounts,
     LinkTargetStat,
     NamespaceView,
@@ -35,6 +33,8 @@ from mirage.ops.types import (
     SessionView,
     StatPath,
 )
+from mirage.io.stream import yield_bytes
+from mirage.io.types import ByteSource, IOResult
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn, ExecPathFn, ShellFn

@@ -20,10 +20,10 @@ from mirage.commands.cli.builtin.git.session import located
 from mirage.commands.cli.builtin.git.util import fatal
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
+from mirage.doors.types import StatPath
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
 

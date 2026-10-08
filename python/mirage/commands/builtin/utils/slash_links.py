@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.doors.types import LinkView
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.ops.types import LinkView
 from mirage.types import FileType, PathSpec
 from mirage.utils.path import CycleError
 

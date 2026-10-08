@@ -25,7 +25,7 @@ import {
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { enoent } from '../../../errors/fs.ts'
 import type { CommandOpts } from '../../config.ts'
-import type { LinkView, MountView } from '../../../ops/types.ts'
+import type { LinkView, MountView } from '../../../doors/types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 const DEC = new TextDecoder()

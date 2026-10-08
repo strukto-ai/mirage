@@ -16,7 +16,7 @@ from mirage.commands.builtin.find_eval import (
 from mirage.commands.builtin.find_printf import printf_kind
 from mirage.commands.errors import is_entry_error
 from mirage.context import session_visibility
-from mirage.ops.types import LinkView
+from mirage.doors.types import LinkView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp, matches_mtime
 from mirage.utils.hidden import path_visible

@@ -3,8 +3,8 @@ from functools import partial
 import pytest
 
 from mirage.commands.builtin.generic.stat import stat
+from mirage.doors.types import LinkView
 from mirage.io.types import materialize
-from mirage.ops.types import LinkView
 from mirage.types import (
     DEVICE_NUMBERS_KEY,
     LINK_TARGET_KEY,

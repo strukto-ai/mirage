@@ -42,6 +42,12 @@ from mirage.context import (
 )
 from mirage.context.session_context import require_paths_writable
 from mirage.core.generic.rewrite import refuse_taken
+from mirage.doors.namespace_view import paths_scoped
+from mirage.doors.types import (
+    ChildMounts,
+    NamespaceView,
+    StatOverlay,
+)
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
@@ -55,12 +61,6 @@ from mirage.errors.fs import (
 )
 from mirage.errors.types import DotWalkError
 from mirage.io import IOResult
-from mirage.ops.namespace_view import paths_scoped
-from mirage.ops.types import (
-    ChildMounts,
-    NamespaceView,
-    StatOverlay,
-)
 from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, get_op_policies, pre_vfs_gate
 from mirage.runtime.types import DispatchFn

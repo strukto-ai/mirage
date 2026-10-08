@@ -24,9 +24,9 @@ from mirage.commands.builtin.generic.cp import (
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
+from mirage.doors.types import LinkView
 from mirage.errors.fs import enotsup
 from mirage.io.types import IOResult
-from mirage.ops.types import LinkView
 from mirage.types import (
     LINK_TARGET_KEY,
     ContentType,

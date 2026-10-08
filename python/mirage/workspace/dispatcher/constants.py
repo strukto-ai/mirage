@@ -102,3 +102,14 @@ ENTRY_CREATE_OPS = frozenset({"mkdir", "symlink"})
 # The attribute fields a setattr op can carry, in one place so the
 # requested/residual split and the overlay write read the same names.
 SETATTR_KEYS = ("mode", "uid", "gid", "atime", "mtime")
+
+# Ops with lstat semantics: they act on the entry named by the path, so
+# no stat surface (dispatch, the Files facade, FUSE) may rewrite their
+# operand through the symlink table.
+NO_FOLLOW_OPS = frozenset({"unlink", "rename", "rmdir", "symlink", "readlink"})
+
+# Content-writing ops whose completion stamps an observed mtime on the
+# namespace node (removals invalidate but must not stamp).
+STAMP_WRITE_OPS = frozenset(
+    {"write", "write_bytes", "append", "pwrite", "create", "truncate", "mkdir"}
+)

@@ -22,7 +22,7 @@ import type { Accessor } from '../../../../accessor/base.ts'
 import type { EntryGate } from '../../../../policy/types.ts'
 import { scopedIo } from '../adapter.ts'
 import type { CommandIO } from '../../../config.ts'
-import type { MountView, NamespaceView } from '../../../../ops/types.ts'
+import type { MountView, NamespaceView } from '../../../../doors/types.ts'
 
 const DEC = new TextDecoder()
 

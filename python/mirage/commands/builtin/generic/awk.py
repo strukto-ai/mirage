@@ -30,6 +30,7 @@ from mirage.core.awk import (
 )
 from mirage.core.awk.builtins import unescape
 from mirage.core.awk.value import text as text_value
+from mirage.doors.types import NamespaceView
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import eisdir, fs_strerror
 from mirage.errors.posix import posix_phrase
@@ -37,7 +38,6 @@ from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import (
     byte_view,

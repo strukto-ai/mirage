@@ -15,7 +15,7 @@
 from collections.abc import Callable
 from typing import Any
 
-from mirage.ops.types import SessionView
+from mirage.doors.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import get_text

@@ -26,8 +26,8 @@ from mirage.commands.builtin.generic_bind.adapter import (
     overlaid_stat,
 )
 from mirage.commands.config import CommandIO, CommandOpts
+from mirage.doors.namespace_view import paths_scoped
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.namespace_view import paths_scoped
 from mirage.types import FileStat, PathSpec
 
 

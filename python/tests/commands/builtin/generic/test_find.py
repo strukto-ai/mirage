@@ -17,8 +17,8 @@ from mirage.commands.builtin.generic.find import (
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import CommandTimeoutError, FindParseError
 from mirage.core.generic.find import walk_find
+from mirage.doors.types import LinkView
 from mirage.io.types import materialize
-from mirage.ops.types import LinkView
 from mirage.types import (
     ContentType,
     FileStat,

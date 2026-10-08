@@ -15,7 +15,7 @@
 import { type IOResult, OpReport } from '../io/types.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { finishRecord, type OpTimer, startOp } from '../observe/context.ts'
-import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
+import { NO_FOLLOW_OPS } from './dispatcher/constants.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
@@ -23,7 +23,7 @@ import { dottedSpelling } from '../utils/path.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { getCurrentSession, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from '../utils/hidden.ts'
-import type { OpKwargs, SessionBind } from './types.ts'
+import type { NamespaceLinks, OpKwargs, SessionBind } from '../doors/types.ts'
 
 /** Receives each record with the id of the session the op ran as. */
 export type OpSink = (rec: OpRecord, sessionId: string) => Promise<void>
@@ -36,7 +36,7 @@ interface MountOwner {
 export type OwnerOf = (path: string) => MountOwner | null
 
 /** What a derived facade carries over and a constructor may set. */
-export interface OpsOptions {
+export interface FilesOptions {
   bind?: SessionBind | null
   sessionId?: string | null
   records?: OpRecord[]
@@ -44,7 +44,7 @@ export interface OpsOptions {
 
 // The op's byte count for recording: the result first, else the input
 // (write payloads travel as the first positional argument). Mirrors
-// Python's Ops._payload_bytes.
+// Python's Files._payload_bytes.
 function payloadBytes(result: unknown, args: readonly unknown[]): number {
   if (result instanceof Uint8Array) return result.byteLength
   for (const arg of args) {
@@ -63,8 +63,8 @@ function payloadBytes(result: unknown, args: readonly unknown[]): number {
  * keeps only what is its own: the typed surface and the op ledger
  * (`records`, with the network/cache split derived from it) — the
  * ledger lives here, not on the workspace, which is what lets
- * `MountCore` take one `Ops` instead of reaching through a whole
- * `Workspace`. Mirrors Python's `Ops`.
+ * `MountCore` take one `Files` instead of reaching through a whole
+ * `Workspace`. Mirrors Python's `Files`.
  *
  * The facade runs as one session, `sessionId`, through `bind`: every
  * op is judged under that session's profile (hides, mount modes,
@@ -84,7 +84,7 @@ function payloadBytes(result: unknown, args: readonly unknown[]): number {
  * line's session wins when one is, which is what keeps a handler
  * reaching this door from widening the view it was given.
  */
-export class Ops {
+export class Files {
   private readonly dispatch: DispatchFn
   private readonly sink: OpSink | null
   // Injected namespace seam (workspace wires it); FUSE reads `links`
@@ -97,7 +97,7 @@ export class Ops {
   /**
    * The op ledger: every facade op lands here, and the executor
    * appends each shell line's ops too, so this is the one
-   * workspace-wide account (python's `Ops.records`).
+   * workspace-wide account (python's `Files.records`).
    */
   readonly records: OpRecord[]
 
@@ -106,7 +106,7 @@ export class Ops {
     sink: OpSink | null = null,
     links: NamespaceLinks | null = null,
     ownerOf: OwnerOf = () => null,
-    options: OpsOptions = {},
+    options: FilesOptions = {},
   ) {
     this.dispatch = dispatch
     this.sink = sink
@@ -127,17 +127,17 @@ export class Ops {
    * that exists), so there is one way to say it rather than two.
    * TypeScript has no package-private, so this stays reachable; it is
    * not part of the supported surface. Python spells it
-   * `Ops._for_session`.
+   * `Files._for_session`.
    */
-  forSession(sessionId: string): Ops {
-    return new Ops(this.dispatch, this.sink, this.links, this.ownerOf, {
+  forSession(sessionId: string): Files {
+    return new Files(this.dispatch, this.sink, this.links, this.ownerOf, {
       bind: this.bind,
       sessionId,
       records: this.records,
     })
   }
 
-  /** Ops that moved bytes over the network, in arrival order. */
+  /** Files that moved bytes over the network, in arrival order. */
   get networkRecords(): OpRecord[] {
     return this.records.filter((r) => !r.isCache)
   }
@@ -148,7 +148,7 @@ export class Ops {
     return total
   }
 
-  /** Ops a warm cache answered, in arrival order. */
+  /** Files a warm cache answered, in arrival order. */
   get cacheRecords(): OpRecord[] {
     return this.records.filter((r) => r.isCache)
   }
@@ -182,7 +182,7 @@ export class Ops {
    * no-op. That follow runs inside the session binding and only from a
    * path the session can see: a link the session cannot see stays the
    * typed path, so the door refuses it as absent instead of serving the
-   * visible target it points at. Mirrors Python's Ops._call.
+   * visible target it points at. Mirrors Python's Files._call.
    */
   private async through(
     op: string,
@@ -420,7 +420,7 @@ export class Ops {
    * the layer that can see both planes to tell. Throws ENOENT when the
    * directory `path` would sit in is absent, and ENOTDIR when a
    * non-directory stands there or above it. Mirrors Python's
-   * Ops.symlink.
+   * Files.symlink.
    */
   async symlink(path: string, target: string, sessionId?: string): Promise<void> {
     await this.through('symlink', path, [], { target }, sessionId)
@@ -440,7 +440,7 @@ export class Ops {
    * answers: a chmod on an s3 or dropbox mount lands in the name plane
    * and stat reports it back. Stored, not enforced; the mount mode is
    * the access control. Returns what the backend could not keep.
-   * Mirrors Python's Ops.setattr.
+   * Mirrors Python's Files.setattr.
    */
   async setattr(
     path: string,
@@ -458,7 +458,7 @@ export class Ops {
    * One extended attribute's value. The node table answers with what a
    * caller set. `nofollow` reads a link entry's own
    * attributes. Throws ENODATA when the path has no such attribute.
-   * Mirrors Python's Ops.getxattr.
+   * Mirrors Python's Files.getxattr.
    */
   async getxattr(
     path: string,
@@ -485,7 +485,7 @@ export class Ops {
    * on every backend and moves with a rename. `create` refuses with
    * EEXIST when it is set (XATTR_CREATE) and `replace` with ENODATA when
    * it is not (XATTR_REPLACE).
-   * Mirrors Python's Ops.setxattr.
+   * Mirrors Python's Files.setxattr.
    */
   async setxattr(
     path: string,
@@ -539,7 +539,7 @@ export class Ops {
    * boundary, and the dispatcher answers EXDEV across two (ENOENT when a
    * parent directory is missing), which a kernel-facing whole-workspace FUSE
    * mount needs so `mv` between two backends falls back to its copy+unlink
-   * path. Mirrors Python's Ops.rename.
+   * path. Mirrors Python's Files.rename.
    */
   async rename(src: string, dst: string, sessionId?: string): Promise<void> {
     await this.through('rename', src, [PathSpec.fromStrPath(dst)], {}, sessionId)

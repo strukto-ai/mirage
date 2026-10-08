@@ -14,7 +14,7 @@
 
 from typing import Any
 
-from mirage.ops.types import SessionView
+from mirage.doors.types import SessionView
 from mirage.shell.bytes import decode_text
 from mirage.shell.types import NodeType as NT
 from mirage.types import PathSpec

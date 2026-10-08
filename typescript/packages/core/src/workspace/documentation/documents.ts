@@ -14,7 +14,7 @@
 
 import { KeyLock } from '../../cache/lock.ts'
 import { runWithSession } from '../../context/session_context.ts'
-import type { Ops } from '../../ops/ops.ts'
+import type { Files } from '../files.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
 import { DEFAULT_READ_SPEC, FileType, MountMode, PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, isEnoent } from '../../errors/fs.ts'
@@ -33,7 +33,7 @@ export class Documents {
 
   constructor(
     private readonly registry: MountRegistry,
-    private readonly ops: Ops,
+    private readonly ops: Files,
     private readonly manager: SessionManager,
     private readonly session: () => SessionState,
     private readonly profile: (name: string) => CompiledProfile,

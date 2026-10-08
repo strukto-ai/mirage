@@ -23,8 +23,8 @@ from mirage.commands.builtin.generic_bind.archive_io import (
     relay_walk_of,
 )
 from mirage.commands.spec.types import FlagValue
+from mirage.doors.types import NamespaceView
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 

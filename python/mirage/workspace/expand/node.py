@@ -16,8 +16,8 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any
 
+from mirage.doors.types import SessionView
 from mirage.io import IOResult
-from mirage.ops.types import SessionView
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.backticks import split_backtick_region
 from mirage.shell.bytes import decode_text, encode_text

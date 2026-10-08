@@ -115,3 +115,26 @@ export const HIDDEN_CREATE_OPS: ReadonlySet<string> = new Set([
 // Ops that create the name itself: an existing one answers EEXIST, before a
 // trailing slash on it is judged.
 export const ENTRY_CREATE_OPS: ReadonlySet<string> = new Set(['mkdir', 'symlink'])
+
+// Ops with lstat semantics: they act on the entry named by the path, so
+// no stat surface (dispatch, the Files facade, FUSE) may rewrite their
+// operand through the symlink table.
+export const NO_FOLLOW_OPS: ReadonlySet<string> = new Set([
+  'unlink',
+  'rename',
+  'rmdir',
+  'symlink',
+  'readlink',
+])
+
+// Content-writing ops whose completion stamps an observed mtime on the
+// namespace node (removals invalidate but must not stamp).
+export const STAMP_WRITE_OPS: ReadonlySet<string> = new Set([
+  'write',
+  'write_bytes',
+  'append',
+  'pwrite',
+  'create',
+  'truncate',
+  'mkdir',
+])

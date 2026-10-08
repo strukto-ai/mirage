@@ -22,7 +22,7 @@ import { PolicyDenied } from '../../../../policy/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { visibleEnv } from '../../../session/state.ts'
-import type { SessionView } from '../../../../ops/types.ts'
+import type { SessionView } from '../../../../doors/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import {
   arithRefusal,

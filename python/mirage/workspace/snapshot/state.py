@@ -28,7 +28,6 @@ from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import open_regular
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.observe.observer import Observer
-from mirage.ops.ops import Ops
 from mirage.policy.policies import Policies
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
@@ -60,6 +59,7 @@ from mirage.vfs.secrets import (
     revealed_config_dump,
 )
 from mirage.workspace.documentation.documents import Documents
+from mirage.workspace.files import Files
 from mirage.workspace.mount.namespace import Namespace, NodeMeta
 from mirage.workspace.mount.read_policy import resolve_read_spec
 from mirage.workspace.mount.registry import MountRegistry
@@ -114,7 +114,7 @@ class WorkspaceLike(Protocol):
     def cache(self) -> FileCacheMixin: ...
 
     @property
-    def vfs(self) -> Ops: ...
+    def vfs(self) -> Files: ...
 
     @property
     def namespace(self) -> Namespace: ...

@@ -30,7 +30,7 @@ import { DiskVFS } from '@struktoai/mirage-node'
 import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { Ops } from '@struktoai/mirage-core/ops/ops'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { FileType } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
@@ -46,7 +46,7 @@ import {
 } from './text.ts'
 import type {} from './service.ts'
 
-type LinksSeam = NonNullable<Ops['links']>
+type LinksSeam = NonNullable<Files['links']>
 type Host = Awaited<Context['mirage']['ready']>
 
 // Read off the seam's own signature rather than imported: the policy type
@@ -183,7 +183,7 @@ function shadowedByLink(links: LinksSeam | null, virtual: string): boolean {
 export class MirageFileSystem extends FileSystem {
   static readonly inject = ['mirage']
 
-  private fsOps: Ops | null = null
+  private fsOps: Files | null = null
   private host: Host | null = null
   private readonly cwd: string
   private readonly sessionId: string | undefined
@@ -211,7 +211,7 @@ export class MirageFileSystem extends FileSystem {
   // until its first op loads both. This adapter reads the session and
   // the links outside the door, so it hydrates before either is
   // consulted, or a persisted hide would be judged by the wrong session.
-  private async ops(signal?: AbortSignal, operation = 'ready'): Promise<Ops> {
+  private async ops(signal?: AbortSignal, operation = 'ready'): Promise<Files> {
     if (this.fsOps === null) {
       const host = await this.ctx.mirage.ready
       await host.ensureSessionsLoaded()

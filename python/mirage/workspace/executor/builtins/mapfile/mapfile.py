@@ -17,11 +17,11 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
+from mirage.doors.types import SessionView
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import line_buffer
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import ShellArray, array_set
 from mirage.shell.bytes import decode_text

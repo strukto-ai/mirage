@@ -182,7 +182,7 @@ One session's handle, from [`ws.session`](#ws-session). Every call on it answers
 
 <ResponseField name="session_id" type="str" />
 <ResponseField name="state" type="SessionState">The session's record, as [`ws.list_sessions`](#ws-list_sessions-ws-close_session) answers it.</ResponseField>
-<ResponseField name="vfs" type="Ops">The file API, below.</ResponseField>
+<ResponseField name="vfs" type="Files">The file API, below.</ResponseField>
 <ResponseField name="tools" type="MirageToolOperations">The agent tools, below.</ResponseField>
 <ResponseField name="decisions" type="Decisions">The workspace's [asks](/home/permissions#asks) ledger, which this session's questions land in.</ResponseField>
 

@@ -16,9 +16,13 @@ import functools
 from typing import TYPE_CHECKING
 
 from mirage.context import get_admission
-from mirage.ops.config import NamespaceLinks
-from mirage.ops.namespace_view import namespace_names
-from mirage.ops.types import LinkView, MountView, NamespaceView
+from mirage.doors.namespace_view import namespace_names
+from mirage.doors.types import (
+    LinkView,
+    MountView,
+    NamespaceLinks,
+    NamespaceView,
+)
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, Visibility
 from mirage.utils.hidden import hidden_under, path_visible

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SessionView } from '../../ops/types.ts'
+import type { SessionView } from '../../doors/types.ts'
 import { PolicyDenied } from '../../policy/index.ts'
 import {
   arrayCount,

@@ -80,7 +80,7 @@ import {
   runOnMount,
   type RunOnMountCtx,
 } from './run.ts'
-import type { NamespaceView, SessionView, StatPath } from '../../../ops/types.ts'
+import type { NamespaceView, SessionView, StatPath } from '../../../doors/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
 import { sessionView } from '../../session/state.ts'
 import { optionError, parseFlags } from './flags.ts'

@@ -15,7 +15,7 @@
 from collections.abc import Callable
 from typing import Any
 
-from mirage.ops.types import SessionView
+from mirage.doors.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import SET_OPTION_DEFAULTS
 from mirage.shell.escapes import unescape_unquoted

@@ -22,7 +22,7 @@ import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import type { SessionView } from '../../ops/types.ts'
+import type { SessionView } from '../../doors/types.ts'
 import {
   handleDeclareFunctions,
   handleDeclarePrint,

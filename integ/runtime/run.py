@@ -704,7 +704,7 @@ def _check_ops(expect: dict[str, Any], seen: list[str]) -> list[str]:
 async def _run_facade(
     ws: Workspace, expect: dict[str, Any], spec: dict[str, Any]
 ) -> list[str]:
-    """One facade step: call a typed Ops convenience and check its value.
+    """One facade step: call a typed Files convenience and check its value.
 
     Args:
         ws (Workspace): the workspace under test.

@@ -19,7 +19,7 @@ from mirage.commands.builtin.utils.slash_links import (
     mkdir_link_refusal,
     rm_link_refusal,
 )
-from mirage.ops.types import LinkView
+from mirage.doors.types import LinkView
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 

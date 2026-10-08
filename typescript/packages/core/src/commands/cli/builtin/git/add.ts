@@ -17,7 +17,7 @@ import git from 'isomorphic-git'
 import { visibleEntries, matched, repoRelative } from './pathspec.ts'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { LinkView, StatPath } from '../../../../ops/types.ts'
+import type { LinkView, StatPath } from '../../../../doors/types.ts'
 import { FileType, type FileStat } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'

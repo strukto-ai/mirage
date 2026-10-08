@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.ls import (
 )
 from mirage.commands.builtin.utils.formatting import LsColumns
 from mirage.commands.errors import CommandTimeoutError
-from mirage.ops.types import MountView
+from mirage.doors.types import MountView
 from mirage.types import (
     ContentType,
     FileStat,

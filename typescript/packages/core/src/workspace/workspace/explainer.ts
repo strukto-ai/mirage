@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runExplaining } from '../../context/session_context.ts'
-import type { Ops } from '../../ops/ops.ts'
+import type { Files } from '../files.ts'
 import { Explained } from '../../policy/errors.ts'
 import { Outcome, type ShellExplanation, type VfsExplanation } from '../../policy/types.ts'
 import type { SetAttrFields } from '../../types.ts'
@@ -37,7 +37,7 @@ export class Explainer {
   constructor(
     private readonly explain: (line: string, sessionId: string) => Promise<ShellExplanation>,
     private readonly sessionId: string | null,
-    private readonly ops: Ops,
+    private readonly ops: Files,
   ) {}
 
   /**
@@ -77,7 +77,7 @@ export class Explainer {
  * Mirrors the Python `VfsExplainer`.
  */
 export class VfsExplainer {
-  constructor(private readonly ops: Ops) {}
+  constructor(private readonly ops: Files) {}
 
   /** Explain `session.vfs.read`. */
   read(

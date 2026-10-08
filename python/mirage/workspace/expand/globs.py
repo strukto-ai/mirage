@@ -16,9 +16,9 @@ import dataclasses
 import posixpath
 
 from mirage.context import session_visibility
+from mirage.doors.namespace_view import child_mount_names, namespace_names
+from mirage.doors.types import NamespaceLinks
 from mirage.errors.constants import WALK_ERRORS
-from mirage.ops.config import NamespaceLinks
-from mirage.ops.namespace_view import child_mount_names, namespace_names
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.errors import DiscardSignal

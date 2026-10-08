@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.namespace_view import (
+from mirage.doors.namespace_view import (
     child_mount_names,
     merge_readdir,
     namespace_listing,

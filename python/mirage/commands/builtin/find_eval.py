@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from mirage.commands.builtin.types import RowActionKind
-from mirage.ops.types import LinkView
+from mirage.doors.types import LinkView
 from mirage.types import FindType, PathSpec
 from mirage.utils.dates import in_mtime_window
 from mirage.utils.fnmatch import fnmatch

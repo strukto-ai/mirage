@@ -108,7 +108,7 @@ export interface SessionInit {
    * Per-mount mode caps for this session. `null` (the default) means
    * no restriction: every mount in the workspace is reachable at its own
    * mode. When provided, a mount absent from the map is invisible
-   * (dispatch / handle_command / Ops reject it with a capability error)
+   * (dispatch / handle_command / Files reject it with a capability error)
    * and a present mount is narrowed to the weaker of its own mode and
    * the session's mode. The workspace always implicitly grants its own
    * infrastructure mounts (implicit scratch root, observer, /dev).

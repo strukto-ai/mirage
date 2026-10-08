@@ -45,7 +45,7 @@ import {
   removeEmptyParents,
   removeTree,
 } from './io.ts'
-import type { MountView } from '../../../../ops/types.ts'
+import type { MountView } from '../../../../doors/types.ts'
 import type { Dispatch } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 

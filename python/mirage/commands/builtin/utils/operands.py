@@ -18,13 +18,13 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.commands.spec.usage import read_fail_exit_code
+from mirage.doors.types import LinkView, MountView, StatPath
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import eisdir
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import DotWalkError
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.shell.bytes import encode_text
 from mirage.types import (
     FileStat,

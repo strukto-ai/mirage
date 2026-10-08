@@ -12,6 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.ops import Ops
+from mirage.workspace.dispatcher.constants import (
+    NO_FOLLOW_OPS,
+    STAMP_WRITE_OPS,
+)
 
-__all__ = ["Ops"]
+
+def test_link_entry_ops_never_follow():
+    # lstat semantics: the operand names the link itself, so no stat
+    # surface may rewrite it through the table.
+    assert set(NO_FOLLOW_OPS) == {
+        "unlink",
+        "rename",
+        "rmdir",
+        "symlink",
+        "readlink",
+    }
+
+
+def test_removals_do_not_stamp_an_mtime():
+    assert "unlink" not in STAMP_WRITE_OPS
+    assert "rmdir" not in STAMP_WRITE_OPS
+    assert "write" in STAMP_WRITE_OPS

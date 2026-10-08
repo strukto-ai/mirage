@@ -21,10 +21,10 @@ from mirage.commands.spec.usage import (
     extra_operand_error,
     missing_operand_error,
 )
+from mirage.doors.types import StatPath
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import format_fs_error
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import StatPath
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey

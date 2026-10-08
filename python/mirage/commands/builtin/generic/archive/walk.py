@@ -7,10 +7,10 @@ from mirage.commands.builtin.generic.archive.types import (
     Scan,
     Walked,
 )
+from mirage.doors.types import LinkView, MountView
 from mirage.errors.classify import classify
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.ops.types import LinkView, MountView
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError

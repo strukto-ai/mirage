@@ -19,7 +19,7 @@ import time
 
 import pytest
 
-from mirage.ops.namespace_view import merge_readdir
+from mirage.doors.namespace_view import merge_readdir
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSStat
 from mirage.runtime.vfs import RuntimeVFS

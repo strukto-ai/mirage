@@ -14,7 +14,7 @@
 
 import re
 
-from mirage.ops.types import SessionView
+from mirage.doors.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
     array_count,

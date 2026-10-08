@@ -17,17 +17,17 @@ from collections.abc import Awaitable
 from typing import TypeVar
 
 from mirage.bridge.sync import run_async_from_sync
-from mirage.ops import Ops
 from mirage.runtime.constants import ABSENT_PATH
 from mirage.runtime.python.host.errors import numbered
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.runtime.vfs import stat_row
+from mirage.workspace.files import Files
 
 T = TypeVar("T")
 
 
 class HostVFS:
-    """The `with ws:` door: one call at a time over the ``Ops`` facade.
+    """The `with ws:` door: one call at a time over the ``Files`` facade.
 
     A guest's door (``RuntimeVFS``) hops to a workspace loop running on
     another thread. The block's code runs on the caller's own thread
@@ -38,13 +38,13 @@ class HostVFS:
     It also answers the questions an open asks (``runtime/open``).
 
     Args:
-        ops (Ops): the facade every call goes through.
+        ops (Files): the facade every call goes through.
         loop (asyncio.AbstractEventLoop | None): the block's loop; None
             gives each call a throwaway loop.
     """
 
     def __init__(
-        self, ops: Ops, loop: asyncio.AbstractEventLoop | None
+        self, ops: Files, loop: asyncio.AbstractEventLoop | None
     ) -> None:
         self.ops = ops
         self._loop = loop

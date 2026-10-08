@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { configValues } from './fs.ts'
-import type { MountRoot, StatPath } from '../../../../ops/types.ts'
+import type { MountRoot, StatPath } from '../../../../doors/types.ts'
 import { GIT_DIR } from './constants.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import {

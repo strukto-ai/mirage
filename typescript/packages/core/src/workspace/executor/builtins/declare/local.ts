@@ -24,7 +24,7 @@ import {
   visibleArrays,
   visibleAssocs,
 } from '../../../session/state.ts'
-import type { SessionView } from '../../../../ops/types.ts'
+import type { SessionView } from '../../../../doors/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { arithRefusal, readonlyRefusal, refusal, requireView } from '../shared.ts'
 import {

@@ -15,12 +15,12 @@
 from collections.abc import Callable
 from dataclasses import replace
 
+from mirage.doors.types import LinkView, StatPath
 from mirage.errors.fs import dot_walk_error, eexist, eloop, enoent
 from mirage.errors.render import operand_spelling
 from mirage.errors.types import (
     FsCondition,
 )
-from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec, StatFn
 from mirage.utils.key_prefix import rekey

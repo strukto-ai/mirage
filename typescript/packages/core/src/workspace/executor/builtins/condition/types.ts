@@ -14,7 +14,7 @@
 
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
-import type { SessionView } from '../../../../ops/types.ts'
+import type { SessionView } from '../../../../doors/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 
 export type CondNode =

@@ -20,7 +20,7 @@ from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git.commit import DEFAULT_EMAIL, identity
 from mirage.commands.spec.flag_view import FlagView
-from mirage.ops.types import SessionView
+from mirage.doors.types import SessionView
 from mirage.types import HiddenVars, Visibility
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import seed_var, session_view

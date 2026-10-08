@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { pathsScoped } from '../../../ops/namespace_view.ts'
+import { pathsScoped } from '../../../doors/namespace_view.ts'
 import { withCommandGuards, withPolicyGuard, mountIo } from '../generic_bind/adapter.ts'
 import { SCOPE_ERROR } from '../../../core/github/constants.ts'
 import { readdir as githubReaddir } from '../../../core/github/readdir.ts'

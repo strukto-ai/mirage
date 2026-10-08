@@ -25,7 +25,6 @@ from typing import Any, cast
 from mirage.errors import FsCondition
 from mirage.errors.fs import eexist, fs_error
 from mirage.errors.posix import posix_errno, posix_phrase
-from mirage.ops import Ops
 from mirage.runtime.python.host.constants import (
     REFUSED_CALLS,
     ROUTED_CALLS,
@@ -46,6 +45,7 @@ from mirage.types import FileStat
 from mirage.utils.dates import iso_timestamp, timestamp_iso
 from mirage.utils.path import owner_prefix
 from mirage.utils.stat_view import LINK_MODE, content_size, is_dir, posix_mode
+from mirage.workspace.files import Files
 
 
 def _spelled(path: Any) -> str | None:
@@ -84,13 +84,13 @@ class HostFs:
     explicit chmod, where the guest asked for exactly that.
 
     Args:
-        ops (Ops): the workspace door.
+        ops (Files): the workspace door.
         loop (asyncio.AbstractEventLoop | None): the loop the door's
             coroutines run on; None gives each call a throwaway loop.
     """
 
     def __init__(
-        self, ops: Ops, loop: asyncio.AbstractEventLoop | None
+        self, ops: Files, loop: asyncio.AbstractEventLoop | None
     ) -> None:
         self._ops = ops
         self._door = HostVFS(ops, loop)
@@ -930,7 +930,7 @@ def _rebind(
 
 
 def os_routing(
-    ops: Ops, loop: asyncio.AbstractEventLoop | None = None
+    ops: Files, loop: asyncio.AbstractEventLoop | None = None
 ) -> dict[str, Callable[..., Any]]:
     """Every `os` name that must not answer from the host, and what does.
 
@@ -948,7 +948,7 @@ def os_routing(
     of the module answering about paths it has never had.
 
     Args:
-        ops (Ops): the workspace door.
+        ops (Files): the workspace door.
         loop (asyncio.AbstractEventLoop | None): shared event loop.
 
     Returns:
@@ -966,7 +966,7 @@ def os_routing(
 
 
 def make_os_module(
-    ops: Ops, loop: asyncio.AbstractEventLoop | None = None
+    ops: Files, loop: asyncio.AbstractEventLoop | None = None
 ) -> types.ModuleType:
     """A standalone copy of `os` that routes mounted paths.
 
@@ -981,7 +981,7 @@ def make_os_module(
     this copy.
 
     Args:
-        ops (Ops): The ops instance with mount table.
+        ops (Files): The ops instance with mount table.
         loop (asyncio.AbstractEventLoop | None): Shared event loop.
 
     Returns:

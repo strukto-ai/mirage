@@ -31,7 +31,7 @@ import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../she
 import { isProgramInvocation } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { abortable, mergeSignals } from '../abort.ts'
-import type { SessionView } from '../../ops/types.ts'
+import type { SessionView } from '../../doors/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { ProcessInfo, ProcessState } from '../../process/types.ts'

@@ -21,8 +21,8 @@ from typing import Any, Callable
 from mirage.fuse.core import MountCore
 from mirage.fuse.darwin import rename_flags_check
 from mirage.fuse.errors import classify_error
-from mirage.ops import Ops
 from mirage.types import JsonValue
+from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class MirageFS:
     File Provider adapter can reuse them unchanged.
 
     Args:
-        ops (Ops): the workspace op facade every callback routes to.
+        ops (Files): the workspace op facade every callback routes to.
         root_prefix (str): mount root; non-empty scopes the tree to one mount.
         session (SessionState | None): bind every op to this
             session's mount grants.
@@ -54,7 +54,7 @@ class MirageFS:
 
     def __init__(
         self,
-        ops: Ops,
+        ops: Files,
         root_prefix: str = "",
         session: SessionState | None = None,
     ) -> None:

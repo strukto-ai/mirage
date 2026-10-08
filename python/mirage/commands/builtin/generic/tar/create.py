@@ -8,11 +8,11 @@ from mirage.commands.builtin.generic.archive.walk import (
 )
 from mirage.commands.builtin.generic.tar import constants
 from mirage.commands.builtin.generic.tar.types import CreateResult, Member
+from mirage.doors.types import LinkView, MountView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.ops.types import LinkView, MountView
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.path import respell_one

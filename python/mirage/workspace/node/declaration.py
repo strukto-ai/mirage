@@ -14,8 +14,8 @@
 
 from typing import Any, Callable
 
+from mirage.doors.types import SessionView
 from mirage.io import IOResult
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack

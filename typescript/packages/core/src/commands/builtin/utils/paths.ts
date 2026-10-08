@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LinkView, StatPath } from '../../../ops/types.ts'
+import type { LinkView, StatPath } from '../../../doors/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, LINK_TARGET_KEY, PathSpec, type StatFn } from '../../../types.ts'

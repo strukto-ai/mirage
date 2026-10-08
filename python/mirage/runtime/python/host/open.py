@@ -18,9 +18,9 @@ import os
 from collections.abc import Callable
 from typing import IO, TypeAlias, cast
 
-from mirage.ops import Ops
 from mirage.runtime.python.host.file import MirageFile
 from mirage.runtime.python.host.host_io import in_host_io
+from mirage.workspace.files import Files
 
 OpenPath: TypeAlias = str | bytes | int | os.PathLike[str] | os.PathLike[bytes]
 OpenResult: TypeAlias = IO[str] | IO[bytes] | MirageFile
@@ -28,7 +28,7 @@ OpenResult: TypeAlias = IO[str] | IO[bytes] | MirageFile
 
 class MountedOpen:
     def __init__(
-        self, ops: Ops, loop: asyncio.AbstractEventLoop | None = None
+        self, ops: Files, loop: asyncio.AbstractEventLoop | None = None
     ) -> None:
         self._ops = ops
         self._loop = loop
@@ -88,12 +88,12 @@ class MountedOpen:
 
 
 def make_open(
-    ops: Ops, loop: asyncio.AbstractEventLoop | None = None
+    ops: Files, loop: asyncio.AbstractEventLoop | None = None
 ) -> MountedOpen:
     """Create a patched open() that routes mounted paths through ops.
 
     Args:
-        ops (Ops): The ops instance with mount table.
+        ops (Files): The ops instance with mount table.
         loop (asyncio.AbstractEventLoop | None): Shared event loop.
 
     Returns:

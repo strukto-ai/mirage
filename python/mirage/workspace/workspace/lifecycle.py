@@ -24,11 +24,11 @@ from typing import Any, cast
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.concurrency.limiter import run_blocking
 from mirage.observe.store import ObserverStore
-from mirage.ops.ops import Ops
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.python.host.fs import os_routing
 from mirage.runtime.python.host.open import make_open
 from mirage.shell.job_table import JobTable, cancel_job
+from mirage.workspace.files import Files
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.manager import SessionManager
@@ -86,7 +86,7 @@ class CloseDeps:
 
 
 def patch_process(
-    ops: Ops,
+    ops: Files,
     loop: asyncio.AbstractEventLoop,
 ) -> list[Patched]:
     """Point ``open`` and ``os`` at the workspace for a ``with`` block.
@@ -110,7 +110,7 @@ def patch_process(
     is the one that shows it; any pooled async client would).
 
     Args:
-        ops (Ops): the workspace's op facade.
+        ops (Files): the workspace's op facade.
         loop (asyncio.AbstractEventLoop): the block's loop.
 
     Returns:

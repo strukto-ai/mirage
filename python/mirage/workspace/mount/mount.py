@@ -57,6 +57,7 @@ from mirage.core.generic.rewrite import (
     pwrite_by_rewrite,
     refuse_taken,
 )
+from mirage.doors.types import StatPath
 from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.io.cachable_iterator import CachableAsyncIterator
@@ -69,7 +70,6 @@ from mirage.observe.context import (
     with_mount_context,
     with_revisions,
 )
-from mirage.ops.types import StatPath
 from mirage.policy import resolve_limit
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text

@@ -24,8 +24,8 @@ from typing import Any
 from mirage.fuse.backend import MountBackend, prepare_backend
 from mirage.fuse.darwin import install_macfuse_extensions
 from mirage.fuse.fs import MirageFS
-from mirage.ops import Ops
 from mirage.types import JsonValue
+from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
 
 
@@ -212,7 +212,7 @@ def _await_ready(
 
 
 def mount_background(
-    ops: Ops,
+    ops: Files,
     mountpoint: str,
     root_prefix: str = "",
     session: SessionState | None = None,
@@ -221,7 +221,7 @@ def mount_background(
     """Mount in a background thread and return once the tree is live.
 
     Args:
-        ops (Ops): the op facade to serve.
+        ops (Files): the op facade to serve.
         mountpoint (str): where to mount.
         root_prefix (str): mount root; non-empty scopes the tree.
         session (SessionState | None): bind ops to this session's mount grants.
@@ -247,7 +247,7 @@ def mount_background(
 
 
 def mount(
-    ops: Ops | None = None,
+    ops: Files | None = None,
     mountpoint: str = "",
     foreground: bool = True,
     fs: MirageFS | None = None,

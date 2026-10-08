@@ -13,8 +13,8 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.doors.types import LinkView, MountView, StatPath
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.types import (
     DEVICE_NUMBERS_KEY,
     LINK_TARGET_KEY,

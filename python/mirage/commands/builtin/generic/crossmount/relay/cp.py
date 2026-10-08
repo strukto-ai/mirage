@@ -27,8 +27,8 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.doors.types import LinkSubtree, MountView, NamespaceView
 from mirage.io.types import ByteSource
-from mirage.ops.types import LinkSubtree, MountView, NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec, PrimitiveCopy
 

@@ -21,8 +21,8 @@ from mirage.commands.builtin.generic.crossmount.scopes import (
     owned_scopes,
     reached,
 )
+from mirage.doors.types import MountView, NamespaceView
 from mirage.errors.fs import eacces
-from mirage.ops.types import MountView, NamespaceView
 from mirage.types import FileStat, FileType, PathSpec
 
 _DIRS = {"/a": ["/a/d", "/a/f", "/a/m"], "/a/d": ["/a/d/g"], "/a/m": []}

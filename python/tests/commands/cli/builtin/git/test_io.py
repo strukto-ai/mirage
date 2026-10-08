@@ -22,7 +22,7 @@ from mirage.commands.cli.builtin.git.io import (
     remove_empty_parents,
     remove_tree,
 )
-from mirage.ops.types import MountView
+from mirage.doors.types import MountView
 from mirage.types import FileStat, FileType, PathSpec
 
 REPO = PathSpec.from_str_path("/repo")

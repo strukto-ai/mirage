@@ -36,7 +36,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import { SHELL_ONLY_BUILTINS } from '../lookup/constants.ts'
 import { lookupAll } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
-import type { NamespaceView, StatPath } from '../../ops/types.ts'
+import type { NamespaceView, StatPath } from '../../doors/types.ts'
 import { SharedStdin } from '../../io/stream.ts'
 import {
   execActions,

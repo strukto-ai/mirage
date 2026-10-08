@@ -49,7 +49,7 @@ from mirage.workspace.abort import (
     StatusWriter,
     set_line_writer,
 )
-from mirage.workspace.dispatcher import Dispatcher
+from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import (
     EvaluationContext,
     child_context,

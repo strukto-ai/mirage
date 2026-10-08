@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { OpKwargs } from '../../ops/types.ts'
+import type { OpKwargs } from '../../doors/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { applyIo } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -53,8 +53,7 @@ import type { EntryGate } from '../../policy/types.ts'
 import { record, runWithMountContext, runWithRevisions, startOp } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
-import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
+import { mergeReaddir, namespaceListing, namespaceStat } from '../../doors/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import {
@@ -84,9 +83,11 @@ import {
   HIDDEN_CREATE_OPS,
   LINK_ENTRY_OPS,
   NAMESPACE_TABLE_OPS,
+  NO_FOLLOW_OPS,
   POLICY_WRITE_OPS,
   SERIAL_WRITE_OPS,
   SETATTR_KEYS,
+  STAMP_WRITE_OPS,
   XATTR_OPS,
 } from './constants.ts'
 import {
@@ -779,7 +780,7 @@ export class Dispatcher {
     let fullArgs = call.args ?? []
     const renameDst = name === 'rename' && fullArgs[0] instanceof PathSpec ? fullArgs[0] : null
     if (renameDst !== null) {
-      // Ops.rename addresses both endpoints against the source's mount,
+      // Files.rename addresses both endpoints against the source's mount,
       // mirroring the Python dispatcher: a caller-supplied dst built
       // from the virtual path alone would otherwise reach the backend
       // untranslated.

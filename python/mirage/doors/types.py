@@ -14,7 +14,7 @@
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from mirage.shell.variable import ShellValue, VarAttr
 from mirage.types import FileStat, PathSpec, Visibility
@@ -185,6 +185,68 @@ class MountView:
     # ``max_du_entries``, None for no cap), so a walk that crosses mounts
     # charges each entry to its own backend's allowance.
     max_du_entries: Callable[[str], int | None] | None = None
+
+
+@runtime_checkable
+class NamespaceLinks(Protocol):
+    """The symlink surface a namespace offers to lower layers.
+
+    The workspace Namespace satisfies this structurally; FUSE and the
+    namespace view consume it through this seam so the dependency points
+    downward (workspace injects, lower layers never import workspace
+    modules).
+
+    Read-only, and the TypeScript twin declares the same five members
+    in the same order. A link is created and removed through the op
+    door (``Files.symlink``, ``Files.unlink``), never here: the door is the
+    only layer that sees both planes, so it is where symlink(2)'s
+    refusal to overwrite an occupied name is decided, and where session
+    grants, admission policies and the op ledger fire. A mutator on
+    this seam is a write at a layer no session view covers, which is
+    how a session-scoped kernel mount came to delete a link on a mount
+    its profile hides. Routing through the door costs a caller nothing:
+    the dispatcher already answers ``unlink`` on a link path, because
+    ``unlink`` is in ``LINK_ENTRY_OPS``.
+    """
+
+    def follow(self, path: str) -> str:
+        """Resolve symlink prefixes in ``path`` (identity when none).
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        ...
+
+    def is_link(self, path: str) -> bool:
+        """Whether ``path`` names a symlink entry.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        ...
+
+    def readlink(self, path: str) -> str | None:
+        """The stored target for a link path, None when not a link.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        ...
+
+    def link_stat_at(self, path: str) -> FileStat | None:
+        """The link's own stat row (lstat), None when not a link.
+
+        A link has no backend inode, so this table is the only
+        authority for one.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        ...
+
+    def symlink_targets(self) -> dict[str, str]:
+        """Every link path to its stored target, the whole table."""
+        ...
 
 
 @dataclass(frozen=True)

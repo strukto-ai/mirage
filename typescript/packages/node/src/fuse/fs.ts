@@ -15,7 +15,7 @@
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { classify } from '@struktoai/mirage-core/errors/index'
 import type { OpRecord } from '@struktoai/mirage-core/observe/record'
-import type { Ops } from '@struktoai/mirage-core/ops/ops'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { type FuseAttr, MountCore } from './core.ts'
 import { classifyError } from './errors.ts'
@@ -37,7 +37,7 @@ export interface MirageFSOptions {
   /**
    * Bind every FUSE op to this session's mount grants. The kernel-tier
    * primitive: bind-mount the tree into a container and the narrowing
-   * travels with it. Enforcement happens inside dispatch/Ops via the
+   * travels with it. Enforcement happens inside dispatch/Files via the
    * session context, so binding at the op entry point is sufficient.
    */
   session?: SessionState
@@ -54,7 +54,7 @@ export interface MirageFSOptions {
 export class MirageFS {
   readonly core: MountCore
 
-  constructor(ops: Ops, options: MirageFSOptions = {}) {
+  constructor(ops: Files, options: MirageFSOptions = {}) {
     this.core = new MountCore(ops, options)
   }
 
@@ -98,7 +98,7 @@ export class MirageFS {
     if (session === null) return table
     // A session-bound tree enters the session context before every op,
     // mirroring Python's MountCore session binding: the async work each
-    // callback starts inherits the context, so dispatch/Ops enforce the
+    // callback starts inherits the context, so dispatch/Files enforce the
     // session's mount grants for kernel-originated I/O too.
     const bound: Record<string, unknown> = {}
     for (const [name, fn] of Object.entries(table)) {

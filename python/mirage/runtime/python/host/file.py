@@ -22,11 +22,11 @@ from typing import TYPE_CHECKING, Self
 
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.ops import Ops
 from mirage.runtime.handles import FileHandle
 from mirage.runtime.handles.mode import parse_mode
 from mirage.runtime.open import apply_open
 from mirage.runtime.python.host.vfs import HostVFS
+from mirage.workspace.files import Files
 
 if TYPE_CHECKING:
     from _typeshed import ReadableBuffer, WriteableBuffer
@@ -97,7 +97,7 @@ class _HandleRaw(io.RawIOBase):
 class MirageFile:
     def __init__(
         self,
-        ops: Ops,
+        ops: Files,
         path: str,
         mode: str = "r",
         loop: asyncio.AbstractEventLoop | None = None,

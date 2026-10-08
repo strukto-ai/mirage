@@ -17,7 +17,7 @@ import git from 'isomorphic-git'
 
 import { visibleEntries } from './pathspec.ts'
 
-import type { LinkView, StatPath } from '../../../../ops/types.ts'
+import type { LinkView, StatPath } from '../../../../doors/types.ts'
 import { isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { entryMode } from './add.ts'
 import { GITLINK_MODE, SYMLINK } from './constants.ts'

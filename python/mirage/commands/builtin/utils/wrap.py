@@ -16,8 +16,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from mirage.commands.builtin.utils.operands import operand_name
+from mirage.doors.types import MountView
 from mirage.errors.constants import MISS_ERRORS
-from mirage.ops.types import MountView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 

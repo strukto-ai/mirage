@@ -17,19 +17,20 @@ from dataclasses import replace
 from typing import Any
 
 from mirage.context import get_current_session, session_visibility
+from mirage.doors.types import NamespaceLinks, SessionBind
 from mirage.errors.types import NoMountError
 from mirage.io import OpReport
 from mirage.observe import OpRecord
 from mirage.observe.context import OpTimer, finish_record, start_op
-from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
-from mirage.ops.types import SessionBind
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import dotted_spelling, owner_prefix
+from mirage.workspace.dispatcher.constants import NO_FOLLOW_OPS
+from mirage.workspace.types import MountRow
 
 
-class Ops:
+class Files:
     """The typed op facade FUSE and programmatic callers use.
 
     Every op delegates to the workspace dispatcher, so FUSE and
@@ -44,7 +45,7 @@ class Ops:
     second pipeline here would be a second door, and it drifted from
     the real one exactly as expected: it served no cache, saw no
     namespace structure, and fired the gates only when a caller
-    remembered to hand it policies. TypeScript's ``Ops`` takes
+    remembered to hand it policies. TypeScript's ``Files`` takes
     the same stance.
 
     The facade runs as one session, ``session_id``, through ``bind``:
@@ -69,7 +70,7 @@ class Ops:
 
     def __init__(
         self,
-        mounts: list[OpsMount],
+        mounts: list[MountRow],
         dispatch: DispatchFn,
         observer: Any | None = None,
         agent_id: str = "default",
@@ -78,7 +79,7 @@ class Ops:
         bind: SessionBind | None = None,
         records: list[OpRecord] | None = None,
     ) -> None:
-        self._mounts: list[OpsMount] = []
+        self._mounts: list[MountRow] = []
         self.set_mounts(mounts)
         self._observer = observer
         self._agent_id = agent_id
@@ -94,7 +95,7 @@ class Ops:
         default session."""
         return self._session_id
 
-    def _for_session(self, session_id: str) -> "Ops":
+    def _for_session(self, session_id: str) -> "Files":
         """The same facade run as another session.
 
         The mechanism behind ``Session.vfs``, not a door of its
@@ -108,7 +109,7 @@ class Ops:
         Args:
             session_id (str): the session whose profile judges the ops.
         """
-        derived = Ops(
+        derived = Files(
             [],
             self._dispatch,
             observer=self._observer,
@@ -138,11 +139,11 @@ class Ops:
         """
         return [m.prefix for m in self._mounts]
 
-    def set_mounts(self, mounts: list[OpsMount]) -> None:
+    def set_mounts(self, mounts: list[MountRow]) -> None:
         """Refresh mount metadata without replacing the facade or its ledger.
 
         Args:
-            mounts (list[OpsMount]): the workspace's current mount table.
+            mounts (list[MountRow]): the workspace's current mount table.
         """
         # In place, so a facade derived for a session sees the
         # refreshed table through the list it shares.
@@ -225,7 +226,7 @@ class Ops:
                 self._observer.log_op(rec, self._agent_id, session)
             )
 
-    def _owner(self, path: str) -> OpsMount | None:
+    def _owner(self, path: str) -> MountRow | None:
         """The mount owning ``path`` by longest prefix, or None."""
         owner = owner_prefix((m.prefix for m in self._mounts), path)
         if owner is None:
@@ -365,7 +366,7 @@ class Ops:
         self,
         op: str,
         path: str,
-        owner: OpsMount,
+        owner: MountRow,
         source: str | None,
         moved: int | None,
         result: Any,
@@ -385,7 +386,7 @@ class Ops:
         Args:
             op (str): the op name.
             path (str): the resolved virtual path.
-            owner (OpsMount): the mount owning the path.
+            owner (MountRow): the mount owning the path.
             source (str | None): the door's server, None for the mount.
             moved (int | None): bytes the backend moved, None to
                 measure the result.

@@ -14,13 +14,13 @@
 
 import inspect
 
-from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS, NamespaceLinks
+from mirage.doors.types import NamespaceLinks
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 # The seam's members in declaration order. The TypeScript twin
-# (ops/config.test.ts) pins this same list camelCased and in this same
+# (doors/types.test.ts) pins this same list camelCased and in this same
 # order, so a member added, dropped or moved in one language fails the
 # other language's test instead of drifting quietly.
 MEMBERS = ("follow", "is_link", "readlink", "link_stat_at", "symlink_targets")
@@ -66,21 +66,3 @@ def test_namespace_satisfies_the_narrowed_protocol():
     assert isinstance(ws.namespace, NamespaceLinks)
     assert inspect.iscoroutinefunction(ws.namespace.symlink)
     assert inspect.iscoroutinefunction(ws.namespace.unlink)
-
-
-def test_link_entry_ops_never_follow():
-    # lstat semantics: the operand names the link itself, so no stat
-    # surface may rewrite it through the table.
-    assert set(NO_FOLLOW_OPS) == {
-        "unlink",
-        "rename",
-        "rmdir",
-        "symlink",
-        "readlink",
-    }
-
-
-def test_removals_do_not_stamp_an_mtime():
-    assert "unlink" not in STAMP_WRITE_OPS
-    assert "rmdir" not in STAMP_WRITE_OPS
-    assert "write" in STAMP_WRITE_OPS

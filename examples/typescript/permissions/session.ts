@@ -19,7 +19,7 @@ import {
   parseSessionProfile,
 } from "@struktoai/mirage-node";
 import type {
-  Ops,
+  Files,
   SessionExecuteOptions,
   Session,
 } from "@struktoai/mirage-node";
@@ -92,7 +92,7 @@ interface Doors {
     stderr: Uint8Array | null;
     exitCode: number;
   }>;
-  vfs: Ops;
+  vfs: Files;
 }
 
 async function line(

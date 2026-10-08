@@ -20,11 +20,11 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.cache.index import IndexCacheStore
 from mirage.cache.index.config import IndexEntry
-from mirage.ops import Ops
 from mirage.vfs.gslides import GSlidesConfig, GSlidesVFS
+from mirage.workspace.files import Files
 
 
-def _make_gslides_ops() -> tuple[Ops, IndexCacheStore]:
+def _make_gslides_ops() -> tuple[Files, IndexCacheStore]:
     # The store to seed is the one the mount runs the driver under.
     vfs = GSlidesVFS(config=GSlidesConfig(client_id="x", refresh_token="y"))
     ws = Workspace({"/gslides/": vfs}, mode=MountMode.READ)

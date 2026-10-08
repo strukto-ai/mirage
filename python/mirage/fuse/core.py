@@ -26,7 +26,6 @@ from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors.fs import einval, enoent, erofs
 from mirage.fuse.platform.macos import is_macos_metadata
-from mirage.ops import Ops
 from mirage.policy.match import skipped_at_op_doors
 from mirage.runtime.handles import ChunkedHandle, FileTable, write_runs
 from mirage.runtime.handles.constants import READ_CHUNK
@@ -38,6 +37,7 @@ from mirage.utils.stat_view import (
     LINK_MODE,
     mtime_ns,
 )
+from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
 
 # How long prefetched bytes for size-unknown files outlive their handle, so a
@@ -76,7 +76,7 @@ class MountCore:
     error codes with ``mirage.fuse.errors.classify_error``.
 
     Args:
-        ops (Ops): the workspace op facade every filesystem call routes to.
+        ops (Files): the workspace op facade every filesystem call routes to.
         root_prefix (str): mount root; non-empty scopes the tree to one mount.
         session (SessionState | None): bind every op to this session's mount
             grants, exactly as a shell command in that session would run.
@@ -90,7 +90,7 @@ class MountCore:
 
     def __init__(
         self,
-        ops: Ops,
+        ops: Files,
         root_prefix: str = "",
         session: SessionState | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
@@ -128,7 +128,7 @@ class MountCore:
         self._loop = loop
 
     @property
-    def ops(self) -> Ops:
+    def ops(self) -> Files:
         return self._ops
 
     @property

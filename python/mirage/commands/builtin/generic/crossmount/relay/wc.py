@@ -38,9 +38,9 @@ from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagValue
+from mirage.doors.types import NamespaceView
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
 

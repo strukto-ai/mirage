@@ -28,7 +28,7 @@ import type { BuiltinCall, Result } from '../types.ts'
 import { ShellBuiltin as SB } from '../../../../shell/types.ts'
 import { wordText } from '../../../../types.ts'
 import { sessionView } from '../../../session/state.ts'
-import type { SessionView } from '../../../../ops/types.ts'
+import type { SessionView } from '../../../../doors/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 /**

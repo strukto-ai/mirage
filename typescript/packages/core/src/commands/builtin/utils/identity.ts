@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import type { NamespaceView, SessionView } from '../../../ops/types.ts'
+import type { NamespaceView, SessionView } from '../../../doors/types.ts'
 import type { CommandOpts } from '../../config.ts'
 
 // What an owner or group column prints when nothing names one: no uid on

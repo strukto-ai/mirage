@@ -23,7 +23,7 @@ import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import type { OpKwargs } from '../../ops/types.ts'
+import type { OpKwargs } from '../../doors/types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
@@ -69,7 +69,7 @@ import {
 import type { Policies } from '../../policy/index.ts'
 import { DryRun, Outcome, type ShellExplanation } from '../../policy/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { Ops } from '../../ops/ops.ts'
+import { Files } from '../files.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
 import { MountRegistry } from '../mount/registry.ts'
@@ -183,7 +183,7 @@ export class Workspace {
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
-  readonly vfs: Ops
+  readonly vfs: Files
   private readonly toolTables = new Map<string | null, MirageToolOperations>()
   private readonly reads = new Map<string, FileVersionTracker>()
   private closed = false
@@ -463,7 +463,7 @@ export class Workspace {
     // ledger, which is its own; the sink is only the observer's copy.
     // It runs as the default session, as a bare `shell` does, so the
     // default profile confines it too.
-    this.vfs = new Ops(
+    this.vfs = new Files(
       (op, path, args, kwargs, report) => {
         if (this.isShuttingDown()) throw new Error('Workspace is closed')
         return this.dispatcher.dispatch(op, path, args, kwargs, report)
@@ -727,7 +727,7 @@ export class Workspace {
   }
 
   // The sandboxed runtimes' sole data path (quickjs, pyodide, monty).
-  // Routes through the private dispatch continuation, not the raw Ops facade,
+  // Routes through the private dispatch continuation, not the raw Files facade,
   // so runtime journal replay stays open during close and sandbox I/O takes
   // the same path as shell commands — cache read-through on
   // reads, post-write invalidation, and mount-mode enforcement narrowed
@@ -1348,7 +1348,7 @@ export class Workspace {
   }
 
   /**
-   * The op ledger. It lives on the `Ops` facade (python parity); these
+   * The op ledger. It lives on the `Files` facade (python parity); these
    * are thin delegates so the public workspace API keeps reading.
    */
   get records(): OpRecord[] {
@@ -2151,7 +2151,7 @@ export class Session {
   }
 
   /** The op facade run as this session. */
-  get vfs(): Ops {
+  get vfs(): Files {
     return this.id === null ? this.ws.vfs : this.ws.vfs.forSession(this.id)
   }
 

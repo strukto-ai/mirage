@@ -41,11 +41,11 @@ from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.concurrency.limiter import run_blocking
+from mirage.doors.types import NamespaceView, SessionView, StatPath
 from mirage.errors.types import FsCondition
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
-from mirage.ops.types import NamespaceView, SessionView, StatPath
 from mirage.policy import resolve_limit
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime

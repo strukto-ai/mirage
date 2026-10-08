@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.commands.spec.types import CommandSpec, ValueType
-from mirage.ops.types import SessionView
+from mirage.doors.types import SessionView
 from mirage.policy.match import scopes_paths
 from mirage.runtime.routing.types import RouteDecision
 from mirage.shell.call_stack import CallStack

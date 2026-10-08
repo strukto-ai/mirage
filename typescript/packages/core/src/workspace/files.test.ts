@@ -31,7 +31,7 @@ import {
   ReadPolicy,
 } from '../types.ts'
 import { eacces, enoent, enotdir } from '../errors/fs.ts'
-import { Session, Workspace } from '../workspace/workspace/workspace.ts'
+import { Session, Workspace } from './workspace/workspace.ts'
 import { rstripSlash } from '../utils/slash.ts'
 
 const DEC = new TextDecoder()
@@ -47,7 +47,7 @@ function mkFailingStat(err: unknown): Workspace {
   return new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
 }
 
-describe('Ops', () => {
+describe('Files', () => {
   it('writeFile + readFile round-trips bytes', async () => {
     const ws = mkWorkspace()
     await ws.vfs.write('/data/a.txt', 'hello')
@@ -150,7 +150,7 @@ describe('Ops', () => {
   })
 })
 
-describe('Ops existence probes', () => {
+describe('Files existence probes', () => {
   it('report false for a missing path', async () => {
     const ws = mkWorkspace()
     expect(await ws.vfs.exists('/data/nope')).toBe(false)
@@ -197,7 +197,7 @@ describe('Ops existence probes', () => {
 
 // The op facade is an op door like the dispatcher: FUSE and programmatic
 // access read through it, so policy hooks must fire here too.
-describe('Ops policy door', () => {
+describe('Files policy door', () => {
   class SealReads implements Policy {
     preVfs(ctx: VfsContext): Action | null {
       if (!ctx.write && ctx.path.virtual.endsWith('.sealed')) {
@@ -320,7 +320,7 @@ async function seed(ws: Workspace, path: string): Promise<void> {
 // The facade is not a second pipeline: it hands every op to the
 // dispatcher, so what the shell sees and what ws.vfs sees cannot drift,
 // and each gate fires exactly once per op.
-describe('Ops is one door with the dispatcher', () => {
+describe('Files is one door with the dispatcher', () => {
   class CountPre implements Policy {
     readonly seen: string[] = []
     preVfs(ctx: VfsContext): Action | null {
@@ -363,7 +363,7 @@ describe('Ops is one door with the dispatcher', () => {
     // ungranted for this session and the answer exists only because a
     // granted mount sits below it. Attributing it to the lexical owner
     // invents a network op against that backend for every such lookup.
-    // Mirrors Python's tests/ops/test_ops.py.
+    // Mirrors Python's tests/workspace/test_files.py.
     const outer = new RAMVFS()
     const inner = new RAMVFS()
     const ws = new Workspace({}, { mode: MountMode.WRITE })
@@ -381,7 +381,7 @@ describe('Ops is one door with the dispatcher', () => {
   it('does not attribute a denied namespace answer to the lexical owner', async () => {
     // Refusing the synthetic answer does not make the parent backend
     // have served it: a deny suppresses a result nothing was contacted
-    // to produce. Mirrors Python's tests/ops/test_ops.py.
+    // to produce. Mirrors Python's tests/workspace/test_files.py.
     const outer = new RAMVFS()
     const inner = new RAMVFS()
     const ws = new Workspace({}, { mode: MountMode.WRITE, policies: [new DenyInner()] })
@@ -414,7 +414,7 @@ describe('Ops is one door with the dispatcher', () => {
     // (that is what `applyIo` does with an IOResult), so whatever it
     // returned sits under the very key a raw read asks for. Seeding
     // the cache directly is the same state one command earlier reaches.
-    // Mirrors Python's tests/ops/test_raw_read.py.
+    // Mirrors Python's tests/workspace/dispatcher/test_raw_read.py.
     const vfs = new RAMVFS()
     Object.assign(vfs, { cachesReads: true })
     const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
@@ -551,7 +551,7 @@ function s3NamedRam(): RAMVFS {
   return vfs
 }
 
-describe('Ops accounting survives the delegation', () => {
+describe('Files accounting survives the delegation', () => {
   class DenyBigReads implements Policy {
     postVfs(ctx: VfsResultContext): Action | null {
       if (ctx.op === 'read') return { kind: 'deny', reason: 'too big' }
@@ -707,7 +707,7 @@ describe('a warm cache still answers a ranged read with the window', () => {
   // instead of the file, so serving the file back is wrong. git reads
   // pack indexes this way (4 bytes at a known offset) and reaches the
   // dispatcher directly, which is where the window has to be applied.
-  // Mirrors Python's tests/ops/test_raw_read.py.
+  // Mirrors Python's tests/workspace/dispatcher/test_raw_read.py.
   function mkCaching(): Workspace {
     const vfs = new RAMVFS()
     Object.assign(vfs, { cachesReads: true })
@@ -740,7 +740,7 @@ describe('a warm cache still answers a ranged read with the window', () => {
   })
 })
 
-describe('Ops rename is bounded by the mount', () => {
+describe('Files rename is bounded by the mount', () => {
   function mkTwoMounts(): Workspace {
     const a = new RAMVFS()
     const b = new RAMVFS()
@@ -781,7 +781,7 @@ describe('Ops rename is bounded by the mount', () => {
   })
 })
 
-describe('Ops.stat', () => {
+describe('Files.stat', () => {
   it('reports a dangling link itself under nofollow', async () => {
     const ws = mkWorkspace()
     await ws.vfs.mkdir('/data/dir')
@@ -792,7 +792,7 @@ describe('Ops.stat', () => {
   })
 })
 
-describe('Ops.setattr', () => {
+describe('Files.setattr', () => {
   it('lands where stat reads it', async () => {
     const ws = mkWorkspace()
     await ws.vfs.mkdir('/data/dir')
@@ -831,7 +831,7 @@ describe('Ops.setattr', () => {
 // against real Linux (python:3.13-slim): a file, a directory and a mount
 // root all answer EINVAL, and a missing path answers ENOENT whether or
 // not its parent exists.
-describe('Ops.readlink', () => {
+describe('Files.readlink', () => {
   const codeOf = async (ws: Workspace, path: string): Promise<string> => {
     try {
       await ws.vfs.readlink(path)
@@ -912,7 +912,7 @@ describe('Ops.readlink', () => {
 // wins when one is -- which is what keeps a handler reaching this door
 // from widening the view it was given. Mirrors python's
 // `TestPerCallSession`.
-describe('Ops per-call sessionId', () => {
+describe('Files per-call sessionId', () => {
   async function splitWs(): Promise<Workspace> {
     const vfs = new RAMVFS()
     const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })

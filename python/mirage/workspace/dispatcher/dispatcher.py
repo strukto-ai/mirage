@@ -33,6 +33,11 @@ from mirage.context import (
     hidden_refusal,
     session_visibility,
 )
+from mirage.doors.namespace_view import (
+    merge_readdir,
+    namespace_listing,
+    namespace_stat,
+)
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
@@ -51,12 +56,6 @@ from mirage.errors.fs import (
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record, start_op
 from mirage.observe.record import OpRecord
-from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
-from mirage.ops.namespace_view import (
-    merge_readdir,
-    namespace_listing,
-    namespace_stat,
-)
 from mirage.policy.boundary import Boundary
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.types import EntryGate
@@ -86,9 +85,11 @@ from mirage.workspace.dispatcher.constants import (
     HIDDEN_CREATE_OPS,
     LINK_ENTRY_OPS,
     NAMESPACE_TABLE_OPS,
+    NO_FOLLOW_OPS,
     POLICY_WRITE_OPS,
     SERIAL_WRITE_OPS,
     SETATTR_KEYS,
+    STAMP_WRITE_OPS,
     XATTR_OPS,
 )
 from mirage.workspace.mount import MountEntry
@@ -867,7 +868,7 @@ class Dispatcher:
         """
         kwargs = call.kwargs
         if call.name == "rename" and isinstance(kwargs.get("dst"), PathSpec):
-            # Ops.rename addresses both endpoints against the source's
+            # Files.rename addresses both endpoints against the source's
             # mount; mirror that here so the backend sees a
             # mount-relative destination.
             dst = kwargs["dst"]

@@ -336,7 +336,7 @@ export {
   ExecuteResult,
   type WorkspaceOptions,
 } from '@struktoai/mirage-core/workspace/workspace/types'
-export { Ops } from '@struktoai/mirage-core/ops/ops'
+export { Files } from '@struktoai/mirage-core/workspace/files'
 export { Namespace } from '@struktoai/mirage-core/workspace/mount/namespace/namespace'
 
 export { WandbVFS } from '@struktoai/mirage-core/vfs/wandb/wandb'

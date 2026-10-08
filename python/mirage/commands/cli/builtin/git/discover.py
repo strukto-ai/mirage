@@ -25,8 +25,8 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.io import read_file, read_optional
 from mirage.commands.cli.builtin.git.repo import config_bool, config_values
 from mirage.commands.cli.builtin.git.types import RepoLocation
+from mirage.doors.types import MountRoot, StatPath
 from mirage.errors.types import FsCondition
-from mirage.ops.types import MountRoot, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
 

@@ -25,7 +25,7 @@ import type {
   ReaddirPath,
   SessionView,
   StatPath,
-} from '../ops/types.ts'
+} from '../doors/types.ts'
 import type { TargetStat } from '../utils/glob_walk.ts'
 import type {
   ContentSearchOps,

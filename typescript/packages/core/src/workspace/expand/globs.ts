@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { childMountNames, namespaceNames } from '../../ops/namespace_view.ts'
+import { childMountNames, namespaceNames } from '../../doors/namespace_view.ts'
 import { sessionVisibility } from '../../context/session_context.ts'
-import type { NamespaceLinks } from '../../ops/config.ts'
+import type { NamespaceLinks } from '../../doors/types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'

@@ -18,9 +18,9 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.context import reset_explaining, set_explaining
-from mirage.ops import Ops
 from mirage.policy import ShellExplanation, VfsExplanation
 from mirage.policy.errors import Explained
+from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +42,14 @@ class Explainer:
         explain (Callable[[str, str], Awaitable[ShellExplanation]]): the
             workspace's line explainer, ``Workspace.explain``.
         session_id (str | None): the session; None for the default one.
-        vfs (Ops): the session's VFS facade.
+        vfs (Files): the session's VFS facade.
     """
 
     def __init__(
         self,
         explain: Callable[[str, str], Awaitable[ShellExplanation]],
         session_id: str | None,
-        vfs: Ops,
+        vfs: Files,
     ) -> None:
         self._explain = explain
         self._session_id = session_id
@@ -93,10 +93,10 @@ class VfsExplainer:
     decides reads the restored state.
 
     Args:
-        vfs (Ops): the session's VFS facade.
+        vfs (Files): the session's VFS facade.
     """
 
-    def __init__(self, vfs: Ops) -> None:
+    def __init__(self, vfs: Files) -> None:
         self._vfs = vfs
 
     async def read(

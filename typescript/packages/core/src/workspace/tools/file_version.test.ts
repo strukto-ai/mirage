@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Ops } from '../../ops/ops.ts'
+import type { Files } from '../files.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
@@ -34,7 +34,7 @@ beforeEach(async () => {
 // stores one thing and readFile hands back the rendering. The tracker
 // reaches the workspace only through these calls, so this is the whole
 // of the condition.
-function renderingVfs(inner: Workspace): Ops {
+function renderingVfs(inner: Workspace): Files {
   const prefix = new TextEncoder().encode('rendered:')
   return {
     links: inner.vfs.links,
@@ -45,7 +45,7 @@ function renderingVfs(inner: Workspace): Ops {
     write: (path: string, content: string | Uint8Array): Promise<void> =>
       inner.vfs.write(path, content),
     exists: (path: string): Promise<boolean> => inner.vfs.exists(path),
-  } as unknown as Ops
+  } as unknown as Files
 }
 
 // A read seam that holds the reads at the given call indices once they
@@ -55,7 +55,7 @@ function heldVfs(
   inner: Workspace,
   holdAt: readonly number[],
 ): {
-  vfs: Ops
+  vfs: Files
   fetched: Map<number, Promise<void>>
   release: Map<number, () => void>
 } {
@@ -92,7 +92,7 @@ function heldVfs(
     },
     write: (path: string, content: string): Promise<void> => inner.vfs.write(path, content),
     exists: (path: string): Promise<boolean> => inner.vfs.exists(path),
-  } as unknown as Ops
+  } as unknown as Files
   return { vfs, fetched, release }
 }
 

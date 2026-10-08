@@ -40,9 +40,9 @@ from mirage.context import (
     set_current_session,
     set_mount_gate,
 )
+from mirage.doors.types import NamespaceView
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import OperationNotSupportedError
-from mirage.ops.types import NamespaceView
 from mirage.policy import Action, Deny, Policy, VfsContext
 from mirage.policy.policies import (
     Policies,

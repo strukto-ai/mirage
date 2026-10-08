@@ -22,11 +22,11 @@ from mirage.commands.builtin.rg_glob import Overrides, Verdict, walk_candidate
 from mirage.commands.builtin.utils.links import LinkDoor
 from mirage.commands.builtin.utils.types import AsyncReaddirFn, AsyncStatFn
 from mirage.commands.resolve import get_extension
+from mirage.doors.types import MountIsRoot, MountRoot
 from mirage.errors.classify import classify
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import linux_errno
-from mirage.ops.types import MountIsRoot, MountRoot
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import respell_one
 

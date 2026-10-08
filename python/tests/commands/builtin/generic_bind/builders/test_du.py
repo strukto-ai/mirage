@@ -18,8 +18,8 @@ import pytest
 
 from mirage.commands.builtin.generic_bind.builders.du import WalkBudget, du
 from mirage.commands.config import CommandIO, CommandOpts
+from mirage.doors.types import MountView
 from mirage.io.stream import materialize
-from mirage.ops.types import MountView
 from mirage.types import FileStat, FileType, PathSpec
 
 TREE = {

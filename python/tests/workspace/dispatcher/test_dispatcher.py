@@ -45,7 +45,7 @@ from mirage.utils.ranges import slice_window, splice_window
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.dispatcher import Dispatcher
+from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.dispatcher.constants import POLICY_WRITE_OPS
 from mirage.workspace.dispatcher.dispatcher import _MountChannel
 from mirage.workspace.mount.mount import MountEntry

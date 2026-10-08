@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { StatPath } from '../../ops/types.ts'
+import type { StatPath } from '../../doors/types.ts'
 import type { FileStat } from '../../types.ts'
 import { isoTimestamp } from '../../utils/dates.ts'
 import { CycleError } from '../../utils/path.ts'

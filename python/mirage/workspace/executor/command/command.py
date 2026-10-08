@@ -41,10 +41,10 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.builtins import registered_spec
 from mirage.commands.spec.flag_view import spread_operands
 from mirage.commands.spec.standard import standard_request
+from mirage.doors.types import NamespaceView, StatPath
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView, StatPath
 from mirage.policy import resolve_limit, resolve_producer
 from mirage.policy.types import HandOff
 from mirage.runtime.routing import RouteDecision

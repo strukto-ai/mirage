@@ -17,10 +17,10 @@ import re
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.usage import usage_hint
 from mirage.context import program_invocation
+from mirage.doors.types import SessionView
 from mirage.io import IOResult
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.errors import ArithError

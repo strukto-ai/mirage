@@ -34,7 +34,7 @@ import {
   sessionVisibility,
   walkProbeFor,
 } from '../../../context/session_context.ts'
-import { pathsScoped } from '../../../ops/namespace_view.ts'
+import { pathsScoped } from '../../../doors/namespace_view.ts'
 import { METADATA_OPS } from '../../../policy/constants.ts'
 import { preVfsGate, type Policies, getOpPolicies } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -43,7 +43,7 @@ import { hiddenUnder, moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../../utils/remnants.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { refuseTaken } from '../../../core/generic/rewrite.ts'
-import type { NamespaceView, StatOverlay } from '../../../ops/types.ts'
+import type { NamespaceView, StatOverlay } from '../../../doors/types.ts'
 
 import {
   FileType,

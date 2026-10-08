@@ -24,11 +24,11 @@ from mirage.context import (
     reset_program_invocation,
     set_program_invocation,
 )
+from mirage.doors.types import SessionView
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.routing import RouteDecision

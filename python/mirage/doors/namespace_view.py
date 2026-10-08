@@ -14,8 +14,7 @@
 
 from collections.abc import Iterable, Sequence
 
-from mirage.ops.config import NamespaceLinks
-from mirage.ops.types import NamespaceView
+from mirage.doors.types import NamespaceLinks, NamespaceView
 from mirage.types import FileStat, FileType, PathSpec, Visibility
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import norm_dir

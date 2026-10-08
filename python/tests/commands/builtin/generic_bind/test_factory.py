@@ -31,7 +31,7 @@ from mirage.commands.builtin.generic_bind.factory import (
     with_slash_guard,
 )
 from mirage.commands.config import CommandIO, CommandOpts
-from mirage.ops.types import LinkView, NamespaceView
+from mirage.doors.types import LinkView, NamespaceView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 

@@ -14,7 +14,7 @@
 
 import { dotglobActive, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
-import type { ChildMounts } from '../ops/types.ts'
+import type { ChildMounts } from '../doors/types.ts'
 import { type FileStat, FileType, PathSpec } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
 import { fnmatch } from './fnmatch.ts'

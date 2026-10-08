@@ -21,12 +21,12 @@ from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
 from mirage.cache.index.store import IndexCacheStore
-from mirage.ops import Ops
 from mirage.shell.constants import BIN_PREFIX
 from mirage.types import KERNEL_BACKENDS, MountBackend, MountMode, ReadSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.files import Files
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.read_policy import check_read_capability
@@ -251,7 +251,7 @@ def prepare_added_mount(
 
 async def unmount(
     registry: MountRegistry,
-    ops: Ops,
+    ops: Files,
     prefix: str,
     is_shutting_down: Callable[[], bool],
     shared_mounts: set[int],
@@ -267,7 +267,7 @@ async def unmount(
 
     Args:
         registry (MountRegistry): the workspace's mount table.
-        ops (Ops): the ops facade to detach the prefix from.
+        ops (Files): the ops facade to detach the prefix from.
         prefix (str): the mount's virtual prefix.
         is_shutting_down: live admission check after asynchronous cleanup.
         shared_mounts: instances owned by another workspace.

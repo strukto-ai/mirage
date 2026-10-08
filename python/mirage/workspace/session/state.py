@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import replace
 
-from mirage.ops.types import SessionView
+from mirage.doors.types import SessionView
 from mirage.policy import Policies, PolicyDenied, pre_session_gate
 from mirage.policy.types import SessionContext
 from mirage.shell.arith import evaluate_arith

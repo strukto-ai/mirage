@@ -62,7 +62,6 @@ from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore
-from mirage.ops import Ops
 from mirage.policy import (
     AskHandler,
     Decisions,
@@ -125,12 +124,13 @@ from mirage.vfs.history import HISTORY_PREFIX, HistoryViewVFS
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.abort import MirageAbortError, run_cancellable
 from mirage.workspace.cli import CLIInstall
-from mirage.workspace.dispatcher import Dispatcher
+from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.documentation.documents import Documents
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.statement import restore_status
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.globs import GlobOptions, resolve_globs
+from mirage.workspace.files import Files
 from mirage.workspace.lookup import lookup, program, program_note, programs
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountEntry, MountRegistry
@@ -474,8 +474,8 @@ class Workspace:
         # and the policy gates fire exactly once, at that door. It runs
         # as the default session, as a bare ``shell`` does, so the
         # default profile confines it too.
-        self._ops = Ops(
-            self._registry.ops_mounts(),
+        self._ops = Files(
+            self._registry.mount_rows(),
             observer=self.observer,
             agent_id=agent_id or "",
             links=self._namespace,
@@ -696,12 +696,11 @@ class Workspace:
         return self._session_mgr.has_managed_env
 
     @property
-    def vfs(self) -> Ops:
+    def vfs(self) -> Files:
         """The op facade: read/write/stat/readdir/... against the mounts.
 
         Named as TypeScript names it (`ws.vfs`), so one host API reads the
-        same in both languages; the `Ops` class name stays, since it is
-        the op vocabulary the dispatcher speaks, not a filesystem.
+        same in both languages.
         """
         return self._ops
 
@@ -872,7 +871,7 @@ class Workspace:
             vfs_ref=vfs_ref,
         )
         prepare_added_mount(self._registry, entry, previous)
-        self._ops.set_mounts(self._registry.ops_mounts())
+        self._ops.set_mounts(self._registry.mount_rows())
         return entry
 
     async def unmount(self, prefix: str) -> None:
@@ -898,7 +897,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         mode = parse_mount_mode(mode)
         self._registry.mount_for_prefix(prefix).mode = mode
-        self._ops.set_mounts(self._registry.ops_mounts())
+        self._ops.set_mounts(self._registry.mount_rows())
 
     def add_fuse_mount(
         self,
@@ -1307,7 +1306,7 @@ class Workspace:
         inside child directories. The default watch runtime attaches
         lazily on first use; call ``attach_watch_runtime`` beforehand
         only to customize it. The str tolerance lives only
-        here, at the consumer boundary (mirroring ``Ops``); the
+        here, at the consumer boundary (mirroring ``Files``); the
         runtime below is PathSpec-only.
 
         Args:
@@ -2448,7 +2447,7 @@ class Session:
         return self._ws.mounts()
 
     @property
-    def vfs(self) -> Ops:
+    def vfs(self) -> Files:
         """The op facade run as this session."""
         if self._id is None:
             return self._ws.vfs

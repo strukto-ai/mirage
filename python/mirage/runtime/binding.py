@@ -18,7 +18,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from mirage.ops.types import NamespaceView, SessionView
+from mirage.doors.types import NamespaceView, SessionView
 from mirage.process.view import ProcessView
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn

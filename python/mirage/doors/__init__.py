@@ -11,26 +11,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-import asyncio
-
-from mirage import MountMode, Workspace
-from mirage.ops import Ops
-from mirage.vfs.ram import RAMVFS
-from mirage.vfs.ram.store import RAMStore
-
-
-def run(coro):
-    return asyncio.run(coro)
-
-
-def make_ops(mode=MountMode.WRITE) -> tuple[Ops, RAMStore]:
-    vfs = RAMVFS()
-    ws = Workspace({"/data/": vfs}, mode=mode)
-    return ws.vfs, vfs._store
-
-
-def make_ops_with_dir(mode=MountMode.WRITE):
-    ops, store = make_ops(mode)
-    asyncio.run(ops.mkdir("/data/dir"))
-    return ops, store

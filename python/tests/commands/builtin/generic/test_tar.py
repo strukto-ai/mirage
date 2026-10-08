@@ -11,7 +11,7 @@ from mirage.commands.builtin.generic.tar import (
     strip_prefix,
     tar,
 )
-from mirage.ops.types import LinkView, MountView
+from mirage.doors.types import LinkView, MountView
 from mirage.types import (
     LINK_TARGET_KEY,
     ContentType,

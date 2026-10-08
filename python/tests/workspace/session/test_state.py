@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage.ops.types import SessionView
+from mirage.doors.types import SessionView
 from mirage.policy import Action, Deny, Policies, Policy, PolicyDenied
 from mirage.policy.types import SessionContext
 from mirage.shell.array import make_array

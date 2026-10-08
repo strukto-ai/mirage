@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LinkView, MountView } from '../../../../ops/types.ts'
+import type { LinkView, MountView } from '../../../../doors/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { fsStrerror, isFsError, walkRefusal } from '../../../../errors/fs.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'

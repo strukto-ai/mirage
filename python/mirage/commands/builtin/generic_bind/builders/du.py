@@ -24,8 +24,8 @@ from mirage.commands.builtin.generic.du import (
 )
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.config import CommandIO, CommandOpts
+from mirage.doors.types import MountView
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountView
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
 from mirage.vfs.types import DuEntries

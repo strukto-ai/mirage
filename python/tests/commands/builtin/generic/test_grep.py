@@ -2,7 +2,7 @@ import pytest
 
 from mirage.commands.builtin.generic.grep import grep_generic, labelled
 from mirage.commands.config import CommandOpts
-from mirage.ops.types import MountView, NamespaceView
+from mirage.doors.types import MountView, NamespaceView
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 

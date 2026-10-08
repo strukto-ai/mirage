@@ -14,8 +14,8 @@
 
 from typing import Any, Callable
 
+from mirage.doors.types import SessionView
 from mirage.io.types import materialize
-from mirage.ops.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import (

@@ -27,7 +27,7 @@ import {
   type LsTimeKind,
 } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import type { ChildMounts, LinkView, MountView, StatPath } from '../../../ops/types.ts'
+import type { ChildMounts, LinkView, MountView, StatPath } from '../../../doors/types.ts'
 import {
   LS_TIME_STYLES,
   STAT_FAILED_KEY,

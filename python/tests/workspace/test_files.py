@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 from dataclasses import replace
 
@@ -19,7 +20,6 @@ import pytest
 
 from mirage import Workspace
 from mirage.context import reset_current_session, set_current_session
-from mirage.ops import Ops
 from mirage.policy import (
     Action,
     Deny,
@@ -30,10 +30,20 @@ from mirage.policy import (
 )
 from mirage.types import FileType, HiddenPaths, MountMode, Visibility
 from mirage.vfs.ram import RAMVFS
+from mirage.vfs.ram.store import RAMStore
 from mirage.workspace import Session
+from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
 
-from .conftest import make_ops, run
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def make_ops(mode=MountMode.WRITE) -> tuple[Files, RAMStore]:
+    vfs = RAMVFS()
+    ws = Workspace({"/data/": vfs}, mode=mode)
+    return ws.vfs, vfs._store
 
 
 class TestMountPrefixes:
@@ -158,7 +168,7 @@ class TestUnlink:
             run(ops.read("/data/dir/f.txt"))
 
 
-def _two_mount_ops() -> Ops:
+def _two_mount_ops() -> Files:
     return Workspace(
         {"/a/": RAMVFS(), "/b/": RAMVFS()}, mode=MountMode.WRITE
     ).vfs
@@ -395,8 +405,8 @@ class _SealInner(Policy):
         return None
 
 
-def _structure_only_ops(policies: list[Policy]) -> Ops:
-    """Ops whose only mount sits below the probed path, so no mount
+def _structure_only_ops(policies: list[Policy]) -> Files:
+    """A facade whose only mount sits below the probed path, so no mount
     serves /data/inner and the answer is namespace structure."""
     return Workspace(
         {"/data/inner/deep/": RAMVFS()},
@@ -420,8 +430,8 @@ class TestStructureFallbackGates:
         assert run(ops.readdir("/data/inner")) == ["/data/inner/deep"]
 
 
-def _granted_child_ops() -> Ops:
-    """Ops with a real mount at /data and a nested one at
+def _granted_child_ops() -> Files:
+    """A facade with a real mount at /data and a nested one at
     /data/inner/deep, for sessions granted only the deep one."""
     return Workspace(
         {"/data/": RAMVFS(), "/data/inner/deep/": RAMVFS()},
@@ -492,7 +502,7 @@ class _DenyEverything(Policy):
 
 
 class TestAttachedOpsOneDoor:
-    """Workspace-attached Ops delegates every op to the dispatcher."""
+    """A workspace-attached Files delegates every op to the dispatcher."""
 
     @pytest.mark.asyncio
     async def test_gates_fire_exactly_once_per_op(self):

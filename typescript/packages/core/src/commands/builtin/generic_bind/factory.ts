@@ -20,7 +20,7 @@ import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_t
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
-import type { ChildMounts, LinkView, NamespaceView } from '../../../ops/types.ts'
+import type { ChildMounts, LinkView, NamespaceView } from '../../../doors/types.ts'
 import { type CommandFn, type Command, command, type CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {

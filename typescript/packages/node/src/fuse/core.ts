@@ -15,7 +15,7 @@
 import { constants as fsConstants } from 'node:fs'
 import { posix } from 'node:path'
 import type { OpRecord } from '@struktoai/mirage-core/observe/record'
-import type { Ops } from '@struktoai/mirage-core/ops/ops'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { ChunkedHandle, FileTable, writeRuns } from '@struktoai/mirage-core/runtime/handles/index'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
 import { FileType } from '@struktoai/mirage-core/types'
@@ -64,7 +64,7 @@ export interface MountCoreOptions {
   /**
    * Bind every op to this session's mount grants. The kernel-tier
    * primitive: bind-mount the tree into a container and the narrowing
-   * travels with it. Enforcement happens inside dispatch/Ops via the
+   * travels with it. Enforcement happens inside dispatch/Files via the
    * session context, so binding at the op entry point is sufficient.
    */
   session?: SessionState
@@ -89,7 +89,7 @@ export interface MountCoreOptions {
  * record; reaching a backend directly would skip the door.
  */
 export class MountCore {
-  readonly ops: Ops
+  readonly ops: Files
   readonly session: SessionState | null
   private readonly now: Date
   private readonly root: string
@@ -112,7 +112,7 @@ export class MountCore {
   private readonly uid: number
   private readonly gid: number
 
-  constructor(ops: Ops, options: MountCoreOptions = {}) {
+  constructor(ops: Files, options: MountCoreOptions = {}) {
     this.ops = ops
     this.now = new Date()
     this.root = options.rootPrefix !== undefined ? rstripSlash(options.rootPrefix) : ''
