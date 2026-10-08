@@ -59,6 +59,7 @@ from mirage.workspace.executor.builtins.exec.constants import (
     TO_STDIN,
     TO_STDOUT,
 )
+from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.builtins.shared import builtin_error
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
@@ -103,27 +104,21 @@ async def handle_exec_command(
         registry (MountRegistry | None): where the head is looked up.
         stdin (ByteSource | None): the shell's standard input, CMD's.
     """
-    words = list(args)
-    clear = False
-    while words and words[0].startswith("-") and words[0] != "-":
-        word = words.pop(0)
-        if word == "--":
-            break
-        for flag in word[1:]:
-            if flag == "c":
-                clear = True
-                continue
-            err = (
-                encode_text(f"mirage: exec: -{flag}: not supported\n")
-                if flag in ("a", "l")
-                else builtin_error("exec", f"-{flag}: invalid option")
-                + encode_text(EXEC_USAGE)
-            )
-            return (
-                None,
-                IOResult(exit_code=2, stderr=err),
-                ExecutionNode(command="exec", exit_code=2, stderr=err),
-            )
+    scan = scan_options(args, "acl")
+    refused = next((f for f in scan.letters if f in "al"), None)
+    if scan.bad is not None or refused is not None:
+        err = (
+            builtin_error("exec", f"{scan.bad}: invalid option")
+            + encode_text(EXEC_USAGE)
+            if scan.bad is not None
+            else encode_text(f"mirage: exec: -{refused}: not supported\n")
+        )
+        return (
+            None,
+            IOResult(exit_code=2, stderr=err),
+            ExecutionNode(command="exec", exit_code=2, stderr=err),
+        )
+    words = scan.operands
     if not words or execute_fn is None or registry is None:
         return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
     head = words[0]
@@ -139,7 +134,7 @@ async def handle_exec_command(
     token = set_program_invocation(session)
     try:
         io = await execute_fn(
-            ("env -i " if clear else "") + line,
+            ("env -i " if "c" in scan.letters else "") + line,
             session_id=session.session_id,
             stdin=stdin,
         )

@@ -19,7 +19,6 @@ from typing import Any
 from mirage.context import clear_program_invocation, reset_program_invocation
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
-from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
@@ -33,20 +32,10 @@ from mirage.shell.variable import ShellVar
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.types import ExecuteNodeFn
-from mirage.workspace.executor.control import UNWINDING, carried
-from mirage.workspace.executor.jobs import run_statement
-from mirage.workspace.executor.statement import (
-    errexit_acts,
-    fd0_binding,
-    finish_statement,
-    land,
-)
+from mirage.workspace.executor.control import execute_body, returning
 from mirage.workspace.executor.traps import (
-    err_trap_armed,
     lift_function_traps,
     restore_function_traps,
-    run_err_trap,
-    run_return_trap,
 )
 from mirage.workspace.session.state import restore_locals
 from mirage.workspace.types import ExecutionNode
@@ -152,79 +141,31 @@ async def run_shell_function(
     if nested is not None:
         execute_node = partial(execute_node, handed=nested)
     try:
-        all_stdout: list[Any] = []
-        merged_io = IOResult()
-        last_exec = ExecutionNode(command=cmd_name, exit_code=0)
-        bound = fd0_binding(session)
-        for cmd in func_body:
-            armed = err_trap_armed(session)
-            try:
-                stdout, io, last_exec = await run_statement(
-                    execute_node,
-                    cmd,
-                    context,
-                    stdin,
-                    bound,
-                    cs,
-                    job_table,
-                    agent_id,
-                    body_handed,
-                    decisions,
-                )
-                # $? tracks each statement inside the body, so a bare
-                # `return` (and mid-function $?) sees the last command.
-                stdout = await finish_statement(stdout, io, session, cmd)
-                if stdout is not None:
-                    all_stdout.append(stdout)
-                merged_io = await merged_io.merge(io)
-                trapped = await run_err_trap(
-                    execute_fn,
-                    cmd,
-                    io.exit_code,
-                    session,
-                    armed,
-                    stdin,
-                    cs,
-                    last_exec,
-                )
-                if trapped:
-                    merged_io = await land(
-                        trapped, sink, all_stdout, merged_io
-                    )
-                    merged_io.exit_code = io.exit_code
-            except ReturnSignal as sig:
-                if sig.stdout is not None:
-                    all_stdout.append(sig.stdout)
-                if sig.stderr:
-                    merged_io = await merged_io.merge(
-                        IOResult(stderr=sig.stderr)
-                    )
-                merged_io.exit_code = sig.exit_code
-                break
-            except UNWINDING as sig:
-                raise await carried(
-                    sig,
-                    async_chain(all_stdout) if all_stdout else None,
-                    merged_io,
-                )
-            if errexit_acts(cmd, io.exit_code, session):
-                merged_io.exit_code = io.exit_code
-                break
-        status = merged_io.exit_code
         try:
-            returned = await run_return_trap(execute_fn, session, stdin, cs)
-        except UNWINDING as sig:
-            raise await carried(
-                sig,
-                async_chain(all_stdout) if all_stdout else None,
-                merged_io,
+            stdout, merged_io, last_exec = await execute_body(
+                execute_node,
+                func_body,
+                context,
+                stdin,
+                cs,
+                job_table,
+                agent_id,
+                body_handed,
+                decisions,
+                execute_fn,
+                sink,
             )
-        if returned:
-            merged_io = await land(returned, sink, all_stdout, merged_io)
-            merged_io.exit_code = status
-        combined = async_chain(all_stdout) if all_stdout else None
+        except ReturnSignal as sig:
+            stdout = sig.stdout
+            merged_io = IOResult(
+                stderr=sig.stderr or None, exit_code=sig.exit_code
+            )
+            last_exec = ExecutionNode(command=cmd_name)
+        stdout, merged_io = await returning(
+            execute_fn, session, stdin, cs, stdout, merged_io, sink
+        )
         last_exec.exit_code = merged_io.exit_code
-        return combined, merged_io, last_exec
+        return stdout, merged_io, last_exec
     except ExitSignal as sig:
         # An `exec` replaced the shell: the actions went with it, so the
         # ones the body took from its caller do not come back.

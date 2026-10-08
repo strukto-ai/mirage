@@ -49,7 +49,12 @@ from mirage.workspace.executor.statement import (
     land,
     record_status,
 )
-from mirage.workspace.executor.traps import err_trap_armed, run_err_trap
+from mirage.workspace.executor.traps import (
+    err_trap_armed,
+    run_err_trap,
+    run_return_trap,
+)
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view, visible_env
 from mirage.workspace.types import ExecutionNode
 
@@ -60,7 +65,7 @@ from mirage.workspace.types import ExecutionNode
 _MAX_WHILE = 10000
 
 
-async def _execute_body(
+async def execute_body(
     execute_node: Callable[..., Any],
     body: list[TSNodeLike],
     context: EvaluationContext,
@@ -71,12 +76,16 @@ async def _execute_body(
     handed: HandOff | None,
     decisions: Decisions | None,
     execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Execute a list of body commands sequentially.
+    """Execute a list of statements in order: a group, a loop or ``if``
+    body, a ``case`` arm, a function body.
 
     A statement ending in ``&`` is launched as a job through
     ``run_statement`` rather than run inline; ``job_table`` and
-    ``agent_id`` are the job plane it needs.
+    ``agent_id`` are the job plane it needs. The ERR action answers a
+    failing statement, its output landed through ``sink`` when the body
+    writes to one, and ``set -e`` stops the list.
     """
     session = context.session
     all_stdout: list[ByteSource | None] = []
@@ -98,22 +107,23 @@ async def _execute_body(
                 handed,
                 decisions,
             )
-            stdout = await finish_statement(stdout, io, session, cmd)
-            all_stdout.append(stdout)
+            all_stdout.append(await finish_statement(stdout, io, session, cmd))
             merged_io = await merged_io.merge(io)
-            trapped = await run_err_trap(
-                execute_fn,
-                cmd,
-                io.exit_code,
-                session,
-                armed,
-                stdin,
-                call_stack,
-                last_exec,
+            merged_io = await land(
+                await run_err_trap(
+                    execute_fn,
+                    cmd,
+                    io.exit_code,
+                    session,
+                    armed,
+                    stdin,
+                    call_stack,
+                    last_exec,
+                ),
+                sink,
+                all_stdout,
+                merged_io,
             )
-            if trapped:
-                merged_io = await land(trapped, None, all_stdout, merged_io)
-                merged_io.exit_code = io.exit_code
         except UNWINDING as sig:
             # The control builtin is a statement the loop leaves through
             # rather than closes, so its own status is recorded here:
@@ -122,7 +132,6 @@ async def _execute_body(
                 record_status(session, sig.io.exit_code)
             raise await carried(sig, _chain_streams(all_stdout), merged_io)
         if errexit_acts(cmd, io.exit_code, session):
-            merged_io.exit_code = io.exit_code
             break
     return _chain_streams(all_stdout), merged_io, last_exec
 
@@ -174,6 +183,43 @@ async def carried(
             else _chain_streams([stdout, sig.stdout])
         )
     return sig
+
+
+async def returning(
+    execute_fn: Callable[..., Any] | None,
+    session: SessionState,
+    stdin: ByteSource | None,
+    call_stack: CallStack,
+    stdout: ByteSource | None,
+    io: IOResult,
+    sink: JobConsole | None = None,
+) -> tuple[ByteSource | None, IOResult]:
+    """What a function or a sourced file gives back as it returns: its
+    output and status, with what its RETURN action wrote after the
+    output. An ``exit`` or ``return`` in the action leaves with that
+    output in front of its own.
+
+    Args:
+        execute_fn (Callable[..., Any] | None): runs the action.
+        session (SessionState): the shell returning.
+        stdin (ByteSource | None): its standard input.
+        call_stack (CallStack): the returning frames.
+        stdout (ByteSource | None): what it wrote.
+        io (IOResult): its result.
+        sink (JobConsole | None): where it writes as it goes, if
+            anywhere.
+    """
+    outputs = [stdout]
+    try:
+        io = await land(
+            await run_return_trap(execute_fn, session, stdin, call_stack),
+            sink,
+            outputs,
+            io,
+        )
+    except UNWINDING as sig:
+        raise await carried(sig, stdout, io)
+    return _chain_streams(outputs), io
 
 
 def ended(sig: Exception) -> IOResult:
@@ -299,7 +345,7 @@ async def handle_if(
             transparent=pipeline_transparent(condition),
         )
         if cond_io.exit_code == 0:
-            return await _execute_body(
+            return await execute_body(
                 execute_node,
                 body,
                 context,
@@ -312,7 +358,7 @@ async def handle_if(
                 execute_fn=execute_fn,
             )
     if else_body is not None:
-        return await _execute_body(
+        return await execute_body(
             execute_node,
             else_body,
             context,
@@ -378,7 +424,7 @@ async def handle_for(
             )
             break
         try:
-            stdout, io, _ = await _execute_body(
+            stdout, io, _ = await execute_body(
                 execute_node,
                 body,
                 context,
@@ -453,7 +499,7 @@ async def _condition_loop(
             hit_limit = False
             break
         try:
-            stdout, io, _ = await _execute_body(
+            stdout, io, _ = await execute_body(
                 execute_node,
                 body,
                 context,
@@ -536,7 +582,7 @@ async def handle_cfor(
                 hit_limit = False
                 break
             try:
-                stdout, io, _ = await _execute_body(
+                stdout, io, _ = await execute_body(
                     execute_node,
                     body,
                     context,
@@ -658,76 +704,38 @@ async def handle_case(
     decisions: Decisions | None = None,
     execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    session = context.session
+    """Run the first arm whose pattern matches ``word``, and after it
+    the arms its terminator reaches: ``;&`` falls into the next arm's
+    body untested, ``;;&`` tests the rest, ``;;`` stops.
+    """
     all_stdout: list[ByteSource | None] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="case", exit_code=0)
-    ran = False
     fallthrough = False
-    bound = fd0_binding(session)
-    stopped = False
     for patterns, body, terminator in items:
         if not (fallthrough or any(fnmatch(word, p) for p in patterns)):
             continue
-        ran = True
-        for stmt in body:
-            armed = err_trap_armed(session)
-            try:
-                stdout, io, last_exec = await run_statement(
-                    execute_node,
-                    stmt,
-                    context,
-                    stdin,
-                    bound,
-                    call_stack,
-                    job_table,
-                    agent_id,
-                    handed,
-                    decisions,
-                )
-                stdout = await finish_statement(stdout, io, session, stmt)
-                if stdout is not None:
-                    all_stdout.append(stdout)
-                merged_io = await merged_io.merge(io)
-                trapped = await run_err_trap(
-                    execute_fn,
-                    stmt,
-                    io.exit_code,
-                    session,
-                    armed,
-                    stdin,
-                    call_stack,
-                    last_exec,
-                )
-                if trapped:
-                    merged_io = await land(
-                        trapped, None, all_stdout, merged_io
-                    )
-                    merged_io.exit_code = io.exit_code
-            except UNWINDING as sig:
-                raise await carried(
-                    sig, _chain_streams(list(all_stdout)), merged_io
-                )
-            if errexit_acts(stmt, io.exit_code, session):
-                merged_io.exit_code = io.exit_code
-                stopped = True
-                break
-        if stopped:
+        try:
+            stdout, io, last_exec = await execute_body(
+                execute_node,
+                body,
+                context,
+                stdin,
+                call_stack,
+                job_table,
+                agent_id,
+                handed,
+                decisions,
+                execute_fn,
+            )
+        except UNWINDING as sig:
+            raise await carried(sig, _chain_streams(all_stdout), merged_io)
+        all_stdout.append(stdout)
+        merged_io = await merged_io.merge(io)
+        fallthrough = terminator == ";&"
+        if context.session.errexit_exiting or terminator not in (";&", ";;&"):
             break
-        if terminator == ";&":
-            # Fall through: run the next arm's body without testing it.
-            fallthrough = True
-            continue
-        # ;;& keeps testing remaining patterns; ;; stops here.
-        fallthrough = False
-        if terminator != ";;&":
-            break
-    if not ran:
-        return None, IOResult(), ExecutionNode(command="case", exit_code=0)
-    if len(all_stdout) == 1:
-        return all_stdout[0], merged_io, last_exec
-    combined = async_chain(all_stdout) if all_stdout else None
-    return combined, merged_io, last_exec
+    return _chain_streams(all_stdout), merged_io, last_exec
 
 
 def _select_menu(words: list[str], columns: str) -> str:
@@ -858,7 +866,7 @@ async def handle_select(
             )
             break
         try:
-            stdout, io, _ = await _execute_body(
+            stdout, io, _ = await execute_body(
                 execute_node,
                 body,
                 context,

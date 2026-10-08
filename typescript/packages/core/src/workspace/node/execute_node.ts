@@ -30,22 +30,13 @@ import type { ProcessSupervisor } from '../../process/supervisor.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
-import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import { makeAbortError, mergeSignals } from '../abort.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { literalText } from '../../shell/parse/names.ts'
 import { BASH_BUILTINS } from '../lookup/constants.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
-import {
-  assignmentStatus,
-  errexitActs,
-  fd0Binding,
-  finishStatement,
-  ignoringErrexit,
-  land,
-  recordStatus,
-} from '../executor/statement.ts'
+import { assignmentStatus, ignoringErrexit, recordStatus } from '../executor/statement.ts'
 import {
   getCaseItems,
   getCaseWord,
@@ -78,8 +69,8 @@ import { expandAndClassify } from '../expand/parts.ts'
 import { assignElement } from '../session/elements.ts'
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
 import {
-  carried,
   type CforEval,
+  executeBody,
   handleCase,
   handleCfor,
   handleFor,
@@ -87,7 +78,6 @@ import {
   handleSelect,
   handleUntil,
   handleWhile,
-  isUnwinding,
 } from '../executor/control.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { handleTest, handleUnset } from '../executor/builtins/index.ts'
@@ -117,9 +107,9 @@ import {
   visibleEnv,
 } from '../session/state.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
-import { drained, runStatement } from '../executor/jobs.ts'
+import { drained } from '../executor/jobs.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
-import { endShell, errTrapArmed, runErrTrap } from '../executor/traps.ts'
+import { endShell } from '../executor/traps.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -1355,60 +1345,18 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.COMPOUND) {
-    const allStdout: ByteSource[] = []
-    let mergedIo = new IOResult()
-    let lastExec = new ExecutionNode({ command: '{}', exitCode: 0 })
-    const bound = fd0Binding(session)
-    for (const child of node.namedChildren) {
-      if (child.type === NT.COMMENT) continue
-      const armed = errTrapArmed(session)
-      let io: IOResult
-      try {
-        const [rawStdout, statementIo, execNode] = await runStatement(
-          stream,
-          child,
-          context,
-          stdin,
-          bound,
-          callStack,
-          jobTable,
-          agentId,
-          deps.handed ?? null,
-          registry.decisions,
-        )
-        io = statementIo
-        lastExec = execNode
-        const stdout = await finishStatement(rawStdout, io, session, child)
-        if (stdout !== null) allStdout.push(stdout)
-        mergedIo = await mergedIo.merge(io)
-        const trapped = await runErrTrap(
-          executeFn,
-          child,
-          io.exitCode,
-          session,
-          armed,
-          stdin,
-          callStack,
-          execNode,
-        )
-        if (trapped.length > 0) {
-          mergedIo = await land(trapped, null, allStdout, mergedIo)
-          mergedIo.exitCode = io.exitCode
-        }
-      } catch (sig) {
-        if (!isUnwinding(sig)) throw sig
-        throw await carried(sig, allStdout.length > 0 ? asyncChain(allStdout) : null, mergedIo)
-      }
-      if (errexitActs(child, io.exitCode, session)) {
-        mergedIo.exitCode = io.exitCode
-        break
-      }
-    }
-    if (allStdout.length === 1 && allStdout[0] !== undefined) {
-      return [allStdout[0], mergedIo, lastExec]
-    }
-    const combined = allStdout.length > 0 ? asyncChain(allStdout) : null
-    return [combined, mergedIo, lastExec]
+    return executeBody(
+      stream,
+      node.namedChildren.filter((child) => child.type !== NT.COMMENT),
+      context,
+      stdin,
+      callStack,
+      jobTable,
+      agentId,
+      deps.handed ?? null,
+      registry.decisions,
+      executeFn,
+    )
   }
 
   if (kind === NodeKind.IF) {

@@ -20,12 +20,15 @@ from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import Channel
 from mirage.shell.constants import ERR_TRAP_EXEMPT_TYPES
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
-from mirage.workspace.executor.statement import Written, record_status
+from mirage.workspace.executor.statement import (
+    Written,
+    as_written,
+    record_status,
+)
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -191,13 +194,11 @@ async def run_err_trap(
     record_status(session, status, transparent=True)
     session.err_trap_running = True
     try:
-        written = await _run_action(
-            execute_fn, action, session, stdin, call_stack
+        return await _run_action(
+            execute_fn, action, session, status, stdin, call_stack
         )
     finally:
         session.err_trap_running = False
-    record_status(session, status)
-    return written
 
 
 def _arithmetic(node: TSNodeLike) -> bool:
@@ -248,27 +249,31 @@ async def run_return_trap(
         or session.errexit_exiting
     ):
         return []
-    status = session.last_exit_code
     session.return_trap_running = True
     try:
-        written = await _run_action(
-            execute_fn, action, session, stdin, call_stack
+        return await _run_action(
+            execute_fn,
+            action,
+            session,
+            session.last_exit_code,
+            stdin,
+            call_stack,
         )
     finally:
         session.return_trap_running = False
-    record_status(session, status)
-    return written
 
 
 async def _run_action(
     execute_fn: Callable[..., Any],
     action: str,
     session: SessionState,
+    status: int,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
 ) -> list[Written]:
     """Run a trap action as a line of the shell and collect its output.
-    What the action runs in a test or after ``!`` leaves the ``set -e``
+    ``$?`` is ``status`` again after it, whatever the action returns, and
+    what the action runs in a test or after ``!`` leaves the ``set -e``
     answer for the statement it answers as it was.
 
     Args:
@@ -276,6 +281,7 @@ async def _run_action(
             frames.
         action (str): the action's text.
         session (SessionState): the shell running it.
+        status (int): the ``$?`` it leaves.
         stdin (ByteSource | None): the shell's standard input.
         call_stack (CallStack | None): the frames it runs in.
     """
@@ -289,16 +295,10 @@ async def _run_action(
         )
     finally:
         session.errexit_immune = immune
-    stdout = await materialize(io.stdout) or b""
-    stderr = await materialize(io.stderr) or b""
-    return [
-        (channel, data, False)
-        for channel, data in (
-            (Channel.STDOUT, stdout),
-            (Channel.STDERR, stderr),
-        )
-        if data
-    ]
+    record_status(session, status)
+    return as_written(
+        await materialize(io.stdout), await materialize(io.stderr)
+    )
 
 
 async def run_exit_trap(

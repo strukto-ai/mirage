@@ -21,8 +21,7 @@ import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecutionNode } from '../types.ts'
-import { recordStatus, type Written } from './statement.ts'
-import { Channel } from '../../shell/console/index.ts'
+import { asWritten, recordStatus, type Written } from './statement.ts'
 import { ERR_TRAP_EXEMPT_TYPES } from '../../shell/constants.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 
@@ -159,14 +158,11 @@ export async function runErrTrap(
   // has not recorded it yet.
   recordStatus(session, status, true)
   session.errTrapRunning = true
-  let written: Written[]
   try {
-    written = await runAction(executeFn, action, session, stdin, callStack)
+    return await runAction(executeFn, action, session, status, stdin, callStack)
   } finally {
     session.errTrapRunning = false
   }
-  recordStatus(session, status)
-  return written
 }
 
 /** Whether a statement is `(( ... ))`, which the grammar parses as a
@@ -199,27 +195,25 @@ export async function runReturnTrap(
     session.errexitExiting
   )
     return []
-  const status = session.lastExitCode
   session.returnTrapRunning = true
-  let written: Written[]
   try {
-    written = await runAction(executeFn, action, session, stdin, callStack)
+    return await runAction(executeFn, action, session, session.lastExitCode, stdin, callStack)
   } finally {
     session.returnTrapRunning = false
   }
-  recordStatus(session, status)
-  return written
 }
 
 /**
- * Run a trap action as a line of the shell and collect its output. What the
- * action runs in a test or after `!` leaves the `set -e` answer for the
- * statement it answers as it was.
+ * Run a trap action as a line of the shell and collect its output. `$?` is
+ * `status` again after it, whatever the action returns, and what the action
+ * runs in a test or after `!` leaves the `set -e` answer for the statement it
+ * answers as it was.
  */
 async function runAction(
   executeFn: ExecuteStringFn,
   action: string,
   session: SessionState,
+  status: number,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Written[]> {
@@ -235,12 +229,8 @@ async function runAction(
   } finally {
     session.errexitImmune = immune
   }
-  const stdout = await materialize(io.stdout)
-  const stderr = await io.materializeStderr()
-  const written: Written[] = []
-  if (stdout.byteLength > 0) written.push([Channel.STDOUT, stdout, false])
-  if (stderr.byteLength > 0) written.push([Channel.STDERR, stderr, false])
-  return written
+  recordStatus(session, status)
+  return asWritten(await materialize(io.stdout), await io.materializeStderr())
 }
 
 /**

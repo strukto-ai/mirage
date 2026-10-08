@@ -18,11 +18,10 @@ from typing import Any
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
-from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import Channel, JobConsole
+from mirage.shell.console import JobConsole
 from mirage.shell.errors import ReturnSignal
 from mirage.types import PathSpec, word_text
 from mirage.workspace.executor.builtins.scope import _scope_path
@@ -32,8 +31,7 @@ from mirage.workspace.executor.builtins.script.script import (
     script_error,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.executor.control import UNWINDING, carried
-from mirage.workspace.executor.traps import run_return_trap
+from mirage.workspace.executor.control import returning
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     positional_params,
@@ -123,22 +121,9 @@ async def handle_source(
                 exit_code=sig.exit_code,
             )
         # The RETURN action runs as the file returns, in its frame.
-        try:
-            returned = await run_return_trap(execute_fn, session, stdin, cs)
-        except UNWINDING as sig:
-            raise await carried(sig, io.stdout, io)
-        if returned:
-            out = b"".join(d for c, d, _ in returned if c == Channel.STDOUT)
-            err = b"".join(d for c, d, _ in returned if c == Channel.STDERR)
-            io = IOResult(
-                stdout=async_chain([io.stdout, out or None]),
-                stderr=(await io.materialize_stderr()) + err or None,
-                exit_code=io.exit_code,
-                reads=io.reads,
-                writes=io.writes,
-                cache=io.cache,
-                refusal=io.refusal,
-            )
+        stdout, io = await returning(
+            execute_fn, session, stdin, cs, io.stdout, io
+        )
     finally:
         frame = cs.pop()
         if session.function_names is not None:
@@ -146,7 +131,7 @@ async def handle_source(
         if not args:
             set_positional_params(session, cs, frame.positional)
     return (
-        io.stdout,
+        stdout,
         io,
         ExecutionNode(command=f"source {raw}", exit_code=io.exit_code),
     )

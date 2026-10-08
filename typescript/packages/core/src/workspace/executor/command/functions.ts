@@ -19,7 +19,6 @@ import type { ParseScope } from '../../../shell/parse/scope.ts'
 import type { ShellVar } from '../../../shell/variable.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import { errexitActs, fd0Binding, finishStatement, land, type Written } from '../statement.ts'
 import { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -28,22 +27,14 @@ import { wordText } from '../../../types.ts'
 import { restoreLocals } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { share } from '../../../io/async_line_iterator.ts'
-import { asyncChain } from '../../../io/stream.ts'
-import { runStatement } from '../jobs.ts'
 import type { ExecuteNodeFn } from './types.ts'
 import type { JobTable } from '../../../shell/job_table/index.ts'
 
 import type { HandOff } from '../../../policy/types.ts'
 import type { Decisions } from '../../../policy/decisions.ts'
 import { ExitSignal, ReturnSignal } from '../../../shell/errors.ts'
-import { carried, isUnwinding } from '../control.ts'
-import {
-  errTrapArmed,
-  liftFunctionTraps,
-  restoreFunctionTraps,
-  runErrTrap,
-  runReturnTrap,
-} from '../traps.ts'
+import { executeBody, returning } from '../control.ts'
+import { liftFunctionTraps, restoreFunctionTraps } from '../traps.ts'
 import type { ExecuteStringFn } from '../builtins/types.ts'
 import { runAsShell } from '../../../context/session_context.ts'
 import type { Result } from './types.ts'
@@ -94,10 +85,6 @@ export async function executeShellFunction(
   const outerLocals = session.localVars
   session.localVars = savedLocals
   session.localFrames.push(savedLocals)
-  const allStdout: (ByteSource | null)[] = []
-  let mergedIo = new IOResult()
-  let lastExec = new ExecutionNode({ command: cmdName, exitCode: 0 })
-  const bound = fd0Binding(session)
   // The body is parsed again from its source, so its rows restart at 0;
   // it reads aliases at its definition, or as a parse of its own when it
   // came from a stored session.
@@ -118,82 +105,49 @@ export async function executeShellFunction(
     handed !== null && origin !== null ? { claimed: [], parent: handed, origin } : null
   const bodyHanded = nested ?? handed
 
+  const run: ExecuteNodeFn =
+    sink === undefined && nested === null
+      ? executeNode
+      : (n, s, i, c, opts) =>
+          executeNode(n, s, i, c, {
+            ...(sink === undefined ? {} : { sink }),
+            ...(nested === null ? {} : { handed: nested }),
+            ...opts,
+          })
+
   try {
     // The body is shell code: the builtins it runs are the shell's,
     // whatever `xargs` or `env` marked the line that called it.
-    await runAsShell(async () => {
-      for (const cmd of body) {
-        const armed = errTrapArmed(session)
-        try {
-          const cmdNode = cmd
-          const [rawStdout, io, execNode] = await runStatement(
-            sink === undefined && nested === null
-              ? executeNode
-              : (n, s, i, c, opts) =>
-                  executeNode(n, s, i, c, {
-                    ...(sink === undefined ? {} : { sink }),
-                    ...(nested === null ? {} : { handed: nested }),
-                    ...opts,
-                  }),
-            cmdNode,
-            context,
-            bodyStdin,
-            bound,
-            cs,
-            jobTable,
-            agentId,
-            bodyHanded,
-            decisions,
-          )
-          // $? tracks each statement inside the body, so a bare `return`
-          // (and mid-function $?) sees the last command.
-          const stdout = await finishStatement(rawStdout, io, session, cmdNode)
-          if (stdout !== null) allStdout.push(stdout)
-          mergedIo = await mergedIo.merge(io)
-          lastExec = execNode
-          const trapped = await runErrTrap(
-            executeFn,
-            cmdNode,
-            io.exitCode,
-            session,
-            armed,
-            bodyStdin,
-            cs,
-            execNode,
-          )
-          if (trapped.length > 0) {
-            mergedIo = await land(trapped, sink ?? null, allStdout, mergedIo)
-            mergedIo.exitCode = io.exitCode
-          }
-          if (errexitActs(cmdNode, io.exitCode, session)) {
-            mergedIo.exitCode = io.exitCode
-            break
-          }
-        } catch (err) {
-          if (err instanceof ReturnSignal) {
-            if (err.stdout !== null) allStdout.push(err.stdout)
-            if (err.stderr.length > 0) {
-              mergedIo = await mergedIo.merge(new IOResult({ stderr: err.stderr }))
-            }
-            mergedIo.exitCode = err.exitCode
-            break
-          }
-          if (!isUnwinding(err)) throw err
-          throw await carried(err, allStdout.length > 0 ? asyncChain(allStdout) : null, mergedIo)
-        }
-      }
-      const status = mergedIo.exitCode
-      let returned: Written[]
+    return await runAsShell(async (): Promise<Result> => {
+      let stdout: ByteSource | null
+      let io: IOResult
+      let lastExec: ExecutionNode
       try {
-        returned = await runReturnTrap(executeFn, session, bodyStdin, cs)
+        ;[stdout, io, lastExec] = await executeBody(
+          run,
+          body,
+          context,
+          bodyStdin,
+          cs,
+          jobTable,
+          agentId,
+          bodyHanded,
+          decisions,
+          executeFn,
+          sink ?? null,
+        )
       } catch (err) {
-        if (!isUnwinding(err)) throw err
-        throw await carried(err, allStdout.length > 0 ? asyncChain(allStdout) : null, mergedIo)
+        if (!(err instanceof ReturnSignal)) throw err
+        stdout = err.stdout
+        io = new IOResult({
+          stderr: err.stderr.byteLength > 0 ? err.stderr : null,
+          exitCode: err.exitCode,
+        })
+        lastExec = new ExecutionNode({ command: cmdName })
       }
-      if (returned.length > 0) {
-        mergedIo = await land(returned, sink ?? null, allStdout, mergedIo)
-        mergedIo.exitCode = status
-      }
+      ;[stdout, io] = await returning(executeFn, session, bodyStdin, cs, stdout, io, sink ?? null)
+      lastExec.exitCode = io.exitCode
+      return [stdout, io, lastExec]
     })
   } catch (err) {
     // An `exec` replaced the shell: the actions went with it, so the ones
@@ -211,8 +165,4 @@ export async function executeShellFunction(
     session.localFrames.pop()
     session.localVars = outerLocals
   }
-
-  const combined = allStdout.length > 0 ? asyncChain(allStdout) : null
-  lastExec.exitCode = mergedIo.exitCode
-  return [combined, mergedIo, lastExec]
 }

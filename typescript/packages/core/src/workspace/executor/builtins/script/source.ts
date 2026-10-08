@@ -13,12 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ByteSource, IOResult } from '../../../../io/types.ts'
-import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
-import { concat } from '../../../../io/cachable_iterator.ts'
-import { asyncChain } from '../../../../io/stream.ts'
-import { runReturnTrap } from '../../traps.ts'
-import { carried, isUnwinding } from '../../control.ts'
-import type { Written } from '../../statement.ts'
+import type { JobConsole } from '../../../../shell/console/index.ts'
+import { returning } from '../../control.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
@@ -73,6 +69,7 @@ export async function handleSource(
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()
   let io: IOResult
+  let stdout: ByteSource | null
   try {
     try {
       io = await executeFn(script, {
@@ -90,33 +87,13 @@ export async function handleSource(
       })
     }
     // The RETURN action runs as the file returns, in its frame.
-    let returned: Written[]
-    try {
-      returned = await runReturnTrap(executeFn, session, stdin, cs)
-    } catch (err) {
-      if (isUnwinding(err)) throw await carried(err, io.stdout, io)
-      throw err
-    }
-    if (returned.length > 0) {
-      const out = concat(returned.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d))
-      const err = concat(returned.filter(([c]) => c === Channel.STDERR).map(([, d]) => d))
-      const stderr = concat([await io.materializeStderr(), err])
-      io = new IOResult({
-        stdout: asyncChain([io.stdout, out]),
-        stderr: stderr.byteLength > 0 ? stderr : null,
-        exitCode: io.exitCode,
-        reads: io.reads,
-        writes: io.writes,
-        cache: io.cache,
-        refusal: io.refusal,
-      })
-    }
+    ;[stdout, io] = await returning(executeFn, session, stdin, cs, io.stdout, io)
   } finally {
     const frame = cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
     if (args.length === 0) setPositionalParams(session, cs, frame.positional)
   }
-  return [io.stdout, io, new ExecutionNode({ command: `source ${raw}`, exitCode: io.exitCode })]
+  return [stdout, io, new ExecutionNode({ command: `source ${raw}`, exitCode: io.exitCode })]
 }
 
 /**

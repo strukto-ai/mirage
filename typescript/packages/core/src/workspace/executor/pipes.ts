@@ -25,6 +25,7 @@ import { IOResult, materialize, settled } from '../../io/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { divertStatement } from './builtins/exec/index.ts'
 import {
+  asWritten,
   carryStatus,
   errexitActs,
   fd0Binding,
@@ -32,9 +33,9 @@ import {
   ignoringErrexit,
   land,
   recordStatus,
+  recording,
   statementOutput,
   statementStdin,
-  type Written,
 } from './statement.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
@@ -56,7 +57,7 @@ import type { HandOff } from '../../policy/types.ts'
 
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
-import { ENCLOSING, Recorder } from '../../shell/descriptors.ts'
+import { Recorder } from '../../shell/descriptors.ts'
 import { Channel } from '../../shell/console/types.ts'
 
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
@@ -340,25 +341,25 @@ export async function handleConnection(
   const rightBytes = await materialize(rightStdout)
   let merged = await leftIo.merge(rightIo)
   const outputs: (ByteSource | null)[] = [leftBytes, rightBytes]
-  let trapped: Written[]
   try {
-    trapped = await runErrTrap(
-      executeFn,
-      right,
-      rightIo.exitCode,
-      session,
-      armed,
-      stdin,
-      callStack,
-      rightExec,
+    merged = await land(
+      await runErrTrap(
+        executeFn,
+        right,
+        rightIo.exitCode,
+        session,
+        armed,
+        stdin,
+        callStack,
+        rightExec,
+      ),
+      null,
+      outputs,
+      merged,
     )
   } catch (err) {
     if (isUnwinding(err)) throw await carried(err, asyncChain(outputs), merged)
     throw err
-  }
-  if (trapped.length > 0) {
-    merged = await land(trapped, null, outputs, merged)
-    merged.exitCode = rightIo.exitCode
   }
   const combined = asyncChain(outputs)
   return [
@@ -499,80 +500,46 @@ export async function handleSubshell(
       continue
     }
     i += 1
-    let stdout: ByteSource | null
-    let io: IOResult
-    let childExec: ExecutionNode
     const recorder = new Recorder()
-    const jobs = session.jobOutput
-    const held = jobs.recorder
+    let io: IOResult
     try {
       const childStdin = statementStdin(session, stdin, bound)
-      jobs.recorder = recorder
-      try {
-        ;[stdout, io, childExec] = await ENCLOSING.run(recorder, () =>
-          executeNode(child, context, childStdin, callStack, { sink: recorder }),
-        )
-      } finally {
-        jobs.recorder = held
-      }
+      let stdout: ByteSource | null
+      ;[stdout, io, lastExec] = await recording(session, recorder, () =>
+        executeNode(child, context, childStdin, callStack, { sink: recorder }),
+      )
+      stdout = await finishStatement(stdout, io, session, child, lastExec)
+      const written = await divertStatement(
+        dispatch,
+        session,
+        await statementOutput(recorder, stdout, io, session.terminal, sink),
+        io,
+        child,
+        lastExec.command ?? '',
+      )
+      mergedIo = await land(written, sink, allStdout, mergedIo)
+      mergedIo = await mergedIo.merge(io)
+      mergedIo = await land(
+        await runErrTrap(runAction, child, io.exitCode, session, armed, stdin, callStack, lastExec),
+        sink,
+        allStdout,
+        mergedIo,
+      )
     } catch (err) {
       if (!(err instanceof ExitSignal || err instanceof ReturnSignal)) throw err
       ;[mergedIo, lastExec] = await subshellEnded(err, recorder, session, sink, allStdout, mergedIo)
       break
     }
-    stdout = await finishStatement(stdout, io, session, child, childExec)
-    const written = await divertStatement(
-      dispatch,
-      session,
-      await statementOutput(recorder, stdout, io, session.terminal, sink),
-      io,
-      child,
-      childExec.command ?? '',
-    )
-    mergedIo = await land(written, sink, allStdout, mergedIo)
-    mergedIo = await mergedIo.merge(io)
-    lastExec = childExec
-    let trapped: Written[]
-    try {
-      trapped = await runErrTrap(
-        runAction,
-        child,
-        io.exitCode,
-        session,
-        armed,
-        stdin,
-        callStack,
-        childExec,
-      )
-    } catch (err) {
-      if (!(err instanceof ExitSignal || err instanceof ReturnSignal)) throw err
-      ;[mergedIo, lastExec] = await subshellEnded(
-        err,
-        new Recorder(),
-        session,
-        sink,
-        allStdout,
-        mergedIo,
-      )
-      break
-    }
-    if (trapped.length > 0) {
-      mergedIo = await land(trapped, sink, allStdout, mergedIo)
-      mergedIo.exitCode = io.exitCode
-    }
-    if (errexitActs(child, io.exitCode, session)) {
-      mergedIo.exitCode = io.exitCode
-      break
-    }
+    if (errexitActs(child, io.exitCode, session)) break
   }
   const cleanup = await runExitTrap(runAction, session, mergedIo.exitCode, stdin, callStack)
   if (cleanup !== null) {
-    const written: Written[] = []
-    const out = await cleanup.materializeStdout()
-    const err = await cleanup.materializeStderr()
-    if (out.byteLength > 0) written.push([Channel.STDOUT, out, false])
-    if (err.byteLength > 0) written.push([Channel.STDERR, err, false])
-    mergedIo = await land(written, sink, allStdout, mergedIo)
+    mergedIo = await land(
+      asWritten(await cleanup.materializeStdout(), await cleanup.materializeStderr()),
+      sink,
+      allStdout,
+      mergedIo,
+    )
     mergedIo.exitCode = cleanup.exitCode
     lastExec = new ExecutionNode({ command: '()', exitCode: cleanup.exitCode })
   }

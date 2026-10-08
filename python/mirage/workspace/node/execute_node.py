@@ -29,7 +29,6 @@ from mirage.context import (
 )
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
-from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import HandOff, PolicyDenied
@@ -76,8 +75,7 @@ from mirage.workspace.executor.builtins import handle_test, handle_unset
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
 from mirage.workspace.executor.builtins.shared import is_valid_name
 from mirage.workspace.executor.control import (
-    UNWINDING,
-    carried,
+    execute_body,
     handle_case,
     handle_cfor,
     handle_for,
@@ -86,7 +84,7 @@ from mirage.workspace.executor.control import (
     handle_until,
     handle_while,
 )
-from mirage.workspace.executor.jobs import drained, run_statement
+from mirage.workspace.executor.jobs import drained
 from mirage.workspace.executor.pipes import (
     handle_connection,
     handle_pipe,
@@ -95,18 +93,10 @@ from mirage.workspace.executor.pipes import (
 from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.executor.statement import (
     assignment_status,
-    errexit_acts,
-    fd0_binding,
-    finish_statement,
     ignoring_errexit,
-    land,
     record_status,
 )
-from mirage.workspace.executor.traps import (
-    end_shell,
-    err_trap_armed,
-    run_err_trap,
-)
+from mirage.workspace.executor.traps import end_shell
 from mirage.workspace.expand import (
     expand_and_classify,
     expand_node,
@@ -1433,55 +1423,18 @@ async def _execute_node(
 
     # ── compound statement ({ ... }) ───────────
     if kind == NodeKind.COMPOUND:
-        all_stdout: list[Any] = []
-        merged_io = IOResult()
-        last_exec = ExecutionNode(command="{}", exit_code=0)
-        bound = fd0_binding(session)
-        for child in node.named_children:
-            if child.type == NT.COMMENT:
-                continue
-            armed = err_trap_armed(session)
-            try:
-                stdout, io, last_exec = await run_statement(
-                    stream,
-                    child,
-                    context,
-                    stdin,
-                    bound,
-                    cs,
-                    job_table,
-                    agent_id,
-                    handed,
-                    registry.decisions,
-                )
-                stdout = await finish_statement(stdout, io, session, child)
-                if stdout is not None:
-                    all_stdout.append(stdout)
-                merged_io = await merged_io.merge(io)
-                trapped = await run_err_trap(
-                    execute_fn,
-                    child,
-                    io.exit_code,
-                    session,
-                    armed,
-                    stdin,
-                    cs,
-                    last_exec,
-                )
-                if trapped:
-                    merged_io = await land(
-                        trapped, None, all_stdout, merged_io
-                    )
-                    merged_io.exit_code = io.exit_code
-            except UNWINDING as sig:
-                raise await carried(sig, async_chain(all_stdout), merged_io)
-            if errexit_acts(child, io.exit_code, session):
-                merged_io.exit_code = io.exit_code
-                break
-        if len(all_stdout) == 1:
-            return all_stdout[0], merged_io, last_exec
-        combined = async_chain(all_stdout) if all_stdout else None
-        return combined, merged_io, last_exec
+        return await execute_body(
+            stream,
+            [c for c in node.named_children if c.type != NT.COMMENT],
+            context,
+            stdin,
+            cs,
+            job_table,
+            agent_id,
+            handed,
+            registry.decisions,
+            execute_fn,
+        )
 
     # ── if ──────────────────────────────────────
     if kind == NodeKind.IF:

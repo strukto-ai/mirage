@@ -40,7 +40,7 @@ from mirage.shell.constants import (
     FORK_FAILED,
     FORK_FAILED_STATUS,
 )
-from mirage.shell.descriptors import ENCLOSING, Recorder
+from mirage.shell.descriptors import Recorder
 from mirage.shell.errors import ExitSignal, PipeClosed, ReturnSignal
 from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.types import NodeType as NT
@@ -51,6 +51,7 @@ from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.control import UNWINDING, carried, ended
 from mirage.workspace.executor.jobs import handle_background, pump
 from mirage.workspace.executor.statement import (
+    as_written,
     carry_status,
     errexit_acts,
     fd0_binding,
@@ -58,6 +59,7 @@ from mirage.workspace.executor.statement import (
     ignoring_errexit,
     land,
     record_status,
+    recording,
     statement_output,
     statement_stdin,
 )
@@ -326,24 +328,25 @@ async def handle_connection(
     merged = await left_io.merge(right_io)
     outputs: list[ByteSource | None] = [left_bytes, right_bytes]
     try:
-        trapped = await run_err_trap(
-            execute_fn,
-            right,
-            right_io.exit_code,
-            session,
-            armed,
-            stdin,
-            call_stack,
-            right_exec,
+        merged = await land(
+            await run_err_trap(
+                execute_fn,
+                right,
+                right_io.exit_code,
+                session,
+                armed,
+                stdin,
+                call_stack,
+                right_exec,
+            ),
+            None,
+            outputs,
+            merged,
         )
     except UNWINDING as sig:
         raise await carried(sig, async_chain(outputs), merged)
-    if trapped:
-        merged = await land(trapped, None, outputs, merged)
-        merged.exit_code = right_io.exit_code
-    combined = async_chain(outputs)
     return (
-        combined,
+        async_chain(outputs),
         merged,
         ExecutionNode(
             op=str(op), exit_code=merged.exit_code, children=children
@@ -496,74 +499,62 @@ async def handle_subshell(
             i += 2
             continue
         i += 1
-        child_stdin = statement_stdin(session, stdin, bound)
         recorder = Recorder()
-        enclosing = ENCLOSING.set(recorder)
-        jobs = session.job_output
-        held = jobs.recorder
         try:
-            jobs.recorder = recorder
-            try:
+            with recording(session, recorder):
                 stdout, io, last_exec = await execute_node(
-                    child, context, child_stdin, call_stack, sink=recorder
+                    child,
+                    context,
+                    statement_stdin(session, stdin, bound),
+                    call_stack,
+                    sink=recorder,
                 )
-            finally:
-                jobs.recorder = held
+            stdout = await finish_statement(
+                stdout, io, session, child, last_exec
+            )
+            written = await divert_statement(
+                dispatch,
+                session,
+                await statement_output(
+                    recorder, stdout, io, session.terminal, sink
+                ),
+                io,
+                child,
+                last_exec.command or "",
+            )
+            merged_io = await land(written, sink, all_stdout, merged_io)
+            merged_io = await merged_io.merge(io)
+            merged_io = await land(
+                await run_err_trap(
+                    execute_fn,
+                    child,
+                    io.exit_code,
+                    session,
+                    armed,
+                    stdin,
+                    call_stack,
+                    last_exec,
+                ),
+                sink,
+                all_stdout,
+                merged_io,
+            )
         except (ExitSignal, ReturnSignal) as sig:
             merged_io, last_exec = await _subshell_ended(
                 sig, recorder, session, sink, all_stdout, merged_io
             )
             break
-        finally:
-            ENCLOSING.reset(enclosing)
-        stdout = await finish_statement(stdout, io, session, child, last_exec)
-        written = await divert_statement(
-            dispatch,
-            session,
-            await statement_output(
-                recorder, stdout, io, session.terminal, sink
-            ),
-            io,
-            child,
-            last_exec.command or "",
-        )
-        merged_io = await land(written, sink, all_stdout, merged_io)
-        merged_io = await merged_io.merge(io)
-        try:
-            trapped = await run_err_trap(
-                execute_fn,
-                child,
-                io.exit_code,
-                session,
-                armed,
-                stdin,
-                call_stack,
-                last_exec,
-            )
-        except (ExitSignal, ReturnSignal) as sig:
-            merged_io, last_exec = await _subshell_ended(
-                sig, Recorder(), session, sink, all_stdout, merged_io
-            )
-            break
-        if trapped:
-            merged_io = await land(trapped, sink, all_stdout, merged_io)
-            merged_io.exit_code = io.exit_code
         if errexit_acts(child, io.exit_code, session):
-            merged_io.exit_code = io.exit_code
             break
     cleanup = await run_exit_trap(
         execute_fn, session, merged_io.exit_code, stdin, call_stack
     )
     if cleanup is not None:
         merged_io = await land(
-            [
-                (channel, data, False)
-                for channel, data in (
-                    (Channel.STDOUT, await cleanup.materialize_stdout()),
-                    (Channel.STDERR, await cleanup.materialize_stderr()),
-                )
-                if data
-            ],
+            as_written(
+                await cleanup.materialize_stdout(),
+                await cleanup.materialize_stderr(),
+            ),
             sink,
             all_stdout,
             merged_io,

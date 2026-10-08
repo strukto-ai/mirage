@@ -56,6 +56,7 @@ import { programHead } from '../../find_action_dispatch.ts'
 import { clearTraps } from '../../traps.ts'
 import { builtinError } from '../shared.ts'
 import { EXEC_USAGE } from './constants.ts'
+import { scanOptions } from '../getopt.ts'
 
 /**
  * The `exec` builtin without redirects. Bare `exec` is a no-op that
@@ -77,33 +78,27 @@ export async function handleExecCommand(
   registry: MountRegistry | null = null,
   stdin: ByteSource | null = null,
 ): Promise<Result> {
-  const words = [...args]
-  let clear = false
-  for (let word = words[0]; word?.startsWith('-') === true && word !== '-'; word = words[0]) {
-    words.shift()
-    if (word === '--') break
-    for (const flag of word.slice(1)) {
-      if (flag === 'c') {
-        clear = true
-        continue
-      }
-      const err =
-        flag === 'a' || flag === 'l'
-          ? encodeText(`mirage: exec: -${flag}: not supported\n`)
-          : concat([builtinError('exec', `-${flag}: invalid option`), encodeText(EXEC_USAGE)])
-      return [
-        null,
-        new IOResult({ exitCode: 2, stderr: err }),
-        new ExecutionNode({ command: 'exec', exitCode: 2, stderr: err }),
-      ]
-    }
+  const scan = scanOptions(args, 'acl')
+  const refused = scan.letters.find((f) => f === 'a' || f === 'l')
+  if (scan.bad !== null || refused !== undefined) {
+    const err =
+      scan.bad !== null
+        ? concat([builtinError('exec', `${scan.bad}: invalid option`), encodeText(EXEC_USAGE)])
+        : encodeText(`mirage: exec: -${refused ?? ''}: not supported\n`)
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'exec', exitCode: 2, stderr: err }),
+    ]
   }
+  const words = scan.operands
   const head = words[0]
   if (head === undefined || executeFn === null || registry === null)
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
   const [missing, shadowed] = await programHead(head, session, registry, session.cwd, null)
   if (missing) throw new ExitSignal(127, builtinError('exec', `${head}: not found`))
-  const line = (clear ? 'env -i ' : '') + (shadowed ? 'command ' : '') + shellJoin(words)
+  const line =
+    (scan.letters.includes('c') ? 'env -i ' : '') + (shadowed ? 'command ' : '') + shellJoin(words)
   clearTraps(session)
   const io = await runAsProgram(session, () =>
     executeFn(line, { sessionId: session.sessionId, stdin }),

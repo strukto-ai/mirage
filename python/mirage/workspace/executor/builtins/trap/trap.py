@@ -41,11 +41,7 @@ def event_of(spec: str) -> TrapEvent | None:
             return TrapEvent.EXIT
         return TrapEvent.OTHER if number <= SIGNAL_MAX else None
     name = spec.upper()
-    if name in (
-        TrapEvent.EXIT.value,
-        TrapEvent.ERR.value,
-        TrapEvent.RETURN.value,
-    ):
+    if name in {event.value for event in RUN_EVENTS}:
         return TrapEvent(name)
     if name in PSEUDO_SIGNALS:
         return TrapEvent.OTHER

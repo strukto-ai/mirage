@@ -43,7 +43,8 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { sessionView, visibleEnv } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { runStatement } from './jobs.ts'
-import { errTrapArmed, runErrTrap } from './traps.ts'
+import { errTrapArmed, runErrTrap, runReturnTrap } from './traps.ts'
+import type { SessionState } from '../session/session.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
@@ -81,13 +82,15 @@ export class ContinueSignal extends Error {
 }
 
 /**
- * Execute a list of body commands sequentially.
+ * Execute a list of statements in order: a group, a loop or `if` body, a
+ * `case` arm, a function body.
  *
  * A statement ending in `&` is launched as a job through `runStatement`
  * rather than run inline; `jobTable` and `agentId` are the job plane it
- * needs.
+ * needs. The ERR action answers a failing statement, its output landed
+ * through `sink` when the body writes to one, and `set -e` stops the list.
  */
-async function executeBody(
+export async function executeBody(
   executeNode: ExecuteNodeFn,
   body: readonly TSNodeLike[],
   context: EvaluationContext,
@@ -98,6 +101,7 @@ async function executeBody(
   handed: HandOff | null,
   decisions: Decisions | null,
   executeFn: ExecuteStringFn | null = null,
+  sink: JobConsole | null = null,
 ): Promise<Result> {
   const session = context.session
   const allStdout: (ByteSource | null)[] = []
@@ -107,7 +111,7 @@ async function executeBody(
   for (const cmd of body) {
     const armed = errTrapArmed(session)
     try {
-      const [rawStdout, io, execNode] = await runStatement(
+      const [stdout, io, execNode] = await runStatement(
         executeNode,
         cmd,
         context,
@@ -120,27 +124,15 @@ async function executeBody(
         decisions,
       )
       lastExec = execNode
-      const stdout = await finishStatement(rawStdout, io, session, cmd)
-      allStdout.push(stdout)
+      allStdout.push(await finishStatement(stdout, io, session, cmd))
       mergedIo = await mergedIo.merge(io)
-      const trapped = await runErrTrap(
-        executeFn,
-        cmd,
-        io.exitCode,
-        session,
-        armed,
-        stdin,
-        callStack,
-        execNode,
+      mergedIo = await land(
+        await runErrTrap(executeFn, cmd, io.exitCode, session, armed, stdin, callStack, execNode),
+        sink,
+        allStdout,
+        mergedIo,
       )
-      if (trapped.length > 0) {
-        mergedIo = await land(trapped, null, allStdout, mergedIo)
-        mergedIo.exitCode = io.exitCode
-      }
-      if (errexitActs(cmd, io.exitCode, session)) {
-        mergedIo.exitCode = io.exitCode
-        break
-      }
+      if (errexitActs(cmd, io.exitCode, session)) break
     } catch (sig) {
       if (!isUnwinding(sig)) throw sig
       // The control builtin is a statement the loop leaves through
@@ -152,8 +144,7 @@ async function executeBody(
       throw await carried(sig, chainNonNull(allStdout), mergedIo)
     }
   }
-  const combined = chainNonNull(allStdout)
-  return [combined, mergedIo, lastExec]
+  return [chainNonNull(allStdout), mergedIo, lastExec]
 }
 
 function chainNonNull(sources: readonly (ByteSource | null)[]): ByteSource | null {
@@ -195,6 +186,31 @@ export async function carried(
   sig.stdout = concat([await materialize(stdout), sig.stdout ?? new Uint8Array()])
   sig.stderr = stderr
   return sig
+}
+
+/**
+ * What a function or a sourced file gives back as it returns: its output and
+ * status, with what its RETURN action wrote after the output. An `exit` or
+ * `return` in the action leaves with that output in front of its own.
+ * Mirrors Python's returning.
+ */
+export async function returning(
+  executeFn: ExecuteStringFn | null,
+  session: SessionState,
+  stdin: ByteSource | null,
+  callStack: CallStack,
+  stdout: ByteSource | null,
+  io: IOResult,
+  sink: JobConsole | null = null,
+): Promise<[ByteSource | null, IOResult]> {
+  const outputs = [stdout]
+  try {
+    io = await land(await runReturnTrap(executeFn, session, stdin, callStack), sink, outputs, io)
+  } catch (sig) {
+    if (!isUnwinding(sig)) throw sig
+    throw await carried(sig, stdout, io)
+  }
+  return [chainNonNull(outputs), io]
 }
 
 /**
@@ -662,6 +678,11 @@ export function handleUntil(
   )
 }
 
+/**
+ * Run the first arm whose pattern matches `word`, and after it the arms its
+ * terminator reaches: `;&` falls into the next arm's body untested, `;;&`
+ * tests the rest, `;;` stops.
+ */
 export async function handleCase(
   executeNode: ExecuteNodeFn,
   word: string,
@@ -675,77 +696,36 @@ export async function handleCase(
   decisions: Decisions | null = null,
   executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
-  const session = context.session
-  const allStdout: ByteSource[] = []
+  const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: 'case', exitCode: 0 })
-  let ran = false
   let fallthrough = false
-  const bound = fd0Binding(session)
-  let stopped = false
   for (const [patterns, body, terminator] of items) {
     if (!(fallthrough || patterns.some((p) => fnmatch(word, p)))) continue
-    ran = true
-    for (const stmt of body) {
-      const armed = errTrapArmed(session)
-      let io: IOResult
-      try {
-        const [rawStdout, statementIo, execNode] = await runStatement(
-          executeNode,
-          stmt,
-          context,
-          stdin,
-          bound,
-          callStack,
-          jobTable,
-          agentId,
-          handed,
-          decisions,
-        )
-        io = statementIo
-        lastExec = execNode
-        const stdout = await finishStatement(rawStdout, io, session, stmt)
-        if (stdout !== null) allStdout.push(stdout)
-        mergedIo = await mergedIo.merge(io)
-        const trapped = await runErrTrap(
-          executeFn,
-          stmt,
-          io.exitCode,
-          session,
-          armed,
-          stdin,
-          callStack,
-          execNode,
-        )
-        if (trapped.length > 0) {
-          mergedIo = await land(trapped, null, allStdout, mergedIo)
-          mergedIo.exitCode = io.exitCode
-        }
-      } catch (sig) {
-        if (!isUnwinding(sig)) throw sig
-        throw await carried(sig, chainNonNull(allStdout), mergedIo)
-      }
-      if (errexitActs(stmt, io.exitCode, session)) {
-        mergedIo.exitCode = io.exitCode
-        stopped = true
-        break
-      }
+    try {
+      const [stdout, io, execNode] = await executeBody(
+        executeNode,
+        body,
+        context,
+        stdin,
+        callStack,
+        jobTable,
+        agentId,
+        handed,
+        decisions,
+        executeFn,
+      )
+      allStdout.push(stdout)
+      mergedIo = await mergedIo.merge(io)
+      lastExec = execNode
+    } catch (sig) {
+      if (!isUnwinding(sig)) throw sig
+      throw await carried(sig, chainNonNull(allStdout), mergedIo)
     }
-    if (stopped) break
-    if (terminator === ';&') {
-      // Fall through: run the next arm's body without testing it.
-      fallthrough = true
-      continue
-    }
-    // ;;& keeps testing remaining patterns; ;; stops here.
-    fallthrough = false
-    if (terminator !== ';;&') break
+    fallthrough = terminator === ';&'
+    if (context.session.errexitExiting || (terminator !== ';&' && terminator !== ';;&')) break
   }
-  if (!ran) return [null, new IOResult(), new ExecutionNode({ command: 'case', exitCode: 0 })]
-  const first = allStdout[0]
-  if (allStdout.length === 1 && first !== undefined) return [first, mergedIo, lastExec]
-  const combined = allStdout.length > 0 ? asyncChain(allStdout) : null
-  return [combined, mergedIo, lastExec]
+  return [chainNonNull(allStdout), mergedIo, lastExec]
 }
 
 /**

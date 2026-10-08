@@ -21,6 +21,7 @@ import { formatFsError } from '../../errors/render.ts'
 import type { ExecutionNode } from '../types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import {
+  ENCLOSING,
   Inherited,
   type Recorder,
   type StreamOwner,
@@ -272,11 +273,42 @@ export function assignmentStatus(frame: ExecutionFrame, seqBefore: number): numb
 export type Written = readonly [Channel, Uint8Array, boolean]
 
 /**
- * What a statement wrote that stays with the shell running it. Bytes written
- * to the shell's terminal through a copy (`exec 3>&1`, whose owner is `own`)
- * stay, flagged; bytes written to an enclosing level's stream go on there.
- * What the statement returned rather than wrote comes last, its stderr taken
- * off `io`. Mirrors Python's statement_output.
+ * Output written as it is, stdout then stderr, none of it through a copy of
+ * the terminal. Mirrors Python's as_written.
+ */
+export function asWritten(stdout: Uint8Array | null, stderr: Uint8Array | null): Written[] {
+  const written: Written[] = []
+  if (stdout !== null && stdout.byteLength > 0) written.push([Channel.STDOUT, stdout, false])
+  if (stderr !== null && stderr.byteLength > 0) written.push([Channel.STDERR, stderr, false])
+  return written
+}
+
+/**
+ * Run a statement into `recorder`: what it writes to an enclosing level's
+ * stream, and what a job this shell started writes while it runs, land among
+ * what it writes. Mirrors Python's recording.
+ */
+export async function recording<T>(
+  session: SessionState,
+  recorder: Recorder,
+  run: () => Promise<T>,
+): Promise<T> {
+  const jobs = session.jobOutput ?? session.tty.jobs
+  const held = jobs.recorder
+  jobs.recorder = recorder
+  try {
+    return await ENCLOSING.run(recorder, run)
+  } finally {
+    jobs.recorder = held
+  }
+}
+
+/**
+ * What a statement wrote that stays with the shell running it, taken off
+ * `recorder`. Bytes written to the shell's terminal through a copy (`exec
+ * 3>&1`, whose owner is `own`) stay, flagged; bytes written to an enclosing
+ * level's stream go on there. What the statement returned rather than wrote
+ * comes last, its stderr taken off `io`. Mirrors Python's statement_output.
  */
 export async function statementOutput(
   recorder: Recorder,
@@ -286,7 +318,7 @@ export async function statementOutput(
   sink: JobConsole | null,
 ): Promise<Written[]> {
   const written: Written[] = []
-  for (const [key, data] of recorder.chunks) {
+  for (const [key, data] of recorder.chunks.splice(0)) {
     if (!(key instanceof Inherited)) written.push([key, data, false])
     else if (key.owner === own || !(await deliver(sink, key, data)))
       written.push([key.channel, data, true])
@@ -301,7 +333,8 @@ export async function statementOutput(
 
 /**
  * Put a statement's output where its shell's goes: the sink, in order, or the
- * stdout and stderr the shell returns. Mirrors Python's land.
+ * stdout and stderr the shell returns. The result keeps its status. Mirrors
+ * Python's land.
  */
 export async function land(
   written: readonly Written[],
@@ -316,5 +349,7 @@ export async function land(
   const stdout = concat(written.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d))
   if (stdout.byteLength > 0) allStdout.push(stdout)
   const stderr = concat(written.filter(([c]) => c === Channel.STDERR).map(([, d]) => d))
-  return stderr.byteLength > 0 ? mergedIo.merge(new IOResult({ stderr })) : mergedIo
+  return stderr.byteLength > 0
+    ? mergedIo.merge(new IOResult({ stderr, exitCode: mergedIo.exitCode }))
+    : mergedIo
 }
