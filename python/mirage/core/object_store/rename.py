@@ -31,7 +31,7 @@ from mirage.core.object_store.driver import (
     keep_lost,
 )
 from mirage.errors.fs import enoent
-from mirage.observe.context import record, start_op
+from mirage.observe.context import lift_lost, record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
 
@@ -170,5 +170,7 @@ def make_rename(
                 ) from exc
         if not moved:
             raise enoent(src_spec.virtual)
+        lift_lost(src_spec.virtual, subtree=op != "rename")
+        lift_lost(dst_spec.virtual, subtree=op != "rename")
 
     return rename

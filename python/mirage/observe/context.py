@@ -19,6 +19,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from mirage.observe.record import STAMP_FINGERPRINT_OPS, OpRecord, RecordIndex
+from mirage.utils.key_prefix import under_path
 
 
 @dataclass
@@ -29,7 +30,7 @@ class LostPaths:
     before the loss may be cached again. The version the write lost on is
     the one a retry sends, so it is refused again until a read. A read or
     write of the path after the loss names the bytes now there, and lifts
-    the mark.
+    the mark, as does removing or moving it away.
 
     Args:
         sink (list[OpRecord]): the line's records, shared with its frames.
@@ -54,6 +55,19 @@ class LostPaths:
             self.versions[key] = version
         else:
             self.versions.pop(key, None)
+
+    def lift(self, key: str, subtree: bool = False) -> None:
+        """Lift the marks a removal or move of ``key`` made stale.
+
+        Args:
+            key (str): the virtual path removed or moved.
+            subtree (bool): the paths below it went too.
+        """
+        for marked in [
+            k for k in self.marks if k == key or subtree and under_path(k, key)
+        ]:
+            del self.marks[marked]
+            self.versions.pop(marked, None)
 
     def version(self, key: str) -> str | None:
         """The version a write to ``key`` lost on, while it is still lost.
@@ -224,6 +238,18 @@ def mark_lost(key: str, version: str | None = None) -> None:
     lost = active_lost()
     if lost is not None:
         lost.mark(key, version)
+
+
+def lift_lost(key: str, subtree: bool = False) -> None:
+    """Lift the running line's marks a removal or move of ``key`` ended.
+
+    Args:
+        key (str): the virtual path removed or moved.
+        subtree (bool): the paths below it went too.
+    """
+    lost = active_lost()
+    if lost is not None:
+        lost.lift(key, subtree)
 
 
 def active_recorder() -> Recorder | None:

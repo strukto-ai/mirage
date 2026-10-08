@@ -22,7 +22,7 @@ import {
   stale,
   writeCondition,
 } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { liftLost, record, startOp } from '../../observe/context.ts'
 import { enoent } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import * as kp from '../../utils/key_prefix.ts'
@@ -152,5 +152,7 @@ export function makeRename<A extends Accessor, C>(
       throw await stale(lost, err.landed, err.gone, sent)
     }
     if (!moved) throw enoent(src)
+    liftLost(src.virtual, op !== 'rename')
+    liftLost(dst.virtual, op !== 'rename')
   }
 }

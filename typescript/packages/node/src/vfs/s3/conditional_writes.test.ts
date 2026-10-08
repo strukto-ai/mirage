@@ -441,6 +441,25 @@ describe('conditional writes on an S3 mount', () => {
     },
   )
 
+  it.each([
+    ['rm', 'cat /s3/f /s3/g', 'f', 'mv /s3/f /s3/g; rm /s3/g', 'g'],
+    ['rm -r of an ancestor', 'cat /s3/g /s3/d/a', 'g', 'mv /s3/g /s3/d/a; rm -r /s3/d', 'd/a'],
+    ['mv away', 'cat /s3/f /s3/g', 'f', 'mv /s3/f /s3/g; mv /s3/g /s3/h', 'g'],
+    ['mv onto', 'cat /s3/f /s3/g', 'f', 'mv /s3/f /s3/g; mv /s3/d/a /s3/g', 'g'],
+  ] as const)(
+    'lifts a kept version once the file is gone: %s',
+    async (_name, setup, changed, line, key) => {
+      // The refused mv keeps the untouched end's version; once that file is
+      // removed or moved away, a new one goes out plain.
+      const ws = workspace()
+      await run(ws, setup)
+      theirs(changed)
+      const [code, , err] = await run(ws, `${line}; echo new > /s3/${key}`)
+      expect(code, err).toBe(0)
+      expect(object(key)).toBe('new\n')
+    },
+  )
+
   it('holds each destination key a directory rename read', async () => {
     const ws = workspace()
     mock.store.set('b', 'e/a', ENC.encode('ea\n'))

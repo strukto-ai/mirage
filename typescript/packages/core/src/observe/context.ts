@@ -15,6 +15,7 @@
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
 import { OpRecord, RecordIndex, STAMP_FINGERPRINT_OPS } from './record.ts'
+import { underPath } from '../utils/key_prefix.ts'
 
 interface RecordingState {
   records: OpRecord[]
@@ -84,6 +85,16 @@ export class LostPaths {
     else this.versions.delete(key)
   }
 
+  /** Lift the marks a removal or move of `key` (and, with `subtree`, below it) ended. */
+  lift(key: string, subtree = false): void {
+    for (const marked of [...this.marks.keys()]) {
+      if (marked === key || (subtree && underPath(marked, key))) {
+        this.marks.delete(marked)
+        this.versions.delete(marked)
+      }
+    }
+  }
+
   /** The version a write to `key` lost on, while it is still lost. */
   version(key: string): string | null {
     return this.holds(key) ? (this.versions.get(key) ?? null) : null
@@ -143,6 +154,11 @@ export function lostPaths(records: readonly OpRecord[] | undefined): LostPaths |
 /** Mark `key` lost on the running line, if one is recording. */
 export function markLost(key: string, version: string | null = null): void {
   lostPaths(storage.getStore()?.records)?.mark(key, version)
+}
+
+/** Lift the running line's marks a removal or move of `key` ended. Mirrors python's `lift_lost`. */
+export function liftLost(key: string, subtree = false): void {
+  lostPaths(storage.getStore()?.records)?.lift(key, subtree)
 }
 
 export function activeRecords(): readonly OpRecord[] | undefined {

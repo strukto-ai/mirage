@@ -559,6 +559,35 @@ async def test_a_refusal_keeps_every_version_it_was_measured_on(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "setup, changed, line, key",
+    [
+        ("cat /s3/f /s3/g", "f", "mv /s3/f /s3/g; rm /s3/g", "g"),
+        (
+            "cat /s3/g /s3/d/a",
+            "g",
+            "mv /s3/g /s3/d/a; rm -r /s3/d",
+            "d/a",
+        ),
+        ("cat /s3/f /s3/g", "f", "mv /s3/f /s3/g; mv /s3/g /s3/h", "g"),
+        ("cat /s3/f /s3/g", "f", "mv /s3/f /s3/g; mv /s3/d/a /s3/g", "g"),
+    ],
+    ids=["rm", "rm -r of an ancestor", "mv away", "mv onto"],
+)
+async def test_a_removal_lifts_a_kept_version(
+    fake, workspaces, setup, changed, line, key
+):
+    # The refused mv keeps the untouched end's version; once that file is
+    # removed or moved away, a new one goes out plain.
+    ws = workspaces()
+    await _run(ws, setup)
+    _theirs(fake, changed)
+    code, _, err = await _run(ws, f"{line}; echo new > /s3/{key}")
+    assert code == 0, err
+    assert fake.buckets["b"][key] == b"new\n"
+
+
+@pytest.mark.asyncio
 async def test_a_directory_rename_holds_each_destination_key_it_read(
     fake, workspaces
 ):

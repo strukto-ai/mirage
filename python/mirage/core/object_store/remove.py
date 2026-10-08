@@ -35,7 +35,7 @@ from mirage.core.object_store.driver import (
 )
 from mirage.core.object_store.stat import make_stat
 from mirage.errors.fs import eisdir, enoent, enotempty
-from mirage.observe.context import record, start_op
+from mirage.observe.context import lift_lost, record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
 from mirage.utils.stat_view import is_dir
@@ -92,6 +92,7 @@ def make_unlink(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
                 await evict_after(op, settle)
             except ConditionLost as exc:
                 raise await refused(path_spec, exc, cond) from exc
+        lift_lost(path_spec.virtual)
 
     return unlink
 
@@ -145,6 +146,7 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
                     kp.key_path(path_spec, kpfx, key),
                     version=exc.versions.get(key),
                 ) from exc
+        lift_lost(path_spec.virtual, subtree=True)
 
     return remove_prefix
 
