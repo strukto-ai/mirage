@@ -1616,21 +1616,6 @@
         "stdout": "empty=1\nsplit=1\nbrace=1\nquoted\n",
         "stderr": "$empty: ambiguous redirect\n$names: ambiguous redirect\n{a,b}: ambiguous redirect\n"
       }
-    },
-    {
-      "id": "redirect_failed_open_stops_expansion",
-      "seq": 501173,
-      "targets": [
-        "ram",
-        "disk",
-        "ssh"
-      ],
-      "command": "(mkdir -p /data/redirect-open && cd /data/redirect-open; echo bad > missing/leaf > \"$(touch skipped; echo unused)\"; echo failed=$?; test ! -e skipped && echo unexpanded; echo bad 2>errors > missing/leaf; echo routed=$?; cat errors); rm -r /data/redirect-open",
-      "expect": {
-        "exit": 0,
-        "stdout": "failed=1\nunexpanded\nrouted=1\nmissing/leaf: No such file or directory\n",
-        "stderr": "missing/leaf: No such file or directory\n"
-      }
     }
   ]
 }

@@ -23,7 +23,7 @@ export async function create(accessor: SSHAccessor, path: PathSpec): Promise<voi
   const timer = startOp()
   const sftp = await accessor.sftp()
   const remote = joinRoot(accessor.config.root ?? '/', stripPrefix(path))
-  const handle = await openForWrite(sftp, remote, path, true)
+  const handle = await openForWrite(sftp, remote, path, 'w')
   await new Promise<void>((resolveFn, rejectFn) => {
     sftp.close(handle, (err) => {
       if (err) rejectFn(err)

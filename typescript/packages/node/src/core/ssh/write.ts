@@ -24,7 +24,7 @@ export async function write(accessor: SSHAccessor, p: PathSpec, data: Uint8Array
   const sftp = await accessor.sftp()
   const key = stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', key)
-  const handle = await openForWrite(sftp, remote, p, true)
+  const handle = await openForWrite(sftp, remote, p, 'w')
   try {
     await new Promise<void>((resolveFn, rejectFn) => {
       sftp.write(handle, Buffer.from(data), 0, data.byteLength, 0, (err) => {

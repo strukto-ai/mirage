@@ -28,7 +28,7 @@ async def write(
     timer = start_op()
     remote_path = join_root(config.root, path)
     async with await open_for_write(
-        sftp, remote_path, path_spec, truncate=True
+        sftp, remote_path, path_spec, flags="wb"
     ) as f:
         await f.write(data)
     record("write", path_spec.virtual, "ssh", len(data), timer)
