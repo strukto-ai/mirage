@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   const real = statSync(join(filesDir, 'mirage_hello.txt'))
   console.log(`real inode mode: ${(real.mode & 0o777).toString(8)}, mtime: ${real.mtime.toISOString()}`)
 
-  console.log('\n━━━ fs-monkey routes /data/ through workspace ━━━')
+  console.log('\n━━━ patchNodeFs routes /data/ through workspace ━━━')
   console.log('(ESM `import from "node:fs"` is NOT patchable — only CJS `require("fs")`)')
   const text = await fs.promises.readFile('/data/mirage_hello.txt', 'utf-8')
   console.log('require("fs").promises.readFile:', text.trimEnd())

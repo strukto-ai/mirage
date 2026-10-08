@@ -291,8 +291,8 @@ describe('patchNodeFs — fall-through to native fs', () => {
   it('a disk root at its own prefix does not re-enter', async () => {
     // Python needs runtime/python/host/host_io for this layout: its
     // patched os answers the disk backend's own physical path. The node
-    // backends bind node:fs/promises as ESM, which fs-monkey's swap of
-    // the CJS fs.promises getter never reaches.
+    // backends bind node:fs/promises as ESM, which the patch's swap of
+    // the CommonJS fs functions never reaches.
     writeFileSync(join(scratch, 'a.txt'), 'hello')
     const ws = new Workspace(
       { [scratch]: new DiskVFS({ root: scratch }) },

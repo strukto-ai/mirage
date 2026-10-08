@@ -137,7 +137,7 @@ Mirage never reports a fake size and never fetches content during `stat`: return
 
 ## Browser
 
-The browser SDK runs entirely in-page: no kernel, no subprocesses, no Node `fs`. That removes the Node sections above (neither FUSE nor `fs-monkey` apply) but introduces its own constraints.
+The browser SDK runs entirely in-page: no kernel, no subprocesses, no Node `fs`. That removes the Node sections above (neither FUSE nor `patchNodeFs` apply) but introduces its own constraints.
 
 ### 1. No FUSE
 

@@ -107,7 +107,7 @@
     "-rw-r----- 1 500 staff 16 Jan  2  2026 /data/mirage_hello.txt",
     "real inode mode: 640, mtime: 2026-01-02T15:30:00.000Z",
     "",
-    "━━━ fs-monkey routes /data/ through workspace ━━━",
+    "━━━ patchNodeFs routes /data/ through workspace ━━━",
     "(ESM `import from \"node:fs\"` is NOT patchable — only CJS `require(\"fs\")`)",
     "require(\"fs\").promises.readFile: hello from disk",
     "require(\"fs\").promises.readdir: example.feather, example.h5, example.json ...",
