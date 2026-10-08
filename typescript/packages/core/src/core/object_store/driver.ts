@@ -13,8 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
+import { dropCached, stale } from '../../cache/context.ts'
+import { type KnownVersions, OwnRead, type WriteCondition } from '../../cache/types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { StaleWriteError } from '../../errors/types.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
+import * as kp from '../../utils/key_prefix.ts'
+import type { ConditionLostError } from './errors.ts'
 
 export type ReaddirFn<A extends Accessor> = (
   accessor: A,
@@ -247,4 +252,118 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
    * absent means find walks `listTree` unnarrowed.
    */
   findTree?: (conn: C, pfx: string, hints: FindHints) => [AsyncIterable<TreeEntry>, boolean]
+  /**
+   * `put` carrying a write condition; a lost one throws `ConditionLostError`.
+   * Absent when the store cannot condition a write.
+   */
+  putIf?: (
+    conn: C,
+    key: string,
+    data: Uint8Array,
+    cond: WriteCondition,
+  ) => Promise<ObjectMeta | null>
+  /** `get` plus the token of the bytes returned, for an op that writes back what it read; a revision reads that revision. */
+  getVersioned?: (
+    conn: C,
+    key: string,
+    revision: string | null,
+  ) => Promise<[Uint8Array, string | null] | null>
+  /** `copyFile` with the destination's condition. */
+  copyIf?: (conn: C, srcKey: string, dstKey: string, cond: WriteCondition) => Promise<boolean>
+  /** `deleteFile` with a condition. */
+  deleteIf?: (conn: C, key: string, cond: WriteCondition) => Promise<void>
+  /**
+   * `moveFile` whose copy and delete are both conditioned on the source's
+   * version (the one given, else the one its own lookup sees), and whose
+   * copy carries the destination's.
+   */
+  moveFileIf?: (
+    conn: C,
+    srcKey: string,
+    dstKey: string,
+    cond: WriteCondition,
+    source: string | null,
+  ) => Promise<boolean>
+  /**
+   * `movePrefix` moving each key only if it is still the version the mount
+   * saw (`known`), else the one listed, onto a destination key the mount
+   * holds a version for (`dstKnown`) only if it is still that version; the
+   * keys that changed stay where they were and are thrown in a ConditionLostError.
+   */
+  movePrefixIf?: (
+    conn: C,
+    srcPfx: string,
+    dstPfx: string,
+    known: KnownVersions,
+    dstKnown: KnownVersions,
+  ) => Promise<boolean>
+  /**
+   * `deletePrefix` deleting each key only if it is still the version the
+   * mount saw, else the one listed.
+   */
+  deletePrefixIf?: (conn: C, pfx: string, known: KnownVersions) => Promise<void>
+}
+
+/** The refusal for a one-path op whose condition lost. Mirrors Python's `refused`. */
+export function refused(
+  path: PathSpec,
+  err: ConditionLostError,
+  cond: WriteCondition | null,
+): Promise<StaleWriteError> {
+  return stale(path, { gone: err.gone, version: cond?.ifMatch ?? null })
+}
+
+/**
+ * Keep every lost key's version, then throw the walk's later error. Mirrors
+ * Python's `keep_all_lost`.
+ */
+export async function keepAllLost(
+  root: PathSpec,
+  keyPrefix: string,
+  err: ConditionLostError,
+): Promise<never> {
+  await keepLost(root, keyPrefix, err, null)
+  throw err.error
+}
+
+/**
+ * Keep what a walk's refusal measured, and name the key it reports: every
+ * lost key but the named one keeps its version; a later error that stopped
+ * the walk is thrown instead, with every version kept. Mirrors Python's
+ * `keep_walk`.
+ */
+export async function keepWalk(
+  root: PathSpec,
+  keyPrefix: string,
+  err: ConditionLostError,
+): Promise<string> {
+  if (err.error !== null) await keepAllLost(root, keyPrefix, err)
+  const key = err.keys[0] ?? ''
+  await keepLost(root, keyPrefix, err, key)
+  return key
+}
+
+/**
+ * Keep the version of each key a walk lost on, except `skip`, which the
+ * refusal itself names and keeps. Mirrors Python's `keep_lost`.
+ */
+export async function keepLost(
+  root: PathSpec,
+  keyPrefix: string,
+  err: ConditionLostError,
+  skip: string | null,
+): Promise<void> {
+  for (const [key, version] of err.versions) {
+    const kept = version === OwnRead.ABSENT ? null : version
+    if (key !== skip) await dropCached(kp.keyPath(root, keyPrefix, key), kept)
+  }
+}
+
+/**
+ * The `*If` hook a conditional op calls. Every `write: conditional` mount is
+ * on the S3 driver, which carries them all.
+ */
+export function requireHook<F>(hook: F | undefined): F {
+  if (hook === undefined) throw new Error('conditional op on a driver without its hook')
+  return hook
 }

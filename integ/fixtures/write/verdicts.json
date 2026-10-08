@@ -1,0 +1,93 @@
+{
+  "_note": "check_write_capability / checkWriteCapability over (vfs, policy, mode, caches): expect is the refusal message, null when the mount comes up. The order of the arms is the contract the multi-fault rows pin.",
+  "cases": [
+    {
+      "name": "unconditional is always allowed",
+      "vfs": "gridfs",
+      "policy": "unconditional",
+      "mode": "read",
+      "caches": false,
+      "expect": null
+    },
+    {
+      "name": "conditional on s3",
+      "vfs": "s3",
+      "policy": "conditional",
+      "mode": "write",
+      "caches": true,
+      "expect": null
+    },
+    {
+      "name": "conditional on minio (put only)",
+      "vfs": "minio",
+      "policy": "conditional",
+      "mode": "write",
+      "caches": true,
+      "expect": null
+    },
+    {
+      "name": "conditional on an assumed alias",
+      "vfs": "gcs",
+      "policy": "conditional",
+      "mode": "write",
+      "caches": true,
+      "expect": null
+    },
+    {
+      "name": "staged is refused",
+      "vfs": "s3",
+      "policy": "staged",
+      "mode": "write",
+      "caches": true,
+      "expect": "mount '/x/': write: staged needs a staging layer, and mirage has none; use conditional or unconditional"
+    },
+    {
+      "name": "conditional on a read-only mount",
+      "vfs": "s3",
+      "policy": "conditional",
+      "mode": "read",
+      "caches": true,
+      "expect": "mount '/x/': write: conditional needs a writable mount; this one is read"
+    },
+    {
+      "name": "conditional on a backend with no condition",
+      "vfs": "gridfs",
+      "policy": "conditional",
+      "mode": "write",
+      "caches": true,
+      "expect": "mount '/x/': write: conditional needs a backend that refuses a stale write; gridfs does not"
+    },
+    {
+      "name": "conditional on a mount that caches nothing",
+      "vfs": "s3",
+      "policy": "conditional",
+      "mode": "write",
+      "caches": false,
+      "expect": "mount '/x/': write: conditional needs a mount that caches reads; the version a write sends is the one its cached copy holds"
+    },
+    {
+      "name": "several faults: staged is named first",
+      "vfs": "gridfs",
+      "policy": "staged",
+      "mode": "read",
+      "caches": false,
+      "expect": "mount '/x/': write: staged needs a staging layer, and mirage has none; use conditional or unconditional"
+    },
+    {
+      "name": "several faults: read-only before the backend",
+      "vfs": "gridfs",
+      "policy": "conditional",
+      "mode": "read",
+      "caches": false,
+      "expect": "mount '/x/': write: conditional needs a writable mount; this one is read"
+    },
+    {
+      "name": "several faults: the conditions before the cache",
+      "vfs": "gridfs",
+      "policy": "conditional",
+      "mode": "write",
+      "caches": false,
+      "expect": "mount '/x/': write: conditional needs a backend that refuses a stale write; gridfs does not"
+    }
+  ]
+}

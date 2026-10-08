@@ -14,9 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { runWithCacheManager } from '../../cache/context.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import { errorVirtualPath } from '../../errors/fs.ts'
+import { enoent, errorVirtualPath } from '../../errors/fs.ts'
 import type { ObjectStoreDriver } from './driver.ts'
 import type { FakeStore as Store } from './fakes.ts'
 import { FakeAccessor, FakeManager, FakeStore, makeDriver, spec } from './fakes.ts'
@@ -122,6 +122,15 @@ describe('object_store write', () => {
     const cut = await caught(() =>
       makeTruncate(missingContainer())(accessor, spec('/a/cut.txt'), 4),
     )
+    expect(errorVirtualPath(cut)).toBe('/mnt/a/cut.txt')
+  })
+
+  it('truncate names the path when its pinned revision is gone', async () => {
+    const driver: ObjectStoreDriver<FakeAccessor, Store> = {
+      ...makeDriver(new FakeStore()),
+      getVersioned: (_conn, key) => Promise.reject(enoent(key)),
+    }
+    const cut = await caught(() => makeTruncate(driver)(accessor, spec('/a/cut.txt'), 1))
     expect(errorVirtualPath(cut)).toBe('/mnt/a/cut.txt')
   })
 
@@ -241,6 +250,26 @@ describe('object store write records the put token', () => {
       makeTruncate(makeDriver(store))(accessor, spec('/a/cut.txt'), 2),
     )
     expect(records.map((r) => [r.op, r.fingerprint])).toEqual([['truncate', 'fp-a/cut.txt']])
+  })
+
+  it('truncate reads the revision a restore pinned', async () => {
+    const store = new FakeStore()
+    store.objects.set('a/cut.txt', ENC.encode('hello'))
+    const asked: (string | null | undefined)[] = []
+    const driver: ObjectStoreDriver<FakeAccessor, Store> = {
+      ...makeDriver(store),
+      getVersioned: (_conn, key, revision) => {
+        asked.push(revision)
+        const data = store.objects.get(key)
+        return Promise.resolve(data === undefined ? null : [data, 'v1'])
+      },
+    }
+    await managed(() =>
+      runWithRevisions(new Map([['/mnt/a/cut.txt', 'rev-1']]), () =>
+        makeTruncate(driver)(accessor, spec('/a/cut.txt'), 2),
+      ),
+    )
+    expect(asked).toEqual(['rev-1'])
   })
 
   it('records no token when the store reports none', async () => {

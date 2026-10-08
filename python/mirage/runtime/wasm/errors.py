@@ -40,6 +40,7 @@ WASI: dict[FsCondition, int] = {
     # preview1 has no xattr syscalls, so this row is unreachable from a
     # guest; ENOTSUP is the honest answer if a future host ever asks.
     FsCondition.NO_XATTR: 58,
+    FsCondition.STALE_WRITE: 72,
 }
 
 

@@ -59,9 +59,16 @@ import {
   RAMConsoleStore,
   exitOutcome,
 } from '../../shell/console/index.ts'
-import { type ReadSpec, DEFAULT_READ_SPEC, MountMode, VFSName } from '../../types.ts'
+import {
+  type ReadSpec,
+  type WritePolicy,
+  DEFAULT_READ_SPEC,
+  MountMode,
+  VFSName,
+} from '../../types.ts'
 import { readRegular } from './fs.ts'
 import { resolveReadSpec } from '../mount/read_policy.ts'
+import { coerceWritePolicy } from '../mount/write_policy.ts'
 import { Mount } from '../mount/spec.ts'
 import { VERSION } from '../../version.ts'
 import type { Documents } from '../documentation/documents.ts'
@@ -71,6 +78,7 @@ import {
   type Namespace,
   type NodeMeta,
 } from '../mount/namespace/namespace.ts'
+import { WritePolicyError } from '../mount/errors.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionManager } from '../session/manager.ts'
 import { SessionState, varsFromFields, varsToFields } from '../session/session.ts'
@@ -95,6 +103,7 @@ export interface WorkspaceLike {
   readonly sessionManager: SessionManager
   readonly jobTable: JobTable
   readonly agentId: string | null
+  readonly writeDefault: WritePolicy
   readonly cache: FileCache & BaseVFS
   readonly namespace: Namespace
   readonly observer: Observer
@@ -128,6 +137,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
       mode: m.mode,
       read: m.read.policy,
       ttl: m.read.ttl,
+      write: m.write,
       vfs_class: m.vfs.name,
       vfs_ref: m.vfsRef,
       index_config: indexConfigDump(m.indexConfig),
@@ -137,14 +147,17 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   const ramCache = ws.cache instanceof RAMFileCacheStore ? ws.cache : null
   const cacheEntries: CacheEntrySnapshot[] =
     ramCache !== null
-      ? ramCache.snapshotEntries().map(({ key, entry }) => ({
-          key,
-          data: ramCache.store.files.get(key) ?? new Uint8Array(),
-          fingerprint: entry.fingerprint,
-          ttl: entry.ttl,
-          cached_at: entry.cachedAt,
-          size: entry.size,
-        }))
+      ? ramCache
+          .snapshotEntries()
+          .filter(({ entry }) => entry.hasBytes)
+          .map(({ key, entry }) => ({
+            key,
+            data: ramCache.store.files.get(key) ?? new Uint8Array(),
+            fingerprint: entry.fingerprint,
+            ttl: entry.ttl,
+            cached_at: entry.cachedAt,
+            size: entry.size,
+          }))
       : []
   const sessions: SessionSnapshot[] = ws.sessionManager
     .list()
@@ -205,6 +218,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   return {
     version: FORMAT_VERSION,
     mirage_version: VERSION,
+    write: ws.writeDefault,
     default_session_id: ws.sessionManager.defaultId,
     default_agent_id: ws.agentId,
     current_agent_id: ws.agentId,
@@ -262,7 +276,7 @@ function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
 }
 
 /**
- * Refuse a snapshot this loader's format has moved past.
+ * Refuse a snapshot in another format than this loader's, older or newer.
  *
  * An absent version is v3 or older, not "current". It used to be
  * harmless because every key the loader read had a default; v4 makes the
@@ -280,12 +294,18 @@ export function checkFormatVersion(state: WorkspaceStateDict): void {
   // Widened deliberately: the type says `version` is always present, but a
   // dict written before the field existed comes back from JSON without it.
   const saved = (state as { version?: number }).version
-  if (saved === undefined || saved < FORMAT_VERSION) {
+  // A newer snapshot may carry keys this loader would drop.
+  if (saved === undefined || saved !== FORMAT_VERSION) {
     const shown = saved === undefined ? 'unversioned' : `v${String(saved)}`
     throw new Error(
       `snapshot format ${shown} not supported (loader expects v${String(FORMAT_VERSION)})`,
     )
   }
+}
+
+/** A saved policy as its refusal names it: as Python's str() for strings and integers. */
+function savedName(value: unknown): string {
+  return typeof value === 'string' ? value : String(value as number)
 }
 
 export function buildMountArgs(
@@ -366,12 +386,30 @@ export function buildMountArgs(
     const read: ReadSpec = foreign.has(normMountPrefix(m.prefix))
       ? (placed?.options.read ?? DEFAULT_READ_SPEC)
       : savedSpec
+    // The saved policy survives an override, as `mode` does.
+    const savedWrite = (m as { write?: unknown }).write
+    if (savedWrite === undefined || savedWrite === null || savedWrite === '') {
+      throw new WritePolicyError(
+        `Workspace.fromState: mount '${m.prefix}' is missing its write policy; ` +
+          `regenerate the snapshot`,
+      )
+    }
+    const write = coerceWritePolicy(savedName(savedWrite))
+    const optionWrite = placed?.options.write
+    const asked = optionWrite !== undefined ? coerceWritePolicy(optionWrite) : undefined
+    if (asked !== undefined && asked !== write) {
+      throw new WritePolicyError(
+        `Workspace.fromState: mount '${m.prefix}' was saved write: ${write}; ` +
+          `the override asks write: ${asked}`,
+      )
+    }
     const index = restoreIndexConfig(m.index_config, placed?.options.index, m.prefix)
     mountArgs[m.prefix] = new Mount(
       placed !== null ? placed.vfs : ((override as BaseVFS | undefined) ?? new RAMVFS()),
       {
         mode: m.mode as MountMode,
         read,
+        write,
         ...(index === undefined ? {} : { index }),
         vfsRef: placed !== null ? (placed.options.vfsRef ?? null) : savedRef(m),
       },
@@ -400,10 +438,18 @@ export function buildMountArgs(
     }
   }
 
+  const savedDefault = (state as { write?: unknown }).write
+  if (savedDefault === undefined || savedDefault === null || savedDefault === '') {
+    throw new WritePolicyError(
+      'Workspace.fromState: the snapshot is missing its workspace write policy; ' +
+        'regenerate the snapshot',
+    )
+  }
   return {
     mountArgs,
     defaultSessionId: state.default_session_id,
     defaultAgentId: state.default_agent_id,
+    writeDefault: coerceWritePolicy(savedName(savedDefault)),
     ...(cliEntries.length > 0 ? { clis: cliArgs } : {}),
   }
 }

@@ -29,7 +29,10 @@
  * One member is mirage's own condition rather than a POSIX spelling:
  * `NO_XATTR` is "attribute not set", which POSIX names ENOATTR on macOS
  * and ENODATA on Linux. `EBADF` is the shell's own: no mount raises it,
- * only a standard input that is closed or write-only.
+ * only a standard input that is closed or write-only. `STALE_WRITE` is a
+ * lost conditional write: the host's ESTALE number with its own phrase and
+ * its own code, so a kernel ESTALE from a disk or NFS mount keeps "Stale
+ * file handle".
  */
 export type FsCondition =
   | 'EBADF'
@@ -49,6 +52,7 @@ export type FsCondition =
   | 'EROFS'
   | 'EFBIG'
   | 'NO_XATTR'
+  | 'STALE_WRITE'
 
 export const FS_CONDITIONS: readonly FsCondition[] = [
   'EBADF',
@@ -68,6 +72,7 @@ export const FS_CONDITIONS: readonly FsCondition[] = [
   'EROFS',
   'EFBIG',
   'NO_XATTR',
+  'STALE_WRITE',
 ]
 
 /** One condition's POSIX rendering: errno plus strerror text. */
@@ -100,6 +105,15 @@ export interface FsError extends Error {
  */
 export interface DotWalkError extends FsError {
   readonly dotWalk: true
+}
+
+/**
+ * A conditional write the backend refused; `landed` marks a move whose copy
+ * landed and whose source's delete lost, which `mv` reports as a failed
+ * removal. Mirrors Python's StaleWriteError.
+ */
+export interface StaleWriteError extends FsError {
+  readonly landed: boolean
 }
 
 // The registry's refusal for a path that falls outside every mount. Mirrors

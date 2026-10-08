@@ -29,7 +29,12 @@ from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.view import IndexView
 from mirage.cache.manager import CacheManager
-from mirage.observe.context import active_recorder
+from mirage.observe.context import (
+    RecordingScope,
+    active_recorder,
+    active_records,
+)
+from mirage.observe.record import OpRecord, RecordIndex
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -170,6 +175,28 @@ async def _cached_local_case() -> bytes | None:
 
 def test_cached_bytes_local_mount_returns_none():
     assert _run(_cached_local_case()) is None
+
+
+async def _cached_spelled_case(dotted: str | None) -> bytes | None:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"cached")
+    manager = CacheManager(cache, index, "/data/", True)
+    spec = PathSpec(
+        vfs_path=mount_key("/data/x.txt", "/data/"),
+        virtual="/data/x.txt",
+        directory="/data/",
+        dotted=dotted,
+    )
+    return await manager.cached_bytes(spec)
+
+
+@pytest.mark.parametrize(
+    "dotted, served",
+    [(None, b"cached"), ("/data/x.txt", b"cached"), ("/data/x.txt/", None)],
+)
+def test_cached_bytes_withholds_a_trailing_slash_spelling(dotted, served):
+    # GNU's ENOTDIR for `f/` comes from the backend; the cache key drops the slash.
+    assert _run(_cached_spelled_case(dotted)) == served
 
 
 def _spec(path: str = "/data/x.txt") -> PathSpec:
@@ -1130,3 +1157,62 @@ async def test_failed_fact_capture_does_not_leak_into_next_fill():
         AsyncMock(return_value=data),
     )
     assert not await cache.is_fresh("/s3/a.txt", "orphan")
+
+
+@pytest.mark.asyncio
+async def test_a_cold_read_bigger_than_the_cache_is_not_kept():
+    cache = RAMFileCacheStore(cache_limit=10)
+    index = RAMIndexCacheStore(ttl=600)
+    await cache.set("/data/warm", b"abc")
+    manager = CacheManager(cache, index, "/data/", True)
+
+    fetch = AsyncMock(return_value=b"x" * 11)
+    assert await manager.fill(_spec("/data/big"), fetch) == b"x" * 11
+    assert not await cache.exists("/data/big")
+    assert await cache.get("/data/warm") == b"abc"
+
+
+@pytest.mark.asyncio
+async def test_a_cold_read_the_store_refuses_still_returns_its_bytes(
+    refusing_store,
+):
+    manager = CacheManager(
+        refusing_store(), RAMIndexCacheStore(ttl=600), "/data/", True
+    )
+
+    fetch = AsyncMock(return_value=b"hello")
+    assert await manager.fill(_spec("/data/a"), fetch) == b"hello"
+
+
+@pytest.mark.asyncio
+async def test_a_line_is_indexed_a_bounded_number_of_times(monkeypatch):
+    # One index per line, absorbing only new records; one per write was quadratic.
+    built: list[int] = []
+    real = RecordIndex.__init__
+
+    def counted(self, records):
+        built.append(len(records))
+        real(self, records)
+
+    monkeypatch.setattr(RecordIndex, "__init__", counted)
+    manager = CacheManager(RAMFileCacheStore(), None, "/data/", True)
+    path = _spec("/data/f")
+    scope = RecordingScope()
+    try:
+        records = active_records()
+        for i in range(50):
+            records.append(
+                OpRecord(
+                    op="write",
+                    path="/data/f",
+                    source="s3",
+                    bytes=1,
+                    timestamp=0,
+                    duration_ms=0,
+                    fingerprint=f"v{i}",
+                )
+            )
+            assert await manager.read_versions([path]) == [f"v{i}"]
+    finally:
+        scope.close()
+    assert len(built) < 3, built

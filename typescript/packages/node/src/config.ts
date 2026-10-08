@@ -43,6 +43,7 @@ import {
   coerceReadPolicy,
   resolveReadSpec,
 } from '@struktoai/mirage-core/workspace/mount/read_policy'
+import { coerceWritePolicy } from '@struktoai/mirage-core/workspace/mount/write_policy'
 import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
 import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
@@ -188,6 +189,7 @@ const TOP_LEVEL_KEYS = [
   'profile',
   'mode',
   'read',
+  'write',
   'default_session_id',
   'default_agent_id',
   'workspace_id',
@@ -207,6 +209,7 @@ const MOUNT_KEYS = [
   'mountpoint',
   'read',
   'ttl',
+  'write',
   'index',
 ] as const
 // A source instance is a type beside a config, the way a mount is. Its
@@ -431,6 +434,7 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   // At the sync door, as Python's WorkspaceConfig validator is, so the CLI
   // refuses a bad value before it POSTs the document to the daemon.
   if (raw.read !== undefined && raw.read !== null) resolveReadSpec(raw.read, undefined)
+  if (raw.write !== undefined && raw.write !== null) coerceWritePolicy(raw.write)
   if (isPlainObject(raw.mounts)) {
     for (const [prefix, block] of Object.entries(raw.mounts)) {
       if (!isPlainObject(block)) throw new Error(`mount \`${prefix}\` must be a mapping`)
@@ -439,6 +443,7 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
       validateTypedBlock(block.index, INDEX_KEYS, `mounts.${prefix}.index`)
       validateIndexValues(block.index, `mounts.${prefix}.index`)
       validateReadBlock(prefix, block)
+      if (block.write !== undefined && block.write !== null) coerceWritePolicy(block.write)
       parseCommandLimits(block.command_limits)
     }
   }
@@ -678,6 +683,8 @@ export interface MountBlock {
    */
   read?: string
   ttl?: number
+  /** Overrides the workspace `write:` as `mode` does. */
+  write?: string | null
   /** Replaces the workspace `index:` whole; nothing is inherited. */
   index?: RedisIndexBlock | (RamIndexBlock & { type: 'ram' }) | null
 }
@@ -781,6 +788,8 @@ export interface WorkspaceConfigRaw {
   profile?: unknown
   mode?: string
   read?: string
+  /** The write policy a mount inherits when it declares none. */
+  write?: string | null
   defaultSessionId?: string
   defaultAgentId?: string
   workspaceId?: string
@@ -1092,6 +1101,7 @@ function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateSt
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
   const defaultRead = resolveReadSpec(cfg.read, undefined)
+  const defaultWrite = coerceWritePolicy(cfg.write)
   const mounts: Record<string, Mount> = {}
   const kernelMounts: Record<string, [MountBackend, string | undefined]> = {}
   // Built before the mounts, because a mount's config may point at one:
@@ -1107,9 +1117,14 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
     // Already validated by the sync door (validateReadBlock).
     const read = block.read === undefined ? defaultRead : resolveReadSpec(block.read, block.ttl)
     const mountIndex = buildIndex(block.index)
+    const write =
+      block.write === undefined || block.write === null
+        ? defaultWrite
+        : coerceWritePolicy(block.write)
     mounts[prefix] = new Mount(r, {
       mode: m,
       read,
+      write,
       commandLimits: parseCommandLimits(block.command_limits),
       vfsRef: block.vfs,
       ...(mountIndex !== undefined ? { index: mountIndex } : {}),
@@ -1134,6 +1149,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       mode: wsMode,
       commandLimits: parseCommandLimits(cfg.commandLimits),
       read: defaultRead,
+      write: defaultWrite,
       ...(cfg.defaultSessionId !== undefined ? { sessionId: cfg.defaultSessionId } : {}),
       ...(cfg.defaultAgentId !== undefined ? { agentId: cfg.defaultAgentId } : {}),
       ...(cfg.workspaceId !== undefined ? { workspaceId: cfg.workspaceId } : {}),

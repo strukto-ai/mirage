@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-FORMAT_VERSION = 4
+FORMAT_VERSION = 5
 
 # How long a capture (a snapshot, a copy, a clone) waits for the lines
 # already running to end before it answers EBUSY.

@@ -298,8 +298,9 @@ export function loadCases(root: string): Case[] {
  * A duplicate id collides in the parity runner, which keys rows by
  * (target, id), so one of the pair is dropped from the py/ts diff without a
  * word. A target id that matches no manifest entry means the case never runs
- * anywhere, which reads as "passing" everywhere. A `mount_read` without a
- * `read` is routed as an ordinary case, where the override is never applied.
+ * anywhere, which reads as "passing" everywhere. A `mount_read` or a `write`
+ * without a `read` is routed as an ordinary case, where the selector is never
+ * applied.
  */
 export function validateCases(root: string, cases: Case[]): void {
   const known = new Set(loadTargets(root).keys())
@@ -316,6 +317,9 @@ export function validateCases(root: string, cases: Case[]): void {
     }
     if (c.mount_read !== undefined && c.read === undefined) {
       throw new Error(`case ${c.id}: mount_read needs read, the policy every other mount inherits`)
+    }
+    if (c.write !== undefined && c.read === undefined) {
+      throw new Error(`case ${c.id}: write needs read, which routes a case to the scenario runner`)
     }
     const first = seen.get(c.id)
     if (first !== undefined) duplicates.push(`${c.id} (${first} and ${c._source ?? '?'})`)

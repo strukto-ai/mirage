@@ -18,7 +18,123 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
-from mirage.observe.record import OpRecord
+from mirage.observe.record import STAMP_FINGERPRINT_OPS, OpRecord, RecordIndex
+from mirage.types import PathSpec
+from mirage.utils.key_prefix import under_path
+
+
+@dataclass(frozen=True, slots=True)
+class LostMark:
+    """One lost path's mark.
+
+    Args:
+        at (int): where in the line's records it was lost.
+        order (int): its place among the line's marks, from 1.
+        version (str | None): the version its write lost on, if any.
+    """
+
+    at: int
+    order: int
+    version: str | None
+
+
+@dataclass
+class LostPaths:
+    """The paths whose conditional write lost on this line.
+
+    A lost path's cached copy was dropped; nothing the line read of it
+    before the loss may be cached again. The version the write lost on is
+    the one a retry sends, so it is refused again until a read. A read or
+    write of the path after the loss names the bytes now there, and lifts
+    the mark, as does removing or moving it away.
+
+    Args:
+        sink (list[OpRecord]): the line's records, shared with its frames.
+        marks (dict[str, LostMark]): each lost path's mark.
+        count (int): the marks made so far.
+    """
+
+    sink: list[OpRecord]
+    marks: dict[str, LostMark] = field(default_factory=dict)
+    count: int = 0
+
+    def mark(self, key: str, version: str | None = None) -> None:
+        """Record that a conditional write to ``key`` lost.
+
+        Args:
+            key (str): the virtual path.
+            version (str | None): the version it lost on, if any.
+        """
+        self.count += 1
+        self.marks[key] = LostMark(len(self.sink), self.count, version or None)
+
+    def lift(self, key: str, upto: int, subtree: bool = False) -> None:
+        """Lift the marks a removal or move of ``key`` made stale.
+
+        Only marks made by the time it began: a refusal another command of
+        the line made while it ran is newer than it, and stays.
+
+        Args:
+            key (str): the virtual path removed or moved.
+            upto (int): ``count`` when the removal or move began.
+            subtree (bool): the paths below it went too.
+        """
+        for marked in [
+            k
+            for k, m in self.marks.items()
+            if (k == key or subtree and under_path(k, key)) and m.order <= upto
+        ]:
+            del self.marks[marked]
+
+    def version(self, key: str) -> str | None:
+        """The version a write to ``key`` lost on, while it is still lost.
+
+        Args:
+            key (str): the virtual path.
+        """
+        mark = self.marks.get(key)
+        return mark.version if mark is not None and self.holds(key) else None
+
+    def holds(self, key: str) -> bool:
+        """Whether ``key`` is lost and nothing since has read or written it.
+
+        Args:
+            key (str): the virtual path.
+        """
+        mark = self.marks.get(key)
+        if mark is None:
+            return False
+        return not any(
+            rec.path == key and rec.op in STAMP_FINGERPRINT_OPS
+            for rec in self.sink[mark.at :]
+        )
+
+
+def line_version(
+    index: RecordIndex, lost: LostPaths | None, key: str
+) -> tuple[bool, str | None]:
+    """The version the running line itself names for ``key``.
+
+    A lost path names the version its write lost on; otherwise the newest
+    version record does, a stamp its token and a retraction none.
+
+    Args:
+        index (RecordIndex): the line's records, indexed.
+        lost (LostPaths | None): the line's lost paths.
+        key (str): the virtual path.
+
+    Returns:
+        tuple[bool, str | None]: whether the line knows ``key`` at all,
+        and the version it names.
+    """
+    if lost is not None and lost.holds(key):
+        return True, lost.version(key)
+    rec = index.newest_version(key)
+    if rec is None:
+        return False, None
+    if rec.op in STAMP_FINGERPRINT_OPS:
+        return True, rec.fingerprint or None
+    return True, None
 
 
 @dataclass(frozen=True)
@@ -34,10 +150,14 @@ class Recorder:
 
     Args:
         sink (list[OpRecord]): Where new records are appended.
+        lost (LostPaths): The line's lost paths.
+        index (RecordIndex): The line's version index over ``sink``.
         mount_id (str | None): Identity of the mounted instance serving reads.
     """
 
-    sink: list[OpRecord] = field(default_factory=list)
+    sink: list[OpRecord]
+    lost: LostPaths
+    index: RecordIndex
     mount_id: str | None = None
 
 
@@ -63,7 +183,10 @@ class RecordingScope:
         self.records: list[OpRecord] = []
         self._token = None
         if active:
-            rec = Recorder()
+            sink: list[OpRecord] = []
+            rec = Recorder(
+                sink=sink, lost=LostPaths(sink), index=RecordIndex(sink)
+            )
             self.records = rec.sink
             self._token = _recorder.set(rec)
 
@@ -117,6 +240,43 @@ def command_records() -> Iterator[list[OpRecord]]:
         _command_sink.reset(token)
 
 
+def active_lost() -> LostPaths | None:
+    """The running line's lost paths, None outside a recorded line."""
+    rec = _recorder.get()
+    return rec.lost if rec is not None else None
+
+
+def mark_lost(path: PathSpec, version: str | None = None) -> None:
+    """Mark ``path`` lost on the running line, if one is recording.
+
+    Args:
+        path (PathSpec): the path whose conditional write lost.
+        version (str | None): the version it lost on, if any.
+    """
+    lost = active_lost()
+    if lost is not None:
+        lost.mark(path.virtual, version)
+
+
+def lost_count() -> int:
+    """The running line's marks so far, for a later :func:`lift_lost`."""
+    lost = active_lost()
+    return lost.count if lost is not None else 0
+
+
+def lift_lost(path: PathSpec, upto: int, subtree: bool = False) -> None:
+    """Lift the running line's marks a removal or move of ``path`` ended.
+
+    Args:
+        path (PathSpec): the path removed or moved.
+        upto (int): :func:`lost_count` when the removal or move began.
+        subtree (bool): the paths below it went too.
+    """
+    lost = active_lost()
+    if lost is not None:
+        lost.lift(path.virtual, upto, subtree)
+
+
 def active_recorder() -> Recorder | None:
     """Return the active Recorder for the current async context, if any."""
     return _recorder.get()
@@ -145,7 +305,11 @@ def push_mount_context(mount_id: str | None):
     """
     rec = _recorder.get()
     return _recorder.set(
-        None if rec is None else Recorder(sink=rec.sink, mount_id=mount_id)
+        None
+        if rec is None
+        else Recorder(
+            sink=rec.sink, mount_id=mount_id, lost=rec.lost, index=rec.index
+        )
     )
 
 

@@ -46,4 +46,5 @@ def test_vocabulary_names_the_probed_conditions():
         "EROFS",
         "EFBIG",
         "NO_XATTR",
+        "STALE_WRITE",
     }

@@ -84,7 +84,7 @@
     "e2b": "^2.45.0"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/client-s3": "^3.1116.0",
     "@modelcontextprotocol/client": "^2.3.0",
     "@octokit/core": "^7.0.7",
     "@octokit/plugin-retry": "^8.1.1",

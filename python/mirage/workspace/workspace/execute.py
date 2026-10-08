@@ -1009,8 +1009,9 @@ async def run_prepared_line(
                     if r.op not in READ_FINGERPRINT_OPS
                 ]
             )
+        # The line's own end keeps the versions its nested lines saw.
         await ws.dispatcher.apply_io(
-            io, records=applied, cache_facts=cache_facts
+            io, records=applied, cache_facts=cache_facts, nested=not is_line
         )
         return io
     except CommandTimeoutError as exc:

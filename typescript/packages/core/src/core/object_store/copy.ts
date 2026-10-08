@@ -13,11 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import { evictAfter, invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
+import {
+  evictAfter,
+  invalidateAfterWrite,
+  invalidateAncestors,
+  writeCondition,
+} from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { enoent } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
-import type { ExistsFn, ObjectStoreDriver, PairFn } from './driver.ts'
+import {
+  type ExistsFn,
+  type ObjectStoreDriver,
+  type PairFn,
+  refused,
+  requireHook,
+} from './driver.ts'
+import { ConditionLostError } from './errors.ts'
 
 /**
  * Build single-object copy over one driver. The driver must carry a
@@ -63,14 +75,23 @@ export function makeCopy<A extends Accessor, C>(
       // The copy can materialize the destination's missing ancestors.
       await invalidateAncestors(dst)
     }
+    const cond = await writeCondition(dst, 'copy')
     const { conn, close } = await driver.connect(accessor)
-    const copied = await evictAfter(async () => {
-      try {
-        return await copyFile(conn, srcKey, dstKey)
-      } finally {
-        await close()
-      }
-    }, settle)
+    let copied: boolean
+    try {
+      copied = await evictAfter(async () => {
+        try {
+          return cond !== null
+            ? await requireHook(driver.copyIf)(conn, srcKey, dstKey, cond)
+            : await copyFile(conn, srcKey, dstKey)
+        } finally {
+          await close()
+        }
+      }, settle)
+    } catch (err) {
+      if (err instanceof ConditionLostError) throw await refused(dst, err, cond)
+      throw err
+    }
     if (!copied) throw enoent(src)
   }
 }

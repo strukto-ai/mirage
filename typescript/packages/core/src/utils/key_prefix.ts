@@ -142,6 +142,11 @@ export function mountedPath(root: PathSpec, mountPath: string): PathSpec {
   return PathSpec.fromStrPath(virtual, stripSlash(mountPath))
 }
 
+/** The path a backend key under `keyPrefix` names, addressed like `root`. Mirrors Python `key_path`. */
+export function keyPath(root: PathSpec, keyPrefix: string, key: string): PathSpec {
+  return mountedPath(root, `/${strip(keyPrefix, key).replace(/^\/+/, '')}`)
+}
+
 // `path` spelled as `rawPath`, every other field kept: Python's
 // `dataclasses.replace(path, raw_path=...)`.
 export function respelled(path: PathSpec, rawPath: string): PathSpec {

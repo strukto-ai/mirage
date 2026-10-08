@@ -110,6 +110,19 @@ async function run(
 }
 
 describe('mvGeneric guards', () => {
+  it('names a failed operand as typed', async () => {
+    // GNU (coreutils 9.7) keeps the trailing slash when the operand itself
+    // failed: mv: cannot move 'd/' to 'nonexist/sub/'.
+    const files = new Map([['/d/a.txt', new Uint8Array([1])]])
+    const { stat } = makeBackend(files, new Set(['/d']))
+    const rename = (_src: PathSpec, dst: PathSpec): Promise<void> =>
+      Promise.reject(enoent(dst.virtual))
+    const [, io] = await mvGeneric(['/d/', '/gone/x/'].map(spec), stat, { rename }, mvFlags({}))
+    expect(await io.stderrStr()).toBe(
+      "mv: cannot move '/d/' to '/gone/x/': No such file or directory\n",
+    )
+  })
+
   it('reports a rename that hits a non-directory parent as Not a directory', async () => {
     const files = new Map([['/a.txt', new Uint8Array([1])]])
     const { stat } = makeBackend(files, new Set())

@@ -77,6 +77,49 @@ function notFound(): Error {
   return err
 }
 
+function preconditionFailed(): Error {
+  const err: Error & { name: string; $metadata?: { httpStatusCode: number } } = new Error(
+    'PreconditionFailed',
+  )
+  err.name = 'PreconditionFailed'
+  err.$metadata = { httpStatusCode: 412 }
+  return err
+}
+
+/** The 409 AWS answers a conditional write racing another one. */
+export function inFlightConflict(): Error {
+  const err: Error & { name: string; $metadata?: { httpStatusCode: number } } = new Error(
+    'ConditionalRequestConflict',
+  )
+  err.name = 'ConditionalRequestConflict'
+  err.$metadata = { httpStatusCode: 409 }
+  return err
+}
+
+const CONDITION_KEYS = ['IfMatch', 'IfNoneMatch', 'CopySourceIfMatch'] as const
+
+export const MUTATIONS: ReadonlySet<string> = new Set([
+  'PutObject',
+  'CopyObject',
+  'DeleteObject',
+  'DeleteObjects',
+])
+
+type Conditions = Partial<Record<(typeof CONDITION_KEYS)[number], string>>
+
+function bare(tag: string): string {
+  return tag.replace(/^"|"$/g, '')
+}
+
+function sentOf(input: Conditions): Record<string, string> {
+  const sent: Record<string, string> = {}
+  for (const key of CONDITION_KEYS) {
+    const value = input[key]
+    if (value !== undefined) sent[key] = value
+  }
+  return sent
+}
+
 function invalidRange(): Error {
   const err: Error & { name: string; $metadata?: { httpStatusCode: number } } = new Error(
     'InvalidRange',
@@ -179,6 +222,18 @@ export interface S3Mock {
     input?: Partial<TInput>,
   ): number
   resetCalls(): void
+  /** Every request in order with the condition parameters it sent. */
+  ledger: [string, Record<string, string>][]
+  /** Run `hook` once, just before the next `op` request lands. */
+  before(op: string, hook: () => void | Promise<void>): void
+  /** Drop every hook not yet run, so one a test left queued fires in no other. */
+  clearHooks(): void
+  /** Throw on a mutation sent without a condition, except a marker key. */
+  tripwire: boolean
+  /** Keys DeleteObjects refuses with AccessDenied in its body, as Python's `undeletable`. */
+  undeletable: Set<string>
+  /** Rows per flat ListObjectsV2 page; null answers in one page, as Python's `page_size`. */
+  pageSize: number | null
 }
 
 /**
@@ -204,24 +259,50 @@ export function installS3Mock(
     calls.set(name, (calls.get(name) ?? 0) + 1)
   }
   const etag = (data: Uint8Array): string => `"${md5Hex(data)}${suffix}"`
+  const ledger: [string, Record<string, string>][] = []
+  const hooks = new Map<string, (() => void | Promise<void>)[]>()
+  const state: { tripwire: boolean; pageSize: number | null } = { tripwire: false, pageSize: null }
+  const undeletable = new Set<string>()
+  const enter = async (op: string, key: string, sent: Record<string, string>): Promise<void> => {
+    ledger.push([op, sent])
+    const hook = hooks.get(op)?.shift()
+    if (hook !== undefined) await hook()
+    if (
+      state.tripwire &&
+      MUTATIONS.has(op) &&
+      Object.keys(sent).length === 0 &&
+      !key.endsWith('/')
+    ) {
+      throw new Error(`unconditioned ${op} of '${key}'`)
+    }
+  }
+  // AWS answers an If-Match on a key that is gone with 404, not 412.
+  const require = (current: Uint8Array | undefined, input: Conditions): void => {
+    if (input.IfMatch !== undefined) {
+      if (current === undefined) throw notFound()
+      if (bare(input.IfMatch) !== bare(etag(current))) throw preconditionFailed()
+    }
+  }
 
-  mock.on(GetObjectCommand).callsFake((input: { Bucket: string; Key: string; Range?: string }) => {
-    count('GetObject')
-    const data = store.get(input.Bucket, input.Key)
-    if (data === undefined) throw notFound()
-    const sliced = sliceRange(data, input.Range)
-    // From the whole object, never the slice: an ETag describes the object,
-    // and real S3 (and the python mock) return it on GetObject too. Without
-    // it a read stamps no token and the cache entry carries none.
-    return Promise.resolve({
-      Body: mockBody(sliced),
-      ContentLength: sliced.byteLength,
-      ETag: etag(data),
+  mock
+    .on(GetObjectCommand)
+    .callsFake(async (input: { Bucket: string; Key: string; Range?: string }) => {
+      count('GetObject')
+      await enter('GetObject', input.Key, {})
+      const data = store.get(input.Bucket, input.Key)
+      if (data === undefined) throw notFound()
+      const sliced = sliceRange(data, input.Range)
+      // The whole object's ETag, never the slice's, as S3 returns on GetObject.
+      return Promise.resolve({
+        Body: mockBody(sliced),
+        ContentLength: sliced.byteLength,
+        ETag: etag(data),
+      })
     })
-  })
 
-  mock.on(HeadObjectCommand).callsFake((input: { Bucket: string; Key: string }) => {
+  mock.on(HeadObjectCommand).callsFake(async (input: { Bucket: string; Key: string }) => {
     count('HeadObject')
+    await enter('HeadObject', input.Key, {})
     const data = store.get(input.Bucket, input.Key)
     if (data === undefined) throw notFound()
     return Promise.resolve({
@@ -233,68 +314,163 @@ export function installS3Mock(
 
   mock
     .on(ListObjectsV2Command)
-    .callsFake((input: { Bucket: string; Prefix?: string; Delimiter?: string }) => {
-      const objects = store.objects(input.Bucket)
-      const prefix = input.Prefix ?? ''
-      const page =
-        input.Delimiter === '/' ? paginateDirectory(objects, prefix) : paginateFlat(objects, prefix)
-      return Promise.resolve({
-        Contents: page.Contents ?? [],
-        ...(page.CommonPrefixes !== undefined ? { CommonPrefixes: page.CommonPrefixes } : {}),
-        IsTruncated: false,
-        KeyCount: page.Contents?.length ?? 0,
-      })
-    })
+    .callsFake(
+      (input: {
+        Bucket: string
+        Prefix?: string
+        Delimiter?: string
+        ContinuationToken?: string
+      }) => {
+        const objects = store.objects(input.Bucket)
+        const prefix = input.Prefix ?? ''
+        const full =
+          input.Delimiter === '/'
+            ? paginateDirectory(objects, prefix)
+            : paginateFlat(objects, prefix)
+        // Real S3 continues after the last key it sent.
+        const after = input.ContinuationToken
+        const rows = (full.Contents ?? []).filter((c) => after === undefined || c.Key > after)
+        const size = input.Delimiter === '/' ? null : state.pageSize
+        const truncated = size !== null && rows.length > size
+        const page = { ...full, Contents: truncated ? rows.slice(0, size) : rows }
+        // Real S3 lists each object's ETag, which a conditional delete reads.
+        return Promise.resolve({
+          Contents: page.Contents.map((c) => {
+            const data = objects.get(c.Key)
+            return data === undefined ? c : { ...c, ETag: etag(data) }
+          }),
+          ...(page.CommonPrefixes !== undefined ? { CommonPrefixes: page.CommonPrefixes } : {}),
+          IsTruncated: truncated,
+          ...(truncated ? { NextContinuationToken: page.Contents.at(-1)?.Key ?? '' } : {}),
+          KeyCount: page.Contents.length,
+        })
+      },
+    )
 
   mock
     .on(PutObjectCommand)
-    .callsFake((input: { Bucket: string; Key: string; Body: Uint8Array | string | undefined }) => {
-      let body: Uint8Array
-      const raw = input.Body
-      if (raw instanceof Uint8Array) body = raw
-      else if (typeof raw === 'string') body = new TextEncoder().encode(raw)
-      else body = new Uint8Array()
-      count('PutObject')
-      store.set(input.Bucket, input.Key, body)
-      return Promise.resolve({ ETag: etag(body) })
-    })
+    .callsFake(
+      async (
+        input: { Bucket: string; Key: string; Body: Uint8Array | string | undefined } & Conditions,
+      ) => {
+        let body: Uint8Array
+        const raw = input.Body
+        if (raw instanceof Uint8Array) body = raw
+        else if (typeof raw === 'string') body = new TextEncoder().encode(raw)
+        else body = new Uint8Array()
+        count('PutObject')
+        await enter('PutObject', input.Key, sentOf(input))
+        require(store.get(input.Bucket, input.Key), input)
+        store.set(input.Bucket, input.Key, body)
+        return { ETag: etag(body) }
+      },
+    )
 
-  mock.on(DeleteObjectCommand).callsFake((input: { Bucket: string; Key: string }) => {
-    store.delete(input.Bucket, input.Key)
-    return Promise.resolve({})
-  })
+  mock
+    .on(DeleteObjectCommand)
+    .callsFake(async (input: { Bucket: string; Key: string } & Conditions) => {
+      count('DeleteObject')
+      await enter('DeleteObject', input.Key, sentOf(input))
+      const current = store.get(input.Bucket, input.Key)
+      if (current !== undefined)
+        require(current, input.IfMatch !== undefined ? { IfMatch: input.IfMatch } : {})
+      store.delete(input.Bucket, input.Key)
+      return {}
+    })
 
   mock
     .on(DeleteObjectsCommand)
-    .callsFake((input: { Bucket: string; Delete: { Objects?: { Key: string }[] } }) => {
-      const deleted: { Key: string }[] = []
-      for (const obj of input.Delete.Objects ?? []) {
-        store.delete(input.Bucket, obj.Key)
-        deleted.push({ Key: obj.Key })
-      }
-      return Promise.resolve({ Deleted: deleted })
-    })
+    .callsFake(
+      async (input: { Bucket: string; Delete: { Objects?: { Key: string; ETag?: string }[] } }) => {
+        count('DeleteObjects')
+        const listed = input.Delete.Objects ?? []
+        // Judged per key: a marker never exempts an untagged file key.
+        const untagged = listed.filter((o) => o.ETag === undefined && !o.Key.endsWith('/'))
+        const tags = listed.filter((o) => o.ETag !== undefined).map((o) => String(o.ETag))
+        const tagged = tags.length > 0 && untagged.length === 0 ? { ETag: tags.join(',') } : {}
+        await enter('DeleteObjects', untagged[0]?.Key ?? listed[0]?.Key ?? '', tagged)
+        const deleted: { Key: string }[] = []
+        const errors: { Key: string; Code: string; Message: string }[] = []
+        // A refused key comes back in the body of a 200, as real DeleteObjects does.
+        for (const obj of listed) {
+          const current = store.get(input.Bucket, obj.Key)
+          if (
+            obj.ETag !== undefined &&
+            current !== undefined &&
+            bare(obj.ETag) !== bare(etag(current))
+          ) {
+            errors.push({
+              Key: obj.Key,
+              Code: 'PreconditionFailed',
+              Message: 'At least one of the pre-conditions you specified did not hold',
+            })
+            continue
+          }
+          if (undeletable.has(obj.Key)) {
+            errors.push({ Key: obj.Key, Code: 'AccessDenied', Message: 'Access Denied' })
+            continue
+          }
+          store.delete(input.Bucket, obj.Key)
+          deleted.push({ Key: obj.Key })
+        }
+        return { Deleted: deleted, Errors: errors }
+      },
+    )
 
   mock
     .on(CopyObjectCommand)
-    .callsFake((input: { Bucket: string; Key: string; CopySource: string }) => {
+    .callsFake(async (input: { Bucket: string; Key: string; CopySource: string } & Conditions) => {
+      count('CopyObject')
+      await enter('CopyObject', input.Key, sentOf(input))
       const source = lstripSlash(input.CopySource)
       const idx = source.indexOf('/')
       const srcBucket = idx > 0 ? source.slice(0, idx) : input.Bucket
       const srcKey = idx > 0 ? source.slice(idx + 1) : source
+      const src = store.get(srcBucket, srcKey)
+      if (src === undefined) throw notFound()
+      if (
+        input.CopySourceIfMatch !== undefined &&
+        bare(input.CopySourceIfMatch) !== bare(etag(src))
+      ) {
+        throw preconditionFailed()
+      }
+      require(store.get(input.Bucket, input.Key), input)
       store.copy(srcBucket, srcKey, input.Bucket, input.Key)
-      return Promise.resolve({
+      return {
         CopyObjectResult: {
           ETag: etag(store.get(input.Bucket, input.Key) ?? new Uint8Array()),
         },
-      })
+      }
     })
 
   return {
     store,
     calls,
+    ledger,
+    before: (op, hook) => {
+      const queue = hooks.get(op) ?? []
+      queue.push(hook)
+      hooks.set(op, queue)
+    },
+    clearHooks: () => {
+      hooks.clear()
+    },
+    undeletable,
+    get pageSize() {
+      return state.pageSize
+    },
+    set pageSize(value: number | null) {
+      state.pageSize = value
+    },
+    get tripwire() {
+      return state.tripwire
+    },
+    set tripwire(value: boolean) {
+      state.tripwire = value
+    },
     reset: () => {
       calls.clear()
+      ledger.length = 0
       mock.reset()
     },
     restore: () => {

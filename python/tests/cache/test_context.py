@@ -27,13 +27,17 @@ from mirage.cache.context import (
     invalidate_ancestors,
     invalidate_subtree,
     listing_refreshed,
+    own_write_version,
     publish_read,
     push_cache_manager,
+    push_write_context,
+    write_condition,
 )
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
+from mirage.cache.types import WriteContext
 from mirage.types import PathSpec
 
 
@@ -263,3 +267,39 @@ async def test_capture_preserves_non_byte_results():
         return value
 
     assert await capture_read("/m/x", fetch) == (42, [])
+
+
+async def _held(_path: PathSpec) -> str | None:
+    return "v1"
+
+
+async def _held_all(paths: list[PathSpec]) -> list[str | None]:
+    return ["v1"] * len(paths)
+
+
+async def _noop(*_args: PathSpec | str) -> None:
+    return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "own_path, want", [("/s3/f", "v2"), ("/s3/o", "v1")], ids=["same", "other"]
+)
+async def test_an_own_version_conditions_only_its_own_path(own_path, want):
+    path = PathSpec(virtual="/s3/f", directory="/s3/", vfs_path="/f")
+    other = PathSpec(virtual=own_path, directory="/s3/", vfs_path=own_path[3:])
+    context = WriteContext(
+        vfs="s3",
+        conditions=frozenset({"put", "copy", "delete"}),
+        read_version=_held,
+        read_versions=_held_all,
+        drop=_noop,
+        keep=_noop,
+    )
+    prev = push_write_context(context)
+    try:
+        with own_write_version(other, "v2"):
+            cond = await write_condition(path, "put")
+    finally:
+        push_write_context(prev)
+    assert cond is not None and cond.if_match == want

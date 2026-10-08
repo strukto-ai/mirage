@@ -89,6 +89,7 @@ import {
   RedisConsoleStore,
   RedisVFS,
   type BaseVFS,
+  type WritePolicy,
   S3VFS,
   ScalewayVFS,
   SeaweedFSVFS,
@@ -145,6 +146,8 @@ export interface OpenOptions {
   read?: ReadSpec
   // Per-mount policies over `read`, for the read workspace only.
   mountRead?: Record<string, ReadSpec>
+  // The write policy, for both workspaces: the shadow is a second writer.
+  write?: WritePolicy
 }
 
 type MountMap = ConstructorParameters<typeof Workspace>[0]
@@ -200,11 +203,13 @@ function isMountPair(
  */
 function openWorkspaces(build: () => MountMap, options?: OpenOptions): OpenedWorkspaces {
   const opened: Workspace[] = []
+  const write = options?.write
   const make = (read?: ReadSpec, mountRead?: Record<string, ReadSpec>): ExecWorkspace => {
     const mounts = mountRead !== undefined ? applyMountRead(build(), mountRead) : build()
     const ws = new Workspace(mounts, {
       mode: MountMode.WRITE,
       ...(read !== undefined ? { read } : {}),
+      ...(write !== undefined ? { write } : {}),
     })
     opened.push(ws)
     return ws as unknown as ExecWorkspace
@@ -2384,6 +2389,7 @@ export async function openConsistency(
   target: Target,
   read: ReadSpec,
   mountRead: Record<string, ReadSpec>,
+  write: WritePolicy,
 ): Promise<OpenConsistency | null> {
   // Refused before anything opens, so there is nothing to clean up.
   const paths = new Set(target.mounts.map((m) => m.path))
@@ -2395,7 +2401,7 @@ export async function openConsistency(
   }
   const adapter = ADAPTERS[target.mounts[0].vfs]
   if (adapter === undefined) return null
-  const opened = await adapter(target, { read, mountRead })
+  const opened = await adapter(target, { read, mountRead, write })
   if (opened.shadow === undefined) {
     await opened.cleanup()
     return null
@@ -2407,11 +2413,14 @@ export async function openConsistency(
       throw new Error(`${command}: ${new TextDecoder().decode(result.stderr)}`)
     }
   }
-  const tee = (path: string, content: Uint8Array): Promise<void> =>
-    onShadow(`tee ${path} > /dev/null`, content)
+  // Through the op door, as python's mutate_write: a shell tee would cache
+  // its bytes on the shadow, which a later shadow line would then read stale.
+  const writeOut = async (path: string, content: Uint8Array): Promise<void> => {
+    await shadow.dispatch('write', path, [content])
+  }
   // A mount that cannot take a write (a Hub repo, where a change is a commit)
   // brings its own out-of-band change; every other one writes through the
-  // shadow's shell. A file an account CLI edits by id (a Google Doc through
+  // shadow's op door. A file an account CLI edits by id (a Google Doc through
   // gws) has no bytes to write, so its scenario names the line the shadow
   // runs: the same line on the read side would drop that side's own caches.
   // No fallback for a delete: a write is a fair stand-in for a write, but
@@ -2420,7 +2429,7 @@ export async function openConsistency(
     Promise.reject(new Error(`${target.id}: no delete mutator for ${path}`))
   return {
     ws: opened.ws,
-    mutate: opened.mutate ?? tee,
+    mutate: opened.mutate ?? writeOut,
     remove: opened.remove ?? refuse,
     mutateLine: (command) => onShadow(command),
     cleanup: opened.cleanup,

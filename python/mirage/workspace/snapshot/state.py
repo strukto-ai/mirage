@@ -41,7 +41,7 @@ from mirage.shell.console import (
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.variable import ShellVar
-from mirage.types import JsonValue, MountMode, ReadSpec, VFSName
+from mirage.types import JsonValue, MountMode, ReadSpec, VFSName, WritePolicy
 from mirage.version import __version__
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
@@ -60,10 +60,12 @@ from mirage.vfs.secrets import (
 )
 from mirage.workspace.documentation.documents import Documents
 from mirage.workspace.files import Files
+from mirage.workspace.mount.errors import WritePolicyError
 from mirage.workspace.mount.namespace import Namespace, NodeMeta
 from mirage.workspace.mount.read_policy import resolve_read_spec
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.mount.spec import Mount
+from mirage.workspace.mount.write_policy import coerce_write_policy
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.resolve import narrow
 from mirage.workspace.session.session import (
@@ -105,6 +107,7 @@ class WorkspaceLike(Protocol):
     _session_mgr: SessionManager
     _default_agent_id: str | None
     _implicit_root: bool
+    _write_default: WritePolicy
     _documents: Documents
 
     @property
@@ -267,6 +270,7 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
                 MountKey.MODE: m.mode.value,
                 MountKey.READ: m.read.policy.value,
                 MountKey.TTL: m.read.ttl,
+                MountKey.WRITE: m.write.value,
                 MountKey.VFS_CLASS: f"{type(m.vfs).__module__}.{type(m.vfs).__name__}",
                 MountKey.VFS_REF: m.vfs_ref,
                 MountKey.INDEX_CONFIG: index_config_dump(m.index_config),
@@ -289,6 +293,7 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
                 CacheKey.SIZE: e.size,
             }
             for k, e in cache._entries.items()
+            if e.has_bytes
         ]
         if isinstance(cache, RAMFileCacheStore)
         else []
@@ -318,6 +323,7 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
 
     return {
         StateKey.VERSION: FORMAT_VERSION,
+        StateKey.WRITE: ws._write_default.value,
         StateKey.MIRAGE_VERSION: __version__,
         StateKey.MOUNTS: mounts_state,
         StateKey.SESSIONS: [s.to_dict() for s in ws._session_mgr.list()],
@@ -360,10 +366,12 @@ def check_format_version(state: dict[str, Any]) -> None:
         state (dict[str, Any]): the snapshot state.
 
     Raises:
-        ValueError: the snapshot predates this loader's format.
+        ValueError: the snapshot is in another format than this
+            loader's, older or newer.
     """
     saved_version = state.get(StateKey.VERSION)
-    if saved_version is None or saved_version < FORMAT_VERSION:
+    # A newer snapshot may carry keys this loader would drop.
+    if saved_version != FORMAT_VERSION:
         shown = "unversioned" if saved_version is None else f"v{saved_version}"
         raise ValueError(
             f"snapshot format {shown} not supported "
@@ -464,6 +472,25 @@ def build_mount_args(
                 if isinstance(override, Mount) and override.read is not None
                 else ReadSpec()
             )
+        # The saved policy survives an override, as `mode` does.
+        saved_write = m.get(MountKey.WRITE)
+        if saved_write is None or saved_write == "":
+            raise WritePolicyError(
+                f"Workspace.load: mount {m[MountKey.PREFIX]!r} is missing "
+                "its write policy; regenerate the snapshot"
+            )
+        write = coerce_write_policy(str(saved_write))
+        asked = (
+            coerce_write_policy(override.write)
+            if isinstance(override, Mount) and override.write is not None
+            else None
+        )
+        if asked is not None and asked is not write:
+            raise WritePolicyError(
+                f"Workspace.load: mount {m[MountKey.PREFIX]!r} was saved "
+                f"write: {write.value}; the override asks write: "
+                f"{asked.value}"
+            )
         # command_limits is deliberately absent: a mount entry has never
         # carried one, so there is nothing to restore. Emitting Mount
         # objects makes the slot exist, but filling it needs a new
@@ -472,6 +499,7 @@ def build_mount_args(
             vfs=prov,
             mode=MountMode(m[MountKey.MODE]),
             read=read,
+            write=write,
             vfs_ref=ref,
             index=restore_index_config(
                 m.get(MountKey.INDEX_CONFIG),
@@ -496,11 +524,18 @@ def build_mount_args(
                 e[CLIKey.CONFIG],
             )
 
+    saved_default = state.get(StateKey.WRITE)
+    if saved_default is None or saved_default == "":
+        raise WritePolicyError(
+            "Workspace.load: the snapshot is missing its workspace write "
+            "policy; regenerate the snapshot"
+        )
     return MountArgs(
         mount_args=mount_args,
         default_session_id=state[StateKey.DEFAULT_SESSION_ID],
         default_agent_id=state.get(StateKey.DEFAULT_AGENT_ID),
         clis=cli_args or None,
+        write_default=coerce_write_policy(str(saved_default)),
     )
 
 

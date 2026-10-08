@@ -19,7 +19,10 @@ from mirage import MountMode, Workspace
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
-from mirage.server.clone import clone_workspace_with_override
+from mirage.server.clone import (
+    build_override_mounts,
+    clone_workspace_with_override,
+)
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.slack import SlackConfig, SlackVFS
 
@@ -249,3 +252,12 @@ async def test_an_override_pointer_still_builds_the_declared_sources():
             )
     finally:
         await src.close()
+
+
+@pytest.mark.asyncio
+async def test_an_override_mount_with_a_null_write_keeps_the_saved_policy():
+    # null means absent, as on every other door.
+    built = await build_override_mounts(
+        {"mounts": {"/r": {"vfs": "ram", "write": None}}}, None
+    )
+    assert built["/r/"].write is None

@@ -24,6 +24,7 @@ from mirage.core.object_store.write import (
     make_truncate,
     make_write,
 )
+from mirage.errors.fs import enoent
 from mirage.observe.context import RecordingScope
 from tests.core.object_store.conftest import (
     FakeManager,
@@ -201,6 +202,25 @@ def test_create_and_truncate_name_the_path_too(accessor):
         lambda d, s: make_truncate(d)(accessor, s, 4), "/a/cut.txt"
     )
     assert cut.filename == "/mnt/a/cut.txt"
+
+
+async def _pinned_revision_gone(
+    conn: FakeStore, key: str, revision: str | None
+) -> None:
+    del conn, revision
+    raise enoent(key)
+
+
+def test_truncate_names_the_path_when_its_pinned_revision_is_gone(accessor):
+    driver = replace(
+        make_driver(FakeStore()), get_versioned=_pinned_revision_gone
+    )
+    try:
+        _managed(make_truncate(driver)(accessor, spec("/a/cut.txt"), 1))
+    except FileNotFoundError as exc:
+        assert exc.filename == "/mnt/a/cut.txt"
+        return
+    raise AssertionError("expected FileNotFoundError")
 
 
 def test_a_store_error_that_is_not_a_missing_container_propagates(accessor):
