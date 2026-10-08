@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { dirnameFn } from '../../generic/dirname.ts'
-import type { Builder, BuilderFn } from '../adapter.ts'
+import type { GenericCommand, GenericCommandFn } from '../adapter.ts'
 
-const dirname: BuilderFn = (_ops, accessor, paths, texts, opts) =>
+const dirname: GenericCommandFn = (_ops, accessor, paths, texts, opts) =>
   dirnameFn(accessor, paths, texts, opts)
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'dirname',
   fn: dirname,
 }

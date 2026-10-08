@@ -14,7 +14,7 @@
 
 import { PolicyDenied, describeRefusal, saysWhy } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
-import type { ExecuteResult } from '../workspace/workspace.ts'
+import type { ExecuteResult } from '../workspace/types.ts'
 import { errorVirtualPath, fsStrerror } from '../../errors/fs.ts'
 
 export function decode(value: Uint8Array | null | undefined): string {

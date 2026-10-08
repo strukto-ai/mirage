@@ -14,12 +14,11 @@
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.github.io import resolve_glob
 from mirage.commands.builtin.grep_pushdown import (
     text_candidates,
     whole_word_literal,
 )
-from mirage.core.github.constants import SCOPE_WARN
+from mirage.core.github.constants import SCOPE_ERROR, SCOPE_WARN
 from mirage.core.github.pushdown import (
     count_scope_files,
     is_directory_key,
@@ -27,11 +26,17 @@ from mirage.core.github.pushdown import (
     search_safe,
     should_use_search,
 )
+from mirage.core.github.readdir import readdir
 from mirage.core.github.repo import ensure_default_branch, ensure_ref
 from mirage.core.github.search import narrow_paths
+from mirage.core.github.stat import stat
 from mirage.core.github.tree import ensure_tree
 from mirage.types import PathSpec
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_prefix_of
+
+# Glob expansion over the repository tree, capped as the mount caps it.
+resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR, stat=stat)
 
 
 def scope_refusal(command: str, file_count: int, whole_word: bool) -> str:

@@ -2,7 +2,7 @@ import { odGeneric, parseCount } from '../../generic/od.ts'
 import { resolveSource, stdinStream } from '../../utils/stream.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf } from '../adapter.ts'
 
 async function* concatSources(sources: AsyncIterable<Uint8Array>[]): AsyncIterable<Uint8Array> {
   for (const source of sources) {
@@ -10,7 +10,7 @@ async function* concatSources(sources: AsyncIterable<Uint8Array>[]): AsyncIterab
   }
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'od',
   read: true,
   fn: async (ops, accessor, paths, _texts, opts) => {

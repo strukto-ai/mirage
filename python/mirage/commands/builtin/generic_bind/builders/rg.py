@@ -22,8 +22,7 @@ from mirage.commands.builtin.generic.rg import (
     walk_filter,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     bound_op,
 )
 from mirage.commands.builtin.generic_bind.search import (
@@ -32,7 +31,7 @@ from mirage.commands.builtin.generic_bind.search import (
 )
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.rg_scan import walk_candidates
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -87,4 +86,4 @@ async def rg(
     )
 
 
-BUILDER = Builder("rg", rg, read=True)
+BUILDER = GenericCommand("rg", rg, read=True)

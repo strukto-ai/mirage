@@ -15,8 +15,8 @@
 export const ALIAS_USAGE = 'alias: usage: alias [-p] [name[=value] ... ]'
 export const UNALIAS_USAGE = 'unalias: usage: unalias [-a] name [name ...]'
 
-// bash's `legal_alias_name`: a shell metacharacter, a quote, `/`, `$`
-// or a backtick anywhere in the name makes it unusable, since the parser
+// The names bash's `alias` refuses: a shell metacharacter, a quote, `/`,
+// `$` or a backtick anywhere in the name makes it unusable, since the parser
 // would never read such a word as one command name.
 export const BAD_NAME_CHARS = ' \t\n/=$`\'"|&;()<>'
 

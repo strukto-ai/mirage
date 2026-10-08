@@ -15,6 +15,5 @@
 import { unlink } from '../../../core/gdocs/unlink.ts'
 import { VFSName } from '../../../types.ts'
 import { makeRm } from '../generic/rm_cmd.ts'
-import { IO } from './io.ts'
 
-export const GDOCS_RM = makeRm(VFSName.GDOCS, IO, unlink)
+export const GDOCS_RM = makeRm(VFSName.GDOCS, unlink)

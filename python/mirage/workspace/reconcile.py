@@ -94,9 +94,7 @@ class Reconciler:
             scratch = ListingCheckStore(hints=mount.index)
             # No cached row answers; the mount's rows ride along as hints.
             try:
-                remote_stat = await mount.execute_op(
-                    "stat", path, index=scratch
-                )
+                remote_stat = await mount.call("stat", path, index=scratch)
             except (FileNotFoundError, NotADirectoryError):
                 await self.on_missing(path)
                 await mount.index.clear()
@@ -302,9 +300,7 @@ class Reconciler:
             mount (MountEntry): the mount holding the listing.
             path (str): the mount root or the folder the version covers.
         """
-        remote = await mount.execute_op(
-            "stat", path, index=ListingCheckStore()
-        )
+        remote = await mount.call("stat", path, index=ListingCheckStore())
         return remote.fingerprint if isinstance(remote, FileStat) else None
 
     async def reconcile_read(self, mount: MountEntry, path: str) -> None:

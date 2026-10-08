@@ -1,8 +1,10 @@
 from pydantic import SecretStr
 
+from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
+from tests.fixtures.vfs_io import served
 
 
 def test_vfs_basic():
@@ -24,7 +26,7 @@ def test_get_state_redacts_api_key():
 def test_vfs_uses_generic_read_only_surface():
     cfg = Mem0Config(api_key=SecretStr("secret"), user_id="alex")
     res = Mem0VFS(cfg)
-    commands = {command.name for command in res.commands()}
+    commands = {command.name for command in commands_for(res)}
     assert {
         "cat",
         "find",
@@ -35,4 +37,4 @@ def test_vfs_uses_generic_read_only_surface():
         "search",
         "stat",
     } <= commands
-    assert {op.name for op in res.ops()} == {"glob", "read", "readdir", "stat"}
+    assert served(res) == {"glob", "read", "readdir", "stat"}

@@ -17,14 +17,8 @@ import { HOME_CONFIG_KEYS } from '../../config.ts'
 import { EvalError } from '../../errors.ts'
 import { JsRuntime } from '../base.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
-import type {
-  EvalResult,
-  EvalValue,
-  RunArgs,
-  RunResult,
-  RuntimeOptions,
-  RuntimeContext,
-} from '../../types.ts'
+import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../../types.ts'
+import type { RuntimeContext } from '../../binding.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
 import { cwdPreamble } from './execution.ts'

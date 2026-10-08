@@ -15,17 +15,18 @@
 import { BaseVFS } from '../base.ts'
 import { GSlidesAccessor } from '../../accessor/gslides.ts'
 
-import { GSLIDES_COMMANDS } from '../../commands/builtin/gslides/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 import { TokenManager } from '../../core/google/client.ts'
-
-import { GSLIDES_OPS } from '../../ops/gslides/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 
 import { redactGSlidesConfig, type GSlidesConfig, type GSlidesConfigRedacted } from './config.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { readdir as gslidesReaddir } from '../../core/gslides/readdir.ts'
+import { read as gslidesRead } from '../../core/gslides/read.ts'
+import { stat as gslidesStat } from '../../core/gslides/stat.ts'
 
 export interface GSlidesVFSState {
   type: string
@@ -50,12 +51,25 @@ export class GSlidesVFS extends BaseVFS {
     this.accessor = new GSlidesAccessor({ tokenManager: tm })
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return GSLIDES_COMMANDS
+  override readonly renderers: Readonly<Record<string, string>> = { '.gslide.json': 'readDeck' }
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return gslidesReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return GSLIDES_OPS
+  /** Render the file as the JSON its `.gslide.json` name holds. */
+  async readDeck(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await gslidesRead(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return gslidesStat(this.accessor, path, index)
   }
 
   override getState(): Promise<GSlidesVFSState> {

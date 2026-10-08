@@ -18,6 +18,7 @@ from functools import partial
 from typing import Any
 
 from mirage.commands.builtin.utils.limit import run_with_timeout
+from mirage.context import reset_current_session, set_current_evaluation
 from mirage.io import IOResult
 from mirage.io.stream import (
     async_chain,
@@ -45,12 +46,7 @@ from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    child_context,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.control import UNWINDING, carried, ended
 from mirage.workspace.executor.jobs import handle_background, pump
@@ -175,7 +171,7 @@ async def handle_pipe(
             io.stderr = await output.snapshot(Channel.STDERR)
             ios[i] = io
             child_nodes[i] = child_exec
-            reset_current_evaluation(token)
+            reset_current_session(token)
         return io.exit_code
 
     tasks: list[asyncio.Task[int]] = []

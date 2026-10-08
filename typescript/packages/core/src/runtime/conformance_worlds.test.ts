@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { FileType, MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
@@ -39,14 +38,11 @@ import { MontyRuntime } from './python/monty/index.ts'
 
 async function structureWorld(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const base = new RAMVFS()
   const inner = new RAMVFS()
-  ops.registerVfs(base)
-  ops.registerVfs(inner)
   const ws = new Workspace(
     {},
-    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new MontyRuntime(), 'workspace'] },
+    { mode: MountMode.EXEC, shellParser: parser, runtimes: [new MontyRuntime(), 'workspace'] },
   )
   ws.addMount('/base', base, MountMode.WRITE)
   ws.addMount('/base/inner', inner, MountMode.WRITE)
@@ -69,14 +65,11 @@ async function structureWorld(): Promise<Workspace> {
  */
 async function scopedWorld(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const open = new RAMVFS()
   const closed = new RAMVFS()
-  ops.registerVfs(open)
-  ops.registerVfs(closed)
   const ws = new Workspace(
     {},
-    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new MontyRuntime(), 'workspace'] },
+    { mode: MountMode.EXEC, shellParser: parser, runtimes: [new MontyRuntime(), 'workspace'] },
   )
   ws.addMount('/open', open, MountMode.WRITE)
   ws.addMount('/closed', closed, MountMode.WRITE)
@@ -158,16 +151,12 @@ describe('structure world', () => {
     // cross-mount fan-out) and ls -d must all agree instead of
     // reporting the operand missing.
     const parser = await getTestParser()
-    const ops = new OpsRegistry()
     const base = new RAMVFS()
     const deep = new RAMVFS()
-    ops.registerVfs(base)
-    ops.registerVfs(deep)
     const ws = new Workspace(
       {},
       {
         mode: MountMode.EXEC,
-        ops,
         shellParser: parser,
         runtimes: [new MontyRuntime(), 'workspace'],
       },
@@ -272,16 +261,12 @@ describe('scoped world', () => {
     // which serves the shadowed key that path dispatch itself
     // refuses.
     const parser = await getTestParser()
-    const ops = new OpsRegistry()
     const base = new RAMVFS()
     const inner = new RAMVFS()
-    ops.registerVfs(base)
-    ops.registerVfs(inner)
     const ws = new Workspace(
       {},
       {
         mode: MountMode.EXEC,
-        ops,
         shellParser: parser,
         runtimes: [new MontyRuntime(), 'workspace'],
       },

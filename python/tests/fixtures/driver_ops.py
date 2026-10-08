@@ -12,23 +12,45 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
+import inspect
+from typing import Any
 from weakref import WeakKeyDictionary
 
+from mirage.cache.index import RAMIndexCacheStore
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.testing import DriverOps
-
-_TABLES: WeakKeyDictionary[BaseVFS, DriverOps] = WeakKeyDictionary()
 
 
-def ops(vfs: BaseVFS) -> DriverOps:
-    """The op table of ``vfs``, bound once per instance so its index store
-    persists across calls.
+class BoundVFS:
+    """A VFS whose functions share one index store, as a mount's do.
+
+    Args:
+        vfs (BaseVFS): the VFS under test.
+    """
+
+    def __init__(self, vfs: BaseVFS) -> None:
+        self.vfs = vfs
+        self.index = RAMIndexCacheStore(ttl=vfs.index_ttl)
+
+    def __getattr__(self, name: str) -> Any:
+        method = getattr(self.vfs, name)
+        if "index" in inspect.signature(method).parameters:
+            return functools.partial(method, index=self.index)
+        return method
+
+
+_BOUND: WeakKeyDictionary[BaseVFS, BoundVFS] = WeakKeyDictionary()
+
+
+def ops(vfs: BaseVFS) -> BoundVFS:
+    """The functions of ``vfs``, bound once per instance so its index
+    store persists across calls.
 
     Args:
         vfs (BaseVFS): the driver under test.
     """
-    table = _TABLES.get(vfs)
-    if table is None:
-        table = DriverOps(vfs)
-        _TABLES[vfs] = table
-    return table
+    bound = _BOUND.get(vfs)
+    if bound is None:
+        bound = BoundVFS(vfs)
+        _BOUND[vfs] = bound
+    return bound

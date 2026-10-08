@@ -15,6 +15,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import type * as ReaddirModule from './readdir.ts'
 import type * as ResolveModule from './resolve.ts'
+import type * as DriveModule from '../google/drive.ts'
+
+vi.mock('../google/drive.ts', async () => {
+  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
+  const { driveModuleMock } = await import('./_test_util.ts')
+  return driveModuleMock(actual)
+})
 
 vi.mock('./readdir.ts', async () => {
   const actual = await vi.importActual<typeof ReaddirModule>('./readdir.ts')
@@ -29,10 +36,11 @@ vi.mock('./resolve.ts', async () => {
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/client.ts'
 import * as readdirModule from './readdir.ts'
 import * as resolveModule from './resolve.ts'
+import { DOC_MIME, makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { stat } from './stat.ts'
 
 const STUB_TOKEN_MANAGER = {
@@ -139,5 +147,48 @@ describe('the token stat stamps', () => {
   it('stamps a doc by its modified time', async () => {
     const st = await statWith({}, 'gdrive/gdoc')
     expect(st.fingerprint).toBe(STAMP)
+  })
+})
+
+describe('gdrive stat with no index', () => {
+  it('renders every kind in full', async () => {
+    // Each kind's name suffix, size, token and extras.
+    // An earlier test queues a one-shot rejection it never consumes.
+    vi.mocked(resolveModule.resolveKey).mockReset()
+    const fake = resetFakeDrive()
+    fake.add('Report', 'root', DOC_MIME)
+    fake.folder('d')
+    fake.add('a.bin', 'root', undefined, new TextEncoder().encode('hello'))
+    const accessor = makeGDriveAccessor()
+    expect(await stat(accessor, PathSpec.fromStrPath('/Report'))).toEqual(
+      new FileStat({
+        name: 'Report.gdoc.json',
+        size: null,
+        type: FileType.FILE,
+        content: ContentType.JSON,
+        modified: '2026-01-01T00:00:00Z',
+        fingerprint: '2026-01-01T00:00:00Z',
+        extra: { file_id: 'id1', resource_type: 'gdrive/gdoc' },
+      }),
+    )
+    expect(await stat(accessor, PathSpec.fromStrPath('/d'))).toEqual(
+      new FileStat({
+        name: 'd',
+        type: FileType.DIRECTORY,
+        modified: '2026-01-01T00:00:00Z',
+        extra: { file_id: 'id2' },
+      }),
+    )
+    expect(await stat(accessor, PathSpec.fromStrPath('/a.bin'))).toEqual(
+      new FileStat({
+        name: 'a.bin',
+        size: 5,
+        type: FileType.FILE,
+        content: ContentType.BINARY,
+        modified: '2026-01-01T00:00:00Z',
+        fingerprint: '5d41402abc4b2a76b9719d911017c592',
+        extra: { file_id: 'id3', resource_type: 'gdrive/file' },
+      }),
+    )
   })
 })

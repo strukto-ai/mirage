@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
@@ -36,13 +35,7 @@ async function makeQuotingWs(): Promise<Workspace> {
   ram.store.dirs.add('/my folder')
   ram.store.dirs.add('/数据')
 
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-
-  const ws = new Workspace(
-    { '/data': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
   ws.getSession(ws.defaultSessionId).cwd = '/data'
   return ws
 }
@@ -631,13 +624,7 @@ async function makeGlobbableWs(): Promise<Workspace> {
   ram.store.files.set('/a.txt', ENC.encode('hello\n'))
   ram.store.files.set('/b.txt', ENC.encode('world\n'))
 
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-
-  const ws = new Workspace(
-    { '/data': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
   ws.getSession(ws.defaultSessionId).cwd = '/'
   return ws
 }
@@ -720,12 +707,7 @@ async function makeMetacharWs(): Promise<Workspace> {
   for (const name of ['*a.txt', 'xa.txt', 'a.txt', '?b.txt', '[c].txt']) {
     ram.store.files.set(`/${name}`, ENC.encode('x\n'))
   }
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  const ws = new Workspace(
-    { '/data': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
   ws.getSession(ws.defaultSessionId).cwd = '/data'
   return ws
 }

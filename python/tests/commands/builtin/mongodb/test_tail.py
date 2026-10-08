@@ -22,7 +22,9 @@ from mirage.commands.builtin.mongodb.tail import tail
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
+from mirage.vfs.mongodb import MongoDBVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
+from tests.fixtures.vfs_io import io_for
 
 
 def _path(s: str) -> PathSpec:
@@ -48,7 +50,11 @@ async def test_tail_does_not_query_a_collection_it_cannot_see(monkeypatch):
         accessor,
         [_path("/db1/collections/missing/documents.jsonl")],
         [],
-        CommandOpts(index=RAMIndexCacheStore(), flags={"follow": True}),
+        CommandOpts(
+            io=io_for(MongoDBVFS, accessor),
+            index=RAMIndexCacheStore(),
+            flags={"follow": True},
+        ),
     )
     await materialize(out)
     assert io.exit_code == 1

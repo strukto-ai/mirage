@@ -12,17 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
+import { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import type { Command } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { HfHubAccessor } from '../../../accessor/hf_hub.ts'
-import { IO } from './io.ts'
 
 // The three git-repo VFS. `hf_buckets` is deliberately absent: it is a
 // different Hugging Face product (Xet-backed mutable object storage, no
 // commits and no revisions) and keeps its own OpenDAL-backed commands.
 export const HF_HUB_VFS_NAMES = [VFSName.HF_MODELS, VFSName.HF_DATASETS, VFSName.HF_SPACES] as const
 
-export const HF_HUB_COMMANDS: readonly RegisteredCommand[] = HF_HUB_VFS_NAMES.flatMap((vfs) =>
-  makeGenericCommands<HfHubAccessor>(vfs, IO),
+export const HF_HUB_COMMANDS: readonly Command[] = HF_HUB_VFS_NAMES.flatMap((vfs) =>
+  genericCommands(vfs),
 )

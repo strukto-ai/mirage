@@ -1,4 +1,3 @@
-import type { ChildProcess } from './child.ts'
 import type { PathSpec } from '../types.ts'
 
 export type ProcessState = 'running' | 'stopping' | 'exited'
@@ -16,21 +15,6 @@ export interface ProcessInfo {
   readonly failure: string | null
   readonly parentPid: number | null
   readonly groupId: number
-}
-
-/**
- * Profile-scoped operations. Seeing a process grants no streams; invisible
- * PIDs return null. Stopping one the view sees but may not stop throws EPERM.
- */
-export interface ProcessView {
-  readonly list: () => readonly ProcessInfo[]
-  readonly get: (pid: number) => ProcessInfo | null
-  readonly checkSpawn: () => void
-  readonly probe: (pid: number) => boolean
-  readonly terminate: (pid: number) => boolean
-  readonly wait: (pid: number) => Promise<ProcessInfo | null>
-  readonly depth?: number
-  readonly spawn?: (request: SpawnRequest) => ChildProcess
 }
 
 export type ProcessRunner = () => Promise<number>

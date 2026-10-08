@@ -15,7 +15,6 @@ import {
   type PathSpec,
   RuntimeVFS,
   type SearchQuery,
-  VFSAdapter,
   Workspace,
 } from "@struktoai/mirage-node";
 import { grepSearchOptions } from "@struktoai/mirage-core/commands/builtin/grep_pushdown";
@@ -46,75 +45,66 @@ function pageBytes(accessor: NotesAccessor, path: PathSpec): Uint8Array {
   return ENC.encode(page);
 }
 
-async function readdir(
-  accessor: NotesAccessor,
-  path: PathSpec,
-): Promise<string[]> {
-  if (path.vfsPath.replace(/^\/+|\/+$/g, "") !== "") {
-    pageBytes(accessor, path);
-    throw enotdir(path);
-  }
-  const parent = path.virtual.replace(/\/+$/, "");
-  return [...accessor.pages.keys()].sort().map((name) => `${parent}/${name}`);
-}
-
-async function readBytes(
-  accessor: NotesAccessor,
-  path: PathSpec,
-): Promise<Uint8Array> {
-  accessor.readCalls += 1;
-  return pageBytes(accessor, path);
-}
-
-async function stat(
-  accessor: NotesAccessor,
-  path: PathSpec,
-): Promise<FileStat> {
-  const name = path.virtual.replace(/\/+$/, "").split("/").pop() || "/";
-  if (path.vfsPath.replace(/^\/+|\/+$/g, "") === "") {
-    return new FileStat({ name, type: FileType.DIRECTORY, size: null });
-  }
-  return new FileStat({
-    name,
-    type: FileType.FILE,
-    content: ContentType.TEXT,
-    size: pageBytes(accessor, path).length,
-  });
-}
-
-/** Search one page literally, declining requests that need a scan. */
-async function search(
-  accessor: NotesAccessor,
-  path: PathSpec,
-  query: SearchQuery,
-): Promise<string[] | null> {
-  accessor.searchCalls += 1;
-  const options = grepSearchOptions(query);
-  if (
-    path.vfsPath.replace(/^\/+|\/+$/g, "") === "" ||
-    options.ignoreCase ||
-    options.wholeWord
-  ) {
-    return null;
-  }
-  const text = new TextDecoder().decode(pageBytes(accessor, path));
-  if (text.includes("\0")) return null;
-  return splitLines(text).filter((line) => line.includes(query.query));
-}
-
 /** A flat, read-only collection of UTF-8 pages. */
 class NotesVFS extends BaseVFS<NotesAccessor> {
+  // grep and rg may hand a literal pattern to search instead of reading.
+  override readonly searchMeta = { grep: { mode: "literal" } };
+
   constructor(pages: Record<string, string>) {
     super({
       name: "notes",
       accessor: new NotesAccessor(pages),
-      io: new VFSAdapter({
-        read: { readdir, readBytes, stat },
-        search: { search, meta: { grep: { mode: "literal" } } },
-      }),
       prompt: "Read-only notes rendered as UTF-8 text files.",
       sizesAlwaysKnown: true,
     });
+  }
+
+  override async readdir(path: PathSpec): Promise<string[]> {
+    if (path.vfsPath.replace(/^\/+|\/+$/g, "") !== "") {
+      pageBytes(this.accessor, path);
+      throw enotdir(path);
+    }
+    const parent = path.virtual.replace(/\/+$/, "");
+    return [...this.accessor.pages.keys()]
+      .sort()
+      .map((name) => `${parent}/${name}`);
+  }
+
+  override async read(path: PathSpec): Promise<Uint8Array> {
+    this.accessor.readCalls += 1;
+    return pageBytes(this.accessor, path);
+  }
+
+  override async stat(path: PathSpec): Promise<FileStat> {
+    const name = path.virtual.replace(/\/+$/, "").split("/").pop() || "/";
+    if (path.vfsPath.replace(/^\/+|\/+$/g, "") === "") {
+      return new FileStat({ name, type: FileType.DIRECTORY, size: null });
+    }
+    return new FileStat({
+      name,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
+      size: pageBytes(this.accessor, path).length,
+    });
+  }
+
+  /** Search one page literally, declining requests that need a scan. */
+  override async search(
+    path: PathSpec,
+    query: SearchQuery,
+  ): Promise<string[] | null> {
+    this.accessor.searchCalls += 1;
+    const options = grepSearchOptions(query);
+    if (
+      path.vfsPath.replace(/^\/+|\/+$/g, "") === "" ||
+      options.ignoreCase ||
+      options.wholeWord
+    ) {
+      return null;
+    }
+    const text = new TextDecoder().decode(pageBytes(this.accessor, path));
+    if (text.includes("\0")) return null;
+    return splitLines(text).filter((line) => line.includes(query.query));
   }
 }
 

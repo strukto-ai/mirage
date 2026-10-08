@@ -15,23 +15,15 @@
 import { concatAggregate } from '@struktoai/mirage-core/commands/builtin/aggregators'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Operand } from '@struktoai/mirage-core/commands/spec/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
+import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import { commandIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { RAM_COMMANDS } from '@struktoai/mirage-core/commands/builtin/ram/index'
+import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { command, type RegisteredCommand } from '@struktoai/mirage-core/commands/config'
+import { command, type Command } from '@struktoai/mirage-core/commands/config'
 import { specOf } from '@struktoai/mirage-core/commands/spec/builtins'
 import { IOResult } from '@struktoai/mirage-core/io/types'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { eacces } from '@struktoai/mirage-core/errors/fs'
-
-function guardedListing(original: RegisteredOp): RegisteredOp {
-  return {
-    ...original,
-    fn: (accessor, path, ...args) => {
-      if (path.virtual.endsWith('.deny')) throw eacces(path)
-      return original.fn(accessor, path, ...args)
-    },
-  }
-}
 
 const GATE = {
   started: 0,
@@ -43,14 +35,26 @@ const GATE = {
 
 export class CommandService extends RAMVFS {
   private readonly calls: string[] = []
-  constructor(private readonly metadataOnly = false) {
+  private readonly dropped: readonly string[]
+  override readonly overrides: ReadonlySet<string>
+
+  constructor(metadataOnly = false) {
     super()
+    this.dropped = metadataOnly ? ['grep', 'rg', 'find', 'du'] : []
+    this.overrides = new Set([...this.dropped, 'grep', 'rg', 'rev'])
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    const handlers = super.commands().flatMap((original) => {
-      if (this.metadataOnly && ['grep', 'rg', 'find', 'du'].includes(original.name)) return []
-      if (!['grep', 'rg', 'rev'].includes(original.name)) return [original]
+  override commands(): readonly Command[] {
+    // The service's own handlers read through a plain RAM view of its store;
+    // every other read reaches the refusal below.
+    const view = new RAMVFS()
+    Object.assign(view, { accessor: this.accessor })
+    const own = commandIo(view)
+    const wrapped = RAM_COMMANDS.filter(
+      (original) =>
+        ['grep', 'rg', 'rev'].includes(original.name) && !this.dropped.includes(original.name),
+    )
+    const handlers = wrapped.flatMap((original) => {
       return command({
         name: original.name,
         vfs: 'ram',
@@ -97,7 +101,7 @@ export class CommandService extends RAMVFS {
             }
             return [stream(), new IOResult()]
           }
-          return original.fn(accessor, paths, texts, opts)
+          return original.fn(accessor, paths, texts, { ...opts, io: own })
         },
       })
     })
@@ -137,19 +141,13 @@ export class CommandService extends RAMVFS {
     ]
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return super.ops().map((op) =>
-      op.name === 'read'
-        ? {
-            ...op,
-            fn: (_accessor, path) => {
-              throw eacces(path)
-            },
-          }
-        : op.name === 'readdir'
-          ? guardedListing(op)
-          : op,
-    )
+  override read(path: PathSpec): Promise<Uint8Array> {
+    return Promise.reject(eacces(path))
+  }
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    if (path.virtual.endsWith('.deny')) return Promise.reject(eacces(path))
+    return super.readdir(path, index)
   }
 }
 export const CLI = new CLISpec({

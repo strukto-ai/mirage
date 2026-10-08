@@ -25,10 +25,10 @@ from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eacces
 from mirage.io import IOResult
-from mirage.ops.registry import op
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import install, replaces
 
 
 def _rows_from_its_own_find(rows: bool = True):
@@ -52,7 +52,7 @@ async def _refused(accessor, paths, texts, opts):
     raise eacces(paths[0])
 
 
-@op("readdir", vfs="ram")
+@replaces("readdir")
 async def _unlisted(accessor, path, **kwargs):
     raise eacces(path)
 
@@ -67,7 +67,7 @@ async def _workspace(*fns) -> Workspace:
     )
     inner.load_state({"files": {"/g": b"z"}})
     ws = Workspace({"/a": outer, "/a/n": inner}, mode=MountMode.WRITE)
-    ws.mount("/a/n").register_fns(list(fns))
+    install(ws.mount("/a/n"), list(fns))
     return ws
 
 
@@ -147,7 +147,7 @@ async def test_a_mount_below_a_failed_part_counts_where_the_walk_reaches(
     fns, expected
 ):
     ws = await _workspace(_rows_from_its_own_find())
-    ws.mount("/a").register_fns(fns)
+    install(ws.mount("/a"), fns)
     try:
         result = await ws.shell("find /a")
         assert await result.materialize_stdout() == expected

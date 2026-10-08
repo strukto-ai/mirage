@@ -72,7 +72,7 @@ def test_history_command_per_session():
 
 def test_history_builtin_wins_over_mount_command():
     ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)})
-    ws.mount("/data").register_fns([fake_history])
+    ws.mount("/data").register_commands([fake_history])
     _exec(ws, "ls /data")
     out = _stdout(_exec(ws, "history", cwd="/data"))
     assert "FAKE" not in out
@@ -393,7 +393,7 @@ def test_unrecorded_execute_skips_history_keeps_caller_ops():
     assert commands == ["echo hi > /data/f.txt"]
 
 
-async def _raise_induced(io):
+async def _raise_induced(io, **_):
     raise RuntimeError("induced")
 
 
@@ -412,7 +412,7 @@ def test_in_place_restore_rewinds_history(tmp_path):
 def test_failed_line_ops_still_in_audit(monkeypatch):
     ws = _ws()
     _exec(ws, "echo hi > /data/f.txt")
-    monkeypatch.setattr(ws, "apply_io", _raise_induced)
+    monkeypatch.setattr(ws._dispatcher, "apply_io", _raise_induced)
     io = _exec(ws, "cat /data/f.txt")
     assert io.exit_code == 1
     events = asyncio.run(ws.observer.events())
@@ -424,7 +424,7 @@ def test_failed_line_ops_still_in_audit(monkeypatch):
 
 
 # bash 5.2 adds a line to history only when it is non-empty
-# (`shell_input_line[0]`): a blank line is never recorded, while a
+# (anything before its newline): a blank line is never recorded, while a
 # whitespace-only or comment-only line is. Pinned in debian:stable-slim
 # with `printf 'echo one\n\n   \n# comment\n' | bash -i; history -w`.
 def test_a_blank_line_is_not_recorded_but_whitespace_and_comments_are():

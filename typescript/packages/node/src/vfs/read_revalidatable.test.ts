@@ -32,23 +32,12 @@ import { applyIo } from '@struktoai/mirage-core/cache/file/io'
 import { CachableAsyncIterator } from '@struktoai/mirage-core/io/cachable_iterator'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
-import * as s3Io from '@struktoai/mirage-core/commands/builtin/s3/io'
-import * as onedriveIo from '@struktoai/mirage-core/commands/builtin/onedrive/io'
-import * as sharepointIo from '@struktoai/mirage-core/commands/builtin/sharepoint/io'
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import type { SharePointAccessor } from '@struktoai/mirage-core/accessor/sharepoint'
-import * as dropboxIo from '@struktoai/mirage-core/commands/builtin/dropbox/io'
 import type { DropboxAccessor } from '@struktoai/mirage-core/accessor/dropbox'
-import * as boxIo from '@struktoai/mirage-core/commands/builtin/box/io'
 import type { BoxAccessor } from '@struktoai/mirage-core/accessor/box'
-import * as gdocsIo from '@struktoai/mirage-core/commands/builtin/gdocs/io'
-import * as gdriveIo from '@struktoai/mirage-core/commands/builtin/gdrive/io'
-import * as gsheetsIo from '@struktoai/mirage-core/commands/builtin/gsheets/io'
-import * as gslidesIo from '@struktoai/mirage-core/commands/builtin/gslides/io'
-import type { CommandIO } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { commandIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { GDriveAccessor } from '@struktoai/mirage-core/accessor/gdrive'
-import * as githubIo from '@struktoai/mirage-core/commands/builtin/github/io'
-import { readStream as githubStream } from '@struktoai/mirage-core/core/github/read'
 import type { GitHubAccessor } from '@struktoai/mirage-core/accessor/github'
 import { DRIVER as S3_DRIVER } from '@struktoai/mirage-core/core/s3/driver'
 import { recordingActive, runWithRecording } from '@struktoai/mirage-core/observe/context'
@@ -58,9 +47,7 @@ import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { GridFSAccessor } from '../accessor/gridfs.ts'
 import type { HfBucketsAccessor } from '../accessor/hf_buckets.ts'
 import type { HfHubAccessor } from '../accessor/hf_hub.ts'
-import * as hfBucketsIo from '../commands/builtin/hf_buckets/io.ts'
 import { fakeHfOperator } from '../core/hf_buckets/mock.ts'
-import * as hfHubIo from '../commands/builtin/hf_hub/io.ts'
 import { FakeHub, blobOid, serveHub, xetHash } from '../core/hf_hub/_test_util.ts'
 import {
   DRIVE_ID,
@@ -70,7 +57,6 @@ import {
   SITE_NAME,
   serveGraph,
 } from '../core/msgraph/_test_util.ts'
-import * as gridfsIo from '../commands/builtin/gridfs/io.ts'
 import { Workspace } from '../workspace.ts'
 import { buildVfs, knownVfsNames } from './registry.ts'
 import { installS3Mock, type S3Mock } from './s3/mock.ts'
@@ -128,11 +114,13 @@ const H = vi.hoisted(() => ({
   captured: [] as OpRecord[],
   gridfs: new Map<string, GridFSDoc>(),
   opened: 0,
+  uploads: 0,
   // A Drive folder tree keyed by id, served through the mocked Drive calls
   // below; the counters are what the rows assert a warm read avoids.
   gdrive: new Map<string, GDriveItem>(),
   gdriveDownloads: 0,
   gdriveRenders: 0,
+  gdriveUploads: 0,
   reach: [] as string[],
   // Replaces the token a read records, to stage a backend stamping a token of
   // another kind than its stat's.
@@ -217,6 +205,29 @@ vi.mock('../core/gridfs/client.ts', async () => {
           if (doc === undefined) throw new Error(`no file ${id.toString()}`)
           return Readable.from(chunked(doc.data))
         },
+        // A new revision is a new doc with a new _id, dated after every
+        // seeded one, so it is what latestFile answers next.
+        openUploadStream: (key: string) => {
+          H.uploads += 1
+          const oid = `b${String(H.uploads).padStart(23, '0')}`
+          const listeners: Record<string, (() => void)[]> = {}
+          return {
+            id: { toString: () => oid },
+            on: (event: string, fn: () => void) => {
+              ;(listeners[event] ??= []).push(fn)
+            },
+            end: (data: Uint8Array) => {
+              H.gridfs.set(key, {
+                _id: { toString: () => oid },
+                filename: key,
+                length: data.byteLength,
+                uploadDate: new Date(Date.UTC(2030, 0, 2)),
+                data,
+              })
+              for (const fn of listeners.finish ?? []) fn()
+            },
+          }
+        },
       }),
     iterLatest: refuse('iterLatest'),
     filesColl: refuse('filesColl'),
@@ -287,6 +298,29 @@ vi.mock('@struktoai/mirage-core/core/google/drive', async (importOriginal) => {
     downloadFile: (_tm: unknown, id: string) => {
       H.gdriveDownloads += 1
       return Promise.resolve(item(id).content)
+    },
+    // A write's reply is the uploaded file resource, rendered through
+    // gdriveResource like a listing entry, so the token a write records and
+    // the token a later probe lists cannot disagree.
+    uploadFile: async (_tm: unknown, name: string, parentId: string, data: Uint8Array) => {
+      H.gdriveUploads += 1
+      const created: GDriveItem = {
+        id: `u${String(H.gdriveUploads)}`,
+        name,
+        mimeType: 'application/octet-stream',
+        parents: [parentId],
+        modifiedTime: `2026-04-17T00:00:${String(H.gdriveUploads).padStart(2, '0')}Z`,
+        content: data,
+      }
+      H.gdrive.set(created.id, created)
+      return gdriveResource(created)
+    },
+    updateFileContent: async (_tm: unknown, id: string, data: Uint8Array) => {
+      H.gdriveUploads += 1
+      const found = item(id)
+      found.content = data
+      found.modifiedTime = `2026-04-17T00:00:${String(H.gdriveUploads).padStart(2, '0')}Z`
+      return gdriveResource(found)
     },
   }
 })
@@ -505,14 +539,11 @@ const HARNESSES: Record<string, Family> = {
 }
 
 // The mounts that render a Drive file through its editor API: the mime type
-// they list, the door, and the name their listing gives the file.
-const GAPPS: Record<
-  string,
-  [string, CommandIO, (title: string, id: string, modified: string) => string]
-> = {
-  gdocs: ['application/vnd.google-apps.document', gdocsIo.IO as CommandIO, docFilename],
-  gsheets: ['application/vnd.google-apps.spreadsheet', gsheetsIo.IO as CommandIO, sheetFilename],
-  gslides: ['application/vnd.google-apps.presentation', gslidesIo.IO as CommandIO, slideFilename],
+// they list and the name their listing gives the file.
+const GAPPS: Record<string, [string, (title: string, id: string, modified: string) => string]> = {
+  gdocs: ['application/vnd.google-apps.document', docFilename],
+  gsheets: ['application/vnd.google-apps.spreadsheet', sheetFilename],
+  gslides: ['application/vnd.google-apps.presentation', slideFilename],
 }
 
 // The drive each Graph backend addresses in the fake: OneDrive the signed-in
@@ -593,7 +624,7 @@ const { registryCapabilities } = (await import(pathToFileURL(FACTS).href)) as {
   registryCapabilities: (
     root: string,
     pkgs: readonly string[],
-  ) => Record<string, { read_revalidatable?: unknown } | null>
+  ) => Record<string, { read_revalidatable?: unknown; functions: string[] } | null>
 }
 const CAPABILITIES = registryCapabilities(resolve(FACTS, '../../packages'), ['core', 'node'])
 
@@ -723,9 +754,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         dropbox.write(stored, next)
       },
-      readBytes: (p) => dropboxIo.IO.readBytes(accessor, p, index),
-      readStream: (p) => dropboxIo.IO.readStream(accessor, p, index),
-      stat: (p) => dropboxIo.IO.stat(accessor, p, index),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, index),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p, index),
+      stat: (p) => commandIo(vfs).stat(accessor, p, index),
       streamSlot: 'stream',
     }
   }
@@ -753,9 +784,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         box.write(stored, next)
       },
-      readBytes: (p) => boxIo.IO.readBytes(accessor, p, index),
-      readStream: (p) => boxIo.IO.readStream(accessor, p, index),
-      stat: (p) => boxIo.IO.stat(accessor, p, index),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, index),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p, index),
+      stat: (p) => commandIo(vfs).stat(accessor, p, index),
       streamSlot: 'stream',
     }
   }
@@ -800,9 +831,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         gh.files.set(key, next)
       },
-      readBytes: (p) => githubIo.IO.readBytes(accessor, p, ownIndex(vfs)),
-      readStream: (p) => githubIo.IO.readStream(accessor, p, ownIndex(vfs)),
-      stat: (p) => githubIo.IO.stat(accessor, p, ownIndex(vfs)),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, ownIndex(vfs)),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p, ownIndex(vfs)),
+      stat: (p) => commandIo(vfs).stat(accessor, p, ownIndex(vfs)),
       streamSlot: 'bytes',
     }
   }
@@ -838,9 +869,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
         key,
         fetches: () => graph.fetches() - before,
         rewrite,
-        readBytes: (p) => onedriveIo.IO.readBytes(accessor, p),
-        readStream: (p) => onedriveIo.IO.readStream(accessor, p),
-        stat: (p) => onedriveIo.IO.stat(accessor, p),
+        readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+        readStream: (p) => commandIo(vfs).readStream(accessor, p),
+        stat: (p) => commandIo(vfs).stat(accessor, p),
         streamSlot: 'stream',
       }
     }
@@ -852,9 +883,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       key,
       fetches: () => graph.fetches() - before,
       rewrite,
-      readBytes: (p) => sharepointIo.IO.readBytes(accessor, p),
-      readStream: (p) => sharepointIo.IO.readStream(accessor, p),
-      stat: (p) => sharepointIo.IO.stat(accessor, p),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p),
+      stat: (p) => commandIo(vfs).stat(accessor, p),
       streamSlot: 'stream',
     }
   }
@@ -875,18 +906,19 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         item.content = next
       },
-      readBytes: (p) => gdriveIo.IO.readBytes(accessor, p, index),
-      readStream: (p) => gdriveIo.IO.readStream(accessor, p, index),
-      stat: (p) => gdriveIo.IO.stat(accessor, p),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, index),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p, index),
+      stat: (p) => commandIo(vfs).stat(accessor, p),
       streamSlot: 'bytes',
     }
   }
   const gapp = GAPPS[name]
   if (gapp !== undefined) {
-    const [mime, io, filename] = gapp
+    const [mime, filename] = gapp
     const item = gdriveAdd('a', data, mime)
     const vfs = await buildVfs(name, GDRIVE_CONFIG)
     const accessor = vfs.accessor
+    const io = commandIo(vfs)
     expect(vfs.readRevalidatable).toBe(true)
     // The fake names no owner, so the file lists under shared/. A rewrite
     // moves modifiedTime within the same day, which keeps the name.
@@ -940,9 +972,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         op.files.set(stored, Buffer.from(next))
       },
-      readBytes: (p) => hfBucketsIo.IO.readBytes(accessor, p),
-      readStream: (p) => hfBucketsIo.IO.readStream(accessor, p),
-      stat: (p) => hfBucketsIo.IO.stat(accessor, p),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p),
+      stat: (p) => commandIo(vfs).stat(accessor, p),
       streamSlot: 'stream',
     }
   }
@@ -989,9 +1021,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         files.set(stored, next)
       },
-      readBytes: (p) => hfHubIo.IO.readBytes(accessor, p),
-      readStream: (p) => hfHubIo.IO.readStream(accessor, p),
-      stat: (p) => hfHubIo.IO.stat(accessor, p),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p),
+      stat: (p) => commandIo(vfs).stat(accessor, p),
       streamSlot: 'stream',
     }
   }
@@ -1016,9 +1048,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         H.gridfs.set(stored, gridfsDoc(stored, next, 'aaaaaaaaaaaaaaaaaaaaaaaa', 2022))
       },
-      readBytes: (p) => gridfsIo.IO.readBytes(accessor, p),
-      readStream: (p) => gridfsIo.IO.readStream(accessor, p),
-      stat: (p) => gridfsIo.IO.stat(accessor, p),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p),
+      stat: (p) => commandIo(vfs).stat(accessor, p),
       streamSlot: 'stream',
     }
   }
@@ -1041,9 +1073,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     rewrite: (next) => {
       s3.store.set('b', stored, next)
     },
-    readBytes: (p) => s3Io.IO.readBytes(accessor, p),
-    readStream: (p) => s3Io.IO.readStream(accessor, p),
-    stat: (p) => s3Io.IO.stat(accessor, p),
+    readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+    readStream: (p) => commandIo(vfs).readStream(accessor, p),
+    stat: (p) => commandIo(vfs).stat(accessor, p),
     streamSlot: 'stream',
   }
 }
@@ -1088,6 +1120,43 @@ const CHANGED_CASES: { name: string; shape: Shape }[] = [
   ...Object.keys(GRAPH).map((name) => ({ name, shape: 'listed' as const })),
 ]
 const B_CASES = cases(['bytes', 'stream'])
+
+// Derived from the live roster and each backend's own write function (the
+// facts the spec generator reads), not listed: a declarer that gains a write
+// joins the write rows.
+function writableNames(): Set<string> {
+  const known = new Set(knownVfsNames())
+  const out = new Set<string>()
+  for (const [name, caps] of Object.entries(CAPABILITIES)) {
+    if (caps?.read_revalidatable !== true || !known.has(name)) continue
+    if (caps.functions.includes('write')) out.add(name)
+  }
+  return out
+}
+
+function writeFamilies(): Set<Family> {
+  const out = new Set<Family>()
+  for (const name of writableNames()) {
+    const family = HARNESSES[name]
+    if (family !== undefined) out.add(family)
+  }
+  return out
+}
+
+// hf_buckets, onedrive and sharepoint record no write token, as on main, so
+// the next fresh read downloads once.
+const WRITE_EXCEPTIONS: Partial<Record<Family, number>> = {
+  hf_buckets: 1,
+  onedrive: 1,
+  sharepoint: 1,
+}
+const WRITE_TARGETS = { new: 'w.txt', seeded: KEYS.root } as const
+const WRITE_CASES = [...writeFamilies()].sort().flatMap((family) =>
+  (Object.keys(WRITE_TARGETS) as (keyof typeof WRITE_TARGETS)[]).map((target) => ({
+    family,
+    target,
+  })),
+)
 
 function specFor(virtual: string, key: string): PathSpec {
   return new PathSpec({
@@ -1136,14 +1205,9 @@ async function partialRead(ws: Workspace, fake: Fake, virtual: string): Promise<
 // Reconcile stats through a fresh index (workspace/reconcile.ts), so a
 // listing's index row, which carries no token, cannot answer for it.
 async function reconcileStat(ws: Workspace, fake: Fake, virtual: string): Promise<FileStat> {
-  const stat = await ws.opsRegistry.call(
-    'stat',
-    fake.vfs,
-    fake.accessor,
-    specFor(virtual, fake.key),
-    [],
-    { index: new RAMIndexCacheStore() },
-  )
+  const stat = await ws.namespace
+    .mountFor(virtual)
+    .callOp('stat', specFor(virtual, fake.key), [], { index: new RAMIndexCacheStore() })
   return stat as FileStat
 }
 
@@ -1206,6 +1270,8 @@ describe('the read-token contract', () => {
     H.gdrive.clear()
     H.gdriveDownloads = 0
     H.gdriveRenders = 0
+    H.gdriveUploads = 0
+    H.uploads = 0
     H.reach.length = 0
     H.stampOverride = null
   })
@@ -1278,7 +1344,58 @@ describe('the read-token contract', () => {
     )
     const whole = ['github', 'gdrive', 'gdocs', 'gsheets', 'gslides']
     expect(cases(['drain']).some((c) => whole.includes(c.name))).toBe(false)
+    const expectedWrite = new Set<string>()
+    for (const family of [
+      's3',
+      'gridfs',
+      'hf_buckets',
+      'onedrive',
+      'sharepoint',
+      'gdrive',
+      'box',
+      'dropbox',
+    ])
+      for (const target of ['new', 'seeded']) expectedWrite.add(`${family}-write-${target}`)
+    expect(new Set(WRITE_CASES.map((c) => `${c.family}-write-${c.target}`))).toEqual(expectedWrite)
   })
+
+  it('every writable family has a write harness or an exception', () => {
+    // The write rows run each family's own harness through makeFake, so a
+    // writable family is covered exactly when it has a harness; the
+    // exception table may name only writable families.
+    const names = writableNames()
+    expect(names.size).toBeGreaterThan(0)
+    for (const name of names) expect(HARNESSES[name], name).toBeDefined()
+    const families = writeFamilies()
+    for (const family of Object.keys(WRITE_EXCEPTIONS))
+      expect(families.has(family as Family)).toBe(true)
+  })
+
+  for (const { family, target } of WRITE_CASES) {
+    it(`a written file is served without a download: ${family}-write-${target}`, async () => {
+      // The new target takes the create path (box/gdrive new upload, Graph
+      // create), the seeded one the update path (version, update by id).
+      // H.unrecorded stays false, so record() reaches the real recorder.
+      expect(H.unrecorded).toBe(false)
+      const fake = await makeFake(family, 'root', SEED)
+      const virtual = `/m/${WRITE_TARGETS[target]}`
+      const ws = freshWorkspace(fake.vfs)
+      try {
+        await line(ws, `echo new | tee ${virtual}`)
+        const written = [...H.reach]
+        const before = fake.fetches()
+        expect(new TextDecoder().decode(await line(ws, `cat ${virtual}`))).toBe('new\n')
+        expect(fake.fetches() - before).toBe(WRITE_EXCEPTIONS[family] ?? 0)
+        // A new gridfs key's stat miss asks filesColl whether the key names a
+        // folder, a door the read rows refuse; the read itself reaches nothing.
+        const statMiss = family === 'gridfs' && target === 'new'
+        expect(written).toEqual(statMiss ? ['filesColl'] : [])
+        expect(H.reach).toEqual(written)
+      } finally {
+        await ws.close()
+      }
+    })
+  }
 
   it('a native gdoc under fresh renders once until it changes', async () => {
     // A native file has no md5 and no head revision; its token is the
@@ -1580,10 +1697,13 @@ describe('the read-token contract', () => {
     }
   })
 
-  it("github's stream is its read, so it records through record", () => {
+  it("github's stream is its read, so it records through record", async () => {
     // Its expected stream slot is "bytes" for that reason. A native stream
     // that forgot to record would otherwise hide behind that slot.
-    expect(githubIo.IO.readStream).toBe(githubStream)
+    const fake = await makeFake('github', 'root', SEED)
+    const chunks: Uint8Array[] = []
+    for await (const chunk of fake.readStream(specFor('/m/a.txt', fake.key))) chunks.push(chunk)
+    expect(chunks).toEqual([SEED])
   })
 
   it('the contract goes red on github stamping another kind', async () => {
@@ -1669,6 +1789,17 @@ describe('the read-token contract', () => {
         expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
         expect(box.log.slice(before)).toEqual([`info:${box.idOf(root + DEEP)}`])
       }, root)
+    })
+
+    it('a fresh box read after a tee probes once without a download', async () => {
+      await boxCase(async (ws, box) => {
+        await line(ws, `echo new | tee /m/${DEEP}`)
+        const before = box.log.length
+        expect(new TextDecoder().decode(await line(ws, `cat /m/${DEEP}`))).toBe('new\n')
+        const log = box.log.slice(before)
+        // The probe after a write is one parent walk, not an info by id.
+        expect(log).toEqual(walk(box))
+      })
     })
 
     it('a direct warm fresh box read is one request by id', async () => {

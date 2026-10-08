@@ -17,9 +17,11 @@ class ReadonlyVariableError(Exception):
     """A write to a name ``readonly`` has marked.
 
     Raised by the session door so every writer refuses the same way;
-    each builtin catches it and renders its own bash wording.
+    each builtin catches it and renders its own bash wording. Its
+    message is bash's plain refusal, which a line that does not catch it
+    reports as it ends (``declare -i n; n='R=3'``).
     """
 
     def __init__(self, name: str) -> None:
-        super().__init__(name)
+        super().__init__(f"bash: {name}: readonly variable")
         self.name = name

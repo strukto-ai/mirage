@@ -12,17 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.commands.builtin.mem0 import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
-from mirage.ops.mem0 import OPS as MEM0_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import VFSName
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.mem0.read import read as _read
+from mirage.core.mem0.read import read_stream as _read_stream
+from mirage.core.mem0.readdir import readdir as _readdir
+from mirage.core.mem0.search import search_many, search_resource
+from mirage.core.mem0.stat import stat as _stat
+from mirage.types import FileStat, PathSpec, VFSName
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mem0.config import Mem0Config
 from mirage.vfs.mem0.prompt import PROMPT
+from mirage.vfs.types import SearchQuery
 
 
 class Mem0VFS(BaseVFS):
@@ -40,11 +45,46 @@ class Mem0VFS(BaseVFS):
         self.config = config
         self.accessor = Mem0Accessor(self.config)
 
-    def ops(self) -> list[RegisteredOp]:
-        return MEM0_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
+
+    def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path, index)
+
+    async def search(
+        self,
+        path: PathSpec,
+        query: SearchQuery,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[str] | None:
+        return await search_resource(self.accessor, path, query, index)
+
+    async def search_many(
+        self,
+        paths: list[PathSpec],
+        query: SearchQuery,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[str] | None:
+        return await search_many(self.accessor, paths, query, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

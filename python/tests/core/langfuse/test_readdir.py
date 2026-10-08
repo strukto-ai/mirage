@@ -16,16 +16,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage import BaseVFS, Workspace
+from mirage import Workspace
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.langfuse.io import IO
 from mirage.core.langfuse.readdir import readdir
 from mirage.core.langfuse.stat import stat
 from mirage.core.render.json import jsonl_bytes
 from mirage.types import PathSpec
 from mirage.vfs.langfuse.config import LangfuseConfig
+from mirage.vfs.langfuse.langfuse import LangfuseVFS
 from tests.fixtures.index_spy import WindowSpy
+from tests.fixtures.vfs_io import vfs_over
 
 
 @pytest.fixture
@@ -93,9 +94,7 @@ async def test_workspace_long_listing_fetches_a_full_trace_page_once():
                 default_trace_limit=2,
             )
         )
-    ws = Workspace(
-        {"/nested/lf/": BaseVFS(name="langfuse", accessor=accessor, io=IO)}
-    )
+    ws = Workspace({"/nested/lf/": vfs_over(LangfuseVFS, accessor)})
     try:
         with patch(
             "mirage.core.langfuse.readdir.fetch_traces",

@@ -213,7 +213,7 @@ describe('hf_hub versions a listing by its head commit', () => {
     const two = wsOf(twoVfs, shared)
     await out(one, 'ls /m')
     fake.log.length = 0
-    const found = (await two.opsRegistry.call('stat', twoVfs, twoVfs.accessor, ROOT, [], {
+    const found = (await two.mount('/m').callOp('stat', ROOT, [], {
       index: new ListingCheckStore(),
     })) as FileStat
     expect(found.fingerprint).toBe(fake.head())
@@ -405,7 +405,7 @@ describe('hf_hub versions a listing by its head commit', () => {
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('fetch failed')))
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     vi.useFakeTimers({ toFake: ['setTimeout'] })
-    const rec = new Reconciler(w.cache, w.namespace, w.opsRegistry)
+    const rec = new Reconciler(w.cache, w.namespace)
     const verdict = runInCommandScope(() =>
       rec.mayServeListing(mount, '/m/docs/sub', before.version ?? null),
     )

@@ -57,7 +57,10 @@ from mirage.types import (
     Visibility,
 )
 from mirage.workspace.abort import StatusWriter
-from mirage.workspace.session.constants import INHERITED_FIELDS
+from mirage.workspace.session.constants import (
+    INHERITED_FIELDS,
+    STARTUP_VALUES,
+)
 from mirage.workspace.session.functions import (
     FunctionSite,
     function_sources,
@@ -287,6 +290,8 @@ class SessionState:
     # two different frozen things in bash, and each refuses in its own
     # voice.
     readonly_functions: set[str] = field(default_factory=set)
+    # The functions `export -f` marked, which a nested shell inherits.
+    exported_functions: set[str] = field(default_factory=set)
     last_exit_code: int = 0
     # `${PIPESTATUS[@]}`: the exit status of every segment of the last
     # pipeline, where a simple command is a one-segment pipeline. Written
@@ -409,6 +414,12 @@ class SessionState:
     # name, innermost last: a local `RANDOM` is an ordinary variable for
     # the function's extent, and the generator resumes when it returns.
     _local_random: list[str | None] = field(default_factory=list, repr=False)
+    # The names a running `declare -g` has put at global scope
+    # (`reach_global`), each with its frame and the function's local it
+    # set aside: arithmetic in the declaration still reads that local.
+    _reached: list[tuple[str, dict[str, ShellVar | None], ShellVar | None]] = (
+        field(default_factory=list, repr=False)
+    )
     # Hidden `getopts` state: the 1-based char offset within the current
     # word being scanned, plus the OPTIND value that offset belongs to.
     # A caller resetting OPTIND (e.g. to 1) makes the seen value stale,
@@ -537,6 +548,8 @@ class SessionState:
             data["functions"] = dict(self.functions)
         if self.readonly_functions:
             data["readonly_functions"] = sorted(self.readonly_functions)
+        if self.exported_functions:
+            data["exported_functions"] = sorted(self.exported_functions)
         if self.mount_modes is not None:
             data["mount_modes"] = {
                 prefix: mode.value for prefix, mode in self.mount_modes.items()
@@ -585,6 +598,7 @@ class SessionState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SessionState":
+        recorded: dict[str, ShellVar] | None = None
         if "env" in data or "var_attrs" in data or "managed" in data:
             data = dict(data)
             env = data.pop("env", {})
@@ -620,11 +634,11 @@ class SessionState:
                     ),
                 )
             data["vars"] = out_vars
-        if "readonly_functions" in data:
-            data = {
-                **data,
-                "readonly_functions": set(data["readonly_functions"]),
-            }
+            if attrs is not None:
+                recorded = dict(out_vars)
+        for marks in ("readonly_functions", "exported_functions"):
+            if marks in data:
+                data = {**data, marks: set(data[marks])}
         modes = data.get("mount_modes")
         paths = data.get("hidden_paths")
         shown = data.get("shown_paths")
@@ -710,7 +724,13 @@ class SessionState:
                 processes=data.get("processes", ProcessPermissions()).list,
                 commands=rules.allow if rules is not None else None,
             )
-        return cls(**data)
+        session = cls(**data)
+        if recorded is not None:
+            # A recorded session comes back as it was written, so a
+            # startup variable it had unset stays unset rather than being
+            # seeded again; a bare environment starts a new shell.
+            session.vars = recorded
+        return session
 
     @property
     def argv0(self) -> str:
@@ -797,6 +817,10 @@ class SessionState:
         # reads `${#IFS}` as 3 and `OLDIFS=$IFS ... IFS=$OLDIFS` puts the
         # default back rather than an empty IFS that splits nothing.
         self.vars.setdefault("IFS", ShellVar(IFS_DEFAULT, frozenset()))
+        # bash starts OPTIND (an integer) and OPTERR at 1 and never exports
+        # them, so `shift $((OPTIND-1))` works before any `getopts`.
+        for name, var in STARTUP_VALUES.items():
+            self.vars.setdefault(name, var)
 
     def fork(self, **overrides: Any) -> "SessionState":
         """Return a copy of this session with overrides applied.
@@ -829,7 +853,13 @@ class SessionState:
                 **defaults["vars"],
                 "PWD": ShellVar(overrides["cwd"], frozenset({VarAttr.EXPORT})),
             }
+        kept = None if "vars" in overrides else dict(defaults["vars"])
         forked = SessionState(**defaults)
+        if kept is not None:
+            # A fork is the same shell going on, so a startup variable the
+            # source unset stays unset (`unset IFS; ( ... )`) rather than
+            # being seeded again; a fork given new variables starts them.
+            forked.vars = kept
         if self._random_seed == RANDOM_UNSET:
             forked._random_seed = RANDOM_UNSET
         return forked
@@ -838,10 +868,10 @@ class SessionState:
         """A child shell of this session: a fork that reads on from here.
 
         ``fork`` copies what a session keeps; a child shell (a command
-        substitution, a subshell, a nested ``bash``) also inherits the
-        reader's position, the aliases being expanded and the local frames,
-        and reseeds ``$RANDOM`` on its first draw instead of replaying
-        this session's seed.
+        substitution, a subshell) also inherits the reader's position, the
+        aliases being expanded and the local frames, and reseeds
+        ``$RANDOM`` on its first draw instead of replaying this session's
+        seed.
 
         Args:
             None
@@ -861,10 +891,91 @@ class SessionState:
         ]
         child._local_random = list(self._local_random)
         if child._random_seed != RANDOM_UNSET:
-            var = self.vars.get(RANDOM)
-            child._random_seed = (
-                var.value
-                if var is not None and isinstance(var.value, str)
-                else None
-            )
+            child._draw_afresh()
         return child
+
+    def _draw_afresh(self) -> None:
+        """Start ``$RANDOM`` on a new sequence at its next draw, rather
+        than seed it from the value the variable holds now.
+
+        Args:
+            None
+        """
+        var = self.vars.get(RANDOM)
+        self._random_seed = (
+            var.value
+            if var is not None and isinstance(var.value, str)
+            else None
+        )
+
+    def new_shell(self) -> "SessionState":
+        """A new shell started from this session, as a nested ``bash`` is.
+
+        bash runs a nested shell as a program of its own, which inherits
+        the working directory, the umask, the open files and the
+        environment: the exported variables, as plain exported strings
+        (no array, no other attribute), and the functions ``export -f``
+        marked. The rest starts as a fresh shell's does: the other
+        variables and functions, the aliases, the ``set`` and ``shopt``
+        options, ``$?``, ``$!``, ``$RANDOM``'s sequence, ``getopts``'s
+        place, the call stack, any test its caller is in (``if bash -ec
+        'false; ...'`` still ends at ``false``) and the startup
+        variables, which bash never reads from its environment: IFS is
+        dropped and ``STARTUP_VALUES`` restart. A managed variable not yet fetched crosses as its
+        pointer, which the nested shell fetches through.
+
+        Args:
+            None
+        """
+        exported = frozenset({VarAttr.EXPORT})
+        variables: dict[str, ShellVar] = {}
+        for name, var in self.vars.items():
+            if VarAttr.EXPORT not in var.attrs or name == "IFS":
+                continue
+            if not isinstance(var.value, str) and var.managed is None:
+                continue
+            start = STARTUP_VALUES.get(name)
+            variables[name] = (
+                ShellVar(var.value, exported, var.managed)
+                if start is None
+                else ShellVar(start.value, start.attrs | exported)
+            )
+        functions = {
+            name: source
+            for name, source in self.functions.items()
+            if name in self.exported_functions
+        }
+        child = self.fork(
+            vars=variables,
+            functions=functions,
+            exported_functions=set(functions),
+            readonly_functions=set(),
+            _function_sites={
+                name: site
+                for name, site in self._function_sites.items()
+                if name in functions
+            },
+            aliases={},
+            _alias_marks={},
+            shell_options={},
+            shopts={},
+            last_exit_code=0,
+            pipe_status=(),
+            last_bg_job_id=None,
+            function_names=(),
+            _getopts_pos=0,
+            _getopts_optind=None,
+            errexit_ignored=False,
+        )
+        child._draw_afresh()
+        return child
+
+    def remove_function(self, name: str) -> None:
+        """Remove a function with its definition site and export mark.
+
+        Args:
+            name (str): the function's name.
+        """
+        self.functions.pop(name, None)
+        self._function_sites.pop(name, None)
+        self.exported_functions.discard(name)

@@ -117,7 +117,7 @@ function linkView(
 // session view is: its listings come filtered by that session's hides,
 // and `scoped` answers for the command being admitted, whose gate is
 // bound while it runs; a null session is an unrestricted view. Exported
-// for the mount fan-out, which reaches `executeCmd` without going
+// for the mount fan-out, which reaches `runCommand` without going
 // through `runOnMount` and would otherwise run every sub-command
 // name-plane-blind.
 export function namespaceViewOf(

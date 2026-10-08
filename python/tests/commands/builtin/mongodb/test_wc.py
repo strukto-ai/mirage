@@ -22,7 +22,9 @@ from mirage.commands.builtin.mongodb.wc import wc
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
+from mirage.vfs.mongodb import MongoDBVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
+from tests.fixtures.vfs_io import io_for
 
 
 def _path(s: str) -> PathSpec:
@@ -48,7 +50,11 @@ async def test_wc_l_counts_a_visible_collection_server_side(monkeypatch):
         accessor,
         [_path(path)],
         [],
-        CommandOpts(index=RAMIndexCacheStore(), flags={"lines": True}),
+        CommandOpts(
+            io=io_for(MongoDBVFS, accessor),
+            index=RAMIndexCacheStore(),
+            flags={"lines": True},
+        ),
     )
     assert await materialize(out) == f"7 {path}\n".encode()
     assert io.exit_code == 0

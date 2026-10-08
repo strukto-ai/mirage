@@ -12,12 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { JaegerAccessor } from '../../../accessor/jaeger.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 
-export const JAEGER_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<JaegerAccessor>(VFSName.JAEGER, IO),
-]
+export const JAEGER_COMMANDS: readonly Command[] = [...genericCommands(VFSName.JAEGER)]

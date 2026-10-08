@@ -16,7 +16,6 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
     with_command_guards,
     with_policy_guard,
 )
@@ -29,6 +28,7 @@ from mirage.commands.builtin.object_store.rm import make_rm
 from mirage.commands.builtin.object_store.stat import make_stat
 from mirage.commands.builtin.object_store.tee import make_tee
 from mirage.commands.builtin.object_store.touch import make_touch
+from mirage.commands.config import CommandIO
 
 # Keyed-store behaviours kept as overrides of the generic commands: no
 # real directories (mkdir -p, rm not-empty), write-tracking (touch/tee),
@@ -36,34 +36,36 @@ from mirage.commands.builtin.object_store.touch import make_touch
 OBJECT_STORE_OVERRIDES = {"stat", "rm", "mkdir", "tee", "touch"}
 
 
-def make_object_store_commands(
-    vfs: str, io: CommandIO
-) -> list[Callable[..., Any]]:
+def _guarded(io: CommandIO) -> CommandIO:
+    return with_command_guards(with_policy_guard(with_slash_guard(io)))
+
+
+def _answered(io: CommandIO) -> CommandIO:
+    return with_command_guards(
+        with_policy_guard(with_slash_guard(with_probe_answers(io)))
+    )
+
+
+def make_object_store_commands(vfs: str) -> list[Callable[..., Any]]:
     """Build the five keyed-store command overrides for one backend.
 
-    The op table is wrapped with the same hidden/rule/mode chain the
-    factory gives every generic command, the policy guard outermost as
-    there, so an override enforces the session's path axis and the
-    coded op policies exactly like the generic it replaces. The slash
-    guard rides along for the same reason: ``tee missing/`` on a keyed
-    store must refuse as the generic does instead of writing a key
-    called ``missing``. ``stat`` also reuses the running command's probe
-    answer (``with_probe_answers``), applied to the raw table below every
-    guard, as the factory applies it.
+    Each runs over the table of the mount it runs on, wrapped with the
+    same hidden/rule/mode chain the factory gives every generic command,
+    the policy guard outermost as there, so an override enforces the
+    session's path axis and the coded op policies exactly like the
+    generic it replaces. The slash guard rides along for the same reason:
+    ``tee missing/`` on a keyed store must refuse as the generic does
+    instead of writing a key called ``missing``. ``stat`` also reuses the
+    running command's probe answer (``with_probe_answers``), applied to
+    the raw table below every guard, as the factory applies it.
 
     Args:
         vfs (str): VFS name the commands register under.
-        io (CommandIO): the backend's op table; must wire the write-side
-            slots the overrides consume.
     """
-    guarded = with_command_guards(with_policy_guard(with_slash_guard(io)))
-    answered = with_command_guards(
-        with_policy_guard(with_slash_guard(with_probe_answers(io)))
-    )
     return [
-        make_mkdir(vfs, guarded),
-        make_rm(vfs, guarded),
-        make_stat(vfs, answered),
-        make_tee(vfs, guarded),
-        make_touch(vfs, guarded),
+        make_mkdir(vfs, _guarded),
+        make_rm(vfs, _guarded),
+        make_stat(vfs, _answered),
+        make_tee(vfs, _guarded),
+        make_touch(vfs, _guarded),
     ]

@@ -14,8 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { Accessor } from '@struktoai/mirage-core/accessor/base'
-import type { CommandIO } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import { streamFromBytes } from '@struktoai/mirage-core/commands/builtin/utils/wrap'
 import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import {
@@ -45,56 +43,48 @@ function key(path: PathSpec): string {
   return stripSlash(path.vfsPath)
 }
 
-function readdir(accessor: NotesAccessor, path: PathSpec): Promise<string[]> {
-  const parent = rstripSlash(path.virtual)
-  return Promise.resolve(
-    Object.keys(accessor.pages)
-      .sort()
-      .map((name) => `${parent}/${name}`),
-  )
-}
+/** A page per file, read from the accessor's pages. */
+class NotesVFS extends BaseVFS<NotesAccessor> {
+  override readdir(path: PathSpec): Promise<string[]> {
+    const parent = rstripSlash(path.virtual)
+    return Promise.resolve(
+      Object.keys(this.accessor.pages)
+        .sort()
+        .map((name) => `${parent}/${name}`),
+    )
+  }
 
-function readBytes(accessor: NotesAccessor, path: PathSpec): Promise<Uint8Array> {
-  const page = accessor.pages[key(path)]
-  if (page === undefined) throw enoent(path)
-  return Promise.resolve(ENC.encode(page))
-}
+  override read(path: PathSpec): Promise<Uint8Array> {
+    const page = this.accessor.pages[key(path)]
+    if (page === undefined) throw enoent(path)
+    return Promise.resolve(ENC.encode(page))
+  }
 
-function stat(accessor: NotesAccessor, path: PathSpec): Promise<FileStat> {
-  const k = key(path)
-  const name = rstripSlash(path.virtual).split('/').pop() ?? '/'
-  if (k === '')
-    return Promise.resolve(new FileStat({ name: '/', size: null, type: FileType.DIRECTORY }))
-  const page = accessor.pages[k]
-  if (page === undefined) throw enoent(path)
-  return Promise.resolve(
-    new FileStat({
-      name,
-      size: ENC.encode(page).length,
-      type: FileType.FILE,
-      content: ContentType.TEXT,
-    }),
-  )
-}
-
-function notesIO(): CommandIO<NotesAccessor> {
-  return {
-    readdir,
-    readBytes,
-    readStream: (a, p, i) => streamFromBytes(readBytes, a, p, i),
-    stat,
-    isMounted: () => true,
-    local: false,
+  override stat(path: PathSpec): Promise<FileStat> {
+    const k = key(path)
+    const name = rstripSlash(path.virtual).split('/').pop() ?? '/'
+    if (k === '')
+      return Promise.resolve(new FileStat({ name: '/', size: null, type: FileType.DIRECTORY }))
+    const page = this.accessor.pages[k]
+    if (page === undefined) throw enoent(path)
+    return Promise.resolve(
+      new FileStat({
+        name,
+        size: ENC.encode(page).length,
+        type: FileType.FILE,
+        content: ContentType.TEXT,
+      }),
+    )
   }
 }
 
 /** Content the VFS owns rides its state, so a version restores it. */
-class Notes extends BaseVFS<NotesAccessor> {
+class Notes extends NotesVFS {
   readonly notes: NotesAccessor
 
   constructor(pages: Record<string, string> = {}) {
     const notes = new NotesAccessor({ ...pages })
-    super({ name: 'notes-test', accessor: notes, io: notesIO() })
+    super({ name: 'notes-test', accessor: notes })
     this.notes = notes
   }
 
@@ -109,9 +99,9 @@ class Notes extends BaseVFS<NotesAccessor> {
 }
 
 /** Keeps the default state, so it has to be handed back live. */
-class Bare extends BaseVFS<NotesAccessor> {
+class Bare extends NotesVFS {
   constructor() {
-    super({ name: 'bare-test', accessor: new NotesAccessor({}), io: notesIO() })
+    super({ name: 'bare-test', accessor: new NotesAccessor({}) })
   }
 }
 

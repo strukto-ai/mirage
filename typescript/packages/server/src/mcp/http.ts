@@ -22,7 +22,7 @@ import {
   MirageToolOperations,
   type ToolResult,
 } from '@struktoai/mirage-core/workspace/tools/tool_operations'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { JsonValue } from '@struktoai/mirage-core/types'

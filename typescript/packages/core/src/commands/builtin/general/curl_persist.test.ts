@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { OpsRegistry } from '../../../ops/registry.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
@@ -49,12 +48,7 @@ async function makeWs(): Promise<Workspace> {
   const ramRw = new RAMVFS()
   const ramRo = new RAMVFS()
   const stub = new StubVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ramRw)
-  const ws = new Workspace(
-    { '/ram': ramRw },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  const ws = new Workspace({ '/ram': ramRw }, { mode: MountMode.WRITE, shellParser: parser })
   ws.addMount('/readonly', ramRo, MountMode.READ)
   ws.addMount('/nowrite', stub, MountMode.WRITE)
   return ws

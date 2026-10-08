@@ -28,6 +28,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace.abort import ABORT_JOIN_SECONDS, MirageAbortError
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.store import SessionFields
+from tests.fixtures.apply_marks import caching_ram_workspace, capture_marks
 
 
 @pytest.mark.asyncio
@@ -698,3 +699,21 @@ async def test_invocation_shell_does_not_admit_unrelated_calls(named):
     finally:
         held.set()
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_nested_line_applies_against_only_the_writes_since_it_began():
+    # Neither the outer line's earlier write nor any read reaches the
+    # nested apply: a concurrent sibling records into the same list, so a
+    # read token there could label bytes it never described.
+    ws = caching_ram_workspace()
+    try:
+        assert (await ws.shell("echo a > /r/f")).exit_code == 0
+        captured = capture_marks(ws)
+        line = "cat /r/f; echo b | tee /r/g; x=$(cat /r/f; echo c | tee /r/h)"
+        assert (await ws.shell(line)).exit_code == 0
+    finally:
+        await ws.close()
+    (nested, _), (outer, _) = captured
+    assert [m[:2] for m in nested] == [("write", "/r/h")]
+    assert [m[:2] for m in outer].count(("read", "/r/f")) == 2

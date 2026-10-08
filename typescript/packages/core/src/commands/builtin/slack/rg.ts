@@ -15,7 +15,6 @@
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { SlackAccessor } from '../../../accessor/slack.ts'
 import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 import {
   buildQuery,
   formatFileGrepResults,
@@ -32,6 +31,7 @@ import { pushdownOperand } from '../grep_pushdown.ts'
 import { parseFlags, refuseMissingPattern, rgGeneric } from '../generic/rg.ts'
 import { RG_SEARCH_HONORED, SEARCH_MAX_RESULTS } from './grep.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { mountIo } from '../generic_bind/adapter.ts'
 
 const ENC = new TextEncoder()
 
@@ -49,7 +49,7 @@ async function rg(
   const pushdownWarnings: string[] = []
   // Same gate as slack grep, from the same table: only a lone concrete
   // operand with no reshaping flag may be answered by the search API.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const [scan, scoped] = scanIo(mountIo(opts), opts.ns, opts.mountPrefix)
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   if (operand !== null && pattern !== null && fl.asBool('word_regexp')) {
     const match = detectScope(operand)

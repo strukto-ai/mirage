@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
@@ -25,12 +24,7 @@ async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
   const r = new RAMVFS()
   r.store.dirs.add('/')
-  const registry = new OpsRegistry()
-  registry.registerVfs(r)
-  return new Workspace(
-    { '/ram/': r },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  return new Workspace({ '/ram/': r }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 async function makeMultiWs(): Promise<Workspace> {
@@ -44,17 +38,13 @@ async function makeMultiWs(): Promise<Workspace> {
   const ro = new RAMVFS()
   ro.store.dirs.add('/')
   ro.store.files.set('/c.txt', new TextEncoder().encode('c\n'))
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  registry.registerVfs(other)
-  registry.registerVfs(ro)
   return new Workspace(
     {
       '/ram/': [ram, MountMode.EXEC],
       '/other/': [other, MountMode.EXEC],
       '/ro/': [ro, MountMode.READ],
     },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
 }
 

@@ -20,7 +20,6 @@ import {
   formatGrepResults,
 } from '../../../core/slack/formatters.ts'
 import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 import { detectScope, NATIVE_KINDS, searchTarget } from '../../../core/slack/scope.ts'
 import { searchFiles, searchMessages } from '../../../core/slack/search.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -32,6 +31,7 @@ import { patternArg } from '../grep_pattern.ts'
 import { pushdownOperand, textSearchResults } from '../grep_pushdown.ts'
 import { prependStderr } from '../utils/output.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { mountIo } from '../generic_bind/adapter.ts'
 
 const ENC = new TextEncoder()
 
@@ -64,7 +64,7 @@ async function grep(
   const pushdownWarnings: string[] = []
   // Output-shaping flags, a glob operand and a multi-operand line all need
   // the per-message scan; see SEARCH_HONORED above.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const [scan, scoped] = scanIo(mountIo(opts), opts.ns, opts.mountPrefix)
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   if (pattern !== null && operand !== null && fl.asBool('w')) {
     const match = detectScope(operand)

@@ -15,20 +15,32 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import evict_after, invalidate_after_write
 from mirage.core.gdrive.resolve import (
     eacces_on_denied,
     resolve_key,
     resolve_parent,
 )
+from mirage.core.gdrive.stat import stat_from_item
 from mirage.core.google.drive import update_file_content, upload_file
 from mirage.errors.fs import eacces, eisdir
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
+from mirage.utils.upload import upload_token
 
 
 @eacces_on_denied
 async def write(accessor: GDriveAccessor, path: PathSpec, data: bytes) -> None:
+    """Upload a new file, or new content for an existing one.
+
+    A failed upload still evicts the path: Drive may have stored the
+    bytes before its reply broke off.
+
+    Args:
+        accessor (GDriveAccessor): Drive accessor.
+        path (PathSpec): target path.
+        data (bytes): file content.
+    """
     virtual = path.virtual
     key = path.vfs_path
     if not key:
@@ -43,11 +55,15 @@ async def write(accessor: GDriveAccessor, path: PathSpec, data: bytes) -> None:
     if node is not None and node.is_native:
         raise eacces(virtual)
     if node is not None:
-        await update_file_content(token_manager, node.id, data)
+        upload = update_file_content(token_manager, node.id, data)
     else:
         parent_id, _ = await resolve_parent(accessor, path)
-        await upload_file(
+        upload = upload_file(
             token_manager, posixpath.basename(key), parent_id, data
         )
-    record("write", virtual, "gdrive", len(data), timer)
-    await invalidate_after_write(path)
+
+    async def send() -> None:
+        token = upload_token(await upload, stat_from_item, virtual)
+        record("write", virtual, "gdrive", len(data), timer, fingerprint=token)
+
+    await evict_after(send(), lambda _: invalidate_after_write(path))

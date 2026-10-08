@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { OpsRegistry, type RegisteredOp } from '../../../ops/registry.ts'
+import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { type CommandOpts } from '../../config.ts'
 import {
@@ -102,10 +102,15 @@ const GNU_QUOTED: [string, string][] = [
   ["a'béc", "'a'\\''b'$'\\303\\251''c'"],
 ]
 
-class NoSetattrRegistry extends OpsRegistry {
-  override register(ro: RegisteredOp): void {
-    if (ro.name === 'setattr') return
-    super.register(ro)
+class OverlayRAMVFS extends RAMVFS {
+  static {
+    // No setattr of its own, as an API backend with no attribute slot:
+    // attrs land in the namespace overlay.
+    Object.defineProperty(
+      this.prototype,
+      'setattr',
+      Object.getOwnPropertyDescriptor(BaseVFS.prototype, 'setattr') ?? {},
+    )
   }
 }
 
@@ -262,12 +267,9 @@ describe('stat -c directive formatting', () => {
 describe('stat -c workspace integration', () => {
   it('reflects overlay chmod/chown on a setattr-less backend', async () => {
     const parser = await getTestParser()
-    const vfs = new RAMVFS()
+    const vfs = new OverlayRAMVFS()
     vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
-    const ws = new Workspace(
-      { '/data': vfs },
-      { mode: MountMode.WRITE, shellParser: parser, ops: new NoSetattrRegistry() },
-    )
+    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, shellParser: parser })
     await run(ws, 'chmod 600 /data/f.txt')
     await run(ws, 'chown 501:staff /data/f.txt')
     const [code, out] = await run(ws, 'stat -c "%a %u %g" /data/f.txt')

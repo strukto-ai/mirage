@@ -14,13 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { md5Hex } from '../../utils/hash.ts'
-
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
-import { IOResult } from '../../io/types.ts'
+import { IOResult, type ByteSource } from '../../io/types.ts'
 import { OpRecord } from '../../observe/record.ts'
 import type { CacheFacts, PathSpec } from '../../types.ts'
-import { applyIo } from './io.ts'
+import { applyIo, latestFingerprint, writtenVerdict } from './io.ts'
 import { RAMFileCacheStore } from './ram.ts'
 
 const ENC = new TextEncoder()
@@ -117,7 +115,13 @@ describe('cache population via applyIo', () => {
   })
 })
 
-function opRecord(op: string, path: string, fingerprint: string | null, nbytes = 0): OpRecord {
+function opRecord(
+  op: string,
+  path: string,
+  fingerprint: string | null,
+  nbytes = 0,
+  claimed: ByteSource | null = null,
+): OpRecord {
   return new OpRecord({
     op,
     path,
@@ -126,6 +130,7 @@ function opRecord(op: string, path: string, fingerprint: string | null, nbytes =
     timestamp: 0,
     durationMs: 0,
     fingerprint,
+    claimed,
   })
 }
 
@@ -174,17 +179,6 @@ describe('backend fingerprint threading', () => {
     expect(await cache.isFresh('/m/f.txt', 'token-a')).toBe(false)
   })
 
-  it('keeps an older write token past a tokenless write', async () => {
-    // The write direction is unchanged.
-    const cache = new RAMFileCacheStore()
-    const io = new IOResult({ writes: { '/m/f.txt': ENC.encode('new') }, cache: ['/m/f.txt'] })
-    await applyIo(cache, io, undefined, [
-      opRecord('write', '/m/f.txt', 'put-a', 3),
-      opRecord('write', '/m/f.txt', null, 3),
-    ])
-    expect(await cache.isFresh('/m/f.txt', 'put-a')).toBe(true)
-  })
-
   it('uses the record fingerprint for an exhausted stream', async () => {
     const cache = new RAMFileCacheStore()
     const stream = makeStream('hello')
@@ -192,27 +186,6 @@ describe('backend fingerprint threading', () => {
     const io = new IOResult({ reads: { '/s3/f.txt': stream }, cache: ['/s3/f.txt'] })
     await applyIo(cache, io, undefined, [readRecord('/s3/f.txt', 'etag-multipart-2')])
     expect(await cache.isFresh('/s3/f.txt', 'etag-multipart-2')).toBe(true)
-  })
-
-  it('leaves the entry tokenless when a write token describes other bytes', async () => {
-    // The byte-length guard refuses a token whose length disagrees with the
-    // bytes stored. The entry then carries no token at all, so it matches
-    // neither the refused token nor a hash of its own content -- the
-    // fabricated md5 that used to stand in here was a valid validator only
-    // on a simple-PUT S3 object, by coincidence of ETag format.
-    const cache = new RAMFileCacheStore()
-    const io = new IOResult({
-      writes: { '/s3/f.txt': ENC.encode('new') },
-      cache: ['/s3/f.txt'],
-    })
-    await applyIo(cache, io, undefined, [opRecord('write', '/s3/f.txt', 'etag-put-2', 99)])
-    expect(DEC.decode((await cache.get('/s3/f.txt')) ?? undefined)).toBe('new')
-    expect(await cache.isFresh('/s3/f.txt', 'etag-put-2')).toBe(false)
-    // md5Hex, not node:crypto: this is the exact function the deleted
-    // fallback called, so the assertion pins "the entry does not carry
-    // what the old code would have fabricated" rather than merely "some
-    // md5". It is core's own helper, so the test stays runtime-agnostic.
-    expect(await cache.isFresh('/s3/f.txt', md5Hex(ENC.encode('new')))).toBe(false)
   })
 
   it('preserves the entry fingerprint on a warm re-apply', async () => {
@@ -492,13 +465,6 @@ describe('maxDrainBytes (cancellable cache drain)', () => {
 })
 
 describe('the token describes the bytes stored', () => {
-  it('stamps a write token on written bytes', async () => {
-    const cache = new RAMFileCacheStore()
-    const io = new IOResult({ writes: { '/s3/f.txt': ENC.encode('new') }, cache: ['/s3/f.txt'] })
-    await applyIo(cache, io, undefined, [opRecord('write', '/s3/f.txt', 'etag-put-2', 3)])
-    expect(await cache.isFresh('/s3/f.txt', 'etag-put-2')).toBe(true)
-  })
-
   it('read bytes take the read token, not the write', async () => {
     // Read bytes carry the read's token even when a write record of the
     // path comes later. Stamping the write's would make isFresh call stale
@@ -518,10 +484,11 @@ describe('the token describes the bytes stored', () => {
     // sed -i lists the path in writes only, but emits its own pre-edit
     // read record; the entry must carry the post-edit write token.
     const cache = new RAMFileCacheStore()
-    const io = new IOResult({ writes: { '/s3/f.txt': ENC.encode('new') }, cache: ['/s3/f.txt'] })
+    const written = ENC.encode('new')
+    const io = new IOResult({ writes: { '/s3/f.txt': written }, cache: ['/s3/f.txt'] })
     await applyIo(cache, io, undefined, [
       opRecord('read', '/s3/f.txt', 'etag-old-2', 3),
-      opRecord('write', '/s3/f.txt', 'etag-new-2', 3),
+      opRecord('write', '/s3/f.txt', 'etag-new-2', 3, written),
     ])
     expect(await cache.isFresh('/s3/f.txt', 'etag-new-2')).toBe(true)
     expect(await cache.isFresh('/s3/f.txt', 'etag-old-2')).toBe(false)
@@ -539,29 +506,6 @@ describe('the token describes the bytes stored', () => {
     expect(await cache.isFresh('/s3/f.txt', 'etag-old-2')).toBe(true)
   })
 
-  it('drops a write token of a different length', async () => {
-    // `cp` overwrites IOResult.writes with an empty eviction marker while
-    // the path stays in `cache` and the earlier `tee`'s record stays the
-    // last one, so the token would land on bytes it does not describe. A
-    // length disagreement is the proof it does not, and the entry falls
-    // back to the content default rather than reading as fresh forever.
-    const cache = new RAMFileCacheStore()
-    const io = new IOResult({ writes: { '/s3/f.txt': new Uint8Array(0) }, cache: ['/s3/f.txt'] })
-    await applyIo(cache, io, undefined, [opRecord('write', '/s3/f.txt', 'etag-tee-2', 2)])
-    expect((await cache.get('/s3/f.txt'))?.byteLength).toBe(0)
-    expect(await cache.isFresh('/s3/f.txt', 'etag-tee-2')).toBe(false)
-  })
-
-  it.each(['create', 'truncate'])('ignores %s, which never supplies bytes', async (op) => {
-    // Both stamp a token on their own record but never hand bytes to the
-    // cache, so pairing one with another op's bytes is the mispairing
-    // WRITE_FINGERPRINT_OPS exists to refuse.
-    const cache = new RAMFileCacheStore()
-    const io = new IOResult({ writes: { '/s3/f.txt': ENC.encode('new') }, cache: ['/s3/f.txt'] })
-    await applyIo(cache, io, undefined, [opRecord(op, '/s3/f.txt', 'etag-other-2', 3)])
-    expect(await cache.isFresh('/s3/f.txt', 'etag-other-2')).toBe(false)
-  })
-
   it('an op in neither direction is never a token', async () => {
     const cache = new RAMFileCacheStore()
     const io = new IOResult({ reads: { '/s3/f.txt': ENC.encode('x') }, cache: ['/s3/f.txt'] })
@@ -577,6 +521,85 @@ describe('the token describes the bytes stored', () => {
     const io = new IOResult({ reads: { '/s3/f.txt': ENC.encode('abcdef') }, cache: ['/s3/f.txt'] })
     await applyIo(cache, io, undefined, [opRecord('read', '/s3/f.txt', 'etag-2', 1)])
     expect(await cache.isFresh('/s3/f.txt', 'etag-2')).toBe(true)
+  })
+})
+
+// ── writtenVerdict: which written bytes a line keeps ─────────────────────
+
+describe('latestFingerprint', () => {
+  it('reads only reads', () => {
+    // A write's token labels written bytes through writtenVerdict; here it
+    // would stamp the write's token onto bytes a read produced, and the
+    // entry would read as fresh forever.
+    const records = [
+      opRecord('read', '/s3/f.txt', 'etag-1', 3),
+      opRecord('write', '/s3/f.txt', 'etag-2', 3),
+      opRecord('readdir', '/s3/f.txt', 'etag-3', 3),
+    ]
+    expect(latestFingerprint(records, '/s3/f.txt')).toBe('etag-1')
+  })
+})
+
+describe('writtenVerdict', () => {
+  // The workspace tests pin what a shell line shows. These rows are the rest:
+  // an unrecorded apply, a claim that is an equal copy rather than the very
+  // value cached, and a claim whose bytes or size differ. Mirrors python's
+  // test_written_verdict_where_no_shell_line_reaches.
+  const written = ENC.encode('abc')
+  it.each<[string, [Uint8Array, number][] | undefined, [boolean, string | null]]>([
+    ['unrecorded', undefined, [true, null]],
+    ['equal copy', [[written.slice(), 3]], [true, 'Ta']],
+    ['last byte differs', [[ENC.encode('abd'), 3]], [false, null]],
+    ['shorter prefix', [[ENC.encode('ab'), 3]], [false, null]],
+    ['other size', [[written, 9]], [false, null]],
+  ])('%s', (_name, rows, expected) => {
+    const records = rows?.map(([claimed, n]) => opRecord('write', '/f', 'Ta', n, claimed))
+    expect(writtenVerdict(records, '/f', written, 3)).toEqual(expected)
+  })
+
+  it.each([
+    ['unfinished', false],
+    ['discarded', true],
+  ])('a claimed written stream left %s evicts the pre-write entry', async (_name, discard) => {
+    // No claimer returns a written stream it did not finish, and its bytes
+    // are not the file's; the eviction loop skips claimed paths, so the
+    // pre-write entry goes here, with no drain.
+    const cache = new RAMFileCacheStore()
+    await cache.set('/s3/f.txt', ENC.encode('old'))
+    const stream = makeStream('abc')
+    if (discard) await stream.discard()
+    const io = new IOResult({ writes: { '/s3/f.txt': stream }, cache: ['/s3/f.txt'] })
+    await applyIo(cache, io, undefined, [opRecord('write', '/s3/f.txt', 'etag-put-2', 3, stream)])
+    expect(cache.drainTasks.size).toBe(0)
+    expect(await cache.exists('/s3/f.txt')).toBe(false)
+  })
+
+  it.each([
+    ['bytes agree', false, 3, true],
+    ['bytes differ', false, 99, false],
+    ['finished stream agrees', true, 3, true],
+    ['finished stream differs', true, 99, false],
+  ])('claimed written %s: the verdict decides', async (_, stream, stored, kept) => {
+    // A stored size other than the bytes sent means neither they nor the
+    // pre-write entry are the file, so the entry is removed, not skipped.
+    const cache = new RAMFileCacheStore()
+    await cache.set('/s3/f.txt', ENC.encode('old'))
+    let written: ByteSource = ENC.encode('abc')
+    if (stream) {
+      const it = makeStream('abc')
+      expect(DEC.decode(await it.drain())).toBe('abc')
+      written = it
+    }
+    const io = new IOResult({ writes: { '/s3/f.txt': written }, cache: ['/s3/f.txt'] })
+    await applyIo(cache, io, undefined, [
+      opRecord('write', '/s3/f.txt', 'etag-put-2', stored, written),
+    ])
+    if (kept) {
+      expect(DEC.decode((await cache.get('/s3/f.txt')) ?? new Uint8Array())).toBe('abc')
+      expect(await cache.isFresh('/s3/f.txt', 'etag-put-2')).toBe(true)
+    } else {
+      expect(await cache.exists('/s3/f.txt')).toBe(false)
+    }
   })
 })
 

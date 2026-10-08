@@ -16,13 +16,13 @@ import { IOResult } from '../../../../io/types.ts'
 import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { UsageError } from '../../../errors.ts'
 import { usageHint } from '../../../spec/usage.ts'
 
 const ENC = new TextEncoder()
 
-const touch: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const touch: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   if (paths.length === 0) {
     throw new UsageError(`touch: missing file operand\n${usageHint('touch')}`, 1)
   }
@@ -51,7 +51,7 @@ const touch: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   return [null, new IOResult({ writes, stderr, exitCode: errors.length > 0 ? 1 : 0 })]
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'touch',
   write: true,
   fn: touch,

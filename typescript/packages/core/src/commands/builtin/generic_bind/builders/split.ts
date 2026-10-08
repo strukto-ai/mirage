@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { splitGeneric } from '../../generic/split.ts'
-import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const split: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const split: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const write = requireOp(ops.write, 'write')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
@@ -36,7 +36,7 @@ const split: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'split',
   write: true,
   fn: split,

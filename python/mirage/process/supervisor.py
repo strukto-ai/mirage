@@ -6,7 +6,8 @@ from threading import RLock
 
 from mirage.process.config import ProcessPermissions, ProcessScope
 from mirage.process.handle import ProcessHandle
-from mirage.process.types import ProcessInfo, ProcessRunner, ProcessView
+from mirage.process.types import ProcessInfo, ProcessRunner
+from mirage.process.view import ProcessView
 from mirage.types import PathSpec
 
 

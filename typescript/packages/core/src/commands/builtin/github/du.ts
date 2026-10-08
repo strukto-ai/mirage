@@ -13,23 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
+import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
 import { pathsScoped } from '../../../ops/namespace_view.ts'
 import type { NamespaceView } from '../../../ops/types.ts'
 import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
-import { IO } from './io.ts'
 import { ensureTree } from '../../../core/github/tree.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { DEFAULT_MAX_DU_ENTRIES, duGeneric } from '../generic/du.ts'
+import { DEFAULT_MAX_DU_ENTRIES } from '../../../vfs/constants.ts'
+import { duGeneric } from '../generic/du.ts'
 import { WalkBudget, walkEntries, walkSize } from '../generic_bind/builders/du.ts'
 import type { DuEntries } from '../../../vfs/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-
-const resolveGlob = resolveGlobOf(IO)
 
 /**
  * Every blob and every directory at or under `path`, and the blobs' sum.
@@ -74,23 +72,24 @@ async function du(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
+  const io = mountIo(opts)
   const idx = opts.index ?? undefined
   // Sizes come from accessor.tree, so the first callback brings it live,
   // after du has validated its flags: an invalid line must cost no fetch.
   // Once per line, so one du reads one tree.
   let probe: Promise<void> | undefined
   const live = (): Promise<void> => (probe ??= ensureTree(accessor, idx, opts.mountPrefix ?? ''))
-  const budget = new WalkBudget(IO.maxDuEntries ?? DEFAULT_MAX_DU_ENTRIES)
+  const budget = new WalkBudget(io.maxDuEntries ?? DEFAULT_MAX_DU_ENTRIES)
   return duGeneric(
     paths,
     opts,
     async (targets) => {
       await live()
-      return resolveGlob(accessor, targets, idx)
+      return resolveGlobOf(io)(accessor, targets, idx)
     },
     async (p) => {
       await live()
-      return IO.stat(accessor, p, idx)
+      return io.stat(accessor, p, idx)
     },
     // A truncated tree names only some paths and is never refetched, so it
     // is walked folder by folder, as a backend with no tree would be; so is
@@ -98,13 +97,13 @@ async function du(
     async (p) => {
       await live()
       if (walked(accessor, opts.ns, p))
-        return walkSize(withCommandGuards(withPolicyGuard(IO)), accessor, idx, budget, p)
+        return walkSize(withCommandGuards(withPolicyGuard(io)), accessor, idx, budget, p)
       return subtree(accessor, p)[0][1]
     },
     async (p) => {
       await live()
       if (walked(accessor, opts.ns, p))
-        return walkEntries(withCommandGuards(withPolicyGuard(IO)), accessor, idx, budget, p)
+        return walkEntries(withCommandGuards(withPolicyGuard(io)), accessor, idx, budget, p)
       const [entries, directories] = subtree(accessor, p)
       const mount = mountPrefixOf(p.virtual, p.vfsPath)
       budget.directories.push(...directories.map((d) => `${mount}${d}`))

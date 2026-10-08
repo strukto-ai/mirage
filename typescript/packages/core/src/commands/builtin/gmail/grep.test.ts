@@ -19,6 +19,8 @@ import { PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { grepGeneric } from '../generic/grep.ts'
 import { GMAIL_GREP } from './grep.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { GmailVFS } from '../../../vfs/gmail/gmail.ts'
 
 const search = vi.mocked(searchMessages)
 const generic = vi.mocked(grepGeneric)
@@ -31,10 +33,12 @@ const path = new PathSpec({
 async function run(flags: Record<string, FlagValue>) {
   const cmd = GMAIL_GREP[0]
   if (cmd === undefined) throw new Error('grep not registered')
-  return cmd.fn(new GmailAccessor({ tokenManager: {} as TokenManager }), [path], ['needle'], {
+  const accessor = new GmailAccessor({ tokenManager: {} as TokenManager })
+  return cmd.fn(accessor, [path], ['needle'], {
     stdin: null,
     flags: { w: true, ...flags },
     filetypeFns: null,
+    io: ioFor(GmailVFS, accessor),
     cwd: '/',
   })
 }

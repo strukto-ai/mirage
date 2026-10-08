@@ -16,7 +16,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { materialize } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
-import { OpsRegistry, type RegisteredOp } from '../../ops/registry.ts'
+import { MountEntry } from '../mount/mount.ts'
+import { render } from '../../test-utils.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS } from './constants.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
@@ -114,27 +116,25 @@ describe('dispatch rename across mounts', () => {
   )
 })
 
-describe('dispatch resolves filetype-registered ops by path extension', () => {
-  it('a read op keyed to a rendered filetype wins over the plain read', async () => {
-    // gdocs/gsheets/gslides/gmail register their rendered reads under a
-    // compound filetype; Python reaches them because its dispatcher goes
-    // through Mount.execute_op, which stamps the extension. The TS
-    // dispatcher must stamp it the same way or every dispatch-based path
-    // (crossmount relay, FUSE) misses the op.
+describe('dispatch resolves a rendered filetype by path extension', () => {
+  it('the renderer of a filetype wins over the plain read', async () => {
+    // gdocs/gsheets/gslides render their reads under a compound filetype.
+    // Every dispatch-based path (crossmount relay, FUSE) reaches the
+    // renderer by the path's extension, as the shell does.
     const parser = await getTestParser()
-    const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
-    registry.register({
-      name: 'read',
-      vfs: 'ram',
-      filetype: '.gdoc.json',
-      write: false,
-      fn: () => Promise.resolve(ENC.encode('rendered')),
-    })
+    class DocRAM extends RAMVFS {
+      override readonly renderers: Readonly<Record<string, string>> = {
+        '.gdoc.json': 'readDoc',
+      }
+
+      readDoc(): Promise<Uint8Array> {
+        return Promise.resolve(ENC.encode('rendered'))
+      }
+    }
+    const ram = new DocRAM()
     const ws = new Workspace(
       { '/m': ram },
-      { mode: MountMode.EXEC, ops: registry, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
       await ws.shell('echo raw > /m/doc.gdoc.json')
@@ -401,7 +401,7 @@ describe('the node table answers every verb that names a link', () => {
 describe('the fenced remnant cascade rides the mount revisions', () => {
   it('a fenced backend op reads the pinned revision', async () => {
     // fencedCall reruns backend ops outside `dispatch`, and Python's
-    // twin routes them through `Mount.execute_op`, which binds the
+    // twin routes them through `Mount.call`, which binds the
     // mount prefix AND the revision pins. A fenced readdir/stat that
     // reads unpinned answers from the wrong version of a
     // revision-pinned mount, so the binding is pinned here through the
@@ -409,27 +409,18 @@ describe('the fenced remnant cascade rides the mount revisions', () => {
     // cannot see.
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     const ws = new Workspace(
       { '/ram': ram },
-      { mode: MountMode.WRITE, ops: registry, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
       await ws.shell('mkdir /ram/d && echo x > /ram/d/h.txt')
-      // Mounting re-registers the VFS's ops (workspace.ts), so the
-      // probe wraps readdir only after construction, or it is clobbered.
-      const original = registry.find('readdir', 'ram')
-      if (original === null) throw new Error('ram readdir op missing')
-      const originalFn = original.fn
+      const original = ram.readdir.bind(ram)
       let seen: string | null | undefined
-      registry.register({
-        ...original,
-        fn: (...args: Parameters<typeof originalFn>) => {
-          seen = revisionFor('/ram/d/h.txt')
-          return originalFn(...args)
-        },
-      })
+      ram.readdir = (path, index) => {
+        seen = revisionFor('/ram/d/h.txt')
+        return original(path, index)
+      }
       const internals = ws as unknown as {
         registry: { mountFor(path: string): { revisions: Map<string, string> } }
       }
@@ -622,14 +613,8 @@ describe('a failed backend probe is not evidence of absence', () => {
   it('symlink refuses a name whose backend could not answer', async () => {
     const parser = await getTestParser()
     class BrokenVFS extends RAMVFS {
-      override ops(): readonly RegisteredOp[] {
-        return super
-          .ops()
-          .map((op) =>
-            op.name === 'stat'
-              ? { ...op, fn: () => Promise.reject(new Error('401 bad credentials')) }
-              : op,
-          )
+      override stat(): Promise<FileStat> {
+        return Promise.reject(new Error('401 bad credentials'))
       }
     }
     const broken = new BrokenVFS()
@@ -777,12 +762,14 @@ describe('the door answers extended attributes from the node table', () => {
 
   it("keeps a backend stat's extra out of the attributes", async () => {
     const ws = await open()
-    const stat = vi.spyOn(ws.opsRegistry, 'call')
+    const mount = ws.mount('/r')
+    const call = mount.callOp.bind(mount)
+    const stat = vi.spyOn(mount, 'callOp')
     stat.mockImplementation(async (op, ...rest) => {
       if (op === 'stat') {
         return new FileStat({ name: 'd', type: FileType.DIRECTORY, extra: { file_id: '1AbC' } })
       }
-      return OpsRegistry.prototype.call.call(ws.opsRegistry, op, ...rest)
+      return call(op, ...rest)
     })
     try {
       await ws.vfs.setxattr('/r/f', 'user.tag', ENC.encode('t'))
@@ -820,7 +807,7 @@ describe('shell mutations share read-only admission', () => {
     try {
       await ws.dispatch('write', '/ro/file', [ENC.encode('original')])
       ws.namespace.mountFor('/ro/file').mode = MountMode.READ
-      const read = vi.spyOn(ws.opsRegistry, 'call')
+      const read = vi.spyOn(ws.mount('/ro'), 'callOp')
       const result = await ws.shell(command)
       expect(result.exitCode).toBe(1)
       expect(DEC.decode(await materialize(result.stderr))).toBe(diagnostic)
@@ -866,8 +853,9 @@ describe('rmdir namespace entries', () => {
     )
     try {
       await ws.shell('mkdir /data/d; ln -s nowhere /data/d/old')
-      const call = ws.opsRegistry.call.bind(ws.opsRegistry)
-      vi.spyOn(ws.opsRegistry, 'call').mockImplementation(async (name, ...rest) => {
+      const mount = ws.mount('/data')
+      const call = mount.callOp.bind(mount)
+      vi.spyOn(mount, 'callOp').mockImplementation(async (name, ...rest) => {
         if (name === 'rmdir')
           await ws.dispatch('symlink', '/data/d/late', [], { target: 'nowhere' })
         return call(name, ...rest)
@@ -892,30 +880,27 @@ describe('a cold read keeps its bytes for the next reader', () => {
   function counted(
     race = false,
     filetype: string | null = null,
-  ): { ws: Workspace; fetched: string[]; ops: OpsRegistry } {
+  ): { ws: Workspace; fetched: string[] } {
     const fetched: string[] = []
     const vfs = new RAMVFS()
     Object.assign(vfs, { cachesReads: true })
-    const ops = new OpsRegistry()
-    ops.registerVfs(vfs)
     const ws = new Workspace(
       { '/data': vfs },
-      { mode: MountMode.WRITE, ops, shellParserFactory: getTestParser },
+      { mode: MountMode.WRITE, shellParserFactory: getTestParser },
     )
-    ops.register({
-      name: 'read',
-      vfs: vfs.name,
-      filetype,
-      write: false,
-      fn: async (_accessor, path, _args, kwargs) => {
-        fetched.push(path.virtual)
-        if (race && fetched.length === 1) await ws.vfs.write('/data/f.count', 'NEWER')
-        const offset = typeof kwargs.offset === 'number' ? kwargs.offset : 0
-        const size = typeof kwargs.size === 'number' ? kwargs.size : null
-        return sliceWindow(ENC.encode('BODY'), offset, size)
-      },
-    })
-    return { ws, fetched, ops }
+    const read = async (
+      path: PathSpec,
+      _index?: IndexCacheStore,
+      offset = 0,
+      size: number | null = null,
+    ): Promise<Uint8Array> => {
+      fetched.push(path.virtual)
+      if (race && fetched.length === 1) await ws.vfs.write('/data/f.count', 'NEWER')
+      return sliceWindow(ENC.encode('BODY'), offset, size)
+    }
+    if (filetype === null) Object.assign(vfs, { readsRanges: false, read })
+    else render(vfs, filetype, read)
+    return { ws, fetched }
   }
 
   it('serves the ranges of an unranged read from one kept read', async () => {
@@ -964,7 +949,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
       // the mount is ready; a renderer landing in between runs, and its
       // rendering must not become what cat reads. A ranged read on a store
       // with no native range fills the whole file too.
-      const { ws, ops } = counted()
+      const { ws } = counted()
       await ws.vfs.write('/data/f.count', 'STORED')
       const mount = ws.mount('/data')
       const probe = ws.cache.get.bind(ws.cache)
@@ -978,14 +963,8 @@ describe('a cold read keeps its bytes for the next reader', () => {
       })
       Object.assign(mount, {
         ensureReady: async () => {
-          if (probed && ops.find('read', mount.vfs, '.count') === null) {
-            ops.register({
-              name: 'read',
-              vfs: mount.vfs.name,
-              filetype: '.count',
-              write: false,
-              fn: () => Promise.resolve(ENC.encode('RENDER')),
-            })
+          if (probed && !('.count' in mount.vfs.renderers)) {
+            render(mount.vfs, '.count', () => Promise.resolve(ENC.encode('RENDER')))
           }
           await ready()
         },
@@ -999,18 +978,12 @@ describe('a cold read keeps its bytes for the next reader', () => {
   it('hands a ranged render to the renderer as its range', async () => {
     // A render is never kept, so filling the whole file for a range would
     // only render more than the read asked for.
-    const { ws, ops } = counted()
+    const { ws } = counted()
     const mount = ws.mount('/data')
     const windows: [unknown, unknown][] = []
-    ops.register({
-      name: 'read',
-      vfs: mount.vfs.name,
-      filetype: '.count',
-      write: false,
-      fn: (_accessor, _path, _args, kwargs) => {
-        windows.push([kwargs.offset, kwargs.size])
-        return Promise.resolve(ENC.encode('RE'))
-      },
+    render(mount.vfs, '.count', (_path, _index, offset, size) => {
+      windows.push([offset, size])
+      return Promise.resolve(ENC.encode('RE'))
     })
     await ws.vfs.write('/data/f.count', 'STORED')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 2 }))).toBe('RE')
@@ -1169,11 +1142,11 @@ describe('a marked op is judged on the paths the door reaches', () => {
   // arguments. A null mark is no mark, as Python's rule_gate=None.
   it('never forwards the mark to the op', async () => {
     const ws = await linkedWs()
-    const spy = vi.spyOn(OpsRegistry.prototype, 'call')
+    const spy = vi.spyOn(MountEntry.prototype, 'callOp')
     try {
       const { gate, asked } = refusing('/nothing')
       await ws.dispatch('read', '/data/real/secret', [], { ruleGate: gate })
-      const seen = spy.mock.calls.map((call) => call[5])
+      const seen = spy.mock.calls.map((call) => call[3])
       expect(seen.length).toBeGreaterThan(0)
       expect(seen.every((kw) => kw === undefined || !('ruleGate' in kw))).toBe(true)
       expect(asked).toEqual(['/data/real/secret'])
@@ -1195,18 +1168,10 @@ class SplicingRAMVFS extends RAMVFS {
     super()
   }
 
-  override ops(): readonly RegisteredOp[] {
-    const found = new Map(super.ops().map((op) => [op.name, op.fn]))
-    const read = found.get('read')
-    const write = found.get('write')
-    if (read === undefined || write === undefined) throw new Error('RAM lacks read or write')
-    const pwrite: RegisteredOp['fn'] = async (accessor, path, args, kwargs) => {
-      const whole = (await read(accessor, path, [], {})) as Uint8Array
-      await new Promise((resolve) => setTimeout(resolve, this.pause))
-      const data = args[0] as Uint8Array
-      await write(accessor, path, [spliceWindow(whole, kwargs.offset as number, data)], {})
-    }
-    return super.ops().map((op) => (op.name === 'pwrite' ? { ...op, fn: pwrite } : op))
+  override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
+    const whole = await this.read(path)
+    await new Promise((resolve) => setTimeout(resolve, this.pause))
+    await this.write(path, spliceWindow(whole, offset, data))
   }
 }
 
@@ -1215,24 +1180,16 @@ class StalledRAMVFS extends RAMVFS {
   calls = 0
   release = (): void => undefined
 
-  constructor(private readonly stalled = 'pwrite') {
+  constructor(stalled = 'pwrite') {
     super()
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return super.ops().map((op) =>
-      op.name === this.stalled
-        ? {
-            ...op,
-            fn: () => {
-              this.calls += 1
-              return new Promise<void>((resolve) => {
-                this.release = resolve
-              })
-            },
-          }
-        : op,
-    )
+    Object.assign(this, {
+      [stalled]: () => {
+        this.calls += 1
+        return new Promise<void>((resolve) => {
+          this.release = resolve
+        })
+      },
+    })
   }
 }
 
@@ -1257,9 +1214,7 @@ describe('dispatch runs writers to one path one at a time', () => {
             ['C', 6],
             ['D', 9],
           ] as const
-        ).map(([letter, offset]) =>
-          ws.dispatch('pwrite', '/data/f', [ENC.encode(letter)], { offset }),
-        ),
+        ).map(([letter, offset]) => ws.dispatch('pwrite', '/data/f', [ENC.encode(letter), offset])),
       )
       expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('A12B45C78D')
     } finally {
@@ -1288,7 +1243,7 @@ describe('dispatch runs writers to one path one at a time', () => {
             ['/b/f', 'D', 9],
           ] as const
         ).map(([name, letter, offset]) =>
-          ws.dispatch('pwrite', name, [ENC.encode(letter)], { offset }),
+          ws.dispatch('pwrite', name, [ENC.encode(letter), offset]),
         ),
       )
       expect(DEC.decode((await ws.dispatch('read', '/b/f')) as Uint8Array)).toBe('A12B45C78D')
@@ -1310,12 +1265,8 @@ describe('dispatch runs writers to one path one at a time', () => {
     )
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(
-        ws.dispatch('pwrite', '/data/f', [ENC.encode('A')], { offset: 0 }),
-      ).rejects.toThrow()
-      await expect(
-        ws.dispatch('pwrite', '/data/f', [ENC.encode('B')], { offset: 3 }),
-      ).rejects.toThrow()
+      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
+      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('B'), 3])).rejects.toThrow()
       store.release()
       await new Promise((resolve) => setTimeout(resolve, 20))
       expect(store.calls).toBe(1)
@@ -1339,9 +1290,7 @@ describe('dispatch runs writers to one path one at a time', () => {
     )
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(
-        ws.dispatch('pwrite', '/data/f', [ENC.encode('A')], { offset: 0 }),
-      ).rejects.toThrow()
+      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
       await ws.unmount('/data')
       expect(store.calls).toBe(1)
     } finally {
@@ -1417,9 +1366,7 @@ describe('dispatch runs writers to one path one at a time', () => {
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('f')])
       await ws.dispatch('write', '/data/g', [ENC.encode('g')])
-      await expect(
-        ws.dispatch('pwrite', '/data/g', [ENC.encode('G')], { offset: 0 }),
-      ).rejects.toThrow()
+      await expect(ws.dispatch('pwrite', '/data/g', [ENC.encode('G'), 0])).rejects.toThrow()
       await expect(
         ws.dispatch('rename', '/data/f', [PathSpec.fromStrPath('/data/g')]),
       ).rejects.toThrow()
@@ -1436,18 +1383,9 @@ describe('dispatch runs writers to one path one at a time', () => {
     // reaches no one else: it is reported, not dropped.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     class LateFailingRAMVFS extends RAMVFS {
-      override ops(): readonly RegisteredOp[] {
-        return super.ops().map((op) =>
-          op.name === 'pwrite'
-            ? {
-                ...op,
-                fn: async () => {
-                  await new Promise((resolve) => setTimeout(resolve, 50))
-                  throw new Error('store went away')
-                },
-              }
-            : op,
-        )
+      override async pwrite(): Promise<void> {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        throw new Error('store went away')
       }
     }
     const parser = await getTestParser()
@@ -1463,9 +1401,7 @@ describe('dispatch runs writers to one path one at a time', () => {
     )
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(
-        ws.dispatch('pwrite', '/data/f', [ENC.encode('A')], { offset: 0 }),
-      ).rejects.toThrow()
+      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
       await new Promise((resolve) => setTimeout(resolve, 100))
       expect(warn).toHaveBeenCalledTimes(1)
       expect(String(warn.mock.calls[0]?.[0])).toContain('store went away')
@@ -1492,9 +1428,7 @@ describe('dispatch runs writers to one path one at a time', () => {
     )
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(
-        ws.dispatch('pwrite', '/data/f', [ENC.encode('A')], { offset: 0 }),
-      ).rejects.toThrow()
+      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
       await ws.dispatch('write', '/data/f', [ENC.encode('XXXXXXXXXX')])
       await new Promise((resolve) => setTimeout(resolve, 100))
       expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('XXXXXXXXXX')

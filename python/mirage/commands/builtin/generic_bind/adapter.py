@@ -16,26 +16,32 @@ import errno
 import functools
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, NoReturn, Protocol, overload
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.commands.builtin.utils.paths import dot_refusal
-from mirage.commands.config import AggregateFn, CommandFnResult, CommandOpts
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.commands.config import (
+    AggregateFn,
+    CommandFnResult,
+    CommandIO,
+    CommandOpts,
+)
+from mirage.commands.resolve import get_extension
 from mirage.context import (
     effective_path_mode,
     get_admission,
     get_current_session,
     get_mount_gate,
-    get_op_policies,
     get_walk_probe,
     hidden_refusal,
     session_visibility,
 )
 from mirage.context.session_context import require_paths_writable
+from mirage.core.generic.rewrite import refuse_taken
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
@@ -49,41 +55,33 @@ from mirage.errors.fs import (
 )
 from mirage.errors.types import DotWalkError
 from mirage.io import IOResult
-from mirage.ops.generic.factory import refuse_taken
 from mirage.ops.namespace_view import paths_scoped
 from mirage.ops.types import (
     ChildMounts,
-    LinkTargetStat,
     NamespaceView,
     StatOverlay,
 )
 from mirage.policy.constants import METADATA_OPS
-from mirage.policy.policies import Policies, pre_vfs_gate
+from mirage.policy.policies import Policies, get_op_policies, pre_vfs_gate
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec, WalkProbe
-from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.path import norm, parent
 from mirage.utils.remnants import remove_remnants, visible_below
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.types import (
     ContentSearchOps,
     DuOps,
-    IsMountedOp,
-    NativeReadOps,
     OperationFn,
-    ReadOps,
-    ReadStreamOp,
-    ResolveGlobOp,
     SearchOps,
     StatOp,
-    WriteOps,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class BuilderFn(Protocol):
-    """Builder body: a CommandFn with the backend's ops bound in front."""
+class GenericCommandFn(Protocol):
+    """GenericCommand body: a CommandFn with the backend's ops bound in front."""
 
     def __call__(
         self,
@@ -166,78 +164,224 @@ class Operation(StrEnum):
 
 
 @dataclass(frozen=True)
-class Builder:
+class GenericCommand:
     name: str
-    fn: BuilderFn
+    fn: GenericCommandFn
     write: bool = False
     aggregate: AggregateFn | None = None
     read: bool = False
 
 
-@dataclass(frozen=True)
-class CommandIO(ReadOps, NativeReadOps, WriteOps):
-    """Backend capabilities consumed by command algorithms.
+def require_op(ops: CommandIO, op: Operation) -> OperationFn:
+    """Return a backend op, or one that refuses when the backend
+    omits it.
 
-    Command admission guards these calls; POSIX policy hooks belong to
-    the filesystem dispatcher and are not part of this interface.
+    A backend without the write-side ops (github, notion, a
+    database) still runs every generic command, because only the
+    write itself knows whether a line writes: ``gzip -c``, ``tar
+    -t`` and ``split -n 1/2`` never call the op, and a line that
+    does is refused at that call with ENOTSUP for the path it
+    named, which the command renders in its own GNU voice, as a
+    filesystem that does not allow the operation would. Mirrors TS
+    ``requireOp``.
 
-    ``glob_children`` is the child names the namespace owes a directory
-    (nested mount roots and symlinks), and ``glob_target_stat`` what an
-    owed name points at, the namespace's own stat resolved through the
-    workspace. The factory stamps both per invocation from ``opts.ns``,
-    because they are session-scoped state and the adapter is built once
-    per backend; the target stat lets a trailing-slash glob follow a link
-    the way bash does instead of keeping every link it cannot see
-    through.
+    Args:
+        ops (CommandIO): The mount's table.
+        op (Operation): Required backend operation.
+    """
+    fn: OperationFn | None = getattr(ops, op.value)
+    if fn is None:
+        return _with_operation_guards(
+            functools.partial(_refuse_missing, op), op.value
+        )
+    return fn
+
+
+def mount_io(opts: CommandOpts) -> CommandIO:
+    """The table of the mount a command runs on.
+
+    Args:
+        opts (CommandOpts): the command's options.
+
+    Raises:
+        TypeError: the command ran outside a mount.
+    """
+    if opts.io is None:
+        raise TypeError(f"{opts.command}: ran without its mount's table")
+    return opts.io
+
+
+def over_mount_io(
+    build: Callable[[CommandIO], Callable[..., Any]],
+    wrap: Callable[[CommandIO], CommandIO] | None = None,
+) -> Callable[..., Any]:
+    """A handler that builds ``build``'s handler over the running mount's
+    table, wrapped by ``wrap``, on every call.
+
+    For a builder that reads its slots once, up front: the table is the
+    mount's, so it is only known once a command runs.
+
+    Args:
+        build (Callable): makes the handler for one table.
+        wrap (Callable | None): the guards to put over the table first.
     """
 
-    read_stream: ReadStreamOp = field()
-    is_mounted: IsMountedOp = field()
-    streams_bytes: bool = False
-    local: bool = True
-    max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
-    max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
-    search: SearchOps | None = None
-    content_search: ContentSearchOps | None = None
-    glob_children: ChildMounts | None = None
-    glob_target_stat: LinkTargetStat | None = None
+    async def run(
+        accessor: Accessor,
+        paths: list[PathSpec],
+        texts: list[str],
+        opts: CommandOpts,
+    ) -> Any:
+        io = mount_io(opts)
+        handler = build(wrap(io) if wrap is not None else io)
+        return await handler(accessor, paths, texts, opts)
 
-    @property
-    def resolve_glob(self) -> ResolveGlobOp:
-        return make_resolve_glob(
-            self.readdir,
-            self.max_glob_matches,
-            self.glob_children,
-            self.stat,
-            self.glob_target_stat,
+    return run
+
+
+def _without_accessor(method: Callable[..., Any]) -> OperationFn:
+    """``method`` callable the way a command calls a slot.
+
+    Commands still pass an accessor in front of every call; the VFS
+    holds its own, so it is dropped here.
+
+    Args:
+        method (Callable[..., Any]): a bound VFS function.
+    """
+
+    def call(accessor: Accessor, *args: Any, **kwargs: Any) -> Any:
+        return method(*args, **kwargs)
+
+    return call
+
+
+async def _exists_by_stat(
+    vfs: BaseVFS, accessor: Accessor, path: PathSpec
+) -> bool:
+    """Whether ``stat`` finds anything at ``path``.
+
+    Args:
+        vfs (BaseVFS): the VFS to ask.
+        accessor (Accessor): the command's accessor, unused.
+        path (PathSpec): the path.
+    """
+    try:
+        await vfs.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    return True
+
+
+def _reader(vfs: BaseVFS) -> Callable[..., Awaitable[bytes]]:
+    """What a command reads: the stored bytes through ``vfs.read``.
+
+    So an in-place edit (``sed -i``) writes back what it read and a byte
+    read agrees with a stream. Only a VFS with no ``read`` of its own
+    (gdocs, gsheets, gslides, whose stored form is the rendering) is read
+    through the renderer of the path's filetype. Both are looked up per
+    call, as the op door looks them up; the op door renders for the
+    surfaces that show files.
+
+    Args:
+        vfs (BaseVFS): the mounted VFS.
+    """
+
+    async def read(
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        renderer = (
+            None
+            if vfs.supports("read")
+            else vfs.renderers.get(get_extension(path.virtual) or "")
         )
+        if renderer is None:
+            return await vfs.read(path, index, offset, size)
+        rendered: bytes = await getattr(vfs, renderer)(
+            path, index, offset, size
+        )
+        return rendered
 
-    def operation(self, op: Operation) -> OperationFn | None:
-        fn: OperationFn | None = getattr(self, op.value)
-        return fn
+    return read
 
-    def require(self, op: Operation) -> OperationFn:
-        """Return a backend op, or one that refuses when the backend
-        omits it.
 
-        A backend without the write-side ops (github, notion, a
-        database) still runs every generic command, because only the
-        write itself knows whether a line writes: ``gzip -c``, ``tar
-        -t`` and ``split -n 1/2`` never call the op, and a line that
-        does is refused at that call with ENOTSUP for the path it
-        named, which the command renders in its own GNU voice, as a
-        filesystem that does not allow the operation would. Mirrors TS
-        ``requireOp``.
+def command_io(vfs: BaseVFS) -> CommandIO:
+    """The command tier's table for ``vfs``, built from its functions.
 
-        Args:
-            op (Operation): Required backend operation.
-        """
-        fn = self.operation(op)
-        if fn is None:
-            return _with_operation_guards(
-                functools.partial(_refuse_missing, op), op.value
+    A function the VFS does not define is an absent slot, except the two
+    every reader needs: a stream, which reads the file whole when the VFS
+    does not stream, and an existence check, which asks ``stat``. A
+    ranged read is the VFS's own ``read`` only when it reads ranges.
+
+    Args:
+        vfs (BaseVFS): the mounted VFS.
+    """
+
+    def slot(name: str) -> OperationFn | None:
+        if not vfs.supports(name):
+            return None
+        return _without_accessor(getattr(vfs, name))
+
+    read_bytes = _without_accessor(_reader(vfs))
+    streams = vfs.supports("read_stream")
+    return CommandIO(
+        readdir=_without_accessor(vfs.readdir),
+        read_bytes=read_bytes,
+        stat=_without_accessor(vfs.stat),
+        read_stream=(
+            _without_accessor(vfs.read_stream)
+            if streams
+            else functools.partial(stream_from_bytes, read_bytes)
+        ),
+        streams_bytes=not streams,
+        read_range=read_bytes if vfs.reads_ranges else None,
+        exists=slot("exists") or functools.partial(_exists_by_stat, vfs),
+        find=slot("find"),
+        du=(
+            DuOps(
+                size=_without_accessor(vfs.du_size),
+                entries=_without_accessor(vfs.du_entries),
             )
-        return fn
+            if vfs.supports("du_size") and vfs.supports("du_entries")
+            else None
+        ),
+        write=slot("write"),
+        append=slot("append"),
+        pwrite=slot("pwrite"),
+        create=slot("create"),
+        mkdir=slot("mkdir"),
+        unlink=slot("unlink"),
+        rmdir=slot("rmdir"),
+        rm_r=slot("rm_r"),
+        rename=slot("rename"),
+        copy=slot("copy"),
+        dir_copy=slot("dir_copy"),
+        truncate=slot("truncate"),
+        set_attrs=slot("setattr"),
+        is_mounted=_without_accessor(vfs.is_mounted),
+        local=vfs.local,
+        max_glob_matches=vfs.max_glob_matches,
+        max_du_entries=vfs.max_du_entries,
+        search=(
+            SearchOps(
+                search=_without_accessor(vfs.search),
+                search_many=slot("search_many"),
+                meta=vfs.search_meta,
+            )
+            if vfs.supports("search")
+            else None
+        ),
+        content_search=(
+            ContentSearchOps(
+                narrow_paths=_without_accessor(vfs.narrow_paths),
+                enabled=_without_accessor(vfs.content_search_enabled),
+            )
+            if vfs.supports("narrow_paths")
+            else None
+        ),
+    )
 
 
 async def _refuse_missing(
@@ -1181,7 +1325,7 @@ async def _mkdir_on_writable(
         **options: forwarded untouched.
     """
     if isinstance(path, PathSpec):
-        await refuse_taken(stat, accessor, path, parents)
+        await refuse_taken(functools.partial(stat, accessor), path, parents)
     return await fn(accessor, path, parents=parents, **options)
 
 

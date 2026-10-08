@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { joinGeneric } from '../../generic/join.ts'
-import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const join: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const join: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolveGlob = resolveGlobOf(ops)
   return joinGeneric(
@@ -26,7 +26,7 @@ const join: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'join',
   read: true,
   fn: join,

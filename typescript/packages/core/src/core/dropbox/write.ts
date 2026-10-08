@@ -13,23 +13,33 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { evictAfter, invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
+import { uploadToken } from '../../utils/upload.ts'
+import type { DropboxEntry } from './api.ts'
 import { dropboxUpload } from './client.ts'
-import { invalidateAncestors } from '../../cache/context.ts'
 import { dropboxPathOf } from './paths.ts'
+import { statFromEntry } from './stat.ts'
 
 // Single-call upload; Dropbox caps it at ~150 MB (larger files need
-// upload sessions, not supported here).
+// upload sessions, not supported here). A failed upload still evicts the
+// path: Dropbox may have stored the bytes before its reply broke off.
 export async function write(
   accessor: DropboxAccessor,
   path: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
   const timer = startOp()
-  await dropboxUpload(accessor.tokenManager, dropboxPathOf(accessor, path), data)
-  record('write', path.virtual, 'dropbox', data.byteLength, timer)
-  await invalidateAfterWrite(path)
-  await invalidateAncestors(path)
+  await evictAfter(
+    async () => {
+      const entry = await dropboxUpload(accessor.tokenManager, dropboxPathOf(accessor, path), data)
+      const token = uploadToken(entry as DropboxEntry | null, statFromEntry, path.virtual)
+      record('write', path.virtual, 'dropbox', data.byteLength, timer, { fingerprint: token })
+    },
+    async () => {
+      await invalidateAfterWrite(path)
+      await invalidateAncestors(path)
+    },
+  )
 }

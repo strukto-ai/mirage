@@ -87,6 +87,8 @@ async def test_env_run_form_forwards_stdin_and_restores_env():
         "PWD": "/",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
         "FOO": "original",
     }
 

@@ -217,6 +217,13 @@ duration or throughput estimate is not the assertion. The normal `python/**`,
 suite. Run it locally with `cd integ && pnpm exec tsx hosting/run.ts` after
 building TypeScript; append `python` or `typescript` to select one host.
 
+`hosting/tracking.json` also runs on both HTTP hosts, in foreground and
+background modes. It joins execution-store results with policy denials,
+approval/retry decisions and the observer's history view. Completed records
+must remain unchanged after cancellation attempts or approval retries, and
+`record: false` suppresses history while retaining execution tracking. The
+existing `integ/**` filter includes these cases in `integ-hosting`.
+
 The substitution release/cancel cases hold `$(cd /; curl ...)` at that same
 HTTP gate and query the public session API while it is suspended. The parent
 must remain at `/work` both during the await and after completion or

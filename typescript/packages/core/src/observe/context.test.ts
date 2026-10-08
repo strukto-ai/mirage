@@ -16,8 +16,11 @@
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
+import { ContextScope } from '../utils/context_scope.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import {
+  captureRecordingContext,
+  commandRecords,
   record,
   recordStream,
   revisionFor,
@@ -27,6 +30,7 @@ import {
   startOp,
   withMountContext,
 } from './context.ts'
+import type { OpRecord } from './record.ts'
 
 describe('runWithRecording / record / runWithMountContext', () => {
   it('record outside recording scope is a no-op', () => {
@@ -220,20 +224,15 @@ describe('revisions context', () => {
 // the workspace, neither may gain the mount's prefix.
 describe('recorder stores the path as given', () => {
   it('record keeps both paths through a dispatched op', async () => {
-    const ws = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.WRITE })
+    const ram = new RAMVFS()
     let calls = 0
-    ws.opsRegistry.register({
-      name: 'read',
-      vfs: 'ram',
-      filetype: null,
-      write: false,
-      fn: async () => {
-        calls += 1
-        record('read', '/x/y', 'ram', 1, startOp())
-        record('read', '/m/k.txt', 'ram', 1, startOp())
-        return new Uint8Array([1])
-      },
-    })
+    ram.read = async () => {
+      calls += 1
+      record('read', '/x/y', 'ram', 1, startOp())
+      record('read', '/m/k.txt', 'ram', 1, startOp())
+      return new Uint8Array([1])
+    }
+    const ws = new Workspace({ '/m': ram }, { mode: MountMode.WRITE })
     try {
       const [, records] = await runWithRecording(() => ws.dispatch('read', '/m/k.txt'))
       expect(calls).toBe(1)
@@ -244,20 +243,15 @@ describe('recorder stores the path as given', () => {
   })
 
   it('recordStream keeps both paths through a dispatched op', async () => {
-    const ws = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.WRITE })
+    const ram = new RAMVFS()
     let calls = 0
-    ws.opsRegistry.register({
-      name: 'read',
-      vfs: 'ram',
-      filetype: null,
-      write: false,
-      fn: async () => {
-        calls += 1
-        recordStream('read', '/x/y', 'ram')
-        recordStream('read', '/m/k.txt', 'ram')
-        return new Uint8Array([1])
-      },
-    })
+    ram.read = async () => {
+      calls += 1
+      recordStream('read', '/x/y', 'ram')
+      recordStream('read', '/m/k.txt', 'ram')
+      return new Uint8Array([1])
+    }
+    const ws = new Workspace({ '/m': ram }, { mode: MountMode.WRITE })
     try {
       const [, records] = await runWithRecording(() => ws.dispatch('read', '/m/k.txt'))
       expect(calls).toBe(1)
@@ -265,5 +259,78 @@ describe('recorder stores the path as given', () => {
     } finally {
       await ws.close()
     }
+  })
+})
+
+describe('commandRecords', () => {
+  it("collects only its own command's records", async () => {
+    let inner: OpRecord[] = []
+    let outer: OpRecord[] = []
+    const [, sink] = await runWithRecording(async () => {
+      await commandRecords(async (mine) => {
+        outer = mine
+        record('write', '/a', 'ram', 1, startOp())
+        await commandRecords(async (nested) => {
+          inner = nested
+          record('write', '/b', 'ram', 1, startOp())
+          recordStream('write', '/c', 'ram')
+        })
+        record('write', '/post', 'ram', 1, startOp())
+      })
+    })
+    expect(inner.map((r) => r.path)).toEqual(['/b', '/c'])
+    expect(outer.map((r) => r.path)).toEqual(['/a', '/post'])
+    expect(sink.map((r) => r.path)).toEqual(['/a', '/b', '/c', '/post'])
+    // The marks land on the line's own records, so the lists share them.
+    for (const r of [...inner, ...outer]) expect(sink).toContain(r)
+  })
+
+  it('stays empty outside a recording scope', async () => {
+    let mine: OpRecord[] = []
+    await commandRecords(async (records) => {
+      mine = records
+      record('write', '/a', 'ram', 1, startOp())
+      expect(recordStream('write', '/b', 'ram')).toBeNull()
+    })
+    expect(mine).toEqual([])
+  })
+
+  // Each command records only after the other has opened its own list.
+  it('is task-local across concurrent commands', async () => {
+    const opened = new Set<string>()
+    const recorded = new Set<string>()
+    const command = async (me: string, other: string, file: string): Promise<string[]> =>
+      commandRecords(async (mine) => {
+        opened.add(me)
+        while (!opened.has(other)) await new Promise((r) => setTimeout(r, 0))
+        record('write', file, 'ram', 1, startOp())
+        recorded.add(me)
+        // Both lists stay open until both have recorded, so a shared variable
+        // that restores the previous list on exit still holds the other
+        // command's list when this one records.
+        while (!recorded.has(other)) await new Promise((r) => setTimeout(r, 0))
+        return mine.map((r) => r.path)
+      })
+    const [[first, second]] = await runWithRecording(async () =>
+      Promise.all([command('A', 'B', '/a/x.txt'), command('B', 'A', '/b/y.txt')]),
+    )
+    expect([first, second]).toEqual([['/a/x.txt'], ['/b/y.txt']])
+  })
+
+  // A lazy stream pull or a runtime hop runs under a captured context after
+  // the command's own frame has exited; its record is still the command's.
+  it('rides a captured recording context', async () => {
+    const [mine] = await runWithRecording(async () => {
+      let captured: ContextScope | undefined
+      const list = await commandRecords(async (records) => {
+        captured = new ContextScope(captureRecordingContext())
+        return records
+      })
+      await captured?.run(async () => {
+        record('write', '/late', 'ram', 1, startOp())
+      })
+      return list
+    })
+    expect(mine.map((r) => r.path)).toEqual(['/late'])
   })
 })

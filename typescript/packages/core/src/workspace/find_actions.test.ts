@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { compareDepthFirst } from './executor/find_action_dispatch.ts'
@@ -22,24 +21,18 @@ import { Workspace } from './workspace/workspace.ts'
 
 async function singleMountWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const root = new RAMVFS()
-  ops.registerVfs(root)
-  return new Workspace({ '/': root }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  return new Workspace({ '/': root }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 async function twoMountWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const root = new RAMVFS()
   const a = new RAMVFS()
   const b = new RAMVFS()
-  ops.registerVfs(root)
-  ops.registerVfs(a)
-  ops.registerVfs(b)
   return new Workspace(
     { '/': root, '/a': a, '/b': b },
-    { mode: MountMode.WRITE, ops, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
 }
 
@@ -385,7 +378,7 @@ describe('find -exec isolation', () => {
         // The mutating programs are `sh -c` lines: GNU's -exec sees no
         // shell function, so a function head would not run at all.
         await ws.shell(
-          'mkdir -p /w/d; touch /w/d/a.txt /w/d/b.txt; cd /w; KEEP=parent; set -- original',
+          'mkdir -p /w/d; touch /w/d/a.txt /w/d/b.txt; cd /w; export KEEP=parent; set -- original',
         )
         const io = await ws.shell(
           `find d -name '*.txt' -exec ${action} ${terminator}; ` +
@@ -683,16 +676,12 @@ it('deletes only the other arm under OR', async () => {
 
 it('preserves newline mount names and filenames through print0 and ls', async () => {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const root = new RAMVFS()
   const nested = new RAMVFS()
-  ops.registerVfs(root)
-  ops.registerVfs(nested)
   const ws = new Workspace(
     { '/': root, '/d/nested\nmount': nested },
     {
       mode: MountMode.WRITE,
-      ops,
       shellParser: parser,
     },
   )

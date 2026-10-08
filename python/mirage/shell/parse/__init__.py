@@ -24,22 +24,17 @@ from mirage.shell.parse.names import (
 )
 from mirage.shell.parse.parse import parse
 from mirage.shell.parse.source import join_continuations, source_offsets
-from mirage.shell.parse.syntax import (
-    find_syntax_error,
-    find_unterminated_backtick,
-    syntax_error_result,
-)
+from mirage.shell.parse.syntax import check_syntax, syntax_error_result
 
 __all__ = [
     "BASH_LANGUAGE",
     "TS_PARSER",
     "arith_reads",
     "assignment_values",
+    "check_syntax",
     "command_invocations",
     "command_words",
     "env_reads",
-    "find_syntax_error",
-    "find_unterminated_backtick",
     "identifier_names",
     "implicit_reads",
     "opaque_reads",

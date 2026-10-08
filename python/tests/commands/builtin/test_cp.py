@@ -14,6 +14,7 @@
 
 import asyncio
 
+from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.ram import COMMANDS
 from mirage.commands.config import CommandCatalog, CommandOpts
 from mirage.core.ram.stream import read_stream
@@ -50,7 +51,7 @@ def test_cp_recursive(backend):
                 PathSpec.from_str_path("/tmp/dst/"),
             ],
             [],
-            CommandOpts(flags={"r": True}),
+            CommandOpts(io=command_io(backend), flags={"r": True}),
         )
     )
     assert (

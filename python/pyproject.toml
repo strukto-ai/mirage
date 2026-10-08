@@ -4,7 +4,7 @@ version = "0.0.7a2"
 description = "A unified virtual filesystem for AI agents. Mount S3, Google Drive, Slack, Gmail, GitHub, Linear, Notion, Postgres, MongoDB, SSH, and more behind one filesystem so agents read, write, and pipe across services with familiar shell commands."
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES"]
 requires-python = ">=3.11"
 authors = [
     { name = "Zecheng Zhang", email = "zecheng@strukto.ai" },

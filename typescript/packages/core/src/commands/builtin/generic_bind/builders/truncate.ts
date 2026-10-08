@@ -1,7 +1,7 @@
 import { parseFlags, truncateGeneric } from '../../generic/truncate.ts'
-import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const truncate: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const truncate: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const flags = parseFlags(opts.flags)
   const truncateOp = requireOp(ops.truncate, 'truncate')
   const index = opts.index ?? undefined
@@ -14,7 +14,7 @@ const truncate: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'truncate',
   write: true,
   fn: truncate,

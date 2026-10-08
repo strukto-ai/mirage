@@ -15,6 +15,7 @@
 import asyncio
 import hashlib
 import itertools
+import json
 import logging
 import re
 import threading
@@ -56,14 +57,19 @@ class FakeBox:
     ``/2.0/folders/{id}/items``, ``/2.0/files/{id}`` (only the fields its
     ``fields`` query asks for, plus ``type`` and ``id``), and
     ``/2.0/files/{id}/content``, which 302s to ``/dl/{id}`` the way Box
-    sends a download to its content host. Every write keeps
+    sends a download to its content host. The two upload routes,
+    ``POST /2.0/files/content`` (new) and ``POST /2.0/files/{id}/content``
+    (version), answer ``{total_count: 1, entries: [file]}`` with the file
+    rendered by ``_row``, the renderer listings and info use, so an upload
+    reply's sha1 and a later stat's cannot disagree. Every write keeps
     ``modified_at``, so two same-size edits land in one second and only
     ``sha1`` tells them apart, as on the real service.
 
     Args:
         files (dict[str, bytes]): path under All Files to bytes.
         log (list[str]): ``route:id`` for every request (``items``,
-            ``info``, ``content``, ``dl``).
+            ``info``, ``content``, ``dl``, ``upload``; an upload logs the
+            parent id for a new file and the file id for a version).
         url (str): the origin ``serve`` sets once it is listening.
         forbidden (set[str]): ids whose ``GET /files/{id}`` answers 403.
         unhashed (set[str]): ids Box renders with no ``sha1``.
@@ -260,6 +266,36 @@ class FakeBox:
             return web.json_response({"code": "not_found"}, status=404)
         raise web.HTTPFound(f"{self.url}/dl/{item.id}")
 
+    async def _upload_form(self, req: web.Request) -> tuple[dict, bytes]:
+        form = await req.post()
+        attributes = json.loads(str(form["attributes"]))
+        part = form["file"]
+        assert isinstance(part, web.FileField), part
+        return attributes, part.file.read()
+
+    def _uploaded(self, item: _Item, status: int) -> web.Response:
+        return web.json_response(
+            {"total_count": 1, "entries": [self._row(item)]}, status=status
+        )
+
+    async def upload_new(self, req: web.Request) -> web.Response:
+        attributes, data = await self._upload_form(req)
+        parent_id = attributes["parent"]["id"]
+        self.log.append(f"upload:{parent_id}")
+        item = _Item(
+            str(next(self._ids)), attributes["name"], parent_id, False, data
+        )
+        self.items[item.id] = item
+        return self._uploaded(item, 201)
+
+    async def upload_version(self, req: web.Request) -> web.Response:
+        file_id = req.match_info["id"]
+        _, data = await self._upload_form(req)
+        self.log.append(f"upload:{file_id}")
+        item = self.items[file_id]
+        item.data = data
+        return self._uploaded(item, 200)
+
     async def dl(self, req: web.Request) -> web.Response:
         file_id = req.match_info["id"]
         self.log.append(f"dl:{file_id}")
@@ -294,6 +330,8 @@ def serve(box: FakeBox | None = None) -> Iterator[FakeBox]:
     app.router.add_get("/2.0/folders/{id}/items", box.folder_items)
     app.router.add_get("/2.0/files/{id}", box.file_info)
     app.router.add_get("/2.0/files/{id}/content", box.content)
+    app.router.add_post("/2.0/files/content", box.upload_new)
+    app.router.add_post("/2.0/files/{id}/content", box.upload_version)
     app.router.add_get("/dl/{id}", box.dl)
     loop = asyncio.new_event_loop()
     startup: Future[None] = Future()

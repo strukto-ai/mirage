@@ -19,8 +19,7 @@ import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { scanIo } from '../generic_bind/index.ts'
 import { runSearch } from '../generic_bind/search.ts'
-
-import { IO } from './io.ts'
+import { mountIo } from '../generic_bind/adapter.ts'
 
 // The $regex push-down prints each matching document as a whole line;
 // pushdownOperand defers shaping flags and multi-operand lines to the
@@ -32,7 +31,7 @@ export const MONGODB_GREP = command({
   spec: specOf('grep'),
   fn: (accessor: MongoDBAccessor, paths, texts, opts) =>
     runSearch<MongoDBAccessor>(
-      scanIo(IO, opts.ns, opts.mountPrefix)[0],
+      scanIo(mountIo(opts), opts.ns, opts.mountPrefix)[0],
       'grep',
       accessor,
       paths,

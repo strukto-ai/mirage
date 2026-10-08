@@ -19,6 +19,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount.namespace.redis import RedisNamespaceStore
@@ -86,11 +87,10 @@ def test_redis_store_subclasses_namespace_store():
 
 
 class _OverlayRAMVFS(RAMVFS):
-    """RAM VFS with the native setattr op stripped, standing in for
-    an API backend that has no attribute slot."""
+    """RAM VFS without a native setattr, standing in for an API backend
+    that has no attribute slot."""
 
-    def ops(self):
-        return [ro for ro in super().ops() if ro.name != "setattr"]
+    setattr = BaseVFS.setattr
 
 
 @pytest.mark.asyncio

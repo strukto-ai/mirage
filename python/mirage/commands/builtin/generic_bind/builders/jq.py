@@ -15,12 +15,11 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.jq import jq_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -42,4 +41,4 @@ async def jq(
     )
 
 
-BUILDER = Builder("jq", jq, read=True)
+BUILDER = GenericCommand("jq", jq, read=True)

@@ -21,10 +21,12 @@ import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.gmail.grep import grep
-from mirage.commands.builtin.gmail.io import IO as GMAIL_IO
 from mirage.commands.builtin.gmail.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
+from mirage.core.gmail.read import read as core_read
+from mirage.core.gmail.readdir import readdir as core_readdir
+from mirage.core.gmail.stat import stat as core_stat
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -33,9 +35,9 @@ from mirage.utils.key_prefix import mount_key
 def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
     """The command's IO with the given slots faked; the rest stay real."""
     real = {
-        "readdir": GMAIL_IO.readdir,
-        "stat": GMAIL_IO.stat,
-        "read_bytes": GMAIL_IO.read_bytes,
+        "readdir": core_readdir,
+        "stat": core_stat,
+        "read_bytes": core_read,
     }
     return SimpleNamespace(**{**real, **slots})
 
@@ -73,14 +75,16 @@ async def test_grep_without_word_flag_skips_native_search():
         grep.__wrapped__.__globals__,
         {
             "search_messages": spy,
-            "IO": _io(resolve_glob=AsyncMock(return_value=[])),
         },
     ):
         _, io = await grep(
             accessor,
             [_label_scope()],
             ["hello"],
-            CommandOpts(index=RAMIndexCacheStore()),
+            CommandOpts(
+                io=_io(resolve_glob=AsyncMock(return_value=[])),
+                index=RAMIndexCacheStore(),
+            ),
         )
     assert io.exit_code == 1
     spy.assert_not_awaited()
@@ -97,7 +101,6 @@ async def test_rg_without_word_flag_skips_native_search():
         rg.__wrapped__.__globals__,
         {
             "search_messages": spy,
-            "IO": _io(resolve_glob=AsyncMock(return_value=[])),
         },
     ):
         with pytest.raises(UsageError):
@@ -105,7 +108,10 @@ async def test_rg_without_word_flag_skips_native_search():
                 accessor,
                 [_label_scope()],
                 ["hello"],
-                CommandOpts(index=RAMIndexCacheStore()),
+                CommandOpts(
+                    io=_io(resolve_glob=AsyncMock(return_value=[])),
+                    index=RAMIndexCacheStore(),
+                ),
             )
     spy.assert_not_awaited()
 
@@ -118,7 +124,6 @@ async def test_binary_search_snippet_uses_rendered_file_scan():
         grep.__wrapped__.__globals__,
         {
             "search_messages": AsyncMock(return_value=rows),
-            "IO": _io(resolve_glob=AsyncMock(return_value=[_label_scope()])),
             "grep_generic": generic,
         },
     ):
@@ -126,6 +131,10 @@ async def test_binary_search_snippet_uses_rendered_file_scan():
             AsyncMock(),
             [_label_scope()],
             ["hello"],
-            CommandOpts(index=RAMIndexCacheStore(), flags={"w": True}),
+            CommandOpts(
+                io=_io(resolve_glob=AsyncMock(return_value=[_label_scope()])),
+                index=RAMIndexCacheStore(),
+                flags={"w": True},
+            ),
         )
     generic.assert_awaited_once()

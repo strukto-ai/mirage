@@ -19,13 +19,12 @@ from mirage.commands.builtin.discord.grep import (
     RG_SEARCH_HONORED,
     SEARCH_MAX_RESULTS,
 )
-from mirage.commands.builtin.discord.io import IO
 from mirage.commands.builtin.generic.rg import (
     parse_flags,
     refuse_missing_pattern,
     rg_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.adapter import bound_op, mount_io
 from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import pushdown_operand
@@ -58,7 +57,7 @@ async def rg(
     pushdown_warnings: list[str] = []
     # Output-shaping flags, a glob operand and a multi-operand line all need
     # the generic scan; see SEARCH_HONORED above.
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, scoped = scan_io(mount_io(opts), opts.ns, opts.mount_prefix)
     operand = (
         None
         if scoped

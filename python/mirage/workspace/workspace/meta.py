@@ -57,6 +57,24 @@ class WorkspaceMeta:
     def default_session_id(self) -> str:
         return self._default_session_id
 
+    async def adopt_default(self, session_id: str) -> None:
+        """Snapshot restore: adopt the snapshot's default session identity
+        and point the discovery record at it.
+
+        Args:
+            session_id (str): the snapshot's default session.
+        """
+        self._sessions.adopt_default(session_id)
+        self._default_session_id = session_id
+        await self._store.replace_meta(
+            self._workspace_id,
+            {
+                "workspace_id": self._workspace_id,
+                "default_session_id": session_id,
+            },
+        )
+        self._written = True
+
     async def load(self) -> dict[str, Any]:
         """The record, registering this workspace first if needed."""
         await self.ensure()

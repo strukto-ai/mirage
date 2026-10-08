@@ -749,7 +749,7 @@ export async function handleCase(
 }
 
 /**
- * bash's select menu (print_select_list, bash 5.2): column-major in
+ * The select menu as bash 5.2 prints it: column-major in
  * `$COLUMNS` (80 when unset or not positive), each cell padded with tabs
  * to an 8-wide stop, one entry per row when they all fit on one.
  */

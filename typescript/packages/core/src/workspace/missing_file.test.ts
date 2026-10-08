@@ -15,7 +15,6 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
@@ -33,12 +32,7 @@ beforeAll(async () => {
 
 function buildWorkspace(): { ws: Workspace; ram: RAMVFS } {
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  const ws = new Workspace(
-    { '/ram': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, shellParser: parser })
   return { ws, ram }
 }
 

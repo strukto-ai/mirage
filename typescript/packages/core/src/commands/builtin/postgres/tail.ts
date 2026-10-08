@@ -15,8 +15,7 @@
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { countRows } from '../../../core/postgres/client.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
 import { readStream } from '../../../core/postgres/read.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
@@ -26,8 +25,6 @@ import { followFlags, tailGeneric } from '../generic/tail.ts'
 import { parseN } from '../tail_counts.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { noteAfter, rowCapNotice } from '../utils/limit.ts'
-
-const resolveGlob = resolveGlobOf(IO)
 
 // Row reads on tables/views fetch only the last N rows (COUNT + OFFSET)
 // instead of the whole relation; tailGeneric then trims the already-small
@@ -65,7 +62,9 @@ async function tail(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+    paths.length > 0
+      ? await resolveGlobOf(mountIo(opts))(accessor, paths, opts.index ?? undefined)
+      : []
   const fl = new FlagView(opts.flags, specOf('tail'))
   const nRaw = fl.asStr('n') ?? null
   const [lines, plusMode] = parseN(nRaw)
@@ -81,7 +80,7 @@ async function tail(
     texts,
     opts,
     (p) => tailSource(accessor, p, opts.index ?? undefined, lines, pushdown, notices),
-    (p) => IO.stat(accessor, p, opts.index ?? undefined),
+    (p) => mountIo(opts).stat(accessor, p, opts.index ?? undefined),
   )
   if (result === null) return result
   const [out, io] = result

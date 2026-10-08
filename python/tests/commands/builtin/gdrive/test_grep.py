@@ -11,6 +11,8 @@ from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.io.types import materialize
 from mirage.types import PathSpec
+from mirage.vfs.gdrive import GoogleDriveVFS
+from tests.fixtures.vfs_io import io_for
 
 
 @pytest.mark.asyncio
@@ -56,7 +58,11 @@ async def test_grep_i_keeps_rendered_google_json(kind, module):
             accessor,
             [path],
             ["needle"],
-            CommandOpts(index=index, flags={"args_I": True}),
+            CommandOpts(
+                index=index,
+                flags={"args_I": True},
+                io=io_for(GoogleDriveVFS, accessor),
+            ),
         )
         data = await materialize(out)
     assert io.exit_code == 0

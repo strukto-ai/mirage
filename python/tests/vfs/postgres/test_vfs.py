@@ -14,7 +14,9 @@
 
 import pytest
 
+from mirage.commands.builtin.backends import commands_for
 from mirage.vfs.postgres import PostgresConfig, PostgresVFS
+from tests.fixtures.vfs_io import served
 
 
 def test_vfs_name():
@@ -25,13 +27,13 @@ def test_vfs_name():
 
 def test_vfs_registers_three_ops():
     res = PostgresVFS(PostgresConfig(dsn="postgres://localhost/db"))
-    op_names = {ro.name for ro in res.ops()}
+    op_names = served(res)
     assert {"read", "readdir", "stat"} <= op_names
 
 
 def test_vfs_registers_commands():
     res = PostgresVFS(PostgresConfig(dsn="postgres://localhost/db"))
-    cmd_names = {rc.name for rc in res.commands()}
+    cmd_names = {rc.name for rc in commands_for(res)}
     expected = {
         "cat",
         "find",

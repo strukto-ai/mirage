@@ -47,14 +47,14 @@ def _mounted(obs: Observer):
 
 def test_read_op_renders_gnu_file():
     mount = _mounted(_observer_with([("ls /data", "s1"), ("pwd", "s2")]))
-    data = asyncio.run(mount.execute_op("read", "/.bash_history"))
+    data = asyncio.run(mount.call("read", "/.bash_history"))
     assert data == b"#1\nls /data\n#2\npwd\n"
 
 
 def test_read_reflects_new_events_without_invalidation():
     obs = _observer_with([("ls /a", "s1")])
     mount = _mounted(obs)
-    first = asyncio.run(mount.execute_op("read", "/.bash_history"))
+    first = asyncio.run(mount.call("read", "/.bash_history"))
     asyncio.run(
         obs._log(
             LogEntry(
@@ -67,14 +67,14 @@ def test_read_reflects_new_events_without_invalidation():
             )
         )
     )
-    second = asyncio.run(mount.execute_op("read", "/.bash_history"))
+    second = asyncio.run(mount.call("read", "/.bash_history"))
     assert first != second
     assert second.endswith(b"#2\npwd\n")
 
 
 def test_stat_op_reports_file():
     mount = _mounted(_observer_with([("ls /a", "s1")]))
-    st = asyncio.run(mount.execute_op("stat", "/.bash_history"))
+    st = asyncio.run(mount.call("stat", "/.bash_history"))
     assert st.type != FileType.DIRECTORY
     assert st.size == len(b"#1\nls /a\n")
 
@@ -82,10 +82,10 @@ def test_stat_op_reports_file():
 def test_write_op_not_registered():
     mount = _mounted(_observer_with([]))
     with pytest.raises(OperationNotSupportedError):
-        asyncio.run(mount.execute_op("write", "/.bash_history", b"x"))
+        asyncio.run(mount.call("write", "/.bash_history", b"x"))
 
 
 def test_other_paths_not_found():
     mount = _mounted(_observer_with([("ls /a", "s1")]))
     with pytest.raises(FileNotFoundError):
-        asyncio.run(mount.execute_op("read", "/.bash_history/nope"))
+        asyncio.run(mount.call("read", "/.bash_history/nope"))

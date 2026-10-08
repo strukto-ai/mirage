@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { MountMode } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
@@ -24,15 +23,9 @@ import { Workspace } from './workspace/workspace.ts'
 // 1, per GNU coreutils. Single-mount and cross-mount must be byte-identical.
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const a = new RAMVFS()
   const b = new RAMVFS()
-  ops.registerVfs(a)
-  ops.registerVfs(b)
-  const ws = new Workspace(
-    { '/a': a, '/b': b },
-    { mode: MountMode.WRITE, ops, shellParser: parser },
-  )
+  const ws = new Workspace({ '/a': a, '/b': b }, { mode: MountMode.WRITE, shellParser: parser })
   await ws.shell('echo aaa > /a/f.txt')
   return ws
 }
@@ -204,10 +197,8 @@ describe('cross-mount partial output matches single-mount bytes', () => {
 
 async function makeNumberedWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const a = new RAMVFS()
-  ops.registerVfs(a)
-  const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE, shellParser: parser })
   await ws.shell("printf '1\\n2\\n' > /a/f.txt && printf '3\\n4\\n' > /a/g.txt")
   await ws.shell("printf 'hello\\n' > /a/h.txt")
   return ws

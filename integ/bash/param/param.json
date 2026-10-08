@@ -3059,6 +3059,40 @@
         "stdout": "2 p2 p2 hello 5 el\nrc=0\n",
         "stderr": "bash: ${}: bad substitution\nbash: ${.}: bad substitution\nbash: ${pb3.b}: bad substitution\nbash: ${1a}: bad substitution\nbash: ${pb3:}: bad substitution\nbash: ${#pb3 b}: bad substitution\nbash: ${#pb3-x}: bad substitution\nbash: ${!pb3 b}: bad substitution\nbash: ${pb3;b}: bad substitution\nbash: ${pb3[1]x}: bad substitution\nbash: ${pb3*}: bad substitution\nbash: ${ pb3}: bad substitution\nbash: ${pb3 b}: bad substitution\nbash: ${pb3 }: bad substitution\nbash: ${%pb3}: bad substitution\nbash: ${-pb3}: bad substitution\nbash: ${$pb3}: bad substitution\nbash: ${#%}: bad substitution\nbash: ${#!x}: bad substitution\nbash: ${!$}: bad substitution\nbash: ${pb3[]}: bad substitution\nbash: ${@pb3}: bad substitution\nbash: ${pb3\\ b}: bad substitution\nbash: ${pb3\"b\"}: bad substitution\n"
       }
+    },
+    {
+      "id": "param_random_subshells_draw_their_own",
+      "seq": 500690,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( n=0; for i in 1 2 3 4 5 6 7 8; do a=$( (echo $RANDOM $RANDOM $RANDOM) ); b=$( (echo $RANDOM $RANDOM $RANDOM) ); [ \"$a\" = \"$b\" ] && n=$((n+1)); done; echo \"same=$n\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "same=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

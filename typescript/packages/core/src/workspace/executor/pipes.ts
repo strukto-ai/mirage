@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { childContext, runWithEvaluation, type EvaluationContext } from '../evaluation.ts'
+import { childContext, type EvaluationContext } from '../evaluation.ts'
+import { runWithEvaluation } from '../../context/session_context.ts'
 
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ProcessSupervisor } from '../../process/supervisor.ts'

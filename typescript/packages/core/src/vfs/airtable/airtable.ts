@@ -13,18 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AirtableAccessor } from '../../accessor/airtable.ts'
-import { AIRTABLE_COMMANDS } from '../../commands/builtin/airtable/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 import {
   redactAirtableConfig,
   type AirtableConfig,
   type AirtableConfigRedacted,
 } from '../../core/airtable/config.ts'
-import { AIRTABLE_OPS } from '../../ops/airtable/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { readdir as airtableReaddir } from '../../core/airtable/readdir.ts'
+import { read as airtableRead } from '../../core/airtable/read.ts'
+import { stat as airtableStat } from '../../core/airtable/stat.ts'
 
 export interface AirtableVFSState {
   type: string
@@ -56,12 +58,22 @@ export class AirtableVFS extends BaseVFS {
     this.accessor = new AirtableAccessor(config, options)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return AIRTABLE_COMMANDS
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return airtableReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return AIRTABLE_OPS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await airtableRead(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return airtableStat(this.accessor, path, index)
   }
 
   override getState(): AirtableVFSState {

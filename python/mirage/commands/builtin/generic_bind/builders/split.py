@@ -30,13 +30,13 @@ from mirage.commands.builtin.generic.split import (
     split_generic as generic_split,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     Operation,
     bound_op,
+    require_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -87,7 +87,7 @@ async def split(
     write_bytes = (
         transfer_primitives(opts.dispatch)["write"]
         if opts.dispatch is not None
-        else partial(ops.require(Operation.WRITE), accessor)
+        else partial(require_op(ops, Operation.WRITE), accessor)
     )
     return await generic_split(
         paths,
@@ -118,4 +118,4 @@ async def split(
     )
 
 
-BUILDER = Builder("split", split, write=True)
+BUILDER = GenericCommand("split", split, write=True)

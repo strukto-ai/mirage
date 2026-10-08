@@ -161,7 +161,7 @@ async def test_reconcile_private_index_can_resolve_github_ids(
         path = "/gh/src/main.py"
         await ws.namespace.ensure_loaded()
         mount = ws.namespace.mount_for(path)
-        await mount.execute_op("stat", path)
+        await mount.call("stat", path)
         await ws.cache.set(path, b"cached", fingerprint="b")
         await ws.namespace.set_attrs(path, mode=0o600)
         rec = Reconciler(ws.cache, ws.namespace)

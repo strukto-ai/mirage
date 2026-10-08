@@ -193,7 +193,7 @@ async function levelMatches(
   await owner.ensureReady()
   const prefix = rstripSlash(owner.prefix)
   const out: string[] = []
-  if (owner.hasOp('glob')) {
+  if (owner.answers('glob')) {
     const spec = new PathSpec({
       virtual: real,
       directory: real,
@@ -383,7 +383,7 @@ async function isDirectory(
     await owner.ensureReady()
     row =
       registry.opStat === null
-        ? await owner.executeOp('stat', real)
+        ? await owner.call('stat', real)
         : await registry.opStat(owner, PathSpec.fromStrPath(real, mountKey(real, prefix)))
   } catch (err) {
     if (isFsError(err)) return false
@@ -441,7 +441,7 @@ export async function resolveGlobs(
       const linked = !midPath && listingDir(links, directory) !== directory
       const extra =
         midPath || linked ? [] : namespaceChildren(registry, links, directory, item.pattern)
-      if (!linked && !mount.hasOp('glob') && extra.length === 0) {
+      if (!linked && !mount.answers('glob') && extra.length === 0) {
         result.push(item)
         continue
       }

@@ -24,7 +24,7 @@ from mirage.cache.read_through import (
     cache_aware_read_stream,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
+    mount_io,
     scoped_io,
     with_command_guards,
     with_dir_guard,
@@ -32,7 +32,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
 )
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eisdir
 from mirage.ops.types import NamespaceView
@@ -238,52 +238,59 @@ def _write_wraps(ops: CommandIO) -> CommandIO:
 
 
 async def _run_with_namespace_globs(
-    ops: CommandIO,
     finish: Callable[[CommandIO], CommandIO],
     fn: Callable[..., Any],
+    table: Callable[[CommandIO], CommandIO] | None,
+    adapt: Callable[[CommandIO], CommandIO] | None,
+    write: bool,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
 ) -> Any:
-    """Run a builder with an adapter that carries the invocation's
-    namespace facts below every guard.
+    """Run a builder over the mount's table, with the invocation's
+    namespace facts stamped on below every guard.
 
-    A nested mount's keys live in another VFS and no VFS stores
-    a symlink, so a glob resolved by one backend's readdir misses both,
-    while the same names are already merged into a listing. The adapter
-    is built once per backend and the names are session-scoped, so the
-    fact is stamped on here, per invocation, from ``opts.ns`` -- and the
-    whole guard chain is applied on top of the stamped copy, so every
-    guard that consumes a namespace fact simply reads it off the
-    adapter it wraps: glob resolution derives from ``glob_children``,
-    the dir guard closes over it, and the hidden guard's rmdir captures
-    it for its emptiness judgment. Binding the guards at registration
-    instead would strand them behind partials built before any
-    invocation exists, which is exactly the wiring that made the rmdir
-    guard blind to a mounted child. The stamp happens whether or not
-    the namespace owes this directory anything, so there is one code
-    path rather than two; the guards read the current session at call
-    time, so per-invocation binding changes cost, not behavior.
+    The table is the mount's (``opts.io``), read per invocation, so one
+    registration serves every mount of the backend. A nested mount's
+    keys live in another VFS and no VFS stores a symlink, so a glob
+    resolved by one backend's readdir misses both, while the same names
+    are already merged into a listing. The names are session-scoped, so
+    the fact is stamped on here, per invocation, from ``opts.ns`` -- and
+    the whole guard chain is applied on top of the stamped copy, so every
+    guard that consumes a namespace fact simply reads it off the table it
+    wraps: glob resolution derives from ``glob_children``, the dir guard
+    closes over it, and the hidden guard's rmdir captures it for its
+    emptiness judgment. The stamp happens whether or not the namespace
+    owes this directory anything, so there is one code path rather than
+    two; the guards read the current session at call time.
 
-    ``ops`` stays the first bound argument, because that partial slot is
-    how the adapter is reached for a registered command; it arrives raw
-    and is guarded here.
+    A read-only builder's stat serves the freshness probe's answer
+    (``with_probe_answers``), unless the command swaps in a stat of its
+    own (dify's light ``ls``), so what that prints never changes with
+    the policy.
 
     Args:
-        ops (CommandIO): the backend's raw IO adapter.
         finish (Callable): the builder tier's cache and slash wraps,
             chosen at registration from the builder's read/write kind.
         fn (Callable): the builder's command function.
+        table (Callable | None): the backend's change to the table for
+            every command.
+        adapt (Callable | None): the command's own change to the table.
+        write (bool): whether the builder writes.
         accessor (Accessor): backend handle.
         paths (list[PathSpec]): the command's path operands.
         texts (list[str]): the command's text arguments.
         opts (CommandOpts): the per-invocation option bag.
     """
+    io = table(mount_io(opts)) if table is not None else mount_io(opts)
+    raw = adapt(io) if adapt is not None else io
+    if raw.stat is io.stat and not write:
+        raw = with_probe_answers(raw)
     children = opts.ns.child_mounts if opts.ns is not None else None
     links = opts.ns.links if opts.ns is not None else None
     stamped = replace(
-        ops,
+        raw,
         glob_children=children,
         glob_target_stat=(links.target_stat if links is not None else None),
     )
@@ -291,7 +298,7 @@ async def _run_with_namespace_globs(
     # hooks, both outside the cache wraps (`finish`) so a refusal fires
     # before a warm serve, the dispatcher's own order at the op door. A
     # probe answer is served below them (`with_probe_answers` on the
-    # raw adapter), so they still judge every path before it. Under a
+    # raw table), so they still judge every path before it. Under a
     # hide or a path rule the native subtree ops are set aside
     # (`scoped_io`), so every entry passes through the guarded walk.
     bound = with_dir_guard(
@@ -301,42 +308,49 @@ async def _run_with_namespace_globs(
     return await fn(bound, accessor, paths, texts, opts)
 
 
-def make_generic_commands(
+def generic_commands(
     vfs: str,
-    ops: CommandIO,
     *,
-    overrides: set[str] | None = None,
-    ops_overrides: dict[str, CommandIO] | None = None,
+    overrides: set[str] | frozenset[str] | None = None,
+    table: Callable[[CommandIO], CommandIO] | None = None,
+    adapt: dict[str, Callable[[CommandIO], CommandIO]] | None = None,
+    local: bool = False,
 ) -> list[Callable[..., Any]]:
-    """Generate the default command set for a backend from its ops.
+    """Generate the default command set for a backend.
+
+    Each command runs over the table of the mount it runs on
+    (``opts.io``), so the set is built once per backend name.
 
     Args:
         vfs (str): VFS name the commands register under.
-        ops (CommandIO): the backend's IO adapter.
-        overrides (set[str] | None): command names to skip (the backend
-            ships its own wrapper for these).
-        ops_overrides (dict[str, CommandIO] | None): per-command adapters
-            that replace the shared adapter when one command needs a cheaper
-            backend operation.
+        overrides (set[str] | frozenset[str] | None): command names to
+            skip (the backend ships its own wrapper for these).
+        table (Callable | None): a change to the mount's table for every
+            command (disk sets its native ``find`` and ``du`` aside, so a
+            shell walk reports partial results and per-directory errors).
+        adapt (dict[str, Callable] | None): per-command changes to the
+            mount's table, for a command that needs a cheaper backend
+            operation (dify's light ``ls``).
+        local (bool): whether the backend's data lives on the host, which
+            lets a command aggregate there.
     """
     skip = overrides or set()
-    ops_over = ops_overrides or {}
+    changes = adapt or {}
     # A name no builder has does nothing at all, so a misspelled override
     # left the generic registered beside the bespoke one, and an override
     # for a command the table never had (mem0's `search`) read as if it
     # displaced something. Refused at registration, which is import time.
     known = {b.name for b in BUILDERS}
-    unknown = sorted((set(skip) | set(ops_over)) - known)
+    unknown = sorted((set(skip) | set(changes)) - known)
     if unknown:
         raise ValueError(
-            f"make_generic_commands({vfs!r}): no generic "
+            f"generic_commands({vfs!r}): no generic "
             f"builder named {', '.join(unknown)}"
         )
     commands: list[Callable[..., Any]] = []
     for b in BUILDERS:
         if b.name in skip:
             continue
-        raw = ops_over.get(b.name, ops)
         finish: Callable[[CommandIO], CommandIO]
         if b.read:
             finish = _read_wraps
@@ -344,23 +358,20 @@ def make_generic_commands(
             finish = _stat_wraps
         else:
             finish = _write_wraps
-        # A per-command adapter with its own stat (dify's light ls) would
-        # otherwise print the probe's full stat under fresh only.
-        answered = (
-            with_probe_answers(raw)
-            if raw.stat is ops.stat and not b.write
-            else raw
-        )
         bound = functools.partial(
-            _run_with_namespace_globs, answered, finish, b.fn
+            _run_with_namespace_globs,
+            finish,
+            b.fn,
+            table,
+            changes.get(b.name),
+            b.write,
         )
-        agg = b.aggregate if raw.local else None
         commands.append(
             command(
                 b.name,
                 vfs=vfs,
                 spec=SPECS[b.name],
-                aggregate=agg,
+                aggregate=b.aggregate if local else None,
                 write=b.write,
                 path_guarded=True,
             )(bound)

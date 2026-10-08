@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { materialize } from '../../io/types.ts'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { ancestors } from '../../utils/path.ts'
@@ -50,12 +49,7 @@ export async function makeIntegrationWS(
   for (const [relPath, body] of Object.entries(files)) {
     put(data, `/${relPath}`, body)
   }
-  const registry = new OpsRegistry()
-  registry.registerVfs(data)
-  const ws = new Workspace(
-    { '/data': data },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  const ws = new Workspace({ '/data': data }, { mode: MountMode.WRITE, shellParser: parser })
   return { ws, data }
 }
 

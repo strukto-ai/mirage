@@ -229,7 +229,7 @@ def shell_quote(name: str) -> str:
 def single_quote(text: str) -> str:
     """Wrap text so bash reads it back as exactly one word.
 
-    bash's own ``sh_single_quote``: always the ``'text'`` form, with an
+    The quoting bash itself writes: always the ``'text'`` form, with an
     embedded quote spelled ``'\\''`` and every other character, newlines
     included, left as itself. This is not
     :func:`shell_quote_always`, which is GNU's diagnostic rendering and

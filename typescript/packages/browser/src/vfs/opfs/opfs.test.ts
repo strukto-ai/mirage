@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { OPFS_COMMANDS } from '../../commands/builtin/opfs/index.ts'
+import '../../commands/builtin/backends.ts'
+import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { FileType, VFSName } from '@struktoai/mirage-core/types'
 import { copy as copyCore } from '../../core/opfs/copy.ts'
@@ -43,11 +46,8 @@ describe('OPFSVFS — identity', () => {
     expect(typeof res.prompt).toBe('string')
     expect(res.rootName).toBe('')
   })
-  it('ops() returns the OPFS_OPS array', () => {
-    expect(res.ops().length).toBeGreaterThan(0)
-  })
-  it('commands() returns OPFS_COMMANDS', () => {
-    expect(res.commands().length).toBeGreaterThan(0)
+  it('serves OPFS_COMMANDS', () => {
+    expect(commandsFor(res)).toEqual(OPFS_COMMANDS)
   })
 })
 

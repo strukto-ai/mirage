@@ -17,7 +17,6 @@ import { command, type CommandFn } from '../../../config.ts'
 import { SPECS } from '../../../spec/index.ts'
 import { duGeneric } from '../du.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { RegisteredOp } from '../../../../ops/registry.ts'
 import { FileStat, FileType, MountMode } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -52,10 +51,8 @@ const partlyMeasured: CommandFn = () => [
 ]
 
 class Unlisted extends RAMVFS {
-  override ops(): readonly RegisteredOp[] {
-    return super
-      .ops()
-      .map((ro) => (ro.name === 'readdir' ? { ...ro, fn: () => Promise.reject(eacces('/a')) } : ro))
+  override readdir(): Promise<string[]> {
+    return Promise.reject(eacces('/a'))
   }
 }
 

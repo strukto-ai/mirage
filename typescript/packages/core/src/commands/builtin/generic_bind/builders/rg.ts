@@ -28,9 +28,9 @@ import {
 } from '../../generic/rg.ts'
 import { patternArg } from '../../grep_pattern.ts'
 import { walkCandidates } from '../../rg_scan.ts'
-import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const rg: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+const rg: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   if (ops.search !== undefined) return runSearch(ops, 'rg', accessor, paths, texts, opts)
   const idx = opts.index ?? undefined
   let resolved: PathSpec[] = []
@@ -73,7 +73,7 @@ const rg: BuilderFn = async (ops, accessor, paths, texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'rg',
   read: true,
   fn: rg,

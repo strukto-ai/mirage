@@ -15,14 +15,13 @@
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { materialize, type ByteSource } from '../../io/types.ts'
 import type { FileDescription } from '../../shell/descriptors.ts'
-import { DEFAULT_UMASK } from '../../context/session_context.ts'
+import { DEFAULT_UMASK, getCurrentEvaluation } from '../../context/session_context.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 import type { SessionState } from '../session/session.ts'
 import { hasAborted, makeAbortError } from '../abort.ts'
-import { getCurrentEvaluation } from '../evaluation.ts'
 
 /**
  * Write or append, giving a newly created file the umask's mode.

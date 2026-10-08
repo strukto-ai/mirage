@@ -130,7 +130,7 @@ async def run_overlay_orphan_gc(config: S3Config) -> dict[str, MetaValue]:
     await ws.shell("echo alpha > /data/g.txt && chmod 601 /data/g.txt")
     before = ws.namespace.meta_for("/data/g.txt") is not None
     mount = ws.namespace.mount_for("/data/g.txt")
-    await mount.execute_op("unlink", "/data/g.txt")
+    await mount.call("unlink", "/data/g.txt")
     await ws.shell("stat /data/g.txt")
     after = ws.namespace.meta_for("/data/g.txt") is not None
     return {"overlay_orphan_before": before, "overlay_orphan_after": after}

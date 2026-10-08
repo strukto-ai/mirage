@@ -14,9 +14,14 @@
 
 import { headerAggregate } from '../../aggregators.ts'
 import { headGeneric } from '../../generic/head.ts'
-import { type Builder, dirAwareStat, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import {
+  type GenericCommand,
+  dirAwareStat,
+  resolveGlobOf,
+  type GenericCommandFn,
+} from '../adapter.ts'
 
-const head: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+const head: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return headGeneric(resolved, texts, opts, dirAwareStat(ops, accessor, opts), (p) =>
@@ -24,7 +29,7 @@ const head: BuilderFn = async (ops, accessor, paths, texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'head',
   read: true,
   aggregate: headerAggregate,

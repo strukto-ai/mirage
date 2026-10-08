@@ -19,31 +19,22 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.stat import stat_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
     bound_op,
+    over_mount_io,
     overlaid_stat,
 )
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def make_stat(vfs: str, io: CommandIO) -> Callable[..., Any]:
-    """Build the index-threaded stat override for one keyed store.
-
-    Wiring only, and it delegates to ``stat_generic`` rather than to the
-    generic itself, so every fact the generic reads off ``CommandOpts``
-    reaches a keyed store too. Reading the flags here and calling the
-    generic with keywords is how the mount boundaries and the dispatched
-    stat went missing on s3 and gridfs: the two arguments were added to
-    the generic and to the one builder that calls it, and this wrapper
-    named the older set.
+def _build(io: CommandIO) -> Callable[..., Any]:
+    """The stat handler over one mount's table.
 
     Args:
-        vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table.
+        io (CommandIO): the guarded table of the running mount.
     """
     stat_core = io.stat
     resolve_glob = io.resolve_glob
@@ -68,7 +59,27 @@ def make_stat(vfs: str, io: CommandIO) -> Callable[..., Any]:
             )
         return await stat_generic(resolved, list(texts), opts, stat_fn)
 
+    return stat
+
+
+def make_stat(
+    vfs: str, wrap: Callable[[CommandIO], CommandIO]
+) -> Callable[..., Any]:
+    """Build the index-threaded stat override for one keyed store.
+
+    Wiring only, and it delegates to ``stat_generic`` rather than to the
+    generic itself, so every fact the generic reads off ``CommandOpts``
+    reaches a keyed store too. Reading the flags here and calling the
+    generic with keywords is how the mount boundaries and the dispatched
+    stat went missing on s3 and gridfs: the two arguments were added to
+    the generic and to the one builder that calls it, and this wrapper
+    named the older set.
+
+    Args:
+        vfs (str): VFS name the command registers under.
+        wrap (Callable): the guards over the mount's table.
+    """
     wrapped: Callable[..., Any] = command("stat", vfs=vfs, spec=SPECS["stat"])(
-        stat
+        over_mount_io(_build, wrap)
     )
     return wrapped

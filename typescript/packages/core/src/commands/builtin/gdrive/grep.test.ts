@@ -12,6 +12,8 @@ import { googleGet, type TokenManager } from '../../../core/google/client.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { GDRIVE_COMMANDS } from './index.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { GDriveVFS } from '../../../vfs/gdrive/gdrive.ts'
 
 const DEC = new TextDecoder()
 const TM = { config: { clientId: 'test', refreshToken: 'test' } } as TokenManager
@@ -30,10 +32,12 @@ async function run(kind: string, flags: Record<string, boolean> = {}) {
   ])
   const cmd = GDRIVE_COMMANDS.find((c) => c.name === 'grep')
   if (cmd === undefined) throw new Error('grep not registered')
-  const result = await cmd.fn(new GDriveAccessor({ tokenManager: TM }), [p], ['needle'], {
+  const accessor = new GDriveAccessor({ tokenManager: TM })
+  const result = await cmd.fn(accessor, [p], ['needle'], {
     stdin: null,
     flags,
     filetypeFns: null,
+    io: ioFor(GDriveVFS, accessor),
     cwd: '/',
     index,
   })

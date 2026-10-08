@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { captureSessionContext } from '../../../context/session_context.ts'
+import { captureOpPolicies } from '../../../policy/policies.ts'
 import type { PathSpec } from '../../../types.ts'
 import { captureRecordingContext } from '../../../observe/context.ts'
 import { ContextScope } from '../../../utils/context_scope.ts'
@@ -24,11 +25,11 @@ import type {
   EvalResult,
   EvalValue,
   RunArgs,
-  RuntimeContext,
   RunResult,
   RuntimeOptions,
   RuntimeReach,
 } from '../../types.ts'
+import type { RuntimeContext } from '../../binding.ts'
 import {
   createPyodideInterrupter,
   type ArmedInterrupt,
@@ -317,7 +318,12 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     }
     if (args.cwd === undefined && context !== undefined) args = { ...args, cwd: context.cwd }
     const scope =
-      context?.scope ?? new ContextScope([...captureSessionContext(), ...captureRecordingContext()])
+      context?.scope ??
+      new ContextScope([
+        ...captureSessionContext(),
+        ...captureOpPolicies(),
+        ...captureRecordingContext(),
+      ])
     const task = (): Promise<RunResult> => scope.run(() => this.runOne(args, context))
     const next = this.queue.then(task, task)
     this.queue = next.catch(() => undefined)
@@ -348,7 +354,12 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       }
     }
     const scope =
-      context?.scope ?? new ContextScope([...captureSessionContext(), ...captureRecordingContext()])
+      context?.scope ??
+      new ContextScope([
+        ...captureSessionContext(),
+        ...captureOpPolicies(),
+        ...captureRecordingContext(),
+      ])
     const task = (): Promise<EvalResult> => scope.run(() => this.evalOne(code, opts, context))
     const next = this.queue.then(task, task)
     this.queue = next.catch(() => undefined)

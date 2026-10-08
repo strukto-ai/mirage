@@ -15,11 +15,12 @@
 from typing import Any
 
 from mirage.accessor.jaeger import JaegerAccessor
-from mirage.commands.builtin.jaeger import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
-from mirage.ops.jaeger import OPS as JAEGER_VFS_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import VFSName
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.jaeger.read import read as _read
+from mirage.core.jaeger.readdir import readdir as _readdir
+from mirage.core.jaeger.stat import stat as _stat
+from mirage.types import FileStat, PathSpec, VFSName
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.jaeger.config import JaegerConfig
 from mirage.vfs.jaeger.prompt import PROMPT
@@ -40,11 +41,25 @@ class JaegerVFS(BaseVFS):
         self.config = config
         self.accessor = JaegerAccessor(self.config)
 
-    def ops(self) -> list[RegisteredOp]:
-        return JAEGER_VFS_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

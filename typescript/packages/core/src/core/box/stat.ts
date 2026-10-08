@@ -26,7 +26,7 @@ import { namesThisPath, pathParts, resolveItem } from './resolve.ts'
 import { enoent } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 
-function statFromItem(item: BoxItem): FileStat {
+export function statFromItem(item: BoxItem): FileStat {
   const vfsName = item.name
   const rt = resourceTypeFor(item)
   if (rt === 'box/folder') {

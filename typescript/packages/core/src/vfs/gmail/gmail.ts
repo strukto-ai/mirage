@@ -15,17 +15,18 @@
 import { BaseVFS } from '../base.ts'
 import { GmailAccessor } from '../../accessor/gmail.ts'
 
-import { GMAIL_COMMANDS } from '../../commands/builtin/gmail/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
-
 import { TokenManager } from '../../core/google/client.ts'
-import { GMAIL_OPS } from '../../ops/gmail/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 
 import { redactGmailConfig, type GmailConfig, type GmailConfigRedacted } from './config.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { readdir as gmailReaddir } from '../../core/gmail/readdir.ts'
+import { read as gmailRead } from '../../core/gmail/read.ts'
+import { stat as gmailStat } from '../../core/gmail/stat.ts'
 
 export interface GmailVFSState {
   type: string
@@ -52,12 +53,22 @@ export class GmailVFS extends BaseVFS {
     this.accessor = new GmailAccessor({ tokenManager: tm })
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return GMAIL_COMMANDS
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return gmailReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return GMAIL_OPS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await gmailRead(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return gmailStat(this.accessor, path, index)
   }
 
   override getState(): Promise<GmailVFSState> {

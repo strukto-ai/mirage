@@ -390,8 +390,8 @@ def _read_escape(
     then ``3`` and ``printf %b '\\0003'`` as the byte 3.
 
     A ``\\x``, ``\\u`` or ``\\U`` with no hex digit after it is written
-    as it stands, and bash's warning for it goes to ``warnings``. bash's
-    tescape reports it with builtin_error and leaves the exit status
+    as it stands, and bash's warning for it goes to ``warnings``. bash
+    writes it as a ``bash: printf:`` diagnostic and leaves the exit status
     alone, so ``printf '\\x'`` still exits 0.
 
     Args:

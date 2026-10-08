@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import type { Action, VfsContext, Policy } from '../../policy/index.ts'
@@ -29,13 +28,8 @@ class NoRmdir implements Policy {
 
 async function shellWs(policies: Policy[] = []): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const root = new RAMVFS()
-  ops.registerVfs(root)
-  const ws = new Workspace(
-    { '/': root },
-    { mode: MountMode.WRITE, ops, shellParser: parser, policies },
-  )
+  const ws = new Workspace({ '/': root }, { mode: MountMode.WRITE, shellParser: parser, policies })
   ws.createSession('s')
   return ws
 }

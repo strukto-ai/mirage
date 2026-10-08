@@ -20,9 +20,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.commands.builtin.discord.grep import grep
-from mirage.commands.builtin.discord.io import IO as DISCORD_IO
 from mirage.commands.builtin.discord.rg import rg
 from mirage.commands.config import CommandOpts
+from mirage.core.discord.read import read as core_read
+from mirage.core.discord.readdir import readdir as core_readdir
+from mirage.core.discord.stat import stat as core_stat
 from mirage.core.time_range import TimeRange
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
@@ -32,9 +34,9 @@ from mirage.utils.key_prefix import mount_key
 def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
     """The command's IO with the given slots faked; the rest stay real."""
     real = {
-        "readdir": DISCORD_IO.readdir,
-        "stat": DISCORD_IO.stat,
-        "read_bytes": DISCORD_IO.read_bytes,
+        "readdir": core_readdir,
+        "stat": core_stat,
+        "read_bytes": core_read,
     }
     return SimpleNamespace(**{**real, **slots})
 
@@ -57,14 +59,19 @@ async def test_grep_emits_token_hint_on_forbidden():
             "search_guild": AsyncMock(
                 side_effect=RuntimeError("403 Forbidden")
             ),
-            "IO": _io(resolve_glob=AsyncMock(return_value=paths)),
             "grep_generic": AsyncMock(
                 return_value=(b"", IOResult(exit_code=1))
             ),
         },
     ):
         _out, io = await grep(
-            accessor, paths, ["hi"], CommandOpts(flags={"w": True, "r": True})
+            accessor,
+            paths,
+            ["hi"],
+            CommandOpts(
+                io=_io(resolve_glob=AsyncMock(return_value=paths)),
+                flags={"w": True, "r": True},
+            ),
         )
     stderr = (io.stderr or b"").decode()
     assert "push-down failed" in stderr
@@ -83,12 +90,17 @@ async def test_rg_emits_warning_on_rate_limit():
             "search_guild": AsyncMock(
                 side_effect=RuntimeError("rate limited 429")
             ),
-            "IO": _io(resolve_glob=AsyncMock(return_value=paths)),
             "rg_generic": AsyncMock(return_value=(b"", IOResult(exit_code=1))),
         },
     ):
         _out, io = await rg(
-            accessor, paths, ["hi"], CommandOpts(flags={"word_regexp": True})
+            accessor,
+            paths,
+            ["hi"],
+            CommandOpts(
+                io=_io(resolve_glob=AsyncMock(return_value=paths)),
+                flags={"word_regexp": True},
+            ),
         )
     stderr = (io.stderr or b"").decode()
     assert "push-down failed" in stderr

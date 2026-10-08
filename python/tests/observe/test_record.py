@@ -124,6 +124,8 @@ def test_internal_mount_identity_is_not_serialized():
         revision="v1",
         mount_id="internal-mount",
     )
+    record.claimed = b"claimed bytes"
+    record.sealed = True
     fields = record.to_dict()
     assert set(fields) == {
         "op",
@@ -136,3 +138,20 @@ def test_internal_mount_identity_is_not_serialized():
         "revision",
     }
     assert ExecutionNode(records=[record]).to_dict()["records"] == [fields]
+
+
+def test_the_claim_and_seal_are_out_of_equality_and_repr():
+    fields = dict(
+        op="write",
+        path="/data/file",
+        source="s3",
+        bytes=3,
+        timestamp=1,
+        duration_ms=2,
+        fingerprint="fp",
+    )
+    plain = OpRecord(**fields)
+    marked = OpRecord(**fields, claimed=b"abc", sealed=True)
+    assert marked == plain
+    assert "claimed" not in repr(marked)
+    assert "sealed" not in repr(marked)

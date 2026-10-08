@@ -58,8 +58,8 @@ async function main(): Promise<void> {
     console.log(`  VFS='${rc.vfs ?? ''}'  name='${rc.name}'`)
   }
 
-  ws.mount('/ram/')?.registerFns(greet)
-  ws.mount('/disk/')?.registerFns(greet)
+  ws.mount('/ram/')?.registerCommands(greet)
+  ws.mount('/disk/')?.registerCommands(greet)
 
   await ws.shell('echo content > /ram/note.txt')
 

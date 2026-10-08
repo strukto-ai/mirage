@@ -547,7 +547,7 @@ async function substitution(
     await landArithWrites(session, view, result.writes, reader)
     return result.value.toString()
   }
-  const rawSub = (tsNode.sourceText ?? tsNode.text).slice(prefix.length)
+  const rawSub = (tsNode.inlined ?? tsNode.sourceText ?? tsNode.text).slice(prefix.length)
   if (rawSub.startsWith('`') && rawSub.endsWith('`')) {
     // Backtick regions are re-lexed here rather than trusted from the
     // grammar, which merges adjacent pairs (see splitBacktickRegion).

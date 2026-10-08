@@ -353,7 +353,7 @@ export class CommandSpec {
 export type ParsedFlagValue = string | boolean | number | string[]
 // What a command receives. The executor recovers a PATH-typed value as the
 // PathSpec of the word that spelled it (`parseFlags`), and the mount stamps
-// its backend key (`Mount.executeCmd`), so an error line can name the path
+// its backend key (`Mount.runCommand`), so an error line can name the path
 // as typed. The mixed list is the `pair` shape (jq's `--rawfile name file`).
 // Mirrors Python's FlagValue.
 export type FlagValue = ParsedFlagValue | PathSpec | PathSpec[] | (string | PathSpec)[]

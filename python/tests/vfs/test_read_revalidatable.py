@@ -50,21 +50,9 @@ import mirage.core.msgraph.drive as drive_ops
 import mirage.core.s3.read as s3_read
 import mirage.core.s3.stream as s3_stream
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
-from mirage.commands.builtin.box.io import IO as BOX_IO
-from mirage.commands.builtin.dropbox.io import IO as DROPBOX_IO
-from mirage.commands.builtin.gdocs.io import IO as GDOCS_IO
-from mirage.commands.builtin.gdrive.io import IO as GDRIVE_IO
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
-from mirage.commands.builtin.github.io import IO as GITHUB_IO
-from mirage.commands.builtin.gridfs.io import IO as GRIDFS_IO
-from mirage.commands.builtin.gsheets.io import IO as GSHEETS_IO
-from mirage.commands.builtin.gslides.io import IO as GSLIDES_IO
-from mirage.commands.builtin.hf_buckets.io import IO as HF_BUCKETS_IO
-from mirage.commands.builtin.hf_hub.io import IO as HF_IO
-from mirage.commands.builtin.onedrive.io import IO as ONEDRIVE_IO
-from mirage.commands.builtin.s3.io import IO as S3_IO
-from mirage.commands.builtin.sharepoint.io import IO as SHAREPOINT_IO
+from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.commands.config import CommandIO
 from mirage.core.hf_hub.client import etag_value
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import IOResult
@@ -73,6 +61,7 @@ from mirage.observe.record import OpRecord
 from mirage.types import FileStat, MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdocs.doc_entry import make_filename as doc_filename
+from mirage.vfs.github import GitHubVFS
 from mirage.vfs.gsheets.sheet_entry import make_filename as sheet_filename
 from mirage.vfs.gslides.slide_entry import make_filename as slide_filename
 from mirage.vfs.loader import load_attr
@@ -98,6 +87,7 @@ from tests.fixtures.msgraph_api import (
     FakeGraph,
 )
 from tests.fixtures.msgraph_api import serve as serve_graph
+from tests.fixtures.vfs_io import vfs_over
 
 S3_FAMILY = (
     "s3",
@@ -143,32 +133,30 @@ HARNESSES = {
 # user's own, SharePoint one library of one site, mounted scoped so the keys
 # stay drive-relative (unscoped, `a.txt` would name a site).
 GRAPH = {
-    "onedrive": (ME, ONEDRIVE_IO),
-    "sharepoint": (DRIVE_ID, SHAREPOINT_IO),
+    "onedrive": ME,
+    "sharepoint": DRIVE_ID,
 }
 
 ALL_SHAPES = ("root", "nested", "prefixed")
 ALL_ROWS = ("bytes", "stream", "drain")
 
 # The mounts that render a Drive file through its editor API: the mime type
-# they list, the module whose `record` a read stamps through, and the door.
+# they list, the module whose `record` a read stamps through, and the file
+# name a listing gives the file.
 GAPPS = {
     "gdocs": (
         "application/vnd.google-apps.document",
         gdocs_read,
-        GDOCS_IO,
         doc_filename,
     ),
     "gsheets": (
         "application/vnd.google-apps.spreadsheet",
         gsheets_read,
-        GSHEETS_IO,
         sheet_filename,
     ),
     "gslides": (
         "application/vnd.google-apps.presentation",
         gslides_read,
-        GSLIDES_IO,
         slide_filename,
     ),
 }
@@ -236,7 +224,6 @@ class Fake:
     fetches: Callable[[], int]
     rewrite: Callable[[bytes], None]
     reach: list[str]
-    io: CommandIO
     read_mod: ModuleType
     # None when the stream is synthesized from the whole read, which then
     # records through read_mod's record; the slot it lands in is "bytes".
@@ -251,6 +238,10 @@ class Fake:
     # no index, so the unrecorded row compares two independent reads of the
     # object rather than one index entry with itself.
     stat_indexed: bool = True
+
+    @property
+    def io(self) -> CommandIO:
+        return command_io(self.vfs)
 
     def slot(self, row: str) -> str:
         return SLOTS[row] if self.stream_mod is not None else "bytes"
@@ -300,6 +291,13 @@ class _Bucket:
     def __init__(self, files: dict[str, dict]) -> None:
         self._files = files
         self.opened: list[ObjectId] = []
+
+    async def upload_from_stream(self, filename: str, data: bytes) -> ObjectId:
+        # A new revision is a new doc with a new _id, dated after every
+        # seeded one, so it is what latest_file answers next.
+        oid = ObjectId()
+        self._files[filename] = _gridfs_doc(filename, data, str(oid), 2030)
+        return oid
 
     async def open_download_stream(self, file_id: ObjectId) -> _Download:
         self.opened.append(file_id)
@@ -352,7 +350,6 @@ def _s3_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: session._client.calls["get_object"],
             rewrite=rewrite,
             reach=[],
-            io=S3_IO,
             read_mod=s3_read,
             stream_mod=s3_stream,
         )
@@ -402,7 +399,6 @@ def _gridfs_fake(
         fetches=lambda: len(bucket.opened),
         rewrite=rewrite,
         reach=reach,
-        io=GRIDFS_IO,
         read_mod=gridfs_read,
         stream_mod=gridfs_stream,
     )
@@ -452,7 +448,6 @@ def _hf_fake(
             fetches=lambda: hub.count("resolve"),
             rewrite=rewrite,
             reach=reach,
-            io=HF_IO,
             read_mod=hf_read,
             stream_mod=hf_stream,
         )
@@ -463,7 +458,7 @@ def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
     key = KEYS[shape]
     prefix = PREFIX if shape == "prefixed" else None
     stored = (prefix or "") + key
-    drive, io = GRAPH[name]
+    drive = GRAPH[name]
     files = {stored: data}
     config: dict[str, str] = {"access_token": "t"}
     if name == "sharepoint":
@@ -491,7 +486,6 @@ def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
             fetches=graph.fetches,
             rewrite=rewrite,
             reach=graph.reach,
-            io=io,
             read_mod=drive_ops,
             stream_mod=drive_ops,
         )
@@ -512,7 +506,6 @@ def _gdrive_fake(shape: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: drive.calls["download_file"],
             rewrite=lambda new: drive.add_file(key, new),
             reach=[],
-            io=GDRIVE_IO,
             read_mod=gdrive_read,
             stream_mod=None,
             index=RAMIndexCacheStore(),
@@ -522,7 +515,7 @@ def _gdrive_fake(shape: str, data: bytes) -> Iterator[Fake]:
 
 @contextmanager
 def _gapps_fake(name: str, data: bytes) -> Iterator[Fake]:
-    mime, read_mod, io, filename = GAPPS[name]
+    mime, read_mod, filename = GAPPS[name]
     drive = FakeGDrive()
     file_id = drive.add_file("a", data, mime)
     listed = drive.find_entry(file_id)
@@ -538,7 +531,6 @@ def _gapps_fake(name: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: drive.calls["render"],
             rewrite=lambda new: drive.add_file("a", new, mime),
             reach=[],
-            io=io,
             read_mod=read_mod,
             stream_mod=None,
             index=RAMIndexCacheStore(),
@@ -578,7 +570,6 @@ def _hf_buckets_fake(shape: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: hub.count("bucket_resolve"),
             rewrite=rewrite,
             reach=reach,
-            io=HF_BUCKETS_IO,
             read_mod=hf_buckets_read,
             stream_mod=hf_buckets_stream,
         )
@@ -625,7 +616,6 @@ def _github_fake(
             fetches=lambda: hub.count("blob"),
             rewrite=rewrite,
             reach=reach,
-            io=GITHUB_IO,
             read_mod=github_read,
             stream_mod=None,
             mount_index=True,
@@ -654,7 +644,6 @@ def _dropbox_fake(shape: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: dropbox.count("download"),
             rewrite=lambda new: dropbox.write(stored, new),
             reach=[],
-            io=DROPBOX_IO,
             read_mod=dropbox_read,
             stream_mod=dropbox_read,
             index=RAMIndexCacheStore(),
@@ -681,7 +670,6 @@ def _box_fake(shape: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: box.count("content"),
             rewrite=lambda new: box.write(stored, new),
             reach=[],
-            io=BOX_IO,
             read_mod=box_read,
             stream_mod=box_read,
             index=RAMIndexCacheStore(),
@@ -808,7 +796,7 @@ async def _partial_read(ws: Workspace, fake: Fake, virtual: str) -> bytes:
 async def _reconcile_stat(ws: Workspace, virtual: str) -> FileStat:
     # Reconcile stats through a fresh index (workspace/reconcile.py), so a
     # listing's index row, which carries no token, cannot answer for it.
-    return await ws.mount(virtual).execute_op(
+    return await ws.mount(virtual).call(
         "stat", virtual, index=RAMIndexCacheStore()
     )
 
@@ -920,6 +908,20 @@ def test_each_family_runs_exactly_its_rows():
     }
     assert {c.id for c in A_CASES} == expected_a
     assert {c.id for c in B_CASES} == expected_b
+    assert {c.id for c in WRITE_CASES} == {
+        f"{family}-write-{target}"
+        for family in (
+            "s3",
+            "gridfs",
+            "hf_buckets",
+            "onedrive",
+            "sharepoint",
+            "gdrive",
+            "box",
+            "dropbox",
+        )
+        for target in ("new", "seeded")
+    }
     assert not any(
         c.id.startswith(
             ("github-", "gdrive-", "gdocs-", "gsheets-", "gslides-")
@@ -1219,6 +1221,75 @@ def test_a_changed_object_is_refetched(name, shape, monkeypatch):
     assert third_fetched == 0
     assert third == CHANGED
     assert fake.reach == []
+
+
+def _wires_write(name: str) -> bool:
+    vfs = load_attr(REGISTRY[name].vfs_path)
+    return vfs.write is not BaseVFS.write
+
+
+def _writable_names() -> set[str]:
+    # Derived from the registry and each backend's wired write slot (the
+    # CommandIO the spec generator reads), not listed: a declarer that gains
+    # a write op joins the write rows.
+    return {name for name in _declared() if _wires_write(name)}
+
+
+def _write_families() -> set[str]:
+    return {HARNESSES[n] for n in _writable_names() if n in HARNESSES}
+
+
+# hf_buckets, onedrive and sharepoint record no write token, as on main, so
+# the next fresh read downloads once.
+WRITE_EXCEPTIONS = {"hf_buckets": 1, "onedrive": 1, "sharepoint": 1}
+WRITE_TARGETS = {"new": "w.txt", "seeded": KEYS["root"]}
+WRITE_FAMILIES = sorted(_write_families())
+WRITE_CASES = [
+    pytest.param(family, target, id=f"{family}-write-{target}")
+    for family in WRITE_FAMILIES
+    for target in WRITE_TARGETS
+]
+
+
+def test_every_writable_family_has_a_write_harness_or_an_exception():
+    # The write rows run each family's own harness through _fake, so a
+    # writable family is covered exactly when it has a harness; the
+    # exception table may name only writable families.
+    names = _writable_names()
+    assert names
+    assert names <= set(HARNESSES)
+    assert set(WRITE_EXCEPTIONS) <= _write_families()
+
+
+@pytest.mark.parametrize(("family", "target"), WRITE_CASES)
+def test_a_written_file_is_served_without_a_download(
+    family, target, monkeypatch
+):
+    # The new target takes the create path (box/gdrive new upload, Graph
+    # create), the seeded one the update path (version, update by id).
+    with _fake(family, "root", SEED, monkeypatch) as fake:
+        virtual = "/m/" + WRITE_TARGETS[target]
+
+        async def run():
+            ws = _fresh_workspace(fake.vfs)
+            try:
+                await _line(ws, f"echo new | tee {virtual}")
+                written = list(fake.reach)
+                before = fake.fetches()
+                out = await _line(ws, f"cat {virtual}")
+                return out, fake.fetches() - before, written
+            finally:
+                await ws.close()
+
+        out, downloads, written = asyncio.run(run())
+
+    assert out == b"new\n"
+    assert downloads == WRITE_EXCEPTIONS.get(family, 0)
+    # A new gridfs key's stat miss asks files_coll whether the key names a
+    # folder, a door the read rows refuse; the read itself reaches nothing.
+    stat_miss = family == "gridfs" and target == "new"
+    assert written == (["files_coll"] if stat_miss else [])
+    assert fake.reach == written
 
 
 def test_a_dropbox_fresh_probe_asks_for_the_file_not_its_folder():
@@ -1528,10 +1599,11 @@ def test_a_synthesized_stream_is_the_read_it_records_through():
     # github's stream slot is filled from its whole read, which is why its
     # expected slot is "bytes". A native stream that forgot to record would
     # otherwise hide behind stream_mod=None.
-    stream = GITHUB_IO.read_stream
+    vfs = vfs_over(GitHubVFS, None)
+    assert not vfs.supports("read_stream")
+    stream = command_io(vfs).read_stream
     assert isinstance(stream, functools.partial)
     assert stream.func is stream_from_bytes
-    assert stream.args == (github_read.read,)
 
 
 def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):
@@ -1649,7 +1721,6 @@ def _box_case(scenario, root: str = ""):
 
 
 def test_a_cold_fresh_box_read_lists_each_level_once_then_downloads():
-
     out, log, walk, fid = _box_case(
         _a_cold_fresh_box_read_lists_each_level_once_then_downloads_case
     )
@@ -1667,6 +1738,19 @@ def test_a_warm_fresh_box_read_is_one_request_by_id(root):
     )
     assert out == SEED
     assert log == [f"info:{fid}"]
+
+
+def test_a_fresh_box_read_after_a_tee_probes_once_without_a_download():
+    async def scenario(ws, box):
+        await _line(ws, f"echo new | tee /m/{DEEP}")
+        before = len(box.log)
+        out = await _line(ws, f"cat /m/{DEEP}")
+        return out, box.log[before:], _walk(box)
+
+    out, log, walk = _box_case(scenario)
+    assert out == b"new\n"
+    # The probe after a write is one parent walk, not an info by id.
+    assert log == walk
 
 
 async def _direct_box_read_case(ws, box):
@@ -1706,7 +1790,6 @@ def test_a_same_size_box_rewrite_in_the_same_second_is_refetched():
 
 
 def test_a_box_file_moved_outside_is_gone_and_drops_its_overlay():
-
     code, err, log, meta, moved, fid, walk = _box_case(
         _a_box_file_moved_outside_is_gone_and_drops_its_overlay_case
     )
@@ -1748,7 +1831,6 @@ def test_a_box_file_deleted_and_recreated_is_read_anew(mode):
 
 
 def test_a_box_file_recreated_with_the_same_bytes_is_served_warm():
-
     logs, old, new, walk = _box_case(
         _a_box_file_recreated_with_the_same_bytes_is_served_warm_case
     )
@@ -1756,7 +1838,6 @@ def test_a_box_file_recreated_with_the_same_bytes_is_served_warm():
 
 
 def test_a_box_file_under_a_renamed_parent_is_gone():
-
     code, err, renamed, log, fid, to_a = _box_case(
         _a_box_file_under_a_renamed_parent_is_gone_case
     )
@@ -1784,7 +1865,6 @@ def test_a_box_file_under_a_trashed_mount_root_is_gone():
 
 
 def test_a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk():
-
     out, log, again, mode_bits, fid, walk = _box_case(
         _a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk_case
     )
@@ -1818,7 +1898,6 @@ def test_a_warm_box_ls_shows_what_a_cold_one_does_from_one_request():
 
 
 async def _replaced_box_folder_case(ws, box, root="", operand="/m/a/b"):
-
     await _line(ws, f"ls {operand}")
     box.rename_folder(f"{root}a/b", "old")
     box.create(f"{root}a/b/new.txt", b"new listing")

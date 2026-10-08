@@ -17,9 +17,9 @@ import { extraOperandError } from '../../../spec/usage.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
 import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
-import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const unlink: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   if (paths.length === 0) {
     throw new UsageError("unlink: missing operand\nTry 'unlink --help' for more information.", 1)
   }
@@ -88,7 +88,7 @@ const unlink: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   return [null, new IOResult()]
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'unlink',
   write: true,
   fn: unlink,

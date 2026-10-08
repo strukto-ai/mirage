@@ -15,8 +15,6 @@
 import { BaseVFS } from '../base.ts'
 import { GitHubAccessor } from '../../accessor/github.ts'
 
-import { GITHUB_COMMANDS } from '../../commands/builtin/github/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 import {
   HttpGitHubTransport,
   fetchRepoInfo as fetchGitHubRepoInfo,
@@ -27,8 +25,6 @@ import {
   fetchTree as fetchGitHubTree,
 } from '../../core/github/tree.ts'
 import { buildDeltaHook } from '../../core/github/watch.ts'
-import { GITHUB_OPS } from '../../ops/github/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 
 import { PROMPT } from './prompt.ts'
 import { COMMIT_SHA } from '../../core/github/constants.ts'
@@ -40,6 +36,13 @@ import {
   type GitHubConfig,
   type GitHubConfigRedacted,
 } from '../../core/github/config.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { readdir as githubReaddir } from '../../core/github/readdir.ts'
+import { read as githubRead } from '../../core/github/read.ts'
+import { stat as githubStat } from '../../core/github/stat.ts'
+import { SCOPE_ERROR } from '../../core/github/constants.ts'
 
 export interface GitHubVFSState {
   type: string
@@ -117,12 +120,24 @@ export class GitHubVFS extends BaseVFS {
     return new GitHubVFS(config, accessor)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return GITHUB_COMMANDS
+  override readonly maxGlobMatches: number = SCOPE_ERROR
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return githubReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return GITHUB_OPS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await githubRead(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return githubStat(this.accessor, path, index)
   }
 
   override deltaHook(): DeltaHook {

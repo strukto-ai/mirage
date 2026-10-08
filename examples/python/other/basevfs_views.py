@@ -1,4 +1,5 @@
 import asyncio
+from types import MappingProxyType
 
 from mirage import (
     NULL_INDEX,
@@ -14,10 +15,7 @@ from mirage import (
     MountMode,
     Operand,
     PathSpec,
-    ReadOps,
-    SearchOps,
     SearchQuery,
-    VFSAdapter,
     Workspace,
 )
 from mirage.commands.builtin.grep_pushdown import grep_search_options
@@ -44,91 +42,78 @@ def page_bytes(accessor: NotesAccessor, path: PathSpec) -> bytes:
     return page.encode("utf-8")
 
 
-async def readdir(
-    accessor: NotesAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
-    if path.vfs_path.strip("/"):
-        page_bytes(accessor, path)
-        raise NotADirectoryError(path.virtual)
-    parent = path.virtual.rstrip("/")
-    return [f"{parent}/{name}" for name in sorted(accessor.pages)]
-
-
-async def read_bytes(
-    accessor: NotesAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> bytes:
-    accessor.read_calls += 1
-    return page_bytes(accessor, path)
-
-
-async def stat(
-    accessor: NotesAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
-    name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
-    if not path.vfs_path.strip("/"):
-        return FileStat(name=name, type=FileType.DIRECTORY, size=None)
-    return FileStat(
-        name=name,
-        type=FileType.FILE,
-        content=ContentType.TEXT,
-        size=len(page_bytes(accessor, path)),
-    )
-
-
-async def search(
-    accessor: NotesAccessor,
-    path: PathSpec,
-    query: SearchQuery,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str] | None:
-    """Search one page literally, declining requests that need a scan.
-
-    Args:
-        accessor (NotesAccessor): the notes service.
-        path (PathSpec): the page to search.
-        query (SearchQuery): text and grep integration options.
-        index (IndexCacheStore): the mount's metadata view.
-    """
-    accessor.search_calls += 1
-    options = grep_search_options(query)
-    if (
-        not path.vfs_path.strip("/")
-        or options.ignore_case
-        or options.whole_word
-    ):
-        return None
-    text = page_bytes(accessor, path).decode("utf-8")
-    if "\0" in text:
-        return None
-    return [line for line in split_lines(text) if query.query in line]
-
-
 class NotesVFS(BaseVFS):
     """A flat, read-only collection of UTF-8 pages."""
 
     accessor: NotesAccessor
+    # grep and rg may hand a literal pattern to search instead of reading.
+    search_meta = MappingProxyType({"grep": {"mode": "literal"}})
 
     def __init__(self, pages: dict[str, str]) -> None:
         super().__init__(
             name="notes",
             accessor=NotesAccessor(pages),
-            io=VFSAdapter(
-                read=ReadOps(
-                    readdir=readdir, read_bytes=read_bytes, stat=stat
-                ),
-                search=SearchOps(
-                    search=search, meta={"grep": {"mode": "literal"}}
-                ),
-            ),
             prompt="Read-only notes rendered as UTF-8 text files.",
             sizes_always_known=True,
         )
+
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        if path.vfs_path.strip("/"):
+            page_bytes(self.accessor, path)
+            raise NotADirectoryError(path.virtual)
+        parent = path.virtual.rstrip("/")
+        return [f"{parent}/{name}" for name in sorted(self.accessor.pages)]
+
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        self.accessor.read_calls += 1
+        return page_bytes(self.accessor, path)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
+        if not path.vfs_path.strip("/"):
+            return FileStat(name=name, type=FileType.DIRECTORY, size=None)
+        return FileStat(
+            name=name,
+            type=FileType.FILE,
+            content=ContentType.TEXT,
+            size=len(page_bytes(self.accessor, path)),
+        )
+
+    async def search(
+        self,
+        path: PathSpec,
+        query: SearchQuery,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[str] | None:
+        """Search one page literally, declining requests that need a scan.
+
+        Args:
+            path (PathSpec): the page to search.
+            query (SearchQuery): text and grep integration options.
+            index (IndexCacheStore): the mount's metadata view.
+        """
+        self.accessor.search_calls += 1
+        options = grep_search_options(query)
+        if (
+            not path.vfs_path.strip("/")
+            or options.ignore_case
+            or options.whole_word
+        ):
+            return None
+        text = page_bytes(self.accessor, path).decode("utf-8")
+        if "\0" in text:
+            return None
+        return [line for line in split_lines(text) if query.query in line]
 
 
 async def note_info(inv: CLIInvocation[None]) -> tuple[bytes, IOResult]:

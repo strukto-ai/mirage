@@ -15,8 +15,7 @@
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { countDocuments, findDocuments } from '../../../core/mongodb/client.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
 import { streamAny } from '../../../core/mongodb/read.ts'
 import { documentsExist, entityGuard } from '../../../core/mongodb/readdir.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
@@ -34,8 +33,6 @@ import { followFlags, tailGeneric } from '../generic/tail.ts'
 import { parseN } from '../tail_counts.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { noteAfter, rowCapNotice } from '../utils/limit.ts'
-
-const resolveGlob = resolveGlobOf(IO)
 
 const ENC = new TextEncoder()
 
@@ -91,7 +88,9 @@ async function tail(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('tail'))
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+    paths.length > 0
+      ? await resolveGlobOf(mountIo(opts))(accessor, paths, opts.index ?? undefined)
+      : []
   const first = resolved[0]
   // One followed collection is a change stream (-F included, as the
   // Python twin reads it); anything else a follow polls, and a
@@ -120,7 +119,7 @@ async function tail(
     texts,
     opts,
     (p) => tailSource(accessor, p, opts.index ?? undefined, lines, pushdown, notices),
-    (p) => IO.stat(accessor, p, opts.index ?? undefined),
+    (p) => mountIo(opts).stat(accessor, p, opts.index ?? undefined),
   )
   if (result === null) return result
   const [out, io] = result

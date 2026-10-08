@@ -14,7 +14,7 @@
 
 import { Activity } from '../utils/activity.ts'
 import { coerceRuntimeConfig, type RuntimeConfig } from './config.ts'
-import type { WorkspaceBinding } from './binding.ts'
+import type { WorkspaceBinding, RuntimeContext } from './binding.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import { isEvaluator, isLineExecutor, isProcessExecutor } from './mixin.ts'
 import type { RouteScript } from './routing/types.ts'
@@ -23,7 +23,6 @@ import type {
   ExecutionRequest,
   FilesystemOperation,
   RuntimeCapabilities,
-  RuntimeContext,
   RunResult,
   RuntimeOptions,
   RuntimeReach,

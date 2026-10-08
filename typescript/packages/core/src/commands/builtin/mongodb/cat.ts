@@ -13,16 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
 import { streamAny } from '../../../core/mongodb/read.ts'
 import { stat as mongoStat } from '../../../core/mongodb/stat.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { catGeneric } from '../generic/cat.ts'
-
-const resolveGlob = resolveGlobOf(IO)
 
 async function cat(
   accessor: MongoDBAccessor,
@@ -31,7 +28,9 @@ async function cat(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+    paths.length > 0
+      ? await resolveGlobOf(mountIo(opts))(accessor, paths, opts.index ?? undefined)
+      : []
   return catGeneric(
     resolved,
     texts,

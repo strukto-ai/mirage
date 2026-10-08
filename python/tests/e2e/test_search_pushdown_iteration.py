@@ -12,16 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage import MountMode, Workspace
 from mirage.commands.builtin.slack.grep import grep as slack_grep
-from mirage.commands.builtin.slack.io import IO as SLACK_IO
 from mirage.types import ContentType, FileStat, FileType
 from mirage.vfs.slack import SlackConfig, SlackVFS
+from tests.fixtures.vfs_io import override
 
 DAYS = [f"2026-{m:02d}-{d:02d}" for m in range(1, 5) for d in range(1, 16)]
 
@@ -38,10 +37,6 @@ async def test_slack_grep_glob_expanded_to_60_paths_reads_those_60_days():
     slack = SlackVFS(
         config=SlackConfig(token="xoxb-test", search_token="xoxp-test")
     )
-    ws = Workspace({"/slack": (slack, MountMode.READ)}, mode=MountMode.READ)
-    expanded = " ".join(
-        f"/slack/channels/general__C1/{day}/chat.jsonl" for day in DAYS
-    )
     read = AsyncMock(return_value=b'{"text":"hello there"}\n')
     stat = AsyncMock(
         return_value=FileStat(
@@ -51,14 +46,17 @@ async def test_slack_grep_glob_expanded_to_60_paths_reads_those_60_days():
             size=23,
         )
     )
+    override(slack, "read", read)
+    override(slack, "stat", stat)
+    ws = Workspace({"/slack": (slack, MountMode.READ)}, mode=MountMode.READ)
+    expanded = " ".join(
+        f"/slack/channels/general__C1/{day}/chat.jsonl" for day in DAYS
+    )
     try:
         fake_search = AsyncMock()
         with patch.dict(
             slack_grep.__wrapped__.__globals__,
-            {
-                "search_messages": fake_search,
-                "IO": replace(SLACK_IO, read_bytes=read, stat=stat),
-            },
+            {"search_messages": fake_search},
         ):
             result = await ws.shell(f"grep -iw hello {expanded}")
         fake_search.assert_not_awaited()

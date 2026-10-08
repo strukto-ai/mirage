@@ -17,7 +17,6 @@ import hashlib
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.hf_buckets.io import IO
 from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
@@ -344,9 +343,9 @@ async def test_a_window_past_eof_is_empty_on_every_door():
         vfs = _vfs(hub)
         ws = _ws(vfs, ReadPolicy.BOUNDED)
         try:
-            # The ops read op folds a 416 for every backend; the table's own
-            # range slot has no fold, so the read must answer it itself.
-            via_op = await ws.mount("/m/a.txt").execute_op(
+            # The door folds a 416 for every backend; the VFS's own ranged
+            # read has no fold, so the read must answer it itself.
+            via_op = await ws.mount("/m/a.txt").call(
                 "read",
                 "/m/a.txt",
                 index=RAMIndexCacheStore(),
@@ -355,9 +354,7 @@ async def test_a_window_past_eof_is_empty_on_every_door():
             )
             assert via_op == b""
             assert (
-                await IO.read_range(
-                    vfs.accessor, _spec("a.txt"), RAMIndexCacheStore(), 99, 5
-                )
+                await vfs.read(_spec("a.txt"), RAMIndexCacheStore(), 99, 5)
                 == b""
             )
         finally:

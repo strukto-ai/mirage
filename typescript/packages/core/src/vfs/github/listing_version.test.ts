@@ -364,7 +364,7 @@ describe('github versions a listing by its head commit', () => {
     const before = await mount.indexStore.listDir('/gh/d1')
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('fetch failed')))
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const rec = new Reconciler(w.cache, w.namespace, w.opsRegistry)
+    const rec = new Reconciler(w.cache, w.namespace)
     expect(
       await runInCommandScope(() => rec.mayServeListing(mount, '/gh/d1', before.version ?? null)),
     ).toBe(false)

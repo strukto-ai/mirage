@@ -771,7 +771,7 @@ FUNC_JOB_CASES = [
     (
         "rof_lists_frozen",
         "f(){ :; }; g(){ :; }; readonly -f f; readonly -f",
-        "declare -fr f\n",
+        "f () \n{ \n    :\n}\ndeclare -fr f\n",
         "",
         0,
     ),

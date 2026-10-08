@@ -66,12 +66,3 @@ async function readFile(
 }
 
 export const read = makeRead<GDocsAccessor>(detectScope, { file: readFile })
-
-export async function* readStream(
-  accessor: GDocsAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  const data = await read(accessor, path, index)
-  yield data
-}

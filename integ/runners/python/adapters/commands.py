@@ -15,33 +15,22 @@
 import asyncio
 from dataclasses import replace
 
-from mirage.accessor.base import Accessor
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
+from mirage.commands.builtin.generic_bind.adapter import command_io
+from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
 from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.commands.config import (
-    RegisteredCommand,
+    Command,
+    CommandIO,
     command,
     registered_commands,
 )
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import Operand
 from mirage.io.types import IOResult
-from mirage.ops.registry import RegisteredOp
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
-
-
-async def refuse_read(accessor: Accessor, path: PathSpec, *args, **kwargs):
-    raise PermissionError(13, "service exposes search only", path.virtual)
-
-
-def guarded_listing(original: RegisteredOp) -> RegisteredOp:
-    async def readdir(accessor, path, *args, **kwargs):
-        if path.virtual.endswith(".deny"):
-            raise PermissionError(13, "Permission denied", path.virtual)
-        return await original.fn(accessor, path, *args, **kwargs)
-
-    return replace(original, fn=readdir)
 
 
 class Gate:
@@ -58,14 +47,17 @@ class CommandService(RAMVFS):
     def __init__(self, metadata_only: bool = False) -> None:
         super().__init__()
         calls: list[str] = []
-        handlers: list[RegisteredCommand] = []
-        for original in super().commands():
-            if metadata_only and original.name in ("grep", "rg", "find", "du"):
-                continue
-            if original.name in ("grep", "rg", "rev"):
-                handlers.extend(self._search(original, calls))
-            else:
-                handlers.append(original)
+        handlers: list[Command] = []
+        dropped = {"grep", "rg", "find", "du"} if metadata_only else set()
+        # The service's own handlers read through a plain RAM view of its
+        # store; every other read reaches the refusal below.
+        view = RAMVFS()
+        view.accessor = self.accessor
+        own = command_io(view)
+        for original in registered_commands(RAM_COMMANDS):
+            if original.name in {"grep", "rg", "rev"} - dropped:
+                handlers.extend(self._search(original, calls, own))
+        self.overrides = frozenset(dropped | {"grep", "rg", "rev"})
 
         @command("calls", vfs="ram", spec=SPECS["cat"])
         async def show_calls(accessor, paths, texts, opts):
@@ -96,8 +88,8 @@ class CommandService(RAMVFS):
         )
 
     def _search(
-        self, original: RegisteredCommand, calls: list[str]
-    ) -> list[RegisteredCommand]:
+        self, original: Command, calls: list[str], own: CommandIO
+    ) -> list[Command]:
         @command(original.name, vfs="ram", spec=SPECS[original.name])
         async def search(accessor, paths, texts, opts):
             calls.extend(original.name + " " + p.virtual for p in paths)
@@ -137,22 +129,30 @@ class CommandService(RAMVFS):
                     )
 
                 return stream(), IOResult()
-            return await original.fn(accessor, paths, texts, opts)
+            return await original.fn(
+                accessor, paths, texts, replace(opts, io=own)
+            )
 
         return registered_commands([search])
 
-    def commands(self) -> list[RegisteredCommand]:
+    def commands(self) -> list[Command]:
         return self._commands
 
-    def ops(self) -> list[RegisteredOp]:
-        return [
-            replace(op, fn=refuse_read)
-            if op.name == "read"
-            else guarded_listing(op)
-            if op.name == "readdir"
-            else op
-            for op in super().ops()
-        ]
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        raise PermissionError(13, "service exposes search only", path.virtual)
+
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        if path.virtual.endswith(".deny"):
+            raise PermissionError(13, "Permission denied", path.virtual)
+        return await super().readdir(path, index)
 
 
 async def scope_probe(inv: CLIInvocation):

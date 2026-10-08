@@ -16,6 +16,8 @@ import asyncio
 from collections.abc import Iterable
 from typing import Any
 
+from mirage.types import PathSpec
+
 
 def validate_max_drain_bytes(
     cache_limit: int, max_drain_bytes: int | None
@@ -63,7 +65,7 @@ class FileCacheMixin:
     async def remove(self, key: str) -> None:
         raise NotImplementedError
 
-    async def exists(self, key: str) -> bool:
+    async def exists(self, key: str | PathSpec) -> bool:
         raise NotImplementedError
 
     async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:

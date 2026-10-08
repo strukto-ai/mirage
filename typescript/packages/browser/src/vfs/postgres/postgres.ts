@@ -12,15 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { PostgresVFSBase } from '@struktoai/mirage-core/vfs/postgres/postgres'
 import { PostgresAccessor } from '@struktoai/mirage-core/accessor/postgres'
 
-import { POSTGRES_COMMANDS } from '@struktoai/mirage-core/commands/builtin/postgres/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { PgDriver } from '@struktoai/mirage-core/core/postgres/_driver'
-
-import { POSTGRES_OPS } from '@struktoai/mirage-core/ops/postgres/index'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 
 import {
   redactPostgresConfig,
@@ -48,7 +43,7 @@ export interface PostgresVFSState {
   needs_override: true
 }
 
-export class PostgresVFS extends BaseVFS {
+export class PostgresVFS extends PostgresVFSBase {
   override readonly name: string = VFSName.POSTGRES
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
@@ -83,13 +78,5 @@ export class PostgresVFS extends BaseVFS {
   override async close(): Promise<void> {
     await this.driver.close()
     await super.close()
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return POSTGRES_OPS
-  }
-
-  override commands(): readonly RegisteredCommand[] {
-    return POSTGRES_COMMANDS
   }
 }

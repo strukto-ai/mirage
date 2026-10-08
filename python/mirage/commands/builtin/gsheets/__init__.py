@@ -12,17 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.gsheets.io import IO as _IO
+from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.gsheets.rm import rm
 
 # Sheets verbs and API passthroughs live in the gws CLI
 # (mirage.commands.cli.builtin.gws), installed by name; the mount only
 # serves the filesystem surface.
 COMMANDS = [
-    *make_generic_commands(
+    *generic_commands(
         "gsheets",
-        _IO,
         overrides={"rm"},
     ),
     rm,

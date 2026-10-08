@@ -16,21 +16,79 @@ import asyncio
 import builtins
 import io
 import os
-from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from types import ModuleType
+from typing import Any, cast
 
+from mirage.cache.file.mixin import FileCacheMixin
 from mirage.concurrency.limiter import run_blocking
+from mirage.observe.store import ObserverStore
+from mirage.ops.ops import Ops
+from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.python.host.fs import os_routing
 from mirage.runtime.python.host.open import make_open
-from mirage.shell.job_table import cancel_job
+from mirage.shell.job_table import JobTable, cancel_job
+from mirage.workspace.mount.namespace.store import NamespaceStore
+from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.session.manager import SessionManager
+from mirage.workspace.session.store import SessionStore
+from mirage.workspace.store import WorkspaceStateStore
+from mirage.workspace.workspace.kernel_mounts import KernelMounts
+from mirage.workspace.workspace.watch import WatchManager
 
-if TYPE_CHECKING:
-    from mirage.workspace.workspace import Workspace
+# An attribute a ``with`` block replaced: the module, the name and what
+# the name held before.
+Patched = tuple[ModuleType, str, Callable[..., Any]]
+
+
+@dataclass(slots=True)
+class CloseDeps:
+    """What closing a workspace releases (``close_workspace``).
+
+    Attributes:
+        sessions (SessionManager): settled first, so a pending write
+            lands.
+        watch (WatchManager): detached before anything it reads goes.
+        cache (FileCacheMixin): cleared and closed last, once its drains
+            have settled.
+        owns_state_store (bool): the workspace built its state store.
+        state_store (WorkspaceStateStore): where the state lives.
+        closers (list[Callable[[], Awaitable[None]]]): the policy
+            scripts and line runtimes, closed once the jobs stop.
+        job_table (JobTable): the background jobs.
+        processes (ProcessSupervisor): the managed runners.
+        registry (MountRegistry): the mounts.
+        shared_mounts (set[int]): ids of the VFSes a sibling workspace
+            still uses.
+        kernel_mounts (KernelMounts): the FUSE mounts.
+        drop_state (bool): delete the workspace's state from its store
+            once nothing writes it any more, before the store closes.
+        workspace_id (str): the workspace whose state is dropped.
+        planes (Sequence[NamespaceStore | ObserverStore | SessionStore]):
+            the stores the state lives in, however they were wired.
+    """
+
+    sessions: SessionManager
+    watch: WatchManager
+    cache: FileCacheMixin
+    owns_state_store: bool
+    state_store: WorkspaceStateStore
+    closers: list[Callable[[], Awaitable[None]]]
+    job_table: JobTable
+    processes: ProcessSupervisor
+    registry: MountRegistry
+    shared_mounts: set[int]
+    kernel_mounts: KernelMounts
+    drop_state: bool
+    workspace_id: str
+    planes: Sequence[NamespaceStore | ObserverStore | SessionStore]
 
 
 def patch_process(
-    ws: "Workspace",
-) -> None:
+    ops: Ops,
+    loop: asyncio.AbstractEventLoop,
+) -> list[Patched]:
     """Point ``open`` and ``os`` at the workspace for a ``with`` block.
 
     Each door is installed as an attribute on the module that owns the
@@ -52,93 +110,68 @@ def patch_process(
     is the one that shows it; any pooled async client would).
 
     Args:
-        ws: the workspace entering context-manager scope.
+        ops (Ops): the workspace's op facade.
+        loop (asyncio.AbstractEventLoop): the block's loop.
+
+    Returns:
+        list[Patched]: what the block replaced, for ``unpatch_process``.
     """
-    ws._original_open = builtins.open
-    ws._original_io_open = io.open
-    ws._vfs_loop = asyncio.new_event_loop()
-    opener = cast(Any, make_open(ws._ops, ws._vfs_loop))
+    opener = cast(Any, make_open(ops, loop))
+    routing = os_routing(ops, loop)
+    patched: list[Patched] = [
+        (builtins, "open", builtins.open),
+        (io, "open", io.open),
+        *((os, name, getattr(os, name)) for name in routing),
+    ]
     builtins.open = opener
     io.open = opener
-    routing = os_routing(ws._ops, ws._vfs_loop)
-    ws._original_os_names = {name: getattr(os, name) for name in routing}
     for name, fn in routing.items():
         setattr(os, name, fn)
+    return patched
 
 
-def unpatch_process(
-    ws: "Workspace",
-) -> None:
+def unpatch_process(patched: list[Patched]) -> None:
     """Restore the process-level ``open`` and ``os`` patched on entry.
 
     Args:
-        ws: the workspace leaving context-manager scope.
+        patched (list[Patched]): what ``patch_process`` replaced.
     """
-    if ws._original_open is not None:
-        builtins.open = ws._original_open
-    if ws._original_io_open is not None:
-        io.open = ws._original_io_open
-    for name, fn in (ws._original_os_names or {}).items():
-        setattr(os, name, fn)
-    ws._original_os_names = None
+    for module, name, fn in patched:
+        setattr(module, name, fn)
 
 
-def stop_vfs_loop(
-    ws: "Workspace",
-) -> None:
-    """Close the loop ``patch_process`` opened, after the workspace close.
-
-    Args:
-        ws: the workspace leaving context-manager scope.
-    """
-    loop = ws._vfs_loop
-    if loop is None:
-        return
-    ws._vfs_loop = None
-    loop.close()
-
-
-async def close_local_parts(
-    ws: "Workspace",
-) -> None:
+async def close_local_parts(deps: CloseDeps) -> None:
     """Release kernel mounts and remaining local bookkeeping.
 
     Args:
-        ws: the workspace being closed.
+        deps (CloseDeps): what the workspace owns.
     """
-    if ws._closed:
-        return
-    ws._closed = True
     try:
-        await run_blocking(ws._kernel_mounts.close)
+        await run_blocking(deps.kernel_mounts.close)
     finally:
-        for job in ws.job_table.all_running_jobs():
+        for job in deps.job_table.all_running_jobs():
             cancel_job(job)
-        for task in ws._cache._drain_tasks.values():
+        for task in deps.cache._drain_tasks.values():
             task.cancel()
-        ws._cache._drain_tasks.clear()
+        deps.cache._drain_tasks.clear()
 
 
-async def _drop_state(ws: "Workspace") -> None:
+async def _drop_state(deps: CloseDeps) -> None:
     """Delete the workspace's state: its own planes, then its store scope.
 
     A plane store passed in directly is not the state store's, so the
     store's drop alone would leave it holding the workspace.
 
     Args:
-        ws: the workspace being deleted.
+        deps (CloseDeps): what the workspace owns.
     """
-    for plane in ws._planes:
+    for plane in deps.planes:
         await plane.clear()
-    await ws._state_store.drop(ws.workspace_id)
+    await deps.state_store.drop(deps.workspace_id)
 
 
-async def close_async(
-    ws: "Workspace",
-    *,
-    drop_state: bool = False,
-) -> None:
-    """Release everything the workspace owns, exactly once.
+async def close_workspace(deps: CloseDeps) -> list[BaseException]:
+    """Release everything the workspace owns; the caller runs it once.
 
     Order matters: the watch runtime goes first (it reads mounts), then
     background jobs, then the line runtimes, then mounts not shared
@@ -156,85 +189,69 @@ async def close_async(
     written after close reconnects a client that nothing closes again.
 
     Args:
-        ws: the workspace being closed.
-        drop_state (bool): delete the workspace's state from its store
-            once nothing writes it any more, before the store closes.
+        deps (CloseDeps): what the workspace owns.
+
+    Returns:
+        list[BaseException]: what failed, in order; teardown went on
+        past each.
     """
-    # Stop lifecycle mutations before teardown yields or captures its close
-    # lists. Keep _closed separate so runtime journals can still dispatch.
-    ws._closing = True
-    async with ws._close_lock:
-        if ws._async_closed:
-            if ws._close_error is not None:
-                raise ws._close_error
-            return
-        failures: list[BaseException] = []
+    failures: list[BaseException] = []
 
-        async def settle(*work: Awaitable[Any]) -> None:
-            results = await asyncio.gather(*work, return_exceptions=True)
-            failures.extend(
-                result
-                for result in results
-                if isinstance(result, BaseException)
-            )
+    async def settle(*work: Awaitable[Any]) -> None:
+        results = await asyncio.gather(*work, return_exceptions=True)
+        failures.extend(
+            result for result in results if isinstance(result, BaseException)
+        )
 
-        await settle(ws._session_mgr.settle())
-        await settle(ws._watch.detach())
-        await settle(ws.job_table.kill_all())
+    await settle(deps.sessions.settle())
+    await settle(deps.watch.detach())
+    await settle(deps.job_table.kill_all())
+    try:
+        deps.processes.stop()
+    except Exception as exc:
+        failures.append(exc)
+    drain_tasks = list(deps.cache._drain_tasks.values())
+    for close in deps.closers:
+        await settle(close())
+    await settle(deps.processes.drain())
+    await settle(deps.job_table.close_consoles())
+    await settle(
+        *(
+            asyncio.shield(task)
+            for task in list(deps.registry.retiring_mounts.values())
+        )
+    )
+    mounts = {
+        id(mount.vfs): mount.vfs
+        for mount in deps.registry.mounts()
+        if id(mount.vfs) not in deps.shared_mounts
+    }
+    await settle(*(vfs.close() for vfs in mounts.values()))
+    stores = {
+        id(mount.index_store): mount.index_store
+        for mount in deps.registry.mounts()
+    }
+    await settle(*(store.close() for store in stores.values()))
+    if deps.drop_state:
+        # The kernel mounts still serve requests until the sync parts
+        # unmount them, and a request may write the very state being
+        # deleted, so they go first. A failed drop must not skip the
+        # rest of teardown: a mount left up keeps the process alive.
         try:
-            ws.processes.stop()
+            await run_blocking(deps.kernel_mounts.close)
         except Exception as exc:
             failures.append(exc)
-        drain_tasks = list(ws._cache._drain_tasks.values())
-        await settle(ws._script_policy.close())
-        await settle(ws._runtimes.close())
-        await settle(ws.processes.drain())
-        await settle(ws.job_table.close_consoles())
-        await settle(
-            *(
-                asyncio.shield(task)
-                for task in list(ws._registry.retiring_mounts.values())
-            )
-        )
-        mounts = {
-            id(mount.vfs): mount.vfs
-            for mount in ws._registry.mounts()
-            if id(mount.vfs) not in ws._shared_mounts
-        }
-        await settle(*(vfs.close() for vfs in mounts.values()))
-        stores = {
-            id(mount.index_store): mount.index_store
-            for mount in ws._registry.mounts()
-        }
-        await settle(*(store.close() for store in stores.values()))
-        if drop_state:
-            # The kernel mounts still serve requests until the sync parts
-            # unmount them, and a request may write the very state being
-            # deleted, so they go first. A failed drop must not skip the
-            # rest of teardown: a mount left up keeps the process alive.
-            try:
-                await run_blocking(ws._kernel_mounts.close)
-            except Exception as exc:
-                failures.append(exc)
-            ws._state_dropped = True
-            await settle(_drop_state(ws))
-        if ws._owns_state_store:
-            await settle(ws._state_store.close())
-        await settle(close_local_parts(ws))
-        drains = await asyncio.gather(*drain_tasks, return_exceptions=True)
-        failures.extend(
-            result
-            for result in drains
-            if isinstance(result, BaseException)
-            and not isinstance(result, asyncio.CancelledError)
-        )
-        await settle(ws._cache.clear())
-        await settle(ws._cache.close())
-        ws._async_closed = True
-        if failures:
-            ws._close_error = (
-                failures[0]
-                if len(failures) == 1
-                else BaseExceptionGroup("workspace teardown failed", failures)
-            )
-            raise ws._close_error
+        await settle(_drop_state(deps))
+    if deps.owns_state_store:
+        await settle(deps.state_store.close())
+    await settle(close_local_parts(deps))
+    drains = await asyncio.gather(*drain_tasks, return_exceptions=True)
+    failures.extend(
+        result
+        for result in drains
+        if isinstance(result, BaseException)
+        and not isinstance(result, asyncio.CancelledError)
+    )
+    await settle(deps.cache.clear())
+    await settle(deps.cache.close())
+    return failures

@@ -17,7 +17,7 @@ import inspect
 import pkgutil
 
 import mirage.commands.builtin as builtin
-from mirage.commands.config import RegisteredCommand
+from mirage.commands.config import Command
 
 # A native fast path answers from the raw backend tree, so every place
 # one is wired must fork to the guarded walk when a hide, a path rule or
@@ -29,13 +29,13 @@ from mirage.commands.config import RegisteredCommand
 GATE = "paths_scoped"
 
 
-def _registered() -> tuple[list[RegisteredCommand], list[str]]:
+def _registered() -> tuple[list[Command], list[str]]:
     """Every registered builtin command, plus modules that would not
     import, mirrored from test_links_optin for the same reason: a
     module that will not import registers nothing, so a wrapper missing
     its gate would pass by being absent rather than by being correct.
     """
-    found: list[RegisteredCommand] = []
+    found: list[Command] = []
     failed: list[str] = []
     seen: set[int] = set()
     for info in pkgutil.walk_packages(

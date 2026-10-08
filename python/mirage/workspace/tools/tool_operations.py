@@ -18,17 +18,19 @@ import posixpath
 import shlex
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar
+from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar
 
 from mirage.context import strongest_under_session
 from mirage.io.types import IOResult
 from mirage.ops.ops import Ops
+from mirage.policy.decisions import Decisions
 from mirage.policy.match.pattern import pattern_matches
 from mirage.types import MOUNT_MODE_RANK, MountMode
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import gnu_dirname
 from mirage.workspace.lookup import command_visible
-from mirage.workspace.mount.registry import DEV_PREFIX
+from mirage.workspace.mount.registry import DEV_PREFIX, MountEntry
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.tools.file_version import (
     FileVersionTracker,
     StaleMirageFileError,
@@ -40,11 +42,6 @@ from mirage.workspace.tools.io_text import (
     replace_text,
 )
 
-if TYPE_CHECKING:
-    from mirage.workspace.mount.registry import MountEntry
-    from mirage.workspace.session import SessionState
-    from mirage.workspace.workspace.handle import Session
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_READ_LIMIT = 2000
@@ -54,6 +51,33 @@ R = TypeVar("R")
 
 # Every tool, in the order the doors list them.
 TOOL_NAMES = ("shell", "read", "write", "edit", "ls", "grep", "glob")
+
+
+class SessionLike(Protocol):
+    """What a tool table acts through: one session's doors
+    (``Session``)."""
+
+    @property
+    def session_id(self) -> str: ...
+
+    @property
+    def state(self) -> SessionState: ...
+
+    @property
+    def decisions(self) -> Decisions: ...
+
+    @property
+    def vfs(self) -> Ops: ...
+
+    def mounts(self) -> list[MountEntry]: ...
+
+    async def shell(self, command: str) -> IOResult: ...
+
+    async def glob(self, pattern: str) -> list[str]: ...
+
+    async def _loaded(self) -> None: ...
+
+    async def _reads(self) -> FileVersionTracker: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,7 +170,7 @@ async def missing(vfs: Ops, path: str) -> bool:
         return False
 
 
-def runs(name: str, session: "SessionState") -> bool:
+def runs(name: str, session: SessionState) -> bool:
     """Whether a session can run a command at all: its allow list
     installs the name and no rule refuses the bare command whole.
 
@@ -169,7 +193,7 @@ def runs(name: str, session: "SessionState") -> bool:
     )
 
 
-def writes(session: "SessionState", mounts: list["MountEntry"]) -> bool:
+def writes(session: SessionState, mounts: list[MountEntry]) -> bool:
     """Whether a session may write anywhere: a mount it can see whose
     mode, narrowed by the profile or opened by a show entry below it,
     reaches write. ``/dev`` is left out: its null sink takes a write
@@ -223,14 +247,14 @@ class MirageToolOperations:
     guard off.
 
     Args:
-        session (Session): The session the tools act as, with its cwd,
+        session (SessionLike): The session the tools act as, with its cwd,
             environment and mount grants.
         stale_write_protection (bool): False lets an agent overwrite a
             file that changed since it read it.
     """
 
     def __init__(
-        self, session: "Session", stale_write_protection: bool = True
+        self, session: SessionLike, stale_write_protection: bool = True
     ) -> None:
         self._session = session
         self._own = (

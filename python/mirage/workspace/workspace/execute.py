@@ -14,31 +14,38 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mirage.commands.errors import CommandTimeoutError
-from mirage.context import reset_refusal_sink, set_refusal_sink
+from mirage.context import (
+    get_current_evaluation,
+    reset_refusal_sink,
+    set_current_evaluation,
+    set_refusal_sink,
+)
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.observe.context import RecordingScope
+from mirage.observe.context import RecordingScope, active_records
+from mirage.observe.observer import Observer
+from mirage.observe.record import READ_FINGERPRINT_OPS, OpRecord
 from mirage.policy import Deny, HandOff
+from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.routing import RouteDecision, RouteError
-from mirage.shell.bytes import decode_text
+from mirage.runtime.types import DispatchFn
+from mirage.secrets.types import ResolvedSource
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import FORK_FAILED, FORK_FAILED_STATUS
+from mirage.shell.errors import DiscardSignal, ExitSignal
 from mirage.shell.helpers import input_substitution_redirect
 from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.literal import literal_tree
-from mirage.shell.parse import (
-    find_syntax_error,
-    find_unterminated_backtick,
-    syntax_error_result,
-)
+from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.scope import ParseScope
+from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
@@ -47,13 +54,8 @@ from mirage.workspace.abort import (
     StatusWriter,
     set_line_writer,
 )
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    child_context,
-    get_current_evaluation,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.workspace.dispatcher import Dispatcher
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.alias import expanding_aliases
 from mirage.workspace.executor.control import UNWINDING, ended
@@ -63,6 +65,8 @@ from mirage.workspace.executor.statement import (
     snapshot_status,
 )
 from mirage.workspace.executor.traps import finish_shell, inherit_traps
+from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.admission import (
     admit_line,
     is_pending,
@@ -84,7 +88,9 @@ from mirage.workspace.session import (
     reset_current_session,
     set_current_session,
 )
+from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.snapshot import ContentDriftError
+from mirage.workspace.snapshot.drift import DriftQueue
 from mirage.workspace.workspace.failure import (
     failure_result,
     placement_refused,
@@ -97,12 +103,60 @@ from mirage.workspace.workspace.fill import (
     line_nodes,
 )
 from mirage.workspace.workspace.line import run_whole_line
+from mirage.workspace.workspace.meta import WorkspaceMeta
+from mirage.workspace.workspace.routing import Router
+from mirage.workspace.workspace.runtimes import Runtimes
 from mirage.workspace.workspace.utils import fork_for_call
 
-if TYPE_CHECKING:
-    from mirage.workspace.workspace import Workspace
-
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class ExecuteEnv:
+    """The workspace parts a line runs against, built per line by
+    ``Workspace``.
+
+    Attributes:
+        meta (WorkspaceMeta): the discovery record, written before the
+            first line.
+        drift (DriftQueue): the checks a load queued, drained first.
+        namespace (Namespace): the mount table, links and overlay.
+        sessions (SessionManager): the sessions a line resolves.
+        registry (MountRegistry): mounts, policies and decisions.
+        dispatcher (Dispatcher): the op door.
+        observer (Observer): records each typed line.
+        records (list[OpRecord]): the workspace's op log.
+        job_table (JobTable): the workspace's jobs.
+        agent_id (str | None): the workspace's default agent.
+        runtimes (Runtimes): the runtimes a whole line may run in.
+        router (Router): places a line.
+        processes (ProcessSupervisor): starts a session's process.
+        dispatch (DispatchFn): ``Workspace.dispatch``.
+        has_managed_env (Callable[[], bool]): any session may hold a
+            managed variable.
+        secret_sources (Callable[[], Awaitable[Mapping[str,
+            ResolvedSource]]]): the declared sources, built once.
+        execute (Callable[..., Awaitable[IOResult]]): ``Workspace.shell``,
+            which a nested line re-enters.
+    """
+
+    meta: WorkspaceMeta
+    drift: DriftQueue
+    namespace: Namespace
+    sessions: SessionManager
+    registry: MountRegistry
+    dispatcher: Dispatcher
+    observer: Observer
+    records: list[OpRecord]
+    job_table: JobTable
+    agent_id: str | None
+    runtimes: Runtimes
+    router: Router
+    processes: ProcessSupervisor
+    dispatch: DispatchFn
+    has_managed_env: Callable[[], bool]
+    secret_sources: Callable[[], Awaitable[Mapping[str, ResolvedSource]]]
+    execute: Callable[..., Awaitable[IOResult]]
 
 
 @dataclass(slots=True)
@@ -124,7 +178,7 @@ class NestedRefusal:
 
 
 async def recurse(
-    ws: "Workspace",
+    ws: ExecuteEnv,
     cmd: str,
     node: Any = None,
     span: tuple[int, int] | None = None,
@@ -155,7 +209,7 @@ async def recurse(
     line or job holding it spends it.
 
     Args:
-        ws: the workspace hosting the outer line.
+        ws (ExecuteEnv): the workspace the outer line runs in.
         cancel (asyncio.Event | None): the abort event of the line or
             job this evaluation runs in; the walker rebinds it at every
             node, so a background job's evaluations carry none.
@@ -193,10 +247,10 @@ async def recurse(
         inner = HandOff(parent=handed)
     else:
         inner = evaluated_from(node, handed, span)
-    session = get_current_session_for(ws._session_mgr)
+    session = get_current_session_for(ws.sessions)
     if session is None:
-        session = ws._session_mgr.get(
-            opts.get("session_id") or ws._session_mgr.default_id
+        session = ws.sessions.get(
+            opts.get("session_id") or ws.sessions.default_id
         )
     context = get_current_evaluation()
     if context is None:
@@ -224,8 +278,8 @@ async def recurse(
                 )
                 io, _ = await run_command_tree(
                     ws.dispatch,
-                    ws._registry,
-                    ws._namespace,
+                    ws.registry,
+                    ws.namespace,
                     ws.job_table,
                     evaluate,
                     agent_id or "",
@@ -248,7 +302,7 @@ async def recurse(
     if substitution:
         context = child_context(context)
         session = context.session
-        child_token = set_current_evaluation(context, owner=ws._session_mgr)
+        child_token = set_current_evaluation(context, owner=ws.sessions)
     capture = Terminal()
     waits = JobWaits(capture.jobs)
     rest = session.job_output or session.tty.jobs
@@ -272,7 +326,7 @@ async def recurse(
         opts["sink"] = capture
     try:
         try:
-            io = await ws.shell(
+            io = await ws.execute(
                 cmd,
                 cancel=cancel,
                 record=False,
@@ -320,24 +374,24 @@ async def recurse(
     finally:
         if substitution:
             if child_token is not None:
-                reset_current_evaluation(child_token)
+                reset_current_session(child_token)
     if io.refusal is not None:
         nested.latest = io.refusal
     return io
 
 
 def session_cwd(
-    ws: "Workspace",
+    sessions: SessionManager,
     session_id: str,
 ) -> str | None:
     """The session's cwd for history, None once the session is gone.
 
     Args:
-        ws: the workspace owning the session manager.
+        sessions (SessionManager): the workspace's sessions.
         session_id (str): session whose cwd the history entry records.
     """
     try:
-        return ws._session_mgr.get(session_id).cwd
+        return sessions.get(session_id).cwd
     except KeyError:
         return None
 
@@ -364,7 +418,7 @@ class LineFrame:
 
 
 async def execute_line(
-    ws: "Workspace",
+    ws: ExecuteEnv,
     command: str,
     session_id: str | None,
     stdin: ByteSource | None,
@@ -394,7 +448,7 @@ async def execute_line(
     policy misconfiguration), which propagate.
 
     Args:
-        ws: the workspace the line runs in.
+        ws (ExecuteEnv): the workspace the line runs in.
         handed (HandOff | None): the hand-off the line runs on, made by
             ``recurse`` for a nested evaluation; None for a typed line,
             which gets one of its own.
@@ -404,11 +458,11 @@ async def execute_line(
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
-    await ws._namespace.ensure_loaded()
-    await ws._meta.ensure()
-    await ws._session_mgr.ensure_loaded()
-    if ws._drift.pending:
-        await ws._drift.drain(ws._registry.try_mount_for)
+    await ws.namespace.ensure_loaded()
+    await ws.meta.ensure()
+    await ws.sessions.ensure_loaded()
+    if ws.drift.pending:
+        await ws.drift.drain(ws.registry.try_mount_for)
 
     # A re-entrant execute (the evaluator's $(), eval, source, xargs, or
     # an embedder callback fired mid-line) continues in the live ambient
@@ -419,15 +473,15 @@ async def execute_line(
     # Only this workspace's own binding counts: a session carries one
     # workspace's cwd, env and mount grants, so a callback reaching a
     # second workspace must resolve that workspace's session instead.
-    ambient = get_current_session_for(ws._session_mgr)
+    ambient = get_current_session_for(ws.sessions)
     tty = None
     if ambient is not None and session_id in (None, ambient.session_id):
         session = ambient
         session_id = ambient.session_id
     else:
         if session_id is None:
-            session_id = ws._session_mgr.default_id
-        session = ws._session_mgr.get(session_id)
+            session_id = ws.sessions.default_id
+        session = ws.sessions.get(session_id)
         # A typed line writes to its session's terminal, and so do the
         # jobs it starts, as they write; the line answers with whatever
         # reached the terminal while it ran, a job's output from before
@@ -476,7 +530,7 @@ async def execute_line(
 
 
 async def _run_line(
-    ws: "Workspace",
+    ws: ExecuteEnv,
     command: str,
     session: SessionState,
     cwd: str | None,
@@ -485,7 +539,7 @@ async def _run_line(
     """Run a line as the session's process, starting one if it has none.
 
     Args:
-        ws (Workspace): the workspace.
+        ws (ExecuteEnv): the workspace.
         command (str): the line's text.
         session (SessionState): the session it runs on.
         cwd (str | None): the per-call directory, if any.
@@ -495,7 +549,7 @@ async def _run_line(
         results: list[IOResult] = []
 
         async def run() -> int:
-            token = set_current_session(session, owner=ws._session_mgr)
+            token = set_current_session(session, owner=ws.sessions)
             try:
                 result = await run_line()
                 results.append(result)
@@ -543,7 +597,7 @@ async def _shown(io: IOResult, sink: JobConsole | None) -> IOResult:
 
 
 async def run_prepared_line(
-    ws: "Workspace",
+    ws: ExecuteEnv,
     command: str,
     session: SessionState,
     *,
@@ -569,12 +623,12 @@ async def run_prepared_line(
     here; the other arguments are ``execute_line``'s.
 
     Args:
-        ws (Workspace): the workspace the line runs in.
+        ws (ExecuteEnv): the workspace the line runs in.
         command (str): the line's text.
         session (SessionState): the session the line acquired.
     """
     session_id = session.session_id
-    cache_facts = ws._dispatcher.capture_cache_facts()
+    cache_facts = ws.dispatcher.capture_cache_facts()
     effective_session = fork_for_call(session, cwd, env)
     parent = get_current_evaluation()
     if parent is not None and parent.session is not session:
@@ -587,7 +641,7 @@ async def run_prepared_line(
     # The agent of this line, carried with the execution rather than
     # held on the workspace: a nested line inherits it through
     # `recurse`, a concurrent line keeps its own.
-    agent = agent_id if agent_id is not None else ws._default_agent_id
+    agent = agent_id if agent_id is not None else ws.agent_id
     io = IOResult()
     # The line-reader decision (GNU: history is appended where the
     # typed line is read, never inside the evaluator). Internal
@@ -595,8 +649,14 @@ async def run_prepared_line(
     is_line = record
     scope = RecordingScope(active=is_line)
     parse_scope = ParseScope()
+    # A nested line applies against the records added to the enclosing
+    # line's since it began, copied at apply, reads left out: a
+    # concurrent sibling stage records into the same list, and its read
+    # token would label bytes this line read before the change.
+    outer = None if is_line else active_records()
+    nested_start = len(outer) if outer is not None else 0
 
-    session_token = set_current_evaluation(context, owner=ws._session_mgr)
+    session_token = set_current_evaluation(context, owner=ws.sessions)
     # Taken before any statement stamps, so a cancelled line can put
     # `$?` back to what it found. Restored at the seam in
     # ``Workspace.shell``, after the last await of the line, so an
@@ -613,20 +673,29 @@ async def run_prepared_line(
         )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
-        # consulted about it.
-        offending = find_syntax_error(
-            ast,
-            expanding_aliases(effective_session),
-            parse_fn=parse_scope.parse,
-        )
-        if offending is None and argv is None:
-            # tree-sitter accepts an unclosed backtick as a complete
-            # command, so the region is scanned separately.
-            offending = find_unterminated_backtick(
-                decode_text(ast.text or b"")
-            )
-        if offending is not None:
-            io = syntax_error_result(offending, ast)
+        # consulted about it. bash's reading of the line decides; the
+        # grammar's own errors only stop a line it cannot build.
+        found = None
+        if argv is None:
+            found = check_syntax(
+                command, expanding_aliases(effective_session)
+            ) or find_syntax_issue(ast)
+        if found is not None:
+            io = syntax_error_result(found)
+            if call_stack is not None and io.exit_code == 127:
+                # A substitution bash cannot parse ends the shell, from
+                # `eval` and `source` too: 127, or 1 out of a child.
+                raise ExitSignal(
+                    127, await io.materialize_stderr(), contained_code=1
+                )
+            if (
+                call_stack is not None
+                and call_stack.subshell
+                and io.exit_code == 1
+            ):
+                # An array bash cannot read discards its line: `eval`
+                # and `source` return 1, and a child shell ends there.
+                raise DiscardSignal(await io.materialize_stderr())
             record_status(session, io.exit_code)
             return io
         nested = NestedRefusal()
@@ -659,8 +728,8 @@ async def run_prepared_line(
                     await line_judgments(
                         ast,
                         effective_session,
-                        ws._registry,
-                        ws._namespace,
+                        ws.registry,
+                        ws.namespace,
                         line_handed,
                         agent or "",
                     )
@@ -669,12 +738,12 @@ async def run_prepared_line(
 
         async def admission_holds() -> bool:
             return await line_held(
-                await judged(), ws._registry, line_handed, cancel
+                await judged(), ws.registry, line_handed, cancel
             )
 
         held = False
         try:
-            placed = await ws._router.decide(
+            placed = await ws.router.decide(
                 ast,
                 command,
                 runtime,
@@ -702,7 +771,7 @@ async def run_prepared_line(
                 execution_scope=execution_scope,
                 job_table=job_table,
             )
-            line_runtime = ws._runtimes.whole_line(decision)
+            line_runtime = ws.runtimes.whole_line(decision)
             if line_runtime is not None:
                 # A whole line is a command like any other: the same
                 # visibility and admission gate as the tree, per parsed
@@ -713,8 +782,8 @@ async def run_prepared_line(
                 refused = await admit_line(
                     ast,
                     effective_session,
-                    ws._registry,
-                    ws._namespace,
+                    ws.registry,
+                    ws.namespace,
                     agent or "",
                     cancel,
                     handed,
@@ -728,7 +797,7 @@ async def run_prepared_line(
                     )
                     record_status(session, io.exit_code)
                     return io
-                if ws._has_managed_env:
+                if ws.has_managed_env():
                     # Filled only after the line is admitted (a refused
                     # line must never reach a secret store) and before the
                     # runtime snapshots the env; a whole-line program may
@@ -751,17 +820,17 @@ async def run_prepared_line(
                         await fill_env(
                             effective_session,
                             whole_names,
-                            await ws._secret_sources(),
+                            await ws.secret_sources(),
                         )
                 io = await run_whole_line(
                     line_runtime,
                     command,
                     stdin,
                     effective_session,
-                    ws._registry.mounts(),
-                    ws._registry.policies,
-                    ws._dispatcher.invalidate_all_after_remote,
-                    ws._registry.command_limits,
+                    ws.registry.mounts(),
+                    ws.registry.policies,
+                    ws.dispatcher.invalidate_all_after_remote,
+                    ws.registry.command_limits,
                 )
                 if io.refusal is None:
                     io.refusal = nested.latest
@@ -780,8 +849,8 @@ async def run_prepared_line(
             refused = await prejudge_line(
                 ast,
                 effective_session,
-                ws._registry,
-                ws._namespace,
+                ws.registry,
+                ws.namespace,
                 handed,
                 agent or "",
                 cancel,
@@ -800,7 +869,7 @@ async def run_prepared_line(
                 )
                 record_status(session, io.exit_code)
                 return io
-            if ws._has_managed_env:
+            if ws.has_managed_env():
                 # Filled only after the line-tier admission and before the
                 # tree's expansion reads the vars. The walked set carries
                 # stored function bodies too, so a function invoked by bare
@@ -814,7 +883,7 @@ async def run_prepared_line(
                 # value gate can see still follows the fetch, because
                 # expansion is what consumes the values.
                 nodes = line_nodes(ast, effective_session)
-                policies = ws._registry.policies
+                policies = ws.registry.policies
                 writes_gated = (
                     policies is not None
                     and await policies.wants_for(
@@ -827,10 +896,10 @@ async def run_prepared_line(
                         effective_session,
                         subset,
                         whole=guest_bound(
-                            subset, decision, ws._registry.runtime_bindings
+                            subset, decision, ws.registry.runtime_bindings
                         ),
                         cli_env_names=cli_env_names(
-                            subset, effective_session, ws._registry
+                            subset, effective_session, ws.registry
                         ),
                         writes_gated=writes_gated,
                     )
@@ -840,8 +909,8 @@ async def run_prepared_line(
                     served = await unrefused_nodes(
                         nodes,
                         effective_session,
-                        ws._registry,
-                        ws._namespace,
+                        ws.registry,
+                        ws.namespace,
                         handed,
                         agent or "",
                         cancel,
@@ -867,7 +936,7 @@ async def run_prepared_line(
                         # refuses, which is the same treatment an
                         # unreachable store gets. Memoized, so the loop's
                         # later passes cost one await.
-                        sources = await ws._secret_sources()
+                        sources = await ws.secret_sources()
                         await fill_env(effective_session, names, sources)
                         names = plan_names(nodes)
             # No seam of its own: the whole line is one task under
@@ -875,8 +944,8 @@ async def run_prepared_line(
             # the tree is in.
             io, _ = await run_command_tree(
                 ws.dispatch,
-                ws._registry,
-                ws._namespace,
+                ws.registry,
+                ws.namespace,
                 job_table or ws.job_table,
                 exec_recursion,
                 agent or "",
@@ -903,18 +972,18 @@ async def run_prepared_line(
         finally:
             reset_refusal_sink(sink_token)
             if held:
-                ws._registry.decisions.release(
+                ws.registry.decisions.release(
                     effective_session.session_id, handed
                 )
             elif handed.parent is not None:
                 # A nested evaluation's claims are the outer line's to
                 # keep for the next evaluation from the same node and
                 # to spend at its own end.
-                ws._registry.decisions.hand_up(
+                ws.registry.decisions.hand_up(
                     effective_session.session_id, handed
                 )
             else:
-                await ws._registry.decisions.revoke(
+                await ws.registry.decisions.revoke(
                     effective_session.session_id, handed
                 )
         # The program loop stamped each statement; the line as a whole
@@ -923,7 +992,20 @@ async def run_prepared_line(
         if warnings:
             io.stderr = warnings + await io.materialize_stderr()
         record_status(session, io.exit_code, transparent=True)
-        await ws.apply_io(io, records=scope.records, cache_facts=cache_facts)
+        applied: list[OpRecord] | None = scope.records
+        if not is_line:
+            applied = (
+                None
+                if outer is None
+                else [
+                    r
+                    for r in outer[nested_start:]
+                    if r.op not in READ_FINGERPRINT_OPS
+                ]
+            )
+        await ws.dispatcher.apply_io(
+            io, records=applied, cache_facts=cache_facts
+        )
         return io
     except CommandTimeoutError as exc:
         # The caller's event is read, never written: a timeout is this
@@ -961,11 +1043,20 @@ async def run_prepared_line(
         # succeeded.
         parse_scope.release()
         scope.close()
-        reset_current_evaluation(session_token)
-        await ws._session_mgr.flush(session.session_id)
-        ws._ops.records.extend(scope.records)
+        reset_current_session(session_token)
+        # The marks were only for this line's apply_io, so they go however
+        # the save ends, with any a background job added during it; the
+        # seal stops a background command that returns later from marking
+        # a record persisted here, which nothing outside FUSE ever trims.
+        try:
+            await ws.sessions.flush(session.session_id)
+        finally:
+            for rec in scope.records:
+                rec.claimed = None
+                rec.sealed = True
+        ws.records.extend(scope.records)
         # bash adds a line to history only when it is non-empty
-        # (`shell_input_line[0]`): a blank line is skipped, while a
+        # (anything before its newline): a blank line is skipped, while a
         # whitespace-only or comment-only line is kept.
         if is_line and command.strip("\n"):
             await ws.observer.log_execution(
@@ -974,5 +1065,5 @@ async def run_prepared_line(
                 scope.records,
                 agent or "",
                 session_id,
-                session_cwd(ws, session_id),
+                session_cwd(ws.sessions, session_id),
             )

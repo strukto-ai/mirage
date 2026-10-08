@@ -16,11 +16,11 @@ import { IOResult } from '../../../../io/types.ts'
 import { sedGeneric, positionalAsPaths } from '../../generic/sed.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf } from '../adapter.ts'
 
 const ENC = new TextEncoder()
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'sed',
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined

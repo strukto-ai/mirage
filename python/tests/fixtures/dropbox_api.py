@@ -51,7 +51,10 @@ class FakeDropbox:
     ``/2/files/list_folder``, ``/2/files/get_metadata`` and
     ``/2/files/download``. A download answers ``Dropbox-API-Result`` with
     the file's metadata on a full read and on a ranged one (206), as the
-    real service does.
+    real service does. ``/2/files/upload`` stores the body at the
+    ``Dropbox-API-Arg`` path and answers the FileMetadata rendered by
+    ``_file_entry``, the renderer get_metadata and listings use, so an
+    upload reply's content_hash and a later stat's cannot disagree.
 
     A rewrite keeps ``server_modified``: the real service repeated it
     across same-size writes, so only ``content_hash`` tells them apart.
@@ -180,6 +183,12 @@ class FakeDropbox:
             return web.json_response(self._folder_entry(path))
         return self._missing()
 
+    async def upload(self, req: web.Request) -> web.Response:
+        path = _norm(json.loads(req.headers["Dropbox-API-Arg"])["path"])
+        self.log.append(("upload", path))
+        self.files[path] = await req.read()
+        return web.json_response(self._file_entry(path))
+
     async def download(self, req: web.Request) -> web.Response:
         path = _norm(json.loads(req.headers["Dropbox-API-Arg"])["path"])
         self.log.append(("download", path))
@@ -225,6 +234,7 @@ def serve(dropbox: FakeDropbox | None = None) -> Iterator[FakeDropbox]:
     app.router.add_post("/2/files/list_folder", dropbox.list_folder)
     app.router.add_post("/2/files/get_metadata", dropbox.get_metadata)
     app.router.add_post("/2/files/download", dropbox.download)
+    app.router.add_post("/2/files/upload", dropbox.upload)
     loop = asyncio.new_event_loop()
     ready = threading.Event()
     runner = web.AppRunner(app)
