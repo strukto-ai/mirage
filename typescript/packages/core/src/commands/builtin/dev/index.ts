@@ -12,22 +12,47 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RAMAccessor } from '../../../accessor/ram.ts'
-import { readStream } from '../../../core/dev/stream.ts'
-import { VFSName } from '../../../types.ts'
+import type { Accessor } from '../../../accessor/base.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import { ZERO_CHUNK_SIZE } from '../../../core/dev/constants.ts'
+import { VFSName, type PathSpec } from '../../../types.ts'
 import type { Command, CommandIO } from '../../config.ts'
 import { genericCommands } from '../generic_bind/index.ts'
 
-function endless(io: CommandIO): CommandIO {
-  return {
-    ...io,
-    readStream: (accessor, path, index) => readStream(accessor as RAMAccessor, path, index),
+type ReadRange = NonNullable<CommandIO['readRange']>
+
+/**
+ * Stream `path` as successive ranged reads at the door. `/dev/zero` answers
+ * every range in full, so the stream ends only when the reader stops;
+ * `/dev/null` and a regular file end at the first short range. Each range
+ * is a door read, so hides, path rules and policies judge it. Mirrors
+ * Python's `_ranged`.
+ */
+async function* ranged(
+  readRange: ReadRange,
+  accessor: Accessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  let offset = 0
+  for (;;) {
+    const chunk = await readRange(accessor, path, index, offset, ZERO_CHUNK_SIZE)
+    if (chunk.byteLength > 0) yield chunk
+    if (chunk.byteLength < ZERO_CHUNK_SIZE) return
+    offset += chunk.byteLength
   }
+}
+
+function endless(io: CommandIO): CommandIO {
+  const readRange = io.readRange
+  if (readRange === undefined) return io
+  return { ...io, readStream: (accessor, path, index) => ranged(readRange, accessor, path, index) }
 }
 
 // /dev is a RAM mount whose read and stat know the two synthetic character
 // devices. Commands that consume a whole input read a finite stream, while
-// the two bounded streaming commands opt into the endless source.
+// the two bounded streaming commands read in ranges, which /dev/zero answers
+// without end.
 export const DEV_COMMANDS: readonly Command[] = [
   ...genericCommands(VFSName.RAM, { adapt: { cat: endless, head: endless }, local: true }),
 ]
