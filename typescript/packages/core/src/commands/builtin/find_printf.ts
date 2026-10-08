@@ -17,6 +17,7 @@ import { FileStat, FileType } from '../../types.ts'
 import { lsModeString } from './utils/formatting.ts'
 import { groupName, ownerName, type Identity } from './utils/identity.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import type { PrintfKind } from '../../core/generic/find_eval.ts'
 
 const PRINTF_ESCAPES: Record<string, string> = {
   n: '\n',
@@ -127,8 +128,6 @@ function timeDirective(letter: string, ts: number): string | null {
   }
 }
 
-export type PrintfKind = 'f' | 'd' | 'l' | 'c'
-
 export interface PrintfStatFacts {
   size: number
   kind: PrintfKind
@@ -143,13 +142,6 @@ export interface PrintfStatFacts {
   // %u %U %g %G fall back to the session's identity from there.
   uid: number | string | null
   gid: number | string | null
-}
-
-export function printfKind(st: FileStat): PrintfKind {
-  if (st.type === FileType.DIRECTORY) return 'd'
-  if (st.type === FileType.SYMLINK) return 'l'
-  if (st.type === FileType.CHAR_DEVICE) return 'c'
-  return 'f'
 }
 
 function modeBits(st: PrintfStatFacts | null, kind: PrintfKind): number {

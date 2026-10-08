@@ -20,7 +20,7 @@ import { KeyLock } from '../../cache/lock.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { dispatchStat, dotRefusal, walkSpelling } from '../../commands/builtin/utils/paths.ts'
-import { getExtension } from '../../commands/resolve.ts'
+import { getExtension } from '../../utils/filetype.ts'
 import { IOResult, type OpReport } from '../../io/types.ts'
 import {
   eacces,
@@ -49,7 +49,13 @@ import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { CycleError, norm, parent, posixNormpath } from '../../utils/path.ts'
 import type { Visibility } from '../../types.ts'
 import type { EntryGate } from '../../policy/types.ts'
-import { record, runWithMountContext, runWithRevisions, startOp } from '../../observe/context.ts'
+import {
+  commandRecords,
+  record,
+  runWithMountContext,
+  runWithRevisions,
+  startOp,
+} from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
@@ -232,6 +238,56 @@ function served(report: OpReport | undefined, result: unknown): void {
   report?.served(null, result instanceof Uint8Array ? result.byteLength : null)
 }
 
+/**
+ * Pull a stream's first chunk now and answer the stream from there, so a read
+ * that fails at its start fails at the call, where the door handles it, rather
+ * than in the hands of whoever pulls it later. Mirrors Python's `_primed`.
+ */
+async function primed(
+  stream: AsyncIterable<Uint8Array>,
+  report: OpReport | undefined,
+): Promise<AsyncIterable<Uint8Array>> {
+  const iterator = stream[Symbol.asyncIterator]()
+  let first: IteratorResult<Uint8Array>
+  try {
+    first = await iterator.next()
+  } catch (err) {
+    await iterator.return?.()
+    throw err
+  }
+  const rest = resumed(first.done === true ? [] : [first.value], iterator, report)
+  await rest.next()
+  return rest
+}
+
+/**
+ * The chunks already pulled, then the rest of the stream. `primed` runs it to
+ * its empty first step, inside the `try`, so a caller that closes it before
+ * pulling still closes the stream. The stream completes when its last chunk is
+ * pulled or it is closed, so that is when the caller's report is stamped, with
+ * the bytes the store moved.
+ */
+async function* resumed(
+  head: readonly Uint8Array[],
+  iterator: AsyncIterator<Uint8Array>,
+  report: OpReport | undefined,
+): AsyncGenerator<Uint8Array> {
+  let moved = head.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+  try {
+    yield new Uint8Array()
+    yield* head
+    for (;;) {
+      const next = await iterator.next()
+      if (next.done === true) return
+      moved += next.value.byteLength
+      yield next.value
+    }
+  } finally {
+    await iterator.return?.()
+    report?.served(null, moved)
+  }
+}
+
 /** The door's link follow of one path, the final name too (`last`) or
  * only the names above it, with a loop thrown as ELOOP rather than the
  * namespace's CycleError. */
@@ -277,6 +333,8 @@ interface Call {
    * walk, and from the VFS's own declaration at admission.
    */
   write: boolean
+  /** Whether a read is answered as it is pulled. */
+  stream: boolean
 }
 
 /** Whether the caller asked for the stored bytes, no renderer. */
@@ -364,8 +422,12 @@ export class Dispatcher {
     // withDispatchRuleGuard's mark, never forwarded to an op.
     const { ruleGate, ...unmarked } = (stripped ?? {}) as { ruleGate?: EntryGate | null }
     kwargs = ruleGate === undefined ? stripped : unmarked
+    // The door's own keyword: a read answered as it is pulled.
+    const { stream, ...unstreamed } = (kwargs ?? {}) as { stream?: unknown }
+    if (name === 'read' && stream !== undefined) kwargs = unstreamed
     await this.prepare()
     const call = await this.walk(name, path, args, kwargs, ruleGate ?? null, report, issuer)
+    call.stream = name === 'read' && stream === true
     await this.refuseRename(call)
     if (this.tableAnswers(name, call.path.virtual, call.kwargs)) {
       return [
@@ -533,6 +595,7 @@ export class Dispatcher {
       issuer,
       noFollow,
       write: POLICY_WRITE_OPS.has(name),
+      stream: false,
     }
   }
 
@@ -718,6 +781,46 @@ export class Dispatcher {
     return bare.complete(call.name, call.path, call.write, fallback)
   }
 
+  /**
+   * Whether a read is answered as it is pulled. A whole read of stored bytes
+   * streams through the VFS's own `readStream`. A window, a rendering, a VFS
+   * with no stream and a postVfs policy that may read the result each get the
+   * whole bytes instead, which are a stream of one chunk. Mirrors Python's
+   * Dispatcher._streams.
+   */
+  private streams(call: Call, mount: MountEntry, vfs: BaseVFS): boolean {
+    const [offset, size] = readWindow(call.kwargs)
+    return (
+      call.stream &&
+      offset === 0 &&
+      size === null &&
+      vfs.supports('readStream') &&
+      !this.rendersRead(call, mount) &&
+      !this.policies.readsResults()
+    )
+  }
+
+  /**
+   * Open a streamed read, its first chunk pulled before it returns. A cold
+   * read fills the cache as it is pulled. Mirrors Python's
+   * Dispatcher._open_stream.
+   */
+  private async openStream(
+    call: Call,
+    mount: MountEntry,
+    scope: PathSpec,
+    filler: CacheManager | null,
+  ): Promise<AsyncIterable<Uint8Array>> {
+    const [opened, records] = await commandRecords((mine) =>
+      Promise.resolve([mount.readStream(scope), mine] as const),
+    )
+    const stream =
+      filler === null
+        ? opened
+        : filler.fillStream(call.path, opened, records, () => !this.rendersRead(call, mount))
+    return await primed(stream, call.report)
+  }
+
   /** Whether a filetype renderer answers this read on `vfs`; asked each
    * time, since a renderer can land while the read runs. */
   private rendersRead(call: Call, mount: MountEntry): boolean {
@@ -841,6 +944,9 @@ export class Dispatcher {
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
     let result
     try {
+      if (this.streams(call, mount, vfs)) {
+        return [await this.openStream(call, mount, scope, filler), renameDst, fullArgs]
+      }
       const run = (opKwargs: OpKwargs, onCall?: (call: Promise<unknown>) => void) =>
         mount.use(async () => {
           const answer = await runWithMountContext(

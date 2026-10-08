@@ -3,19 +3,19 @@ from typing import Protocol, TypeVar
 
 from mirage.cache.context import active_cache_manager
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin import find_eval
-from mirage.commands.builtin.find_eval import (
+from mirage.context import session_visibility
+from mirage.core.generic import find_eval
+from mirage.core.generic.find_eval import (
     FindEntry,
     PredNode,
     build_tree,
     keep,
+    printf_kind,
     start_basename,
     tree_has_empty,
     tree_has_type,
 )
-from mirage.commands.builtin.find_printf import printf_kind
-from mirage.commands.errors import is_entry_error
-from mirage.context import session_visibility
+from mirage.errors.classify import is_entry_error
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp, matches_mtime
 from mirage.utils.hidden import path_visible

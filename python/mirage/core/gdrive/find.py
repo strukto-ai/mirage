@@ -14,7 +14,9 @@
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.find_eval import (
+from mirage.core.gdrive.resolve import resolve_key
+from mirage.core.gdrive.tree import iter_tree
+from mirage.core.generic.find_eval import (
     FindEntry,
     PredNode,
     build_tree,
@@ -22,8 +24,6 @@ from mirage.commands.builtin.find_eval import (
     keep,
     start_basename,
 )
-from mirage.core.gdrive.resolve import resolve_key
-from mirage.core.gdrive.tree import iter_tree
 from mirage.types import PathSpec
 from mirage.utils.stat_view import DIR_SIZE
 

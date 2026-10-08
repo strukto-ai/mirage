@@ -21,6 +21,55 @@ import type { Accessor } from './accessor/base.ts'
 import { commandIo } from './commands/builtin/generic_bind/adapter.ts'
 import type { CommandIO } from './commands/config.ts'
 import { MountEntry } from './workspace/mount/mount.ts'
+import { sha256Hex } from './utils/hash.ts'
+import {
+  EUC_CN,
+  EUC_JP,
+  EUC_KR,
+  GB18030,
+  GBK,
+  SJIS,
+  type MultibyteSpec,
+  multibyteReverse,
+  multibyteTable,
+} from './commands/builtin/generic/iconv_multibyte.ts'
+
+// Shared by the Node tests and the Chrome suite, with the same digests in
+// Python. Every entry was checked against glibc 2.41 on debian:stable-slim,
+// both directions; the host decoder only seeds these normalized tables.
+export const ICONV_MULTIBYTE_DIGESTS: [MultibyteSpec, number, string, number, string][] = [
+  [GBK, 21791, 'bba66856a1a44bdc', 21920, '4013fbd0c747f579'],
+  [EUC_CN, 7445, 'e73a16723240a945', 7573, 'acabc939aa1cb893'],
+  [GB18030, 63360, '995fabe77efceaa4', 63488, '56a3c65aa0c1b946'],
+  [EUC_KR, 8227, 'f1f8fe46cc836ea0', 8388, '96d8b6b82ea1a6de'],
+  [SJIS, 6879, '9e31ef626b7726f0', 7075, '152ab23536e0befb'],
+  [EUC_JP, 13009, '0a3c10912de393e1', 13169, 'af425d9e826f2b95'],
+]
+
+async function iconvTableDigest(
+  entries: Iterable<[number, number]>,
+  width: number,
+): Promise<string> {
+  const text = [...entries]
+    .sort((a, b) => a[0] - b[0])
+    .map(([k, v]) => `${k.toString(16)}:${v.toString(16).padStart(width, '0')}\n`)
+    .join('')
+  return (await sha256Hex(new TextEncoder().encode(text))).slice(0, 16)
+}
+
+/** The decode and reverse table sizes and digests for one iconv charset. */
+export async function iconvMultibyteDigests(
+  spec: MultibyteSpec,
+): Promise<[number, string, number, string]> {
+  const table = multibyteTable(spec)
+  const reverse = multibyteReverse(spec)
+  return [
+    table.size,
+    await iconvTableDigest(table, 1),
+    reverse.size,
+    await iconvTableDigest(reverse, 2),
+  ]
+}
 
 /**
  * A VFS called the way a mount calls it: through the op door, one index

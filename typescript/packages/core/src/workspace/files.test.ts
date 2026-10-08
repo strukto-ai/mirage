@@ -970,3 +970,26 @@ describe('Files per-call sessionId', () => {
     expect(await ws.vfs.exists('/data/secret.txt')).toBe(true)
   })
 })
+
+describe('readStream', () => {
+  // Mirrors Python's test_a_streamed_read_is_recorded_once_it_ends.
+  it('records the read once the stream ends', async () => {
+    const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.vfs.write('/r/a.txt', 'x'.repeat(100))
+      const before = ws.records.length
+      const stream = await ws.vfs.readStream('/r/a.txt')
+      expect(ws.records.length).toBe(before)
+      let got = ''
+      for await (const chunk of stream) got += DEC.decode(chunk)
+      expect(got).toBe('x'.repeat(100))
+      await (await ws.vfs.readStream('/r/a.txt'))[Symbol.asyncIterator]().return?.()
+      expect(ws.records.slice(before).map((r) => [r.op, r.bytes])).toEqual([
+        ['read', 100],
+        ['read', 100],
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+})

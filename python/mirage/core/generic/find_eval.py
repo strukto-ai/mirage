@@ -16,13 +16,24 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
-from mirage.commands.builtin.types import RowActionKind
-from mirage.types import FindType, PathSpec
+from mirage.types import FileStat, FileType, FindType, PathSpec
 from mirage.utils.dates import in_mtime_window
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.path import respell_one
 from mirage.utils.stat_view import DIR_SIZE
 from mirage.view.types import LinkView
+
+# find's row actions: -print, -print0, -ls and -delete.
+RowActionKind = Literal["print", "print0", "ls", "delete"]
+
+_TYPE_LETTER = {
+    FileType.DIRECTORY: "d",
+    FileType.SYMLINK: "l",
+    FileType.CHAR_DEVICE: "c",
+    FileType.BLOCK_DEVICE: "b",
+    FileType.FIFO: "p",
+    FileType.SOCKET: "s",
+}
 
 
 def start_basename(path: PathSpec) -> str:
@@ -769,3 +780,14 @@ def unrespell_raw(row: str, virtual: str, raw: str) -> str:
     if row.startswith(stem):
         return (virtual.rstrip("/") or "") + "/" + row[len(stem) :]
     return row
+
+
+def printf_kind(st: FileStat | None) -> str:
+    """The one-letter kind a -printf %y/%Y directive renders for a stat.
+
+    Args:
+        st (FileStat | None): the row's stat, None when unknown.
+    """
+    if st is None or st.type is None:
+        return "f"
+    return _TYPE_LETTER.get(st.type, "f")

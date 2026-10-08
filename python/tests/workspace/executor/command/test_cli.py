@@ -18,9 +18,10 @@ import pytest
 from pydantic import BaseModel
 
 from mirage.commands.cli.types import CLIInvocation, CLISpec
-from mirage.commands.errors import CommandTimeoutError, PartialOutputError
+from mirage.commands.errors import PartialOutputError
 from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import CommandSpec, Operand, Option, UsageStyle
+from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import Action, Deny, Policy

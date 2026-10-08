@@ -21,7 +21,7 @@ import {
   withoutPrune,
   type ActionKind,
   type PredNode,
-} from './find_eval.ts'
+} from '../../core/generic/find_eval.ts'
 import {
   C_SPACE,
   EXEC_BATCH_END,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CommandTimeoutError } from '../commands/errors.ts'
+import { CommandTimeoutError } from '../errors/types.ts'
 import { EvalError } from './errors.ts'
 import { EVALUATOR, isEvaluator, type Evaluator } from './mixin.ts'
 import { ScriptSource } from './types.ts'

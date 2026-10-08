@@ -2,7 +2,7 @@ import pytest
 from aioresponses import aioresponses
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
-from mirage.commands.builtin.find_eval import Name, Not, Or
+from mirage.core.generic.find_eval import Name, Not, Or
 from mirage.core.onedrive.find import find
 from mirage.types import PathSpec
 

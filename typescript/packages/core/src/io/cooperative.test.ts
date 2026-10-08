@@ -3,6 +3,7 @@ import { RAMFileCacheStore } from '../cache/file/ram.ts'
 import { describe, expect, it } from 'vitest'
 import { AsyncLineIterator } from './async_line_iterator.ts'
 import { chunks } from './cooperative.ts'
+import { CommandTimeoutError } from '../errors/types.ts'
 import { wcGeneric } from '../commands/builtin/generic/wc.ts'
 
 const ENC = new TextEncoder()
@@ -258,7 +259,6 @@ it('discards hidden cache reads when a value barrier fails', async () => {
 it.each(['timeout', 'read failure'])('records %s while finalizing a shell reader', async (kind) => {
   const { Workspace } = await import('../workspace/workspace/workspace.ts')
   const { getTestParser } = await import('../workspace/fixtures/workspace_fixture.ts')
-  const { CommandTimeoutError } = await import('../commands/errors.ts')
   const ws = new Workspace({}, { shellParser: await getTestParser() })
   async function* source() {
     yield ENC.encode('partial\n')

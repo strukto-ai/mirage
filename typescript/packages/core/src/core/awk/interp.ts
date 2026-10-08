@@ -88,27 +88,6 @@ const SCALAR_DEFAULTS: Readonly<Record<string, string>> = {
 
 const COUNTERS: ReadonlySet<string> = new Set(['NR', 'FNR', 'NF'])
 
-const ARITY: Readonly<Record<string, number>> = {
-  close: 1,
-  atan2: 2,
-  cos: 1,
-  exp: 1,
-  index: 2,
-  int: 1,
-  log: 1,
-  match: 2,
-  sin: 1,
-  split: 2,
-  sprintf: 1,
-  sqrt: 1,
-  sub: 2,
-  gsub: 2,
-  substr: 2,
-  system: 1,
-  tolower: 1,
-  toupper: 1,
-}
-
 const STDOUT_NAMES: ReadonlySet<string> = new Set(['/dev/stdout', '-'])
 const STDERR_NAME = '/dev/stderr'
 const PROGRAM_NAME = 'awk'
@@ -653,10 +632,6 @@ export class Interpreter {
     const name = node.name
     const args = node.args
     if (name === 'length') return this.builtinLength(args)
-    const arity = ARITY[name]
-    if (arity !== undefined && args.length < arity) {
-      throw new AwkRuntimeError(`awk: not enough arguments to ${name}`)
-    }
     if (name === 'sin' || name === 'cos') return num(safeTrig(await this.numArg(args, 0), name))
     if (name === 'exp') return num(safeExp(await this.numArg(args, 0)))
     if (name === 'sqrt') return num(safeSqrt(await this.numArg(args, 0)))

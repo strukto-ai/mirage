@@ -655,6 +655,12 @@ async function preupload(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
   const found = await locate(ctx)
   if (isReply(found)) return found
+  const revision = ctx.params.rev ?? DEFAULT_REVISION
+  const sha = await resolveRevision(ctx.db, ctx.tenant, found.key, revision)
+  if (sha === null) return revisionNotFound(revision)
+  const existing = new Map(
+    (await blobsAt(ctx.db, ctx.tenant, found.key, sha)).map((blob) => [blob.path, blob]),
+  )
   const body = obj(ctx.json())
   const files = Array.isArray(body.files) ? body.files : []
   return {
@@ -662,6 +668,7 @@ async function preupload(ctx: Ctx<C>): Promise<Reply> {
     body: {
       files: files.map((raw) => {
         const file = obj(raw)
+        const previous = existing.get(str(file.path))
         const size = typeof file.size === 'number' ? file.size : 0
         return {
           path: str(file.path),
@@ -671,6 +678,7 @@ async function preupload(ctx: Ctx<C>): Promise<Reply> {
           // the lfs branch.
           uploadMode: size > 10 * 1024 * 1024 ? 'lfs' : 'regular',
           shouldIgnore: false,
+          oid: previous === undefined ? null : previous.lfsOid || previous.oid,
         }
       }),
     },

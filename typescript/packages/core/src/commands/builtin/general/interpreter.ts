@@ -22,7 +22,7 @@ import type { DispatchFn, RunResult } from '../../../runtime/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { ExecutionNode } from '../../../workspace/types.ts'
-import { CommandTimeoutError } from '../../errors.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 
 /**
  * Convert one interpreter outcome into a command's output pair.

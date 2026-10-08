@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.awk.errors import AwkSyntaxError
-from mirage.core.awk.lexer import Token, TokKind, tokenize
+from mirage.core.awk.lexer import BUILTIN_ARITY, Token, TokKind, tokenize
 from mirage.core.awk.nodes import (
     ArrayRef,
     Assign,
@@ -96,6 +96,8 @@ CONCAT_START_KINDS = frozenset(
 CONCAT_START_OPS = frozenset({"$", "(", "++", "--", "!"})
 
 LVALUE_TYPES = (Var, Field, ArrayRef)
+
+GRAMMAR_BUILTINS = frozenset({"gsub", "length", "match", "split", "sub"})
 
 
 class Parser:
@@ -512,12 +514,7 @@ class Parser:
             return self.parse_getline(None)
         if tok.kind is TokKind.BUILTIN:
             self.pos += 1
-            if self.at_op("("):
-                self.pos += 1
-                args = self.parse_expr_list(")")
-                self.eat_op(")")
-                return BuiltinCall(tok.text, args)
-            return BuiltinCall(tok.text, ())
+            return BuiltinCall(tok.text, self.parse_builtin_args(tok.text))
         if tok.kind is TokKind.FUNC_NAME:
             self.pos += 1
             self.eat_op("(")
@@ -533,6 +530,52 @@ class Parser:
                 return ArrayRef(tok.text, subs)
             return Var(tok.text)
         raise self.error("expected an expression")
+
+    def parse_builtin_args(self, name: str) -> tuple[Expr, ...]:
+        """Parse a builtin's argument list and check its count, as mawk does.
+
+        Only ``length`` may go without parentheses. ``length``, ``match``,
+        ``split``, ``sub`` and ``gsub`` are grammar rules in mawk 1.3.4, so a
+        surplus or missing argument is a syntax error at the token that
+        breaks the rule (``match(s, re, arr)``, gawk's array form, stops at
+        its second comma). Every other builtin takes a free list that is
+        then counted against its bounds.
+
+        Args:
+            name (str): the builtin's name.
+        """
+        if not self.at_op("("):
+            if name == "length":
+                return ()
+            raise self.error("expected '('")
+        self.pos += 1
+        least, most = BUILTIN_ARITY[name]
+        if name not in GRAMMAR_BUILTINS:
+            args = self.parse_expr_list(")")
+            self.eat_op(")")
+            count = len(args)
+            if count < least:
+                raise AwkSyntaxError(
+                    f"awk: not enough arguments in call to {name}: "
+                    f"{count} (need {least})"
+                )
+            if count > most:
+                raise AwkSyntaxError(
+                    f"awk: too many arguments in call to {name}: "
+                    f"{count} (maximum {most})"
+                )
+            return args
+        items: list[Expr] = []
+        self.skip_newlines()
+        while len(items) < most:
+            if len(items) >= least and self.at_op(")"):
+                break
+            if items:
+                self.eat_op(",")
+                self.skip_newlines()
+            items.append(self.parse_expr(P_ASSIGN))
+        self.eat_op(")")
+        return tuple(items)
 
     def parse_field_index(self, no_gt: bool) -> Expr:
         # `$` binds tighter than every binary operator, so `$NF-1` is

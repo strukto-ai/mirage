@@ -53,7 +53,6 @@ from mirage.commands.builtin.grep_select import dir_admitted, file_admitted
 from mirage.commands.builtin.rg_scan import walk_error_line
 from mirage.commands.builtin.utils.links import LinkDoor
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
-from mirage.commands.resolve import get_extension
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
@@ -63,6 +62,7 @@ from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.filetype import get_extension
 from mirage.view.types import NamespaceView
 
 

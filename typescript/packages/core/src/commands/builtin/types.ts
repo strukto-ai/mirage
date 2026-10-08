@@ -15,13 +15,13 @@
 /** One `-exec` action: the words between `-exec` and its terminator, `{}`
  * still in place, and whether it is `{} +` (one run over every match)
  * rather than `;` (one run per match). */
+import type { RowActionKind } from '../../core/generic/find_eval.ts'
+
 export interface ExecAction {
   readonly kind: 'exec'
   readonly argv: readonly string[]
   readonly batch: boolean
 }
-
-export type RowActionKind = 'print' | 'print0' | 'ls' | 'delete'
 
 /** One of find's row actions, in the position it was written. */
 export interface RowAction {

@@ -18,9 +18,15 @@ import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { departed } from '@struktoai/mirage-core/cache/index/diff'
 import { LookupStatus } from '@struktoai/mirage-core/cache/index/config'
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
+import { fnmatchcase } from '@struktoai/mirage-core/utils/fnmatch'
 import type { HfHubAccessor, RowTables } from '../../accessor/hf_hub.ts'
 import { HfHubError, apiUrl, hubGetResponse, hubPost, revSegment } from './client.ts'
-import { MAX_TREE_PAGES, TREE_PAGE_SIZE, TREE_PAGE_SIZE_EXPANDED } from './constants.ts'
+import {
+  GITATTRIBUTES,
+  MAX_TREE_PAGES,
+  TREE_PAGE_SIZE,
+  TREE_PAGE_SIZE_EXPANDED,
+} from './constants.ts'
 import { headCommit, mountVersion } from './repo.ts'
 import type { TreeEntry } from './tree_entry.ts'
 import { isDirEntry } from './tree_entry.ts'
@@ -503,4 +509,66 @@ export async function localRows(accessor: HfHubAccessor, prefix: string): Promis
   const rows = indexRows(accessor.tree, prefix)
   accessor.rowsCache = { prefix, rows }
   return rows
+}
+
+/** The file paths of a tree, sorted, its directories left out. */
+export function repoFiles(tree: Map<string, TreeEntry>): string[] {
+  return [...tree.entries()]
+    .filter(([, entry]) => !isDirEntry(entry))
+    .map(([path]) => path)
+    .sort(compareCodePoints)
+}
+
+/**
+ * Keep the repo paths an allowlist and a denylist of upstream patterns admit.
+ *
+ * huggingface_hub's `filter_repo_objects`, the one rule its `--include`,
+ * `--exclude` and `--delete` share: a pattern is a CPython fnmatch glob over
+ * the whole path, so `*` crosses a `/` (`data/*.json` holds
+ * `data/sub/x.json`), `[^a]` is `^` or `a` rather than bash's negation, and a
+ * pattern ending in `/` names a folder and matches everything under it. An
+ * empty list puts no constraint on the paths.
+ */
+export function filterRepoPaths(
+  paths: readonly string[],
+  include: readonly string[],
+  exclude: readonly string[] = [],
+): string[] {
+  const allow = include.map(folderWildcard)
+  const deny = exclude.map(folderWildcard)
+  return paths.filter(
+    (path) =>
+      (allow.length === 0 || allow.some((pattern) => fnmatchcase(path, pattern))) &&
+      !deny.some((pattern) => fnmatchcase(path, pattern)),
+  )
+}
+
+function folderWildcard(pattern: string): string {
+  return pattern.endsWith('/') ? `${pattern}*` : pattern
+}
+
+/**
+ * The repo files a set of deletion patterns names, as upstream computes them.
+ *
+ * huggingface_hub's `_prepare_folder_deletions`: the patterns match the
+ * repository's listing, not paths of their own, so `**` or `*.txt` deletes the
+ * files it matches and a pattern matching nothing deletes nothing. They match
+ * relative to `pathInRepo`, the folder an upload lands in (normalized: no
+ * leading or trailing slash, '' for the root), and `.gitattributes` always
+ * survives, because the Hub needs it to serve the repo.
+ */
+export function deletionsFor(
+  files: readonly string[],
+  patterns: readonly string[],
+  pathInRepo = '',
+): string[] {
+  if (patterns.length === 0) return []
+  const folder = pathInRepo === '' ? '' : `${pathInRepo}/`
+  const relative = new Map<string, string>()
+  for (const file of files) {
+    if (file.startsWith(folder)) relative.set(file.slice(folder.length), file)
+  }
+  return filterRepoPaths([...relative.keys()], patterns)
+    .map((rel) => relative.get(rel) ?? rel)
+    .filter((file) => file !== GITATTRIBUTES)
 }

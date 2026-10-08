@@ -134,4 +134,33 @@ describe('awk parser', () => {
       expect(() => parse(src)).toThrow(AwkSyntaxError)
     },
   )
+
+  it.each([
+    ['BEGIN{match("a",\n/a/,\nm)}', "awk: syntax error at ',': expected ')'"],
+    ['BEGIN{match("a")}', "awk: syntax error at ')': expected ','"],
+    ['BEGIN{match()}', "awk: syntax error at ')': expected an expression"],
+    ['BEGIN{sub(/a/)}', "awk: syntax error at ')': expected ','"],
+    ['BEGIN{gsub(/a/, "b", x, y)}', "awk: syntax error at ',': expected ')'"],
+    ['BEGIN{print length("a", "b")}', "awk: syntax error at ',': expected ')'"],
+    ['BEGIN{print substr}', "awk: syntax error at '}': expected '('"],
+    ['BEGIN{print substr("abc")}', 'awk: not enough arguments in call to substr: 1 (need 2)'],
+    ['BEGIN{print rand(1)}', 'awk: too many arguments in call to rand: 1 (maximum 0)'],
+    ['BEGIN{print sprintf()}', 'awk: not enough arguments in call to sprintf: 0 (need 1)'],
+    ['BEGIN{print atan2(1, 2, 3)}', 'awk: too many arguments in call to atan2: 3 (maximum 2)'],
+  ])('counts the arguments of %j', (src, message) => {
+    expect(() => parse(src)).toThrow(new AwkSyntaxError(message))
+  })
+
+  it.each([
+    ['BEGIN{print length}', 0],
+    ['BEGIN{print length()}', 0],
+    ['BEGIN{print split("a b", x, " ")}', 3],
+    ['BEGIN{print sprintf("%s %s %s", 1, 2, 3)}', 4],
+    ['BEGIN{print srand()}', 0],
+    ['BEGIN{print fflush()}', 0],
+  ] as const)('accepts the arguments of %j', (src, count) => {
+    expect(firstStmt(src)).toMatchObject({
+      args: [{ type: 'BuiltinCall', args: { length: count } }],
+    })
+  })
 })

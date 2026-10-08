@@ -23,7 +23,7 @@ import {
   keep,
   type PredNode,
   startBasename,
-} from '../../commands/builtin/find_eval.ts'
+} from '../generic/find_eval.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'
 

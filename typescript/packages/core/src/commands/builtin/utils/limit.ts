@@ -14,10 +14,11 @@
 
 import { concat } from '../../../io/cachable_iterator.ts'
 import { chunks } from '../../../io/cooperative.ts'
-import { ensureStream } from '../../../io/stream.ts'
+import { closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type Limit, OnExceed } from '../../../types.ts'
-import { CommandTimeoutError, LimitExceededError } from '../../errors.ts'
+import { LimitExceededError } from '../../errors.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 
 const NEWLINE = 0x0a
 const ENC = new TextEncoder()
@@ -119,6 +120,39 @@ async function* withTimeout(
       // queued behind that pull and cannot delay the timeout itself.
       if (pulling) void closing.catch(() => undefined)
       else await closing
+    }
+  }
+}
+
+/**
+ * Give each pull of a streamed op its own timeout. An op's timeout bounds a
+ * backend call, and a streamed op calls the backend once per pull, so each
+ * pull gets the whole budget and a consumer that pauses between pulls spends
+ * none of it. Mirrors Python's `with_pull_timeout`.
+ */
+export async function* withPullTimeout(
+  src: AsyncIterable<Uint8Array>,
+  seconds: number | null,
+  name: string,
+): AsyncIterableIterator<Uint8Array> {
+  const iterator = src[Symbol.asyncIterator]()
+  let pulling = false
+  try {
+    for (;;) {
+      pulling = true
+      const next = await runWithTimeout(iterator.next(), seconds, name)
+      pulling = false
+      if (next.done === true) return
+      yield next.value
+    }
+  } finally {
+    const closing = iterator.return?.()
+    if (closing !== undefined) {
+      if (pulling) {
+        void closing.catch((err: unknown) => {
+          console.debug(`${name}: closing a timed-out stream failed: ${String(err)}`)
+        })
+      } else await closing
     }
   }
 }
@@ -280,13 +314,37 @@ export async function guardOutput(
   return [data, io.stderr, io.exitCode]
 }
 
+/**
+ * A streamed op result cut at its cap as it is pulled. Nothing past the cap is
+ * pulled from `src`: TRUNCATE ends the stream there, ERROR throws
+ * LimitExceededError at the pull that crossed it. `limitResult` runs it to its
+ * empty first step, inside the `try`, so a caller that closes it before
+ * pulling still closes `src`. Mirrors Python's `_capped`.
+ */
+async function* capped(src: ByteSource, limit: Limit): AsyncGenerator<Uint8Array> {
+  const io = new IOResult()
+  try {
+    yield new Uint8Array()
+    yield* boundedStream(src, io, limit)
+  } finally {
+    await closeQuietly(src)
+  }
+  if (io.exitCode !== 0) {
+    throw new LimitExceededError(DEC.decode(await materialize(io.stderr)).trim())
+  }
+}
+
 export async function limitResult(result: unknown, limit: Limit | null): Promise<unknown> {
   if (limit === null) return result
   if (limit.maxBytes === null && limit.maxLines === null) return result
-  const isBytes = result instanceof Uint8Array
   const isStream = result !== null && typeof result === 'object' && Symbol.asyncIterator in result
-  if (!isBytes && !isStream) return result
-  const [data, sgIo] = await applyLimit(result as ByteSource, limit)
+  if (isStream) {
+    const stream = capped(result as ByteSource, limit)
+    await stream.next()
+    return stream
+  }
+  if (!(result instanceof Uint8Array)) return result
+  const [data, sgIo] = await applyLimit(result, limit)
   if (sgIo.exitCode !== 0) {
     const message = sgIo.stderr instanceof Uint8Array ? DEC.decode(sgIo.stderr) : 'limit exceeded'
     throw new LimitExceededError(message.trim())

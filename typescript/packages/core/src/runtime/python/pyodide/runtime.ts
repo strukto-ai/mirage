@@ -17,7 +17,7 @@ import { captureOpPolicies } from '../../../policy/policies.ts'
 import type { PathSpec } from '../../../types.ts'
 import { captureRecordingContext } from '../../../observe/context.ts'
 import { ContextScope } from '../../../utils/context_scope.ts'
-import { CommandTimeoutError } from '../../../commands/errors.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PythonRuntime } from '../base.ts'
 import { EvalError } from '../../errors.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
@@ -233,10 +233,10 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   readonly name = 'pyodide'
   protected override readonly versionSuffix = ' (pyodide)'
   // The WASM guest's filesystem is the workspace-backed Emscripten FS,
-  // so file effects pass the workspace gate, and loader.ts seals the
-  // `js` module (null-prototype jsglobals) so guest code cannot reach
-  // js.process or js.fetch either. Both doors closed is what makes this
-  // 'workspace' unless a trusted initializer installs host capabilities.
+  // so its file calls pass the workspace gate; loader.ts gives the `js`
+  // module a null-prototype jsglobals, and sealNetwork (network.ts) makes
+  // Emscripten's WebSocket-backed sockets refuse. A trusted initializer
+  // that installs host capabilities makes this 'process'.
   override readonly reach: RuntimeReach
   override readonly filesystem = ['read', 'write', 'list', 'stat', 'glob'] as const
   readonly [EVALUATOR] = true as const

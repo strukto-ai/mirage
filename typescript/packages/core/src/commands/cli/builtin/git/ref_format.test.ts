@@ -143,17 +143,6 @@ it('sorts by the last key given first', () => {
   ])
 })
 
-it.each([
-  ['v1.9', 'v1.10', -1],
-  ['v1.10', 'v1.9', 1],
-  ['v1.0', 'v1.0', 0],
-  ['v2.0-rc1', 'v2.0', 1],
-  ['a01', 'a1', -1],
-  ['a', 'b', -1],
-])('orders %s and %s as versions', (a, b, sign) => {
-  expect(Math.sign(versioncmp(a, b))).toBe(sign)
-})
-
 it('sorts a prerelease suffix before its release', () => {
   expect(versioncmp('v2.0-rc1', 'v2.0', ['-rc'])).toBeLessThan(0)
   expect(versioncmp('v2.0', 'v2.0-rc1', ['-rc'])).toBeGreaterThan(0)

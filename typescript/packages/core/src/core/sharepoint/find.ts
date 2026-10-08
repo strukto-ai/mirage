@@ -20,7 +20,7 @@ import {
   startBasename,
   type FindEntry,
   type PredNode,
-} from '../../commands/builtin/find_eval.ts'
+} from '../generic/find_eval.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import { isEnoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'

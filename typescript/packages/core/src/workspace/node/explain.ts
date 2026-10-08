@@ -56,8 +56,10 @@ import {
   redirectPaths,
   statementRedirects,
   type Refused,
+  UNREADABLE_LINES,
+  unreadable,
 } from './admission.ts'
-import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.ts'
+import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
 import {
   type Frame,
   bodyFrame,
@@ -243,12 +245,12 @@ function unreadPaths(
   return unread
 }
 
-function unreadableWord(raw: string): Judgment {
-  const reason = `cannot read ${raw} before the runtime expands it`
+/** The explanation of a command the gate refuses outright. */
+function denied(command: string, reason: string): Judgment {
   const deny: Deny = { kind: 'deny', reason, scope: 'command' }
-  const [stderr, exitCode] = renderDeny(raw, deny)
+  const [stderr, exitCode] = renderDeny(command, deny)
   return {
-    command: raw,
+    command,
     argv: [],
     outcome: Outcome.DENY,
     rule: null,
@@ -381,7 +383,7 @@ async function judgeWords(
   if (head === undefined) return []
   if (head.text === null) {
     if (wholeLine && hasRules(session.commands)) {
-      return [{ judgment: unreadableWord(head.raw), occurrence, stated: false }]
+      return [{ judgment: denied(head.raw, unreadable(head.raw)), occurrence, stated: false }]
     }
     return []
   }
@@ -436,7 +438,19 @@ async function judgeWords(
     },
   ]
   for (const inner of innerLines(name, words.slice(1))) {
-    if (!innerReadable(inner)) continue
+    if (!innerReadable(inner)) {
+      if (wholeLine && hasRules(session.commands)) {
+        return [
+          {
+            judgment: withOperands(denied(name, UNREADABLE_LINES), operands),
+            occurrence,
+            stated: literal,
+            intrinsic,
+          },
+        ]
+      }
+      continue
+    }
     if (inner.line !== null) {
       out.push(
         ...(await judgeLine(
@@ -481,7 +495,7 @@ async function judgeWords(
 /** One command node's words, name first, the env prefix dropped. */
 function wordsOf(node: TSNodeLike, home: string | null): Word[] {
   const [, parts] = splitEnvPrefix(getParts(node))
-  return parts.map((part) => ({ raw: getText(part), text: literalWord(part, home) }))
+  return parts.map((part) => readWord(part, home))
 }
 
 /**

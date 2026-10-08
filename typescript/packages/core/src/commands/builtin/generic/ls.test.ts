@@ -28,7 +28,7 @@ import {
   parseFlags,
   typeIndicator,
 } from './ls.ts'
-import { CommandTimeoutError } from '../../errors.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'

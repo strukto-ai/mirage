@@ -32,16 +32,12 @@ from mirage.commands.cli.refusal import (
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation, CLISpec
 from mirage.commands.cli.walk import listed_node, node_help, owns_argv, walk
-from mirage.commands.errors import (
-    CommandTimeoutError,
-    PartialOutputError,
-    UsageError,
-)
+from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.concurrency.limiter import run_blocking
-from mirage.errors.types import FsCondition
+from mirage.errors.types import CommandTimeoutError, FsCondition
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput

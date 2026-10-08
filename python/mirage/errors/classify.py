@@ -16,7 +16,7 @@ import errno
 
 from mirage.errors.constants import CLASS_ARMS, ERRNO_ARMS
 from mirage.errors.posix import posix_phrase
-from mirage.errors.types import FsCondition
+from mirage.errors.types import CommandTimeoutError, FsCondition
 
 
 def classify(exc: BaseException) -> FsCondition | None:
@@ -67,3 +67,18 @@ def failure_text(exc: BaseException) -> str:
     if isinstance(exc, OSError) and exc.strerror:
         return exc.strerror
     return str(exc)
+
+
+def is_entry_error(exc: Exception) -> bool:
+    """Whether a listing reports this failure against one entry and walks on.
+
+    GNU's ls and find carry on from any failed stat below an operand,
+    whatever the errno, so a dropped connection or a 5xx on a mount
+    whose stat is a request costs that entry alone. Only what ends the
+    whole command still ends it: the line's timeout here, and its
+    cancellation, which is no Exception at all. Mirrors TS isEntryError.
+
+    Args:
+        exc (Exception): what the entry's stat raised.
+    """
+    return not isinstance(exc, CommandTimeoutError)

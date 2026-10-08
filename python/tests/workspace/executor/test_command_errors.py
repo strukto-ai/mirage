@@ -4,9 +4,9 @@ import pytest
 
 from mirage import RAMVFS, Workspace
 from mirage.commands.config import command
-from mirage.commands.errors import CommandTimeoutError
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eacces
+from mirage.errors.types import CommandTimeoutError
 from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
 from mirage.workspace.mount.mount import MountEntry

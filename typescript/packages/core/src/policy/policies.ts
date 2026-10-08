@@ -21,6 +21,7 @@ import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
 import { HiddenPathsPolicy } from './builtin/hidden_paths.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
+import { OutputCapPolicy } from './builtin/output_cap.ts'
 import { POLICY_DENIED_EXIT } from './constants.ts'
 import { Explained, PolicyDenied, PolicyError } from './errors.ts'
 import { sourceOf } from './match/decide.ts'
@@ -422,6 +423,20 @@ export class Policies {
    */
   wants(hook: Hook): boolean {
     return this.wanted.has(hook)
+  }
+
+  /**
+   * Whether a postVfs policy may read an op's result. The built-in output cap
+   * answers from the op and the mount alone; any other hook, a subclass's
+   * override of the cap's included, may read `ctx.result`, so a streamed read
+   * reaches it read whole. Mirrors
+   * Python's `reads_results`.
+   */
+  readsResults(): boolean {
+    return this.policies.some(
+      (policy) =>
+        policy.postVfs !== undefined && policy.postVfs !== OutputCapPolicy.prototype.postVfs,
+    )
   }
 
   /**

@@ -18,8 +18,13 @@ import type { LinkView } from '../../view/types.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'
-import type { RowActionKind } from './types.ts'
+import { FileType, type FileStat } from '../../types.ts'
 
+/** find's row actions: -print, -print0, -ls and -delete. */
+export type RowActionKind = 'print' | 'print0' | 'ls' | 'delete'
+
+/** The one-letter kind a -printf %y/%Y directive renders. */
+export type PrintfKind = 'f' | 'd' | 'l' | 'c'
 export interface FindEntry {
   key: string
   name: string
@@ -550,4 +555,12 @@ export function unrespellRaw(row: string, virtual: string, raw: string): string 
     return base + '/' + row.slice(stem.length)
   }
   return row
+}
+
+/** The one-letter kind a -printf %y/%Y directive renders for a stat. */
+export function printfKind(st: FileStat): PrintfKind {
+  if (st.type === FileType.DIRECTORY) return 'd'
+  if (st.type === FileType.SYMLINK) return 'l'
+  if (st.type === FileType.CHAR_DEVICE) return 'c'
+  return 'f'
 }

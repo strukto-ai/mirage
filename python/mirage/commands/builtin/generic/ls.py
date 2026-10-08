@@ -14,7 +14,7 @@ from mirage.commands.builtin.utils.output import (
     format_records,
 )
 from mirage.commands.config import CommandOpts
-from mirage.commands.errors import UsageError, is_entry_error
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.argmatch import ArgmatchKind, ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
@@ -24,7 +24,7 @@ from mirage.commands.spec.usage import (
     argmatch_line,
     usage_hint,
 )
-from mirage.errors.classify import failure_text
+from mirage.errors.classify import failure_text, is_entry_error
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import DotWalkError, DotWalkLoop
 from mirage.io.types import IOResult

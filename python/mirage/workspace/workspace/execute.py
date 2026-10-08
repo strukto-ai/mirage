@@ -19,13 +19,13 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
-from mirage.commands.errors import CommandTimeoutError
 from mirage.context import (
     get_current_evaluation,
     reset_refusal_sink,
     set_current_evaluation,
     set_refusal_sink,
 )
+from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope, active_records

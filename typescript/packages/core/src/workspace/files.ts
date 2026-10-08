@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type IOResult, OpReport } from '../io/types.ts'
+import { type ByteSource, type IOResult, OpReport } from '../io/types.ts'
+import { ensureStream } from '../io/stream.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { finishRecord, type OpTimer, startOp } from '../observe/context.ts'
 import { NO_FOLLOW_OPS } from './dispatcher/constants.ts'
@@ -51,6 +52,31 @@ function payloadBytes(result: unknown, args: readonly unknown[]): number {
     if (arg instanceof Uint8Array) return arg.byteLength
   }
   return 0
+}
+
+/**
+ * A streamed answer, recorded once it ends: the door stamps the report with
+ * the bytes the stream carried when it ends, so the record waits for that
+ * rather than counting none. The caller runs it to its empty first step,
+ * inside the `try`, so a stream closed before its first pull is still closed
+ * and recorded. Mirrors Python's `_recorded`.
+ */
+async function* recorded(
+  stream: AsyncIterable<Uint8Array>,
+  record: () => Promise<void>,
+): AsyncGenerator<Uint8Array> {
+  const iterator = stream[Symbol.asyncIterator]()
+  try {
+    yield new Uint8Array()
+    for (;;) {
+      const next = await iterator.next()
+      if (next.done === true) return
+      yield next.value
+    }
+  } finally {
+    await iterator.return?.()
+    await record()
+  }
 }
 
 /**
@@ -244,19 +270,25 @@ export class Files {
       }
       throw err
     }
-    if (owner !== null) {
-      await this.recordOp(
+    if (owner === null) return result
+    const record = (answer: unknown): Promise<void> =>
+      this.recordOp(
         op,
         followed,
         owner,
         report.source,
         report.bytes,
-        result,
+        answer,
         args,
         timer,
         this.sessionFor(seen),
       )
+    if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
+      const stream = recorded(result as AsyncIterable<Uint8Array>, () => record(null))
+      await stream.next()
+      return stream
     }
+    await record(result)
     return result
   }
 
@@ -320,6 +352,24 @@ export class Files {
       )) as Uint8Array
     }
     return (await this.through('read', path, [], kwargs, sessionId)) as Uint8Array
+  }
+
+  /**
+   * Read file content as the caller pulls it. The first chunk is read before
+   * this returns, so a missing file fails here rather than at the first pull.
+   * A cold read fills the cache as it is pulled, and the read is recorded once
+   * the stream ends. A read the door answers whole (a warm copy, a rendering,
+   * a backend with no stream) arrives as one chunk. Python spells this
+   * `read_stream(path, raw)`.
+   */
+  async readStream(
+    path: string,
+    options: { raw?: boolean } = {},
+    sessionId?: string,
+  ): Promise<AsyncIterable<Uint8Array>> {
+    const kwargs: OpKwargs =
+      options.raw === true ? { filetype: null, stream: true } : { stream: true }
+    return ensureStream((await this.through('read', path, [], kwargs, sessionId)) as ByteSource)
   }
 
   async write(path: string, data: Uint8Array | string, sessionId?: string): Promise<void> {

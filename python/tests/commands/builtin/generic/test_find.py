@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.commands.builtin.find_eval import FindArgs, Name, Not, Or
 from mirage.commands.builtin.generic.find import (
     apply_mount_prefix,
     apply_mtime_filter,
@@ -15,8 +14,10 @@ from mirage.commands.builtin.generic.find import (
     find_walk_generic as stream_walk_find,
 )
 from mirage.commands.config import CommandOpts
-from mirage.commands.errors import CommandTimeoutError, FindParseError
+from mirage.commands.errors import FindParseError
 from mirage.core.generic.find import walk_find
+from mirage.core.generic.find_eval import FindArgs, Name, Not, Or
+from mirage.errors.types import CommandTimeoutError
 from mirage.io.types import materialize
 from mirage.types import (
     ContentType,

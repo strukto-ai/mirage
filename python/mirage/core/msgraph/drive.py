@@ -25,14 +25,14 @@ from mirage.cache.index import (
     IndexEntry,
     ResourceType,
 )
-from mirage.commands.builtin.find_eval import (
+from mirage.core.api.client import SessionArg
+from mirage.core.generic.find_eval import (
     FindEntry,
     PredNode,
     build_tree,
     emit_start_path,
     keep,
 )
-from mirage.core.api.client import SessionArg
 from mirage.core.msgraph.client import (
     GraphError,
     graph_delete,

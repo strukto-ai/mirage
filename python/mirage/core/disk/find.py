@@ -19,19 +19,19 @@ from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.find_eval import (
+from mirage.core.disk.errors import disk_errors
+from mirage.core.disk.utils import (
+    read_entries,
+    resolve_inside_sync,
+    walk_entries,
+)
+from mirage.core.generic.find_eval import (
     FindEntry,
     PredNode,
     build_tree,
     emit_start_path,
     keep,
     start_basename,
-)
-from mirage.core.disk.errors import disk_errors
-from mirage.core.disk.utils import (
-    read_entries,
-    resolve_inside_sync,
-    walk_entries,
 )
 from mirage.types import PathSpec
 from mirage.utils.stat_view import DIR_SIZE
