@@ -571,8 +571,20 @@ async def test_a_refusal_keeps_every_version_it_was_measured_on(
         ),
         ("cat /s3/f /s3/g", "f", "mv /s3/f /s3/g; mv /s3/g /s3/h", "g"),
         ("cat /s3/f /s3/g", "f", "mv /s3/f /s3/g; mv /s3/d/a /s3/g", "g"),
+        (
+            "cat /s3/g /s3/d/a",
+            "g",
+            "mv /s3/g /s3/d/a; mv /s3/d /s3/e",
+            "d/a",
+        ),
     ],
-    ids=["rm", "rm -r of an ancestor", "mv away", "mv onto"],
+    ids=[
+        "rm",
+        "rm -r of an ancestor",
+        "mv away",
+        "mv onto",
+        "mv of an ancestor",
+    ],
 )
 async def test_a_removal_lifts_a_kept_version(
     fake, workspaces, setup, changed, line, key
@@ -591,14 +603,42 @@ async def test_a_removal_lifts_a_kept_version(
 async def test_a_directory_rename_holds_each_destination_key_it_read(
     fake, workspaces
 ):
+    # Every changed destination key is refused and keeps its version.
     ws = workspaces()
-    fake.buckets["b"]["e/a"] = b"ea\n"
-    await _run(ws, "cat /s3/e/a")
+    fake.buckets["b"].update({"e/a": b"ea\n", "e/b": b"eb\n"})
+    await _run(ws, "cat /s3/e/a /s3/e/b")
     _theirs(fake, "e/a")
+    _theirs(fake, "e/b")
     with pytest.raises(StaleWriteError):
         await ws.vfs.rename("/s3/d", "/s3/e")
-    assert fake.buckets["b"]["e/a"] == b"theirs\n"
     assert fake.buckets["b"]["d/a"] == b"a\n"
+    for key in ("e/a", "e/b"):
+        assert fake.buckets["b"][key] == b"theirs\n"
+        fake.buckets["b"][key] = b"newest\n"
+        code, _, err = await _run(ws, f"echo z > /s3/{key}")
+        assert code == 1 and STALE in err, err
+        assert fake.buckets["b"][key] == b"newest\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("read", [True, False], ids=["gone", "never read"])
+async def test_a_directory_rename_onto_a_key_it_holds_no_version_of(
+    fake, workspaces, read
+):
+    # A destination key found gone keeps no version; one never read is replaced plain.
+    ws = workspaces()
+    fake.buckets["b"]["e/a"] = b"ea\n"
+    if read:
+        await _run(ws, "cat /s3/e/a")
+        del fake.buckets["b"]["e/a"]
+        with pytest.raises(StaleWriteError):
+            await ws.vfs.rename("/s3/d", "/s3/e")
+        code, _, err = await _run(ws, "echo z > /s3/e/a")
+        assert code == 0, err
+        assert fake.buckets["b"]["e/a"] == b"z\n"
+    else:
+        await ws.vfs.rename("/s3/d", "/s3/e")
+        assert fake.buckets["b"]["e/a"] == b"a\n"
 
 
 @pytest.mark.asyncio

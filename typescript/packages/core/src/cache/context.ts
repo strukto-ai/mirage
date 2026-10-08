@@ -417,7 +417,8 @@ export async function dropCached(path: PathSpec, keep: string | null = null): Pr
  * retry to overwrite. `landed` marks a move whose copy landed before its
  * source's delete lost, which `mv` reports as a failed removal; `version` is
  * the one the write sent, when the line no longer names it (a move retracts
- * both paths). Mirrors python's `stale`.
+ * both paths), empty when the op found the file had none to keep. Mirrors
+ * python's `stale`.
  */
 export async function stale(
   path: PathSpec,
@@ -426,8 +427,10 @@ export async function stale(
   version: string | null = null,
 ): Promise<FsError> {
   const context = activeWriteContext(path)
-  const sent = version !== null && version !== '' ? version : null
-  const keep = !gone && context !== null ? (sent ?? (await context.readVersion(path))) : null
+  const keep =
+    !gone && version !== '' && context !== null
+      ? (version ?? (await context.readVersion(path)))
+      : null
   await dropCached(path, keep)
   return staleWrite(path, landed)
 }

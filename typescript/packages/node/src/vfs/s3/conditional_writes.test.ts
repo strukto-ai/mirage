@@ -446,6 +446,7 @@ describe('conditional writes on an S3 mount', () => {
     ['rm -r of an ancestor', 'cat /s3/g /s3/d/a', 'g', 'mv /s3/g /s3/d/a; rm -r /s3/d', 'd/a'],
     ['mv away', 'cat /s3/f /s3/g', 'f', 'mv /s3/f /s3/g; mv /s3/g /s3/h', 'g'],
     ['mv onto', 'cat /s3/f /s3/g', 'f', 'mv /s3/f /s3/g; mv /s3/d/a /s3/g', 'g'],
+    ['mv of an ancestor', 'cat /s3/g /s3/d/a', 'g', 'mv /s3/g /s3/d/a; mv /s3/d /s3/e', 'd/a'],
   ] as const)(
     'lifts a kept version once the file is gone: %s',
     async (_name, setup, changed, line, key) => {
@@ -461,13 +462,44 @@ describe('conditional writes on an S3 mount', () => {
   )
 
   it('holds each destination key a directory rename read', async () => {
+    // Every changed destination key is refused and keeps its version.
     const ws = workspace()
     mock.store.set('b', 'e/a', ENC.encode('ea\n'))
-    await run(ws, 'cat /s3/e/a')
+    mock.store.set('b', 'e/b', ENC.encode('eb\n'))
+    await run(ws, 'cat /s3/e/a /s3/e/b')
     theirs('e/a')
+    theirs('e/b')
     await expect(ws.vfs.rename('/s3/d', '/s3/e')).rejects.toMatchObject({ code: 'STALE_WRITE' })
-    expect(object('e/a')).toBe('theirs\n')
     expect(object('d/a')).toBe('a\n')
+    for (const key of ['e/a', 'e/b']) {
+      expect(object(key)).toBe('theirs\n')
+      mock.store.set('b', key, ENC.encode('newest\n'))
+      const [code, , err] = await run(ws, `echo z > /s3/${key}`)
+      expect(code === 1 && err.includes(STALE), err).toBe(true)
+      expect(object(key)).toBe('newest\n')
+    }
+  })
+
+  it.each([
+    ['gone', true],
+    ['never read', false],
+  ] as const)('renames a directory onto a key it holds no version of: %s', async (_name, read) => {
+    // A destination key found gone keeps no version; one never read is replaced plain.
+    const ws = workspace()
+    mock.store.set('b', 'e/a', ENC.encode('ea\n'))
+    if (read) {
+      await run(ws, 'cat /s3/e/a')
+      mock.store.delete('b', 'e/a')
+      await expect(ws.vfs.rename('/s3/d', '/s3/e')).rejects.toMatchObject({
+        code: 'STALE_WRITE',
+      })
+      const [code, , err] = await run(ws, 'echo z > /s3/e/a')
+      expect(code, err).toBe(0)
+      expect(object('e/a')).toBe('z\n')
+    } else {
+      await ws.vfs.rename('/s3/d', '/s3/e')
+      expect(object('e/a')).toBe('a\n')
+    }
   })
 
   it('refuses an ops call again after a refusal', async () => {

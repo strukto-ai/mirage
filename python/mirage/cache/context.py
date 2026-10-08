@@ -475,11 +475,12 @@ async def stale(
             lost.
         gone (bool): the file no longer exists.
         version (str | None): the version the write sent, when the line
-            no longer names it (a move retracts both paths).
+            no longer names it (a move retracts both paths); empty when
+            the op found the file had none to keep.
     """
     context = _write.get()
     keep = None
-    if not gone and context is not None:
+    if not gone and version != "" and context is not None:
         keep = version or await context.read_version(path)
     await drop_cached(path, keep)
     err = stale_write(path)
