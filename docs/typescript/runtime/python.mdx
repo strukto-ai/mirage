@@ -44,6 +44,27 @@ await ws.shell('echo hello > /data/a.txt')
 const io = await ws.shell(`python3 -c "print(open('/data/a.txt').read().strip())"`)
 ```
 
+### Concurrent calls
+
+`PyodideRuntime` accepts `config.maxConcurrency`, a positive safe integer
+that defaults to `1`. This bounds active top-level commands, one-shot
+evaluations, and feeds to distinct named console sessions. Extra calls wait
+for a slot; feeds to the same console remain serial. Each ordinary command
+and one-shot evaluation still owns a fresh interpreter, and each named
+console retains its own interpreter. Nested subprocess calls bypass the
+limit so a parent waiting for its child cannot deadlock.
+
+Shell calls sharing a session stay ordered. Create distinct sessions with
+`ws.createSession(id)` and pass `{ sessionId: id }` to `ws.shell()` for
+independent concurrent shell calls.
+
+Hosts without isolated asynchronous task context use an effective limit
+of `1`. CPU parallelism also requires workers and `SharedArrayBuffer`;
+otherwise guest execution stays on the host thread. Increasing concurrency
+uses more interpreter memory and does not remove startup cost.
+See [Python command concurrency](/typescript/python#2-concurrency-is-bounded-and-defaults-to-one)
+for a `Promise.all` example.
+
 ### Workspace file access
 
 Pyodide supports `open()`, `os.listdir`, `pathlib`, and native packages
@@ -216,10 +237,10 @@ registered with `registerRuntime`, or a `./file.mjs:Class` reference to a
 
 ```yaml
 runtimes:
-  - monty         # or: pyodide
   - name: pyodide # knobs live in the entry's config block
     config:
       home: https://assets.example.com/pyodide/
+      max_concurrency: 2
   - workspace
 mounts:
   /data:
@@ -244,9 +265,17 @@ own options:
 
 ```ts
 const ws = new Workspace(mounts, {
-  runtimes: [new PyodideRuntime({ config: { home: 'https://assets.example.com/pyodide/' } }), 'workspace'],
+  runtimes: [
+    new PyodideRuntime({
+      config: { home: 'https://assets.example.com/pyodide/', maxConcurrency: 2 },
+    }),
+    'workspace',
+  ],
 })
 ```
+
+YAML spells the concurrency option `max_concurrency`; TypeScript uses
+`maxConcurrency`. Both default to one active top-level invocation per runtime.
 
 `pyodide.config.initModule` accepts a trusted host module URL or absolute
 Node path. Its default export receives the loaded Pyodide instance before

@@ -16,7 +16,10 @@ import { readFileSync } from 'node:fs'
 import { captureBinding, WorkspaceBinding } from '../../binding.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { PathSpec } from '../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { getCurrentSession, runWithSession } from '../../../context/session_context.ts'
+import { SessionState } from '../../../workspace/session/session.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PyodideRuntime } from './runtime.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import { loadPyodideRuntime } from './loader.ts'
@@ -25,6 +28,14 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+
+function gate(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
 
 describe('Pyodide execution lifetime', { timeout: 120_000 }, () => {
   it.each(['inline', 'worker', 'fallback'] as const)(
@@ -69,6 +80,217 @@ describe('Pyodide execution lifetime', { timeout: 120_000 }, () => {
       }
     },
   )
+})
+
+describe('Pyodide concurrency', { timeout: 120_000 }, () => {
+  it.each([1, 2])(
+    'bounds calls and preserves close barriers (limit %s)',
+    async (maxConcurrency) => {
+      const rt = new PyodideRuntime({ config: maxConcurrency === 1 ? {} : { maxConcurrency } })
+      const reads = new Map(
+        ['one', 'two', 'three', 'four'].map(
+          (name) => [name, { entered: gate(), release: gate() }] as const,
+        ),
+      )
+      const create = vi.spyOn(PyodideWorkerClient, 'create')
+      const pending: Promise<unknown>[] = []
+      rt.bind(
+        new WorkspaceBinding(
+          async (op, path) => {
+            if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 5 })
+            const read = reads.get(path.slice('/data/'.length))
+            if (op !== 'read' || read === undefined) throw new Error(`unexpected ${op}: ${path}`)
+            read.entered.resolve()
+            await read.release.promise
+            return new TextEncoder().encode(getCurrentSession()?.sessionId ?? 'missing')
+          },
+          new PrefixResolver(() => ['/data/']),
+        ),
+      )
+      const run = (name: string) =>
+        runWithSession(new SessionState({ sessionId: name }), () =>
+          rt.run({ code: `print(open('/data/${name}').read())`, args: [], env: {}, stdin: null }),
+        )
+      try {
+        const first =
+          maxConcurrency === 1
+            ? runWithSession(new SessionState({ sessionId: 'one' }), () =>
+                rt.eval("value = open('/data/one').read(); print(value)", { session: 'first' }),
+              )
+            : run('one')
+        const second = runWithSession(new SessionState({ sessionId: 'two' }), () =>
+          rt.eval("open('/data/two').read(); raise ValueError('expected failure')"),
+        ).catch((error: unknown) => error)
+        const third = run('three')
+        pending.push(first, second, third)
+        if (maxConcurrency === 1) {
+          const firstRead = await Promise.race(
+            [...reads].map(async ([name, read]) => {
+              await read.entered.promise
+              return name
+            }),
+          )
+          expect(firstRead).toBe('one')
+        }
+        await reads.get('one')?.entered.promise
+        if (maxConcurrency === 2) await reads.get('two')?.entered.promise
+        expect(create).toHaveBeenCalledTimes(maxConcurrency)
+        let closed = false
+        const closing = rt.close().then(() => {
+          closed = true
+        })
+        const fourth = run('four')
+        const closeAgain = rt.close()
+        pending.push(closing, fourth, closeAgain)
+        reads.get('one')?.release.resolve()
+        if (maxConcurrency === 1) {
+          await reads.get('two')?.entered.promise
+          reads.get('two')?.release.resolve()
+        }
+        await reads.get('three')?.entered.promise
+        expect(create).toHaveBeenCalledTimes(3)
+        expect(closed).toBe(false)
+        reads.get('two')?.release.resolve()
+        reads.get('three')?.release.resolve()
+        await closing
+        await reads.get('four')?.entered.promise
+        expect(closed).toBe(true)
+        reads.get('four')?.release.resolve()
+        const results = await Promise.all([first, third, fourth])
+        expect(results.map((result) => new TextDecoder().decode(result.stdout))).toEqual([
+          'one\n',
+          'three\n',
+          'four\n',
+        ])
+        expect(results.map((result) => result.exitCode)).toEqual([0, 0, 0])
+        const failure = await second
+        expect(failure).toBeInstanceOf(Error)
+        expect((failure as Error).message).toContain('expected failure')
+        await closeAgain
+      } finally {
+        for (const read of reads.values()) read.release.resolve()
+        await Promise.allSettled(pending)
+        await rt.close()
+        create.mockRestore()
+      }
+    },
+  )
+
+  it.each(['abort', 'timeout'] as const)(
+    'keeps another call running and releases its slot after %s',
+    async (kind) => {
+      const entered = gate()
+      const release = gate()
+      const rt = new PyodideRuntime({ config: { maxConcurrency: 2 } })
+      rt.bind(
+        new WorkspaceBinding(
+          async (op, path) => {
+            if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 4 })
+            if (op !== 'read') throw new Error(`unexpected ${op}: ${path}`)
+            entered.resolve()
+            await release.promise
+            return new TextEncoder().encode('safe')
+          },
+          new PrefixResolver(() => ['/data/']),
+        ),
+      )
+      const controller = new AbortController()
+      const pending: Promise<unknown>[] = []
+      try {
+        const other = rt.run({
+          code: "print(open('/data/other').read())",
+          args: [],
+          env: {},
+          stdin: null,
+        })
+        pending.push(other)
+        await entered.promise
+        const interrupted = rt
+          .run({
+            code: 'while True: pass',
+            args: [],
+            env: {},
+            stdin: null,
+            ...(kind === 'abort' ? { signal: controller.signal } : { timeoutSeconds: 0.1 }),
+          })
+          .catch((error: unknown) => error)
+        pending.push(interrupted)
+        const next = rt.run({ code: 'print(42)', args: [], env: {}, stdin: null })
+        pending.push(next)
+        controller.abort()
+        const result = await interrupted
+        if (kind === 'timeout') expect(result).toBeInstanceOf(CommandTimeoutError)
+        else expect(result).toMatchObject({ exitCode: 1 })
+        const fresh = await next
+        expect(fresh.exitCode).toBe(0)
+        expect(new TextDecoder().decode(fresh.stdout)).toBe('42\n')
+        release.resolve()
+        const continued = await other
+        expect(continued.exitCode).toBe(0)
+        expect(new TextDecoder().decode(continued.stdout)).toBe('safe\n')
+      } finally {
+        release.resolve()
+        controller.abort()
+        await Promise.allSettled(pending)
+        await rt.close()
+      }
+    },
+  )
+
+  it('serializes each console without occupying another call slot', async () => {
+    const rt = new PyodideRuntime({ config: { maxConcurrency: 2 } })
+    const reads = new Map(
+      ['first', 'second', 'other'].map(
+        (name) => [name, { entered: gate(), release: gate() }] as const,
+      ),
+    )
+    const create = vi.spyOn(PyodideWorkerClient, 'create')
+    const pending: Promise<unknown>[] = []
+    rt.bind(
+      new WorkspaceBinding(
+        async (op, path) => {
+          if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 0 })
+          const read = reads.get(path.slice('/data/'.length))
+          if (op !== 'read' || read === undefined) throw new Error(`unexpected ${op}: ${path}`)
+          read.entered.resolve()
+          await read.release.promise
+          return new Uint8Array()
+        },
+        new PrefixResolver(() => ['/data/']),
+      ),
+    )
+    try {
+      const first = rt.eval("token = 41; value = open('/data/first').read(); print(token)", {
+        session: 'one',
+      })
+      const second = rt.eval("token += 1; value = open('/data/second').read(); print(token)", {
+        session: 'one',
+      })
+      const other = rt.eval("value = open('/data/other').read(); print('token' in globals())", {
+        session: 'two',
+      })
+      pending.push(first, second, other)
+      await Promise.all([reads.get('first')?.entered.promise, reads.get('other')?.entered.promise])
+      expect(create).toHaveBeenCalledTimes(2)
+      reads.get('first')?.release.resolve()
+      await reads.get('second')?.entered.promise
+      expect(create).toHaveBeenCalledTimes(2)
+      reads.get('second')?.release.resolve()
+      reads.get('other')?.release.resolve()
+      const results = await Promise.all([first, second, other])
+      expect(results.map((result) => new TextDecoder().decode(result.stdout))).toEqual([
+        '41\n',
+        '42\n',
+        'False\n',
+      ])
+      expect(results.map((result) => result.exitCode)).toEqual([0, 0, 0])
+    } finally {
+      for (const read of reads.values()) read.release.resolve()
+      await Promise.allSettled(pending)
+      await rt.close()
+      create.mockRestore()
+    }
+  })
 })
 
 describe('Python guest module', { timeout: 120_000 }, () => {
