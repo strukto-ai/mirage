@@ -493,19 +493,17 @@ describe('fillEnv through execute', () => {
     }
   })
 
-  it("an uncalled function's saved alias fetches nothing", async () => {
+  it.each([
+    [['alias echo=\'printf "$TOKEN"\'', 'f() { :; }', 'unalias echo'], 'echo ok'],
+    [['alias a=\'echo "$TOKEN"\'', 'f() { echo "$(a)"; }', "alias a='echo ok'"], 'f'],
+  ])('a saved alias fetches nothing where it is not read (%j)', async (lines, line) => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
-    registerSecrets('fake-alias-uncalled', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-alias-uncalled', ref: 'r' } })
+    registerSecrets('fake-alias-unread', FakeConfig, fetch)
+    const ws = await makeWs({ TOKEN: { from: 'fake-alias-unread', ref: 'r' } })
     try {
-      for (const line of [
-        'shopt -s expand_aliases',
-        'alias echo=\'printf "$TOKEN"\'',
-        'f() { :; }',
-        'unalias echo',
-      ])
-        expect((await ws.shell(line)).exitCode).toBe(0)
-      expect(stdoutStr(await ws.shell('echo ok'))).toBe('ok\n')
+      for (const setup of ['shopt -s expand_aliases', ...lines])
+        expect((await ws.shell(setup)).exitCode).toBe(0)
+      expect(stdoutStr(await ws.shell(line))).toBe('ok\n')
       expect(calls).toEqual([])
     } finally {
       await ws.close()

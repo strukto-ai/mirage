@@ -37,6 +37,7 @@ from mirage.shell.parse import (
     parse,
     referenced_names,
 )
+from mirage.shell.parse.names import walk_named_outside_defs
 from mirage.shell.types import TSNodeLike
 from mirage.shell.variable import ManagedRef, VarAttr, with_value
 from mirage.utils.hidden import var_hidden
@@ -53,6 +54,11 @@ from mirage.workspace.session.state import deref
 # variable no read walk collects -- a synthetic *name* here would be a
 # real variable a workspace could manage, and every alias would read it.
 _ALIAS_REST = ' "$@"'
+
+# A substitution runs commands of its own, read when it runs: a prefix
+# assignment holding one runs code before the masks land, and one in a
+# stored body reads the aliases of that moment, not the body's saved ones.
+_SUBSTITUTIONS = frozenset({"command_substitution", "process_substitution"})
 
 
 def _defined_bodies(node: TSNodeLike) -> dict[str, list[TSNodeLike]]:
@@ -93,9 +99,10 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
     has already run. The line, and a body it defines, read the live
     aliases, only under ``expand_aliases`` (the gate ``alias_value``
     applies at dispatch); a stored function's body reads the ones its
-    definition saved. Each name resolves once per alias table, so mutual
-    recursion terminates; over-selection only ever over-fetches,
-    under-selection is the bug.
+    definition saved, except in a substitution, which is read when it
+    runs and so reads the live ones. Each name resolves once per alias
+    table, so mutual recursion terminates; over-selection only ever
+    over-fetches, under-selection is the bug.
 
     Args:
         node (TSNodeLike): the parsed line.
@@ -115,7 +122,14 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
     frontier: list[tuple[TSNodeLike, Mapping[str, str]]] = [(node, live)]
     while frontier:
         current, aliases = frontier.pop()
-        for word in command_words(current):
+        nested = _SUBSTITUTIONS if aliases is not live else frozenset()
+        frontier.extend(
+            (child, live)
+            for outer in walk_named_outside_defs(current, nested)
+            for child in outer.named_children
+            if child.type in nested
+        )
+        for word in command_words(current, nested):
             if (word, id(aliases)) in seen:
                 continue
             seen.add((word, id(aliases)))
@@ -229,14 +243,6 @@ def cli_env_names(
     return frozenset(out)
 
 
-# A prefix assignment's value may carry expansions (the walk reads
-# them), but a substitution runs commands of its own, which is exactly
-# the "nothing runs before the masks land" premise the prefix trades on.
-_MASK_VALUE_BLOCKERS = frozenset(
-    {"command_substitution", "process_substitution"}
-)
-
-
 def _replacement_blocked(part: TSNodeLike) -> bool:
     """Whether an assignment's subtree defeats the masking premise.
 
@@ -252,7 +258,7 @@ def _replacement_blocked(part: TSNodeLike) -> bool:
     stack = list(part.named_children)
     while stack:
         current = stack.pop()
-        if current.type in _MASK_VALUE_BLOCKERS:
+        if current.type in _SUBSTITUTIONS:
             return True
         stack.extend(current.named_children)
     return False

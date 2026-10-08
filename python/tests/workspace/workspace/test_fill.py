@@ -455,19 +455,31 @@ async def test_a_functions_saved_alias_fills_on_invocation():
 
 
 @pytest.mark.asyncio
-async def test_an_uncalled_functions_saved_alias_fetches_nothing():
+@pytest.mark.parametrize(
+    "lines, line",
+    [
+        (
+            ("alias echo='printf \"$TOKEN\"'", "f() { :; }", "unalias echo"),
+            "echo ok",
+        ),
+        (
+            (
+                "alias a='echo \"$TOKEN\"'",
+                'f() { echo "$(a)"; }',
+                "alias a='echo ok'",
+            ),
+            "f",
+        ),
+    ],
+)
+async def test_a_saved_alias_fetches_nothing_where_it_is_not_read(lines, line):
     calls, fetch = counting_source({"TOKEN": "t0"})
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        for line in (
-            "shopt -s expand_aliases",
-            "alias echo='printf \"$TOKEN\"'",
-            "f() { :; }",
-            "unalias echo",
-        ):
-            assert (await ws.shell(line)).exit_code == 0
-        io = await ws.shell("echo ok")
+        for setup in ("shopt -s expand_aliases", *lines):
+            assert (await ws.shell(setup)).exit_code == 0
+        io = await ws.shell(line)
         assert (await io.stdout_str()) == "ok\n"
         assert calls == []
     finally:

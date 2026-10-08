@@ -33,6 +33,7 @@ import {
   referencedNames,
   sameNode,
 } from '../../shell/parse/index.ts'
+import { walkNamedOutsideDefs } from '../../shell/parse/names.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { VarAttr, withValue } from '../../shell/variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -54,6 +55,11 @@ import { deref } from '../session/state.ts'
 // variable no read walk collects -- a synthetic *name* here would be a
 // real variable a workspace could manage, and every alias would read it.
 const ALIAS_REST = ' "$@"'
+
+// A substitution runs commands of its own, read when it runs: a prefix
+// assignment holding one runs code before the masks land, and one in a
+// stored body reads the aliases of that moment, not the body's saved ones.
+const SUBSTITUTIONS: ReadonlySet<string> = new Set(['command_substitution', 'process_substitution'])
 
 /**
  * Function bodies the line itself defines, every one per name.
@@ -96,9 +102,10 @@ function definedBodies(node: TSNodeLike): Map<string, TSNodeLike[]> {
  * pass has already run. The line, and a body it defines, read the live
  * aliases, only under `expand_aliases` (the gate alias expansion applies
  * at dispatch); a stored function's body reads the ones its definition
- * saved. Each name resolves once per alias table, so mutual recursion
- * terminates; over-selection only ever over-fetches, under-selection is
- * the bug.
+ * saved, except in a substitution, which is read when it runs and so
+ * reads the live ones. Each name resolves once per alias table, so mutual
+ * recursion terminates; over-selection only ever over-fetches,
+ * under-selection is the bug.
  */
 export function lineNodes(
   node: TSNodeLike,
@@ -119,7 +126,12 @@ export function lineNodes(
     const [current, aliases] = next
     let done = seen.get(aliases)
     if (done === undefined) seen.set(aliases, (done = new Set()))
-    for (const word of commandWords(current)) {
+    const nested: ReadonlySet<string> = aliases !== live ? SUBSTITUTIONS : new Set()
+    for (const outer of walkNamedOutsideDefs(current, nested)) {
+      for (const child of outer.namedChildren)
+        if (nested.has(child.type)) frontier.push([child, live])
+    }
+    for (const word of commandWords(current, nested)) {
       if (done.has(word)) continue
       done.add(word)
       const stored = Object.hasOwn(session.functions, word) ? session.functions[word] : undefined
@@ -229,14 +241,6 @@ function pendingOf(session: SessionState): Map<string, ManagedRef> {
   return out
 }
 
-// A prefix assignment's value may carry expansions (the walk reads
-// them), but a substitution runs commands of its own, which is exactly
-// the "nothing runs before the masks land" premise the prefix trades on.
-const MASK_VALUE_BLOCKERS: ReadonlySet<string> = new Set([
-  'command_substitution',
-  'process_substitution',
-])
-
 /**
  * Whether an assignment's subtree defeats the masking premise.
  *
@@ -250,7 +254,7 @@ function replacementBlocked(part: TSNodeLike): boolean {
   for (;;) {
     const current = stack.pop()
     if (current === undefined) break
-    if (MASK_VALUE_BLOCKERS.has(current.type)) return true
+    if (SUBSTITUTIONS.has(current.type)) return true
     stack.push(...current.namedChildren)
   }
   return false
