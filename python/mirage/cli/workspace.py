@@ -28,6 +28,7 @@ from mirage.cli.output import (
     format_table,
     handle_response,
 )
+from mirage.utils.yaml import parse_yaml
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspaces.")
 
@@ -66,9 +67,9 @@ def _resolve_config_arg(path: Path) -> dict[str, Any]:
     the config module the same way so a spawn that loads no config
     never pays for it.
     """
-    from mirage.config import _absolutize_scripts, _interpolate_env, _load_yaml
+    from mirage.config import _absolutize_scripts, _interpolate_env
 
-    raw = _load_yaml(path) or {}
+    raw = parse_yaml(path.read_text(encoding="utf-8")) or {}
     try:
         resolved = _interpolate_env(raw, dict(os.environ))
     except ValueError as e:

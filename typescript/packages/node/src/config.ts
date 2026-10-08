@@ -16,7 +16,7 @@ import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { parse as parseYaml } from 'yaml'
+import { parseYaml } from './utils/yaml.ts'
 import type { CacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import type { IndexConfig, RedisIndexConfig } from '@struktoai/mirage-core/cache/index/config'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
@@ -964,7 +964,7 @@ export function checkWorkspaceConfigFile(
   env?: Record<string, string>,
 ): Record<string, unknown> {
   const text = readFileSync(path, 'utf-8')
-  const parsed: unknown = parseYaml(text)
+  const parsed = parseYaml(text)
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`config source must be a mapping`)
   }

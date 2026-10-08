@@ -1,5 +1,5 @@
 {
- "baseline": 4002,
+ "baseline": 4001,
  "modules": {
   "policy/policies": {
    "typescript_only": {
@@ -282,10 +282,12 @@
     "refuseRepeatedFields": "Python's models take one spelling of a field, so a second spelling is an extra field pydantic refuses; a TypeScript config takes either spelling, so the code door refuses one field named in both."
    }
   },
-  "config": {
+  "utils/yaml": {
    "python_only": {
     "_YamlLoader": "PyYAML needs a SafeLoader subclass to recognize exponent-only floats without changing yaml.safe_load globally; TypeScript's yaml package already uses YAML 1.2 exponent resolution. Both loaders read the shared YAML scalar fixture."
-   },
+   }
+  },
+  "config": {
    "typescript_only": {
     "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same door."
    }

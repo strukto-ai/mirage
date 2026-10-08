@@ -19,7 +19,6 @@ import uuid
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -52,6 +51,7 @@ from mirage.types import (
     ReadPolicy,
     parse_mount_mode,
 )
+from mirage.utils.yaml import parse_yaml
 from mirage.vfs.loader import load_attr
 from mirage.vfs.registry import build_vfs
 from mirage.vfs.s3.config import S3Config
@@ -93,30 +93,6 @@ def _coerce_mount_mode(value):
 
 
 _VAR_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
-
-
-class _YamlLoader(yaml.SafeLoader):
-    """Resolve exponent numbers as TypeScript's YAML 1.2 loader does.
-
-    The remaining PyYAML resolvers stay unchanged, and this subclass
-    leaves ``yaml.safe_load`` untouched for other consumers.
-    """
-
-
-_YamlLoader.add_implicit_resolver(
-    "tag:yaml.org,2002:float",
-    re.compile(r"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)[eE][+-]?[0-9]+$"),
-    list("+-0123456789."),
-)
-
-
-def _load_yaml(path: Path) -> Any:
-    """Read config scalars identically for validation and CLI transport.
-
-    Args:
-        path (Path): Workspace YAML or JSON file to read.
-    """
-    return yaml.load(path.read_text(encoding="utf-8"), Loader=_YamlLoader)
 
 
 class _EnvInterpolator:
@@ -1058,7 +1034,7 @@ def load_config(
     """
     base: Path | None = None
     if isinstance(source, (str, Path)):
-        raw = _load_yaml(Path(source))
+        raw = parse_yaml(Path(source).read_text(encoding="utf-8"))
         base = Path(source).resolve().parent
     else:
         raw = dict(source)

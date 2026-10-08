@@ -54,6 +54,8 @@ jobs:
         with:
           # A filter with no '!' rule matches exactly as under 'some'; a '!'
           # rule drops a file even when another rule of its filter matched it.
+          # The shared utils/yaml config readers stay under the broad python
+          # and typescript filters here and in runtime, as config itself does.
           predicate-quantifier: some-with-excludes
           filters: |
             core:
