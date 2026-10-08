@@ -1499,6 +1499,11 @@ class Tape extends BaseVFS {
     return data === undefined ? Promise.reject(enoent(path)) : Promise.resolve(data)
   }
 
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    this.files.set(path.vfsPath.replace(/^\/+/, ''), data)
+    return Promise.resolve()
+  }
+
   override async *readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     const data = this.files.get(path.vfsPath.replace(/^\/+/, ''))
     if (data === undefined) throw enoent(path)
@@ -1627,6 +1632,20 @@ describe('a streamed read', () => {
       await stream.return(undefined)
       expect([tape.pulled, tape.closed]).toEqual([1, true])
       await ws.dispatch('read', TAPE)
+      expect(tape.reads).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps none of itself when a write lands during it', async () => {
+    const tape = new Tape()
+    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
+    try {
+      const stream = await ws.dispatch('read', TAPE, [], { stream: true })
+      await ws.dispatch('write', TAPE, [ENC.encode('new')])
+      expect((await pullAll(stream))[0]).toBe('0123456789')
+      expect(DEC.decode((await ws.dispatch('read', TAPE)) as Uint8Array)).toBe('new')
       expect(tape.reads).toBe(1)
     } finally {
       await ws.close()

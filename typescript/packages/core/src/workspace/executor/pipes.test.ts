@@ -22,6 +22,7 @@ import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { handleConnection, handlePipe, handleSubshell } from './pipes.ts'
+import { CommandTimeoutError } from '../../errors/types.ts'
 import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
 
 function node(text: string): TSNodeLike {
@@ -308,7 +309,6 @@ it.each(['abort', 'timeout'])(
   async (kind) => {
     const { CachableAsyncIterator } = await import('../../io/cachable_iterator.ts')
     const { asyncChain } = await import('../../io/stream.ts')
-    const { CommandTimeoutError } = await import('../../errors/types.ts')
     let closed = false
     async function* source() {
       await Promise.resolve()

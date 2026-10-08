@@ -10,6 +10,7 @@ from mirage.core.generic.find_eval import (
     Action,
     And,
     Empty,
+    FindEntry,
     Mtime,
     Name,
     Not,
@@ -236,8 +237,6 @@ def test_invalid_numeric_arg_raises_find_parse_error(tokens):
 
 
 def _ent(name="a", kind="f"):
-    from mirage.core.generic.find_eval import FindEntry
-
     return FindEntry(key="/" + name, name=name, kind=kind, depth=1)
 
 

@@ -1597,6 +1597,11 @@ class Tape(BaseVFS):
         self.reads += 1
         return self.files[path.vfs_path.strip("/")]
 
+    async def write(
+        self, path: PathSpec, data: bytes, index: IndexCacheStore = NULL_INDEX
+    ) -> None:
+        self.files[path.vfs_path.strip("/")] = data
+
     async def read_stream(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
@@ -1721,6 +1726,17 @@ async def test_a_stream_closed_before_its_first_pull_closes_and_keeps_nothing():
         assert (tape.pulled, tape.closed) == (1, True)
         await ws.dispatch("read", TAPE)
         assert tape.reads == 1
+
+
+@pytest.mark.asyncio
+async def test_a_write_during_a_stream_keeps_none_of_it():
+    tape = Tape()
+    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+        stream, _ = await ws.dispatch("read", TAPE, stream=True)
+        await ws.dispatch("write", TAPE, data=b"new")
+        assert [chunk async for chunk in stream][0] == b"0123456789"
+        got, _ = await ws.dispatch("read", TAPE)
+        assert (got, tape.reads) == (b"new", 1)
 
 
 @pytest.mark.asyncio
