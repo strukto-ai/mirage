@@ -14,7 +14,7 @@
   "exit": 0,
   "lines": [
     "python3 in @mirage-ai — Pyodide-backed, three invocation modes",
-    "(first call takes ~1-2s to boot Pyodide; subsequent calls are instant)",
+    "(each command starts a fresh Pyodide interpreter)",
     "",
     "=== python3 -c \"print(2+3)\" ===",
     "5",

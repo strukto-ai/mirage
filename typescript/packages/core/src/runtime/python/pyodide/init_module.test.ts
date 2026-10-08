@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { CommandTimeoutError } from '../../../errors/types.ts'
+import { WorkspaceBinding } from '../../binding.ts'
+import { EvalError } from '../../errors.ts'
+import { PrefixResolver } from '../../resolver.ts'
+import { PyodideExecution } from './execution.ts'
 import { PyodideRuntime } from './runtime.ts'
 import * as interrupt from './interrupt.ts'
 import type * as PendingCleanup from './fixtures/pending_cleanup.ts'
@@ -25,7 +30,12 @@ describe('PyodideRuntime host initializer', () => {
       })
       const pending: Promise<unknown>[] = []
       try {
-        expect((await rt.eval('from _test_lifecycle import use; use()')).value).toBe(1)
+        expect(
+          new TextDecoder().decode(
+            (await rt.eval('from _test_lifecycle import use; print(use())', { session: 'one' }))
+              .stdout,
+          ),
+        ).toBe('1\n')
         const closing = rt.close()
         const closed = rejects
           ? expect(closing).rejects.toBe(module.failure)
@@ -48,7 +58,7 @@ describe('PyodideRuntime host initializer', () => {
         const result = await run
         expect(result.exitCode).toBe(0)
         expect(new TextDecoder().decode(result.stdout)).toBe('2\n')
-        expect((await evaluation).value).toBe(2)
+        expect((await evaluation).value).toBe(3)
         await closeAgain
         expect(module.events).toEqual([
           'install 1',
@@ -57,9 +67,12 @@ describe('PyodideRuntime host initializer', () => {
           'closed 1',
           'install 2',
           'use 2',
-          'use 2',
           'closing 2',
           'closed 2',
+          'install 3',
+          'use 3',
+          'closing 3',
+          'closed 3',
         ])
       } finally {
         module.release()
@@ -87,13 +100,17 @@ describe('PyodideRuntime host initializer', () => {
         config: { initModule: ref.href, bootstrapCode: 'import builtins; builtins.ready = 42' },
       })
       try {
-        expect((await rt.eval('ready')).value).toBe(42)
+        expect(
+          new TextDecoder().decode((await rt.eval('print(ready)', { session: 'one' })).stdout),
+        ).toBe('42\n')
         await expect(rt.close()).rejects.toBe(module.failure)
         expect(closeInterrupt).toHaveBeenCalledTimes(1)
         await rt.close()
         expect(module.disposals).toBe(1)
         expect(closeInterrupt).toHaveBeenCalledTimes(1)
-        expect((await rt.eval('ready')).value).toBe(42)
+        expect(
+          new TextDecoder().decode((await rt.eval('print(ready)', { session: 'one' })).stdout),
+        ).toBe('42\n')
         expect(module.installs).toBe(2)
         await expect(rt.close()).rejects.toBe(module.failure)
         expect(module.disposals).toBe(2)
@@ -110,7 +127,7 @@ describe('PyodideRuntime host initializer', () => {
     60_000,
   )
 
-  it('initializes once before bootstrap and disposes with the runtime', async () => {
+  it('initializes before bootstrap and disposes after every command', async () => {
     const ref = new URL('./fixtures/capability.ts', import.meta.url)
     const module = (await import(ref.href)) as typeof Capability
     const rt = new PyodideRuntime({
@@ -129,13 +146,137 @@ describe('PyodideRuntime host initializer', () => {
         })
         expect(result.exitCode).toBe(0)
         expect(new TextDecoder().decode(result.stdout)).toBe('7\n')
+        expect(module.installs).toBe(i + 1)
+        expect(module.disposals).toBe(i + 1)
       }
-      expect(module.installs).toBe(1)
     } finally {
       await rt.close()
     }
-    expect(module.disposals).toBe(1)
+    expect(module.disposals).toBe(2)
   }, 60_000)
+
+  it('closes every named console when their cleanup fails', async () => {
+    const ref = new URL('./fixtures/failing_cleanup.ts', import.meta.url)
+    ref.searchParams.set('case', 'multiple-sessions')
+    const module = (await import(ref.href)) as typeof FailingCleanup
+    module.configure('async')
+    const rt = new PyodideRuntime({ config: { initModule: ref.href } })
+    try {
+      await rt.eval('pass', { session: 'one' })
+      await rt.eval('pass', { session: 'two' })
+      await expect(rt.close()).rejects.toMatchObject({ errors: [module.failure, module.failure] })
+      expect(module.disposals).toBe(2)
+      await expect(rt.close()).resolves.toBeUndefined()
+    } finally {
+      await rt.close()
+    }
+  }, 60_000)
+
+  it.each(['inline', 'worker'] as const)(
+    'preserves evaluation and timeout errors when cleanup also fails (%s)',
+    async (mode) => {
+      const ref = new URL('./fixtures/failing_cleanup.ts', import.meta.url)
+      ref.searchParams.set('case', `primary-${mode}`)
+      const module = (await import(ref.href)) as typeof FailingCleanup
+      module.configure('async')
+      const rt = new PyodideRuntime({ config: { initModule: ref.href } })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      if (mode === 'worker') {
+        rt.bind(
+          new WorkspaceBinding(
+            () => Promise.reject(new Error('unexpected filesystem operation')),
+            new PrefixResolver(() => []),
+          ),
+        )
+      }
+      try {
+        const evaluated = rt.eval("raise ValueError('primary failure')")
+        await expect(evaluated).rejects.toBeInstanceOf(EvalError)
+        await expect(evaluated).rejects.toThrow('ValueError: primary failure')
+        await expect(evaluated).rejects.toMatchObject({ syntax: false })
+        if (mode === 'inline')
+          await expect(evaluated).rejects.toHaveProperty('cause', module.failure)
+        const timedOut = rt.run({
+          code: 'while True: pass',
+          args: [],
+          env: {},
+          stdin: null,
+          timeoutSeconds: 0.05,
+        })
+        await expect(timedOut).rejects.toBeInstanceOf(CommandTimeoutError)
+        await expect(timedOut).rejects.toMatchObject({ command: 'pyodide', seconds: 0.05 })
+        if (mode === 'inline')
+          await expect(timedOut).rejects.toHaveProperty('cause', module.failure)
+        expect(warn).toHaveBeenCalledTimes(2)
+        for (const diagnostic of warn.mock.calls) {
+          expect(diagnostic.map(String).join(' ')).toContain('pyodide runtime cleanup failed')
+          expect(diagnostic.map(String).join(' ')).toContain('Error: cleanup failed')
+        }
+      } finally {
+        await rt.close()
+        warn.mockRestore()
+      }
+    },
+    60_000,
+  )
+
+  it.each(['mutable', 'frozen', 'readonly'] as const)(
+    'keeps the original error, stack, and prior cause (%s)',
+    async (mode) => {
+      const ref = new URL('./fixtures/failing_cleanup.ts', import.meta.url)
+      ref.searchParams.set('case', `prior-cause-${mode}`)
+      const module = (await import(ref.href)) as typeof FailingCleanup
+      const prior = new Error('original cause')
+      const primary = new EvalError('original traceback', { cause: prior })
+      const stack = primary.stack
+      if (mode === 'frozen') Object.freeze(primary)
+      if (mode === 'readonly')
+        Object.defineProperty(primary, 'cause', { writable: false, configurable: false })
+      const evaluate = vi.spyOn(PyodideExecution.prototype, 'evaluate').mockImplementation(() => {
+        throw primary
+      })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      const rt = new PyodideRuntime({ config: { initModule: ref.href } })
+      try {
+        await expect(rt.eval('42')).rejects.toBe(primary)
+        expect(primary.stack).toBe(stack)
+        if (mode !== 'mutable') expect(primary.cause).toBe(prior)
+        else {
+          expect(primary.cause).toBeInstanceOf(AggregateError)
+          expect(primary.cause).toHaveProperty('errors', [prior, module.failure])
+        }
+        expect(warn).toHaveBeenCalledWith('pyodide runtime cleanup failed', module.failure)
+        expect(module.disposals).toBe(1)
+      } finally {
+        await rt.close()
+        evaluate.mockRestore()
+        warn.mockRestore()
+      }
+    },
+    60_000,
+  )
+
+  it.each(['run', 'eval'] as const)(
+    'rejects cleanup-only failure after successful %s',
+    async (method) => {
+      const ref = new URL('./fixtures/failing_cleanup.ts', import.meta.url)
+      ref.searchParams.set('case', `cleanup-only-${method}`)
+      const module = (await import(ref.href)) as typeof FailingCleanup
+      module.configure('async')
+      const rt = new PyodideRuntime({ config: { initModule: ref.href } })
+      try {
+        const result =
+          method === 'run'
+            ? rt.run({ code: 'print(42)', args: [], env: {}, stdin: null })
+            : rt.eval('42')
+        await expect(result).rejects.toBe(module.failure)
+        expect(module.disposals).toBe(1)
+      } finally {
+        await rt.close()
+      }
+    },
+    60_000,
+  )
 })
 
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========

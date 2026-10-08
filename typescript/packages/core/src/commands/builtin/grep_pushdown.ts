@@ -219,6 +219,7 @@ const PUSHDOWN_SHAPING_BOOL = [
   'w',
   'o',
   'q',
+  'no_messages',
   'H',
   'h',
   'args_I',

@@ -21,6 +21,91 @@
           }
         }
       ]
+    },
+    {
+      "id": "invocations_start_fresh_after_success_and_failure",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "local"
+      ],
+      "steps": [
+        {
+          "command": {
+            "python": "python3 -c \"mirage_marker = 42\nimport os\nos.environ['MIRAGE_INVOCATION_MARKER'] = 'changed'\"",
+            "js": "node -e \"globalThis.mirage_marker = 42; Array.prototype.mirage_marker = 42\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"try:\n    print(mirage_marker)\nexcept NameError:\n    print('fresh')\nimport os\nprint(os.environ.get('MIRAGE_INVOCATION_MARKER', 'fresh'))\"",
+            "js": "node -e \"console.log(typeof mirage_marker === 'undefined' ? 'fresh' : 'leaked'); console.log([].mirage_marker === undefined ? 'fresh' : 'leaked')\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "fresh\nfresh\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"mirage_marker = 42\nimport os\nos.environ['MIRAGE_INVOCATION_MARKER'] = 'changed'\nraise ValueError('failed')\"",
+            "js": "node -e \"globalThis.mirage_marker = 42; Array.prototype.mirage_marker = 42; throw new Error('failed')\""
+          },
+          "expect": {
+            "exit": 1,
+            "stdout": ""
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"try:\n    print(mirage_marker)\nexcept NameError:\n    print('fresh')\nimport os\nprint(os.environ.get('MIRAGE_INVOCATION_MARKER', 'fresh'))\"",
+            "js": "node -e \"console.log(typeof mirage_marker === 'undefined' ? 'fresh' : 'leaked'); console.log([].mirage_marker === undefined ? 'fresh' : 'leaked')\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "fresh\nfresh\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "builtins_and_imported_modules_start_fresh",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "local"
+      ],
+      "steps": [
+        {
+          "command": {
+            "python": "python3 -c \"import builtins, json, sys\nbuiltins.mirage_marker = 42\njson.encoder.ESCAPE_DCT['x'] = 'leaked'\njson.dumps = lambda value: 'leaked'\nsys.modules['mirage_fake_module'] = json\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"import builtins, json, sys\nprint(hasattr(builtins, 'mirage_marker'))\nprint(json.dumps('x'))\nprint('x' in json.encoder.ESCAPE_DCT)\nprint('mirage_fake_module' in sys.modules)\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "False\n\"x\"\nFalse\nFalse\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

@@ -91,6 +91,32 @@ REPO_ID_SEPARATOR = "--"
 # upstream-style variadic --include line from a real filename operand.
 GLOB_CHARS = ("*", "?", "[")
 
+# The file a deletion pattern never removes: the Hub reads its LFS rules
+# from it, so upstream keeps it whatever `--delete` or `repo-files delete`
+# matched.
+GITATTRIBUTES = ".gitattributes"
+
+# What upstream's upload_folder always leaves out of a folder upload
+# (DEFAULT_IGNORE_PATTERNS): a git checkout's own metadata and the hub's
+# local cache folder, wherever they sit in the tree.
+DEFAULT_IGNORE_PATTERNS = (
+    ".git",
+    ".git/*",
+    "*/.git",
+    "**/.git/**",
+    ".cache/huggingface",
+    ".cache/huggingface/*",
+    "*/.cache/huggingface",
+    "**/.cache/huggingface/**",
+)
+
+# What upstream's `create_commit` logs when a commit would change
+# nothing, and then skips it rather than making an empty one.
+EMPTY_COMMIT_WARNING = (
+    "No files have been modified since last commit. "
+    "Skipping to prevent empty commit.\n"
+)
+
 # What a commit says when the caller had nothing to say. The Hub requires
 # a non-empty summary, and a write reaching the backend through `cp` or a
 # redirect has no message of its own to offer.

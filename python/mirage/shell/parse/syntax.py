@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator
 from typing import NamedTuple, NoReturn
 
 from mirage.io import IOResult
@@ -128,7 +128,7 @@ class _TestFailure(Exception):
 def check_syntax(
     command: str,
     aliases: frozenset[str] = frozenset(),
-    own: Mapping[str, tuple[int, int]] | None = None,
+    own: Callable[[str, int], bool] | None = None,
 ) -> SyntaxDiagnostic | None:
     """Read a line as bash 5.2 does and report what it refuses.
 
@@ -147,16 +147,15 @@ def check_syntax(
         aliases (frozenset[str]): alias names the shell would expand where a
             command starts; a closing reserved word among them is a command
             there.
-        own (Mapping[str, tuple[int, int]] | None): each alias whose own
-            text the line opens with, to the characters of the line that
-            text covers, inside which its name stays reserved.
+        own (Callable[[str, int], bool] | None): whether an alias is in
+            progress at a character of the original line.
 
     Returns:
         SyntaxDiagnostic | None: the text bash names, what it prints and
         its status; None when bash reads the line.
     """
     try:
-        found = _LineReader(command, aliases, own or {}).refusals()
+        found = _LineReader(command, aliases, own).refusals()
     except RecursionError:
         logger.debug("line nested past the host's stack, refused")
         found = [
@@ -185,7 +184,7 @@ def heredoc_plan(command: str) -> HeredocPlan | None:
         HeredocPlan | None: offsets in UTF-8 bytes; None when bash refuses
         the line, whose heredocs nothing reads.
     """
-    reader = _LineReader(command, frozenset(), {})
+    reader = _LineReader(command, frozenset(), None)
     try:
         if reader.refusals():
             return None
@@ -461,14 +460,14 @@ class _LineReader:
     Args:
         text (str): the line.
         aliases (frozenset[str]): as in ``check_syntax``.
-        own (Mapping[str, tuple[int, int]]): as in ``check_syntax``.
+        own (Callable[[str, int], bool] | None): as in ``check_syntax``.
     """
 
     def __init__(
         self,
         text: str,
         aliases: frozenset[str],
-        own: Mapping[str, tuple[int, int]],
+        own: Callable[[str, int], bool] | None,
     ) -> None:
         self.text = text
         self.n = len(text)
@@ -1296,8 +1295,7 @@ class _LineReader:
             and tok.text in self.aliases
             and "sub" not in self.frames
         ):
-            span = self.own.get(tok.text)
-            if span is None or not span[0] <= tok.start < span[1]:
+            if self.own is None or not self.own(tok.text, tok.start):
                 return None
         return tok.text
 

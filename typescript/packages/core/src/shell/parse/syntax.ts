@@ -124,15 +124,15 @@ class TestFailure extends Error {
  * own stack) is refused, as bash refuses one nested past its reader.
  *
  * `aliases` are the names the shell would expand where a command starts; a
- * closing reserved word among them is a command there. `own` maps each alias
- * whose own text the line opens with to the span of the line that text
- * covers, inside which its name stays reserved. Returns what bash prints and
+ * closing reserved word among them is a command there. `own` says whether an alias
+ * is in progress at a character of the original line, where its name
+ * stays reserved. Returns what bash prints and
  * its status, or `null` when bash reads the line.
  */
 export function checkSyntax(
   command: string,
   aliases: ReadonlySet<string> = new Set(),
-  own: ReadonlyMap<string, readonly [number, number]> = new Map(),
+  own: ((name: string, at: number) => boolean) | null = null,
 ): SyntaxDiagnostic | null {
   let found: Refusal[]
   try {
@@ -156,7 +156,7 @@ export function checkSyntax(
  * carries out first), and each substitution that closes with bodies still to
  * read. `null` when bash refuses the line, whose heredocs nothing reads. */
 export function heredocPlan(command: string): HeredocPlan | null {
-  const reader = new LineReader(command, new Set(), new Map())
+  const reader = new LineReader(command, new Set(), null)
   try {
     if (reader.refusals().length > 0) return null
   } catch (err) {
@@ -392,7 +392,7 @@ class LineReader {
   constructor(
     private readonly text: string,
     private readonly aliases: ReadonlySet<string>,
-    private readonly own: ReadonlyMap<string, readonly [number, number]>,
+    private readonly own: ((name: string, at: number) => boolean) | null,
   ) {
     this.n = text.length
     this.quotedEnd = trailingBackslashes(text) % 2 === 1
@@ -1052,8 +1052,7 @@ class LineReader {
   keyword(tok: Token): string | null {
     if (tok.kind !== 'word' || !tok.plain || !RESERVED_WORDS.has(tok.text)) return null
     if (CLOSING_WORDS.has(tok.text) && this.aliases.has(tok.text) && !this.frames.includes('sub')) {
-      const span = this.own.get(tok.text)
-      if (span === undefined || !(span[0] <= tok.start && tok.start < span[1])) return null
+      if (!(this.own?.(tok.text, tok.start) ?? false)) return null
     }
     return tok.text
   }

@@ -229,11 +229,15 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
     await ws.close()
   })
 
-  it('sys.modules sharing within workspace (intentional divergence)', async () => {
+  it('sys.modules entries do not leak between commands in one workspace', async () => {
     const { ws } = await makeWorkspace()
-    await ws.shell('python3 -c "import json"')
-    const io = await ws.shell('python3 -c "import sys; print(\'json\' in sys.modules)"')
-    expect(stdoutStr(io).trim()).toBe('True')
+    await ws.shell(
+      "python3 -c \"import sys, types; sys.modules['mirage_test_module'] = types.ModuleType('mirage_test_module')\"",
+    )
+    const io = await ws.shell(
+      'python3 -c "import sys; print(\'mirage_test_module\' in sys.modules)"',
+    )
+    expect(stdoutStr(io).trim()).toBe('False')
     await ws.close()
   })
 

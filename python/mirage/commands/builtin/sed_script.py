@@ -25,6 +25,7 @@ from mirage.commands.builtin.utils.bre import (
 )
 from mirage.shell.bytes import byte_char, byte_view, encode_text, text_view
 from mirage.utils.posix import compile_posix_regex
+from mirage.utils.strverscmp import strverscmp
 
 SED_VERSION = "4.9"
 
@@ -273,25 +274,6 @@ def _first_byte(ch: str) -> str:
     """
     data = encode_text(ch)
     return ch if len(data) <= 1 else byte_char(data[0])
-
-
-def _version_compare(a: str, b: str) -> int:
-    """GNU's strverscmp over two versions: digit runs compare as numbers.
-
-    Args:
-        a (str): the version a script asks for.
-        b (str): this sed's version.
-    """
-    pa = re.findall(r"\d+|\D+", a)
-    pb = re.findall(r"\d+|\D+", b)
-    for x, y in zip(pa, pb):
-        if x.isdigit() and y.isdigit():
-            if int(x) != int(y):
-                return int(x) - int(y)
-            continue
-        if x != y:
-            return -1 if x < y else 1
-    return len(pa) - len(pb)
 
 
 class _Compiler:
@@ -837,7 +819,7 @@ class _Compiler:
             return False
         if ch == "v":
             version = self._read_label()
-            if _version_compare(version or "4.0", SED_VERSION) > 0:
+            if strverscmp(version or "4.0", SED_VERSION) > 0:
                 raise self._bad(ANCIENT_VERSION)
             return False
         if ch == "{":

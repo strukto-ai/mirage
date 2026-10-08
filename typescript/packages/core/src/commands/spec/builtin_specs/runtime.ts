@@ -118,7 +118,7 @@ const JS_SCRIPT = new Operand({ type: 'path', providedBy: ['-e'] })
 export const SPECS: Record<string, CommandSpec> = {
   bash: new CommandSpec({
     description:
-      "Run a command string through Mirage's shell. Only `-c` is meaningful; other flags are accepted and ignored. `bash` and `sh` are aliases.",
+      'Run a program in a nested Mirage shell: the text after `-c`, a script file, or standard input. `bash` and `sh` are aliases.',
     options: [
       new Option({
         short: '-c',
@@ -137,13 +137,26 @@ export const SPECS: Record<string, CommandSpec> = {
         short: '-i',
         description: '(Ignored) Interactive flag. Mirage shells are non-interactive.',
       }),
-      new Option({ short: '-e', description: '(Ignored) Exit on first error.' }),
-      new Option({ short: '-u', description: '(Ignored) Treat unset variables as errors.' }),
-      new Option({ short: '-x', description: '(Ignored) Print commands as they execute.' }),
+      new Option({ short: '-e', description: 'Exit on first error.' }),
+      new Option({ short: '-u', description: 'Treat unset variables as errors.' }),
+      new Option({ short: '-x', description: 'Print commands as they execute.' }),
+      new Option({ long: '--debug', description: '(Ignored) Debugging mode.' }),
+      new Option({
+        long: '--init-file',
+        type: 'str',
+        description: '(Ignored) Read this file instead of ~/.bashrc.',
+      }),
       new Option({ long: '--login', description: '(Ignored) Login shell.' }),
-      new Option({ long: '--norc', description: '(Ignored) Skip rc files.' }),
+      new Option({ long: '--noediting', description: '(Ignored) No line editing.' }),
       new Option({ long: '--noprofile', description: '(Ignored) Skip profile files.' }),
+      new Option({ long: '--norc', description: '(Ignored) Skip rc files.' }),
       new Option({ long: '--posix', description: '(Ignored) POSIX-conformant mode.' }),
+      new Option({
+        long: '--rcfile',
+        type: 'str',
+        description: '(Ignored) Read this file instead of ~/.bashrc.',
+      }),
+      new Option({ long: '--verbose', description: 'Print input lines as they are read.' }),
     ],
     rest: new Operand({ type: 'str' }),
   }),

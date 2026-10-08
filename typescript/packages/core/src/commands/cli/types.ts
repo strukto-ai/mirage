@@ -77,7 +77,7 @@ export interface CLIDoors {
 /**
  * Everything one CLI line hands its handler, built once per line by the
  * executor. The record carries both views of the invocation: the process
- * view (`argv`, `stdin`, `env`) and the parsed view (`config`, `paths`,
+ * view (`argv`, `stdin`, `env`, `cwd`) and the parsed view (`config`, `paths`,
  * `texts`, `flags`), so every handler tier renders whichever its
  * substrate can express. Narrower than CommandOpts on purpose: a CLI
  * consults no mount, so there is no VFS, no mount prefix, and no

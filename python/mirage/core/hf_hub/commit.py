@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -50,6 +51,27 @@ class Addition:
     data: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class UploadInfo:
+    """The Hub's upload mode, ignore decision and existing content hash."""
+
+    mode: str = REGULAR
+    oid: str | None = None
+    ignore: bool = False
+
+
+def content_oid(data: bytes, mode: str) -> str:
+    """Hash bytes the way the preupload endpoint identifies their content.
+
+    Args:
+        data (bytes): the full file content.
+        mode (str): the Hub's upload mode.
+    """
+    if mode == REGULAR:
+        return hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+    return hashlib.sha256(data).hexdigest()
+
+
 class LfsRequiredError(RuntimeError):
     """A write the Hub will only accept through the LFS/Xet upload path.
 
@@ -81,12 +103,12 @@ def commit_url(accessor: HfHubAccessor, revision: str | None = None) -> str:
     )
 
 
-async def upload_modes(
+async def preupload(
     accessor: HfHubAccessor,
     additions: list[Addition],
     revision: str | None = None,
-) -> dict[str, str]:
-    """Ask the Hub how each file must be uploaded.
+) -> dict[str, UploadInfo]:
+    """Ask the Hub how each file must be uploaded and what it replaces.
 
     The Hub decides regular-vs-LFS-vs-Xet from the repository's
     `.gitattributes` and the file's size, so it is asked rather than
@@ -99,7 +121,7 @@ async def upload_modes(
         revision (str | None): the revision being committed onto.
 
     Returns:
-        dict[str, str]: path -> upload mode.
+        dict[str, UploadInfo]: path -> preupload metadata.
     """
     if not additions:
         return {}
@@ -110,10 +132,14 @@ async def upload_modes(
         accessor.repo_id,
         f"/preupload/{rev_segment(rev)}",
     )
-    modes: dict[str, str] = {}
+    gitignore = next(
+        (add.data.decode() for add in additions if add.path == ".gitignore"),
+        None,
+    )
+    info: dict[str, UploadInfo] = {}
     for start in range(0, len(additions), COMMIT_CHUNK):
         chunk = additions[start : start + COMMIT_CHUNK]
-        body: JsonValue = {
+        body: dict[str, JsonValue] = {
             "files": [
                 {
                     "path": add.path,
@@ -125,20 +151,24 @@ async def upload_modes(
                 for add in chunk
             ]
         }
+        if gitignore is not None:
+            body["gitIgnore"] = gitignore
         data = await hub_post(accessor.token, url, body, session=accessor.pool)
         rows = data.get("files") if isinstance(data, dict) else None
         for row in rows if isinstance(rows, list) else []:
             if isinstance(row, dict):
-                modes[str(row.get("path", ""))] = str(
-                    row.get("uploadMode", REGULAR)
+                oid = row.get("oid")
+                info[str(row.get("path", ""))] = UploadInfo(
+                    mode=str(row.get("uploadMode", REGULAR)),
+                    oid=oid if isinstance(oid, str) else None,
+                    ignore=row.get("shouldIgnore") is True,
                 )
-    return modes
+    return info
 
 
 def payload(
     additions: list[Addition],
     deletions: list[str],
-    folders: list[str],
     message: str,
     description: str = "",
     parent: str = "",
@@ -152,8 +182,6 @@ def payload(
     Args:
         additions (list[Addition]): files to add or replace.
         deletions (list[str]): file paths to remove.
-        folders (list[str]): folder paths to remove, which the Hub
-            spells with its own key rather than as a path with a slash.
         message (str): the commit summary.
         description (str): the commit body.
         parent (str): the commit this one must apply onto, for
@@ -179,8 +207,6 @@ def payload(
         )
     for path in deletions:
         lines.append({"key": "deletedFile", "value": {"path": path}})
-    for path in folders:
-        lines.append({"key": "deletedFolder", "value": {"path": path}})
     return b"".join(json.dumps(line).encode() + b"\n" for line in lines)
 
 
@@ -188,12 +214,11 @@ async def commit(
     accessor: HfHubAccessor,
     additions: list[Addition] | None = None,
     deletions: list[str] | None = None,
-    folders: list[str] | None = None,
     message: str = DEFAULT_COMMIT_MESSAGE,
     description: str = "",
     create_pr: bool = False,
     revision: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Apply one commit to the repository.
 
     Every addition is checked against the preupload endpoint first, and a
@@ -204,29 +229,37 @@ async def commit(
         accessor (HfHubAccessor): the mount's accessor.
         additions (list[Addition] | None): files to add or replace.
         deletions (list[str] | None): file paths to remove.
-        folders (list[str] | None): folder paths to remove.
         message (str): the commit summary.
         description (str): the commit body.
         create_pr (bool): open a pull request instead of pushing.
         revision (str | None): the revision to commit onto.
 
     Returns:
-        dict[str, Any]: the Hub's commit response.
+        dict[str, Any] | None: the Hub's response, or None when no files changed.
 
     Raises:
         LfsRequiredError: a file must go through the LFS/Xet upload path.
     """
-    adds = additions or []
-    modes = await upload_modes(accessor, adds, revision)
-    heavy = sorted(
-        add.path for add in adds if modes.get(add.path, REGULAR) != REGULAR
-    )
+    info = await preupload(accessor, additions or [], revision)
+    adds: list[Addition] = []
+    heavy: list[str] = []
+    for add in additions or []:
+        remote = info.get(add.path, UploadInfo())
+        mode = remote.mode if add.data else REGULAR
+        if remote.ignore or remote.oid == content_oid(add.data, mode):
+            continue
+        adds.append(add)
+        if mode != REGULAR:
+            heavy.append(add.path)
+    heavy.sort()
     if heavy:
         raise LfsRequiredError(
             f"{accessor.repo_id}: the Hub requires an LFS upload for "
             f"{', '.join(heavy)}; write it with `hf upload` instead"
         )
-    body = payload(adds, deletions or [], folders or [], message, description)
+    if not adds and not deletions:
+        return None
+    body = payload(adds, deletions or [], message, description)
     params = {"create_pr": "1"} if create_pr else None
     data = await hub_post_ndjson(
         accessor.token,

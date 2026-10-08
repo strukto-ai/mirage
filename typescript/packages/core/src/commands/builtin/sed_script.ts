@@ -14,6 +14,7 @@
 
 import { byteChar, byteView, encodeText, textView } from '../../shell/bytes.ts'
 import { compilePosixRegex } from '../../utils/posix.ts'
+import { strverscmp } from '../../utils/strverscmp.ts'
 import { BreError, PosixSyntax, translateBre, translateEre } from './utils/bre.ts'
 
 // The GNU sed version `v` compares against.
@@ -206,26 +207,6 @@ function isDigit(ch: string | null): boolean {
 function firstByte(ch: string): string {
   const bytes = encodeText(ch)
   return bytes.length <= 1 ? ch : byteChar(bytes[0] ?? 0)
-}
-
-// GNU's strverscmp over two version strings: digit runs compare as numbers.
-function versionCompare(a: string, b: string): number {
-  const split = (s: string): string[] => s.match(/\d+|\D+/g) ?? []
-  const pa = split(a)
-  const pb = split(b)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i]
-    const y = pb[i]
-    if (x === undefined) return -1
-    if (y === undefined) return 1
-    if (/^\d/.test(x) && /^\d/.test(y)) {
-      const d = Number(x) - Number(y)
-      if (d !== 0) return d
-      continue
-    }
-    if (x !== y) return x < y ? -1 : 1
-  }
-  return 0
 }
 
 interface BlockMark {
@@ -719,7 +700,7 @@ class Compiler {
       }
       case 'v': {
         const version = this.readLabel()
-        if (versionCompare(version === '' ? '4.0' : version, SED_VERSION) > 0) {
+        if (strverscmp(version === '' ? '4.0' : version, SED_VERSION) > 0) {
           this.bad(ANCIENT_VERSION)
         }
         return false

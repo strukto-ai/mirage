@@ -41,6 +41,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--basic-regexp"),
             Option(short="-o"),
             Option(short="-q"),
+            Option(short="-s", long="--no-messages"),
             Option(short="-H"),
             Option(short="-h"),
             Option(short="-m", type="str"),
