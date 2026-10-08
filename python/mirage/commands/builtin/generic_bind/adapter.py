@@ -30,7 +30,6 @@ from mirage.commands.config import (
     CommandIO,
     CommandOpts,
 )
-from mirage.commands.resolve import get_extension
 from mirage.context import (
     effective_path_mode,
     get_admission,
@@ -59,6 +58,7 @@ from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, get_op_policies, pre_vfs_gate
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec, WalkProbe
+from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.path import norm, parent
 from mirage.utils.remnants import remove_remnants, visible_below

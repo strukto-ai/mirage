@@ -50,10 +50,11 @@ import { declared } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
-import { getExtension } from '../../commands/resolve.ts'
+import { getExtension } from '../../utils/filetype.ts'
 import { resolveLimit } from '../../policy/index.ts'
-import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
-import { CommandTimeoutError, UsageError } from '../../commands/errors.ts'
+import { runWithTimeout, withPullTimeout } from '../../commands/builtin/utils/limit.ts'
+import { UsageError } from '../../commands/errors.ts'
+import { CommandTimeoutError } from '../../errors/types.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
@@ -733,6 +734,38 @@ export class MountEntry {
       if (result !== null && result !== undefined) return result
     }
     return null
+  }
+
+  /**
+   * The VFS's streamed read of a scope keyed below the mount, framed for later
+   * pulls. The backend runs on each pull, after this frame is gone, so every
+   * pull gets what a call gets around it: the caller's context (session,
+   * recorder, cache scope), the mount's recording context, its revision pins,
+   * and the read's timeout, which bounds each pull rather than the whole
+   * stream. The mount is held until the stream ends or is closed. Mirrors
+   * Python's `read_stream`.
+   */
+  readStream(scope: PathSpec): AsyncIterable<Uint8Array> {
+    if (this.retiring) throw ebusy(this.prefix)
+    const limit = this.commandLimits.get('read') ?? null
+    const revisions = this.revisions.size > 0 ? this.revisions : null
+    const pulls = new ContextScope([
+      ...captureSessionContext(),
+      ...captureOpPolicies(),
+      ...captureRecordingContext(),
+      captureCacheContext(),
+      captureCommandScope(),
+      (fn) => runWithRevisions(revisions, async () => await fn()),
+    ])
+    const stream = withMountContext(
+      withPullTimeout(
+        this.vfs.readStream(scope, this.index),
+        limit?.timeoutSeconds ?? null,
+        'read',
+      ),
+      this.mountId,
+    )
+    return this.activity.hold(pulls.stream(stream)) as AsyncIterable<Uint8Array>
   }
 
   private resolveCascade<T>(

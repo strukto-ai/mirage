@@ -21,10 +21,10 @@ import { failureText } from '../../errors/classify.ts'
 import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
 import {
   expandPrintf,
-  printfKind,
   printfNeedsStat,
   type PrintfStatFacts,
 } from '../../commands/builtin/find_printf.ts'
+import { printfKind } from '../../core/generic/find_eval.ts'
 import { modifiedTs } from '../../core/generic/find.ts'
 import type { Identity } from '../../commands/builtin/utils/identity.ts'
 import { PolicyDenied } from '../../policy/errors.ts'

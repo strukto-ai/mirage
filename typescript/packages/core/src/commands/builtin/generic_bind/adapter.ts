@@ -20,7 +20,7 @@ import type {
   StatOp,
 } from '../../../vfs/types.ts'
 import type { BaseVFS, FindOptions } from '../../../vfs/base.ts'
-import { getExtension } from '../../resolve.ts'
+import { getExtension } from '../../../utils/filetype.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
 
 import type { Accessor } from '../../../accessor/base.ts'

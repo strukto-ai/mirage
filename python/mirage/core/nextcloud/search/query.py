@@ -2,7 +2,7 @@ import math
 from xml.etree import ElementTree
 
 import mirage.core.nextcloud.search.constants as constants
-from mirage.commands.builtin.find_eval import (
+from mirage.core.generic.find_eval import (
     And,
     Name,
     Not,

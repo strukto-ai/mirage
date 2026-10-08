@@ -28,10 +28,11 @@ from mirage.commands.builtin.generic.crossmount.types import (
     RunSingle,
 )
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
-from mirage.commands.errors import CommandTimeoutError, UsageError
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.errors.render import format_fs_error
+from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource

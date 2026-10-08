@@ -17,10 +17,11 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from mirage.commands.config import ExecContext
-from mirage.commands.errors import CommandTimeoutError, UsageError
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import CommandSpec, FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.errors.render import format_fs_error
+from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource

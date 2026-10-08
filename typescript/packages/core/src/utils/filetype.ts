@@ -115,3 +115,23 @@ export function mimeTypeFor(filename: string): string {
   const ext = extensionOf(filename)
   return ext === '' ? OCTET_STREAM : (MIME_BY_EXTENSION[ext] ?? OCTET_STREAM)
 }
+
+/** Extensions with a dot inside, which the last dot alone would cut short. */
+export const COMPOUND_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.gdoc.json',
+  '.gslide.json',
+  '.gsheet.json',
+  '.gmail.json',
+])
+
+/** A path's extension with its dot, a compound one whole. Mirrors Python's `get_extension`. */
+export function getExtension(path: string | null): string | null {
+  if (path === null) return null
+  const basename = path.split('/').pop() ?? ''
+  for (const ext of COMPOUND_EXTENSIONS) {
+    if (basename.endsWith(ext)) return ext
+  }
+  const dot = path.lastIndexOf('.')
+  if (dot === -1 || path.slice(dot).includes('/')) return null
+  return path.slice(dot)
+}

@@ -14,7 +14,7 @@
 
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type { PredNode } from '../commands/builtin/find_eval.ts'
+import type { PredNode } from '../core/generic/find_eval.ts'
 import type { Command } from '../commands/config.ts'
 import { enotsup } from '../errors/fs.ts'
 import type { CapacityResult, FileStat, JsonValue, PathSpec, SetAttrFields } from '../types.ts'

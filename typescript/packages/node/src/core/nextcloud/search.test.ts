@@ -1,4 +1,4 @@
-import type { PredNode } from '@struktoai/mirage-core/commands/builtin/find_eval'
+import type { PredNode } from '@struktoai/mirage-core/core/generic/find_eval'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { DIR_SIZE } from '@struktoai/mirage-core/utils/stat_view'
 import { afterEach, describe, expect, it, vi } from 'vitest'

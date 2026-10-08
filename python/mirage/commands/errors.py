@@ -33,20 +33,6 @@ class FindParseError(ValueError):
     """Invalid numeric argument to a find predicate (GNU find: exit 1)."""
 
 
-class CommandTimeoutError(Exception):
-    """A command or op overran its timeout budget (exit 124).
-
-    Args:
-        command (str): the command or op name for the message.
-        seconds (float): the budget that was overrun.
-    """
-
-    def __init__(self, command: str, seconds: float) -> None:
-        super().__init__(f"{command}: timed out after {seconds}s")
-        self.command = command
-        self.seconds = seconds
-
-
 class PartialOutputError(Exception):
     """A command's failure after it had already printed output, which a
     program that writes as it goes leaves on stdout ahead of the
@@ -60,21 +46,6 @@ class PartialOutputError(Exception):
     def __init__(self, message: str, stdout: bytes) -> None:
         super().__init__(message)
         self.stdout = stdout
-
-
-def is_entry_error(exc: Exception) -> bool:
-    """Whether a listing reports this failure against one entry and walks on.
-
-    GNU's ls and find carry on from any failed stat below an operand,
-    whatever the errno, so a dropped connection or a 5xx on a mount
-    whose stat is a request costs that entry alone. Only what ends the
-    whole command still ends it: the line's timeout here, and its
-    cancellation, which is no Exception at all. Mirrors TS isEntryError.
-
-    Args:
-        exc (Exception): what the entry's stat raised.
-    """
-    return not isinstance(exc, CommandTimeoutError)
 
 
 class LimitExceededError(Exception):

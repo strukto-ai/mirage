@@ -21,8 +21,14 @@ import { render } from '../../test-utils.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS } from './constants.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { BaseVFS } from '../../vfs/base.ts'
+import { enoent } from '../../errors/fs.ts'
+import { CommandTimeoutError } from '../../errors/types.ts'
+import { LimitExceededError } from '../../commands/errors.ts'
+import type { Policy } from '../../policy/base.ts'
+import type { Action, VfsResultContext } from '../../policy/types.ts'
 import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
-import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
+import { FileStat, FileType, Limit, MountMode, OnExceed, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -1456,6 +1462,211 @@ describe('dispatch runs writers to one path one at a time', () => {
       await ws.dispatch('write', '/data/f', [ENC.encode('XXXXXXXXXX')])
       await new Promise((resolve) => setTimeout(resolve, 100))
       expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('XXXXXXXXXX')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** A cached store whose stream hands out 10-byte chunks, counting each one
+ * the backend delivered. Mirrors Python's Tape. */
+class Tape extends BaseVFS {
+  override readonly name: string = 'tape'
+  override readonly cachesReads: boolean = true
+  readonly files = new Map<string, Uint8Array>([['a.txt', ENC.encode('0123456789'.repeat(5))]])
+  delay = 0
+  pulled = 0
+  reads = 0
+  closed = false
+
+  override readdir(): Promise<string[]> {
+    return Promise.resolve([...this.files.keys()].map((name) => `/tape/${name}`))
+  }
+
+  override stat(path: PathSpec): Promise<FileStat> {
+    const key = path.vfsPath.replace(/^\/+/, '')
+    if (key === '') return Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))
+    const data = this.files.get(key)
+    if (data === undefined) return Promise.reject(enoent(path))
+    return Promise.resolve(new FileStat({ name: key, type: FileType.FILE, size: data.byteLength }))
+  }
+
+  override read(path: PathSpec): Promise<Uint8Array> {
+    this.reads += 1
+    const data = this.files.get(path.vfsPath.replace(/^\/+/, ''))
+    return data === undefined ? Promise.reject(enoent(path)) : Promise.resolve(data)
+  }
+
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    this.files.set(path.vfsPath.replace(/^\/+/, ''), data)
+    return Promise.resolve()
+  }
+
+  override async *readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    const data = this.files.get(path.vfsPath.replace(/^\/+/, ''))
+    if (data === undefined) throw enoent(path)
+    try {
+      for (let at = 0; at < data.byteLength; at += 10) {
+        await sleep(this.delay)
+        this.pulled += 1
+        yield data.subarray(at, at + 10)
+      }
+    } finally {
+      this.closed = true
+    }
+  }
+}
+
+class ReadsResults implements Policy {
+  postVfs(_ctx: VfsResultContext): Action | null {
+    return null
+  }
+}
+
+const TAPE = '/tape/a.txt'
+const WHOLE = '0123456789'.repeat(5)
+
+async function pullAll(stream: unknown): Promise<string[]> {
+  const chunks: string[] = []
+  for await (const chunk of stream as AsyncIterable<Uint8Array>) chunks.push(DEC.decode(chunk))
+  return chunks
+}
+
+describe('a streamed read', () => {
+  it('arrives as it is pulled and fills the cache', async () => {
+    const tape = new Tape()
+    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
+    try {
+      const stream = await ws.dispatch('read', TAPE, [], { stream: true })
+      expect(tape.pulled).toBe(1)
+      expect(await pullAll(stream)).toEqual(Array<string>(5).fill('0123456789'))
+      expect(DEC.decode((await ws.dispatch('read', TAPE)) as Uint8Array)).toBe(WHOLE)
+      expect(tape.reads).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('fails at the call', async () => {
+    const ws = new Workspace({ '/tape': new Tape() }, { mode: MountMode.WRITE })
+    try {
+      await expect(
+        ws.dispatch('read', '/tape/missing.txt', [], { stream: true }),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    [[], { offset: 5 }],
+    [[], { size: 4 }],
+    [[new ReadsResults()], {}],
+  ])('with policies %o and window %o is answered whole', async (policies, window) => {
+    const tape = new Tape()
+    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE, policies })
+    try {
+      const got = await ws.dispatch('read', TAPE, [], { ...window, stream: true })
+      expect(got).toBeInstanceOf(Uint8Array)
+      expect(tape.pulled).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('gives each pull the whole timeout', async () => {
+    const tape = new Tape()
+    tape.delay = 50
+    const ws = new Workspace(
+      { '/tape': [tape, MountMode.WRITE, { read: new Limit({ timeoutSeconds: 0.2 }) }] },
+      { mode: MountMode.WRITE },
+    )
+    try {
+      const stream = await ws.dispatch('read', TAPE, [], { stream: true })
+      const got: Uint8Array[] = []
+      for await (const chunk of stream as AsyncIterable<Uint8Array>) {
+        got.push(chunk)
+        await sleep(100)
+      }
+      expect(got).toHaveLength(5)
+      tape.delay = 500
+      await expect(
+        ws.dispatch('read', TAPE, [], { stream: true, filetype: null }),
+      ).rejects.toBeInstanceOf(CommandTimeoutError)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([OnExceed.TRUNCATE, OnExceed.ERROR])('stops at the cap (%s)', async (onExceed) => {
+    const tape = new Tape()
+    const ws = new Workspace(
+      { '/tape': [tape, MountMode.WRITE, { read: new Limit({ maxBytes: 15, onExceed }) }] },
+      { mode: MountMode.WRITE },
+    )
+    try {
+      const stream = await ws.dispatch('read', TAPE, [], { stream: true, filetype: null })
+      let got = ''
+      const pull = async (): Promise<void> => {
+        for await (const chunk of stream as AsyncIterable<Uint8Array>) got += DEC.decode(chunk)
+      }
+      if (onExceed === OnExceed.ERROR)
+        await expect(pull()).rejects.toBeInstanceOf(LimitExceededError)
+      else await pull()
+      expect(got).toBe('012345678901234')
+      expect(tape.pulled).toBe(2)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([[null], [new Limit({ maxBytes: 15 })]])(
+    'closes and keeps nothing when closed before its first pull (cap %o)',
+    async (cap) => {
+      const tape = new Tape()
+      const ws = new Workspace(
+        { '/tape': cap === null ? tape : [tape, MountMode.WRITE, { read: cap }] },
+        { mode: MountMode.WRITE },
+      )
+      try {
+        const stream = (await ws.dispatch('read', TAPE, [], {
+          stream: true,
+        })) as AsyncGenerator<Uint8Array>
+        await stream.return(undefined)
+        expect([tape.pulled, tape.closed]).toEqual([1, true])
+        await ws.dispatch('read', TAPE)
+        expect(tape.reads).toBe(1)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('keeps none of itself when a write lands during it', async () => {
+    const tape = new Tape()
+    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
+    try {
+      const stream = await ws.dispatch('read', TAPE, [], { stream: true })
+      await ws.dispatch('write', TAPE, [ENC.encode('new')])
+      expect((await pullAll(stream))[0]).toBe('0123456789')
+      expect(DEC.decode((await ws.dispatch('read', TAPE)) as Uint8Array)).toBe('new')
+      expect(tape.reads).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps nothing past the drain budget', async () => {
+    const tape = new Tape()
+    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
+    try {
+      ws.cache.maxDrainBytes = 20
+      const stream = await ws.dispatch('read', TAPE, [], { stream: true })
+      expect((await pullAll(stream)).join('')).toBe(WHOLE)
+      await ws.dispatch('read', TAPE)
+      expect(tape.reads).toBe(1)
     } finally {
       await ws.close()
     }

@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
+from mirage.core.generic.find_eval import RowActionKind
+
 
 @dataclass(frozen=True, slots=True)
 class ExecAction:
@@ -30,9 +32,6 @@ class ExecAction:
 
     argv: tuple[str, ...]
     batch: bool = False
-
-
-RowActionKind = Literal["print", "print0", "ls", "delete"]
 
 
 @dataclass(frozen=True, slots=True)

@@ -118,3 +118,16 @@ export interface NoMountError extends Error {
 export interface MissingOpError extends FsError {
   op: string
 }
+
+// A command or op overran its timeout budget (exit 124).
+// Mirrors Python's mirage.errors.types.CommandTimeoutError.
+export class CommandTimeoutError extends Error {
+  readonly command: string
+  readonly seconds: number
+  constructor(command: string, seconds: number) {
+    super(`${command}: timed out after ${String(seconds)}s`)
+    this.name = 'CommandTimeoutError'
+    this.command = command
+    this.seconds = seconds
+  }
+}

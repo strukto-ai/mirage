@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandTimeoutError } from '../../../commands/errors.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 import { HOME_CONFIG_KEYS } from '../../config.ts'
 import { EvalError } from '../../errors.ts'
 import { JsRuntime } from '../base.ts'
