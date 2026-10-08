@@ -39,13 +39,13 @@ describe('PyodideRuntime sysPath', () => {
     await rt.close()
   }, 60_000)
 
-  it('reports each missing glob once, not on every run', async () => {
+  it('reports a missing glob in each fresh command interpreter', async () => {
     const rt = new PyodideRuntime({ config: { sysPath: ['/ram/*.whl'] } })
     rt.bind(new WorkspaceBinding(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
     const args = { code: 'print(1)', args: [], env: {}, stdin: new Uint8Array() }
     await rt.run(args)
     const second = await rt.run(args)
-    expect(decode(second.stderr)).not.toContain('matched nothing')
+    expect(decode(second.stderr)).toContain('matched nothing')
     await rt.close()
   }, 60_000)
 

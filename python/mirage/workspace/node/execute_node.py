@@ -14,6 +14,7 @@
 
 import asyncio
 import time
+from contextlib import nullcontext
 from dataclasses import replace
 from functools import partial
 from typing import Any, Callable
@@ -28,7 +29,6 @@ from mirage.context import (
 )
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
-from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
@@ -39,7 +39,6 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import (
-    ERREXIT_EXEMPT_TYPES,
     FORK_FAILED,
     FORK_FAILED_STATUS,
 )
@@ -77,8 +76,7 @@ from mirage.workspace.executor.builtins.alias import alias_mark, alias_view
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
 from mirage.workspace.executor.builtins.shared import is_valid_name
 from mirage.workspace.executor.control import (
-    UNWINDING,
-    carried,
+    execute_body,
     handle_case,
     handle_cfor,
     handle_for,
@@ -87,7 +85,7 @@ from mirage.workspace.executor.control import (
     handle_until,
     handle_while,
 )
-from mirage.workspace.executor.jobs import drained, run_statement
+from mirage.workspace.executor.jobs import drained
 from mirage.workspace.executor.pipes import (
     handle_connection,
     handle_pipe,
@@ -96,8 +94,7 @@ from mirage.workspace.executor.pipes import (
 from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.executor.statement import (
     assignment_status,
-    fd0_binding,
-    finish_statement,
+    ignoring_errexit,
     record_status,
 )
 from mirage.workspace.executor.traps import end_shell
@@ -445,7 +442,14 @@ async def _run_pipeline(
             right,
         )
         return await handle_connection(
-            wrapped, left, op, right, context, stdin, call_stack
+            wrapped,
+            left,
+            op,
+            right,
+            context,
+            stdin,
+            call_stack,
+            execute_fn,
         )
     commands = list(stages.commands)
     stderr_flags = list(stages.stderr_flags)
@@ -464,16 +468,17 @@ async def _run_pipeline(
         targets,
         processes,
     )
-    stdout, io, exec_node = await handle_pipe(
-        pipe_recurse,
-        commands,
-        stderr_flags,
-        context,
-        stdin,
-        call_stack,
-        processes,
-        execute_fn,
-    )
+    with ignoring_errexit(session) if stages.negated else nullcontext():
+        stdout, io, exec_node = await handle_pipe(
+            pipe_recurse,
+            commands,
+            stderr_flags,
+            context,
+            stdin,
+            call_stack,
+            processes,
+            execute_fn,
+        )
     if stages.negated:
         io = IOResult(
             exit_code=0 if io.exit_code != 0 else 1,
@@ -635,7 +640,14 @@ async def _run_redirected(
             right,
         )
         return await handle_connection(
-            wrapped, left, op, right, context, stdin, call_stack
+            wrapped,
+            left,
+            op,
+            right,
+            context,
+            stdin,
+            call_stack,
+            execute_fn,
         )
     if command is not None and command.type == NT.PIPELINE:
         return await _run_pipeline(
@@ -654,20 +666,21 @@ async def _run_redirected(
         # redirect is the command's: bash negates what `cmd < f` returns,
         # a redirect that failed to open included.
         inner = get_negated_command(command)
-        stdout, io, exec_node = await _run_redirected(
-            recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            view,
-            inner,
-            redirects,
-            processes,
-            context,
-            stdin,
-            call_stack,
-            sink=sink,
-        )
+        with ignoring_errexit(session):
+            stdout, io, exec_node = await _run_redirected(
+                recurse,
+                dispatch,
+                execute_fn,
+                registry,
+                view,
+                inner,
+                redirects,
+                processes,
+                context,
+                stdin,
+                call_stack,
+                sink=sink,
+            )
         return await _negated(stdout, io, exec_node, context, inner)
     expanded_redirects, pipe_node = await expand_redirects(
         redirects,
@@ -736,6 +749,7 @@ async def _run_continuation(
     context: EvaluationContext,
     stdin: Any,
     call_stack: CallStack | None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Fold the ``&&``/``||`` steps a heredoc's operator line carried
     around the statement, left to right.
@@ -759,15 +773,28 @@ async def _run_continuation(
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
+        execute_fn (Callable[..., Any] | None): runs the ERR action.
     """
     if not steps:
         return await run_left(context, stdin, call_stack)
     op, right = steps[-1]
     wrapped = partial(
-        _recurse_continuation, recurse, run_left, left, steps[:-1]
+        _recurse_continuation,
+        recurse,
+        run_left,
+        left,
+        steps[:-1],
+        execute_fn,
     )
     return await handle_connection(
-        wrapped, left, op, right, context, stdin, call_stack
+        wrapped,
+        left,
+        op,
+        right,
+        context,
+        stdin,
+        call_stack,
+        execute_fn,
     )
 
 
@@ -776,6 +803,7 @@ async def _recurse_continuation(
     run_left: Callable[..., Any],
     left: Any,
     steps: tuple[tuple[str, Any], ...],
+    execute_fn: Callable[..., Any] | None,
     node: Any,
     context: EvaluationContext,
     stdin: Any = None,
@@ -790,6 +818,7 @@ async def _recurse_continuation(
         left (Any): the redirected_statement node.
         steps (tuple[tuple[str, Any], ...]): the steps before the
             current one.
+        execute_fn (Callable[..., Any] | None): runs the ERR action.
         node (Any): the node ``handle_connection`` asks for.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
@@ -797,7 +826,14 @@ async def _recurse_continuation(
     """
     if node is left:
         return await _run_continuation(
-            recurse, run_left, left, steps, context, stdin, call_stack
+            recurse,
+            run_left,
+            left,
+            steps,
+            context,
+            stdin,
+            call_stack,
+            execute_fn,
         )
     return await recurse(node, context, stdin, call_stack)
 
@@ -1200,7 +1236,7 @@ async def _execute_node(
     if kind == NodeKind.LIST:
         left, op, right = get_list_parts(node)
         return await handle_connection(
-            stream, left, op, right, context, stdin, cs
+            stream, left, op, right, context, stdin, cs, execute_fn
         )
 
     # ── redirected statement ────────────────────
@@ -1227,7 +1263,14 @@ async def _execute_node(
             result = await run_left(context, stdin, cs)
         else:
             result = await _run_continuation(
-                recurse, run_left, node, continuation, context, stdin, cs
+                recurse,
+                run_left,
+                node,
+                continuation,
+                context,
+                stdin,
+                cs,
+                execute_fn,
             )
         return result if sink is None else await drained(sink, *result)
 
@@ -1351,44 +1394,19 @@ async def _execute_node(
 
     # ── compound statement ({ ... }) ───────────
     if kind == NodeKind.COMPOUND:
-        all_stdout: list[Any] = []
-        merged_io = IOResult()
-        last_exec = ExecutionNode(command="{}", exit_code=0)
-        bound = fd0_binding(session)
-        for child in node.named_children:
-            if child.type == NT.COMMENT:
-                continue
-            try:
-                stdout, io, last_exec = await run_statement(
-                    stream,
-                    child,
-                    context,
-                    stdin,
-                    bound,
-                    cs,
-                    job_table,
-                    agent_id,
-                    handed,
-                    registry.decisions,
-                )
-            except UNWINDING as sig:
-                raise await carried(sig, async_chain(all_stdout), merged_io)
-            stdout = await finish_statement(stdout, io, session, child)
-            if stdout is not None:
-                all_stdout.append(stdout)
-            merged_io = await merged_io.merge(io)
-            if (
-                io.exit_code != 0
-                and session.shell_options.get("errexit")
-                and child.type not in ERREXIT_EXEMPT_TYPES
-                and not session.errexit_immune
-            ):
-                merged_io.exit_code = io.exit_code
-                break
-        if len(all_stdout) == 1:
-            return all_stdout[0], merged_io, last_exec
-        combined = async_chain(all_stdout) if all_stdout else None
-        return combined, merged_io, last_exec
+        return await execute_body(
+            stream,
+            node.named_children,
+            context,
+            stdin,
+            cs,
+            job_table,
+            agent_id,
+            handed,
+            registry.decisions,
+            execute_fn,
+            sink,
+        )
 
     # ── if ──────────────────────────────────────
     if kind == NodeKind.IF:
@@ -1404,6 +1422,8 @@ async def _execute_node(
             agent_id=agent_id,
             handed=handed,
             decisions=registry.decisions,
+            execute_fn=execute_fn,
+            sink=sink,
         )
 
     # ── C-style for (for ((init;cond;update))) ──
@@ -1429,6 +1449,8 @@ async def _execute_node(
                 agent_id=agent_id,
                 handed=handed,
                 decisions=registry.decisions,
+                execute_fn=execute_fn,
+                sink=sink,
             )
 
     # ── for / select ────────────────────────────
@@ -1475,6 +1497,7 @@ async def _execute_node(
                     agent_id=agent_id,
                     handed=handed,
                     decisions=registry.decisions,
+                    execute_fn=execute_fn,
                     sink=sink,
                 )
         with cs.loop():
@@ -1491,6 +1514,8 @@ async def _execute_node(
                 agent_id=agent_id,
                 handed=handed,
                 decisions=registry.decisions,
+                execute_fn=execute_fn,
+                sink=sink,
             )
 
     # ── while / until ───────────────────────────
@@ -1509,6 +1534,8 @@ async def _execute_node(
                     agent_id=agent_id,
                     handed=handed,
                     decisions=registry.decisions,
+                    execute_fn=execute_fn,
+                    sink=sink,
                 )
         with cs.loop():
             return await handle_while(
@@ -1522,6 +1549,8 @@ async def _execute_node(
                 agent_id=agent_id,
                 handed=handed,
                 decisions=registry.decisions,
+                execute_fn=execute_fn,
+                sink=sink,
             )
 
     # ── case ────────────────────────────────────
@@ -1546,6 +1575,8 @@ async def _execute_node(
             agent_id=agent_id,
             handed=handed,
             decisions=registry.decisions,
+            execute_fn=execute_fn,
+            sink=sink,
         )
 
     # ── function definition ─────────────────────
@@ -1621,7 +1652,8 @@ async def _execute_node(
     # ── negated command ─────────────────────────
     if kind == NodeKind.NEGATED:
         inner = get_negated_command(node)
-        stdout, io, exec_node = await stream(inner, context, stdin, cs)
+        with ignoring_errexit(session):
+            stdout, io, exec_node = await stream(inner, context, stdin, cs)
         return await _negated(stdout, io, exec_node, context, inner)
 
     # ── variable assignment at top level ────────

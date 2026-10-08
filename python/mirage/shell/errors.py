@@ -94,10 +94,16 @@ class ExitSignal(Exception):
     expanded when it was raised. bash expands a simple command's words
     before it applies the command's redirects, so that diagnostic goes
     around them; any other goes through the redirects it was written
-    under. ``sourced`` marks one raised in text ``eval`` or ``source``
-    ran: a forked stage or job reports its contained status even for a
-    simple command (``eval ': ${U?}' | cat`` is 1, ``: ${U?} | cat``
-    127).
+    under. ``replaced`` names the program an ``exec`` replaced the shell
+    with, whose actions went with it. ``unrouted`` marks ``stdout`` as a
+    nested line's (an ``exec``'d program's, or an ERR or RETURN action's
+    that left), which the redirects the signal unwinds through still
+    route. An EXIT action's output goes around those redirects, as bash
+    runs it once the shell has unwound: ``cleanup`` is that output, the
+    end of ``stdout``. ``sourced`` marks one raised in text ``eval`` or
+    ``source`` ran: a forked stage or job reports its contained status
+    even for a simple command (``eval ': ${U?}' | cat`` is 1,
+    ``: ${U?} | cat`` 127).
     """
 
     def __init__(
@@ -114,6 +120,9 @@ class ExitSignal(Exception):
             contained_code if contained_code is not None else exit_code
         )
         self.expanding: int | None = None
+        self.replaced: str | None = None
+        self.unrouted = False
+        self.cleanup = b""
         self.sourced = False
 
 
@@ -213,6 +222,10 @@ class ReturnSignal(Exception):
         stderr (bytes): diagnostic already formatted for the user.
         stdout (ByteSource | None): output the constructs it left had
             produced before it.
+
+    ``unrouted`` marks ``stdout`` as an ERR or RETURN action's that left
+    with ``return``, which the redirects it unwinds through still route,
+    as ``ExitSignal.unrouted`` does.
     """
 
     def __init__(
@@ -224,6 +237,7 @@ class ReturnSignal(Exception):
         self.exit_code = exit_code
         self.stderr = stderr
         self.stdout = stdout
+        self.unrouted = False
 
 
 class PipeClosed(Exception):

@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "id": "return_trap_after_source",
+      "seq": 512080,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo R' RETURN; printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo end ); ( trap 'echo R' RETURN; f() { trap - RETURN; }; f; printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo end ); ( trap 'echo R' RETURN; ( printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo in ); echo out ); printf 'echo in $#\\n' > /data/rt.sh; ( trap 'trap - RETURN; return 7; echo no' RETURN; . /data/rt.sh x; echo \"AFTER $?\" ); ( f() { trap 'trap - RETURN; return 7; echo no' RETURN; . /data/rt.sh x; echo \"in-f $?\"; }; f; echo \"after $?\" ); ( f() { trap 'echo \"R [${FUNCNAME[*]}] $# $1\"' RETURN; . /data/rt.sh q; }; f p ); rm /data/rt.sh; printf ':\\n' > /data/s; ( trap '(return 7; echo AFTER)' RETURN; . /data/s; echo \"end $?\" ); ( f() { trap 'trap - RETURN; (return 7; echo AFTER)' RETURN; . /data/s; echo \"in-f $?\"; }; f; echo \"end $?\" ); rm /data/s",
+      "expect": {
+        "exit": 0,
+        "stdout": "R\nend\nR\nend\nin\nout\nin 1\nno\nAFTER 0\nin 1\nafter 7\nin 1\nR [f] 1 q\nR [f] 1 p\nAFTER\nend 0\nin-f 0\nend 0\n",
+        "stderr": "bash: return: can only `return' from a function or sourced script\nbash: return: can only `return' from a function or sourced script\n"
+      }
+    },
+    {
+      "id": "return_trap_in_functions",
+      "seq": 512081,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo R' RETURN; f() { trap -p RETURN; echo in; }; f; echo end ); ( f() { trap 'echo \"R $?\"' RETURN; return 3; }; f; echo \"end $?\" ); ( set -T; trap 'echo \"R ${FUNCNAME[0]}\"' RETURN; f() { g; }; g() { :; }; f; echo end ); ( set -T; helper() { echo H; }; trap helper RETURN; f() { :; }; f; echo end ); ( f() { trap 'trap - RETURN; return 7' RETURN; :; }; f; echo \"AFTER $?\" ); ( k() { trap 'trap - RETURN; echo kr; return 4; echo no' RETURN; echo kb; }; out=$(k; echo \"st $?\"); echo \"[$out]\" ); ( set -T; g() { :; }; f() { trap 'trap - RETURN; echo R; return 4' RETURN; { g; } > /data/f; echo after-g; }; f; echo \"rc=$? f[$(cat /data/f)]\" ); rm -f /data/f",
+      "expect": {
+        "exit": 0,
+        "stdout": "in\nend\nR 0\nend 3\nR g\nR f\nend\nH\nend\nAFTER 7\n[kb\nkr\nst 4]\nafter-g\nrc=0 f[R]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "traps_listed_and_run_at_exit",
+      "seq": 512086,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo X' EXIT; trap 'echo E' ERR; trap 'echo R' RETURN; trap -p ); ( set -eT; trap 'echo RETURN' RETURN; f() { false; }; f; echo after ); echo \"rc=$?\"; ( set -eT; trap 'echo RET' RETURN; f() { :; }; trap 'echo EXIT; f; false; echo no' EXIT; trap 'echo ERR' ERR; false ); echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "trap -- 'echo X' EXIT\ntrap -- 'echo E' ERR\ntrap -- 'echo R' RETURN\nX\nrc=1\nERR\nEXIT\nRET\nERR\nrc=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

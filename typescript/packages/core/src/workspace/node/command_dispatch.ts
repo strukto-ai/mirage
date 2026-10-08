@@ -17,6 +17,7 @@ import { sessionEntry, setSessionEntry } from '../session/session.ts'
 import { seedVar, setAttr } from '../session/state.ts'
 import { TempEnv, VarAttr } from '../../shell/variable.ts'
 import {
+  isProgramInvocation,
   type RedirectOpener,
   redirectOpenerFor,
   redirectPathsFor,
@@ -165,11 +166,14 @@ export async function executeCommand(
   // `aliasValue` applies the rest of bash's rules (expand_aliases, the
   // same-line mark, the guards on inserted text). The rewritten line
   // runs through the same executor with the same call stack, so `$1`
-  // inside a function still means the function's argument.
+  // inside a function still means the function's argument. A line run as a
+  // program (`exec`, `env`, `find -exec`) is an argv, which no alias
+  // rewrites.
   const headNode = nonPrefixParts[0]
   if (
     parser !== undefined &&
     (Object.keys(session.aliasView ?? session.aliases).length > 0 || session.aliasMarks.size > 0) &&
+    !isProgramInvocation(session) &&
     headNode?.type === NT.COMMAND_NAME &&
     headNode.namedChildren[0]?.type === NT.WORD
   ) {

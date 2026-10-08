@@ -308,6 +308,7 @@ def test_execute_cmd_with_texts(registry):
         resolved=True,
     )
     stdout, io = _run(mount.run_command("grep", [scope], ["hello"], {}))
+    assert b"hello" in _run(materialize(stdout))
     assert io.exit_code == 0
 
 
@@ -370,3 +371,28 @@ async def test_a_path_guarded_command_is_still_held_at_its_write():
         b"\ngzip: /ram/a.gz: Read-only file system\n",
     )
     assert vfs._store.files == {"/a": b"original"}
+
+
+@pytest.mark.asyncio
+async def test_closing_command_output_finalizes_its_source():
+    mount = MountEntry("/", RAMVFS(), MountMode.WRITE)
+    io = IOResult(exit_code=1)
+
+    @command("streaming", vfs="ram", spec=CommandSpec())
+    async def streaming(accessor: RAMAccessor, paths, texts, opts):
+        async def source():
+            try:
+                yield b"first\n"
+                yield b"second\n"
+            finally:
+                io.exit_code = 0
+                io.stderr = b"finished\n"
+
+        return source(), io
+
+    mount.register_commands([streaming])
+    output, result = await mount.run_command("streaming", [], [], {})
+    assert await anext(output) == b"first\n"
+    await output.aclose()
+    assert result.exit_code == 0
+    assert result.stderr == b"finished\n"

@@ -103,16 +103,20 @@ def cache_aware_bound_stream(raw: ReadStreamFn) -> ReadStreamFn:
     For readers injected into the generics, which arrive with accessor
     and index already bound (``bound_op``) and are called as
     ``read(path)``. These readers may be guarded, so a path the running
-    command could be refused is left to them (``_serving``).
+    command could be refused is left to them (``_serving``). Capture
+    the cache manager and admission gate before lazy consumers drain.
 
     Args:
         raw (ReadStreamFn): a bound ``read_stream`` reader.
     """
 
+    bound = active_cache_manager()
+    gate = get_admission()
+
     def reader(
         path: PathSpec, *args: Any, **kwargs: Any
     ) -> AsyncIterator[bytes]:
-        manager = _serving(active_cache_manager(), get_admission(), path)
+        manager = _serving(bound, gate, path)
         return _serve_stream(
             manager, partial(raw, path, *args, **kwargs), path
         )
@@ -153,14 +157,18 @@ def cache_aware_bound_bytes(raw: ReadBytesFn) -> ReadBytesFn:
     For readers injected into the generics, which arrive with accessor
     and index already bound (``bound_op``) and are called as
     ``read(path)``. These readers may be guarded, so a path the running
-    command could be refused is left to them (``_serving``).
+    command could be refused is left to them (``_serving``). Capture
+    the cache manager and admission gate before lazy consumers drain.
 
     Args:
         raw (ReadBytesFn): a bound ``read_bytes`` reader.
     """
 
+    bound = active_cache_manager()
+    gate = get_admission()
+
     async def reader(path: PathSpec, *args: Any, **kwargs: Any) -> bytes:
-        manager = _serving(active_cache_manager(), get_admission(), path)
+        manager = _serving(bound, gate, path)
         if manager is not None:
             cached = await manager.cached_bytes(path)
             if cached is not None:

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from mirage.commands.spec.usage import read_fail_exit_code
@@ -21,7 +23,9 @@ from mirage.io.async_line_iterator import SharedInput
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.console import Channel, JobConsole
+from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.descriptors import (
+    ENCLOSING,
     Inherited,
     Recorder,
     StreamOwner,
@@ -160,6 +164,44 @@ def carry_status(session: SessionState) -> None:
     session._pipe_status_pending = session.pipe_status
 
 
+@contextmanager
+def ignoring_errexit(session: SessionState) -> Iterator[None]:
+    """Run a test, the left of ``&&``/``||`` or a negated command where
+    bash ignores ``set -e``: nothing it runs exits for a failure, a
+    function body or a subshell included.
+
+    Args:
+        session (SessionState): the shell running it.
+    """
+    saved = session.errexit_ignored
+    session.errexit_ignored = True
+    try:
+        yield
+    finally:
+        session.errexit_ignored = saved
+
+
+def errexit_acts(node: TSNodeLike, status: int, session: SessionState) -> bool:
+    """Whether ``set -e`` ends the shell after this statement, marking
+    the shell as ending when it does.
+
+    Args:
+        node (TSNodeLike): the statement that finished.
+        status (int): its status.
+        session (SessionState): the shell it ran in.
+    """
+    acts = (
+        status != 0
+        and bool(session.shell_options.get("errexit"))
+        and node.type not in ERREXIT_EXEMPT_TYPES
+        and not session.errexit_immune
+        and not session.errexit_ignored
+    )
+    if acts:
+        session.errexit_exiting = True
+    return acts
+
+
 async def finish_statement(
     stdout: ByteSource | None,
     io: IOResult,
@@ -293,6 +335,44 @@ def assignment_status(frame: ExecutionFrame, seq_before: int) -> int:
 Written = tuple[Channel, bytes, bool]
 
 
+def as_written(stdout: bytes | None, stderr: bytes | None) -> list[Written]:
+    """Output written as it is, stdout then stderr, none of it through a
+    copy of the terminal.
+
+    Args:
+        stdout (bytes | None): what went to standard output.
+        stderr (bytes | None): what went to standard error.
+    """
+    return [
+        (channel, data, False)
+        for channel, data in (
+            (Channel.STDOUT, stdout),
+            (Channel.STDERR, stderr),
+        )
+        if data
+    ]
+
+
+@contextmanager
+def recording(session: SessionState, recorder: Recorder) -> Iterator[None]:
+    """Run a statement into ``recorder``: what it writes to an enclosing
+    level's stream, and what a job this shell started writes while it
+    runs, land among what it writes.
+
+    Args:
+        session (SessionState): the shell running it.
+        recorder (Recorder): where it writes.
+    """
+    enclosing = ENCLOSING.set(recorder)
+    jobs = session.job_output or session.tty.jobs
+    held, jobs.recorder = jobs.recorder, recorder
+    try:
+        yield
+    finally:
+        jobs.recorder = held
+        ENCLOSING.reset(enclosing)
+
+
 async def statement_output(
     recorder: Recorder,
     stdout: ByteSource | None,
@@ -300,7 +380,8 @@ async def statement_output(
     own: StreamOwner | None,
     sink: JobConsole | None,
 ) -> list[Written]:
-    """What a statement wrote that stays with the shell running it.
+    """What a statement wrote that stays with the shell running it,
+    taken off ``recorder``.
 
     Bytes written to the shell's terminal through a copy (``exec 3>&1``,
     whose owner is ``own``) stay, flagged; bytes written to an enclosing
@@ -316,7 +397,8 @@ async def statement_output(
         sink (JobConsole | None): where the loop writes, if anywhere.
     """
     written: list[Written] = []
-    for key, data in recorder.chunks:
+    chunks, recorder.chunks = recorder.chunks, []
+    for key, data in chunks:
         if not isinstance(key, Inherited):
             written.append((key, data, False))
         elif key.owner is own or not await deliver(sink, key, data):
@@ -338,7 +420,8 @@ async def land(
     merged_io: IOResult,
 ) -> IOResult:
     """Put a statement's output where its shell's goes: the sink, in
-    order, or the stdout and stderr the shell returns.
+    order, or the stdout and stderr the shell returns. The result keeps
+    its status.
 
     Args:
         written (list[Written]): the statement's output in order.
@@ -354,6 +437,8 @@ async def land(
     if stdout:
         all_stdout.append(stdout)
     stderr = b"".join(d for c, d, _ in written if c == Channel.STDERR)
-    return (
-        await merged_io.merge(IOResult(stderr=stderr)) if stderr else merged_io
+    if not stderr:
+        return merged_io
+    return await merged_io.merge(
+        IOResult(stderr=stderr, exit_code=merged_io.exit_code)
     )

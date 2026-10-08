@@ -163,10 +163,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "if false # c\nthen echo bad; else false # c\nfi; echo \"if $?\"; f() { false # c\n}; f; echo \"f $?\"; case x in x) false # c\n;; esac; echo \"case $?\"; printf 'a\\nb\\n' | while read x; do echo \"$x\"; exec <&-; done; ( readonly R=1; until (( R=1 )); do exit 0; done ); echo \"until $?\"",
+      "command": "if false # c\nthen echo bad; else false # c\nfi; echo \"if $?\"; f() { false # c\n}; f; echo \"f $?\"; case x in x) false # c\n;; esac; echo \"case $?\"; printf 'a\\nb\\n' | while read x; do echo \"$x\"; exec <&-; done; ( readonly R=1; until (( R=1 )); do exit 0; done ); echo \"until $?\"; printf 'a\\nb\\n' > /data/fd0; printf 'x\\ny\\n' | for i in 1 2; do [ $i = 1 ] && exec < /data/fd0; read l; echo \"for [$l]\"; done; printf 'x\\ny\\n' | for ((i=1; i<=2; i++)); do [ $i = 1 ] && exec < /data/fd0; read l; echo \"cfor [$l]\"; done; printf 'x\\ny\\n' | { n=0; while [ $n -lt 2 ]; do n=$((n+1)); [ $n = 1 ] && exec < /data/fd0; read l; echo \"while [$l]\"; done; }; rm /data/fd0",
       "expect": {
         "exit": 0,
-        "stdout": "if 1\nf 1\ncase 1\na\nuntil 0\n",
+        "stdout": "if 1\nf 1\ncase 1\na\nuntil 0\nfor [a]\nfor [b]\ncfor [a]\ncfor [b]\nwhile [a]\nwhile [b]\n",
         "stderr": "bash: read: read error: 0: Bad file descriptor\nbash: R: readonly variable\n"
       }
     }

@@ -72,7 +72,7 @@
     },
     {
       "id": "memory_growth_output",
-      "sdk_only": "Holds 2.1 GB in one Pyodide heap for six steps to put output above the 2 GiB wasm32 boundary, an engine path the in-process pass already covers. Through the CLI that heap sits in a daemon sharing the runner with the other host's daemon, the service containers and the docker suite, where the case failed intermittently and nowhere else.",
+      "sdk_only": "Holds 2.1 GB during one Pyodide invocation to put captured and redirected output above the 2 GiB wasm32 boundary. The SDK pass covers this memory-intensive path without competing with both CLI daemons and service containers.",
       "hosts": [
         "typescript"
       ],
@@ -89,39 +89,7 @@
       },
       "steps": [
         {
-          "command": "python3 -c \"import builtins, json; builtins._pressure = [bytearray(700 * 1024 * 1024) for _ in range(3)]; builtins._small = [str(i).encode() for i in range(100000)]; rows = json.loads(json.dumps([{'value': i, 'text': '世界'} for i in range(20000)])); assert len(rows) == 20000\"",
-          "expect": {
-            "exit": 0,
-            "stdout": "",
-            "stderr": ""
-          }
-        },
-        {
-          "command": "python3 -c \"print('hello world')\"",
-          "expect": {
-            "exit": 0,
-            "stdout": "hello world\n",
-            "stderr": ""
-          }
-        },
-        {
-          "command": "python3 -c \"print('hello')\"",
-          "expect": {
-            "exit": 0,
-            "stdout": "hello\n",
-            "stderr": ""
-          }
-        },
-        {
-          "command": "python3 -c \"import sys; print('hello world'); sys.stderr.write('stderr — café 🌍\\n')\"",
-          "expect": {
-            "exit": 0,
-            "stdout": "hello world\n",
-            "stderr": "stderr — café 🌍\n"
-          }
-        },
-        {
-          "command": "python3 -c \"import sys; print('世界 🌍'); sys.stderr.write('café 🌍\\n')\" > /ram/stdout.txt 2> /ram/stderr.txt",
+          "command": "python3 -c \"import json, sys\npressure = [bytearray(700 * 1024 * 1024) for _ in range(3)]\nsmall = [str(i).encode() for i in range(100000)]\nrows = json.loads(json.dumps([{'value': i, 'text': '世界'} for i in range(20000)]))\nassert len(rows) == 20000\nprint('hello world')\nprint('hello')\nprint('世界 🌍')\nsys.stderr.write('stderr — café 🌍\\\\n')\" > /ram/stdout.txt 2> /ram/stderr.txt",
           "expect": {
             "exit": 0,
             "stdout": "",
@@ -132,28 +100,12 @@
           "command": "cat /ram/stdout.txt; cat /ram/stderr.txt",
           "expect": {
             "exit": 0,
-            "stdout": "世界 🌍\ncafé 🌍\n",
+            "stdout": "hello world\nhello\n世界 🌍\nstderr — café 🌍\n",
             "stderr": ""
           }
         },
         {
-          "command": "python3 -c \"print('hello world')\"",
-          "expect": {
-            "exit": 0,
-            "stdout": "hello world\n",
-            "stderr": ""
-          }
-        },
-        {
-          "command": "python3 -c \"import builtins; del builtins._pressure, builtins._small\"",
-          "expect": {
-            "exit": 0,
-            "stdout": "",
-            "stderr": ""
-          }
-        },
-        {
-          "command": "python3 -c \"import sys; print('after cleanup'); sys.stderr.write('still readable\\n')\"",
+          "command": "python3 -c \"import sys; print('after cleanup'); sys.stderr.write('still readable\\\\n')\"",
           "expect": {
             "exit": 0,
             "stdout": "after cleanup\n",

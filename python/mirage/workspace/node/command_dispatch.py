@@ -23,6 +23,7 @@ from typing import Any, TypeVar
 from mirage.commands.builtin.utils.limit import guard_io, run_with_timeout
 from mirage.context import (
     RedirectOpener,
+    program_invocation,
     redirect_opener_for,
     redirect_paths_for,
     reset_admission,
@@ -165,9 +166,11 @@ async def execute_command(
     # the command's read found them, the guards on inserted text). The
     # rewritten line runs through the same executor with the same call
     # stack, so `$1` inside a function still means the function's
-    # argument.
+    # argument. A line run as a program (`exec`, `env`, `find -exec`) is
+    # an argv, which no alias rewrites.
     if (
         (session.aliases or session._alias_view or session._alias_marks)
+        and not program_invocation(session)
         and parts
         and parts[0].type == NT.COMMAND_NAME
         and parts[0].named_children

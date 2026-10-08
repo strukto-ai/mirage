@@ -174,8 +174,8 @@ describe('adapter search', () => {
     const [out, result] = unwrap(
       await search(new FakeAccessor(), [spec('/rooms/red/a.json')], ['ada'], opts()),
     )
-    expect(result.exitCode).toBe(0)
     expect(await drain(out)).toContain('x ada')
+    expect(result.exitCode).toBe(0)
   })
 
   it('defers a shaping flag to the generic scan', async () => {
@@ -183,8 +183,8 @@ describe('adapter search', () => {
     const [out, result] = unwrap(
       await search(new FakeAccessor(), [spec('/rooms/red/a.json')], ['ada'], opts({ v: true })),
     )
-    expect(result.exitCode).toBe(0)
     const drained = await drain(out)
+    expect(result.exitCode).toBe(0)
     expect(drained).toContain('y')
     expect(drained).not.toContain('x ada')
   })
@@ -202,11 +202,11 @@ describe('adapter search', () => {
     const [out, result] = unwrap(
       await search(new FakeAccessor(), [spec('/rooms/red/a.json')], ['ada'], opts()),
     )
-    expect(result.exitCode).toBe(0)
     expect(await drain(out)).toContain('x ada')
+    expect(result.exitCode).toBe(0)
   })
 
-  it('propagates a stream failure after data has flowed', async () => {
+  it('reports a stream failure after data has flowed', async () => {
     const io = makeIO({
       // eslint-disable-next-line @typescript-eslint/require-await
       readStream: async function* (_accessor, p) {
@@ -215,31 +215,28 @@ describe('adapter search', () => {
       },
     })
     const search = searchCommand({ room: roomSearcher }, io, { stream: true })
-    await expect(
-      (async () => {
-        const [out] = unwrap(
-          await search(new FakeAccessor(), [spec('/rooms/red/a.json')], ['ada'], opts()),
-        )
-        await drain(out)
-      })(),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    const [out, result] = unwrap(
+      await search(new FakeAccessor(), [spec('/rooms/red/a.json')], ['ada'], opts()),
+    )
+    await drain(out)
+    expect(result.exitCode).toBe(2)
+    expect(await result.stderrStr()).toBe('grep: /h/rooms/red/a.json: No such file or directory\n')
   })
 
   it('falls back to the scan when the push-down is past the read cap', async () => {
     // A push-down past the mount's read cap cannot print its answer; the scan
     // reads the operand, which refuses the same way against the operand, and
-    // the executor reports it as typed (`grep: <path>: File too large`).
+    // the generic reports it as typed (`grep: <path>: File too large`).
     const refusing: Searcher<FakeAccessor> = (_accessor, match) =>
       Promise.reject(efbig(`rooms/${match.slots.room ?? ''}/${match.slots.note ?? ''}`))
     const io = makeIO({ readBytes: (_accessor, p) => Promise.reject(efbig(p)) })
     const search = searchCommand({ note: refusing }, io, {})
-    const [out] = unwrap(
+    const [out, result] = unwrap(
       await search(new FakeAccessor(), [spec('/rooms/red/a.json')], ['ada'], opts()),
     )
-    await expect(drain(out)).rejects.toMatchObject({
-      code: 'EFBIG',
-      virtualPath: '/h/rooms/red/a.json',
-    })
+    expect(await drain(out)).toBe('')
+    expect(result.exitCode).toBe(2)
+    expect(await result.stderrStr()).toBe('grep: /h/rooms/red/a.json: File too large\n')
   })
 
   it('probes existence before searching when guarded', async () => {

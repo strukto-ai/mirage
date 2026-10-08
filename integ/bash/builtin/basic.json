@@ -409,7 +409,7 @@
       }
     },
     {
-      "id": "blt_exec_command_form_refused",
+      "id": "blt_exec_command_form_ends_the_line",
       "seq": 502312,
       "targets": [
         "ram",
@@ -435,11 +435,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "exec ls; echo $?",
+      "command": "exec true; echo $?",
       "expect": {
         "exit": 0,
-        "stdout": "2\n",
-        "stderr": "mirage: exec: ls: process replacement is not supported (no OS process to replace)\n"
+        "stdout": "",
+        "stderr": ""
       }
     },
     {

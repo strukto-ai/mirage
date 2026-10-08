@@ -50,6 +50,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--basic-regexp' }),
       new Option({ short: '-o' }),
       new Option({ short: '-q' }),
+      new Option({ short: '-s', long: '--no-messages' }),
       new Option({ short: '-H' }),
       new Option({ short: '-h' }),
       new Option({ short: '-m', type: 'str' }),

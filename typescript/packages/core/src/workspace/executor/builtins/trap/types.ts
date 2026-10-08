@@ -13,10 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
- * What a `trap` signal spec names: the shell's EXIT, or another signal
- * bash knows and mirage never delivers.
+ * What a `trap` signal spec names: the shell's EXIT, ERR or RETURN, or
+ * another signal bash knows and mirage never delivers.
  */
 export enum TrapEvent {
-  Exit = 'exit',
+  Exit = 'EXIT',
+  Err = 'ERR',
+  Return = 'RETURN',
   Other = 'other',
 }

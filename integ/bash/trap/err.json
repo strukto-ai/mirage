@@ -1,0 +1,242 @@
+{
+  "cases": [
+    {
+      "id": "err_trap_reads_the_failed_status",
+      "seq": 512060,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo \"ERR $?\"' ERR; false; echo \"after $?\" ); ( trap 'echo \"E $?\"' ERR && false; true && { false; }; echo end ); ( trap 'echo E $?' ERR; x=$(false); echo \"end $?\"; set -E; x=$(false; echo in); echo \"[$x]\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "ERR 1\nafter 1\nE 1\nE 1\nend\nE 1\nend 1\n[E 1\nin]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "err_trap_runs_where_errexit_would_act",
+      "seq": 512061,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo ERR' ERR; if false; then :; fi; false || true; ! true; true && false; echo end ); ( trap 'echo ERR' ERR; { false; }; for i in 1; do false; done; echo end ); ( trap 'echo ERR' ERR; (( 0 )); [[ a == b ]]; echo end ); ( trap 'echo ERR' ERR; { { :; } < /data/missing; }; echo \"end $?\" ); ( trap 'echo ERR' ERR; { false; echo A0; }; if true; then false; echo A1; fi; case x in x) false; echo A2;; esac; while true; do false; echo A3; break; done; until false; do false; echo A4; break; done; for ((i=0; i<1; i++)); do false; echo A5; done; for i in 1; do false; echo A6; done; set -E; f() { false; echo A7; }; f ); ( trap 'echo \"E ${PIPESTATUS[*]} $?\"' ERR; true && false; false | true && false; true && true | false; echo \"after ${PIPESTATUS[*]}\"; false || false | false; echo \"after ${PIPESTATUS[*]}\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "ERR\nend\nERR\nERR\nend\nERR\nERR\nend\nERR\nend 1\nERR\nA0\nERR\nA1\nERR\nA2\nERR\nA3\nERR\nA4\nERR\nA5\nERR\nA6\nERR\nA7\nE 1 1\nE 1 1\nE 0 1 1\nafter 0 1\nE 1 1 1\nafter 1 1\n",
+        "stderr": "/data/missing: No such file or directory\n"
+      }
+    },
+    {
+      "id": "err_trap_function_scope",
+      "seq": 512063,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo ERR' ERR; ( false ); f() { false; echo in-f; }; f; g() { return 2; }; g; echo end ); ( set -E; trap 'echo E' ERR; f() { trap -p ERR; false; }; f; echo end ); ( f() { trap 'echo B' ERR; false; }; f; false; echo end ); ( trap 'echo E' ERR; f() { trap 'echo F' ERR; false; }; f; false; echo end ); ( trap 'echo E' ERR; f() { trap -p ERR; trap - ERR; echo in; }; f; trap -p ERR; false; g() { trap '' ERR; }; g; false; echo end )",
+      "expect": {
+        "exit": 0,
+        "stdout": "ERR\nin-f\nERR\nend\ntrap -- 'echo E' ERR\nE\nE\nend\nB\nB\nend\nF\nF\nF\nend\nin\ntrap -- 'echo E' ERR\nE\nend\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "err_trap_in_child_shells",
+      "seq": 512065,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap '' ERR; false; trap -p ERR; trap 'echo E' ERR; trap - ERR; false; echo \"end $?\" ); ( trap 'echo E' ERR; ( trap -p ERR; false; echo in ); f() { false; }; ( f ); echo \"end $?\" ); ( trap '(trap \"echo CHILD\" ERR; false); echo PARENT' ERR; false ); echo \"rc=$?\"; if bash -ec 'false; echo BAD'; then echo WRONG; else echo EXPECTED; fi; ( trap 'echo E' ERR; env false; echo \"env $?\"; timeout 5 false; echo \"timeout $?\"; find /data -maxdepth 0 -exec false \\; ; echo \"find $?\"; /usr/bin/false; echo \"bin $?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "trap -- '' ERR\nend 1\ntrap -- 'echo E' ERR\nin\nE\nend 1\nCHILD\nPARENT\nrc=1\nEXPECTED\nE\nenv 1\nE\ntimeout 1\nfind 0\nE\nbin 1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "err_trap_with_errexit",
+      "seq": 512066,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo ERR' ERR; set -e; false; echo unreached ); echo \"rc=$?\"; ( set -e; trap '! true' ERR; false; echo BAD ); echo \"rc=$?\"; ( set -eE; trap 'echo E' ERR; f() { false; }; f; echo after ); echo \"rc=$?\"; ( set -e; trap 'echo E' ERR; f() { false; }; f; echo after ); echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "ERR\nrc=1\nrc=1\nE\nrc=1\nrc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "err_trap_action_leaves",
+      "seq": 512092,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'trap \"echo NEW\" ERR; false; echo OLD' ERR; false; echo end ); ( trap 'echo TRAP; exit 7' ERR; echo BEFORE; false; echo after ); echo \"rc=$?\"; ( f() { trap 'echo T; return 5' ERR; false; echo after; }; f; echo \"rc=$?\" ); bash -c 'trap \"echo X\" EXIT; trap \"echo T; exit 7\" ERR; { echo A; false; echo no; } > /data/f'; echo \"rc=$? f[$(cat /data/f)]\"; rm -f /data/f; ( f() { trap 'echo T; return 7' ERR; { echo A; false; echo no; } > /data/f; }; f; echo \"rc=$? f[$(cat /data/f)]\" ); rm -f /data/f",
+      "expect": {
+        "exit": 0,
+        "stdout": "OLD\nend\nBEFORE\nTRAP\nrc=7\nT\nrc=5\nX\nrc=7 f[A\nT]\nrc=7 f[A\nT]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "trap_actions_that_fail_or_leave",
+      "seq": 512100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( set -e; trap '(exit 7)' ERR; false; echo BAD ); echo rc=$?; ( trap '(exit 7)' ERR; false; echo \"after $?\" ); echo rc=$?; ( set -eT; trap '(exit 7)' RETURN; f() { :; }; f; echo BAD ); echo rc=$?; ( trap '(exit 7)' RETURN; f() { return 3; }; f; echo \"after $?\" ); ( trap 'echo ERR' ERR; true | false | false; echo \"${PIPESTATUS[*]} $?\" ); ( trap 'echo T; exit 7' ERR; { false; } > /data/f ); echo \"rc=$? f[$(cat /data/f)]\"; rm -f /data/f",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=7\nafter 1\nrc=0\nrc=7\nafter 3\nERR\n0 1 1 1\nrc=7 f[T]\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

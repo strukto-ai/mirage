@@ -18,12 +18,13 @@ import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { guardInput } from '../utils/limit.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { fsStrerror, isWalkError, walkRefusal } from '../../../errors/fs.ts'
+import { fsStrerror, isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellOne } from '../../../utils/path.ts'
-import { cacheAwareStream } from '../../../cache/read_through.ts'
+import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
+import { concat } from '../../../io/cachable_iterator.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
@@ -33,6 +34,7 @@ import {
   patternWarnings,
   resolvePattern,
 } from '../grep_pattern.ts'
+import { exitCodeFor } from '../grep_scan.ts'
 import { BINARY_EXTENSIONS } from '../constants.ts'
 import { getExtension } from '../../../utils/filetype.ts'
 import { grepInput, type FlagSet } from '../grep_binary.ts'
@@ -149,6 +151,7 @@ export function parseFlags(fl: FlagView): FlagSet {
     onlyMatching: fl.asBool('o'),
     maxCount: fl.asInt('m') ?? null,
     quiet: fl.asBool('q'),
+    noMessages: fl.asBool('no_messages'),
     withFilename: filename === true,
     noFilename: filename === false,
     afterContext: aCtx ?? cCtx ?? 0,
@@ -190,7 +193,7 @@ export async function grepGeneric(
   stream: Stream,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  const cachedStream = stdinStream(cacheAwareStream(stream), opts.stdin)
+  const cachedStream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
   stream = (path) => guardInput(cachedStream(path), opts)
   const fl = new FlagView(opts.flags, specOf('grep'))
   const resolution = await resolvePattern(name, texts, opts.flags, paths, opts.mountPrefix, stream)
@@ -260,137 +263,110 @@ export async function grepGeneric(
   const mounts = opts.ns?.mounts
   const rd = mountParentReaddir((p: string) => readdir(makeSpec(p, first)), mounts, prefix)
   const st = mountParentStat((p: string) => stat(makeSpec(p, first)), mounts)
-  if (!f.recursive && paths.length === 1 && !(f.filesOnly || f.quiet || f.filesWithoutMatch)) {
-    try {
-      if (first.walkError !== null) throw walkRefusal(first)
-      const info = isStdin(first) ? await stat(first) : await st(first.virtual)
-      if (info.type === FileType.DIRECTORY)
-        return [
-          new Uint8Array(),
-          new IOResult({
-            exitCode: 2,
-            stderr: ENC.encode(`${name}: ${first.rawPath}: Is a directory\n`),
-          }),
-        ]
-      if (!fileAdmitted(first.virtual, f.filters)) return [new Uint8Array(), io]
-      // Start the reader while the mount's cache context is still active.
-      const source = stream(first)
-      const singleIO = warned()
-      return [
-        grepInput(
-          source,
-          pat,
-          f,
-          operandLabel(first, '(standard input)'),
-          f.withFilename && !f.noFilename,
-          singleIO,
-          false,
-          opts.signal,
-          utf8,
-        ),
-        singleIO,
-      ]
-    } catch (error) {
-      if (!isWalkError(error)) throw error
-      return [
-        new Uint8Array(),
-        new IOResult({
-          exitCode: 2,
-          stderr: ENC.encode(`${name}: ${first.rawPath}: ${reason(error)}\n`),
-        }),
-      ]
-    }
-  }
-  const warnings: string[] = []
-  const notices: Uint8Array[] = warning ? [ENC.encode(warning)] : []
+  let failed = false
+  const notices: Uint8Array[] = []
   let matched = false
   let printed = false
 
   function warn(message: string): void {
-    warnings.push(message)
-    notices.push(ENC.encode(message + '\n'))
+    failed = true
+    io.exitCode = exitCodeFor(matched, failed, f.quiet)
+    if (!f.noMessages) notices.push(ENC.encode(message + '\n'))
+  }
+
+  function updateStatus(fileIO: IOResult): void {
+    io.exitCode = exitCodeFor(matched || fileIO.exitCode === 0, failed, f.quiet)
   }
 
   async function* scan(p: PathSpec, walked = false): AsyncIterable<Uint8Array> {
+    let info: FileStat
+    let entries: string[] = []
     try {
       // The probes below go by `virtual`, which cannot carry the walk's
       // verdict on an operand it refused.
       if (p.walkError !== null) throw walkRefusal(p)
-      const info = isStdin(p) ? await stat(p) : await st(p.virtual)
-      if (info.type === FileType.DIRECTORY) {
-        if (!f.recursive) {
-          warn(`${name}: ${p.rawPath}: Is a directory`)
-          // GNU 3.11 still lists it under -L: nothing was read from it, so
-          // nothing in it matched. -q suppresses the row like every other
-          // normal output.
-          if (f.filesWithoutMatch && !f.quiet) yield ENC.encode(p.rawPath + '\n')
-          return
-        }
-        for (const entry of await rd(p.virtual)) {
-          const child = new PathSpec({
-            virtual: entry,
-            directory: entry,
-            vfsPath: mountKey(entry, prefix),
-            rawPath: respellOne(entry, p.virtual, p.rawPath),
-          })
-          if (!dirAdmitted(entry, f.filters)) {
-            let probe: FileStat
-            try {
-              probe = await st(entry)
-            } catch (error) {
-              if (!isWalkError(error)) throw error
-              warn(`${name}: ${child.rawPath}: ${reason(error)}`)
-              continue
-            }
-            if (probe.type === FileType.DIRECTORY) continue
-          }
-          yield* scan(child, true)
-          if (f.quiet && matched) break
-        }
-        return
-      }
-      if (walked && info.type !== FileType.FILE) return
-      if (walked && !f.filters.text && BINARY_EXTENSIONS.has(getExtension(p.virtual) ?? '')) return
-      if (!fileAdmitted(p.virtual, f.filters)) return
-      const fileIO = new IOResult({ exitCode: 1 })
-      const show = !f.noFilename && (f.withFilename || walked || paths.length > 1)
-      for await (const chunk of grepInput(
-        stream(p),
-        pat,
-        f,
-        operandLabel(p, '(standard input)'),
-        show,
-        fileIO,
-        printed,
-        opts.signal,
-        utf8,
-      )) {
-        printed = true
-        yield chunk
-      }
-      matched ||= fileIO.exitCode === 0
-      if (fileIO.stderr instanceof Uint8Array) notices.push(fileIO.stderr)
+      info = isStdin(p) ? await stat(p) : await st(p.virtual)
+      if (info.type === FileType.DIRECTORY && f.recursive) entries = await rd(p.virtual)
     } catch (error) {
       if (!isWalkError(error)) throw error
       warn(`${name}: ${p.rawPath}: ${reason(error)}`)
+      return
     }
-  }
-  async function* run(): AsyncIterable<Uint8Array> {
-    for (const path of paths) {
-      yield* scan(path)
-      if (f.quiet && matched) break
-    }
-    const length = notices.reduce((n, part) => n + part.length, 0)
-    if (length) {
-      const stderr = new Uint8Array(length)
-      let offset = 0
-      for (const notice of notices) {
-        stderr.set(notice, offset)
-        offset += notice.length
+    if (info.type === FileType.DIRECTORY) {
+      if (!f.recursive) {
+        warn(`${name}: ${p.rawPath}: Is a directory`)
+        // GNU 3.11 still lists it under -L: nothing was read from it, so
+        // nothing in it matched. -q suppresses the row like every other
+        // normal output.
+        if (f.filesWithoutMatch && !f.quiet) yield ENC.encode(p.rawPath + '\n')
+        return
       }
-      io.stderr = stderr
+      for (const entry of entries) {
+        const child = new PathSpec({
+          virtual: entry,
+          directory: entry,
+          vfsPath: mountKey(entry, prefix),
+          rawPath: respellOne(entry, p.virtual, p.rawPath),
+        })
+        if (!dirAdmitted(entry, f.filters)) {
+          let probe: FileStat
+          try {
+            probe = await st(entry)
+          } catch (error) {
+            if (!isWalkError(error)) throw error
+            warn(`${name}: ${child.rawPath}: ${reason(error)}`)
+            continue
+          }
+          if (probe.type === FileType.DIRECTORY) continue
+        }
+        yield* scan(child, true)
+        if (f.quiet && matched) break
+      }
+      return
     }
-    io.exitCode = f.quiet && matched ? 0 : warnings.length ? 2 : matched ? 0 : 1
+    if (walked && info.type !== FileType.FILE) return
+    if (walked && !f.filters.text && BINARY_EXTENSIONS.has(getExtension(p.virtual) ?? '')) return
+    if (!fileAdmitted(p.virtual, f.filters)) return
+    const fileIO = new IOResult({ exitCode: 1 })
+    try {
+      try {
+        const show = !f.noFilename && (f.withFilename || walked || paths.length > 1)
+        for await (const chunk of grepInput(
+          stream(p),
+          pat,
+          f,
+          operandLabel(p, '(standard input)'),
+          show,
+          fileIO,
+          printed,
+          opts.signal,
+          utf8,
+        )) {
+          updateStatus(fileIO)
+          printed = true
+          yield chunk
+        }
+      } finally {
+        matched ||= fileIO.exitCode === 0
+        updateStatus(fileIO)
+        if (fileIO.stderr !== null) notices.push(await materialize(fileIO.stderr))
+      }
+    } catch (error) {
+      if (!isFsError(error)) throw error
+      warn(`${name}: ${p.rawPath}: ${reason(error)}`)
+    }
   }
+
+  async function* run(): AsyncIterable<Uint8Array> {
+    try {
+      for (const path of paths) {
+        yield* scan(path)
+        if (f.quiet && matched) break
+      }
+    } finally {
+      if (notices.length > 0) io.stderr = concat([await materialize(io.stderr), ...notices])
+    }
+  }
+
   return [run(), io]
 }

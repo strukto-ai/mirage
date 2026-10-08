@@ -18,7 +18,15 @@ import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import { SessionState } from '../session/session.ts'
 import { newStatusWriter } from '../abort.ts'
-import { assignmentStatus, finishStatement, restoreStatus, snapshotStatus } from './statement.ts'
+import {
+  assignmentStatus,
+  errexitActs,
+  finishStatement,
+  ignoringErrexit,
+  restoreStatus,
+  snapshotStatus,
+} from './statement.ts'
+import { getTestParser } from '../fixtures/workspace_fixture.ts'
 
 const decode = (b: Uint8Array | null): string => new TextDecoder().decode(b ?? new Uint8Array())
 
@@ -110,5 +118,30 @@ describe('snapshotStatus / restoreStatus', () => {
     // The line that did stamp last still puts its own back.
     restoreStatus(session, before, theirs)
     expect(session.lastExitCode).toBe(1)
+  })
+})
+
+describe('errexitActs', () => {
+  it.each([
+    ['false', 1, true, true],
+    ['false', 0, true, false],
+    ['false', 1, false, false],
+    ['! true', 1, true, false],
+  ] as const)('%s, status %d, errexit %s: %s', async (line, status, errexit, acts) => {
+    const session = new SessionState({ sessionId: 's', shellOptions: { errexit } })
+    const node = (await getTestParser()).parse(line).children[0]
+    expect(node !== undefined && errexitActs(node, status, session)).toBe(acts)
+  })
+
+  it('is scoped off inside an ignored context', async () => {
+    const session = new SessionState({ sessionId: 's', shellOptions: { errexit: true } })
+    const node = (await getTestParser()).parse('false').children[0]
+    if (node === undefined) throw new Error('no statement')
+    await ignoringErrexit(session, async () => {
+      expect(errexitActs(node, 1, session)).toBe(false)
+      await ignoringErrexit(session, () => Promise.resolve())
+      expect(session.errexitIgnored).toBe(true)
+    })
+    expect(errexitActs(node, 1, session)).toBe(true)
   })
 })

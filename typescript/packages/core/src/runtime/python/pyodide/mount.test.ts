@@ -154,9 +154,8 @@ describe('PyodideRuntime mount visibility', () => {
       expect(result.exitCode).toBe(0)
       expect(calls.filter((c) => c.op === 'write')).toHaveLength(0)
       expect(warnings.some((w) => w.includes("cannot serve a mount at '/'"))).toBe(true)
-      // Reported once, not once per run.
       await rt.run({ code: 'pass', args: [], env: {}, stdin: new Uint8Array() })
-      expect(warnings.filter((w) => w.includes('cannot serve a mount'))).toHaveLength(1)
+      expect(warnings.filter((w) => w.includes('cannot serve a mount'))).toHaveLength(2)
     } finally {
       console.warn = warn
       await rt.close()

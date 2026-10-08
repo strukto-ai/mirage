@@ -150,6 +150,7 @@ def test_is_literal_pattern(pattern, fixed, expected):
     "flags,expected",
     [
         ({}, False),
+        ({"no_messages": True}, True),
         ({"i": True}, False),
         ({"F": True}, False),
         ({"r": True}, False),

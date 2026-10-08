@@ -43,6 +43,7 @@ export interface FlagSet {
   onlyMatching: boolean
   maxCount: number | null
   quiet: boolean
+  noMessages: boolean
   withFilename: boolean
   noFilename: boolean
   afterContext: number

@@ -231,10 +231,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a\\n' | if exec <&-; false; then :; elif read x; then echo bad; else echo good; fi; printf 'payload\\n' | if { exec <&-; false; }; then :; elif read x; then echo \"$x\"; else echo none; fi",
+      "command": "printf 'a\\n' | if exec <&-; false; then :; elif read x; then echo bad; else echo good; fi; printf 'payload\\n' | if { exec <&-; false; }; then :; elif read x; then echo \"$x\"; else echo none; fi; printf 'a\\nb\\n' > /data/fd0; printf 'x\\ny\\n' | if exec < /data/fd0; then read l; echo \"if [$l]\"; fi; printf 'x\\ny\\n' | case x in x) exec < /data/fd0;& y) read l; echo \"case [$l]\";; esac; rm /data/fd0",
       "expect": {
         "exit": 0,
-        "stdout": "good\nnone\n",
+        "stdout": "good\nnone\nif [a]\ncase [a]\n",
         "stderr": "bash: read: read error: 0: Bad file descriptor\nbash: read: read error: 0: Bad file descriptor\n"
       }
     }
