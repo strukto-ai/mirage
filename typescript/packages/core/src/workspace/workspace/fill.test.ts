@@ -474,19 +474,24 @@ describe('fillEnv through execute', () => {
     }
   })
 
-  it("a function's saved alias fills on invocation", async () => {
+  it.each([
+    [['alias show=\'echo "a:$TOKEN"\'', 'f() { show; }', 'unalias show'], 'a:t0\n'],
+    [
+      [
+        "alias show='echo b'",
+        'f() { cat <(show); echo "$(show)"; }',
+        'alias show=\'echo "a:$TOKEN"\'',
+      ],
+      'a:t0\na:t0\n',
+    ],
+  ])("a function's alias fills on invocation (%j)", async (lines, out) => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-alias-saved', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-alias-saved', ref: 'r' } })
     try {
-      for (const line of [
-        'shopt -s expand_aliases',
-        'alias show=\'echo "a:$TOKEN"\'',
-        'f() { show; }',
-        'unalias show',
-      ])
+      for (const line of ['shopt -s expand_aliases', ...lines])
         expect((await ws.shell(line)).exitCode).toBe(0)
-      expect(stdoutStr(await ws.shell('f'))).toBe('a:t0\n')
+      expect(stdoutStr(await ws.shell('f'))).toBe(out)
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()

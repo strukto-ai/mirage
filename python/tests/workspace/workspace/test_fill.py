@@ -435,20 +435,36 @@ async def test_alias_body_fills_on_invocation():
 
 
 @pytest.mark.asyncio
-async def test_a_functions_saved_alias_fills_on_invocation():
+@pytest.mark.parametrize(
+    "lines, out",
+    [
+        (
+            (
+                "alias show='echo \"a:$TOKEN\"'",
+                "f() { show; }",
+                "unalias show",
+            ),
+            "a:t0\n",
+        ),
+        (
+            (
+                "alias show='echo b'",
+                'f() { cat <(show); echo "$(show)"; }',
+                "alias show='echo \"a:$TOKEN\"'",
+            ),
+            "a:t0\na:t0\n",
+        ),
+    ],
+)
+async def test_a_functions_alias_fills_on_invocation(lines, out):
     calls, fetch = counting_source({"TOKEN": "t0"})
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        for line in (
-            "shopt -s expand_aliases",
-            "alias show='echo \"a:$TOKEN\"'",
-            "f() { show; }",
-            "unalias show",
-        ):
+        for line in ("shopt -s expand_aliases", *lines):
             assert (await ws.shell(line)).exit_code == 0
         io = await ws.shell("f")
-        assert (await io.stdout_str()) == "a:t0\n"
+        assert (await io.stdout_str()) == out
         assert calls == ["r"]
     finally:
         await ws.close()
