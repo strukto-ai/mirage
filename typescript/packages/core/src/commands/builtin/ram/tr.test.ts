@@ -34,7 +34,6 @@ async function runTr(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
   })

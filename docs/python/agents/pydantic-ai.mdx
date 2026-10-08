@@ -57,7 +57,7 @@ asyncio.run(main())
 | `MirageWorkspaceBackend` | The workspace backend itself, for code that builds one directly. |
 | `build_system_prompt` | Generates a system prompt that describes mounted paths to the model. |
 
-`MirageWorkspace(ws, session_id="agent")` acts as that session, so its profile judges every call. Commands run in Mirage's shell, each in a clone of the session at its working directory, as a subshell does: a `cd` or an `export` in one command does not reach the next. Files go through the session's op facade, and symlinks resolve through the namespace. The run's `WorkspaceRef` names the session; a ref in message history that names any other session is declined.
+`MirageWorkspace(ws, session_id="agent")` acts as that session, so its profile judges every call. Commands run in Mirage's shell, each in a clone of the session at its working directory, as a subshell does: a `cd` or an `export` in one command does not reach the next. Files go through the session's `ws.vfs`, and symlinks resolve through the namespace. The run's `WorkspaceRef` names the session; a ref in message history that names any other session is declined.
 
 The backend passes Pydantic AI's workspace conformance suite, except the rules that need POSIX processes (`mkfifo`) or mode bits: Mirage's permissions are the session profile, not `chmod`.
 

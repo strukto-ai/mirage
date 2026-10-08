@@ -17,10 +17,10 @@ from dataclasses import dataclass
 
 from mirage.commands.config import CommandOpts
 from mirage.errors.fs import eloop
-from mirage.ops.types import LinkView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
 from mirage.utils.path import CycleError, resolve_path
+from mirage.view.types import LinkView
 
 
 def name_location(links: LinkView, path: PathSpec, cwd: str) -> str | None:

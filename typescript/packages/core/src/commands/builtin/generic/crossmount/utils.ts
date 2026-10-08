@@ -18,7 +18,7 @@ import { chunks } from '../../../../io/cooperative.ts'
 import { concat as concatBytes } from '../../../../io/cachable_iterator.ts'
 import { isStdin } from '../../utils/stream.ts'
 import type { TransferLinks } from '../cp.ts'
-import type { LinkView } from '../../../../ops/types.ts'
+import type { LinkView } from '../../../../view/types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { eisdir, isFsError } from '../../../../errors/fs.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
@@ -135,7 +135,6 @@ export function crossOpts(flagKwargs: Record<string, FlagValue>): CommandOpts {
   return {
     stdin: null,
     flags: flagKwargs,
-    filetypeFns: null,
     mountPrefix: '',
     cwd: '/',
   }

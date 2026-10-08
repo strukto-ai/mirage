@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { pathsScoped } from '../../../ops/namespace_view.ts'
+import { pathsScoped } from '../../../view/namespace_view.ts'
 import { find as githubFind } from '../../../core/github/find.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'

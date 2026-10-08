@@ -32,7 +32,6 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.process.types import ProcessInfo, ProcessState
@@ -60,6 +59,7 @@ from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
 from mirage.utils.timezone import zone_from_env
+from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options

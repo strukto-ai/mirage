@@ -29,9 +29,9 @@ from mirage.core.discord.entry import (
     member_filename,
 )
 from mirage.fuse.fs import MirageFS
-from mirage.ops import Ops
 from mirage.types import ContentType, FileType, MountMode
 from mirage.vfs.discord import DiscordConfig, DiscordVFS
+from mirage.workspace.files import Files
 
 GUILD_PAYLOAD = {"id": "G1", "name": "TestGuild"}
 CHANNEL_PAYLOAD = {"id": "C1", "name": "general", "type": 0}
@@ -118,7 +118,7 @@ def world():
 
 
 @pytest.fixture
-def ops(world) -> Ops:
+def ops(world) -> Files:
     return world[1].vfs
 
 

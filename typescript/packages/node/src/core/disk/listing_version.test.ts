@@ -102,7 +102,7 @@ async function checked(ws: Workspace, key = '/m'): Promise<string | null> {
   const mount = ws.registry.mountFor(key)
   const vfsPath = key === '/m' ? '' : key.slice('/m/'.length)
   const spec = new PathSpec({ virtual: key, directory: key, vfsPath })
-  const remote = (await mount.callOp('stat', spec, [], {
+  const remote = (await mount.callKeyed('stat', spec, [], {
     index: new RAMIndexCacheStore(),
   })) as FileStat
   return remote.fingerprint ?? null

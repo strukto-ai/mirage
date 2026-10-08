@@ -20,7 +20,7 @@ from pydantic_ai.workspaces.conformance import WorkspaceBackendSuite
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.agents.pydantic_ai.backend import MirageWorkspaceBackend
-from mirage.ops.ops import Ops
+from mirage.workspace.files import Files
 
 
 @pytest.fixture
@@ -139,14 +139,14 @@ async def test_files_and_links_need_no_commands():
 async def test_a_refused_child_stat_fails_the_listing(workspace, monkeypatch):
     backend = MirageWorkspaceBackend(workspace)
     await backend.write_bytes("/d/a.txt", b"a")
-    real = Ops.stat
+    real = Files.stat
 
     async def refusing(self, path, **kwargs):
         if path == "/d/a.txt":
             raise PermissionError(errno.EACCES, "Permission denied", path)
         return await real(self, path, **kwargs)
 
-    monkeypatch.setattr(Ops, "stat", refusing)
+    monkeypatch.setattr(Files, "stat", refusing)
     with pytest.raises(PermissionError):
         await backend.list_dir("/d")
 

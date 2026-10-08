@@ -22,13 +22,13 @@ from mirage.context import (
     set_current_session,
 )
 from mirage.errors.fs import eexist, enoent, enotdir
-from mirage.ops.ops import Ops
 from mirage.policy.profile import CompiledProfile
 from mirage.types import FileType, MountMode, PathSpec, ReadSpec
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import norm, parent
 from mirage.vfs.document.document import DocumentVFS
 from mirage.workspace.documentation import render
+from mirage.workspace.files import Files
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.resolve import apply_profile
@@ -40,7 +40,7 @@ class Documents:
 
     Args:
         registry (MountRegistry): the workspace's mounts.
-        ops (Ops): the workspace's op facade.
+        files (Files): the workspace's ``ws.vfs``.
         manager (SessionManager): the workspace's sessions.
         session (Callable[[], SessionState]): the session a call runs as.
         profile (Callable[[str], CompiledProfile]): a named profile,
@@ -55,7 +55,7 @@ class Documents:
     def __init__(
         self,
         registry: MountRegistry,
-        ops: Ops,
+        files: Files,
         manager: SessionManager,
         session: Callable[[], SessionState],
         profile: Callable[[str], CompiledProfile],
@@ -66,7 +66,7 @@ class Documents:
         self.views: dict[str, DocumentVFS] = {}
         self.lock = asyncio.Lock()
         self._registry = registry
-        self._ops = ops
+        self._files = files
         self._manager = manager
         self._session = session
         self._profile = profile
@@ -153,7 +153,7 @@ class Documents:
         path: str,
         session: SessionState | None,
     ) -> None:
-        directory = await self._ops.stat(parent(path))
+        directory = await self._files.stat(parent(path))
         if directory.type != FileType.DIRECTORY:
             raise enotdir(parent(path))
         view = self.views.get(path)
@@ -167,7 +167,7 @@ class Documents:
             )
             try:
                 try:
-                    await self._ops.stat(path, nofollow=True)
+                    await self._files.stat(path, nofollow=True)
                 except FileNotFoundError:
                     pass
                 else:
@@ -186,7 +186,7 @@ class Documents:
                 == self._session().created_at
             )
             self.views[path] = view
-            self._ops.set_mounts(self._registry.ops_mounts())
+            self._files.set_mounts(self._registry.mount_rows())
         if session is None:
             view.global_view = True
         else:

@@ -66,7 +66,7 @@ from mirage.core.github.repo import (
     view_repo,
 )
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue, PathSpec
+from mirage.types import JsonValue
 
 _OWNER = struct(("id", "string"), ("login", "string"))
 _USER = struct(
@@ -634,17 +634,22 @@ async def clone_cmd(
     url = f"{web_origin(inv.config)}/{ref.owner}/{ref.repo}.git"
     target = names[1] if len(names) > 1 else ref.repo
     leaf, _ = find_node(GIT, ["clone"]) or (GIT, ())
-    cwd = inv.env.get("PWD", "/")
     words = [*gitflags, url, target]
     parsed = parse_command(
-        leaf, words, cwd, "git clone", inv.env, unknown_is_operand=True
+        leaf,
+        words,
+        inv.cwd.virtual,
+        "git clone",
+        inv.env,
+        unknown_is_operand=True,
     )
     flags: dict[str, FlagValue] = dict(parse_to_kwargs(parsed))
-    flags["C"] = PathSpec.from_str_path(cwd, cwd="/")
+    flags["C"] = inv.cwd
     git = CLIInvocation[None](
         None,
         argv=("clone", *words),
         texts=tuple(word for word, _ in parsed.args),
+        cwd=inv.cwd,
         flags=flags,
         stdin=inv.stdin,
         env=inv.env,

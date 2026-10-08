@@ -19,7 +19,6 @@ import time
 
 import pytest
 
-from mirage.ops.namespace_view import merge_readdir
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSStat
 from mirage.runtime.vfs import RuntimeVFS
@@ -36,6 +35,7 @@ from mirage.utils.stat_view import (
     FILE_MODE,
     mtime_ns,
 )
+from mirage.view.namespace_view import merge_readdir
 
 # The stamp a link's own row carries, deliberately not the stamp the
 # double gives a file, so a test can tell which row it was answered.
@@ -88,9 +88,9 @@ class FakeVFS(RuntimeVFS):
     def _wait(self, pending):
         return asyncio.run(pending)
 
-    async def _op(self, op, path, **kwargs):
-        self.calls.append((op, path, kwargs))
-        if op == "stat":
+    async def _call(self, name, path, **kwargs):
+        self.calls.append((name, path, kwargs))
+        if name == "stat":
             # The door answers a no-follow stat of a link from the node
             # table, with the link's own row: its stamp, and its size in
             # target bytes.
@@ -106,7 +106,7 @@ class FakeVFS(RuntimeVFS):
             # for its target: the row says nothing about the link and the
             # mark is the only thing that can.
             if path in self.links:
-                return await self._op("stat", self.links[path], **kwargs)
+                return await self._call("stat", self.links[path], **kwargs)
             if path in self.files:
                 return FileStat(
                     name=path,
@@ -121,33 +121,33 @@ class FakeVFS(RuntimeVFS):
             if path in self.dirs or path == "/" or path in roots:
                 return FileStat(name=path, type=FileType.DIRECTORY)
             raise FileNotFoundError(path)
-        if op == "read":
+        if name == "read":
             if path not in self.files:
                 raise FileNotFoundError(path)
             return self.files[path]
-        if op == "write":
+        if name == "write":
             self.files[path] = kwargs["data"]
             return None
-        if op == "create":
+        if name == "create":
             self.files[path] = b""
             return None
-        if op == "truncate":
+        if name == "truncate":
             self.files[path] = b""
             return None
-        if op == "unlink":
+        if name == "unlink":
             del self.files[path]
             return None
-        if op == "mkdir":
+        if name == "mkdir":
             self.dirs.add(path)
             return None
-        if op == "rmdir":
+        if name == "rmdir":
             self.dirs.discard(path)
             return None
-        if op == "rename":
+        if name == "rename":
             dst = kwargs["dst"].virtual
             self.files[dst] = self.files.pop(path)
             return None
-        if op == "readdir":
+        if name == "readdir":
             prefix = path.rstrip("/") + "/"
             out = [p for p in self.files if p.startswith(prefix)]
             out += [d + "/" for d in self.dirs if d.startswith(prefix)]
@@ -159,20 +159,20 @@ class FakeVFS(RuntimeVFS):
             return sorted(
                 merge_readdir(None, out, self.prefixes(), None, path)
             )
-        if op == "symlink":
+        if name == "symlink":
             self.links[path] = kwargs["target"]
             return None
-        if op == "readlink":
+        if name == "readlink":
             found = self.links.get(path)
             if found is None:
                 # The door's own answer for a path the node table holds
                 # no link for, whether or not anything else is there.
                 raise OSError(host_errno.EINVAL, "not a symbolic link", path)
             return found
-        if op == "setattr":
+        if name == "setattr":
             self.attrs.append((path, kwargs))
             return {}
-        raise NotImplementedError(op)
+        raise NotImplementedError(name)
 
 
 class FailingStatVFS(FakeVFS):
@@ -182,10 +182,10 @@ class FailingStatVFS(FakeVFS):
         super().__init__(**kwargs)
         self.failing = failing
 
-    async def _op(self, op, path, **kwargs):
-        if op == "stat" and path == self.failing:
+    async def _call(self, name, path, **kwargs):
+        if name == "stat" and path == self.failing:
             raise OSError(host_errno.EIO, "upstream 502 Bad Gateway", path)
-        return await super()._op(op, path, **kwargs)
+        return await super()._call(name, path, **kwargs)
 
 
 def test_mount_prefix_routes_to_bridge_even_when_host_file_exists(tmp_path):

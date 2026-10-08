@@ -37,7 +37,6 @@ async function runIconv(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
   })

@@ -49,7 +49,7 @@ describe('Workspace record accounting', () => {
     expect(ws.cacheRecords).toEqual([])
   })
 
-  it('Ops facade ops land in ws.records', async () => {
+  it('Files facade ops land in ws.records', async () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.vfs.write('/data/a.txt', 'hello')
     await ws.vfs.read('/data/a.txt')

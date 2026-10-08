@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SessionView } from '../../ops/types.ts'
+import type { SessionView } from '../../view/types.ts'
 import { PolicyDenied, preSessionGate, type Policies } from '../../policy/index.ts'
 import { evaluateArith } from '../../shell/arith.ts'
 import type { CallStack } from '../../shell/call_stack.ts'

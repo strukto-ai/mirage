@@ -30,13 +30,11 @@ describe('identity', () => {
     const ns = { user: 'alice' }
     expect(identityFrom(ns, view)).toEqual({ user: 'alice', profile: 'admin' })
     expect(identityFrom(undefined, undefined)).toEqual(NO_IDENTITY)
-    expect(
-      identityOf({ stdin: null, flags: {}, filetypeFns: null, cwd: '/', ns, sessionView: view }),
-    ).toEqual({
+    expect(identityOf({ stdin: null, flags: {}, cwd: '/', ns, sessionView: view })).toEqual({
       user: 'alice',
       profile: 'admin',
     })
-    expect(identityOf({ stdin: null, flags: {}, filetypeFns: null, cwd: '/' })).toEqual(NO_IDENTITY)
+    expect(identityOf({ stdin: null, flags: {}, cwd: '/' })).toEqual(NO_IDENTITY)
   })
 })
 

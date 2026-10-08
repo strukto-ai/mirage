@@ -4,10 +4,10 @@ from mirage.commands.builtin.github.find import find
 from mirage.commands.config import CommandOpts
 from mirage.context import reset_current_session, set_current_session
 from mirage.io.types import materialize
-from mirage.ops.types import NamespaceView
 from mirage.types import HiddenPaths, PathSpec, Visibility
 from mirage.utils.hidden import hidden_under
 from mirage.vfs.github import GitHubVFS
+from mirage.view.types import NamespaceView
 from mirage.workspace.session import SessionState
 from tests.fixtures.vfs_io import io_for
 

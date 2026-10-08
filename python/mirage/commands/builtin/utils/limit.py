@@ -314,7 +314,7 @@ async def guard_output(
     return data, io.stderr, io.exit_code
 
 
-async def apply_op_limit(result, limit: Limit | None):
+async def limit_result(result, limit: Limit | None):
     """Apply byte/line caps to a byte-producing VFS op result.
 
     VFS ops have no stderr/exit envelope, so on TRUNCATE the capped bytes

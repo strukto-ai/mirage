@@ -425,7 +425,7 @@ async def _cleared_with_overlay(ws: Workspace, hub: FakeGitHub) -> None:
 @pytest.mark.asyncio
 async def test_the_dispatcher_door_never_reads_cannot_see_as_gone():
     # No cached copy, so cp's own stat is the op that reaches the backend:
-    # an ENOENT there goes through on_op_missing, which drops the overlay.
+    # an ENOENT there goes through on_enoent, which drops the overlay.
     with serve(_hub()) as hub:
         ws = _ws(_vfs(hub))
         try:

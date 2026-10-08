@@ -22,12 +22,12 @@ from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar
 
 from mirage.context import strongest_under_session
 from mirage.io.types import IOResult
-from mirage.ops.ops import Ops
 from mirage.policy.decisions import Decisions
 from mirage.policy.match.pattern import pattern_matches
 from mirage.types import MOUNT_MODE_RANK, MountMode
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import gnu_dirname
+from mirage.workspace.files import Files
 from mirage.workspace.lookup import command_visible
 from mirage.workspace.mount.registry import DEV_PREFIX, MountEntry
 from mirage.workspace.session.session import SessionState
@@ -67,7 +67,7 @@ class SessionLike(Protocol):
     def decisions(self) -> Decisions: ...
 
     @property
-    def vfs(self) -> Ops: ...
+    def vfs(self) -> Files: ...
 
     def mounts(self) -> list[MountEntry]: ...
 
@@ -130,11 +130,11 @@ def number_lines(text: str, offset: int, limit: int) -> str:
     )
 
 
-async def ensure_parents(vfs: Ops, path: str) -> None:
+async def ensure_parents(vfs: Files, path: str) -> None:
     """Create the directories a new file needs, parents first.
 
     Args:
-        vfs (Ops): The op facade to create them through.
+        vfs (Files): ``ws.vfs`` to create them through.
         path (str): Virtual path of the file about to be written.
     """
     parent = gnu_dirname(path)
@@ -150,7 +150,7 @@ async def ensure_parents(vfs: Ops, path: str) -> None:
             raise
 
 
-async def missing(vfs: Ops, path: str) -> bool:
+async def missing(vfs: Files, path: str) -> bool:
     """Whether a path a read just failed on is absent, which picks the
     failure's wording.
 
@@ -160,7 +160,7 @@ async def missing(vfs: Ops, path: str) -> bool:
     read's own error stands rather than the probe's.
 
     Args:
-        vfs (Ops): The op facade the read went through.
+        vfs (Files): ``ws.vfs`` the read went through.
         path (str): Virtual path of the failed read.
     """
     try:

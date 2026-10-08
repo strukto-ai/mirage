@@ -29,6 +29,7 @@ import { poll } from './poll.ts'
 import { read } from './read.ts'
 import { send } from './send.ts'
 import { threadCreate } from './thread_create.ts'
+import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
 
 const DEC = new TextDecoder()
 
@@ -70,7 +71,7 @@ function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
 }
 
 function makeInv(config: unknown, flags: CLIInvocation['flags']): CLIInvocation {
-  return { config, argv: [], paths: [], texts: [], flags, stdin: null, env: {} }
+  return cliInvocation({ config, flags })
 }
 
 const VERBS = [

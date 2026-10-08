@@ -1207,7 +1207,7 @@ async function partialRead(ws: Workspace, fake: Fake, virtual: string): Promise<
 async function reconcileStat(ws: Workspace, fake: Fake, virtual: string): Promise<FileStat> {
   const stat = await ws.namespace
     .mountFor(virtual)
-    .callOp('stat', specFor(virtual, fake.key), [], { index: new RAMIndexCacheStore() })
+    .callKeyed('stat', specFor(virtual, fake.key), [], { index: new RAMIndexCacheStore() })
   return stat as FileStat
 }
 

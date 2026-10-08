@@ -34,7 +34,6 @@ async function runFind(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
   })

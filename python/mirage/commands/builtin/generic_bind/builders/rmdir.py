@@ -33,10 +33,10 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of, mounted_path
 from mirage.utils.path import CycleError, resolve_path
+from mirage.view.types import LinkView
 
 logger = logging.getLogger(__name__)
 

@@ -17,12 +17,12 @@ from collections.abc import Sequence
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io import IOResult
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.errors import ArithError
 from mirage.types import PathSpec, word_text
 from mirage.utils.path import resolve_path
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import (
     COUNT_WORD_RE,
     IDENTIFIER_RE,

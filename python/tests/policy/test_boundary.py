@@ -17,8 +17,8 @@ import errno
 import pytest
 
 from mirage.errors.types import ReadOnlyError
-from mirage.ops.boundary import OpBoundary
 from mirage.policy import Deny, Limit, Policies, Policy, PolicyDenied
+from mirage.policy.boundary import Boundary
 from mirage.policy.types import VfsContext, VfsResultContext
 from mirage.types import MountMode, PathSpec
 
@@ -41,7 +41,7 @@ def _path(virtual: str) -> PathSpec:
 
 @pytest.mark.asyncio
 async def test_admit_raises_a_coded_deny_as_eacces():
-    boundary = OpBoundary(Policies([_Sealed()]), "/d/", MountMode.WRITE)
+    boundary = Boundary(Policies([_Sealed()]), "/d/", MountMode.WRITE)
     await boundary.admit("read", _path("/d/pub"), False)
     with pytest.raises(PolicyDenied) as refused:
         await boundary.admit("read", _path("/d/sec/k"), False)
@@ -51,7 +51,7 @@ async def test_admit_raises_a_coded_deny_as_eacces():
 
 @pytest.mark.asyncio
 async def test_admit_holds_the_mount_mode():
-    boundary = OpBoundary(Policies(), "/ro/", MountMode.READ)
+    boundary = Boundary(Policies(), "/ro/", MountMode.READ)
     await boundary.admit("read", _path("/ro/f"), False)
     with pytest.raises(ReadOnlyError):
         await boundary.admit("write", _path("/ro/f"), True)
@@ -59,11 +59,11 @@ async def test_admit_holds_the_mount_mode():
 
 @pytest.mark.asyncio
 async def test_complete_applies_the_post_vfs_limit():
-    capped = OpBoundary(Policies([_Capped()]), "/d/")
+    capped = Boundary(Policies([_Capped()]), "/d/")
     assert await capped.complete("read", _path("/d/f"), False, b"abcdef") == (
         b"abc"
     )
-    bare = OpBoundary(Policies(), "/d/")
+    bare = Boundary(Policies(), "/d/")
     assert await bare.complete("read", _path("/d/f"), False, b"abcdef") == (
         b"abcdef"
     )

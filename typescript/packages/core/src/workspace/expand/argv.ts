@@ -14,7 +14,7 @@
 
 import type { EvaluationContext } from '../evaluation.ts'
 import type { RouteDecision } from '../../runtime/routing/types.ts'
-import type { SessionView } from '../../ops/types.ts'
+import type { NamespaceLinks, SessionView } from '../../view/types.ts'
 import { scopesPaths } from '../../policy/match/reads.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { PathSpec, wordText } from '../../types.ts'
@@ -31,7 +31,6 @@ import {
 } from '../lookup/index.ts'
 
 import { classifyParts } from './classify/index.ts'
-import type { NamespaceLinks } from '../../ops/config.ts'
 import { globNeedsShell, globOptions, resolveGlobs } from './globs.ts'
 import { type ExecuteFn } from './node.ts'
 import { expandWords } from './parts.ts'

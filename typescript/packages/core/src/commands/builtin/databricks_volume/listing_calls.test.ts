@@ -115,7 +115,6 @@ async function findText(
   const result = await cmd.fn(accessor, paths, texts, {
     stdin: null,
     flags: {},
-    filetypeFns: null,
     io: ioFor(DatabricksVolumeVFSBase, accessor),
     cwd: '/',
     index,
@@ -139,7 +138,6 @@ async function runCmd(
   const result = await cmd.fn(accessor, paths, texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     io: ioFor(DatabricksVolumeVFSBase, accessor),
     cwd: '/',
     index,

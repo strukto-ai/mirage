@@ -15,7 +15,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from mirage.commands.builtin.utils.limit import apply_op_limit
+from mirage.commands.builtin.utils.limit import limit_result
 from mirage.policy.policies import Policies, post_vfs_gate, pre_vfs_gate
 from mirage.types import MountMode, PathSpec
 
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class OpBoundary:
+class Boundary:
     """The POSIX policy boundary for dispatched filesystem operations.
 
     Args:
@@ -74,4 +74,4 @@ class OpBoundary:
         bound = await post_vfs_gate(
             self.policies, op, path, write, self.prefix, result
         )
-        return await apply_op_limit(result, bound)
+        return await limit_result(result, bound)

@@ -44,7 +44,6 @@ from mirage.commands.spec.standard import standard_request
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView, StatPath
 from mirage.policy import resolve_limit, resolve_producer
 from mirage.policy.types import HandOff
 from mirage.runtime.routing import RouteDecision
@@ -54,6 +53,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
+from mirage.view.types import NamespaceView, StatPath
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.cli import (
     CLIContext,

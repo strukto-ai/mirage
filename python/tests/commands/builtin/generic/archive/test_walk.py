@@ -6,7 +6,6 @@ from mirage.commands.builtin.generic.archive import walk as aw
 from mirage.commands.builtin.generic.archive.types import Walked
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.ops.types import LinkView, MountView
 from mirage.types import (
     LINK_TARGET_KEY,
     ContentType,
@@ -16,6 +15,7 @@ from mirage.types import (
 )
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError
+from mirage.view.types import LinkView, MountView
 
 
 def _spec(path: str, prefix: str = "") -> PathSpec:

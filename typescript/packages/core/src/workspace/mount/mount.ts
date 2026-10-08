@@ -29,7 +29,6 @@ import type { IndexConfig } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type {
-  CommandFn,
   CommandFnResult,
   CommandOpts,
   ExecContext,
@@ -39,7 +38,7 @@ import type {
 import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
 import { hasInjectedVersion } from '../../commands/spec/standard.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
-import type { LinkView, OpKwargs } from '../../ops/types.ts'
+import type { LinkView, OpKwargs } from '../../view/types.ts'
 import { commandIo, resolveGlobOf } from '../../commands/builtin/generic_bind/adapter.ts'
 import {
   appendByRewrite,
@@ -47,8 +46,8 @@ import {
   pwriteByRewrite,
   refuseTaken,
 } from '../../core/generic/rewrite.ts'
-import { callEffect } from '../../vfs/call.ts'
-import { Effect } from '../../vfs/types.ts'
+import { declared } from '../../vfs/call.ts'
+import { WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
 import { getExtension } from '../../commands/resolve.ts'
@@ -105,13 +104,6 @@ type ReadFn = (
   size?: number | null,
 ) => Promise<Uint8Array>
 
-// Ops that mutate everything under their endpoints in one backend call
-// (a directory rename relocates its whole subtree), so the door also
-// refuses a read-only region below either endpoint. The removal ops
-// stay per-path: the runtimes compose rmtree from unlink/rmdir, and
-// each of those answers for its own path above.
-const SUBTREE_OPS = new Set(['rename'])
-
 function cmdKey(name: string, filetype: string | null): CmdKey {
   return `${name}\u0000${filetype ?? ''}`
 }
@@ -141,6 +133,32 @@ function dstArg(value: unknown): PathSpec {
     throw new TypeError('rename op requires a dst PathSpec as the first arg')
   }
   return value
+}
+
+/**
+ * Refuse a keyword the function `name` does not take: the TypeError a direct
+ * call raises in Python, never silently dropped. The mount hands every
+ * function its `index` and a caller may name the `filetype`; a built-in takes
+ * the keywords its Python signature names, and a custom function none, a
+ * TypeScript function having no keyword parameters. Mirrors Python's `_taken`.
+ */
+function taken(name: string, kwargs: OpKwargs): void {
+  const keywords: Readonly<Record<string, readonly string[]>> = {
+    read: ['offset', 'size'],
+    mkdir: ['parents'],
+    truncate: ['no_create'],
+    setattr: ['mode', 'uid', 'gid', 'atime', 'mtime'],
+  }
+  const known = Object.hasOwn(keywords, name) ? (keywords[name] ?? []) : []
+  const [first] = Object.keys(kwargs)
+    .filter(
+      (key) =>
+        key !== 'index' && key !== 'filetype' && !known.includes(key) && kwargs[key] !== undefined,
+    )
+    .sort(compareCodePoints)
+  if (first !== undefined) {
+    throw new TypeError(`${name}() got an unexpected keyword argument '${first}'`)
+  }
 }
 
 /**
@@ -256,6 +274,13 @@ export class MountEntry {
     }
     if (prefix.includes('//')) {
       throw new Error(`prefix must not contain //: ${prefix}`)
+    }
+    for (const [filetype, renderer] of Object.entries(init.vfs.renderers)) {
+      if (typeof (init.vfs as unknown as Record<string, unknown>)[renderer] !== 'function') {
+        throw new TypeError(
+          `${init.vfs.constructor.name}.renderers maps '${filetype}' to '${renderer}', which is not a method`,
+        )
+      }
     }
     this.prefix = prefix
     this.vfs = init.vfs
@@ -463,18 +488,6 @@ export class MountEntry {
     return this.cmdSpecs.get(cmdName) ?? null
   }
 
-  filetypeHandlers(cmdName: string): Record<string, CommandFn> {
-    // Null prototype: filetype names are registration-controlled.
-    const fns: Record<string, CommandFn> = Object.create(null) as Record<string, CommandFn>
-    for (const [key, rc] of this.cmds) {
-      if (rc.name === cmdName && rc.filetype !== null) {
-        if (!(rc.filetype in fns)) fns[rc.filetype] = rc.fn
-      }
-      void key
-    }
-    return fns
-  }
-
   unregister(names: string[]): void {
     for (const name of names) {
       for (const [key, rc] of this.cmds) {
@@ -507,9 +520,33 @@ export class MountEntry {
     return this.vfs.readsRanges && !this.renders(getExtension(path))
   }
 
-  /** Whether the VFS declares the function `opName` a write. */
-  writes(opName: string): boolean {
-    return callEffect(this.vfs.constructor, opName) === Effect.WRITE
+  /** Whether the VFS declares the function `name` a write. */
+  writes(name: string): boolean {
+    const effect = declared(this.vfs.constructor, name)?.effect
+    return effect !== undefined && WRITE_EFFECTS.includes(effect)
+  }
+
+  /**
+   * Refuse a write the mount's mode no longer grants at any path. Admission
+   * judged the mode before the call waited for the mount and for its write
+   * lock; `setMountMode` can make the mount read-only in between, so the mode
+   * is read again as the backend call starts. A rename moves everything below
+   * its endpoints, so a read-only region below either refuses it. Mirrors
+   * Python's `require_writable`.
+   */
+  requireWritable(name: string, path: PathSpec, values: readonly unknown[]): void {
+    if (!this.writes(name)) return
+    requirePathsWritable(
+      [path, ...values.filter((value): value is PathSpec => value instanceof PathSpec)],
+      this.prefix,
+      this.mode,
+      name === 'rename',
+    )
+  }
+
+  /** Refuse a keyword `name` does not take, as a cold call would. Mirrors Python's `refuse_keywords`. */
+  refuseKeywords(name: string, kwargs: OpKwargs): void {
+    taken(name, kwargs)
   }
 
   /**
@@ -559,7 +596,7 @@ export class MountEntry {
   }
 
   /**
-   * What answers `opName` on this mount, in the order to try.
+   * What answers `name` on this mount, in the order to try.
    *
    * A rendered filetype's renderer answers a read before `read` does,
    * window and all, and the first answer that is not null wins. The rest
@@ -570,9 +607,9 @@ export class MountEntry {
    * custom one is handed the scope and the op's positional arguments.
    * Mirrors Python's `MountEntry._callers`.
    */
-  callers(opName: string, filetype: string | null): OpCall[] {
+  callers(name: string, filetype: string | null): OpCall[] {
     const vfs = this.vfs
-    if (opName === 'read') {
+    if (name === 'read') {
       const levels: OpCall[] = []
       const renderer = filetype !== null ? vfs.renderers[filetype] : undefined
       const render =
@@ -589,21 +626,21 @@ export class MountEntry {
       }
       return levels
     }
-    if (opName === 'glob') {
+    if (name === 'glob') {
       return vfs.supports('readdir') ? [(scope, _args, kw) => this.glob(scope, kw.index)] : []
     }
-    if ((opName === 'append' || opName === 'pwrite') && !vfs.supports(opName)) {
+    if ((name === 'append' || name === 'pwrite') && !vfs.supports(name)) {
       if (!vfs.supports('write')) return []
-      return opName === 'append'
+      return name === 'append'
         ? [(scope, args, kw) => this.appendByRewrite(scope, writeData(args), kw.index)]
         : [
             (scope, args, kw) =>
               this.pwriteByRewrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
           ]
     }
-    if (callEffect(vfs.constructor, opName) === null) return []
-    if (!vfs.supports(opName)) return []
-    switch (opName) {
+    if (declared(vfs.constructor, name) === null) return []
+    if (!vfs.supports(name)) return []
+    switch (name) {
       case 'readdir':
         return [(scope, _args, kw) => vfs.readdir(scope, kw.index)]
       case 'stat':
@@ -632,7 +669,7 @@ export class MountEntry {
       case 'setattr':
         return [(scope, _args, kw) => vfs.setattr(scope, kw as SetAttrFields)]
       default: {
-        const method = (vfs as unknown as Record<string, (...args: unknown[]) => unknown>)[opName]
+        const method = (vfs as unknown as Record<string, (...args: unknown[]) => unknown>)[name]
         return method === undefined ? [] : [(scope, args) => method.call(vfs, scope, ...args)]
       }
     }
@@ -674,21 +711,23 @@ export class MountEntry {
   }
 
   /**
-   * Run `opName` on this mount's VFS over a scope already keyed below the
+   * Run `name` on this mount's VFS over a scope already keyed below the
    * mount: each level in turn until one answers with something other than
    * null. A read resolves its renderer by `kwargs.filetype` when the caller
    * names one (null asks for the stored bytes) and by the path's extension
    * otherwise.
    */
-  async callOp(
-    opName: string,
+  async callKeyed(
+    name: string,
     scope: PathSpec,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     const filetype = kwargs.filetype === undefined ? getExtension(scope.virtual) : kwargs.filetype
-    const levels = this.callers(opName, filetype)
-    if (levels.length === 0) throw enotsup(this.vfs.name, opName, scope)
+    const levels = this.callers(name, filetype)
+    if (levels.length === 0) throw enotsup(this.vfs.name, name, scope)
+    taken(name, kwargs)
+    this.requireWritable(name, scope, [...args, ...Object.values(kwargs)])
     for (const call of levels) {
       const result = await call(scope, args, kwargs)
       if (result !== null && result !== undefined) return result
@@ -724,7 +763,7 @@ export class MountEntry {
     context: ExecContext = {},
   ): Promise<[ByteSource | null, IOResult]> {
     return this.use(async (): Promise<[ByteSource | null, IOResult]> => {
-      const [handlers, extension] = await this.pickHandlers(cmdName, paths, context)
+      const handlers = await this.pickHandlers(cmdName, paths, context)
       if (handlers.length === 0) {
         return [
           null,
@@ -735,7 +774,7 @@ export class MountEntry {
         ]
       }
       const keyedPaths = this.keyedPaths(cmdName, paths)
-      const cmdOpts = this.commandOpts(cmdName, extension, this.keyedFlags(flags), context)
+      const cmdOpts = this.commandOpts(cmdName, this.keyedFlags(flags), context)
       return this.inCommandScope(context, async (): Promise<[ByteSource | null, IOResult]> => {
         for (const cmd of handlers) {
           const refusal = this.readOnlyRefusal(cmdName, cmd, flags)
@@ -749,7 +788,7 @@ export class MountEntry {
   }
 
   /**
-   * The handlers to try in order, and the extension that chose them.
+   * The handlers to try in order.
    *
    * A filetype handler is selected from the operand's NAME, and a
    * directory can carry any extension, so the cascade would hand a
@@ -766,7 +805,7 @@ export class MountEntry {
     cmdName: string,
     paths: PathSpec[],
     context: ExecContext,
-  ): Promise<[Command[], string | null]> {
+  ): Promise<Command[]> {
     let extension =
       paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].virtual) : null
     const first = paths[0]
@@ -780,7 +819,7 @@ export class MountEntry {
       const entry = await context.statPath(first)
       if (entry !== null && entry.type === FileType.DIRECTORY) extension = null
     }
-    return [this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds), extension]
+    return this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds)
   }
 
   /** `p` with this mount's backend key stamped on. */
@@ -853,16 +892,12 @@ export class MountEntry {
    */
   private commandOpts(
     cmdName: string,
-    extension: string | null,
     flags: Record<string, FlagValue>,
     context: ExecContext,
   ): CommandOpts {
-    const isFiletypeCmd =
-      extension !== null && extension !== '' && this.cmds.has(cmdKey(cmdName, extension))
     return {
       stdin: context.stdin ?? null,
       flags,
-      filetypeFns: isFiletypeCmd ? null : this.filetypeHandlers(cmdName),
       mountPrefix: rstripSlash(this.prefix),
       command: cmdName,
       cwd: context.cwd ?? ROOT_CWD,
@@ -1027,23 +1062,12 @@ export class MountEntry {
    * rendering over the file. Mirrors Python's `MountEntry.call`.
    */
   async call(
-    opName: string,
+    name: string,
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     return this.use(async (): Promise<unknown> => {
-      const filetype = kwargs.filetype === undefined ? getExtension(path) : kwargs.filetype
-      const levels = this.callers(opName, filetype)
-      if (levels.length === 0) {
-        throw enotsup(this.vfs.name, opName, path)
-      }
-      if (this.writes(opName)) {
-        const dst = kwargs.dst
-        const endpoints = [PathSpec.fromStrPath(path)]
-        if (dst instanceof PathSpec) endpoints.push(dst)
-        requirePathsWritable(endpoints, this.prefix, this.mode, SUBTREE_OPS.has(opName))
-      }
       const mountPrefix = rstripSlash(this.prefix)
       const lastSlash = path.lastIndexOf('/')
       const scope = new PathSpec({
@@ -1057,22 +1081,19 @@ export class MountEntry {
       }
       // Per-op caps are policy and fire at the op door (postVfs); only
       // the timeout stays here, bounding the backend call itself.
-      const opOverride = this.commandLimits.get(opName) ?? null
+      const opOverride = this.commandLimits.get(name) ?? null
       const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
       return runWithMountContext(
         () =>
           runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
-            for (const call of levels) {
-              const result = await runWithTimeout(
-                Promise.resolve(call(scope, args, effectiveKwargs)),
-                opTimeout,
-                opName,
-              )
-              if (result !== null && result !== undefined) {
-                return wrapOpStream(result, this.mountId, this.activity)
-              }
-            }
-            return null
+            const result = await runWithTimeout(
+              this.callKeyed(name, scope, args, effectiveKwargs),
+              opTimeout,
+              name,
+            )
+            return result === null || result === undefined
+              ? null
+              : wrapStream(result, this.mountId, this.activity)
           }),
         this.mountId,
       )
@@ -1102,7 +1123,7 @@ async function* commandOutput(
 }
 
 /** Preserve a streaming operation's recording owner after its dispatch frame exits. */
-export function wrapOpStream(result: unknown, mountId: string, activity: VFSActivity): unknown {
+export function wrapStream(result: unknown, mountId: string, activity: VFSActivity): unknown {
   if (result instanceof CachableAsyncIterator) {
     result.wrapSource((source) => withMountContext(source, mountId))
     return activity.hold(result)

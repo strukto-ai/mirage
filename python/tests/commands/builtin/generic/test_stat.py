@@ -4,7 +4,6 @@ import pytest
 
 from mirage.commands.builtin.generic.stat import stat
 from mirage.io.types import materialize
-from mirage.ops.types import LinkView
 from mirage.types import (
     DEVICE_NUMBERS_KEY,
     LINK_TARGET_KEY,
@@ -19,6 +18,7 @@ from mirage.types import (
 from mirage.utils.stat_view import DIR_SIZE
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
+from mirage.view.types import LinkView
 from mirage.workspace import Workspace
 
 _MTIME = "2026-01-02T15:30:45Z"

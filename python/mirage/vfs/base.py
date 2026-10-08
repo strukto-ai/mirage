@@ -33,7 +33,7 @@ from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.vfs.call import vfs_call
 from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
 from mirage.vfs.secrets import redacted_config_dump
-from mirage.vfs.types import DuEntries, Effect, SearchQuery
+from mirage.vfs.types import DuEntries, Effect, SearchQuery, Target
 from mirage.watch.base import DeltaHook
 
 
@@ -273,7 +273,7 @@ class BaseVFS:
         """The bespoke ``@command`` functions this VFS was handed."""
         return list(self._commands)
 
-    @vfs_call(effect=Effect.READ)
+    @vfs_call(effect=Effect.READ, target=Target.DIR)
     async def readdir(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> list[str]:
@@ -286,7 +286,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "readdir", path)
 
-    @vfs_call(effect=Effect.READ)
+    @vfs_call(effect=Effect.READ, target=Target.FILE)
     async def read(
         self,
         path: PathSpec,
@@ -307,7 +307,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "read", path)
 
-    @vfs_call(effect=Effect.READ)
+    @vfs_call(effect=Effect.METADATA)
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
@@ -388,7 +388,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "du", path)
 
-    @vfs_call(effect=Effect.WRITE)
+    @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
     async def write(self, path: PathSpec, data: bytes) -> None:
         """Replace a file's bytes, creating it when missing.
 
@@ -398,7 +398,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "write", path)
 
-    @vfs_call(effect=Effect.WRITE)
+    @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
     async def append(
         self,
         path: PathSpec,
@@ -417,7 +417,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "append", path)
 
-    @vfs_call(effect=Effect.WRITE)
+    @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
     async def pwrite(
         self,
         path: PathSpec,
@@ -439,7 +439,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "pwrite", path)
 
-    @vfs_call(effect=Effect.WRITE)
+    @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
     async def create(self, path: PathSpec) -> None:
         """Create an empty file, leaving an existing one as it is.
 
@@ -448,7 +448,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "create", path)
 
-    @vfs_call(effect=Effect.WRITE)
+    @vfs_call(effect=Effect.CREATE, target=Target.DIR)
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         """Make a directory.
 
@@ -458,7 +458,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "mkdir", path)
 
-    @vfs_call(effect=Effect.WRITE)
+    @vfs_call(effect=Effect.REMOVE, target=Target.FILE)
     async def unlink(self, path: PathSpec) -> None:
         """Remove a file.
 
@@ -467,7 +467,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "unlink", path)
 
-    @vfs_call(effect=Effect.WRITE)
+    @vfs_call(effect=Effect.REMOVE, target=Target.DIR)
     async def rmdir(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> None:
@@ -488,7 +488,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "rm_r", path)
 
-    @vfs_call(effect=Effect.WRITE)
+    @vfs_call(effect=Effect.RENAME)
     async def rename(self, src: PathSpec, dst: PathSpec) -> None:
         """Move a name within this VFS.
 
@@ -517,7 +517,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "dir_copy", dst)
 
-    @vfs_call(effect=Effect.WRITE)
+    @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
@@ -532,7 +532,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "truncate", path)
 
-    @vfs_call(effect=Effect.WRITE)
+    @vfs_call(effect=Effect.ATTR)
     async def setattr(
         self,
         path: PathSpec,

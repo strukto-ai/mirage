@@ -24,13 +24,13 @@ from mirage.commands.spec.usage import (
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import format_fs_error
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import StatPath
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import gnu_basename
 from mirage.utils.quote import shell_quote
 from mirage.utils.timezone import zone_from_env
+from mirage.view.types import StatPath
 
 
 @dataclass(frozen=True, slots=True)

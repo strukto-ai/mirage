@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { PolicyDenied } from '../policy/errors.ts'
-import { Policies } from '../policy/policies.ts'
-import type { Policy } from '../policy/base.ts'
-import type { VfsContext } from '../policy/types.ts'
+import { PolicyDenied } from './errors.ts'
+import { Policies } from './policies.ts'
+import type { Policy } from './base.ts'
+import type { VfsContext } from './types.ts'
 import { Limit, MountMode, PathSpec } from '../types.ts'
-import { OpBoundary } from './boundary.ts'
+import { Boundary } from './boundary.ts'
 
 const sealed: Policy = {
   preVfs: (ctx: VfsContext) =>
@@ -31,9 +31,9 @@ function path(virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual)
 }
 
-describe('OpBoundary', () => {
+describe('Boundary', () => {
   it('admit raises a coded deny as EACCES', async () => {
-    const boundary = new OpBoundary(new Policies([sealed]), '/d/', MountMode.WRITE)
+    const boundary = new Boundary(new Policies([sealed]), '/d/', MountMode.WRITE)
     await boundary.admit('read', path('/d/pub'), false)
     const refused = boundary.admit('read', path('/d/sec/k'), false)
     await expect(refused).rejects.toBeInstanceOf(PolicyDenied)
@@ -41,18 +41,18 @@ describe('OpBoundary', () => {
   })
 
   it('admit holds the mount mode', async () => {
-    const boundary = new OpBoundary(new Policies(), '/ro/', MountMode.READ)
+    const boundary = new Boundary(new Policies(), '/ro/', MountMode.READ)
     await boundary.admit('read', path('/ro/f'), false)
     await expect(boundary.admit('write', path('/ro/f'), true)).rejects.toThrow(/read-only/)
   })
 
   it('complete applies the postVfs limit', async () => {
     const data = new TextEncoder().encode('abcdef')
-    const capped3 = new OpBoundary(new Policies([capped]), '/d/')
+    const capped3 = new Boundary(new Policies([capped]), '/d/')
     expect(await capped3.complete('read', path('/d/f'), false, data)).toEqual(
       new TextEncoder().encode('abc'),
     )
-    const bare = new OpBoundary(new Policies(), '/d/')
+    const bare = new Boundary(new Policies(), '/d/')
     expect(await bare.complete('read', path('/d/f'), false, data)).toEqual(data)
   })
 })

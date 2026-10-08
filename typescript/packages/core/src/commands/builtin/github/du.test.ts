@@ -62,7 +62,6 @@ async function runDu(
   const result = await cmd.fn(accessor, [PathSpec.fromStrPath(operand)], [], {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
     io: table,
   })

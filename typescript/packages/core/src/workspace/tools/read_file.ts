@@ -1,5 +1,5 @@
 import { detectFileType } from '../../commands/builtin/file_sniff.ts'
-import type { Ops } from '../../ops/ops.ts'
+import type { Files } from '../files.ts'
 import { FileStat, FileType } from '../../types.ts'
 import type { ContentType } from '../../types.ts'
 import {
@@ -91,7 +91,7 @@ function isTextMime(mimeType: ReadFileMime): boolean {
 }
 
 export async function readWorkspaceFile(
-  vfs: Ops,
+  vfs: Files,
   path: string,
   reader?: WorkspaceFileReader,
 ): Promise<WorkspaceFileReadResult> {

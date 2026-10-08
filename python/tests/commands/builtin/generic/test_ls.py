@@ -20,7 +20,6 @@ from mirage.commands.builtin.generic.ls import (
 )
 from mirage.commands.builtin.utils.formatting import LsColumns
 from mirage.commands.errors import CommandTimeoutError
-from mirage.ops.types import MountView
 from mirage.types import (
     ContentType,
     FileStat,
@@ -30,6 +29,7 @@ from mirage.types import (
     LsTimeKind,
     PathSpec,
 )
+from mirage.view.types import MountView
 
 
 def _spec(path: str) -> PathSpec:

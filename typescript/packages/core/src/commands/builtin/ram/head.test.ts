@@ -35,7 +35,6 @@ async function runHead(
   const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
   })

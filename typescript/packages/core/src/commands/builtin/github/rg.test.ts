@@ -81,7 +81,7 @@ async function runRg(
 ): Promise<CommandFnResult> {
   const cmd = GITHUB_RG[0]
   if (cmd === undefined) throw new Error('rg not registered')
-  const opts: CommandOpts = { stdin: null, flags, filetypeFns: null, cwd: '/' }
+  const opts: CommandOpts = { stdin: null, flags, cwd: '/' }
   return cmd.fn(makeAccessor(), [scope()], ['needle'], opts)
 }
 
@@ -89,7 +89,7 @@ async function exactFileSet(flags: CommandOpts['flags']): Promise<unknown> {
   const cmd = GITHUB_RG[0]
   if (cmd === undefined) throw new Error('rg not registered')
   const root = new PathSpec({ virtual: '/', directory: '/', vfsPath: '' })
-  const opts: CommandOpts = { stdin: null, flags, filetypeFns: null, cwd: '/', index: null }
+  const opts: CommandOpts = { stdin: null, flags, cwd: '/', index: null }
   await cmd.fn(makeAccessor(), [root], ['import'], opts)
   return narrow.mock.calls[0]?.[7]
 }

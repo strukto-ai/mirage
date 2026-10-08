@@ -63,8 +63,9 @@ RuntimeReach: TypeAlias = Literal["workspace", "process", "remote"]
 
 
 class DispatchFn(Protocol):
-    """The workspace op dispatch: run ``op`` against the mount owning
-    ``path`` and return its result with the accounting IOResult.
+    """The workspace dispatch: run the function ``name`` against the
+    mount owning ``path`` and return its result with the accounting
+    IOResult.
 
     The contract a sandboxed runtime's file I/O rides: defined here,
     on the consumer side, because runtimes receive it through a binding while
@@ -76,8 +77,9 @@ class DispatchFn(Protocol):
 
     def __call__(
         self,
-        op: str,
+        name: str,
         path: PathSpec,
+        /,
         *,
         report: OpReport | None = None,
         **kwargs: Any,

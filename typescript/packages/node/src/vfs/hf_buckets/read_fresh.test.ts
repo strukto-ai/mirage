@@ -320,7 +320,7 @@ describe('hf_buckets past EOF', () => {
     try {
       // The op door folds a 416 for every backend; the VFS's own windowed
       // read has no fold, so it must answer one itself.
-      const viaOp = (await w.mount('/m').callOp('read', spec, [], {
+      const viaOp = (await w.mount('/m').callKeyed('read', spec, [], {
         index: new RAMIndexCacheStore(),
         offset: 99,
         size: 5,

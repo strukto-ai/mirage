@@ -58,7 +58,6 @@ async function unlink(io: CommandIO, path: string): Promise<[number, string]> {
   const result = await BUILDER.fn(io, {} as Accessor, [PathSpec.fromStrPath(path)], [], {
     stdin: null,
     flags: {},
-    filetypeFns: null,
     cwd: '/',
     index: INDEX,
   })

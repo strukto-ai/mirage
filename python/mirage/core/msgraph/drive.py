@@ -496,7 +496,7 @@ async def capture_item_metadata(
         versions (bool): also expand the version history for the current
             revision, which only a snapshot needs; without it the revision
             is None. Every shell line records, so only reads outside one
-            (FUSE, a runtime's guest, the ops facade) skip it.
+            (FUSE, a runtime's guest, ``ws.vfs``) skip it.
     """
     params = {"$expand": "versions"} if versions else None
     item = await graph_get(config, loc.item(), params=params, session=session)

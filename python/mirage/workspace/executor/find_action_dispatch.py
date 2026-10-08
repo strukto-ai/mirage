@@ -38,12 +38,12 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.stream import SharedStdin, materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import resolve_path
+from mirage.view.types import NamespaceView, StatPath
 from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
 from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.types import Consumer

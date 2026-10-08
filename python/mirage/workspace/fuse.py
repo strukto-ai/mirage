@@ -30,7 +30,7 @@ from mirage.fuse.mount import (
     mount_background,
     unmount_with_fusermount,
 )
-from mirage.ops import Ops
+from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
 
 
@@ -50,16 +50,16 @@ class FuseManager:
 
     def setup(
         self,
-        ops: Ops,
+        files: Files,
         prefix: str = "/",
         mountpoint: str | None = None,
         session: SessionState | None = None,
         backend: str | MountBackend = MountBackend.FUSE,
     ) -> str:
-        """Mount the ops tree and return the live mountpoint.
+        """Mount the workspace's files and return the live mountpoint.
 
         Args:
-            ops (Ops): the op facade to serve.
+            files (Files): ``ws.vfs`` to serve.
             prefix (str): mount root; non-empty scopes the tree.
             mountpoint (str | None): where to mount; None picks a temporary
                 directory appropriate for the backend.
@@ -103,7 +103,7 @@ class FuseManager:
             else self._mountpoint
         )
         self._thread = mount_background(
-            ops,
+            files,
             self._kernel_mountpoint,
             root_prefix=prefix,
             session=session,

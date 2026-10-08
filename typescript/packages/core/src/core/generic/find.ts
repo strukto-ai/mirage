@@ -35,7 +35,7 @@ import {
   keep,
 } from '../../commands/builtin/find_eval.ts'
 import { FileType, PathSpec, type FileStat } from '../../types.ts'
-import type { LinkView } from '../../ops/types.ts'
+import type { LinkView } from '../../view/types.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { DIR_SIZE, contentSize } from '../../utils/stat_view.ts'

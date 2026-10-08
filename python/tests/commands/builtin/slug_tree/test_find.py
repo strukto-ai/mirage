@@ -16,12 +16,12 @@ from mirage.commands.config import CommandOpts
 from mirage.context import reset_current_session, set_current_session
 from mirage.core.dify import tree
 from mirage.io.types import IOResult, materialize
-from mirage.ops.types import NamespaceView
 from mirage.types import HiddenPaths, PathSpec, Visibility
 from mirage.utils.hidden import hidden_under
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.chroma import ChromaVFS
 from mirage.vfs.dify import DifyVFS
+from mirage.view.types import NamespaceView
 from mirage.workspace.session import SessionState
 from tests.commands.builtin.dify.conftest import document
 from tests.core.chroma.conftest import accessor_for, seeded_collection

@@ -14,8 +14,8 @@
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
-import { pathsScoped } from '../../../ops/namespace_view.ts'
-import type { NamespaceView } from '../../../ops/types.ts'
+import { pathsScoped } from '../../../view/namespace_view.ts'
+import type { NamespaceView } from '../../../view/types.ts'
 import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { ensureTree } from '../../../core/github/tree.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'

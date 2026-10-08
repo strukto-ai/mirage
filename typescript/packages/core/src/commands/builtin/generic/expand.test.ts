@@ -39,7 +39,6 @@ async function run(
   const opts = {
     stdin,
     ...line,
-    filetypeFns: null,
     cwd: '/',
     vfs: { kind: 'ram' } as never,
   } as CommandOpts

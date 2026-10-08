@@ -37,7 +37,6 @@ async function run(flags: Record<string, FlagValue>) {
   return cmd.fn(accessor, [path], ['needle'], {
     stdin: null,
     flags: { w: true, ...flags },
-    filetypeFns: null,
     io: ioFor(GmailVFS, accessor),
     cwd: '/',
   })

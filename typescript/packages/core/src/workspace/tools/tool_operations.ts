@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { strongestUnderSession } from '../../context/session_context.ts'
-import type { Ops } from '../../ops/ops.ts'
+import type { Files } from '../files.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { patternMatches } from '../../policy/match/pattern.ts'
@@ -41,7 +41,7 @@ export interface SessionLike {
   readonly sessionId: string
   readonly state: SessionState
   readonly decisions: Decisions
-  readonly vfs: Ops
+  readonly vfs: Files
   mounts(): readonly MountEntry[]
   shell(command: string, options?: SessionExecuteOptions): Promise<ExecuteResult>
   glob(pattern: string): Promise<string[]>
@@ -77,7 +77,7 @@ function shQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`
 }
 
-async function ensureParents(vfs: Ops, path: string): Promise<void> {
+async function ensureParents(vfs: Files, path: string): Promise<void> {
   const parent = gnuDirname(path)
   if (parent === '/' || parent === '' || parent === '.') return
   if (await vfs.exists(parent)) return
@@ -96,7 +96,7 @@ async function ensureParents(vfs: Ops, path: string): Promise<void> {
  * for any other filesystem reason proves nothing either way. In both
  * cases the read's own error stands rather than the probe's.
  */
-async function missing(vfs: Ops, path: string): Promise<boolean> {
+async function missing(vfs: Files, path: string): Promise<boolean> {
   try {
     return !(await vfs.exists(path))
   } catch (err) {

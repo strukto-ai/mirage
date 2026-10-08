@@ -47,7 +47,6 @@ describe('command()', () => {
     await rc.fn({} as never, [], [], {
       stdin: null,
       flags: { version: true },
-      filetypeFns: null,
       cwd: '/',
     })
     expect(fn).toHaveBeenCalledOnce()
@@ -65,7 +64,6 @@ describe('command()', () => {
     await rc.fn({} as never, [], [], {
       stdin: null,
       flags: { help: true },
-      filetypeFns: null,
       cwd: '/',
     })
     expect(fn).toHaveBeenCalledTimes(calls)
@@ -118,7 +116,6 @@ describe('command()', () => {
     const result = await rc.fn({} as never, [], [], {
       stdin: null,
       flags: { help: true },
-      filetypeFns: null,
       cwd: '/',
     })
     if (result === null) throw new Error('expected result')

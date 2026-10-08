@@ -15,7 +15,7 @@
 import { specOf } from '../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { SessionView } from '../../../ops/types.ts'
+import type { SessionView } from '../../../view/types.ts'
 import type { PolicyDenied } from '../../../policy/errors.ts'
 import type { ArithError } from '../../../shell/errors.ts'
 import { PathSpec, wordText } from '../../../types.ts'

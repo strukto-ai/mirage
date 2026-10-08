@@ -213,7 +213,7 @@ describe('hf_hub versions a listing by its head commit', () => {
     const two = wsOf(twoVfs, shared)
     await out(one, 'ls /m')
     fake.log.length = 0
-    const found = (await two.mount('/m').callOp('stat', ROOT, [], {
+    const found = (await two.mount('/m').callKeyed('stat', ROOT, [], {
       index: new ListingCheckStore(),
     })) as FileStat
     expect(found.fingerprint).toBe(fake.head())

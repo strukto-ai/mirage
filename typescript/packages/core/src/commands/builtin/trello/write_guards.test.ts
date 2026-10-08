@@ -62,7 +62,6 @@ describe('trello card writes hold the mount-wide write grant', () => {
       const opts: CommandOpts = {
         stdin: null,
         flags,
-        filetypeFns: null,
         cwd: '/',
         mountPrefix: '/trello',
       }
@@ -97,7 +96,6 @@ describe('trello card writes hold the mount scope', () => {
       const opts: CommandOpts = {
         stdin: null,
         flags,
-        filetypeFns: null,
         cwd: '/',
         mountPrefix: '/trello',
       }

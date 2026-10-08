@@ -32,8 +32,8 @@ from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as github_readdir
 from mirage.core.github.stat import stat as github_stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
+from mirage.view.namespace_view import paths_scoped
 
 
 @command("grep", vfs="github", spec=SPECS["grep"], aggregate=prefix_aggregate)

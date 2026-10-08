@@ -47,7 +47,6 @@ function opts(flags: Record<string, string | boolean | number | string[]>): Comm
   return {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
     vfs: null,
   } as unknown as CommandOpts

@@ -596,7 +596,7 @@ export const DEVICE_NUMBERS_KEY = 'device_numbers'
  * spell them, so one fact keeps one name from a shell line down to a
  * guest's utime. `nofollow` is not a field but the AT_SYMLINK_NOFOLLOW
  * bit: it writes the link entry's own attrs rather than its target's.
- * Lives here rather than beside either consumer because the ops facade
+ * Lives here rather than beside either consumer because `ws.vfs`
  * and the runtime bridge both take it and neither may import the
  * other.
  */
