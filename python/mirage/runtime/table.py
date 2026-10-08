@@ -13,11 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import importlib
-from collections.abc import Mapping, Sequence
-from typing import Any, Callable
+from collections.abc import Mapping
+from typing import Any
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.js.quickjs import QuickJsRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
@@ -25,7 +24,7 @@ from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.wasi import WasiRuntime
 from mirage.runtime.sandbox.sandlock import SandlockRuntime
-from mirage.runtime.types import RuntimeReach, ScriptSource
+from mirage.runtime.workspace import WorkspaceRuntime
 
 # One source of truth, preference order (sandboxed first, host last).
 # The command -> runtime mapping is derived from each class's captures,
@@ -36,46 +35,6 @@ RUNTIMES: tuple[type[Runtime], ...] = (
     LocalRuntime,
     QuickJsRuntime,
 )
-
-
-class WorkspaceRuntime(Runtime):
-    """The workspace's built-in command engine as a routing marker.
-
-    By default it captures nothing and serves every command no other
-    runtime captures (cat, ls, echo, and anything unknown): it is the
-    catch-all. Passing explicit captures flips it into an ordinary
-    capturer: the workspace serves exactly those commands and anything
-    unclaimed exits 126. Required: every workspace world contains
-    exactly one, appended automatically when the runtimes list omits
-    it; pass your own instance to customize it.
-
-    It is a pure routing marker, so it carries no capability mixin: a
-    line resolved to workspace runs on the workspace executor inline, the
-    path the line takes anyway, so there is no interpreter door (run)
-    and no delegate door (run_line) to implement.
-
-    Constructed like every runtime (captures, config, script), with
-    two workspace readings: captures None (the default) keeps the catch-all
-    behavior, an empty sequence serves nothing (full lockdown); and
-    the config has no fields today, the slot exists for uniformity.
-    """
-
-    name = "workspace"
-    # A workspace-routed line runs on the workspace executor itself: it IS
-    # the gate, so there is no door around it.
-    reach: RuntimeReach = "workspace"
-    captures: tuple[str, ...] = ()
-
-    def __init__(
-        self,
-        captures: Sequence[str] | None = None,
-        config: RuntimeConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
-    ) -> None:
-        # Declaring captures (even empty) turns the catch-all off; the
-        # dispatcher reads this bit, not the tuple's length.
-        self.restricted = captures is not None
-        super().__init__(captures, config, script)
 
 
 NAMED: dict[str, type[Runtime]] = {cls.name: cls for cls in RUNTIMES}

@@ -35,7 +35,7 @@ from mirage.errors.types import NoMountError
 from mirage.policy import Decisions, MountRootPolicy, OutputCapPolicy, Policies
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
-from mirage.runtime.table import WorkspaceRuntime
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.types import Limit, MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.utils.path import owner_prefix
 from mirage.vfs.base import BaseVFS

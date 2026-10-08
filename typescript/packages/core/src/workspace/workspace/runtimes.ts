@@ -21,9 +21,9 @@ import {
   bindCommands,
   buildRuntime,
   DEFAULT_ENTRIES,
-  WorkspaceRuntime,
   wholeLineRuntime,
 } from '../../runtime/table.ts'
+import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
 export interface RuntimesInit {

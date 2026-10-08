@@ -13,49 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { EXTERNAL_COMMANDS } from './constants.ts'
-import { Runtime } from './base.ts'
+import type { Runtime } from './base.ts'
 import { isProcessExecutor, isLineExecutor, type LineExecutor } from './mixin.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import type { RuntimeOptions } from './types.ts'
+import { WorkspaceRuntime } from './workspace.ts'
 import { compareCodePoints } from '../utils/sort.ts'
-
-/**
- * The workspace's built-in command engine as a routing marker.
- *
- * By default it captures nothing and serves every command no other
- * runtime captures (cat, ls, echo, and anything unknown): it is the
- * catch-all. Passing explicit captures flips it into an ordinary
- * capturer: the workspace serves exactly those commands and anything
- * unclaimed exits 126. Required: every workspace world contains
- * exactly one, appended automatically when the runtimes list omits it;
- * pass your own instance to customize it.
- *
- * It is a pure routing marker, so it carries no capability mixin: a
- * line resolved to workspace runs on the workspace executor inline, the path
- * the line takes anyway, so there is no interpreter door (run) and no
- * delegate door (runLine) to implement.
- *
- * Constructed like every runtime (captures, config, script), with two
- * workspace readings: captures undefined (the default) keeps the catch-all
- * behavior, an empty array serves nothing (full lockdown); and the
- * config has no fields today, the slot exists for uniformity.
- */
-export class WorkspaceRuntime extends Runtime {
-  readonly name = 'workspace'
-  // A workspace-routed line runs on the workspace executor itself: it IS the
-  // gate, so there is no door around it.
-  override readonly reach = 'workspace'
-  // Declaring captures (even empty) turns the catch-all off; the
-  // dispatcher reads this bit, not the array's length.
-  readonly restricted: boolean
-
-  constructor(options: RuntimeOptions = {}) {
-    super(options, [], [])
-    this.restricted = options.captures !== undefined
-  }
-}
 
 // One source of truth, preference order. The command -> runtime mapping
 // is derived from each class's captures, never hand-maintained.

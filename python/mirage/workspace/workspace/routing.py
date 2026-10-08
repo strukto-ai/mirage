@@ -28,11 +28,8 @@ from mirage.runtime.routing import (
     evaluate_script,
     parsed_commands,
 )
-from mirage.runtime.table import (
-    WorkspaceRuntime,
-    catch_all,
-    runtime_bindings_for,
-)
+from mirage.runtime.table import catch_all, runtime_bindings_for
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.workspace.lookup import Consumer, lookup
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState, env_snapshot

@@ -37,8 +37,8 @@ from mirage.runtime.routing import (
     parsed_commands,
     runtime_for_language,
 )
-from mirage.runtime.table import WorkspaceRuntime
 from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.parse import parse
 
 
