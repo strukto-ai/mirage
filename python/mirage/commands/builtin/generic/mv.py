@@ -52,9 +52,9 @@ from mirage.commands.builtin.utils.copy import (
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
 from mirage.errors.posix import posix_phrase
-from mirage.errors.types import FsCondition
+from mirage.errors.types import FsCondition, StaleWriteError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (
     MoveStrategy,
@@ -64,6 +64,7 @@ from mirage.types import (
     ReaddirFn,
     StatFn,
 )
+from mirage.utils.key_prefix import under_path
 
 _logger = logging.getLogger(__name__)
 
@@ -576,6 +577,20 @@ async def mv_generic(
             copies is not None
             and copies.links.stat_at(src.virtual) is not None
         )
+        # Refuse an undeletable source before a backup moves the target aside.
+        if (
+            isinstance(strategy, PrimitiveMove)
+            and strategy.check_unlink is not None
+            and not source_link
+        ):
+            try:
+                strategy.check_unlink(src)
+            except FS_ERRORS as exc:
+                errors.append(
+                    f"mv: cannot move '{src.raw_path}' to "
+                    f"'{target.raw_path}': {fs_strerror(exc)}"
+                )
+                continue
         backup_strategy = (
             NativeMove(rename=partial(rename_link, copies))
             if copies is not None
@@ -641,13 +656,36 @@ async def mv_generic(
             try:
                 await strategy.rename(src, target)
             except FS_ERRORS as exc:
+                stale = exc if isinstance(exc, StaleWriteError) else None
+                # A stale key inside a walk is named; other refusals, the operand.
+                inner = (
+                    inner_suffix(src, exc) or inner_suffix(target, exc)
+                    if stale is not None
+                    else ""
+                )
+                shown_src = with_inner(src.raw_path, inner)
+                # Copy landed, source delete lost: GNU's cross-device unlink failure.
+                if stale is not None and stale.landed:
+                    errors.append(
+                        f"mv: cannot remove '{shown_src}': {fs_strerror(exc)}"
+                    )
+                    writes[target.mount_path] = b""
+                    if not src_is_dir:
+                        created.add(key_of(target))
+                    continue
+                shown_dst = with_inner(target.raw_path, inner)
+                # A refused write names the end that changed.
+                changed = ""
+                if stale is not None:
+                    at_dst = under_path(stale.filename or "", target.virtual)
+                    changed = f"'{shown_dst if at_dst else shown_src}' "
                 # A backend rename that refuses (e.g. a destination whose
                 # parent chain is not all directories) is one failed
                 # operand, not an aborted command: GNU reports it and
                 # keeps going with the remaining sources.
                 errors.append(
-                    f"mv: cannot move '{src.raw_path}' to "
-                    f"'{target.raw_path}': {fs_strerror(exc)}"
+                    f"mv: cannot move '{shown_src}' to '{shown_dst}': "
+                    f"{changed}{fs_strerror(exc)}"
                 )
                 continue
             writes[src.mount_path] = b""

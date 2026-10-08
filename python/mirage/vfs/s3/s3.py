@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+import os
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -46,6 +47,26 @@ from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
 
 
+def _declared_endpoint(config: S3Config) -> str | None:
+    """The endpoint a mount declares, for its write-condition row.
+
+    The config's, else ``AWS_ENDPOINT_URL_S3`` or ``AWS_ENDPOINT_URL``
+    unless ``AWS_IGNORE_CONFIGURED_ENDPOINT_URLS`` is true. An endpoint
+    set only in an AWS profile is not read.
+
+    Args:
+        config (S3Config): the mount's config.
+    """
+    if config.endpoint_url:
+        return config.endpoint_url
+    env = os.environ
+    if env.get("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "").lower() == "true":
+        return None
+    return (
+        env.get("AWS_ENDPOINT_URL_S3") or env.get("AWS_ENDPOINT_URL") or None
+    )
+
+
 class S3VFS(BaseVFS):
     accessor: S3Accessor
     name: str = VFSName.S3
@@ -64,7 +85,29 @@ class S3VFS(BaseVFS):
     def __init__(self, config: S3Config) -> None:
         super().__init__()
         self.config = config
-        self.accessor = S3Accessor(self.config)
+        self._endpoint = _declared_endpoint(config)
+        pinned = (
+            config.model_copy(update={"endpoint_url": self._endpoint})
+            if self._endpoint and not config.endpoint_url
+            else config
+        )
+        self.accessor = S3Accessor(pinned)
+
+    def resolved_endpoint(self) -> str | None:
+        """The endpoint this mount's writes go to.
+
+        One declared when the mount was built is fixed, and the client is
+        pinned to it. Without one, it is the endpoint the running loop's
+        client opened with, and before that client opens, the environment,
+        which it will read. Mirrors TS ``resolvedEndpoint``, whose client
+        opens for each op.
+        """
+        if self._endpoint:
+            return self._endpoint
+        client = self.accessor.open_client()
+        if client is not None:
+            return str(client.meta.endpoint_url)
+        return _declared_endpoint(self.config)
 
     async def readdir(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

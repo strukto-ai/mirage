@@ -64,6 +64,7 @@ import {
   DriftPolicy,
   MountMode,
   PathSpec,
+  WritePolicy,
   parseMountMode,
 } from '../../types.ts'
 import type { Policies } from '../../policy/index.ts'
@@ -72,6 +73,8 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { Files } from '../files.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
+import { WritePolicyError } from '../mount/errors.ts'
+import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { PrefixResolver } from '../../runtime/resolver.ts'
 import { ChildProcess } from '../../process/child.ts'
@@ -173,6 +176,8 @@ export class Workspace {
   private readonly meta: WorkspaceMeta
   private readonly indexConfig: IndexConfig | undefined
   private readonly readDefault: ReadSpec
+  /** The write policy a mount added without one takes. */
+  readonly writeDefault: WritePolicy
   private shellParser: ShellParser | null
   private readonly shellParserFactory: (() => Promise<ShellParser>) | null
   private shellParserPromise: Promise<ShellParser> | null = null
@@ -251,8 +256,15 @@ export class Workspace {
     }
     // The workspace-level default a mount overrides, as `mode` is.
     this.readDefault = options.read ?? DEFAULT_READ_SPEC
+    this.writeDefault = coerceWritePolicy(options.write)
     const index = options.index === undefined ? undefined : normalizeIndexConfig(options.index)
-    const normalized = normalizeMounts(mounts, this.readDefault, index)
+    // Before the mounts: the write verdict asks whether the cache keeps anything.
+    this.cache = buildFileCache(options.cache, options.cacheLimit)
+    const normalized = normalizeMounts(mounts, this.readDefault, index, {
+      mode: options.mode ?? MountMode.READ,
+      write: this.writeDefault,
+      caching: this.cache.cacheLimit > 0,
+    })
     this.indexConfig = index
     this.registry = new MountRegistry(
       normalized.bare,
@@ -264,6 +276,8 @@ export class Workspace {
         ...(index !== undefined ? { index } : {}),
         refs: normalized.refs,
         indexes: normalized.indexes,
+        defaultWrite: this.writeDefault,
+        writes: normalized.write,
       },
     )
     this.registry.processView = (session) => this.processView(session)
@@ -399,6 +413,7 @@ export class Workspace {
       new HistoryViewVFS(this.observer),
       MountMode.READ,
       DEFAULT_READ_SPEC,
+      { write: WritePolicy.UNCONDITIONAL },
     )
     // One file per program the session can run, where PATH finds it: the
     // same lookup which, type and command -v answer from.
@@ -410,8 +425,8 @@ export class Workspace {
       ),
       MountMode.READ,
       DEFAULT_READ_SPEC,
+      { write: WritePolicy.UNCONDITIONAL },
     )
-    this.cache = buildFileCache(options.cache, options.cacheLimit)
     this.registry.attachFileCache(this.cache)
     // Only an explicit agentId claims the workspace user; a bare launch
     // adopts whatever identity the namespace store holds.
@@ -443,7 +458,9 @@ export class Workspace {
       // would stamp on it exactly the combination the verdict refuses. It
       // is snapshotted like any other mount, so that stray policy came
       // back as a refusal on restore.
-      this.registry.mount('/', new RAMVFS(), options.mode ?? MountMode.READ, DEFAULT_READ_SPEC)
+      this.registry.mount('/', new RAMVFS(), options.mode ?? MountMode.READ, DEFAULT_READ_SPEC, {
+        write: WritePolicy.UNCONDITIONAL,
+      })
       this.syntheticRootAnchor = true
     }
     // The workspace's own session is a session created without a name,
@@ -1277,6 +1294,11 @@ export class Workspace {
    * already mounted elsewhere keeps the index of that mount, as in the
    * constructor, and this one goes unused -- though a typo in it is still
    * refused, before the read policy is judged.
+   *
+   * `write` is the mount's write policy; left out or null, the workspace
+   * default, as Python's None.
+   * It is judged on the mount's mode and on whether the cache keeps
+   * anything, as the constructor does.
    */
   addMount(
     prefix: string,
@@ -1285,6 +1307,7 @@ export class Workspace {
     read?: ReadSpec,
     vfsRef: string | null = null,
     index?: IndexConfig,
+    write?: string | null,
   ): MountEntry {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const own = index === undefined ? this.indexConfig : normalizeIndexConfig(index)
@@ -1293,10 +1316,19 @@ export class Workspace {
     // An alias keeps the index of the VFS's other mount.
     const alias = this.registry.allMounts().find((m) => m.vfs === vfs)
     checkReadCapability(prefix, vfs, resolvedRead, alias !== undefined ? alias.indexConfig : own)
+    const resolvedWrite = write == null ? this.writeDefault : coerceWritePolicy(write)
+    checkWriteCapability(
+      prefix,
+      vfs,
+      resolvedWrite,
+      mode,
+      this.cache.cacheLimit > 0 && vfs.cachesReads,
+    )
     const previous = this.registry.allMounts()
     const m = this.registry.mount(prefix, vfs, mode, resolvedRead, {
       ...(own !== undefined ? { index: own } : {}),
       vfsRef,
+      write: resolvedWrite,
     })
     prepareAddedMount(this.registry, m, previous)
     return m
@@ -1981,11 +2013,20 @@ export class Workspace {
     // The Mounts ride through whole; flattening them to [vfs, mode]
     // here is what would drop the restored read policy.
     const mounts: Record<string, MountSpec> = { ...args.mountArgs }
+    // The saved write default wins; an option naming another is refused.
+    const asked = options.write !== undefined ? coerceWritePolicy(options.write) : undefined
+    if (asked !== undefined && asked !== args.writeDefault) {
+      throw new WritePolicyError(
+        `Workspace.fromState: the workspace was saved write: ${args.writeDefault}; ` +
+          `the options ask write: ${asked}`,
+      )
+    }
     const mergedOptions: WorkspaceOptions = {
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
       ...options,
+      write: args.writeDefault,
     }
     const ws = new this(mounts, mergedOptions) as InstanceType<T>
     for (const override of Object.values(overrides)) {

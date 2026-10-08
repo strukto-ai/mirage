@@ -216,3 +216,15 @@ def mounted_path(root: PathSpec, mount_path: str) -> PathSpec:
     prefix = mount_prefix_of(root.virtual, root.vfs_path)
     virtual = prefix + mount_path if prefix else mount_path
     return PathSpec.from_str_path(virtual, mount_path.strip("/"))
+
+
+def key_path(root: PathSpec, key_prefix: str, key: str) -> PathSpec:
+    """The path a backend key under ``key_prefix`` names, addressed like ``root``.
+
+    Args:
+        root (PathSpec): Any operand on the same mount, read for its
+            prefix.
+        key_prefix (str): The mount's backend key prefix.
+        key (str): The backend key, prefix included.
+    """
+    return mounted_path(root, "/" + strip(key_prefix, key).lstrip("/"))

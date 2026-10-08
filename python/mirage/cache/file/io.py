@@ -21,10 +21,13 @@ from weakref import WeakKeyDictionary
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.io import CachableAsyncIterator, IOResult
 from mirage.io.types import ByteSource
+from mirage.observe.context import LostPaths, line_version
 from mirage.observe.record import (
     READ_FINGERPRINT_OPS,
+    STAMP_FINGERPRINT_OPS,
     WRITE_FINGERPRINT_OPS,
     OpRecord,
+    RecordIndex,
 )
 from mirage.types import CacheFacts
 
@@ -187,6 +190,10 @@ async def _set_cached_locked(
     # Required in the TypeScript twin for the same reason.
     ttl: int | None,
 ) -> None:
+    if len(data) > cache.cache_limit:
+        # Bytes over the whole cache limit would evict every warm entry.
+        await cache.remove(path)
+        return
     if written is not None:
         keep, token = written_verdict(records, path, written, len(data))
         if not keep:
@@ -194,7 +201,7 @@ async def _set_cached_locked(
             # the pre-write entry has to go here.
             await cache.remove(path)
             return
-        await cache.set(path, data, fingerprint=token, ttl=ttl)
+        await _store(cache, path, data, token, ttl)
         return
     fingerprint = latest_fingerprint(records, path)
     if fingerprint is None and await cache.exists(path):
@@ -207,7 +214,121 @@ async def _set_cached_locked(
         # and only under ``bounded``, which already calls that entry
         # trusted.
         return
-    await cache.set(path, data, fingerprint=fingerprint, ttl=ttl)
+    await _store(cache, path, data, fingerprint, ttl)
+
+
+async def _store(
+    cache: FileCacheMixin,
+    path: str,
+    data: bytes,
+    fingerprint: str | None,
+    ttl: int | None,
+) -> None:
+    """Store bytes the line settled on, never failing the line for it.
+
+    The read or write behind them already happened; a store that refuses
+    the fill (out of memory, a value over its size limit) costs the next
+    read a fetch, so it is logged and the stale entry dropped.
+
+    Args:
+        cache (FileCacheMixin): the file cache.
+        path (str): virtual path used as the cache key.
+        data (bytes): the bytes to store.
+        fingerprint (str | None): their token.
+        ttl (int | None): the mount's bound.
+    """
+    try:
+        await cache.set(path, data, fingerprint=fingerprint, ttl=ttl)
+    except Exception:
+        logger.warning("cache fill refused for %s", path, exc_info=True)
+        try:
+            await cache.remove(path)
+        except Exception:
+            logger.warning(
+                "stale copy not dropped for %s", path, exc_info=True
+            )
+
+
+def _gone(
+    index: RecordIndex | None, lost: LostPaths | None, path: str
+) -> bool:
+    """Whether the line no longer knows the bytes it holds for ``path``.
+
+    A path whose conditional write lost, or whose newest version record
+    removed or moved it (its own or an ancestor's), is not the file those
+    bytes describe any more.
+
+    Args:
+        index (RecordIndex | None): the line's records, indexed.
+        lost (LostPaths | None): the line's lost paths.
+        path (str): virtual path used as the cache key.
+    """
+    if lost is not None and lost.holds(path):
+        return True
+    if index is None:
+        return False
+    return _retracted(index.newest_version(path))
+
+
+def _retracted(rec: OpRecord | None) -> bool:
+    """Whether a path's newest version record removed or moved it.
+
+    Args:
+        rec (OpRecord | None): the newest version record, if any.
+    """
+    return rec is not None and rec.op not in STAMP_FINGERPRINT_OPS
+
+
+async def _keep_versions(
+    cache: FileCacheMixin,
+    records: list[OpRecord],
+    index: RecordIndex,
+    cache_facts: Callable[[str], CacheFacts],
+    lost: LostPaths | None,
+) -> None:
+    """Keep the version each path last had on the line, on conditional mounts.
+
+    A read that fills no cache (``grep``, ``head``) or a write that claims
+    no bytes (``>>``, a resize, a cross-mount ``cp``) still names the
+    version it saw, and the next line's write on a conditional mount needs
+    it; so does a refusal, whose read may have been served from the cache
+    and left no record. Runs after the bytes are settled, so it never
+    undoes a removal.
+
+    Args:
+        cache (FileCacheMixin): the file cache.
+        records (list[OpRecord]): the line's records.
+        index (RecordIndex): the same records, indexed.
+        cache_facts (Callable[[str], CacheFacts]): per-path facts.
+        lost (LostPaths | None): the line's lost paths.
+    """
+    paths = {
+        rec.path
+        for rec in records
+        if rec.op in STAMP_FINGERPRINT_OPS and rec.fingerprint
+    }
+    if lost is not None:
+        paths.update(key for key in lost.marks if lost.holds(key))
+    versions: dict[str, str] = {}
+    for path in paths:
+        facts = cache_facts(path)
+        if not (facts.cacheable and facts.keeps_versions):
+            continue
+        _, version = line_version(index, lost, path)
+        if version:
+            versions[path] = version
+    if not versions:
+        return
+    try:
+        async with mutation_lock(cache):
+            await cache.keep_fingerprints(versions)
+    except Exception:
+        logger.warning(
+            "versions not kept for %d paths, first %s",
+            len(versions),
+            min(versions),
+            exc_info=True,
+        )
 
 
 def _drop_drain_task(
@@ -222,12 +343,33 @@ async def apply_io(
     io: IOResult,
     cache_facts: Callable[[str], CacheFacts] | None = None,
     records: list[OpRecord] | None = None,
+    lost: LostPaths | None = None,
+    nested: bool = False,
 ) -> None:
+    """Settle what a command read and wrote into the file cache.
+
+    Args:
+        cache (FileCacheMixin): the file cache.
+        io (IOResult): the command's reads, writes and cache claims.
+        cache_facts (Callable[[str], CacheFacts] | None): per-path facts.
+        records (list[OpRecord] | None): the line's records.
+        lost (LostPaths | None): the line's lost paths.
+        nested (bool): a nested line's (``eval``, ``$(...)``): it keeps
+            only the versions of paths still lost; its line keeps the rest.
+    """
     # A path both read and written is dropped: neither side is the file.
     kept = [p for p in io.cache if p not in io.reads or p not in io.writes]
     cache_set = set(kept)
+    index = RecordIndex(records) if records is not None else None
     for path in kept:
-        if cache_facts is not None and not cache_facts(path).cacheable:
+        facts = cache_facts(path) if cache_facts is not None else None
+        if facts is not None and not facts.cacheable:
+            continue
+        # Only a conditional mount names what the line removed or lost.
+        if (facts is None or facts.keeps_versions) and _gone(
+            index, lost, path
+        ):
+            await cache.remove(path)
             continue
         # The token has to describe the bytes actually stored, so the
         # side this branch took decides which records label them.
@@ -285,6 +427,10 @@ async def apply_io(
         if cache_facts is not None and not cache_facts(path).cacheable:
             continue
         await cache.remove(path)
+    if records is not None and index is not None and cache_facts is not None:
+        await _keep_versions(
+            cache, [] if nested else records, index, cache_facts, lost
+        )
     # An unfinished read no drain owns is closed; unmount waits on it.
     drains = getattr(cache, "_drain_tasks", {})
     for path, data in io.reads.items():

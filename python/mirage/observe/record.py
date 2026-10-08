@@ -15,6 +15,7 @@
 from dataclasses import dataclass, field
 
 from mirage.io.types import ByteSource
+from mirage.utils.key_prefix import under_path
 
 # Ops whose record carries a token describing the bytes it moved, split
 # by direction: the file cache stores bytes from either `IOResult.reads`
@@ -56,6 +57,8 @@ CONTENT_CHANGING_OPS = frozenset(
 RETRACT_FINGERPRINT_OPS = frozenset(
     {"unlink", "rm_r", "rmdir", "rename", "rename_prefix", "copy"}
 )
+# Stamps name the bytes at a path; retracts mean the line no longer knows them.
+VERSION_OPS = STAMP_FINGERPRINT_OPS | RETRACT_FINGERPRINT_OPS
 # The subset that moved a whole prefix, and so takes every pin beneath
 # it. Membership is what the op *did*, never what it could have done:
 # rename has two code paths and only one of them is a prefix walk, so it
@@ -129,3 +132,50 @@ class OpRecord:
             "fingerprint": self.fingerprint,
             "revision": self.revision,
         }
+
+
+class RecordIndex:
+    """A line's records indexed as they arrive, for per-path version lookups.
+
+    Each lookup first takes in the records appended since the last one, so
+    a record added while a caller awaits is seen, and no record is read
+    twice.
+
+    Args:
+        records (list[OpRecord]): the line's records, oldest first; only
+            ever appended to.
+    """
+
+    def __init__(self, records: list[OpRecord]) -> None:
+        self._records = records
+        self._seen = 0
+        self._at: dict[str, int] = {}
+        self._subtree: list[int] = []
+
+    def _absorb(self) -> None:
+        for i in range(self._seen, len(self._records)):
+            rec = self._records[i]
+            if rec.op in VERSION_OPS:
+                self._at[rec.path] = i
+            if rec.op in SUBTREE_RETRACT_OPS:
+                self._subtree.append(i)
+        self._seen = len(self._records)
+
+    def newest_version(self, key: str) -> OpRecord | None:
+        """The newest record that says which version of ``key`` the line knows.
+
+        A record at the path counts if it stamps or retracts a version; one
+        at an ancestor counts if it moved the whole subtree, which took
+        ``key`` with it.
+
+        Args:
+            key (str): the virtual path asked about.
+        """
+        self._absorb()
+        at = self._at.get(key, -1)
+        for i in reversed(self._subtree):
+            if i <= at:
+                break
+            if under_path(key, self._records[i].path):
+                return self._records[i]
+        return self._records[at] if at >= 0 else None

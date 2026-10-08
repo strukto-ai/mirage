@@ -27,7 +27,7 @@ import type { BaseVFS } from '../../vfs/base.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ConsoleFactory, JobTable } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
-import type { Limit, DriftPolicy, MountMode, ReadSpec, Refusal } from '../../types.ts'
+import type { Limit, DriftPolicy, MountMode, ReadSpec, Refusal, WritePolicy } from '../../types.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { RouteDecision, RoutePolicy } from '../../runtime/routing/index.ts'
 import type { RuntimeEntry } from '../../runtime/base.ts'
@@ -57,6 +57,8 @@ export interface WorkspaceOptions {
    * mount block, where it cannot be confused with `index: {ttl:}`.
    */
   read?: ReadSpec
+  /** The write policy a mount inherits when it declares none. */
+  write?: WritePolicy
   /**
    * Workspace defaults keyed by command name. A session profile's
    * `commandLimits` and a mount's own table take precedence.
