@@ -72,10 +72,11 @@ class ExitSignal(Exception):
     before it applies the command's redirects, so that diagnostic goes
     around them; any other goes through the redirects it was written
     under. ``replaced`` names the program an ``exec`` replaced the shell
-    with: ``stdout`` is then that program's, written under the redirects
-    the signal unwinds through, and the shell's actions went with it.
-    An EXIT action's output goes around those redirects, as bash runs it
-    once the shell has unwound.
+    with, whose actions went with it. ``unrouted`` marks ``stdout`` as a
+    nested line's (an ``exec``'d program's, or an ERR or RETURN action's
+    that left), which the redirects the signal unwinds through still
+    route. An EXIT action's output goes around those redirects, as bash
+    runs it once the shell has unwound.
     """
 
     def __init__(
@@ -93,6 +94,7 @@ class ExitSignal(Exception):
         )
         self.expanding: int | None = None
         self.replaced: str | None = None
+        self.unrouted = False
 
 
 class DiscardSignal(ExitSignal):

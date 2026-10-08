@@ -53,6 +53,7 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { createFile, writeDescription } from './create.ts'
 import {
   CLOSED as EXEC_CLOSED,
+  EXEC_STREAM_UNBOUND,
   OPEN_FOR_READ_WRITE,
   OPEN_FOR_READING,
   TO_STDERR as EXEC_TO_STDERR,
@@ -411,6 +412,27 @@ export async function handleRedirect(
   const jobOutput = session.jobOutput
   const route = new JobRoute(recorder, outputs, jobOutput ?? session.tty.jobs, dispatch, session)
   session.jobOutput = route
+  // A stream the statement redirects is its own while it runs, in the lines
+  // it runs too (`eval`, `exec CMD`, `bash -c`): an earlier `exec >` binding
+  // of it waits until the statement ends.
+  const held = {
+    ...(claimed.has(1)
+      ? {
+          execStdout: session.execStdout,
+          execStdoutAppend: session.execStdoutAppend,
+          execStdoutInput: session.execStdoutInput,
+        }
+      : {}),
+    ...(claimed.has(2)
+      ? {
+          execStderr: session.execStderr,
+          execStderrAppend: session.execStderrAppend,
+          execStderrInput: session.execStderrInput,
+        }
+      : {}),
+  }
+  if (claimed.has(1)) Object.assign(session, EXEC_STREAM_UNBOUND[1])
+  if (claimed.has(2)) Object.assign(session, EXEC_STREAM_UNBOUND[2])
   try {
     const given = inputs.get(0) ?? null
     if (command === null) {
@@ -451,6 +473,7 @@ export async function handleRedirect(
       if (diagnostic.byteLength > 0) await recorder.emit(Channel.STDERR, diagnostic)
     }
   } finally {
+    Object.assign(session, held)
     // A body that raised (an abort, an error) skips the writes below: its
     // jobs write straight through.
     route.recorder = null

@@ -107,6 +107,7 @@ export async function handleExecCommand(
   const stderr = await io.materializeStderr()
   const replaced = new ExitSignal(io.exitCode, stderr, stdout)
   replaced.replaced = head
+  replaced.unrouted = true
   throw replaced
 }
 

@@ -61,11 +61,14 @@ export class ExitSignal extends Error {
   // command's redirects, so that diagnostic goes around them; any other
   // goes through the redirects it was written under.
   expanding: number | null = null
-  // The program an `exec` replaced the shell with: stdout is then that
-  // program's, written under the redirects the signal unwinds through, and
-  // the shell's actions went with it. An EXIT action's output goes around
-  // those redirects, as bash runs it once the shell has unwound.
+  // The program an `exec` replaced the shell with, whose actions went with
+  // it.
   replaced: string | null = null
+  // Whether stdout is a nested line's (an `exec`'d program's, or an ERR or
+  // RETURN action's that left), which the redirects the signal unwinds
+  // through still route. An EXIT action's output goes around those
+  // redirects, as bash runs it once the shell has unwound.
+  unrouted = false
 
   constructor(
     exitCode = 0,

@@ -230,13 +230,13 @@ export function ended(sig: Unwinding): IOResult {
 }
 
 /**
- * Take what an `exec`'d command wrote, for the redirects it ran under to
- * route. An EXIT action's output goes around them, and what the other
- * unwinding signals carry went through them already. Mirrors Python's
- * take_stdout.
+ * Take what a nested line wrote before it left (an `exec`'d command, an ERR
+ * or RETURN action), for the redirects it ran under to route. An EXIT
+ * action's output goes around them, and what the other unwinding signals
+ * carry went through them already. Mirrors Python's take_stdout.
  */
 export function takeStdout(sig: Unwinding): Uint8Array {
-  if (!(sig instanceof ExitSignal) || sig.replaced === null) return new Uint8Array()
+  if (!(sig instanceof ExitSignal) || !sig.unrouted) return new Uint8Array()
   const output = sig.stdout ?? new Uint8Array()
   sig.stdout = null
   return output

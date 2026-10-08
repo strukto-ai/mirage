@@ -28,6 +28,8 @@ from mirage.workspace.executor.statement import (
     Written,
     as_written,
     record_status,
+    restore_status,
+    snapshot_status,
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -195,7 +197,7 @@ async def run_err_trap(
     session.err_trap_running = True
     try:
         return await _run_action(
-            execute_fn, action, session, status, stdin, call_stack
+            execute_fn, action, session, stdin, call_stack
         )
     finally:
         session.err_trap_running = False
@@ -252,12 +254,7 @@ async def run_return_trap(
     session.return_trap_running = True
     try:
         return await _run_action(
-            execute_fn,
-            action,
-            session,
-            session.last_exit_code,
-            stdin,
-            call_stack,
+            execute_fn, action, session, stdin, call_stack
         )
     finally:
         session.return_trap_running = False
@@ -267,24 +264,27 @@ async def _run_action(
     execute_fn: Callable[..., Any],
     action: str,
     session: SessionState,
-    status: int,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
 ) -> list[Written]:
     """Run a trap action as a line of the shell and collect its output.
-    ``$?`` is ``status`` again after it, whatever the action returns, and
-    what the action runs in a test or after ``!`` leaves the ``set -e``
-    answer for the statement it answers as it was.
+
+    ``$?`` and ``${PIPESTATUS[@]}`` are as they were again after it,
+    whatever the action returns, and what the action runs in a test or
+    after ``!`` leaves the ``set -e`` answer for the statement it
+    answers as it was. A failure ``set -e`` acts on in it ends the shell
+    with its status, and an ``exit`` or ``return`` in it leaves with
+    what it wrote, for the redirects of its statement to route.
 
     Args:
         execute_fn (Callable[..., Any]): runs a line in the caller's
             frames.
         action (str): the action's text.
         session (SessionState): the shell running it.
-        status (int): the ``$?`` it leaves.
         stdin (ByteSource | None): the shell's standard input.
         call_stack (CallStack | None): the frames it runs in.
     """
+    held = snapshot_status(session)
     immune = session.errexit_immune
     try:
         io = await execute_fn(
@@ -293,12 +293,19 @@ async def _run_action(
             stdin=stdin,
             call_stack=call_stack if call_stack is not None else CallStack(),
         )
+    except ExitSignal as sig:
+        sig.unrouted = True
+        raise
     finally:
         session.errexit_immune = immune
-    record_status(session, status)
-    return as_written(
-        await materialize(io.stdout), await materialize(io.stderr)
-    )
+    stdout = await materialize(io.stdout)
+    stderr = await materialize(io.stderr) or b""
+    if session.errexit_exiting:
+        ended = ExitSignal(io.exit_code, stderr=stderr, stdout=stdout)
+        ended.unrouted = True
+        raise ended
+    restore_status(session, held, session.status_writer)
+    return as_written(stdout, stderr)
 
 
 async def run_exit_trap(

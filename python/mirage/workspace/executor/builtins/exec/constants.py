@@ -53,6 +53,22 @@ EXEC_STREAM_FIELDS = (
     "exec_stdin_identity",
 )
 
+# The `exec` binding of each standard output stream with no `exec`
+# redirect in force: what a statement's own redirect of the stream holds
+# it at while the statement runs.
+EXEC_STREAM_UNBOUND: dict[int, dict[str, bool | None]] = {
+    1: {
+        "exec_stdout": None,
+        "exec_stdout_append": False,
+        "exec_stdout_input": None,
+    },
+    2: {
+        "exec_stderr": None,
+        "exec_stderr_append": False,
+        "exec_stderr_input": None,
+    },
+}
+
 # bash's usage line for `exec`, printed after an invalid option.
 EXEC_USAGE = (
     "exec: usage: exec [-cl] [-a name] [command [argument ...]] "

@@ -247,14 +247,15 @@ def ended(sig: Exception) -> IOResult:
 
 
 def take_stdout(sig: Exception) -> bytes:
-    """Take what an ``exec``'d command wrote, for the redirects it ran
-    under to route. An EXIT action's output goes around them, and what
-    the other unwinding signals carry went through them already.
+    """Take what a nested line wrote before it left (an ``exec``'d
+    command, an ERR or RETURN action), for the redirects it ran under to
+    route. An EXIT action's output goes around them, and what the other
+    unwinding signals carry went through them already.
 
     Args:
         sig (Exception): one of ``UNWINDING``.
     """
-    if not isinstance(sig, ExitSignal) or sig.replaced is None:
+    if not isinstance(sig, ExitSignal) or not sig.unrouted:
         return b""
     output, sig.stdout = sig.stdout or b"", None
     return output

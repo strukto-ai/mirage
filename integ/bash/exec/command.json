@@ -135,6 +135,40 @@
         "stdout": "rc=1\n0\n",
         "stderr": "echo: write error: Bad file descriptor\n"
       }
+    },
+    {
+      "id": "exec_redirects_govern_nested_lines",
+      "seq": 962420,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( exec > /data/old; exec echo hi > /data/new ); echo \"old[$(cat /data/old)] new[$(cat /data/new)]\"; rm -f /data/old /data/new; ( exec > /data/old; exec echo hi ); echo \"old[$(cat /data/old)]\"; rm -f /data/old; ( exec > /data/old; eval 'echo hi' > /data/new ); echo \"old[$(cat /data/old)] new[$(cat /data/new)]\"; rm -f /data/old /data/new; ( exec > /data/old; bash -c 'echo hi' > /data/new ); echo \"old[$(cat /data/old)] new[$(cat /data/new)]\"; rm -f /data/old /data/new",
+      "expect": {
+        "exit": 0,
+        "stdout": "old[] new[hi]\nold[hi]\nold[] new[hi]\nold[] new[hi]\n",
+        "stderr": ""
+      }
     }
   ]
 }

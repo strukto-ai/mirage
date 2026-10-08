@@ -203,6 +203,40 @@
         "stdout": "OLD\nend\nBEFORE\nTRAP\nrc=7\nT\nrc=5\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "trap_actions_that_fail_or_leave",
+      "seq": 512100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( set -e; trap '(exit 7)' ERR; false; echo BAD ); echo rc=$?; ( trap '(exit 7)' ERR; false; echo \"after $?\" ); echo rc=$?; ( set -eT; trap '(exit 7)' RETURN; f() { :; }; f; echo BAD ); echo rc=$?; ( trap '(exit 7)' RETURN; f() { return 3; }; f; echo \"after $?\" ); ( trap 'echo ERR' ERR; true | false | false; echo \"${PIPESTATUS[*]} $?\" ); ( trap 'echo T; exit 7' ERR; { false; } > /data/f ); echo \"rc=$? f[$(cat /data/f)]\"; rm -f /data/f",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=7\nafter 1\nrc=0\nrc=7\nafter 3\nERR\n0 1 1 1\nrc=7 f[T]\n",
+        "stderr": ""
+      }
     }
   ]
 }

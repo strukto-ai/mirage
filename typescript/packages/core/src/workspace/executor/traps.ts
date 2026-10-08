@@ -21,7 +21,13 @@ import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecutionNode } from '../types.ts'
-import { asWritten, recordStatus, type Written } from './statement.ts'
+import {
+  asWritten,
+  recordStatus,
+  restoreStatus,
+  snapshotStatus,
+  type Written,
+} from './statement.ts'
 import { ERR_TRAP_EXEMPT_TYPES } from '../../shell/constants.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 
@@ -159,7 +165,7 @@ export async function runErrTrap(
   recordStatus(session, status, true)
   session.errTrapRunning = true
   try {
-    return await runAction(executeFn, action, session, status, stdin, callStack)
+    return await runAction(executeFn, action, session, stdin, callStack)
   } finally {
     session.errTrapRunning = false
   }
@@ -197,26 +203,28 @@ export async function runReturnTrap(
     return []
   session.returnTrapRunning = true
   try {
-    return await runAction(executeFn, action, session, session.lastExitCode, stdin, callStack)
+    return await runAction(executeFn, action, session, stdin, callStack)
   } finally {
     session.returnTrapRunning = false
   }
 }
 
 /**
- * Run a trap action as a line of the shell and collect its output. `$?` is
- * `status` again after it, whatever the action returns, and what the action
- * runs in a test or after `!` leaves the `set -e` answer for the statement it
- * answers as it was.
+ * Run a trap action as a line of the shell and collect its output. `$?` and
+ * `${PIPESTATUS[@]}` are as they were again after it, whatever the action
+ * returns, and what the action runs in a test or after `!` leaves the
+ * `set -e` answer for the statement it answers as it was. A failure `set -e`
+ * acts on in it ends the shell with its status, and an `exit` or `return` in
+ * it leaves with what it wrote, for the redirects of its statement to route.
  */
 async function runAction(
   executeFn: ExecuteStringFn,
   action: string,
   session: SessionState,
-  status: number,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Written[]> {
+  const held = snapshotStatus(session)
   const immune = session.errexitImmune
   let io: IOResult
   try {
@@ -226,11 +234,21 @@ async function runAction(
       stdin,
       callStack: callStack ?? new CallStack(),
     })
+  } catch (err) {
+    if (err instanceof ExitSignal) err.unrouted = true
+    throw err
   } finally {
     session.errexitImmune = immune
   }
-  recordStatus(session, status)
-  return asWritten(await materialize(io.stdout), await io.materializeStderr())
+  const stdout = await materialize(io.stdout)
+  const stderr = await io.materializeStderr()
+  if (session.errexitExiting) {
+    const ended = new ExitSignal(io.exitCode, stderr, stdout)
+    ended.unrouted = true
+    throw ended
+  }
+  restoreStatus(session, held, session.statusWriter)
+  return asWritten(stdout, stderr)
 }
 
 /**

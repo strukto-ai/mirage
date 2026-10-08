@@ -143,7 +143,7 @@ async def handle_exec_command(
     stdout = await materialize(io.stdout) or b""
     stderr = await materialize(io.stderr) or b""
     replaced = ExitSignal(io.exit_code, stderr=stderr, stdout=stdout)
-    replaced.replaced = head
+    replaced.replaced, replaced.unrouted = head, True
     raise replaced
 
 

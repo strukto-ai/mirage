@@ -59,6 +59,7 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.executor.builtins.exec.constants import (
     CLOSED,
+    EXEC_STREAM_UNBOUND,
     OPEN_FOR_READ_WRITE,
     OPEN_FOR_READING,
     TO_STDERR,
@@ -540,6 +541,18 @@ async def handle_redirect(
     )
     session.job_output = route
     enclosing = ENCLOSING.set(recorder)
+    # A stream the statement redirects is its own while it runs, in the
+    # lines it runs too (`eval`, `exec CMD`, `bash -c`): an earlier
+    # `exec >` binding of it waits until the statement ends.
+    unbound = {
+        field: value
+        for fd, fields in EXEC_STREAM_UNBOUND.items()
+        if fd in claimed
+        for field, value in fields.items()
+    }
+    held = {field: getattr(session, field) for field in unbound}
+    for field, value in unbound.items():
+        setattr(session, field, value)
     try:
         if command is None:
             if capture_input and not isinstance(inputs[0], _Unreadable):
@@ -577,6 +590,8 @@ async def handle_redirect(
             if diagnostic:
                 await recorder.emit(Channel.STDERR, diagnostic)
     finally:
+        for field, value in held.items():
+            setattr(session, field, value)
         ENCLOSING.reset(enclosing)
         # A body that raised (a cancel, an error) skips the writes below:
         # its jobs write straight through.
