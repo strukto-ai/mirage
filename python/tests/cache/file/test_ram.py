@@ -15,6 +15,7 @@
 import asyncio
 import hashlib
 import json
+from collections.abc import Coroutine
 
 import pytest
 
@@ -156,13 +157,21 @@ async def test_a_cancelled_write_keeps_the_previous_entry():
     assert cache._invalidation._writers == {}
 
 
+def _fill(
+    cache: RAMFileCacheStore, operation: str, key: str
+) -> Coroutine[None, None, bool | None]:
+    if operation == "keep_fingerprints":
+        return cache.keep_fingerprints({key: "v1"})
+    return getattr(cache, operation)(key, b"x")
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["set", "add"])
+@pytest.mark.parametrize("operation", ["set", "add", "keep_fingerprints"])
 async def test_clear_while_a_writer_is_parked_discards_its_write(operation):
     cache = RAMFileCacheStore()
     lock = cache._lock_for("/large")
     await lock.acquire()
-    pending = asyncio.create_task(getattr(cache, operation)("/large", b"x"))
+    pending = asyncio.create_task(_fill(cache, operation, "/large"))
     clearing: asyncio.Task[None] | None = None
     try:
         await asyncio.sleep(0.01)
@@ -174,6 +183,7 @@ async def test_clear_while_a_writer_is_parked_discards_its_write(operation):
         lock.release()
     await asyncio.gather(pending, clearing)
     assert await cache.get("/large") is None
+    assert await cache.fingerprint("/large") is None
     assert cache.cache_size == 0
 
 
@@ -405,3 +415,74 @@ async def test_is_unbounded_distinguishes_absent_from_boundless():
     assert await cache.is_unbounded("/no-bound") is True
     await cache.set("/bounded", b"x", ttl=30)
     assert await cache.is_unbounded("/bounded") is False
+
+
+@pytest.mark.asyncio
+async def test_a_version_kept_without_bytes_is_never_read():
+    cache = RAMFileCacheStore()
+    await cache.keep_fingerprints({"/a": "v1"})
+    assert not await cache.exists("/a")
+    assert await cache.get("/a") is None
+    assert not await cache.is_fresh("/a", "v1")
+    assert not await cache.is_unbounded("/a")
+    assert await cache.fingerprint("/a") == "v1"
+    assert await cache.add("/a", b"drained", fingerprint="v1")
+    assert await cache.get("/a") == b"drained"
+
+
+@pytest.mark.asyncio
+async def test_a_version_never_replaces_bytes_written_since():
+    cache = RAMFileCacheStore()
+    await cache.set("/a", b"theirs", fingerprint="v2")
+    await cache.keep_fingerprints({"/a": "v1"})
+    assert await cache.get("/a") == b"theirs"
+    assert await cache.fingerprint("/a") == "v2"
+    await cache.remove("/a")
+    assert await cache.fingerprint("/a") is None
+
+
+@pytest.mark.asyncio
+async def test_a_version_replaces_bytes_past_their_bound():
+    # Past its bound the entry vouches for nothing; keep the version seen since.
+    cache = RAMFileCacheStore()
+    await cache.set("/a", b"old", fingerprint="v1", ttl=0)
+    await cache.keep_fingerprints({"/a": "v2"})
+    assert await cache.fingerprint("/a") == "v2"
+    assert await cache.get("/a") is None
+    # The old bytes leave the store with their entry, not outside the limit.
+    assert "/a" not in cache._store.files
+
+
+@pytest.mark.asyncio
+async def test_a_version_restamped_counts_its_size_once():
+    cache = RAMFileCacheStore()
+    for token in ("v1", "v2", "v3"):
+        await cache.keep_fingerprints({"/a": token})
+    assert cache.cache_size == len("/a") + len("v3")
+
+
+@pytest.mark.asyncio
+async def test_a_version_an_expiry_leaves_stays_within_the_limit():
+    cache = RAMFileCacheStore(cache_limit=20)
+    await cache.set("/a-long-key", b"x", fingerprint="v1234567890", ttl=1)
+    await cache.keep_fingerprints({"/a-long-key": "v1234567890"})
+    cache._entries["/a-long-key"].cached_at -= 10
+    assert await cache.get("/a-long-key") is None
+    assert cache.cache_size <= 20
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kept", [True, False], ids=["kept", "not kept"])
+async def test_an_expired_entry_still_answers_its_version(kept):
+    # The token stays true for the bytes read, all a condition says; a
+    # version kept for a conditional mount outlives its bytes, as on redis.
+    cache = RAMFileCacheStore()
+    await cache.set("/a", b"x", fingerprint="v1", ttl=1)
+    if kept:
+        await cache.keep_fingerprints({"/a": "v1"})
+    cache._entries["/a"].cached_at -= 10
+    assert not await cache.exists("/a")
+    assert await cache.fingerprint("/a") == "v1"
+    assert await cache.get("/a") is None
+    assert await cache.fingerprint("/a") == ("v1" if kept else None)
+    assert "/a" not in cache._store.files

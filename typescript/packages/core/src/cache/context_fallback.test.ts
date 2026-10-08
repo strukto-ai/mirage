@@ -25,8 +25,14 @@ import {
   invalidateAncestors,
   invalidateSubtree,
   runWithCacheManager,
+  runWithOwnVersion,
+  runWithWriteContext,
+  writeCondition,
 } from './context.ts'
-import { PathSpec } from '../types.ts'
+import { MountMode, PathSpec, WritePolicy } from '../types.ts'
+import { RAMIndexCacheStore } from './index/ram.ts'
+import { MountEntry } from '../workspace/mount/mount.ts'
+import { BaseVFS } from '../vfs/base.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 
 const captureState = vi.hoisted(() => ({ enabled: false, value: undefined as unknown }))
@@ -238,4 +244,99 @@ it('a pending capture owns completed same-path bodies only weakly', async () => 
     release()
     expect((await pending)[1]).toEqual(['held-token'])
   }
+})
+
+describe('a conditional write on the fallback storage', () => {
+  class S3Stub extends BaseVFS {
+    override readonly name = 's3'
+    override readonly cachesReads = true
+    override close(): Promise<void> {
+      return Promise.resolve()
+    }
+  }
+
+  async function conditional(): Promise<[MountEntry, PathSpec]> {
+    const entry = new MountEntry({
+      prefix: '/s3/',
+      vfs: new S3Stub(),
+      mode: MountMode.WRITE,
+      write: WritePolicy.CONDITIONAL,
+    })
+    const cache = new RAMFileCacheStore()
+    await cache.set('/s3/f', new TextEncoder().encode('one'), { fingerprint: 'v1' })
+    entry.cacheManager = new CacheManager(cache, new RAMIndexCacheStore({ ttl: 600 }), '/s3/', true)
+    const path = PathSpec.fromStrPath('/s3/f', '/f')
+    return [entry, path]
+  }
+
+  it("agrees with itself across one mount's nested frames", async () => {
+    // A command's frame and its op door's are one mount, so the version stays.
+    const [entry, path] = await conditional()
+    const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
+      runWithWriteContext('/s3/', entry.writeContext(), () => writeCondition(path, 'put')),
+    )
+    expect(cond).toEqual({ ifMatch: 'v1' })
+  })
+
+  it('keeps an own version every live frame agrees on', async () => {
+    const [entry, path] = await conditional()
+    const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
+      runWithOwnVersion(path, 'v2', () =>
+        runWithOwnVersion(path, 'v2', () => writeCondition(path, 'put')),
+      ),
+    )
+    expect(cond).toEqual({ ifMatch: 'v2' })
+  })
+
+  it('refuses an own version the live frames disagree on', async () => {
+    const [entry, path] = await conditional()
+    await expect(
+      runWithWriteContext('/s3/', entry.writeContext(), () =>
+        runWithOwnVersion(path, 'v2', () =>
+          runWithOwnVersion(path, 'v3', () => writeCondition(path, 'put')),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+  })
+
+  it.each([
+    ['a sibling line nested in it', '/u/', true],
+    ['a root line nested in it', '/', true],
+    ['a root line around it', '/', false],
+  ] as const)(
+    'answers each path from the mount that owns it while lines overlap: %s',
+    async (_name, plainPrefix, inner) => {
+      // An unconditional mount's write is not refused for another mount's line.
+      const [entry, path] = await conditional()
+      const plain = PathSpec.fromStrPath('/u/g', '/g')
+      const both = () => Promise.all([writeCondition(path, 'put'), writeCondition(plain, 'put')])
+      const [cond, other] = await (inner
+        ? runWithWriteContext('/s3/', entry.writeContext(), () =>
+            runWithWriteContext(plainPrefix, null, both),
+          )
+        : runWithWriteContext(plainPrefix, null, () =>
+            runWithWriteContext('/s3/', entry.writeContext(), both),
+          ))
+      expect([cond, other]).toEqual([{ ifMatch: 'v1' }, null])
+    },
+  )
+
+  it('refuses a path no live frame owns while they disagree', async () => {
+    const [entry] = await conditional()
+    const stray = PathSpec.fromStrPath('/x/h', '/h')
+    await expect(
+      runWithWriteContext('/s3/', entry.writeContext(), () =>
+        runWithWriteContext('/u/', null, () => writeCondition(stray, 'put')),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+  })
+
+  it("leaves another path's own version alone", async () => {
+    const [entry, path] = await conditional()
+    const other = PathSpec.fromStrPath('/s3/o', '/o')
+    const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
+      runWithOwnVersion(other, 'v9', () => writeCondition(path, 'put')),
+    )
+    expect(cond).toEqual({ ifMatch: 'v1' })
+  })
 })

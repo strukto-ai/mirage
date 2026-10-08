@@ -301,6 +301,8 @@ describe('readFailExitCode', () => {
     // A read the mount refuses to render whole (EFBIG) is a failed read too.
     expect(readFailExitCode('rg', fsErr('EFBIG'))).toBe(2)
     expect(readFailExitCode('cat', fsErr('EFBIG'))).toBe(1)
+    // A lost conditional write is a write failure, never sort's read 2.
+    expect(readFailExitCode('sort', fsErr('STALE_WRITE'))).toBe(1)
   })
 
   it('splits by errno for the commands that do', () => {

@@ -15,8 +15,10 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PathSpec } from '@struktoai/mirage-core/types'
+import { MountMode, PathSpec, WritePolicy } from '@struktoai/mirage-core/types'
+import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { DiskAccessor } from './accessor/disk.ts'
+import { S3VFS } from './vfs/s3/s3.ts'
 
 export function tmpRoot(label = 'mirage-disk-test-'): {
   root: string
@@ -35,4 +37,12 @@ export function tmpRoot(label = 'mirage-disk-test-'): {
 
 export function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
+}
+
+export function s3Vfs(bucket = 'b'): S3VFS {
+  return new S3VFS({ bucket, region: 'us-east-1', accessKeyId: 'fake', secretAccessKey: 'fake' })
+}
+
+export function conditionalS3(): Mount {
+  return new Mount(s3Vfs(), { mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL })
 }

@@ -40,10 +40,13 @@ def capture_marks(
         result: IOResult,
         records: list[OpRecord] | None = None,
         cache_facts: Callable[[str], CacheFacts] | None = None,
+        nested: bool = False,
     ) -> None:
         marks = [(r.op, r.path, r.claimed) for r in records or []]
         captured.append((marks, dict(result.writes)))
-        return await orig(result, records=records, cache_facts=cache_facts)
+        return await orig(
+            result, records=records, cache_facts=cache_facts, nested=nested
+        )
 
     ws._dispatcher.apply_io = recording
     return captured

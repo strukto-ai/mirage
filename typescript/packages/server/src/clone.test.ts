@@ -19,7 +19,8 @@ import { Workspace, buildVfs, type SlackVFS } from '@struktoai/mirage-node'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { SecretEntries } from '@struktoai/mirage-core/secrets/config'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
-import { cloneWorkspaceWithOverride } from './clone.ts'
+import { buildOverrideMounts, cloneWorkspaceWithOverride } from './clone.ts'
+import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 
 const AccountConfig = z.strictObject({ account: z.string().default('default') })
 type AccountConfig = z.infer<typeof AccountConfig>
@@ -48,6 +49,12 @@ describe('cloneWorkspaceWithOverride', () => {
     expect(cloneRead.stdoutText.trim()).toBe('clone-write')
     await src.close()
     await clone.close()
+  })
+
+  it('leaves a null override write to the saved policy', async () => {
+    // null means absent, as on every other door.
+    const built = await buildOverrideMounts({ mounts: { '/r': { vfs: 'ram', write: null } } }, null)
+    expect((built['/r/'] as Mount).options.write).toBeUndefined()
   })
 
   it('keeps the declared source instances', async () => {
