@@ -280,10 +280,17 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
   ) => Promise<boolean>
   /**
    * `movePrefix` moving each key only if it is still the version the mount
-   * saw (`known`), else the one listed; the keys that changed stay where they
-   * were and are thrown in a ConditionLost.
+   * saw (`known`), else the one listed, onto a destination key the mount
+   * holds a version for (`dstKnown`) only if it is still that version; the
+   * keys that changed stay where they were and are thrown in a ConditionLost.
    */
-  movePrefixIf?: (conn: C, srcPfx: string, dstPfx: string, known: KnownVersions) => Promise<boolean>
+  movePrefixIf?: (
+    conn: C,
+    srcPfx: string,
+    dstPfx: string,
+    known: KnownVersions,
+    dstKnown: KnownVersions,
+  ) => Promise<boolean>
   /**
    * `deletePrefix` deleting each key only if it is still the version the
    * mount saw, else the one listed.

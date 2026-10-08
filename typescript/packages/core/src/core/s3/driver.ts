@@ -491,26 +491,40 @@ async function movePrefixIf(
   srcPfx: string,
   dstPfx: string,
   known: KnownVersions,
+  dstKnown: KnownVersions,
 ): Promise<boolean> {
   let found = false
   const lost: [string, string][] = []
   const moved: [string, string][] = []
   for await (const listed of knownPages(conn, srcPfx, known)) {
     found = true
+    const targets = new Map(listed.map(([key]) => [key, `${dstPfx}${key.slice(srcPfx.length)}`]))
+    const held = await dstKnown([...targets.values()])
     for (const [key, token] of listed) {
+      const dstKey = targets.get(key) ?? key
+      const heldVersion = held.get(dstKey)
+      const cond: WriteCondition =
+        heldVersion !== undefined && heldVersion !== '' ? { ifMatch: heldVersion } : {}
       try {
         await conn.send(
           new conn.mod.CopyObjectCommand({
             Bucket: conn.config.bucket,
             CopySource: `${conn.config.bucket}/${key}`,
-            Key: `${dstPfx}${key.slice(srcPfx.length)}`,
+            Key: dstKey,
             CopySourceIfMatch: token,
+            ...condition(cond),
           }),
         )
       } catch (err) {
         if (!lostCondition(err, true)) throw err
-        // A source gone (404) keeps no version: nothing newer to guard.
-        lost.push([key, isConditionLost(err) ? token : ''])
+        if (cond.ifMatch !== undefined) {
+          const loser = await copyLoser(conn, key, dstKey, cond, token)
+          const named = loser.keys[0] ?? key
+          lost.push([named, loser.versions.get(named) ?? ''])
+        } else {
+          // A source gone (404) keeps no version: nothing newer to guard.
+          lost.push([key, isConditionLost(err) ? token : ''])
+        }
         continue
       }
       moved.push([key, token])

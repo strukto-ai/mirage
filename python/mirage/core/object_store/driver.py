@@ -358,8 +358,10 @@ class ObjectStoreDriver(Generic[A, C]):
             carries the destination condition.
         move_prefix_if (Callable | None): ``move_prefix`` moving each key
             only if it is still the version the mount saw (``known``), else
-            the one listed; the keys that changed stay where they were and
-            are raised in a ConditionLost.
+            the one listed, onto a destination key the mount holds a
+            version for (``dst_known``) only if it is still that version;
+            the keys that changed stay where they were and are raised in a
+            ConditionLost.
         delete_prefix_if (Callable | None): ``delete_prefix`` deleting
             each key only if it is still the version the mount saw, else
             the one listed.
@@ -405,7 +407,8 @@ class ObjectStoreDriver(Generic[A, C]):
         | None
     ) = None
     move_prefix_if: (
-        Callable[[C, str, str, KnownVersions], Awaitable[bool]] | None
+        Callable[[C, str, str, KnownVersions, KnownVersions], Awaitable[bool]]
+        | None
     ) = None
     delete_prefix_if: (
         Callable[[C, str, KnownVersions], Awaitable[None]] | None

@@ -441,6 +441,16 @@ describe('conditional writes on an S3 mount', () => {
     },
   )
 
+  it('holds each destination key a directory rename read', async () => {
+    const ws = workspace()
+    mock.store.set('b', 'e/a', ENC.encode('ea\n'))
+    await run(ws, 'cat /s3/e/a')
+    theirs('e/a')
+    await expect(ws.vfs.rename('/s3/d', '/s3/e')).rejects.toMatchObject({ code: 'STALE_WRITE' })
+    expect(object('e/a')).toBe('theirs\n')
+    expect(object('d/a')).toBe('a\n')
+  })
+
   it('refuses an ops call again after a refusal', async () => {
     // Outside a line the kept version lives only in the cache.
     const ws = workspace()

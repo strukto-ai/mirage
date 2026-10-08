@@ -84,6 +84,7 @@ export function makeRename<A extends Accessor, C>(
           kp.applyDir(kpfx, src.mountPath),
           kp.applyDir(kpfx, dst.mountPath),
           knownVersions(src, kpfx),
+          knownVersions(dst, kpfx),
         )
       }
       if (await moveFile(conn, srcKey, kp.apply(kpfx, dst.mountPath))) return true

@@ -512,26 +512,41 @@ async def _delete_prefix_if(
 
 
 async def _move_prefix_if(
-    conn: S3Conn, src_pfx: str, dst_pfx: str, known: KnownVersions
+    conn: S3Conn,
+    src_pfx: str,
+    dst_pfx: str,
+    known: KnownVersions,
+    dst_known: KnownVersions,
 ) -> bool:
     found = False
     lost: list[tuple[str, str]] = []
     moved: list[tuple[str, str]] = []
     async for listed in _known_pages(conn, src_pfx, known):
         found = True
+        targets = {key: f"{dst_pfx}{key[len(src_pfx) :]}" for key, _ in listed}
+        held = await dst_known(list(targets.values()))
         for key, token in listed:
+            dst_key = targets[key]
+            held_version = held.get(dst_key)
+            cond = WriteCondition(if_match=held_version)
             try:
                 await conn.client.copy_object(
                     Bucket=conn.config.bucket,
                     CopySource={"Bucket": conn.config.bucket, "Key": key},
-                    Key=f"{dst_pfx}{key[len(src_pfx) :]}",
+                    Key=dst_key,
                     CopySourceIfMatch=token,
+                    **_condition(cond),
                 )
             except Exception as exc:
                 if not _lost_condition(exc, matched=True):
                     raise
-                # A source gone (404) keeps no version: nothing newer to guard.
-                lost.append((key, token if is_condition_lost(exc) else ""))
+                if held_version:
+                    loser = await _copy_loser(conn, key, dst_key, cond, token)
+                    named = loser.keys[0]
+                    lost.append((named, loser.versions.get(named, "")))
+                else:
+                    # A source gone (404) keeps no version: nothing newer to guard.
+                    lost.append((key, token if is_condition_lost(exc) else ""))
                 continue
             moved.append((key, token))
     delete_lost, failed = await _delete_batch(conn, moved)

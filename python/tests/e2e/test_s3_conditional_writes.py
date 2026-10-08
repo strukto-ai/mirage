@@ -559,6 +559,20 @@ async def test_a_refusal_keeps_every_version_it_was_measured_on(
 
 
 @pytest.mark.asyncio
+async def test_a_directory_rename_holds_each_destination_key_it_read(
+    fake, workspaces
+):
+    ws = workspaces()
+    fake.buckets["b"]["e/a"] = b"ea\n"
+    await _run(ws, "cat /s3/e/a")
+    _theirs(fake, "e/a")
+    with pytest.raises(StaleWriteError):
+        await ws.vfs.rename("/s3/d", "/s3/e")
+    assert fake.buckets["b"]["e/a"] == b"theirs\n"
+    assert fake.buckets["b"]["d/a"] == b"a\n"
+
+
+@pytest.mark.asyncio
 async def test_an_ops_call_after_a_refusal_is_refused_again(fake, workspaces):
     # Outside a line the kept version lives only in the cache.
     ws = workspaces()

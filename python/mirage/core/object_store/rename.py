@@ -104,6 +104,7 @@ def make_rename(
                     kp.apply_dir(kpfx, src),
                     kp.apply_dir(kpfx, dst),
                     known_versions(src_spec, kpfx),
+                    known_versions(dst_spec, kpfx),
                 )
             if await move_file(conn, src_key, kp.apply(kpfx, dst)):
                 return True
