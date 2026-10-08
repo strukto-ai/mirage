@@ -31,8 +31,11 @@ import {
   handleReadonly,
   noteLocalArray,
 } from '../executor/builtins/index.ts'
-import { VISIBLE_SCOPE_BUILTINS } from '../executor/builtins/declare/constants.ts'
-import { declaredKind, kindConflict } from '../executor/builtins/declare/declare.ts'
+import {
+  LISTED_ATTRIBUTES,
+  VISIBLE_SCOPE_BUILTINS,
+} from '../executor/builtins/declare/constants.ts'
+import { declaredKind, heldValue, kindConflict } from '../executor/builtins/declare/declare.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -449,7 +452,7 @@ export async function executeDeclaration(
         if (!(err instanceof PolicyDenied)) throw err
         throw new DiscardSignal(encodeText(`${err.message}\n`))
       }
-      const conflict = kindConflict(session, bare, kind)
+      const conflict = kindConflict(heldValue(session, bare), kind)
       if (conflict !== null) {
         conversionErrors.push(`bash: ${cmdWord}: ${bare}: ${conflict}`)
         continue
@@ -493,12 +496,17 @@ export async function executeDeclaration(
   // `f() { local -r A=(x); }` freezes f's own A, not the caller's.
   if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
     // `-p` prints rather than declares, so it is answered before the
-    // assignment path runs at all.
+    // assignment path runs at all; with no names, an attribute letter
+    // lists the names carrying it, `-p` or not.
+    const listing =
+      assignments.length === 0 &&
+      staged.length === 0 &&
+      [...flagChars].some((c) => LISTED_ATTRIBUTES.has(c) || c === 'a' || c === 'A')
     if (
-      (flagChars.has('p') || plusChars.has('p')) &&
+      (flagChars.has('p') || plusChars.has('p') || listing) &&
       (keyword === 'declare' || keyword === 'typeset')
     ) {
-      return handleDeclarePrint(assignments, session)
+      return handleDeclarePrint(assignments, session, flagChars)
     }
     const declView2 = sessionView(session, registry.policies, context.frame.diagnostics)
     const stored2: string[] = []

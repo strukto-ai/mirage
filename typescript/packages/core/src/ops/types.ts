@@ -108,8 +108,14 @@ export interface SessionView {
   // `followRef` (default true) resolves a `declare -n` reference to its
   // target first, which is what every ordinary assignment does;
   // `declare -n r=w` on an existing reference re-aims it and passes
-  // false.
-  set(name: string, value: ShellValue, followRef?: boolean): Promise<void>
+  // false. `assigned` names the elements an array write assigns; the rest
+  // are carried over as stored.
+  set(
+    name: string,
+    value: ShellValue,
+    followRef?: boolean,
+    assigned?: ReadonlySet<number | string> | null,
+  ): Promise<void>
   // Drop one variable through the session plane; a missing name is quiet.
   // `followRef` (default true) resolves a reference to its target;
   // `unset -n r` drops the reference itself and passes false.

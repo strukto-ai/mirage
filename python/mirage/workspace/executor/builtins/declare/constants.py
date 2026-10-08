@@ -25,6 +25,10 @@ EXPORT_FLAGS = frozenset("aAfnp")
 
 READONLY_FLAGS = frozenset("aAfp")
 
+# The attribute letters a no-name `declare` listing filters on: a name
+# carrying any of them is listed (`declare -ix` lists both kinds).
+LISTED_ATTRIBUTES = frozenset("ilnrtux")
+
 # The declaration builtins that assign whichever variable is visible, a
 # function's local or else the global; `declare` and `local` make a new
 # local inside a function instead.

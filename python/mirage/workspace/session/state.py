@@ -927,6 +927,7 @@ async def set_var(
     value: ShellValue,
     follow_ref: bool = True,
     *,
+    assigned: frozenset[int | str] | None = None,
     diagnostics: list[str | bytes] | None = None,
 ) -> None:
     """Write one variable through the session plane's gate.
@@ -954,6 +955,8 @@ async def set_var(
             target first, which is what every ordinary assignment does.
             ``declare -n r=w`` on an existing reference is the one
             writer that re-aims the reference instead, and passes False.
+        assigned (frozenset[int | str] | None): the elements an array
+            write assigns (``coerce_value``), None for the whole value.
 
     Raises:
         ReadonlyVariableError: the name is readonly.
@@ -986,7 +989,7 @@ async def set_var(
     coercion = _IntegerCoercion(session)
     if existing is not None and existing.attrs:
         try:
-            value = coerce_value(value, existing.attrs, coercion)
+            value = coerce_value(value, existing.attrs, coercion, assigned)
         except ArithError:
             # bash bound what the expression assigned before it failed
             # (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a

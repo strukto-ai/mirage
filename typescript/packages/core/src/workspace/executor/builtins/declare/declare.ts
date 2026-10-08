@@ -27,7 +27,13 @@ import { varHidden } from '../../../../utils/hidden.ts'
 import { sessionEntry, setSessionEntry } from '../../../session/session.ts'
 import type { ShellValue, VarAttr } from '../../../../shell/variable.ts'
 import { attrLetters, VarKind } from '../../../../shell/variable.ts'
-import { conversionScalar, setAttr, shadowLocal, subscriptIndex } from '../../../session/state.ts'
+import {
+  conversionScalar,
+  deref,
+  setAttr,
+  shadowLocal,
+  subscriptIndex,
+} from '../../../session/state.ts'
 import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -37,6 +43,7 @@ import {
   ANSI_C_ESCAPES,
   BARE_KEY_RE,
   CONTROL_RE,
+  LISTED_ATTRIBUTES,
   SUBSCRIPT_RE,
   VISIBLE_SCOPE_BUILTINS,
 } from './constants.ts'
@@ -102,44 +109,55 @@ export function declaredKind(flags: ReadonlySet<string>): VarKind | null {
 }
 
 /**
- * bash's refusal when a declared array kind meets a variable of the other
- * kind, or null when they agree.
+ * The value a declaration's `NAME=...` lands on: the variable a `declare -n`
+ * reference names, and under `-g` the global record a function's local
+ * shadows.
  */
-export function kindConflict(
+export function heldValue(
   session: SessionState,
   name: string,
-  kind: VarKind | null,
-): string | null {
-  if (kind === VarKind.Assoc && Object.hasOwn(session.arrays, name))
+  globalScope = false,
+): ShellValue | null {
+  const target = deref(session, name) || name
+  if (globalScope) {
+    const frame = session.localFrames.find((f) => f.has(target))
+    if (frame !== undefined) return frame.get(target)?.value ?? null
+  }
+  return sessionEntry(session.vars, target)?.value ?? null
+}
+
+/**
+ * bash's refusal when a declared array kind meets a value of the other
+ * kind, or null when they agree.
+ */
+export function kindConflict(held: ShellValue | null, kind: VarKind | null): string | null {
+  if (kind === VarKind.Assoc && Array.isArray(held))
     return 'cannot convert indexed to associative array'
-  if (kind === VarKind.Indexed && Object.hasOwn(session.assocs, name))
+  if (kind === VarKind.Indexed && held !== null && typeof held === 'object' && !Array.isArray(held))
     return 'cannot convert associative to indexed array'
   return null
 }
 
 /**
- * What a declaration's `NAME=value` stores. An array keeps its kind and
- * takes the value at element 0 (key `"0"` in a map), as a plain `NAME=value`
- * does; otherwise `-A` makes the map `([0]=value)` and `-a` the one-element
- * array, and with neither the value stays a scalar. A `fresh` local holds
- * nothing of the caller's.
+ * What a declaration's `NAME=value` stores, and the elements it assigns
+ * (`coerceValue`). An array keeps its kind and takes the value at element 0
+ * (key `"0"` in a map), as a plain `NAME=value` does, leaving the other
+ * elements as stored; otherwise `-A` makes the map `([0]=value)` and `-a`
+ * the one-element array, and with neither the value stays a scalar.
  */
 export function scalarValue(
-  session: SessionState,
-  name: string,
+  held: ShellValue | null,
   value: string,
   kind: VarKind | null,
-  fresh = false,
-): ShellValue {
-  const heldMap = fresh ? undefined : sessionEntry(session.assocs, name)
-  const heldArr = fresh ? undefined : sessionEntry(session.arrays, name)
-  if (heldMap !== undefined || kind === VarKind.Assoc) return { ...heldMap, '0': value }
-  if (heldArr !== undefined || kind === VarKind.Indexed) {
-    const arr: ShellArray = [...(heldArr ?? [])]
+): [ShellValue, ReadonlySet<number | string> | null] {
+  const map = held !== null && typeof held === 'object' && !Array.isArray(held) ? held : null
+  if (map !== null || kind === VarKind.Assoc) return [{ ...map, '0': value }, new Set(['0'])]
+  if (Array.isArray(held) || kind === VarKind.Indexed) {
+    const arr: ShellArray = Array.isArray(held) ? [...held] : []
     arraySet(arr, 0, value)
-    return arr
+    return [arr, new Set([0])]
   }
-  return value
+  return [value, null]
 }
 
 /**
@@ -181,7 +199,7 @@ export async function storeStagedArrays(
     // `readonly` and `-g` write the visible one.
     const shadowed =
       !globalScope && !VISIBLE_SCOPE_BUILTINS.has(cmd) && noteLocalArray(session, name)
-    const conflict = shadowed ? null : kindConflict(session, name, kind)
+    const conflict = shadowed ? null : kindConflict(heldValue(session, name, globalScope), kind)
     if (conflict !== null) {
       if (fatal) throw new DiscardSignal(encodeText(`bash: ${name}: ${conflict}\n`))
       const line = `bash: ${cmd}: ${name}: ${conflict}`
@@ -231,7 +249,7 @@ export async function storeStagedArrays(
     // Ungated on purpose: the `view.set` immediately above put this same
     // name through the gate, so re-asking would show a policy two writes
     // for one operand.
-    if (mark !== null) setAttr(session, name, mark, on)
+    if (mark !== null) setAttr(session, deref(session, name) || name, mark, on)
   }
   return null
 }
@@ -411,8 +429,38 @@ export function declareLine(session: SessionState, name: string): string | null 
  * end -- GNU prints the names it knows and refuses only the ones it does
  * not. Bare `declare -p` lists every visible name sorted.
  */
-export function handleDeclarePrint(names: string[], session: SessionState): Result {
-  const targets = names.length > 0 ? names : Object.keys(session.vars).sort(compareCodePoints)
+/**
+ * Whether a no-name `declare` listing's letters keep `name`: `-a` / `-A`
+ * narrow it to that array kind (`kindListed`), and any of `-i -l -n -r -t
+ * -u -x` keeps a name carrying one of them.
+ */
+export function declarationListed(
+  session: SessionState,
+  name: string,
+  flags: ReadonlySet<string>,
+): boolean {
+  const v = sessionEntry(session.vars, name)
+  if (v === undefined || !kindListed(session, name, flags)) return false
+  const letters = new Set(attrLetters(v))
+  const wanted = [...flags].filter((c) => LISTED_ATTRIBUTES.has(c))
+  return wanted.length === 0 || wanted.some((c) => letters.has(c))
+}
+
+/**
+ * Run `declare -p`: render declarations for names, or for all; with no
+ * names the declaration's letters narrow the list (`declarationListed`).
+ */
+export function handleDeclarePrint(
+  names: string[],
+  session: SessionState,
+  flags: ReadonlySet<string> = new Set(),
+): Result {
+  const targets =
+    names.length > 0
+      ? names
+      : Object.keys(session.vars)
+          .filter((name) => declarationListed(session, name, flags))
+          .sort(compareCodePoints)
   const lines: string[] = []
   const errors: string[] = []
   for (const name of targets) {
@@ -663,10 +711,11 @@ export async function writeGlobal(
   view: SessionView,
   key: string,
   value: ShellValue,
+  assigned: ReadonlySet<number | string> | null = null,
 ): Promise<void> {
   const outer = session.localFrames.find((frame) => frame.has(key))
   if (outer === undefined) {
-    await view.set(key, value)
+    await view.set(key, value, true, assigned)
     return
   }
   const shadowing = sessionEntry(session.vars, key)
@@ -678,7 +727,7 @@ export async function writeGlobal(
     setSessionEntry(session.vars, key, saved)
   }
   try {
-    await view.set(key, value)
+    await view.set(key, value, true, assigned)
     outer.set(key, sessionEntry(session.vars, key) ?? null)
   } finally {
     if (shadowing === undefined) {

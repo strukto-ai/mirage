@@ -93,9 +93,14 @@ async function fatalIndexLiteral(
   }
 }
 
-async function assignVar(view: SessionView, key: string, value: ShellValue): Promise<void> {
+async function assignVar(
+  view: SessionView,
+  key: string,
+  value: ShellValue,
+  assigned: ReadonlySet<number | string> | null = null,
+): Promise<void> {
   try {
-    await view.set(key, value)
+    await view.set(key, value, true, assigned)
   } catch (err) {
     if (err instanceof PolicyDenied) {
       throw new DiscardSignal(encodeText(`${err.message}\n`))
@@ -313,7 +318,7 @@ export async function executeAssignment(
       // key "1+1".
       const newMap = { ...heldMap }
       newMap[subText] = append ? (heldMap[subText] ?? '') + val : val
-      await assignVar(view, key, newMap)
+      await assignVar(view, key, newMap, new Set([subText]))
       const mapCode = assignmentStatus(context.frame, subSeq)
       return [
         null,
@@ -337,7 +342,7 @@ export async function executeAssignment(
       throw new DiscardSignal(encodeText(`bash: ${nameText}: bad array subscript\n`))
     }
     arraySet(arr, idx, append ? arrayGet(arr, idx) + val : val)
-    await assignVar(view, key, arr)
+    await assignVar(view, key, arr, new Set([idx]))
     const subCode = assignmentStatus(context.frame, subSeq)
     return [
       null,
@@ -352,13 +357,13 @@ export async function executeAssignment(
     // keeps every other key, as bash does.
     const newMap = { ...heldMap }
     newMap['0'] = append ? (heldMap['0'] ?? '') + val : val
-    await assignVar(view, key, newMap)
+    await assignVar(view, key, newMap, new Set(['0']))
   } else if (heldArr !== undefined) {
     // `a=x` writes element 0 and keeps the rest; `a+=x` appends onto
     // element 0.
     const newArr = [...heldArr]
     arraySet(newArr, 0, append ? arrayGet(newArr, 0) + val : val)
-    await assignVar(view, key, newArr)
+    await assignVar(view, key, newArr, new Set([0]))
   } else {
     const heldVar = session.vars[key]
     let newVal: string

@@ -690,6 +690,7 @@ async function setVar(
   value: ShellValue,
   followRef = true,
   diagnostics?: (string | Uint8Array)[],
+  assigned: ReadonlySet<number | string> | null = null,
 ): Promise<void> {
   if (followRef) name = deref(session, name) || name
   ensureVarVisible(session, name)
@@ -713,7 +714,7 @@ async function setVar(
   let shaped: ShellValue = value
   if (existing !== undefined && existing.attrs.size > 0) {
     try {
-      shaped = coerceValue(value, existing.attrs, coercion.run)
+      shaped = coerceValue(value, existing.attrs, coercion.run, assigned)
     } catch (err) {
       // bash bound what the expression assigned before it failed
       // (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a RANDOM
@@ -1020,8 +1021,8 @@ export function sessionView(
   return {
     get: (name) => envGet(session, name),
     snapshot: () => envSnapshot(session),
-    set: (name, value, followRef = true) =>
-      setVar(session, policies, name, value, followRef, diagnostics),
+    set: (name, value, followRef = true, assigned = null) =>
+      setVar(session, policies, name, value, followRef, diagnostics, assigned),
     unset: (name, followRef = true) => unsetVar(session, policies, name, followRef),
     mark: (name, attr, on) => markVar(session, policies, name, attr, on),
     isReadonly: (name) => envIsReadonly(session, name),

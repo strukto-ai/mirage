@@ -15,7 +15,7 @@
 import { IOResult } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { VarAttr, type VarKind } from '../../../../shell/variable.ts'
+import { type ShellValue, VarAttr, type VarKind } from '../../../../shell/variable.ts'
 import { sessionEntry, type SessionState } from '../../../session/session.ts'
 import {
   envGet,
@@ -29,6 +29,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { arithRefusal, readonlyRefusal, refusal, requireView } from '../shared.ts'
 import {
   identifierFailure,
+  heldValue,
   identifierRefusal,
   kindConflict,
   namerefRefusal,
@@ -108,17 +109,20 @@ export async function handleLocal(
       // lands as any declaration's does (`scalarValue`), and an array kind
       // the variable cannot take is refused.
       const fresh = locals !== null && !locals.has(key)
-      const conflict = fresh ? null : kindConflict(session, key, kind)
+      const held = fresh || nameref ? null : heldValue(session, key, globalScope)
+      const conflict = kindConflict(held, kind)
       if (conflict !== null) {
         errors.push(`bash: ${cmd}: ${key}: ${conflict}`)
         continue
       }
       if (locals !== null) shadowLocal(session, locals, key)
-      const value = nameref ? val : scalarValue(session, key, val, kind, fresh)
+      const [value, assigned]: [ShellValue, ReadonlySet<number | string> | null] = nameref
+        ? [val, null]
+        : scalarValue(held, val, kind)
       try {
         await premark(view, key, shaping)
-        if (globalScope) await writeGlobal(session, view, key, value)
-        else await view.set(key, value, !nameref)
+        if (globalScope) await writeGlobal(session, view, key, value, assigned)
+        else await view.set(key, value, !nameref, assigned)
       } catch (err) {
         if (err instanceof PolicyDenied) return refusal(cmd, err)
         if (err instanceof ArithError) return arithRefusal(cmd, err)

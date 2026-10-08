@@ -77,10 +77,16 @@ EnvSnapshot = Callable[[], dict[str, str]]
 
 
 class EnvSet(Protocol):
-    """Store one variable through the session plane."""
+    """Store one variable through the session plane; ``assigned`` names
+    the elements an array write assigns."""
 
     def __call__(
-        self, name: str, value: ShellValue, follow_ref: bool = True
+        self,
+        name: str,
+        value: ShellValue,
+        follow_ref: bool = True,
+        *,
+        assigned: frozenset[int | str] | None = None,
     ) -> Awaitable[None]: ...
 
 

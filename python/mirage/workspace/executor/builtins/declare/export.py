@@ -25,6 +25,7 @@ from mirage.workspace.executor.builtins.declare.constants import (
 from mirage.workspace.executor.builtins.declare.declare import (
     declare_line,
     declared_kind,
+    held_value,
     identifier_failure,
     identifier_refusal,
     kind_conflict,
@@ -42,6 +43,7 @@ from mirage.workspace.executor.builtins.shared import (
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
+    deref,
     exported_names,
     outlive_call,
     session_view,
@@ -154,15 +156,17 @@ async def handle_export(
             return readonly_refusal("export", key)
         # A value of the other array kind is refused and the name is
         # still marked, as bash does.
-        conflict = kind_conflict(session, key, kind) if eq else None
+        held = held_value(session, key) if eq else None
+        conflict = kind_conflict(held, kind) if eq else None
         if conflict is not None:
             errors.append(f"bash: export: {key}: {conflict}")
         if eq and conflict is None:
+            value, assigned = scalar_value(held, val, kind)
             try:
-                await view.set(key, scalar_value(session, key, val, kind))
+                await view.set(key, value, assigned=assigned)
             except PolicyDenied as exc:
                 return refusal("export", exc)
-            set_attr(session, key, VarAttr.EXPORT, on)
+            set_attr(session, deref(session, key), VarAttr.EXPORT, on)
         else:
             # The bare form writes no value, so it marks through the
             # plane's no-value door rather than inventing an empty

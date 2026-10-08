@@ -220,22 +220,30 @@ export function coerceScalar(
 /**
  * `coerceScalar` lifted over every value shape. An array applies the
  * attribute per element, which is GNU's `declare -ai a=(1+1 2*3)` giving
- * `([0]="2" [1]="6")`.
+ * `([0]="2" [1]="6")`. A write that assigns some elements only (`a[1]=x`,
+ * `a=x`) names them in `assigned`, and the others are carried over as
+ * stored: bash shapes a value when it is assigned, so `declare -i a;
+ * a[0]=9` never re-evaluates a stored `a[1]`.
  */
 export function coerceValue(
   value: ShellValue,
   attrs: ReadonlySet<VarAttr>,
   integer: Coercer | null,
+  assigned: ReadonlySet<number | string> | null = null,
 ): ShellValue {
   if (!attrs.has(VarAttr.Integer) && !attrs.has(VarAttr.Lower) && !attrs.has(VarAttr.Upper)) {
     return value
   }
   if (typeof value === 'string') return coerceScalar(value, attrs, integer)
   if (Array.isArray(value)) {
-    return value.map((v) => (v === null ? null : coerceScalar(v, attrs, integer)))
+    return value.map((v, i) =>
+      v === null || (assigned !== null && !assigned.has(i)) ? v : coerceScalar(v, attrs, integer),
+    )
   }
   const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(value)) out[k] = coerceScalar(v, attrs, integer)
+  for (const [k, v] of Object.entries(value)) {
+    out[k] = assigned !== null && !assigned.has(k) ? v : coerceScalar(v, attrs, integer)
+  }
   return out
 }
 

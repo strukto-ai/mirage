@@ -26,6 +26,7 @@ from mirage.workspace.executor.builtins.declare.constants import (
 from mirage.workspace.executor.builtins.declare.declare import (
     declare_line,
     declared_kind,
+    held_value,
     identifier_failure,
     identifier_refusal,
     kind_conflict,
@@ -43,6 +44,7 @@ from mirage.workspace.executor.builtins.shared import (
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
+    deref,
     env_is_readonly,
     outlive_call,
     set_attr,
@@ -147,19 +149,21 @@ async def handle_readonly(
             return readonly_refusal("readonly", key)
         # A value of the other array kind is refused and the name is
         # still frozen, as bash does.
-        conflict = kind_conflict(session, key, kind) if eq else None
+        held = held_value(session, key) if eq else None
+        conflict = kind_conflict(held, kind) if eq else None
         if conflict is not None:
             errors.append(f"bash: readonly: {key}: {conflict}")
         if eq and conflict is None:
+            value, assigned = scalar_value(held, val, kind)
             try:
-                await view.set(key, scalar_value(session, key, val, kind))
+                await view.set(key, value, assigned=assigned)
             except PolicyDenied as exc:
                 return refusal("readonly", exc)
             except ArithError as exc:
                 return arith_refusal("readonly", exc)
             # Ungated: the `view.set` above already put this name
             # through the gate, so the mark rides on that decision.
-            set_attr(session, key, VarAttr.READONLY)
+            set_attr(session, deref(session, key), VarAttr.READONLY)
         else:
             # Gated, exactly as `export NAME` is. The bare form writes no
             # value, so it has no `view.set` to ride on, and marking

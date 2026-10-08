@@ -15,7 +15,7 @@
 import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { VarAttr } from '../../../../shell/variable.ts'
-import { outliveCall, setAttr } from '../../../session/state.ts'
+import { deref, outliveCall, setAttr } from '../../../session/state.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { exportedNames } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
@@ -24,6 +24,7 @@ import { readonlyRefusal, refusal, requireView } from '../shared.ts'
 import { EXPORT_FLAGS, EXPORT_USAGE } from './constants.ts'
 import {
   declaredKind,
+  heldValue,
   declareLine,
   identifierFailure,
   identifierRefusal,
@@ -128,16 +129,18 @@ export async function handleExport(
     if (eq >= 0 && view.isReadonly(key)) return readonlyRefusal('export', key)
     // A value of the other array kind is refused and the name is still
     // marked, as bash does.
-    const conflict = eq >= 0 ? kindConflict(session, key, kind) : null
+    const held = eq >= 0 ? heldValue(session, key) : null
+    const conflict = eq >= 0 ? kindConflict(held, kind) : null
     if (conflict !== null) errors.push(`bash: export: ${key}: ${conflict}`)
     if (eq >= 0 && conflict === null) {
+      const [value, assigned] = scalarValue(held, assign.slice(eq + 1), kind)
       try {
-        await view.set(key, scalarValue(session, key, assign.slice(eq + 1), kind))
+        await view.set(key, value, true, assigned)
       } catch (err) {
         if (err instanceof PolicyDenied) return refusal('export', err)
         throw err
       }
-      setAttr(session, key, VarAttr.Export, on)
+      setAttr(session, deref(session, key) || key, VarAttr.Export, on)
     } else {
       // The bare form writes no value, so it marks through the plane's
       // no-value door rather than inventing an empty string. On a name

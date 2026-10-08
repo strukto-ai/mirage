@@ -33,10 +33,12 @@ from mirage.workspace.executor.builtins import (
     note_local_array,
 )
 from mirage.workspace.executor.builtins.declare.constants import (
+    LISTED_ATTRIBUTES,
     VISIBLE_SCOPE_BUILTINS,
 )
 from mirage.workspace.executor.builtins.declare.declare import (
     declared_kind,
+    held_value,
     kind_conflict,
 )
 from mirage.workspace.expand import expand_node
@@ -502,7 +504,7 @@ async def execute_declaration(
                 ensure_var_visible(session, bare)
             except PolicyDenied as exc:
                 raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
-            conflict = kind_conflict(session, bare, kind)
+            conflict = kind_conflict(held_value(session, bare), kind)
             if conflict is not None:
                 conversion_errors.append(
                     f"bash: {cmd_word}: {bare}: {conflict}"
@@ -548,12 +550,15 @@ async def execute_declaration(
     # `f() { local -r A=(x); }` freezes f's own A, not the caller's.
     if keyword in (NT.LOCAL, "declare", "typeset"):
         # `-p` prints rather than declares, so it is answered before
-        # the assignment path runs at all.
-        if ("p" in flag_chars or "p" in plus_chars) and keyword in (
-            "declare",
-            "typeset",
-        ):
-            return await handle_declare_print(assignments, session)
+        # the assignment path runs at all; with no names, an attribute
+        # letter lists the names carrying it, `-p` or not.
+        listing = not assignments and not staged
+        if (
+            "p" in flag_chars
+            or "p" in plus_chars
+            or (listing and flag_chars & (LISTED_ATTRIBUTES | {"a", "A"}))
+        ) and keyword in ("declare", "typeset"):
+            return await handle_declare_print(assignments, session, flag_chars)
         decl_view = session_view(
             session,
             namespace.registry.policies,

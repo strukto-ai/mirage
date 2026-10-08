@@ -103,7 +103,12 @@ async def _fatal_index_literal(
         raise _arith_fatal(exc) from exc
 
 
-async def _assign_var(view: SessionView, key: str, value: ShellValue) -> None:
+async def _assign_var(
+    view: SessionView,
+    key: str,
+    value: ShellValue,
+    assigned: frozenset[int | str] | None = None,
+) -> None:
     """One assignment through the session door; denial is fatal.
 
     Every assignment spelling (scalar, array literal, subscript,
@@ -116,9 +121,11 @@ async def _assign_var(view: SessionView, key: str, value: ShellValue) -> None:
         view (SessionView): the session plane's gated door.
         key (str): the variable being written.
         value (ShellValue): the resulting value to store.
+        assigned (frozenset[int | str] | None): the elements written,
+            None for the whole value.
     """
     try:
-        await view.set(key, value)
+        await view.set(key, value, assigned=assigned)
     except PolicyDenied as exc:
         raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
     except ArithError as exc:
@@ -362,7 +369,7 @@ async def execute_assignment(
             new_map[sub_text] = (
                 (amap.get(sub_text, "") + val) if append else val
             )
-            await _assign_var(view, key, new_map)
+            await _assign_var(view, key, new_map, frozenset({sub_text}))
             code = assignment_status(context.frame, sub_seq)
             return (
                 None,
@@ -385,7 +392,7 @@ async def execute_assignment(
                 encode_text(f"bash: {name_text}: bad array subscript\n")
             )
         array_set(arr, idx, array_get(arr, idx) + val if append else val)
-        await _assign_var(view, key, arr)
+        await _assign_var(view, key, arr, frozenset({idx}))
         code = assignment_status(context.frame, sub_seq)
         return (
             None,
@@ -399,13 +406,13 @@ async def execute_assignment(
         # and keeps every other key, as bash does.
         new_map = dict(held_map)
         new_map["0"] = (held_map.get("0", "") + val) if append else val
-        await _assign_var(view, key, new_map)
+        await _assign_var(view, key, new_map, frozenset({"0"}))
     elif held_arr is not None:
         # `a=x` writes element 0 and keeps the rest; `a+=x` appends
         # onto element 0.
         new_arr = list(held_arr)
         array_set(new_arr, 0, (array_get(new_arr, 0) + val) if append else val)
-        await _assign_var(view, key, new_arr)
+        await _assign_var(view, key, new_arr, frozenset({0}))
     else:
         held_var = session.vars.get(key)
         if (

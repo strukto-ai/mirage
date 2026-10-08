@@ -1121,6 +1121,40 @@
         "stdout": "rc=1\nrc=1\ndeclare -a X=([0]=\"9\" [1]=\"2\")\ndeclare -a S=([0]=\"1\")\ndeclare -A M=([0]=\"1\" )\ndeclare -a Y=([0]=\"1\" [1]=\"2\")\n",
         "stderr": "bash: declare: Y: cannot convert indexed to associative array\nbash: declare: R: readonly variable\n"
       }
+    },
+    {
+      "id": "declaration_targets_globals_refs_and_listings",
+      "seq": 930533,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( G=outer; f(){ local G=(l0 l1); declare -g G=new; }; f; declare -p G; A=(old keep); declare -n ref=A; export -a ref=new; export -A ref=x; echo \"rc=$?\"; declare -p A; x=4; N=(0 'x++'); declare -i N; export N=9; N[0]=8; echo \"x=$x\"; declare -p N; readonly R=1; declare -r | grep -E ' (R|G)='; declare -ix | grep -E ' (N|A)='; typeset -rp | grep -c ' G=' )",
+      "expect": {
+        "exit": 1,
+        "stdout": "declare -- G=\"new\"\nrc=1\ndeclare -ax A=([0]=\"new\" [1]=\"keep\")\nx=4\ndeclare -aix N=([0]=\"8\" [1]=\"x++\")\ndeclare -r R=\"1\"\ndeclare -ax A=([0]=\"new\" [1]=\"keep\")\ndeclare -aix N=([0]=\"8\" [1]=\"x++\")\n0\n",
+        "stderr": "bash: export: ref: cannot convert indexed to associative array\n"
+      }
     }
   ]
 }

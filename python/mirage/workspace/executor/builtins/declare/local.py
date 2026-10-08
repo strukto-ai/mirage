@@ -19,6 +19,7 @@ from mirage.policy import PolicyDenied
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import VarAttr, VarKind
 from mirage.workspace.executor.builtins.declare.declare import (
+    held_value,
     identifier_failure,
     identifier_refusal,
     kind_conflict,
@@ -135,23 +136,28 @@ async def handle_local(
             # value lands as any declaration's does (`scalar_value`), and
             # an array kind the variable cannot take is refused.
             fresh = local_vars is not None and key not in local_vars
-            conflict = None if fresh else kind_conflict(session, key, kind)
+            held = (
+                None
+                if fresh or nameref
+                else held_value(session, key, global_scope)
+            )
+            conflict = kind_conflict(held, kind)
             if conflict is not None:
                 errors.append(f"bash: {cmd}: {key}: {conflict}")
                 continue
             if local_vars is not None:
                 shadow_local(session, local_vars, key)
-            value = (
-                val
-                if nameref
-                else scalar_value(session, key, val, kind, fresh)
+            value, assigned = (
+                (val, None) if nameref else scalar_value(held, val, kind)
             )
             try:
                 await premark(view, key, shaping)
                 if global_scope:
-                    await write_global(session, view, key, value)
+                    await write_global(session, view, key, value, assigned)
                 else:
-                    await view.set(key, value, follow_ref=not nameref)
+                    await view.set(
+                        key, value, follow_ref=not nameref, assigned=assigned
+                    )
             except PolicyDenied as exc:
                 return refusal(cmd, exc)
             except ArithError as exc:

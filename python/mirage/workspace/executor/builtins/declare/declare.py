@@ -31,6 +31,7 @@ from mirage.utils.hidden import var_hidden
 from mirage.workspace.executor.builtins.declare.constants import (
     ANSI_C_ESCAPES,
     BARE_KEY_RE,
+    LISTED_ATTRIBUTES,
     SUBSCRIPT_RE,
     VISIBLE_SCOPE_BUILTINS,
 )
@@ -44,6 +45,7 @@ from mirage.workspace.executor.builtins.shared import (
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     conversion_scalar,
+    deref,
     set_attr,
     shadow_local,
     subscript_index,
@@ -87,54 +89,69 @@ def declared_kind(flags: set[str] | frozenset[str]) -> VarKind | None:
     return None
 
 
-def kind_conflict(
-    session: SessionState, name: str, kind: VarKind | None
-) -> str | None:
-    """bash's refusal when a declared array kind meets a variable of the
-    other kind, or None when they agree.
+def held_value(
+    session: SessionState, name: str, global_scope: bool = False
+) -> ShellValue | None:
+    """The value a declaration's ``NAME=...`` lands on: the variable a
+    ``declare -n`` reference names, and under ``-g`` the global record a
+    function's local shadows.
 
     Args:
         session (SessionState): shell session state.
-        name (str): the variable being declared.
+        name (str): the declared name.
+        global_scope (bool): the declaration carried ``-g``.
+    """
+    target = deref(session, name)
+    if global_scope:
+        frame = next((f for f in session._local_frames if target in f), None)
+        if frame is not None:
+            saved = frame[target]
+            return None if saved is None else saved.value
+    var = session.vars.get(target)
+    return None if var is None else var.value
+
+
+def kind_conflict(held: ShellValue | None, kind: VarKind | None) -> str | None:
+    """bash's refusal when a declared array kind meets a value of the
+    other kind, or None when they agree.
+
+    Args:
+        held (ShellValue | None): the value the declaration lands on.
         kind (VarKind | None): the kind ``-a`` / ``-A`` asked for.
     """
-    if kind is VarKind.ASSOC and name in session.arrays:
+    if kind is VarKind.ASSOC and isinstance(held, list):
         return "cannot convert indexed to associative array"
-    if kind is VarKind.INDEXED and name in session.assocs:
+    if kind is VarKind.INDEXED and isinstance(held, dict):
         return "cannot convert associative to indexed array"
     return None
 
 
 def scalar_value(
-    session: SessionState,
-    name: str,
-    value: str,
-    kind: VarKind | None,
-    fresh: bool = False,
-) -> ShellValue:
-    """What a declaration's ``NAME=value`` stores.
+    held: ShellValue | None, value: str, kind: VarKind | None
+) -> tuple[ShellValue, frozenset[int | str] | None]:
+    """What a declaration's ``NAME=value`` stores, and the elements it
+    assigns (``coerce_value``).
 
     An array keeps its kind and takes the value at element 0 (key
-    ``"0"`` in a map), as a plain ``NAME=value`` does; otherwise ``-A``
-    makes the map ``([0]=value)`` and ``-a`` the one-element array, and
-    with neither the value stays a scalar.
+    ``"0"`` in a map), as a plain ``NAME=value`` does, leaving the other
+    elements as stored; otherwise ``-A`` makes the map ``([0]=value)``
+    and ``-a`` the one-element array, and with neither the value stays
+    a scalar.
 
     Args:
-        session (SessionState): shell session state.
-        name (str): the variable being assigned.
+        held (ShellValue | None): the value the declaration lands on.
         value (str): the assigned text.
         kind (VarKind | None): the kind ``-a`` / ``-A`` asked for.
-        fresh (bool): a new local, which holds nothing of the caller's.
     """
-    held_map = None if fresh else session.assocs.get(name)
-    held_arr = None if fresh else session.arrays.get(name)
-    if held_map is not None or kind is VarKind.ASSOC:
-        return {**(held_map or {}), "0": value}
-    if held_arr is not None or kind is VarKind.INDEXED:
-        arr = list(held_arr or [])
+    if isinstance(held, dict) or kind is VarKind.ASSOC:
+        return {**(held if isinstance(held, dict) else {}), "0": value}, (
+            frozenset({"0"})
+        )
+    if isinstance(held, list) or kind is VarKind.INDEXED:
+        arr = list(held) if isinstance(held, list) else []
         array_set(arr, 0, value)
-        return arr
-    return value
+        return arr, frozenset({0})
+    return value, None
 
 
 def kind_listed(session: SessionState, name: str, flags: set[str]) -> bool:
@@ -241,7 +258,11 @@ async def store_staged_arrays(
             and cmd not in VISIBLE_SCOPE_BUILTINS
             and note_local_array(session, name)
         )
-        conflict = None if shadowed else kind_conflict(session, name, kind)
+        conflict = (
+            None
+            if shadowed
+            else kind_conflict(held_value(session, name, global_scope), kind)
+        )
         if conflict is not None:
             if fatal:
                 raise DiscardSignal(encode_text(f"bash: {name}: {conflict}\n"))
@@ -295,7 +316,7 @@ async def store_staged_arrays(
             # Ungated on purpose: the `view.set` immediately above put
             # this same name through the gate, so re-asking would show a
             # policy two writes for one operand.
-            set_attr(session, name, mark, on)
+            set_attr(session, deref(session, name), mark, on)
     return None
 
 
@@ -496,22 +517,48 @@ def declare_line(session: SessionState, name: str) -> str | None:
     return f"{head} {name}={bash_declare_quote(var.value)}"
 
 
+def declaration_listed(
+    session: SessionState, name: str, flags: set[str]
+) -> bool:
+    """Whether a no-name ``declare`` listing's letters keep ``name``:
+    ``-a`` / ``-A`` narrow it to that array kind (``kind_listed``), and
+    any of ``-i -l -n -r -t -u -x`` keeps a name carrying one of them.
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the variable listed.
+        flags (set[str]): the listing's option letters.
+    """
+    var = session.vars.get(name)
+    if var is None or not kind_listed(session, name, flags):
+        return False
+    wanted = flags & LISTED_ATTRIBUTES
+    return not wanted or bool(wanted & set(attr_letters(var)))
+
+
 async def handle_declare_print(
     names: list[str],
     session: SessionState,
+    flags: set[str] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run ``declare -p``: render declarations for names, or for all.
 
     With names, they print in the order given and a name that does not
     exist is reported on stderr without stopping the rest, exiting 1 at
     the end -- GNU prints the names it knows and refuses only the ones
-    it does not. Bare ``declare -p`` lists every visible name sorted.
+    it does not. Bare ``declare -p`` lists every visible name sorted,
+    narrowed by the declaration's letters (``declaration_listed``).
 
     Args:
         names (list[str]): the names to render, empty for all.
         session (SessionState): shell session state.
+        flags (set[str] | None): the declaration's option letters.
     """
-    targets = names or sorted(session.vars)
+    targets = names or sorted(
+        name
+        for name in session.vars
+        if declaration_listed(session, name, flags or set())
+    )
     lines: list[str] = []
     errors: list[str] = []
     for name in targets:
@@ -784,6 +831,7 @@ async def write_global(
     view: SessionView,
     key: str,
     value: ShellValue,
+    assigned: frozenset[int | str] | None = None,
 ) -> None:
     """Store a `declare -g` value on the global record.
 
@@ -802,12 +850,14 @@ async def write_global(
         view (SessionView): the session plane's gated door.
         key (str): the variable.
         value (ShellValue): the value.
+        assigned (frozenset[int | str] | None): the elements written,
+            None for the whole value.
     """
     outer = next(
         (frame for frame in session._local_frames if key in frame), None
     )
     if outer is None:
-        await view.set(key, value)
+        await view.set(key, value, assigned=assigned)
         return
     shadowing = session.vars.get(key)
     saved = outer[key]
@@ -816,7 +866,7 @@ async def write_global(
     else:
         session.vars[key] = saved
     try:
-        await view.set(key, value)
+        await view.set(key, value, assigned=assigned)
         outer[key] = session.vars.get(key)
     finally:
         if shadowing is None:

@@ -22,6 +22,12 @@ export const EXPORT_FLAGS = new Set('aAfnp')
 export const READONLY_FLAGS = new Set('aAfp')
 
 /**
+ * The attribute letters a no-name `declare` listing filters on: a name
+ * carrying any of them is listed (`declare -ix` lists both kinds).
+ */
+export const LISTED_ATTRIBUTES: ReadonlySet<string> = new Set('ilnrtux')
+
+/**
  * The declaration builtins that assign whichever variable is visible, a
  * function's local or else the global; `declare` and `local` make a new
  * local inside a function instead.
