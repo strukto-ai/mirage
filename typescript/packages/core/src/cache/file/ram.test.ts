@@ -325,15 +325,22 @@ describe('a version kept without bytes', () => {
     expect(await c.fingerprints(['/a', '/b', '/c'])).toEqual(['v1', null, 'v3'])
   })
 
-  it('answers the version of an expired entry', async () => {
-    // The token stays true for the bytes read, all a condition says.
+  it.each([
+    ['kept', true],
+    ['not kept', false],
+  ] as const)('answers the version of an expired entry: %s', async (_name, kept) => {
+    // The token stays true for the bytes read, all a condition says; a
+    // version kept for a conditional mount outlives its bytes, as on redis.
     vi.useFakeTimers()
     try {
       const c = new RAMFileCacheStore()
       await c.set('/a', encode('x'), { fingerprint: 'v1', ttl: 1 })
+      if (kept) await c.setVersions({ '/a': 'v1' })
       vi.setSystemTime(Date.now() + 10_000)
       expect(await c.exists('/a')).toBe(false)
       expect(await c.fingerprint('/a')).toBe('v1')
+      expect(await c.get('/a')).toBeNull()
+      expect(await c.fingerprint('/a')).toBe(kept ? 'v1' : null)
     } finally {
       vi.useRealTimers()
     }

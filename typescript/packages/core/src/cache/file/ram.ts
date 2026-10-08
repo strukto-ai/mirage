@@ -77,6 +77,10 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
         this.size -= entry.size
         this.entries.delete(key)
         this.store.files.delete(key)
+        // A kept version outlives its bytes, as redis's meta key does.
+        if (entry.keepsVersion && entry.fingerprint !== null && entry.fingerprint !== '') {
+          this.putVersion(key, entry.fingerprint)
+        }
         return Promise.resolve(null)
       }
       this.entries.delete(key)
@@ -221,20 +225,27 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
       await this.lock.withLock(key, () => {
         if (this.invalidation.stale(key, stamp)) return Promise.resolve()
         const entry = this.entries.get(key)
-        if (entry !== undefined && !entry.versionOnly && !entry.expired) return Promise.resolve()
+        if (entry !== undefined && !entry.versionOnly && !entry.expired) {
+          if (entry.fingerprint === fingerprint) {
+            this.entries.set(
+              key,
+              new CacheEntry({
+                size: entry.size,
+                cachedAt: entry.cachedAt,
+                fingerprint: entry.fingerprint,
+                ttl: entry.ttl,
+                keepsVersion: true,
+              }),
+            )
+          }
+          return Promise.resolve()
+        }
         if (entry !== undefined) {
           this.size -= entry.size
           this.entries.delete(key)
           this.store.files.delete(key)
         }
-        const version = new CacheEntry({
-          size: key.length + fingerprint.length,
-          cachedAt: Math.floor(Date.now() / 1000),
-          fingerprint,
-          versionOnly: true,
-        })
-        this.entries.set(key, version)
-        this.size += version.size
+        this.putVersion(key, fingerprint)
         return Promise.resolve()
       })
     } finally {
@@ -242,6 +253,18 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
     }
     await this.evict()
   }
+
+  private putVersion(key: string, fingerprint: string): void {
+    const version = new CacheEntry({
+      size: key.length + fingerprint.length,
+      cachedAt: Math.floor(Date.now() / 1000),
+      fingerprint,
+      versionOnly: true,
+    })
+    this.entries.set(key, version)
+    this.size += version.size
+  }
+
   isFresh(key: string, remoteFingerprint: string): Promise<boolean> {
     const entry = this.entries.get(key)
     if (entry === undefined || entry.versionOnly) return Promise.resolve(false)

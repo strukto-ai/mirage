@@ -61,6 +61,9 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                 self._cache_size -= entry.size
                 del self._entries[key]
                 self._store.files.pop(key, None)
+                # A kept version outlives its bytes, as redis's meta key does.
+                if entry.keeps_version and entry.fingerprint:
+                    self._put_version(key, entry.fingerprint)
                 return None
             self._entries.move_to_end(key)
             return self._store.files.get(key)
@@ -183,22 +186,27 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                     and not entry.version_only
                     and not entry.expired
                 ):
+                    if entry.fingerprint == fingerprint:
+                        entry.keeps_version = True
                     return
                 if entry is not None:
                     self._cache_size -= entry.size
                     del self._entries[key]
                     self._store.files.pop(key, None)
-                version = CacheEntry(
-                    size=len(key) + len(fingerprint),
-                    cached_at=int(time.time()),
-                    fingerprint=fingerprint,
-                    version_only=True,
-                )
-                self._entries[key] = version
-                self._cache_size += version.size
+                self._put_version(key, fingerprint)
         finally:
             self._invalidation.leave(key)
         await self._evict()
+
+    def _put_version(self, key: str, fingerprint: str) -> None:
+        version = CacheEntry(
+            size=len(key) + len(fingerprint),
+            cached_at=int(time.time()),
+            fingerprint=fingerprint,
+            version_only=True,
+        )
+        self._entries[key] = version
+        self._cache_size += version.size
 
     async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:
         entry = self._entries.get(key)

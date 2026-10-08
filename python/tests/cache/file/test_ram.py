@@ -460,10 +460,17 @@ async def test_fingerprints_answers_each_key_in_order():
 
 
 @pytest.mark.asyncio
-async def test_an_expired_entry_still_answers_its_version():
-    # The token stays true for the bytes read, all a condition says.
+@pytest.mark.parametrize("kept", [True, False], ids=["kept", "not kept"])
+async def test_an_expired_entry_still_answers_its_version(kept):
+    # The token stays true for the bytes read, all a condition says; a
+    # version kept for a conditional mount outlives its bytes, as on redis.
     cache = RAMFileCacheStore()
     await cache.set("/a", b"x", fingerprint="v1", ttl=1)
+    if kept:
+        await cache.set_versions({"/a": "v1"})
     cache._entries["/a"].cached_at -= 10
     assert not await cache.exists("/a")
     assert await cache.fingerprint("/a") == "v1"
+    assert await cache.get("/a") is None
+    assert await cache.fingerprint("/a") == ("v1" if kept else None)
+    assert "/a" not in cache._store.files
