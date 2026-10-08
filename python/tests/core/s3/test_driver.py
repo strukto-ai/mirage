@@ -82,6 +82,32 @@ async def test_a_copy_keeps_its_own_error_whatever_the_source_probe_finds(
     assert raised.value is missing
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "revision, code, missing",
+    [
+        (None, "NoSuchKey", True),
+        ("rev", "NoSuchVersion", False),
+        ("rev", "404", False),
+    ],
+    ids=["unpinned", "pinned NoSuchVersion", "pinned bodiless"],
+)
+async def test_a_missing_pinned_revision_is_no_missing_file(
+    revision, code, missing
+):
+    # A pin gone from the store fails the read; only an unpinned 404 is absence.
+    gone = client_error(code, 404, "GetObject")
+    client = Mock()
+    client.get_object = AsyncMock(side_effect=gone)
+    conn = S3Conn(client, S3Config(bucket="b"))
+    if missing:
+        assert await DRIVER.get_versioned(conn, "k", revision) is None
+        return
+    with pytest.raises(ClientError) as raised:
+        await DRIVER.get_versioned(conn, "k", revision)
+    assert raised.value is gone
+
+
 # CopyObject If-Match arrived in botocore 1.40.61; older models reject it.
 _BOTOCORE_FLOOR = Version("1.40.61")
 

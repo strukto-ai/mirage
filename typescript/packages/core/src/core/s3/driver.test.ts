@@ -60,6 +60,28 @@ describe('a write carrying If-Match', () => {
   )
 })
 
+describe('a missing pinned revision', () => {
+  it.each([
+    ['unpinned', null, 'NoSuchKey', true],
+    ['pinned NoSuchVersion', 'rev', 'NoSuchVersion', false],
+    ['pinned bodiless', 'rev', 'Unknown', false],
+  ] as const)('is no missing file: %s', async (_n, revision, code, missing) => {
+    // A pin gone from the store fails the read; only an unpinned 404 is absence.
+    const gone = Object.assign(new Error(code), {
+      name: code,
+      $metadata: { httpStatusCode: 404 },
+    })
+    const conn: S3Conn = {
+      config: { bucket: 'b' } as S3Config,
+      mod: { GetObjectCommand: Command } as unknown as S3Module,
+      send: () => Promise.reject(gone),
+    }
+    const got = DRIVER.getVersioned?.(conn, 'k', revision)
+    if (missing) await expect(got).resolves.toBeNull()
+    else await expect(got).rejects.toBe(gone)
+  })
+})
+
 describe('a missing bucket', () => {
   it.each([
     ['by name', { name: 'NoSuchBucket' }],

@@ -293,7 +293,8 @@ async def _get_versioned(
     try:
         resp = await conn.client.get_object(**kwargs)
     except Exception as exc:
-        if is_not_found(exc):
+        # A pinned revision gone from the store is a failure, not absence.
+        if revision is None and is_not_found(exc):
             return None
         raise
     async with closing_body(resp["Body"]) as body:

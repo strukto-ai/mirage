@@ -288,7 +288,8 @@ async function getVersioned(
       }),
     )) as typeof resp
   } catch (err) {
-    if (isNotFoundError(err)) return null
+    // A pinned revision gone from the store is a failure, not absence.
+    if (revision === null && isNotFoundError(err)) return null
     throw err
   }
   const etag = etagOf(resp)
