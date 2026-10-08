@@ -264,6 +264,8 @@ entries are the `runtimes` workspace option, instances carrying their
 own options:
 
 ```ts
+import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide'
+
 const ws = new Workspace(mounts, {
   runtimes: [
     new PyodideRuntime({

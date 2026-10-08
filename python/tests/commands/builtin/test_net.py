@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import datetime
 import ssl
 import sys
@@ -35,16 +34,41 @@ curl_mod = sys.modules["mirage.commands.builtin.general.curl"]
 wget_mod = sys.modules["mirage.commands.builtin.general.wget"]
 
 
-@pytest.mark.network
-class TestCurl:
-    def test_curl_raw_returns_html(self):
-        # Use example.com (rock-solid IANA reserved host) instead of
-        # httpbin.org which is flaky (502s) in CI.
-        result, _ = asyncio.run(
-            curl(None, None, ["https://example.com"], CommandOpts())
+class _Page(BaseHTTPRequestHandler):
+    def log_message(self, *args) -> None:
+        pass
+
+    def do_GET(self) -> None:
+        body = b"<html><body><h1>Local Test Page</h1></body></html>"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@pytest.fixture
+def http_url():
+    with ThreadingHTTPServer(("127.0.0.1", 0), _Page) as server:
+        thread = threading.Thread(
+            target=server.serve_forever,
+            kwargs={"poll_interval": 0.01},
+            daemon=True,
         )
-        body = result.decode() if isinstance(result, bytes) else result
-        assert "<html" in body.lower() or "<h1" in body.lower()
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{server.server_address[1]}/"
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+class TestCurl:
+    @pytest.mark.asyncio
+    async def test_curl_raw_returns_html(self, http_url):
+        result, io = await curl(None, None, [http_url], CommandOpts())
+        assert io.exit_code == 0
+        assert result == b"<html><body><h1>Local Test Page</h1></body></html>"
 
 
 @pytest.fixture

@@ -180,6 +180,7 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
     'keeps another call running and releases its slot after %s',
     async (kind) => {
       const entered = gate()
+      const started = gate()
       const release = gate()
       const rt = new PyodideRuntime({ config: { maxConcurrency: 2 } })
       rt.bind(
@@ -187,6 +188,10 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
           async (op, path) => {
             if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 4 })
             if (op !== 'read') throw new Error(`unexpected ${op}: ${path}`)
+            if (path === '/data/started') {
+              started.resolve()
+              return new TextEncoder().encode('busy')
+            }
             entered.resolve()
             await release.promise
             return new TextEncoder().encode('safe')
@@ -207,7 +212,10 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
         await entered.promise
         const interrupted = rt
           .run({
-            code: 'while True: pass',
+            code:
+              kind === 'abort'
+                ? "open('/data/started').read()\nwhile True: pass"
+                : 'while True: pass',
             args: [],
             env: {},
             stdin: null,
@@ -217,7 +225,10 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
         pending.push(interrupted)
         const next = rt.run({ code: 'print(42)', args: [], env: {}, stdin: null })
         pending.push(next)
-        controller.abort()
+        if (kind === 'abort') {
+          await started.promise
+          controller.abort()
+        }
         const result = await interrupted
         if (kind === 'timeout') expect(result).toBeInstanceOf(CommandTimeoutError)
         else expect(result).toMatchObject({ exitCode: 1 })

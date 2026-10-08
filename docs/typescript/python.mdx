@@ -49,7 +49,7 @@ Pyodide is an optional peer dependency of `@struktoai/mirage-core`. Workspaces t
 
 <CodeGroup>
 ```bash Node
-pnpm add @struktoai/mirage-node pyodide
+pnpm add @struktoai/mirage-node @struktoai/mirage-core pyodide
 ```
 ```bash Browser
 pnpm add @struktoai/mirage-browser pyodide
@@ -90,7 +90,8 @@ default session. Create distinct sessions and pass their `sessionId` to
 run independent shell calls concurrently:
 
 ```ts
-import { MountMode, PyodideRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide'
 
 const ws = new Workspace(
   { '/data': new RAMVFS() },
