@@ -60,10 +60,16 @@ import { encodeText } from '../../../../shell/bytes.ts'
  * for the declaration's *own* value to coerce (`declare -i n=3+4` stores
  * `7`), the attribute has to be there first; a `+` letter comes off first
  * too, so `declare -i N=5; declare +i N+=x` stores `5x`. Gated like every
- * other mark, and a no-op with nothing to shape.
+ * other mark, and a no-op with nothing to shape. `followRef` is the write's:
+ * a `-n` declaration shapes the reference itself.
  */
-export async function premark(view: SessionView, name: string, shaping: AttrMarks): Promise<void> {
-  for (const [attr, on] of shaping) await view.mark(name, attr, on)
+export async function premark(
+  view: SessionView,
+  name: string,
+  shaping: AttrMarks,
+  followRef = true,
+): Promise<void> {
+  for (const [attr, on] of shaping) await view.mark(name, attr, on, followRef)
 }
 
 /**
@@ -512,7 +518,8 @@ export function identifierRefusal(cmd: string, word: string): string | null {
 
 /**
  * A declaration's answer once every operand ran: each warning, then each
- * refusal, one line apiece, and exit 1 when an operand refused. The good
+ * refusal, one line apiece, and exit 1 when an operand refused; an empty
+ * refusal fails without a word, as bash's do for a reference given `-i`. The good
  * operands on the same line are already stored: GNU reports each and keeps
  * going, so `export GOOD=1 1BAD=x GOOD2=2` exports both good names. A
  * warning alone (`must use subscript`) leaves the status 0.
@@ -522,11 +529,15 @@ export function declarationResult(
   errors: readonly string[],
   warnings: readonly string[] = [],
 ): Result {
-  const lines = [...warnings, ...errors]
-  if (lines.length === 0) {
-    return [null, new IOResult(), new ExecutionNode({ command: cmd, exitCode: 0 })]
-  }
+  const lines = [...warnings, ...errors.filter((line) => line !== '')]
   const code = errors.length > 0 ? 1 : 0
+  if (lines.length === 0) {
+    return [
+      null,
+      new IOResult({ exitCode: code }),
+      new ExecutionNode({ command: cmd, exitCode: code }),
+    ]
+  }
   const err = encodeText(`${lines.join('\n')}\n`)
   return [
     null,

@@ -67,7 +67,9 @@ from mirage.workspace.session.state import (
 from mirage.workspace.types import ExecutionNode
 
 
-async def premark(view: SessionView, name: str, shaping: AttrMarks) -> None:
+async def premark(
+    view: SessionView, name: str, shaping: AttrMarks, follow_ref: bool = True
+) -> None:
     """Put a declaration's value-shaping marks on a name before its
     value stores.
 
@@ -83,9 +85,11 @@ async def premark(view: SessionView, name: str, shaping: AttrMarks) -> None:
         view (SessionView): the session plane's gated door.
         name (str): the variable being declared.
         shaping (AttrMarks): the ``-i -l -u`` / ``+i +l +u`` marks.
+        follow_ref (bool): the write follows a reference; a ``-n``
+            declaration shapes the reference itself.
     """
     for attr, on in shaping:
-        await view.mark(name, attr, on)
+        await view.mark(name, attr, on, follow_ref)
 
 
 def declared_kind(flags: set[str] | frozenset[str]) -> VarKind | None:
@@ -640,20 +644,25 @@ def declaration_result(
     """A declaration's answer once every operand ran.
 
     Each warning, then each refusal, one line apiece, and exit 1 when an
-    operand refused. The good operands on the same line are already
-    stored: GNU reports each and keeps going, so ``export GOOD=1 1BAD=x
-    GOOD2=2`` exports both good names. A warning alone (``must use
-    subscript``) leaves the status 0.
+    operand refused; an empty refusal fails without a word, as bash's
+    do for a reference given ``-i``. The good operands on the same line
+    are already stored: GNU reports each and keeps going, so ``export
+    GOOD=1 1BAD=x GOOD2=2`` exports both good names. A warning alone
+    (``must use subscript``) leaves the status 0.
 
     Args:
         cmd (str): builtin name for the node.
         errors (list[str]): the refusal lines, in operand order.
         warnings (list[str] | None): lines that print without failing.
     """
-    lines = [*(warnings or []), *errors]
-    if not lines:
-        return None, IOResult(), ExecutionNode(command=cmd, exit_code=0)
+    lines = [*(warnings or []), *(line for line in errors if line)]
     code = 1 if errors else 0
+    if not lines:
+        return (
+            None,
+            IOResult(exit_code=code),
+            ExecutionNode(command=cmd, exit_code=code),
+        )
     err = encode_text("\n".join(lines) + "\n")
     return (
         None,

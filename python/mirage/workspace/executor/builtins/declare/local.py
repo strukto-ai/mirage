@@ -374,7 +374,14 @@ async def _declare_operand(
     if conflict is not None:
         return f"bash: {cmd}: {key}: {conflict}"
     checked = key if nameref else deref(session, key)
-    await premark(view, key, shaping)
+    if nameref and _integer_reference(session, key, shaping):
+        # bash coerces the value as arithmetic, which never names a
+        # variable: the operand fails without a word, and only a
+        # reference that already exists keeps the new attributes.
+        if key in session.vars:
+            await premark(view, key, shaping, False)
+        return ""
+    await premark(view, key, shaping, not nameref)
     target = session.vars.get(checked)
     integer = target is not None and VarAttr.INTEGER in target.attrs
     value, assigned = (
@@ -387,6 +394,23 @@ async def _declare_operand(
     await view.set(key, value, follow_ref=not nameref, assigned=assigned)
     await stamp_marks(session, view, key, checked, marks, not nameref)
     return None
+
+
+def _integer_reference(
+    session: SessionState, name: str, shaping: AttrMarks
+) -> bool:
+    """Whether a ``-n`` declaration leaves its reference under ``-i``.
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the reference.
+        shaping (AttrMarks): the declaration's ``-i -l -u`` marks.
+    """
+    for attr, on in shaping:
+        if attr is VarAttr.INTEGER:
+            return on
+    var = visible_record(session, name)
+    return var is not None and VarAttr.INTEGER in var.attrs
 
 
 async def _fresh_local(

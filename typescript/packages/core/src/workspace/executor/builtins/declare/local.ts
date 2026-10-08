@@ -283,7 +283,14 @@ async function declareOperand(
   const conflict = kindConflict(held, kind)
   if (conflict !== null) return `bash: ${cmd}: ${key}: ${conflict}`
   const checked = nameref ? key : deref(session, key) || key
-  await premark(view, key, shaping)
+  if (nameref && integerReference(session, key, shaping)) {
+    // bash coerces the value as arithmetic, which never names a variable:
+    // the operand fails without a word, and only a reference that already
+    // exists keeps the new attributes.
+    if (sessionEntry(session.vars, key) !== undefined) await premark(view, key, shaping, false)
+    return ''
+  }
+  await premark(view, key, shaping, !nameref)
   const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
   const [value, assigned]: [ShellValue, ReadonlySet<number | string> | null] = nameref
     ? [val, null]
@@ -292,6 +299,12 @@ async function declareOperand(
   await view.set(key, value, !nameref, assigned)
   await stampMarks(session, view, key, checked, marks, !nameref)
   return null
+}
+
+/** Whether a `-n` declaration leaves its reference under `-i`. */
+function integerReference(session: SessionState, name: string, shaping: AttrMarks): boolean {
+  for (const [attr, on] of shaping) if (attr === VarAttr.Integer) return on
+  return visibleRecord(session, name)?.attrs.has(VarAttr.Integer) === true
 }
 
 /**

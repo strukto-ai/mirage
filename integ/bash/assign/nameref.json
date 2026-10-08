@@ -339,6 +339,40 @@
         "stdout": "rc=0\ndeclare -nx ref=\"X\"\ndeclare -a T=([0]=\"one\")\nrc=1\ndeclare -a arr=([0]=\"one\")\nright changed prefix\nright again\nrc=1\ndeclare -a A=([0]=\"1\")\n",
         "stderr": "bash: declare: arr: reference variable cannot be an array\n"
       }
+    },
+    {
+      "id": "nameref_shaping_letters_stay_on_the_reference",
+      "seq": 940123,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( declare -i N=7; declare -n r=N; declare -n +i r=U; N=2+3; declare -u M=ab; declare -n s=M; declare -n +u -l s=Q; M=Cd; declare -p N r M s ); ( declare -n -i r=M; echo rc=$?; M=5; declare -n t=N; declare -n -i t=M; echo rc=$?; declare -p t; declare -p r 2>/dev/null || echo unset )",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -i N=\"5\"\ndeclare -n r=\"U\"\ndeclare -u M=\"CD\"\ndeclare -nl s=\"q\"\nrc=1\nrc=1\ndeclare -in t=\"N\"\nunset\n",
+        "stderr": ""
+      }
     }
   ]
 }
