@@ -137,39 +137,9 @@ def _served(report: OpReport | None, result: Any) -> None:
         )
 
 
-async def _reported(
+async def _primed(
     stream: AsyncIterator[bytes], report: OpReport | None
 ) -> AsyncIterator[bytes]:
-    """Stamp the caller's report when a streamed read ends.
-
-    A stream completes when its last chunk is pulled or it is closed,
-    so that is when it is stamped, with the bytes it carried. One whose
-    first pull failed moved nothing and is not stamped.
-
-    Args:
-        stream (AsyncIterator[bytes]): the streamed read.
-        report (OpReport | None): the caller's report.
-    """
-    moved = 0
-    started = False
-    iterator = stream.__aiter__()
-    try:
-        while True:
-            try:
-                chunk = await iterator.__anext__()
-            except StopAsyncIteration:
-                started = True
-                return
-            started = True
-            moved += len(chunk)
-            yield chunk
-    finally:
-        await close_quietly(iterator)
-        if started and report is not None:
-            report.served(None, moved)
-
-
-async def _primed(stream: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
     """Pull a stream's first chunk now and answer the stream from there.
 
     A read that fails at its start (a missing file, a refused request)
@@ -178,6 +148,7 @@ async def _primed(stream: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
 
     Args:
         stream (AsyncIterator[bytes]): the streamed read.
+        report (OpReport | None): the caller's report.
     """
     iterator = stream.__aiter__()
     try:
@@ -187,25 +158,37 @@ async def _primed(stream: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
     except BaseException:
         await close_quietly(iterator)
         raise
-    return _resumed(head, iterator)
+    return _resumed(head, iterator, report)
 
 
 async def _resumed(
-    head: list[bytes], iterator: AsyncIterator[bytes]
+    head: list[bytes],
+    iterator: AsyncIterator[bytes],
+    report: OpReport | None,
 ) -> AsyncIterator[bytes]:
     """The chunks already pulled, then the rest of the stream.
+
+    The stream completes when its last chunk is pulled or it is closed,
+    so that is when the caller's report is stamped, with the bytes it
+    carried.
 
     Args:
         head (list[bytes]): what was pulled before the caller asked.
         iterator (AsyncIterator[bytes]): the stream after them.
+        report (OpReport | None): the caller's report.
     """
+    moved = 0
     try:
         for chunk in head:
+            moved += len(chunk)
             yield chunk
         async for chunk in iterator:
+            moved += len(chunk)
             yield chunk
     finally:
         await close_quietly(iterator)
+        if report is not None:
+            report.served(None, moved)
 
 
 def _appends_nothing(name: str, kwargs: dict[str, Any]) -> bool:
@@ -1112,7 +1095,7 @@ class Dispatcher:
             stream = filler.fill_stream(
                 call.path, stream, keep=lambda: not call.renders_read(mount)
             )
-        return await _primed(_reported(stream, call.report))
+        return await _primed(stream, call.report)
 
     async def _serial_write(self, call: _Call, mount: MountEntry) -> Any:
         """Run a write with its names held, one writer at a time per name.

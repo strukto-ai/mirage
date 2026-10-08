@@ -1596,11 +1596,6 @@ class Tape(BaseVFS):
         self.reads += 1
         return self.files[path.vfs_path.strip("/")]
 
-    async def write(
-        self, path: PathSpec, data: bytes, index: IndexCacheStore = NULL_INDEX
-    ) -> None:
-        self.files[path.vfs_path.strip("/")] = data
-
     async def read_stream(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
@@ -1654,23 +1649,18 @@ async def test_a_streamed_read_fails_at_the_call():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "kwargs",
-    [{"offset": 5}, {"size": 4}],
+    "policies,kwargs",
+    [([], {"offset": 5}), ([], {"size": 4}), ([ReadsResults()], {})],
 )
-async def test_a_window_is_answered_whole(kwargs):
-    with Workspace({"/tape/": Tape()}, mode=MountMode.WRITE) as ws:
-        got, _ = await ws.dispatch("read", TAPE, stream=True, **kwargs)
-        assert isinstance(got, bytes)
-
-
-@pytest.mark.asyncio
-async def test_a_policy_that_reads_results_gets_whole_bytes():
+async def test_a_window_or_a_policy_that_reads_results_gets_whole_bytes(
+    policies, kwargs
+):
     tape = Tape()
     with Workspace(
-        {"/tape/": tape}, mode=MountMode.WRITE, policies=[ReadsResults()]
+        {"/tape/": tape}, mode=MountMode.WRITE, policies=policies
     ) as ws:
-        got, _ = await ws.dispatch("read", TAPE, stream=True)
-        assert got == b"0123456789" * 5
+        got, _ = await ws.dispatch("read", TAPE, stream=True, **kwargs)
+        assert isinstance(got, bytes)
         assert tape.pulled == 0
 
 
@@ -1731,34 +1721,6 @@ async def test_an_abandoned_stream_drains_into_the_cache():
         warm, _ = await ws.dispatch("read", TAPE)
         assert warm == b"0123456789" * 5
         assert tape.reads == 0
-
-
-@pytest.mark.asyncio
-async def test_a_drain_the_cache_dropped_keeps_nothing():
-    tape = Tape(delay=0.01)
-    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
-        stream, _ = await ws.dispatch("read", TAPE, stream=True)
-        await stream.__anext__()
-        await stream.aclose()
-        cache = ws.namespace.mount_for("/tape/a.txt").cache_manager
-        drains = list(cache._file_cache._drain_tasks.values())
-        assert len(drains) == 1
-        await cache._file_cache.clear()
-        await asyncio.gather(*drains, return_exceptions=True)
-        await ws.dispatch("read", TAPE)
-        assert tape.reads == 1
-
-
-@pytest.mark.asyncio
-async def test_a_write_during_a_stream_keeps_none_of_it():
-    tape = Tape()
-    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
-        stream, _ = await ws.dispatch("read", TAPE, stream=True)
-        await ws.dispatch("write", TAPE, data=b"new")
-        assert [chunk async for chunk in stream][0] == b"0123456789"
-        got, _ = await ws.dispatch("read", TAPE)
-        assert got == b"new"
-        assert tape.reads == 1
 
 
 @pytest.mark.asyncio

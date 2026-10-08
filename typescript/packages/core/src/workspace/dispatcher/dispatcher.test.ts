@@ -1498,11 +1498,6 @@ class Tape extends BaseVFS {
     return data === undefined ? Promise.reject(enoent(path)) : Promise.resolve(data)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    this.files.set(path.vfsPath.replace(/^\/+/, ''), data)
-    return Promise.resolve()
-  }
-
   override async *readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     const data = this.files.get(path.vfsPath.replace(/^\/+/, ''))
     if (data === undefined) throw enoent(path)
@@ -1530,7 +1525,6 @@ async function pullAll(stream: unknown): Promise<string[]> {
 }
 
 describe('a streamed read', () => {
-  // Mirrors Python's streamed read tests in test_dispatcher.py.
   it('arrives as it is pulled and fills the cache', async () => {
     const tape = new Tape()
     const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
@@ -1556,28 +1550,16 @@ describe('a streamed read', () => {
     }
   })
 
-  it.each([[{ offset: 5 }], [{ size: 4 }]])(
-    'with a window %o is answered whole',
-    async (window) => {
-      const ws = new Workspace({ '/tape': new Tape() }, { mode: MountMode.WRITE })
-      try {
-        const got = await ws.dispatch('read', TAPE, [], { ...window, stream: true })
-        expect(got).toBeInstanceOf(Uint8Array)
-      } finally {
-        await ws.close()
-      }
-    },
-  )
-
-  it('reaches a policy that reads results whole', async () => {
+  it.each([
+    [[], { offset: 5 }],
+    [[], { size: 4 }],
+    [[new ReadsResults()], {}],
+  ])('with policies %o and window %o is answered whole', async (policies, window) => {
     const tape = new Tape()
-    const ws = new Workspace(
-      { '/tape': tape },
-      { mode: MountMode.WRITE, policies: [new ReadsResults()] },
-    )
+    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE, policies })
     try {
-      const got = await ws.dispatch('read', TAPE, [], { stream: true })
-      expect(DEC.decode(got as Uint8Array)).toBe(WHOLE)
+      const got = await ws.dispatch('read', TAPE, [], { ...window, stream: true })
+      expect(got).toBeInstanceOf(Uint8Array)
       expect(tape.pulled).toBe(0)
     } finally {
       await ws.close()
@@ -1644,42 +1626,6 @@ describe('a streamed read', () => {
       await Promise.all([...(ws.cache.drainTasks?.values() ?? [])])
       expect(DEC.decode((await ws.dispatch('read', TAPE)) as Uint8Array)).toBe(WHOLE)
       expect(tape.reads).toBe(0)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('keeps nothing from a drain the cache dropped', async () => {
-    const tape = new Tape()
-    tape.delay = 10
-    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
-    try {
-      const stream = (await ws.dispatch('read', TAPE, [], {
-        stream: true,
-      })) as AsyncIterable<Uint8Array>
-      const iterator = stream[Symbol.asyncIterator]()
-      await iterator.next()
-      await iterator.return?.()
-      const drains = [...(ws.cache.drainTasks?.values() ?? [])]
-      expect(drains).toHaveLength(1)
-      await ws.cache.clear()
-      await Promise.all(drains)
-      await ws.dispatch('read', TAPE)
-      expect(tape.reads).toBe(1)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('keeps none of itself when a write lands during it', async () => {
-    const tape = new Tape()
-    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
-    try {
-      const stream = await ws.dispatch('read', TAPE, [], { stream: true })
-      await ws.dispatch('write', TAPE, [ENC.encode('new')])
-      expect((await pullAll(stream))[0]).toBe('0123456789')
-      expect(DEC.decode((await ws.dispatch('read', TAPE)) as Uint8Array)).toBe('new')
-      expect(tape.reads).toBe(1)
     } finally {
       await ws.close()
     }

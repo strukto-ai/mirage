@@ -233,38 +233,14 @@ function served(report: OpReport | undefined, result: unknown): void {
 }
 
 /**
- * Stamp the caller's report when a streamed read ends. A stream completes when
- * its last chunk is pulled or it is closed, so that is when it is stamped,
- * with the bytes it carried; one whose first pull failed moved nothing and is
- * not stamped. Mirrors Python's `_reported`.
- */
-async function* reported(
-  stream: AsyncIterable<Uint8Array>,
-  report: OpReport | undefined,
-): AsyncGenerator<Uint8Array> {
-  let moved = 0
-  let started = false
-  const iterator = stream[Symbol.asyncIterator]()
-  try {
-    for (;;) {
-      const next = await iterator.next()
-      started = true
-      if (next.done === true) return
-      moved += next.value.byteLength
-      yield next.value
-    }
-  } finally {
-    await iterator.return?.()
-    if (started) report?.served(null, moved)
-  }
-}
-
-/**
  * Pull a stream's first chunk now and answer the stream from there, so a read
  * that fails at its start fails at the call, where the door handles it, rather
  * than in the hands of whoever pulls it later. Mirrors Python's `_primed`.
  */
-async function primed(stream: AsyncIterable<Uint8Array>): Promise<AsyncIterable<Uint8Array>> {
+async function primed(
+  stream: AsyncIterable<Uint8Array>,
+  report: OpReport | undefined,
+): Promise<AsyncIterable<Uint8Array>> {
   const iterator = stream[Symbol.asyncIterator]()
   let first: IteratorResult<Uint8Array>
   try {
@@ -273,23 +249,34 @@ async function primed(stream: AsyncIterable<Uint8Array>): Promise<AsyncIterable<
     await iterator.return?.()
     throw err
   }
-  return resumed(first.done === true ? [] : [first.value], iterator)
+  return resumed(first.done === true ? [] : [first.value], iterator, report)
 }
 
-/** The chunks already pulled, then the rest of the stream. */
+/**
+ * The chunks already pulled, then the rest of the stream. The stream completes
+ * when its last chunk is pulled or it is closed, so that is when the caller's
+ * report is stamped, with the bytes it carried.
+ */
 async function* resumed(
   head: readonly Uint8Array[],
   iterator: AsyncIterator<Uint8Array>,
+  report: OpReport | undefined,
 ): AsyncGenerator<Uint8Array> {
+  let moved = 0
   try {
-    yield* head
+    for (const chunk of head) {
+      moved += chunk.byteLength
+      yield chunk
+    }
     for (;;) {
       const next = await iterator.next()
       if (next.done === true) return
+      moved += next.value.byteLength
       yield next.value
     }
   } finally {
     await iterator.return?.()
+    report?.served(null, moved)
   }
 }
 
@@ -820,7 +807,7 @@ export class Dispatcher {
     if (filler !== null) {
       stream = filler.fillStream(call.path, stream, () => !this.rendersRead(call, mount))
     }
-    return await primed(reported(stream, call.report))
+    return await primed(stream, call.report)
   }
 
   /** Whether a filetype renderer answers this read on `vfs`; asked each

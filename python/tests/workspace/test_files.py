@@ -741,7 +741,7 @@ async def test_a_streamed_read_is_recorded_once_it_ends():
 
 @pytest.mark.asyncio
 async def test_a_streamed_read_holds_one_chunk_at_a_time(tmp_path):
-    (tmp_path / "big.bin").write_bytes(b"\0" * (100 * 1024 * 1024))
+    (tmp_path / "big.bin").write_bytes(b"\0" * (16 * 1024 * 1024))
     ws = Workspace({"/d/": DiskVFS(root=str(tmp_path))}, mode=MountMode.READ)
     try:
         tracemalloc.start()
@@ -751,7 +751,7 @@ async def test_a_streamed_read_holds_one_chunk_at_a_time(tmp_path):
             total += len(chunk)
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
-        assert total == 100 * 1024 * 1024
-        assert peak < 10 * 1024 * 1024
+        assert total == 16 * 1024 * 1024
+        assert peak < 1024 * 1024
     finally:
         await ws.close()
