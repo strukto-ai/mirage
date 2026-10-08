@@ -53,6 +53,15 @@ def test_any_other_vfs_serves_the_generic_set_under_its_name():
     assert set().union(*named.values()) == {"custom"}
 
 
+def test_a_class_named_like_a_builtin_serves_the_generic_set():
+    class SlackVFS(BaseVFS):
+        name = "mychat"
+
+    named = _named(mount_commands(SlackVFS()))
+    assert {"cat", "ls", "grep"} <= set(named)
+    assert set().union(*named.values()) == {"mychat"}
+
+
 def test_handed_commands_come_after_the_generic_set_they_override():
     cat = command("cat", vfs="custom", spec=SPECS["cat"])(_custom_cat)
     vfs = BaseVFS(name="custom", overrides={"cat"}, commands=[cat])

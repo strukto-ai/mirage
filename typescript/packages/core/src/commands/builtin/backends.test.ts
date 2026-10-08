@@ -38,6 +38,15 @@ describe('mountCommands', () => {
     expect(new Set(served.map((cmd) => cmd.vfs))).toEqual(new Set(['custom']))
   })
 
+  it('serves a class named like a builtin the generic set', () => {
+    class SlackVFS extends BaseVFS {
+      override readonly name: string = 'mychat'
+    }
+    const served = mountCommands(new SlackVFS())
+    expect(served.some((cmd) => cmd.name === 'cat')).toBe(true)
+    expect(new Set(served.map((cmd) => cmd.vfs))).toEqual(new Set(['mychat']))
+  })
+
   it('puts handed commands after the generic set they override', () => {
     const cat = command({
       name: 'cat',

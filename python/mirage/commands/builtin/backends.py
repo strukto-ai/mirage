@@ -20,50 +20,57 @@ from mirage.commands.config import RegisteredCommand, registered_commands
 from mirage.vfs.base import BaseVFS
 
 # The module holding each builtin VFS class's shell commands (its
-# ``COMMANDS``), by the class's name. Imported on first mount, so a
-# workspace loads only the backends it mounts.
+# ``COMMANDS``), by the class's module path, so a class of the same name
+# defined elsewhere is not taken for the builtin. Imported on first mount,
+# so a workspace loads only the backends it mounts.
 _MODULES: dict[str, str] = {
-    "AirtableVFS": "mirage.commands.builtin.airtable",
-    "BinViewVFS": "mirage.commands.builtin.bin",
-    "BoxVFS": "mirage.commands.builtin.box",
-    "ChromaVFS": "mirage.commands.builtin.chroma",
-    "DatabricksVolumeVFS": "mirage.commands.builtin.databricks_volume",
-    "DevVFS": "mirage.commands.builtin.dev",
-    "DifyVFS": "mirage.commands.builtin.dify",
-    "DiscordVFS": "mirage.commands.builtin.discord",
-    "DiskVFS": "mirage.commands.builtin.disk",
-    "DropboxVFS": "mirage.commands.builtin.dropbox",
-    "EmailVFS": "mirage.commands.builtin.email",
-    "GCalVFS": "mirage.commands.builtin.gcal",
-    "GDocsVFS": "mirage.commands.builtin.gdocs",
-    "GSheetsVFS": "mirage.commands.builtin.gsheets",
-    "GSlidesVFS": "mirage.commands.builtin.gslides",
-    "GitHubVFS": "mirage.commands.builtin.github",
-    "GmailVFS": "mirage.commands.builtin.gmail",
-    "GoogleDriveVFS": "mirage.commands.builtin.gdrive",
-    "GridFSVFS": "mirage.commands.builtin.gridfs",
-    "HfBucketsVFS": "mirage.commands.builtin.hf_buckets",
-    "HfHubVFS": "mirage.commands.builtin.hf_hub",
-    "HistoryViewVFS": "mirage.commands.builtin.history",
-    "JaegerVFS": "mirage.commands.builtin.jaeger",
-    "LanceDBVFS": "mirage.commands.builtin.lancedb",
-    "LangfuseVFS": "mirage.commands.builtin.langfuse",
-    "LinearVFS": "mirage.commands.builtin.linear",
-    "Mem0VFS": "mirage.commands.builtin.mem0",
-    "MongoDBVFS": "mirage.commands.builtin.mongodb",
-    "NextcloudVFS": "mirage.commands.builtin.nextcloud",
-    "NotionVFS": "mirage.commands.builtin.notion",
-    "OneDriveVFS": "mirage.commands.builtin.onedrive",
-    "PostgresVFS": "mirage.commands.builtin.postgres",
-    "QdrantVFS": "mirage.commands.builtin.qdrant",
-    "RAMVFS": "mirage.commands.builtin.ram",
-    "RedisVFS": "mirage.commands.builtin.redis",
-    "S3VFS": "mirage.commands.builtin.s3",
-    "SSHVFS": "mirage.commands.builtin.ssh",
-    "SharePointVFS": "mirage.commands.builtin.sharepoint",
-    "SlackVFS": "mirage.commands.builtin.slack",
-    "TrelloVFS": "mirage.commands.builtin.trello",
-    "WandbVFS": "mirage.commands.builtin.wandb",
+    "mirage.vfs.airtable.airtable.AirtableVFS": "mirage.commands.builtin.airtable",
+    "mirage.vfs.bin.bin.BinViewVFS": "mirage.commands.builtin.bin",
+    "mirage.vfs.box.box.BoxVFS": "mirage.commands.builtin.box",
+    "mirage.vfs.chroma.chroma.ChromaVFS": "mirage.commands.builtin.chroma",
+    "mirage.vfs.databricks_volume.databricks_volume.DatabricksVolumeVFS": (
+        "mirage.commands.builtin.databricks_volume"
+    ),
+    "mirage.vfs.dev.dev.DevVFS": "mirage.commands.builtin.dev",
+    "mirage.vfs.dify.dify.DifyVFS": "mirage.commands.builtin.dify",
+    "mirage.vfs.discord.discord.DiscordVFS": "mirage.commands.builtin.discord",
+    "mirage.vfs.disk.disk.DiskVFS": "mirage.commands.builtin.disk",
+    "mirage.vfs.dropbox.dropbox.DropboxVFS": "mirage.commands.builtin.dropbox",
+    "mirage.vfs.email.email.EmailVFS": "mirage.commands.builtin.email",
+    "mirage.vfs.gcal.gcal.GCalVFS": "mirage.commands.builtin.gcal",
+    "mirage.vfs.gdocs.gdocs.GDocsVFS": "mirage.commands.builtin.gdocs",
+    "mirage.vfs.gsheets.gsheets.GSheetsVFS": "mirage.commands.builtin.gsheets",
+    "mirage.vfs.gslides.gslides.GSlidesVFS": "mirage.commands.builtin.gslides",
+    "mirage.vfs.github.github.GitHubVFS": "mirage.commands.builtin.github",
+    "mirage.vfs.gmail.gmail.GmailVFS": "mirage.commands.builtin.gmail",
+    "mirage.vfs.gdrive.gdrive.GoogleDriveVFS": "mirage.commands.builtin.gdrive",
+    "mirage.vfs.gridfs.gridfs.GridFSVFS": "mirage.commands.builtin.gridfs",
+    "mirage.vfs.hf_buckets.hf_buckets.HfBucketsVFS": (
+        "mirage.commands.builtin.hf_buckets"
+    ),
+    "mirage.vfs.hf_hub.base.HfHubVFS": "mirage.commands.builtin.hf_hub",
+    "mirage.vfs.history.history.HistoryViewVFS": "mirage.commands.builtin.history",
+    "mirage.vfs.jaeger.jaeger.JaegerVFS": "mirage.commands.builtin.jaeger",
+    "mirage.vfs.lancedb.lancedb.LanceDBVFS": "mirage.commands.builtin.lancedb",
+    "mirage.vfs.langfuse.langfuse.LangfuseVFS": "mirage.commands.builtin.langfuse",
+    "mirage.vfs.linear.linear.LinearVFS": "mirage.commands.builtin.linear",
+    "mirage.vfs.mem0.mem0.Mem0VFS": "mirage.commands.builtin.mem0",
+    "mirage.vfs.mongodb.mongodb.MongoDBVFS": "mirage.commands.builtin.mongodb",
+    "mirage.vfs.nextcloud.nextcloud.NextcloudVFS": "mirage.commands.builtin.nextcloud",
+    "mirage.vfs.notion.notion.NotionVFS": "mirage.commands.builtin.notion",
+    "mirage.vfs.onedrive.onedrive.OneDriveVFS": "mirage.commands.builtin.onedrive",
+    "mirage.vfs.postgres.postgres.PostgresVFS": "mirage.commands.builtin.postgres",
+    "mirage.vfs.qdrant.qdrant.QdrantVFS": "mirage.commands.builtin.qdrant",
+    "mirage.vfs.ram.ram.RAMVFS": "mirage.commands.builtin.ram",
+    "mirage.vfs.redis.redis.RedisVFS": "mirage.commands.builtin.redis",
+    "mirage.vfs.s3.s3.S3VFS": "mirage.commands.builtin.s3",
+    "mirage.vfs.ssh.ssh.SSHVFS": "mirage.commands.builtin.ssh",
+    "mirage.vfs.sharepoint.sharepoint.SharePointVFS": (
+        "mirage.commands.builtin.sharepoint"
+    ),
+    "mirage.vfs.slack.slack.SlackVFS": "mirage.commands.builtin.slack",
+    "mirage.vfs.trello.trello.TrelloVFS": "mirage.commands.builtin.trello",
+    "mirage.vfs.wandb.wandb.WandbVFS": "mirage.commands.builtin.wandb",
 }
 
 
@@ -82,7 +89,7 @@ def mount_commands(vfs: BaseVFS) -> list[RegisteredCommand]:
     """
     found: list[RegisteredCommand] | None = None
     for klass in type(vfs).__mro__:
-        module = _MODULES.get(klass.__name__)
+        module = _MODULES.get(f"{klass.__module__}.{klass.__qualname__}")
         if module is None:
             continue
         family = klass.__dict__.get("name", vfs.name)
