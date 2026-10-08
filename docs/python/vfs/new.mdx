@@ -80,6 +80,10 @@ available. A window of a file is cut from the whole `read` unless the class sets
 (`size=None` means through EOF) and fetches only that. A derived stream still
 fetches the entire file; define `read_stream` for large files.
 
+`readdir` returns each child's full virtual path (the directory's
+`path.virtual` joined with the child's name), and `stat` sets `FileStat.name`
+to the base name alone. `ls`, `find` and `grep` print what these two return.
+
 Every other function is optional, and each stands alone:
 
 | Functions | Purpose |

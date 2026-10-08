@@ -137,6 +137,22 @@ function dstArg(value: unknown): PathSpec {
 }
 
 /**
+ * Refuse the keywords a custom function cannot take, which is all of
+ * them: a TypeScript function has no keyword parameters. The mount hands
+ * every function its `index` and a caller may name the `filetype`; any
+ * other keyword is the TypeError a direct call raises in Python, never
+ * silently dropped. Mirrors Python's `_taken`.
+ */
+function taken(name: string, kwargs: OpKwargs): void {
+  const [first] = Object.keys(kwargs)
+    .filter((key) => key !== 'index' && key !== 'filetype' && kwargs[key] !== undefined)
+    .sort(compareCodePoints)
+  if (first !== undefined) {
+    throw new TypeError(`${name}() got an unexpected keyword argument '${first}'`)
+  }
+}
+
+/**
  * A read, honoring a byte window when one is asked for.
  *
  * A VFS that reads ranges natively fetches only the window, which is the
@@ -622,7 +638,14 @@ export class MountEntry {
         return [(scope, _args, kw) => vfs.setattr(scope, kw as SetAttrFields)]
       default: {
         const method = (vfs as unknown as Record<string, (...args: unknown[]) => unknown>)[name]
-        return method === undefined ? [] : [(scope, args) => method.call(vfs, scope, ...args)]
+        return method === undefined
+          ? []
+          : [
+              (scope, args, kw) => {
+                taken(name, kw)
+                return method.call(vfs, scope, ...args)
+              },
+            ]
       }
     }
   }

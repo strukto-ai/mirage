@@ -155,6 +155,17 @@ describe('VFS functions', () => {
     }
   })
 
+  it('refuses a keyword a custom function cannot take', async () => {
+    const ws = new Workspace({ '/shelf': new Shelf() }, { mode: MountMode.WRITE })
+    try {
+      await expect(ws.dispatch('peek', '/shelf/a.txt', [], { qeury: 'x' })).rejects.toThrow(
+        "unexpected keyword argument 'qeury'",
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('drops the cached bytes a custom write changed', async () => {
     const ws = new Workspace({ '/shelf': new Shelf() }, { mode: MountMode.WRITE })
     try {
