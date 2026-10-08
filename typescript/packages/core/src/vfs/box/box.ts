@@ -14,13 +14,8 @@
 
 import { BaseVFS } from '../base.ts'
 import { BoxAccessor } from '../../accessor/box.ts'
-import { BOX_COMMANDS } from '../../commands/builtin/box/index.ts'
 
-import type { RegisteredCommand } from '../../commands/config.ts'
 import { BoxTokenManager } from '../../core/box/client.ts'
-
-import { BOX_OPS } from '../../ops/box/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 
 import { PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
@@ -28,6 +23,27 @@ import { VFSName } from '../../types.ts'
 import { redactBoxConfig, type BoxConfig, type BoxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/box/watch.ts'
 import { type DeltaHook } from '../../watch/index.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { DuEntries } from '../types.ts'
+import { readdir as boxReaddir } from '../../core/box/readdir.ts'
+import { read as boxRead, readStream as boxStream } from '../../core/box/read.ts'
+import { stat as boxStat } from '../../core/box/stat.ts'
+import { exists as boxExists } from '../../core/box/exists.ts'
+import { makeWalkedDu } from '../../core/generic/du.ts'
+import { write as boxWrite } from '../../core/box/write.ts'
+import { create as boxCreate } from '../../core/box/create.ts'
+import { mkdir as boxMkdir } from '../../core/box/mkdir.ts'
+import { unlink as boxUnlink } from '../../core/box/unlink.ts'
+import { rmdir as boxRmdir, rmR as boxRmR } from '../../core/box/rmdir.ts'
+import { rename as boxRename } from '../../core/box/rename.ts'
+import { copy as boxCopy } from '../../core/box/copy.ts'
+import { truncate as boxTruncate } from '../../core/box/truncate.ts'
+import { narrowPaths as boxNarrowPaths } from '../../core/box/search.ts'
+
+const du = makeWalkedDu(boxStat, boxReaddir)
+
+const enabledOp = (accessor: BoxAccessor) => accessor.contentSearch
 
 export interface BoxVFSState {
   type: string
@@ -64,12 +80,88 @@ export class BoxVFS extends BaseVFS {
     })
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return BOX_COMMANDS
+  override readonly readsRanges: boolean = true
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return boxReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return BOX_OPS
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    if (offset === 0 && size === null) return boxRead(this.accessor, path, index)
+    return boxRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return boxStat(this.accessor, path, index)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return boxStream(this.accessor, path, index)
+  }
+
+  override exists(path: PathSpec): Promise<boolean> {
+    return boxExists(this.accessor, path)
+  }
+
+  override duSize(path: PathSpec, index?: IndexCacheStore): Promise<number> {
+    return du.size(this.accessor, path, index)
+  }
+
+  override duEntries(path: PathSpec, index?: IndexCacheStore): Promise<DuEntries> {
+    return du.entries(this.accessor, path, index)
+  }
+
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    return boxWrite(this.accessor, path, data)
+  }
+
+  override create(path: PathSpec): Promise<void> {
+    return boxCreate(this.accessor, path)
+  }
+
+  override mkdir(path: PathSpec, parents = false): Promise<void> {
+    return boxMkdir(this.accessor, path, parents)
+  }
+
+  override unlink(path: PathSpec): Promise<void> {
+    return boxUnlink(this.accessor, path)
+  }
+
+  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+    return boxRmdir(this.accessor, path)
+  }
+
+  override rmR(path: PathSpec): Promise<void> {
+    return boxRmR(this.accessor, path)
+  }
+
+  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
+    return boxRename(this.accessor, src, dst)
+  }
+
+  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
+    return boxCopy(this.accessor, src, dst)
+  }
+
+  override dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
+    return boxCopy(this.accessor, src, dst)
+  }
+
+  override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
+    return boxTruncate(this.accessor, path, length, noCreate)
+  }
+
+  override narrowPaths(query: string, paths: PathSpec[]): Promise<PathSpec[] | null> {
+    return boxNarrowPaths(this.accessor, query, paths)
+  }
+
+  override contentSearchEnabled(): boolean {
+    return enabledOp(this.accessor)
   }
 
   override deltaHook(): DeltaHook {

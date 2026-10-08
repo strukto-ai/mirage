@@ -18,13 +18,13 @@ from mirage.commands.config import CommandOpts, ExecContext
 
 # The dispatcher re-boxes ExecContext onto CommandOpts, so cwd changes
 # shape across the seam: the caller supplies the virtual string and
-# execute_cmd promotes it to the PathSpec handlers read (the mount
+# run_command promotes it to the PathSpec handlers read (the mount
 # prefix is not known before the mount is chosen).
 _RESHAPED = {"cwd"}
 
 
 def test_every_context_field_is_spelled_as_command_opts_spells_it():
-    # execute_cmd re-boxes the bag onto CommandOpts, so a fact spelled
+    # run_command re-boxes the bag onto CommandOpts, so a fact spelled
     # two ways across that seam is two vocabularies for one plane. The
     # mirrored TS pin is the ExecContext mapped type in
     # workspace/mount/mount.test.ts.

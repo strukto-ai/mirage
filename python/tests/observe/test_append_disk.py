@@ -16,11 +16,11 @@ import asyncio
 from pathlib import Path
 
 from mirage import MountMode, Workspace
-from mirage.ops import Ops
 from mirage.vfs.disk import DiskVFS
+from mirage.workspace.files import Files
 
 
-def _make_ops(tmp_path: Path) -> tuple[Ops, DiskVFS]:
+def _make_ops(tmp_path: Path) -> tuple[Files, DiskVFS]:
     disk = DiskVFS(root=tmp_path)
     ws = Workspace({"/disk/": disk}, mode=MountMode.WRITE)
     return ws.vfs, disk

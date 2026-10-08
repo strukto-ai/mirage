@@ -15,12 +15,13 @@
 from typing import Any
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.commands.builtin.gmail import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.gmail.read import read as _read
+from mirage.core.gmail.readdir import readdir as _readdir
+from mirage.core.gmail.stat import stat as _stat
 from mirage.core.google.client import TokenManager
-from mirage.ops.gmail import OPS as GMAIL_VFS_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import VFSName
+from mirage.types import FileStat, PathSpec, VFSName
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gmail.config import GmailConfig
 from mirage.vfs.gmail.prompt import PROMPT, WRITE_PROMPT
@@ -47,11 +48,25 @@ class GmailVFS(BaseVFS):
         self._token_manager = TokenManager(config)
         self.accessor = GmailAccessor(self.config, self._token_manager)
 
-    def ops(self) -> list[RegisteredOp]:
-        return GMAIL_VFS_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

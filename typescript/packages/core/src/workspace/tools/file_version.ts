@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Ops } from '../../ops/ops.ts'
+import type { Files } from '../files.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
 
 export class StaleMirageFileError extends Error {
@@ -39,7 +39,7 @@ export async function fingerprint(content: Uint8Array): Promise<string> {
     .replaceAll('=', '')
 }
 
-async function readBytes(vfs: Ops, path: string): Promise<Uint8Array> {
+async function readBytes(vfs: Files, path: string): Promise<Uint8Array> {
   return (await vfs.read(path, { raw: true })).slice()
 }
 
@@ -55,7 +55,7 @@ export class FileVersionTracker {
    * @param enabled False serves every call unchecked.
    */
   constructor(
-    readonly vfs: Ops,
+    readonly vfs: Files,
     private readonly enabled = true,
   ) {}
 

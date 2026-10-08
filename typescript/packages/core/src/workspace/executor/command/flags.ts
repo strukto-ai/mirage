@@ -41,7 +41,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
  * cwd-resolved by `parseCommand`, or a spec-classified PATH operand the
  * upstream classifier left as text. `vfsPath` stays empty on
  * purpose: the mount stamps the backend key on every path at execute
- * time (`Mount.executeCmd`), so a parse-time stamp is dead weight —
+ * time (`Mount.runCommand`), so a parse-time stamp is dead weight —
  * proven in both languages by running the full suite with this field
  * set to a sentinel. The empty name, which only an attached value can
  * spell (`--file=`), names nothing, however it resolved: its walk answers

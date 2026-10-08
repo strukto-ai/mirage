@@ -19,7 +19,7 @@ import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { eacces, enoent } from '../../../../errors/fs.ts'
-import type { CommandIO } from '../adapter.ts'
+import type { CommandIO } from '../../../config.ts'
 import { BUILDER } from './rmdir.ts'
 
 const DEC = new TextDecoder()
@@ -61,7 +61,7 @@ async function rmdir(io: CommandIO, paths: string[]): Promise<[number, string]> 
     {} as Accessor,
     paths.map((p) => PathSpec.fromStrPath(p)),
     [],
-    { stdin: null, flags: {}, filetypeFns: null, cwd: '/', index: INDEX },
+    { stdin: null, flags: {}, cwd: '/', index: INDEX },
   )
   if (result === null) throw new Error('rmdir returned no result')
   const [, res] = result

@@ -16,7 +16,6 @@ import asyncio
 
 import pytest
 
-from mirage.ops.types import SessionView
 from mirage.policy import Action, Deny, Policies, Policy, PolicyDenied
 from mirage.policy.types import SessionContext
 from mirage.shell.array import make_array
@@ -24,6 +23,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ManagedRef, ShellVar, TempEnv, VarAttr
 from mirage.types import HiddenVars, Visibility
+from mirage.view.types import SessionView
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.session import vars_from_env
@@ -259,8 +259,8 @@ def test_visible_env_filters_reads_without_copying():
     assert env.get("SLACK_TOKEN") is None
     assert "AWS_SECRET_KEY" not in env
     assert env["PUBLIC"] == "1"
-    assert sorted(env) == ["IFS", "PATH", "PUBLIC", "PWD"]
-    assert len(env) == 4
+    assert sorted(env) == ["IFS", "OPTERR", "OPTIND", "PATH", "PUBLIC", "PWD"]
+    assert len(env) == 6
     with pytest.raises(KeyError):
         env["SLACK_TOKEN"]
     seed_var(session, "NEW", "2")

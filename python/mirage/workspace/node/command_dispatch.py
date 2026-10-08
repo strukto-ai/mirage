@@ -25,13 +25,12 @@ from mirage.context import (
     redirect_opener_for,
     redirect_paths_for,
     reset_admission,
-    reset_op_policies,
     set_admission,
-    set_op_policies,
 )
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import PolicyDenied, resolve_limit, resolve_producer
+from mirage.policy.policies import reset_op_policies, set_op_policies
 from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import decode_text, encode_text
@@ -45,12 +44,9 @@ from mirage.shell.helpers import (
     get_text,
     split_env_prefix,
 )
-from mirage.shell.parse import (
-    find_syntax_error,
-    source_offsets,
-    syntax_error_result,
-)
+from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.scope import ParseScope
+from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ProcessSubDirection
 from mirage.shell.variable import TempEnv, VarAttr
@@ -184,24 +180,21 @@ async def execute_command(
         rewrite = alias_command_text(session, head, rest, mark)
         if rewrite is not None:
             rewritten, texts = rewrite
-            at = head_node.start_byte - base
-            line = decode_text(source[:at]) + rewritten
+            lead = decode_text(source[: head_node.start_byte - base])
+            line = lead + rewritten
             scope = ParseScope()
             try:
                 ast = scope.parse(line)
                 own: dict[str, tuple[int, int]] = {}
+                at = len(lead)
                 for alias, text in texts:
-                    own[alias] = (at, at + len(encode_text(text)))
+                    own[alias] = (at, at + len(text))
                     at = own[alias][1]
-                offending = find_syntax_error(
-                    ast,
-                    expanding_aliases(session),
-                    own,
-                    source_offsets(line, ast),
-                    parse_fn=scope.parse,
-                )
-                if offending is not None:
-                    io = syntax_error_result(offending, ast)
+                found = check_syntax(
+                    line, expanding_aliases(session), own
+                ) or find_syntax_issue(ast)
+                if found is not None:
+                    io = syntax_error_result(found)
                     bad = io.stderr if isinstance(io.stderr, bytes) else b""
                     return (
                         None,
@@ -721,7 +714,7 @@ def unsaid(lines: list[str], said: bytes) -> list[str]:
 
     A mount-mode refusal names the mount, not the operand, so the line
     the node table wrote for a refused link is the very line
-    ``Mount.execute_cmd`` writes for the backend operands beside it on
+    ``Mount.run_command`` writes for the backend operands beside it on
     the same mount, and ``rm dlink file`` would say it twice. The tier
     writes it without a trailing newline, so the comparison is on the
     stripped text.

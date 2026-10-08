@@ -49,7 +49,7 @@ def synthesize_path_spec(
     operand the upstream classifier left as text. ``vfs_path``
     stays empty on purpose: the mount stamps the backend key on every
     positional path and path-shaped flag value at execute time
-    (``Mount.execute_cmd``), so a parse-time stamp is dead weight —
+    (``Mount.run_command``), so a parse-time stamp is dead weight —
     proven by running the full suite with this field set to a
     sentinel. The empty name, which only an attached value can spell
     (``--file=``), names nothing, however it resolved: its walk answers

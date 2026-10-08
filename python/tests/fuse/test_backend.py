@@ -102,14 +102,14 @@ def test_prepare_backend_runs_every_fskit_guard(monkeypatch, caplog):
     # size guard: warns but the mount proceeds
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
         assert (
-            prepare_backend("fskit", ops=ws.vfs, mountpoint="/Volumes/m")
+            prepare_backend("fskit", files=ws.vfs, mountpoint="/Volumes/m")
             is MountBackend.FSKIT
         )
     assert "will read as empty" in caplog.text
     # both satisfied
     ram = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     assert (
-        prepare_backend("fskit", ops=ram.vfs, mountpoint="/Volumes/m")
+        prepare_backend("fskit", files=ram.vfs, mountpoint="/Volumes/m")
         is MountBackend.FSKIT
     )
 

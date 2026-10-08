@@ -17,15 +17,12 @@ import { mountKey, mountPrefixOf, rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
-import {
-  DEFAULT_MAX_DU_ENTRIES,
-  type ComputeEntries,
-  type ComputeSize,
-  duGeneric,
-} from '../../generic/du.ts'
+import { type ComputeEntries, type ComputeSize, duGeneric } from '../../generic/du.ts'
+import { DEFAULT_MAX_DU_ENTRIES } from '../../../../vfs/constants.ts'
 import { type DuEntries } from '../../../../vfs/types.ts'
-import type { MountView } from '../../../../ops/types.ts'
-import { type Builder, type CommandIO, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import type { MountView } from '../../../../view/types.ts'
+import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandIO } from '../../../config.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 /**
@@ -187,7 +184,7 @@ export async function walkEntries<A extends Accessor>(
   return [entries, total]
 }
 
-const du: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const du: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   // Hides and path rules turn the native du off upstream (scopedIo),
   // so the walk is what reports a directory a rule refuses to open.
@@ -218,7 +215,7 @@ const du: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'du',
   fn: du,
 }

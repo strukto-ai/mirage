@@ -24,12 +24,12 @@ import {
 } from '../cache/index/config.ts'
 import { RedisIndexCacheStore } from '../cache/index/redis.ts'
 import { IndexView } from '../cache/index/view.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
 import { mountKey, mountPrefixOf } from '../utils/key_prefix.ts'
 import { globNameMatches, globPattern } from '../utils/glob_walk.ts'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
-import { op, OpsRegistry, type RegisteredOp } from '../ops/registry.ts'
+import { vfsCall } from '../vfs/call.ts'
+import { Effect } from '../vfs/types.ts'
 import { DEFAULT_READ_TTL, FileType, MountMode, ReadPolicy, VFSName, PathSpec } from '../types.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
@@ -55,41 +55,10 @@ describe('Workspace lifecycle', () => {
   it.each(['glob', 'midpath', 'metadata', 'touch', 'chmod', 'chown', 'chgrp'])(
     'prepares the first %s access to a dynamic mount',
     async (action) => {
-      class IndexedRAM extends RAMVFS {
-        constructor(readonly shared: IndexCacheStore) {
-          super()
-        }
-        override ops(): readonly RegisteredOp[] {
-          return super.ops().map((o): RegisteredOp =>
-            o.name === 'glob'
-              ? {
-                  ...o,
-                  fn: async (accessor, path, args, kwargs) => {
-                    const parent = path.directory.replace(/\/$/, '')
-                    const directory = parent === '' ? '/' : parent
-                    const listing = await this.shared.listDir(directory)
-                    if (listing.entries != null) {
-                      const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-                      return listing.entries
-                        .filter((key) =>
-                          globNameMatches(
-                            key.split('/').at(-1) ?? '',
-                            globPattern(path.pattern ?? '*'),
-                          ),
-                        )
-                        .map((key) => PathSpec.fromStrPath(key, mountKey(key, prefix)))
-                    }
-                    return o.fn(accessor, path, args, kwargs)
-                  },
-                }
-              : o,
-          )
-        }
-      }
       const ancestor = new RAMVFS()
       const ws = new Workspace({ '/': ancestor }, { shellParser: await getTestParser() })
       const shared = ws.mount('/').indexStore
-      const replacement = new IndexedRAM(shared)
+      const replacement = new RAMVFS()
       const bytes = new TextEncoder()
       replacement.loadState({
         type: 'ram',
@@ -106,6 +75,19 @@ describe('Workspace lifecycle', () => {
       ])
       await ws.cache.set('/data/file', bytes.encode('old'))
       ws.addMount('/data', replacement, MountMode.WRITE)
+      const mount = ws.mount('/data')
+      const derived = mount.glob.bind(mount)
+      mount.glob = async (path, index) => {
+        const parent = path.directory.replace(/\/$/, '')
+        const listing = await shared.listDir(parent === '' ? '/' : parent)
+        if (listing.entries == null) return derived(path, index)
+        const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+        return listing.entries
+          .filter((key) =>
+            globNameMatches(key.split('/').at(-1) ?? '', globPattern(path.pattern ?? '*')),
+          )
+          .map((key) => PathSpec.fromStrPath(key, mountKey(key, prefix)))
+      }
       try {
         if (action === 'metadata') {
           const expanded = await expandOperands(ws.namespace, [
@@ -560,7 +542,7 @@ describe('Workspace custom cache option', () => {
     evictPaths(paths: Iterable<string>): void {
       for (const key of paths) this.store.delete(key)
     }
-    exists(key: string | PathSpec): Promise<boolean> {
+    override exists(key: string | PathSpec): Promise<boolean> {
       const k = typeof key === 'string' ? key : key.mountPath
       return Promise.resolve(this.store.has(k))
     }
@@ -610,14 +592,14 @@ describe('Workspace.unmount', () => {
       constructor(readonly label: string) {
         super()
       }
-      @op('identity', { vfs: 'ram' })
+      @vfsCall({ effect: Effect.READ })
       identity(): Uint8Array {
         if (this.closes > 0) throw new Error('VFS closed')
         return new TextEncoder().encode(this.label)
       }
     }
     class SpecializedRAM extends LabeledRAM {
-      @op('unique', { vfs: 'ram' })
+      @vfsCall({ effect: Effect.READ })
       unique(): Uint8Array {
         return this.identity()
       }
@@ -764,19 +746,16 @@ describe('Workspace.unmount', () => {
     }
   })
 
-  it('closes each VFS separately and unregisters operations after the last of its kind', async () => {
-    const a = new MockVFS()
-    const b = new MockVFS()
+  it('closes each VFS separately as its last mount leaves', async () => {
     const content = new TextEncoder().encode('mock data\n')
-    const ops = new OpsRegistry()
-    ops.register({
-      name: 'read',
-      vfs: 'mock',
-      filetype: null,
-      write: false,
-      fn: () => content,
-    })
-    const ws = new Workspace({ '/a': a, '/b': b }, { ops })
+    class ReadingVFS extends MockVFS {
+      override read(): Promise<Uint8Array> {
+        return Promise.resolve(content)
+      }
+    }
+    const a = new ReadingVFS()
+    const b = new ReadingVFS()
+    const ws = new Workspace({ '/a': a, '/b': b })
     try {
       await ws.vfs.read('/a/file.txt')
       await ws.vfs.read('/b/file.txt')
@@ -786,7 +765,6 @@ describe('Workspace.unmount', () => {
       await expect(ws.vfs.read('/b/file.txt')).resolves.toEqual(content)
       await ws.unmount('/b')
       expect(b.closes).toBe(1)
-      expect(ops.find('read', 'mock')).toBeNull()
     } finally {
       await ws.close()
     }
@@ -870,10 +848,8 @@ describe('Workspace mount fallback', () => {
 describe('cd does not change cwd for nonexistent paths', () => {
   async function makeWs(): Promise<Workspace> {
     const parser = await getTestParser()
-    const ops = new OpsRegistry()
     const root = new RAMVFS()
-    ops.registerVfs(root)
-    return new Workspace({ '/': root }, { mode: MountMode.WRITE, ops, shellParser: parser })
+    return new Workspace({ '/': root }, { mode: MountMode.WRITE, shellParser: parser })
   }
 
   it('cd to nonexistent dir under a mount errors and keeps cwd', async () => {
@@ -887,14 +863,11 @@ describe('cd does not change cwd for nonexistent paths', () => {
 
   it('cd into a mount root succeeds', async () => {
     const parser = await getTestParser()
-    const ops = new OpsRegistry()
     const root = new RAMVFS()
     const data = new RAMVFS()
-    ops.registerVfs(root)
-    ops.registerVfs(data)
     const ws = new Workspace(
       { '/': root, '/data': data },
-      { mode: MountMode.WRITE, ops, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
     const result = await ws.shell('cd /data')
     expect(result.exitCode).toBe(0)
@@ -906,9 +879,7 @@ describe('cd does not change cwd for nonexistent paths', () => {
 describe('ls injects child mounts as virtual subdirectories', () => {
   async function makeWs(mounts: Record<string, RAMVFS>): Promise<Workspace> {
     const parser = await getTestParser()
-    const ops = new OpsRegistry()
-    for (const r of Object.values(mounts)) ops.registerVfs(r)
-    return new Workspace(mounts, { mode: MountMode.WRITE, ops, shellParser: parser })
+    return new Workspace(mounts, { mode: MountMode.WRITE, shellParser: parser })
   }
 
   it('ls / shows child mount /data as a subfolder', async () => {
@@ -1027,14 +998,11 @@ describe('rm/rmdir on a mount prefix is refused (Unix-like)', () => {
   // Use the Workspace.unmount() API explicitly to remove a mount.
   async function makeWs(): Promise<Workspace> {
     const parser = await getTestParser()
-    const ops = new OpsRegistry()
     const root = new RAMVFS()
     const data = new RAMVFS()
-    ops.registerVfs(root)
-    ops.registerVfs(data)
     return new Workspace(
       { '/': root, '/data': data },
-      { mode: MountMode.WRITE, ops, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
   }
 
@@ -1200,31 +1168,20 @@ it('unmount drains metadata globs and their index writes', async () => {
     resume = resolve
   })
   let closed = false
-  class GatedGlobRAM extends RAMVFS {
-    override ops(): readonly RegisteredOp[] {
-      return super.ops().map((o): RegisteredOp =>
-        o.name === 'glob'
-          ? {
-              ...o,
-              fn: async (_accessor, _path, _args, { index }) => {
-                enter()
-                await release
-                expect(closed).toBe(false)
-                if (index === undefined) throw new Error('missing index')
-                await index.setDir('/data', [
-                  ['late', new IndexEntry({ id: 'late', name: 'late', resourceType: 'file' })],
-                ])
-                return []
-              },
-            }
-          : o,
-      )
-    }
-  }
-  const vfs = new GatedGlobRAM()
+  const vfs = new RAMVFS()
   const ws = new Workspace({ '/data': vfs })
   await ws.resolve('/data')
   const index = ws.mount('/data').indexStore
+  ws.mount('/data').glob = async (_path, index) => {
+    enter()
+    await release
+    expect(closed).toBe(false)
+    if (index === undefined) throw new Error('missing index')
+    await index.setDir('/data', [
+      ['late', new IndexEntry({ id: 'late', name: 'late', resourceType: 'file' })],
+    ])
+    return []
+  }
   const closeVfs = vfs.close.bind(vfs)
   vi.spyOn(vfs, 'close').mockImplementation(async () => {
     closed = true
@@ -1269,32 +1226,24 @@ it('hands glob a lock-held view it can write through', async () => {
   const raw = ws.mount('/data').indexStore
   let seen: unknown = undefined
   let wrote: unknown = 'not called'
-  ws.mount('/data').registerFns([
-    {
-      name: 'glob',
-      vfs: 'ram',
-      filetype: null,
-      write: false,
-      fn: async (_accessor, _path, _args, kwargs) => {
-        seen = kwargs.index
-        if (seen instanceof IndexView) {
-          wrote = await Promise.race([
-            seen
-              .setDir('/data', [
-                ['row', new IndexEntry({ id: 'row', name: 'row', resourceType: 'file' })],
-              ])
-              .then(() => 'done'),
-            new Promise((resolve) => {
-              setTimeout(() => {
-                resolve('timeout')
-              }, 1000)
-            }),
+  ws.mount('/data').glob = async (_path, index) => {
+    seen = index
+    if (seen instanceof IndexView) {
+      wrote = await Promise.race([
+        seen
+          .setDir('/data', [
+            ['row', new IndexEntry({ id: 'row', name: 'row', resourceType: 'file' })],
           ])
-        }
-        return []
-      },
-    } satisfies RegisteredOp,
-  ])
+          .then(() => 'done'),
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve('timeout')
+          }, 1000)
+        }),
+      ])
+    }
+    return []
+  }
   try {
     await expandOperands(ws.namespace, [
       new PathSpec({

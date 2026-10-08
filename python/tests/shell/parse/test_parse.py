@@ -161,8 +161,8 @@ def test_for_loop():
 def test_while_loop():
     node = parse("while true; do echo loop; done").named_children[0]
     assert node.type == NT.WHILE_STATEMENT
-    cond, body = get_while_parts(node)
-    assert get_text(cond) == "true"
+    test, body = get_while_parts(node)
+    assert [get_text(t) for t in test] == ["true"]
 
 
 def test_until_loop():

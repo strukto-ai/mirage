@@ -85,7 +85,7 @@ async def test_if_runs_the_first_matching_branch_and_skips_the_rest():
             return result()
         return result(f"{n.text}-out".encode())
 
-    branches = [(node("c1"), [node("b1")]), (node("c2"), [node("b2")])]
+    branches = [([node("c1")], [node("b1")]), ([node("c2")], [node("b2")])]
     stdout, io, _ = await handle_if(
         execute, branches, None, EvaluationContext(session())
     )
@@ -103,7 +103,7 @@ async def test_if_runs_the_else_body_when_no_branch_matches():
 
     stdout, io, _ = await handle_if(
         execute,
-        [(node("c"), [node("b")])],
+        [([node("c")], [node("b")])],
         [node("e")],
         EvaluationContext(session()),
     )
@@ -117,7 +117,10 @@ async def test_if_without_an_else_body_succeeds_silently():
         return result(exit_code=1)
 
     stdout, io, _ = await handle_if(
-        execute, [(node("c"), [node("b")])], None, EvaluationContext(session())
+        execute,
+        [([node("c")], [node("b")])],
+        None,
+        EvaluationContext(session()),
     )
     assert io.exit_code == 0
     assert stdout is None
@@ -259,7 +262,7 @@ async def test_while_runs_the_body_while_the_condition_succeeds():
         return result(f"{state['i']};".encode())
 
     stdout, _, _ = await handle_while(
-        execute, node("cond"), [node("body")], EvaluationContext(session())
+        execute, [node("cond")], [node("body")], EvaluationContext(session())
     )
     assert await text_of(stdout) == "1;2;"
 
@@ -275,7 +278,7 @@ async def test_until_runs_the_body_while_the_condition_fails():
         return result(f"{state['i']};".encode())
 
     stdout, _, _ = await handle_until(
-        execute, node("cond"), [node("body")], EvaluationContext(session())
+        execute, [node("cond")], [node("body")], EvaluationContext(session())
     )
     assert await text_of(stdout) == "1;2;"
 
@@ -286,7 +289,7 @@ async def test_while_caps_runaway_loops_and_says_so_on_stderr():
         return result(exit_code=0) if n.text == "cond" else result()
 
     _, io, _ = await handle_while(
-        execute, node("cond"), [node("body")], EvaluationContext(session())
+        execute, [node("cond")], [node("body")], EvaluationContext(session())
     )
     assert b"while loop terminated after 10000" in await materialize(io.stderr)
 
@@ -452,7 +455,7 @@ async def test_if_body_ampersand_launches_a_job_and_answers_the_launch_status():
     gate = asyncio.Event()
     ran: list[str] = []
     sess = session()
-    branches = [(node("c"), [bg("slow")])]
+    branches = [([node("c")], [bg("slow")])]
     _, io, _ = await asyncio.wait_for(
         handle_if(
             _parked_executor(gate, ran),
@@ -539,7 +542,7 @@ async def test_body_ampersand_without_a_job_table_fails_loud():
     with pytest.raises(RuntimeError, match="job table"):
         await handle_if(
             execute,
-            [(node("c"), [bg("x")])],
+            [([node("c")], [bg("x")])],
             None,
             EvaluationContext(session()),
         )

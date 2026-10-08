@@ -47,7 +47,6 @@ async function runWget(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
   })
   if (result === null) return { out: '', err: '', exitCode: -1, writes: {} }

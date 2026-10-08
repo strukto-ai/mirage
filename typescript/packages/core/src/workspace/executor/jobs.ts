@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { childContext, runWithEvaluation, type EvaluationContext } from '../evaluation.ts'
+import { childContext, type EvaluationContext } from '../evaluation.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 
 import { ExecutionScope } from '../execution.ts'
@@ -24,17 +24,18 @@ import { CallStack } from '../../shell/call_stack.ts'
 import { FD_BOTH, FD_CLOSE, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
-import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
+import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
-import { isProgramInvocation } from '../../context/session_context.ts'
+import { isProgramInvocation, runWithEvaluation } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { abortable, mergeSignals } from '../abort.ts'
-import type { SessionView } from '../../ops/types.ts'
+import type { SessionView } from '../../view/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
-import type { ProcessInfo, ProcessState, ProcessView } from '../../process/types.ts'
+import type { ProcessInfo, ProcessState } from '../../process/types.ts'
+import type { ProcessView } from '../../process/view.ts'
 import { UNKNOWN_NAME } from '../../commands/builtin/utils/identity.ts'
 import { gnuStrftime } from '../../commands/builtin/utils/strftime.ts'
 import { LOCAL_ZONE, type Zone, zoneFromEnv } from '../../utils/timezone.ts'
@@ -184,7 +185,7 @@ export async function handleBackground(
   bgSession.jobOutput = new JobOutput(output)
   // A job is a child shell outside every loop: `{ break; } &` in a loop
   // refuses, as bash's does.
-  const bgCallStack = (callStack ?? new CallStack()).fork(false)
+  const bgCallStack = (callStack ?? new CallStack()).fork(false, simpleCommand(left) ? null : true)
   const jobHanded =
     handed !== null && decisions !== null
       ? decisions.split(session.sessionId, handed, occurrenceOf(left, handed))
@@ -226,13 +227,20 @@ export async function handleBackground(
           io = new IOResult({ exitCode: 124, stderr: msg })
           execNode = new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 })
         } else if (err instanceof ExitSignal) {
-          // A background job is its own shell: exit ends the job only.
+          // A background job is its own shell: exit ends the job only, a
+          // simple command the top shell forked with the status that shell
+          // would exit with (`: ${U?} &` is 127, `{ : ${U?}; } &` and
+          // `( : ${U?} & )` are 1).
           stdout = err.stdout ?? new Uint8Array()
-          io = new IOResult({ exitCode: err.containedCode, stderr: err.stderr })
+          const status =
+            simpleCommand(left) && !err.sourced && callStack?.subshell !== true
+              ? err.exitCode
+              : err.containedCode
+          io = new IOResult({ exitCode: status, stderr: err.stderr })
           execNode = new ExecutionNode({
             command: cmdStrInner,
             stderr: err.stderr,
-            exitCode: err.containedCode,
+            exitCode: status,
           })
         } else if (err instanceof ReturnSignal) {
           stdout = err.stdout

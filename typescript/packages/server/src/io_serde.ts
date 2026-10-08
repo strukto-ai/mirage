@@ -26,7 +26,7 @@ import type {
   VfsExplanation,
 } from '@struktoai/mirage-core/policy/types'
 import { FileStat, type JsonValue, type Refusal } from '@struktoai/mirage-core/types'
-import type { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import type { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { BYTES, schemaOf, type Args, type VfsCall } from './vfs_calls.ts'
 

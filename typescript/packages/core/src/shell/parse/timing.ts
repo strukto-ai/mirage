@@ -196,6 +196,9 @@ export class PrefixNode implements WrappedNode {
   get heredoc() {
     return this.node.heredoc
   }
+  get inlined(): string | undefined {
+    return this.node.inlined
+  }
   get warnings(): string {
     return this.node.warnings
   }

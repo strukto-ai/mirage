@@ -105,7 +105,7 @@
         "ram",
         "opfs"
       ],
-      "command": "then() { echo x; }; type -a then",
+      "command": "function then { echo x; }; type -a then",
       "expect": {
         "exit": 0,
         "stdout": "then is a shell keyword\nthen is a function\nfunction then () \n{ \n    echo x\n}\n",

@@ -42,7 +42,9 @@ WILDCARD = "*"
 # them on the directory that holds its scope or on any ancestor: moving
 # or removing ``/x`` takes ``/x/locked/*`` along. ``rename`` is the
 # dispatcher's; ``rmdir`` removes the scope's own directory; ``rm_r`` is
-# the command tier's recursive remove.
+# the command tier's recursive remove. The VFS ops here are pinned to
+# what the functions declare by tests/policy/test_constants.py: policy
+# sits below vfs, so it cannot read the declarations itself.
 SUBTREE_OPS = frozenset({"rename", "rmdir", "rm_r"})
 
 # Commands whose operand is a whole subtree they move or remove, so a
@@ -59,4 +61,6 @@ SUBTREE_COMMANDS = frozenset({"rm", "rmdir", "mv"})
 # and the read of it is what fails, as GNU reports an unreadable file.
 # The command tier's guard leaves its ``stat`` slot unwrapped for the
 # same reason; a hidden path is the hide arm's, and stays ENOENT.
+# ``exists`` is the command tier's probe; ``stat`` is pinned like
+# SUBTREE_OPS's VFS ops.
 METADATA_OPS = frozenset({"stat", "exists"})

@@ -16,7 +16,7 @@ import shlex
 
 from mirage.shell.bytes import byte_char, decode_text, encode_text
 
-# The ANSI-C escape table $'...' shares with bash's strtrans.c. \e/\E
+# The ANSI-C escape table bash decodes $'...' with. \e/\E
 # are here although printf lacks them; \c takes an argument here while
 # printf's \c means stop, which is why the printf reader is not reused.
 _SIMPLE: dict[str, str] = {
@@ -53,7 +53,7 @@ def _scan_hex(content: str, start: int, limit: int) -> tuple[str, int]:
 
 
 def _u32_utf8(value: int) -> bytes:
-    """bash's u32toutf8 (lib/sh/unicode.c) for a value past ASCII.
+    """bash's UTF-8 encoding of an escape's value past ASCII.
 
     UTF-8-shaped bytes for any 32-bit value: surrogate halves encode
     like ordinary three-byte characters, values past Unicode take the
@@ -105,7 +105,7 @@ def _u32_utf8(value: int) -> bytes:
 def code_point_text(value: int) -> str:
     """The text a ``\\u`` or ``\\U`` escape writes for its value.
 
-    bash writes every value through u32toutf8 under a UTF-8 locale: a
+    bash UTF-8-encodes every value under a UTF-8 locale: a
     valid scalar is its character, while surrogate halves and values
     past Unicode become raw UTF-8-shaped bytes, and 0x80000000 and past
     produce nothing. Pinned: ``\\uD800`` is ed a0 80, ``\\U00110000`` is
@@ -136,9 +136,9 @@ def _as_text(out: list[str]) -> str:
 def decode_ansi_c(content: str) -> str:
     """Decode the body of a $'...' word to the text it names.
 
-    Follows bash 5.2 (lib/sh/strtrans.c, under a UTF-8 locale): simple
+    Follows bash 5.2 (under a UTF-8 locale): simple
     escapes, 1-3 octal digits with the value masked to a byte, \\xHH
-    bytes, \\u and \\U values written through u32toutf8 (surrogates and
+    bytes, \\u and \\U values UTF-8-encoded (surrogates and
     values past Unicode come out as raw UTF-8-shaped bytes), \\cX
     control characters (X of ``?`` is DEL, an escaped backslash counts
     as one operand), and any other or incomplete escape kept verbatim,

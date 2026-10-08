@@ -14,12 +14,12 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import array_extent, array_unset
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import FUNCNAME
 from mirage.shell.errors import ArithError, ExitSignal
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.shared import refusal, require_view
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
@@ -183,9 +183,20 @@ async def handle_unset(
         if mode == "n":
             # `unset -n` drops the reference itself rather than what it
             # points at; on a name that is not a reference bash unsets
-            # the variable, and both are one ungated-by-target unset.
+            # the variable, and both are one ungated-by-target unset. A
+            # frozen reference refuses, writable target or not.
+            view = require_view(state)
+            if view.is_readonly(name, False):
+                err = encode_text(
+                    f"bash: unset: {name}: cannot unset: readonly variable\n"
+                )
+                return (
+                    None,
+                    IOResult(exit_code=1, stderr=err),
+                    ExecutionNode(command="unset", exit_code=1, stderr=err),
+                )
             try:
-                await require_view(state).unset(name, follow_ref=False)
+                await view.unset(name, follow_ref=False)
             except PolicyDenied as exc:
                 return refusal("unset", exc)
             continue
@@ -199,8 +210,7 @@ async def handle_unset(
                     IOResult(exit_code=1, stderr=err),
                     ExecutionNode(command="unset", exit_code=1, stderr=err),
                 )
-            session.functions.pop(name, None)
-            session._function_sites.pop(name, None)
+            session.remove_function(name)
             continue
         target = TARGET_RE.match(name)
         subscript = target.group(2) if target is not None else None
@@ -263,8 +273,7 @@ async def handle_unset(
                     IOResult(exit_code=1, stderr=err),
                     ExecutionNode(command="unset", exit_code=1, stderr=err),
                 )
-            session.functions.pop(name, None)
-            session._function_sites.pop(name, None)
+            session.remove_function(name)
     return None, IOResult(), ExecutionNode(command="unset", exit_code=0)
 
 

@@ -318,7 +318,7 @@ async def test_a_snapshot_round_trip_preserves_both_token_states():
         pass
 
     ws = _WS()
-    ws._cache = dst
+    ws.cache = dst
     _restore_cache(ws, {"cache": {"entries": revived}})
 
     assert dst._entries["/none"].fingerprint is None
@@ -344,7 +344,7 @@ async def test_a_restored_entry_folds_a_tokenless_spelling_like_a_write(
         pass
 
     ws = _WS()
-    ws._cache = cache
+    ws.cache = cache
     _restore_cache(
         ws,
         {

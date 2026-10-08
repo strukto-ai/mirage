@@ -189,7 +189,7 @@ async def test_a_root_stat_through_a_throwaway_index_never_walks():
         ):
             await _out(one, "ls /m")
             hub.log.clear()
-            found = await two.mount("/m").execute_op(
+            found = await two.mount("/m").call(
                 "stat", "/m", index=ListingCheckStore()
             )
             assert found.fingerprint == hub.head(REPO)

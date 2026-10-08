@@ -16,9 +16,9 @@ import { PathSpec } from '../../../../types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { mktempGeneric } from '../../generic/mktemp.ts'
 import { pathExists } from '../../utils/copy.ts'
-import { requireOp, type Builder, type BuilderFn } from '../adapter.ts'
+import { requireOp, type GenericCommand, type GenericCommandFn } from '../adapter.ts'
 
-const mktemp: BuilderFn = (ops, accessor, _paths, texts, opts) => {
+const mktemp: GenericCommandFn = (ops, accessor, _paths, texts, opts) => {
   // The name a pathless mktemp creates is under $TMPDIR or /tmp, which the
   // working directory's mount rarely owns, so the create goes through the
   // dispatcher to whichever mount does. Only a generic run outside a
@@ -46,7 +46,7 @@ const mktemp: BuilderFn = (ops, accessor, _paths, texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'mktemp',
   write: true,
   fn: mktemp,

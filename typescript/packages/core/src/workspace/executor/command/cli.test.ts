@@ -286,6 +286,16 @@ describe('handleCli', () => {
     expect(inv?.stdin).toBe(stdin)
     expect(inv?.flags).not.toHaveProperty('stdin')
   })
+
+  it('carries the session cwd on the invocation record', async () => {
+    calls.length = 0
+    await handleCli(
+      makeInstall(),
+      ['prog', 'message', 'send', '-t', 'x'],
+      new SessionState({ sessionId: 't', cwd: '/data' }),
+    )
+    expect(calls.pop()?.cwd.virtual).toBe('/data')
+  })
 })
 
 class FakePyRuntime extends LanguageRuntime {

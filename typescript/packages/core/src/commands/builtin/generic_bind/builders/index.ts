@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Builder } from '../adapter.ts'
+import type { GenericCommand } from '../adapter.ts'
 import * as awk from './awk.ts'
 import * as base64 from './base64.ts'
 import * as basename from './basename.ts'
@@ -85,7 +85,7 @@ import * as zcat from './zcat.ts'
 import * as zgrep from './zgrep.ts'
 import * as zipCmd from './zip_cmd.ts'
 
-export const BUILDERS: readonly Builder[] = [
+export const BUILDERS: readonly GenericCommand[] = [
   awk.BUILDER,
   base64.BUILDER,
   basename.BUILDER,

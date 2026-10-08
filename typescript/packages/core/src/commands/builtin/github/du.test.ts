@@ -19,7 +19,8 @@ import type { TreeEntry } from '../../../core/github/tree_entry.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { materialize } from '../../../io/types.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { IO } from './io.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { GitHubVFS } from '../../../vfs/github/github.ts'
 import { GITHUB_DU } from './du.ts'
 
 vi.mock('../../../core/github/tree.ts', () => ({
@@ -45,11 +46,24 @@ async function runDu(
 ): Promise<[string, number, string]> {
   const cmd = GITHUB_DU[0]
   if (cmd === undefined) throw new Error('du not registered')
+  const table = {
+    ...ioFor(GitHubVFS, accessor),
+    stat: (_a: unknown, p: PathSpec) => {
+      const entry = TREE[p.vfsPath]
+      return Promise.resolve(
+        new FileStat({
+          name: p.virtual,
+          type: entry?.type === 'blob' ? FileType.FILE : FileType.DIRECTORY,
+          size: entry?.size ?? null,
+        }),
+      )
+    },
+  }
   const result = await cmd.fn(accessor, [PathSpec.fromStrPath(operand)], [], {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
+    io: table,
   })
   if (result === null) throw new Error('du returned nothing')
   const [out, io] = result
@@ -68,16 +82,6 @@ it.each([
   ['/docs', { s: true }, '150\t/docs\n'],
   ['/readme.txt', { a: true }, '7\t/readme.txt\n'],
 ])('du %s %o sums the live tree', async (operand, flags, expected) => {
-  vi.spyOn(IO, 'stat').mockImplementation((_a, p) => {
-    const entry = TREE[p.vfsPath]
-    return Promise.resolve(
-      new FileStat({
-        name: p.virtual,
-        type: entry?.type === 'blob' ? FileType.FILE : FileType.DIRECTORY,
-        size: entry?.size ?? null,
-      }),
-    )
-  })
   const accessor = new GitHubAccessor({
     transport: {} as GitHubTransport,
     owner: 'o',

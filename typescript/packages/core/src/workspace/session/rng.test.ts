@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
 import { RANDOM, RANDOM_MAX, RANDOM_UNSET } from '../../shell/constants.ts'
 import { makeVar, type ShellVar } from '../../shell/variable.ts'
@@ -29,6 +29,7 @@ import {
   sessionView,
   shadowLocal,
 } from './state.ts'
+import { initialSeed } from './rng.ts'
 
 function stored(s: SessionState): string | undefined {
   const v = s.vars[RANDOM]?.value
@@ -36,6 +37,15 @@ function stored(s: SessionState): string | undefined {
 }
 
 describe('RANDOM generator', () => {
+  it('seeds generators started in one tick apart', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    try {
+      expect(initialSeed('s')).not.toBe(initialSeed('s'))
+    } finally {
+      now.mockRestore()
+    }
+  })
+
   it('evaluates the seed word as arithmetic', () => {
     const s = new SessionState({ sessionId: 's' })
     s.vars.x = makeVar('42')

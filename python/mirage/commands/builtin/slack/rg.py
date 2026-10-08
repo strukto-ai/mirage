@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.rg import (
     refuse_missing_pattern,
     rg_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.adapter import bound_op, mount_io
 from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import pushdown_operand
@@ -28,7 +28,6 @@ from mirage.commands.builtin.slack.grep import (
     RG_SEARCH_HONORED,
     SEARCH_MAX_RESULTS,
 )
-from mirage.commands.builtin.slack.io import IO
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
@@ -64,7 +63,7 @@ async def rg(
 
     # Same gate as slack grep, from the same table: only a lone concrete
     # operand with no reshaping flag may be answered by the search API.
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, scoped = scan_io(mount_io(opts), opts.ns, opts.mount_prefix)
     operand = (
         None
         if scoped

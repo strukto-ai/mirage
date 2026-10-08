@@ -15,7 +15,6 @@
 import { EvaluationContext } from '../evaluation.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
 import { NodeType as NT } from '../../shell/types.ts'
@@ -51,8 +50,6 @@ function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
 
 function plainRegistry(): MountRegistry {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  ops.registerVfs(ram)
   return new MountRegistry({ '/ram': ram }, MountMode.WRITE)
 }
 
@@ -141,9 +138,9 @@ describe('executeNode dispatcher', () => {
     }
     const session = new SessionState({ sessionId: 't' })
     await executeNode(buildDeps(reg), node, new EvaluationContext(session))
-    // Only the seeded $PWD, $PATH and $IFS, so the assignment really did
-    // nothing.
-    expect(Object.keys(session.env)).toEqual(['PWD', 'PATH', 'IFS'])
+    // Only the seeded $PWD, $PATH, $IFS, $OPTIND and $OPTERR, so the
+    // assignment really did nothing.
+    expect(Object.keys(session.env)).toEqual(['PWD', 'PATH', 'IFS', 'OPTIND', 'OPTERR'])
   })
 
   it('NEGATED_COMMAND flips a zero exit into one', async () => {

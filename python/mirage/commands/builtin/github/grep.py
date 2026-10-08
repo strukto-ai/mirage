@@ -17,10 +17,10 @@ from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep_generic, labelled
 from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
+    mount_io,
     with_command_guards,
     with_policy_guard,
 )
-from mirage.commands.builtin.github.io import IO
 from mirage.commands.builtin.github.pushdown import narrow_scope, scope_refusal
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import grep_needs_every_file
@@ -32,8 +32,8 @@ from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as github_readdir
 from mirage.core.github.stat import stat as github_stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
+from mirage.view.namespace_view import paths_scoped
 
 
 @command("grep", vfs="github", spec=SPECS["grep"], aggregate=prefix_aggregate)
@@ -76,7 +76,11 @@ async def grep(
     if used_search:
         opts = labelled(opts)
 
-    io = with_command_guards(with_policy_guard(IO)) if scoped else None
+    io = (
+        with_command_guards(with_policy_guard(mount_io(opts)))
+        if scoped
+        else None
+    )
     return await grep_generic(
         resolved,
         texts,

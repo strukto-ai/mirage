@@ -1,18 +1,17 @@
 import { BaseVFS } from '../base.ts'
 import { WandbAccessor } from '../../accessor/wandb.ts'
 
-import { WANDB_COMMANDS } from '../../commands/builtin/wandb/index.ts'
-import { IO } from '../../commands/builtin/wandb/io.ts'
-import { DEFAULT_MAX_DU_ENTRIES } from '../../commands/builtin/generic/du.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 import { redactWandbConfig } from '../../core/wandb/config.ts'
 import type { WandbConfig, WandbConfigRedacted } from '../../core/wandb/config.ts'
 
-import { WANDB_OPS } from '../../ops/wandb/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
-
 import { PROMPT } from '../../vfs/wandb/prompt.ts'
 import { VFSName } from '../../types.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { readdir } from '../../core/wandb/readdir.ts'
+import { read, readStream } from '../../core/wandb/read.ts'
+import { stat } from '../../core/wandb/stat.ts'
 
 export interface WandbVFSState {
   type: string
@@ -22,8 +21,7 @@ export interface WandbVFSState {
 export class WandbVFS extends BaseVFS {
   override readonly name: string = VFSName.WANDB
   override readonly prompt: string = PROMPT
-  override readonly maxDuEntries: number | null =
-    IO.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : IO.maxDuEntries
+  override readonly maxDuEntries: number | null = 1000
   readonly config: WandbConfig
   override readonly accessor: WandbAccessor
 
@@ -33,12 +31,26 @@ export class WandbVFS extends BaseVFS {
     this.accessor = new WandbAccessor(config)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return WANDB_COMMANDS
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return readdir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return WANDB_OPS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await read(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return stat(this.accessor, path, index)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return readStream(this.accessor, path, index)
   }
 
   override getState(): Promise<WandbVFSState> {

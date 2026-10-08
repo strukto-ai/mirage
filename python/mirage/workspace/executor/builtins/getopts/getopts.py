@@ -14,10 +14,10 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.shared import (
     is_valid_name,
     require_view,

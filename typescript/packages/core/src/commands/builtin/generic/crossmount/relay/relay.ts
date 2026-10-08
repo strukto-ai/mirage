@@ -28,7 +28,7 @@ import { DISPATCH_BUILDERS, RELAY_COMMANDS } from '../constants.ts'
 import { runDispatch } from '../../../generic_bind/dispatch.ts'
 import type { CrossResult, DispatchFn, RunSingle } from '../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
-import type { NamespaceView, SessionView } from '../../../../../ops/types.ts'
+import type { NamespaceView, SessionView } from '../../../../../view/types.ts'
 
 // Run a command whose work must see every operand at once. Pure wiring:
 // every operand is read or written through dispatch primitives on its owning

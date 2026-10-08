@@ -14,8 +14,7 @@
 
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import { countRows } from '../../../core/postgres/client.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
 import { readStream } from '../../../core/postgres/read.ts'
 import { entityExists } from '../../../core/postgres/readdir.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
@@ -31,8 +30,6 @@ import {
 } from '../generic/wc.ts'
 
 const ENC = new TextEncoder()
-
-const resolveGlob = resolveGlobOf(IO)
 
 function rowsScope(p: PathSpec): { schema: string; entity: string } | null {
   const scope = detectScope(p)
@@ -63,7 +60,9 @@ async function wc(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
   }
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+    paths.length > 0
+      ? await resolveGlobOf(mountIo(opts))(accessor, paths, opts.index ?? undefined)
+      : []
   // Line counts on tables/views come from a server-side COUNT(*) instead of
   // reading every row. -l only (default prints words and bytes too, which
   // needs the content).

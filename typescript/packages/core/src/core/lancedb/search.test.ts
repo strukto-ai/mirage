@@ -60,6 +60,6 @@ it.each([
   const cmd = LANCEDB_COMMANDS.find((c) => c.name === 'search')
   if (cmd === undefined) throw new Error('search not registered')
   const accessor = new LanceDBAccessor({} as LanceDriver, resolveLanceDBConfig({ uri: '/tmp/db' }))
-  const opts = { stdin: null, flags, filetypeFns: null, cwd: '/' }
+  const opts = { stdin: null, flags, cwd: '/' }
   await expect(cmd.fn(accessor, [], texts, opts)).rejects.toMatchObject({ exitCode: 2, message })
 })

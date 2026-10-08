@@ -16,9 +16,9 @@ import asyncio
 import dataclasses
 import hashlib
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TypeVar
+from contextvars import ContextVar, Token
+from typing import Any, TypeVar
 
-from mirage.context import get_op_call, reset_op_call, set_op_call
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
     Abandoned,
@@ -982,3 +982,39 @@ class Decisions:
     async def _flush(self) -> None:
         if self._sessions is not None:
             await self._sessions.flush()
+
+
+_op_call: ContextVar[tuple[Decisions, HandOff] | None] = ContextVar(
+    "mirage_op_call",
+    default=None,
+)
+
+
+def set_op_call(owner: Decisions, handed: HandOff) -> Token[Any]:
+    """Bind one call made outside a line (a file tool's), the unit an
+    op-level answer covers: a grant one of its ops is answered by is
+    claimed on ``handed`` for the call's other ops on that path.
+
+    Args:
+        owner (Decisions): the ledger the call runs under, the only one
+            that claims on ``handed`` and spends it.
+        handed (HandOff): the call's hand-off, spent when it ends.
+    """
+    return _op_call.set((owner, handed))
+
+
+def reset_op_call(token: Token[Any]) -> None:
+    """Restore the previous call binding."""
+    _op_call.reset(token)
+
+
+def get_op_call(owner: Decisions) -> HandOff | None:
+    """The call made outside a line running in this context under
+    ``owner``'s ledger, None for a bare op or for a call another ledger
+    runs (a host callback reaching a second workspace mid-call).
+
+    Args:
+        owner (Decisions): the ledger asking.
+    """
+    call = _op_call.get()
+    return call[1] if call is not None and call[0] is owner else None

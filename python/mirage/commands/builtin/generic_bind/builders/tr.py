@@ -15,12 +15,11 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tr import tr_generic as generic_tr
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -42,4 +41,4 @@ async def tr(
     )
 
 
-BUILDER = Builder("tr", tr, read=True)
+BUILDER = GenericCommand("tr", tr, read=True)

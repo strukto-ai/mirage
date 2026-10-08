@@ -17,10 +17,10 @@ from mirage.errors.types import BadDescriptorError
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import AsyncLineIterator, line_buffer
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.errors import ArithError
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.read.constants import (
     READ_USAGE,

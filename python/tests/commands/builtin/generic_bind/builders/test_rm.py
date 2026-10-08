@@ -15,9 +15,8 @@
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.rm import rm
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, PathSpec
 

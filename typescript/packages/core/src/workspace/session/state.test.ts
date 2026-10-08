@@ -18,7 +18,7 @@ import { ArithError } from '../../shell/errors.ts'
 import { TempEnv, VarAttr, type ShellVar } from '../../shell/variable.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { describe, expect, it } from 'vitest'
-import type { SessionView } from '../../ops/types.ts'
+import type { SessionView } from '../../view/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { Policies } from '../../policy/policies.ts'
 import type { Action, SessionContext } from '../../policy/types.ts'
@@ -280,7 +280,7 @@ describe('hidden vars in the session door', () => {
     expect('SLACK_TOKEN' in env).toBe(false)
     expect('AWS_SECRET_KEY' in env).toBe(false)
     expect(env.PUBLIC).toBe('1')
-    expect(Object.keys(env).sort()).toEqual(['IFS', 'PATH', 'PUBLIC', 'PWD'])
+    expect(Object.keys(env).sort()).toEqual(['IFS', 'OPTERR', 'OPTIND', 'PATH', 'PUBLIC', 'PWD'])
   })
 })
 

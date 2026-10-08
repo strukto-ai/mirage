@@ -17,8 +17,6 @@ import posixpath
 
 from mirage.context import session_visibility
 from mirage.errors.constants import WALK_ERRORS
-from mirage.ops.config import NamespaceLinks
-from mirage.ops.namespace_view import child_mount_names, namespace_names
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.errors import DiscardSignal
@@ -33,6 +31,8 @@ from mirage.utils.glob_walk import (
 )
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError
+from mirage.view.namespace_view import child_mount_names, namespace_names
+from mirage.view.types import NamespaceLinks
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session import SessionState
@@ -534,7 +534,7 @@ async def _is_directory(
     if real.rstrip("/") == owner.prefix.rstrip("/"):
         return True
     try:
-        row = await owner.execute_op("stat", real)
+        row = await owner.call("stat", real)
     except WALK_ERRORS:
         return False
     return isinstance(row, FileStat) and row.type == FileType.DIRECTORY

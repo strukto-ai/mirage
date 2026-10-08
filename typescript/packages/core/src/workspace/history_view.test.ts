@@ -18,7 +18,6 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Channel } from '../shell/console/index.ts'
 import { JobStatus } from '../shell/job_table/index.ts'
@@ -45,9 +44,7 @@ afterAll(() => {
 
 function makeWs(): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  ops.registerVfs(ram)
-  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 function out(r: ExecuteResult): string {
@@ -368,7 +365,7 @@ describe('history recording boundaries (GNU line-reader semantics)', () => {
   })
 
   // bash 5.2 adds a line to history only when it is non-empty
-  // (`shell_input_line[0]`): a blank line is never recorded, while a
+  // (anything before its newline): a blank line is never recorded, while a
   // whitespace-only or comment-only line is. Pinned in debian:stable-slim
   // with `printf 'echo one\n\n   \n# comment\n' | bash -i; history -w`.
   it('a blank line is not recorded but whitespace and comments are', async () => {
@@ -423,7 +420,6 @@ describe('history snapshot rewind', () => {
     await ws.snapshot(path)
     const dst = await Workspace.load(path, {
       mode: MountMode.WRITE,
-      ops: new OpsRegistry(),
       shellParser: parser,
     })
     const mine = out(await dst.shell('history'))

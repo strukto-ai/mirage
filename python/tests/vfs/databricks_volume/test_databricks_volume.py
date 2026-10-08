@@ -22,6 +22,7 @@ from pydantic import ValidationError
 
 from mirage import MountMode, Workspace
 from mirage.cache.index import IndexEntry, LookupStatus
+from mirage.commands.builtin.backends import commands_for
 from mirage.core.databricks_volume.exists import exists
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read
@@ -33,6 +34,7 @@ from mirage.vfs.databricks_volume import (
     DatabricksVolumeVFS,
 )
 from tests.fixtures.driver_ops import ops
+from tests.fixtures.vfs_io import served
 
 
 class NotFoundError(Exception):
@@ -289,7 +291,7 @@ def test_vfs_state_redacts_token():
 
 def test_vfs_registers_ops():
     vfs = make_vfs(FakeFiles())
-    op_names = {op.name for op in vfs.ops()}
+    op_names = served(vfs)
     assert {"read", "readdir", "stat", "write", "create", "unlink"} <= op_names
     assert vfs.name == "databricks_volume"
     assert vfs.caches_reads is True
@@ -297,7 +299,7 @@ def test_vfs_registers_ops():
 
 def test_vfs_registers_commands():
     vfs = make_vfs(FakeFiles())
-    command_names = {command.name for command in vfs.commands()}
+    command_names = {command.name for command in commands_for(vfs)}
     assert {
         "cat",
         "find",

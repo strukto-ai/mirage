@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { DiscordAccessor } from '../../../accessor/discord.ts'
 import { describe, expect, it } from 'vitest'
+import { ioFor } from '../../../test-utils.ts'
+import { DiscordVFSBase } from '../../../vfs/discord/discord.ts'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -36,7 +39,7 @@ async function runGrep(
   const result = await cmd.fn(vfs.accessor, paths, texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
+    io: commandIo(vfs),
     cwd: '/',
     ...(options.index !== undefined ? { index: options.index } : {}),
   })
@@ -105,8 +108,9 @@ describe('discord grep on a time-scoped mount', () => {
     const transport = new FakeDiscordTransport()
     const cmd = DISCORD_GREP[0]
     if (cmd === undefined) throw new Error('grep not registered')
+    const accessor = new DiscordAccessor(transport, { endTime: '2016-05-01T00:00:00Z' })
     await cmd.fn(
-      new DiscordAccessor(transport, { endTime: '2016-05-01T00:00:00Z' }),
+      accessor,
       [
         new PathSpec({
           virtual: '/mnt/discord/My Server__G1/channels/general__C1',
@@ -116,7 +120,13 @@ describe('discord grep on a time-scoped mount', () => {
         }),
       ],
       ['hello'],
-      { stdin: null, flags: { w: true, r: true }, filetypeFns: null, cwd: '/', index: idx },
+      {
+        stdin: null,
+        flags: { w: true, r: true },
+        io: ioFor(DiscordVFSBase, accessor),
+        cwd: '/',
+        index: idx,
+      },
     )
     expect(transport.calls.map((c) => c.endpoint)).not.toContain('/guilds/G1/messages/search')
   })

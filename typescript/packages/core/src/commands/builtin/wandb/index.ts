@@ -1,3 +1,2 @@
-import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
-export const WANDB_COMMANDS = makeGenericCommands('wandb', IO)
+import { genericCommands } from '../generic_bind/index.ts'
+export const WANDB_COMMANDS = genericCommands('wandb')

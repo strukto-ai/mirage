@@ -12,35 +12,46 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
+
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.core.bin.refuse import refuse
+from mirage.commands.builtin.backends import commands_for
+from mirage.types import PathSpec
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.ram import RAMVFS
+from tests.fixtures.vfs_io import DOOR_OPS, served
 
 
 def test_view_registers_reads_and_refuses_every_write_op():
     vfs = BinViewVFS(lambda: ["ls"], lambda n: "ls" if n == "ls" else None)
-    names = {cmd.name for cmd in vfs.commands()}
+    names = {cmd.name for cmd in commands_for(vfs)}
     # Every generic command registers, the writers included: `gzip -c`
     # reads the view like any reader, and a line that writes is refused
     # at the op the view does not have.
     assert {"cat", "ls", "stat", "gzip", "rm", "cp"} <= names
-    ops = {op.name: op for op in vfs.ops()}
-    assert {"read", "readdir", "stat"} <= set(ops)
-    for name in (
-        "write",
-        "append",
-        "create",
-        "mkdir",
-        "unlink",
-        "rmdir",
-        "rename",
-        "truncate",
-        "setattr",
-    ):
-        assert ops[name].write and ops[name].fn is refuse
+    assert served(vfs) == set(DOOR_OPS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name,args",
+    [
+        ("write", (b"x",)),
+        ("append", (b"x",)),
+        ("create", ()),
+        ("mkdir", ()),
+        ("unlink", ()),
+        ("rmdir", ()),
+        ("truncate", (0,)),
+    ],
+)
+async def test_every_write_answers_read_only(name, args):
+    vfs = BinViewVFS(lambda: ["ls"], lambda n: "ls" if n == "ls" else None)
+    with pytest.raises(OSError) as refused:
+        await getattr(vfs, name)(PathSpec.from_str_path("/ls"), *args)
+    assert refused.value.errno == errno.EROFS
 
 
 @pytest.mark.asyncio

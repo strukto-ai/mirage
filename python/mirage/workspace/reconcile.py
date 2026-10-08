@@ -23,12 +23,20 @@ from mirage.errors.fs import enoent
 from mirage.errors.types import OperationNotSupportedError
 from mirage.types import FileStat, ListingVersion, PathSpec, ReadPolicy
 from mirage.utils.path import ancestors
+from mirage.vfs.base import BaseVFS
+from mirage.vfs.call import call_names, declared_calls
+from mirage.vfs.types import Effect, Target
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
 
 logger = logging.getLogger(__name__)
 
-_REVALIDATE_OPS = frozenset({"read", "read_bytes", "stat"})
+_CALLS = declared_calls(BaseVFS)
+
+# What a FRESH read policy revalidates: a file's content and a stat.
+_REVALIDATE_OPS = call_names(
+    _CALLS, effects={Effect.READ}, targets={Target.FILE}
+) | call_names(_CALLS, effects={Effect.METADATA})
 
 
 class Verdict(Enum):
@@ -50,7 +58,7 @@ class Reconciler:
 
     Three read paths call in: the cached-read gate (``may_serve_cached``),
     which the dispatcher and the file cache's own door both run, its main-op
-    catch (``on_op_missing``) for cross-mount and programmatic reads, and the
+    catch (``on_enoent``) for cross-mount and programmatic reads, and the
     mount registry's per-command reconcile (``reconcile_read``) for
     single-mount shell reads. Reconcile state follows each consumer's store
     (RAM local, Redis shared across runtimes), so this is a thin coordinator
@@ -94,9 +102,7 @@ class Reconciler:
             scratch = ListingCheckStore(hints=mount.index)
             # No cached row answers; the mount's rows ride along as hints.
             try:
-                remote_stat = await mount.execute_op(
-                    "stat", path, index=scratch
-                )
+                remote_stat = await mount.call("stat", path, index=scratch)
             except (FileNotFoundError, NotADirectoryError):
                 await self.on_missing(path)
                 await mount.index.clear()
@@ -302,9 +308,7 @@ class Reconciler:
             mount (MountEntry): the mount holding the listing.
             path (str): the mount root or the folder the version covers.
         """
-        remote = await mount.execute_op(
-            "stat", path, index=ListingCheckStore()
-        )
+        remote = await mount.call("stat", path, index=ListingCheckStore())
         return remote.fingerprint if isinstance(remote, FileStat) else None
 
     async def reconcile_read(self, mount: MountEntry, path: str) -> None:
@@ -343,9 +347,7 @@ class Reconciler:
             await mount.index.clear()
             logger.warning("reconcile probe failed for %s: %s", path, exc)
 
-    async def on_op_missing(
-        self, mount: MountEntry, op: str, path: str
-    ) -> None:
+    async def on_enoent(self, mount: MountEntry, name: str, path: str) -> None:
         """React to a read/stat op that the backend reported gone.
 
         Keyed on the mount's policy rather than fired unconditionally,
@@ -362,10 +364,10 @@ class Reconciler:
 
         Args:
             mount (MountEntry): the resolved mount for ``path``.
-            op (str): the op that raised.
+            name (str): the op that raised.
             path (str): absolute virtual path the backend reports gone.
         """
-        if mount.read.policy is ReadPolicy.FRESH and op in _REVALIDATE_OPS:
+        if mount.read.policy is ReadPolicy.FRESH and name in _REVALIDATE_OPS:
             await self.on_missing(path)
 
     async def on_gone(

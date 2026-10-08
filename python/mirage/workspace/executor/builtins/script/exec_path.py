@@ -15,7 +15,12 @@
 from collections.abc import Callable
 from typing import Any
 
-from mirage.context import clear_program_invocation, reset_program_invocation
+from mirage.context import (
+    clear_program_invocation,
+    reset_current_session,
+    reset_program_invocation,
+    set_current_evaluation,
+)
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
@@ -26,12 +31,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.join import shell_join
 from mirage.utils.path import resolve_path
 from mirage.vfs.bin import BinViewVFS
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    child_context,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.command.command import (
     handle_command_builtin,
 )
@@ -163,7 +163,7 @@ async def handle_exec_path(
             )
         finally:
             reset_program_invocation(token)
-            reset_current_evaluation(child_token)
+            reset_current_session(child_token)
     words = shebang_words(script)
     interp = words[0] if words else "sh"
     if interp in ("sh", "bash"):

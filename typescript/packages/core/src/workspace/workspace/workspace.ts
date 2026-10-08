@@ -23,7 +23,7 @@ import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import { type OpKwargs, OpsRegistry } from '../../ops/registry.ts'
+import type { OpKwargs } from '../../view/types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
@@ -69,19 +69,19 @@ import {
 import type { Policies } from '../../policy/index.ts'
 import { DryRun, Outcome, type ShellExplanation } from '../../policy/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { Ops } from '../../ops/ops.ts'
+import { Files } from '../files.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { PrefixResolver } from '../../runtime/resolver.ts'
 import { ChildProcess } from '../../process/child.ts'
 import { ProcessInput, ProcessOutput } from '../../process/stdio.ts'
-import type { SpawnRequest, ProcessView } from '../../process/types.ts'
+import type { SpawnRequest } from '../../process/types.ts'
+import type { ProcessView } from '../../process/view.ts'
 import { literalTree } from '../../shell/literal.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { ProcessSupervisor } from '../../process/supervisor.ts'
-import { WorkspaceBinding, captureBinding } from '../../runtime/binding.ts'
-import type { RuntimeContext } from '../../runtime/types.ts'
+import { WorkspaceBinding, captureBinding, type RuntimeContext } from '../../runtime/binding.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import { captureRecordingContext } from '../../observe/context.ts'
 import {
@@ -130,22 +130,29 @@ import { rstripSlash } from '../../utils/slash.ts'
 import type { WatchRuntime } from '../../watch/base.ts'
 import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
+import { captureOpPolicies } from '../../policy/policies.ts'
 import { closeWorkspace } from './lifecycle.ts'
 import { WorkspaceMeta } from './meta.ts'
 import { normalizeMounts, prepareAddedMount, unmountPrefix } from './mounts.ts'
 import { Router } from './routing.ts'
 import { Runtimes } from './runtimes.ts'
-import { Session } from './handle.ts'
+import { Explainer } from './explainer.ts'
 import { FileVersionTracker } from '../tools/file_version.ts'
 import { MirageToolOperations } from '../tools/tool_operations.ts'
-import type { ExecuteOptions, ExecuteResult, MountSpec, WorkspaceOptions } from './types.ts'
+import type {
+  ExecuteOptions,
+  ExecuteResult,
+  MountSpec,
+  SessionExecuteOptions,
+  WorkspaceOptions,
+} from './types.ts'
 import { Mount } from '../mount/spec.ts'
 import { WatchManager } from './watch.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { placementRefused } from './failure.ts'
 
 export { ExecuteResult } from './types.ts'
-export type { ExecuteOptions, MountSpec, WorkspaceOptions } from './types.ts'
+export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
 
 // The stop of the top-level line this context runs in, so a line that
 // cancels its own session does not wait on itself.
@@ -164,12 +171,6 @@ export class Workspace {
   private readonly ownsStateStore: boolean
   private readonly sharedMounts = new Set<BaseVFS>()
   private readonly meta: WorkspaceMeta
-  /**
-   * The op table every mount's ops are registered on. Not the op
-   * facade: `vfs` is the door a caller reads and writes through, this
-   * is the registry it dispatches into.
-   */
-  readonly opsRegistry: OpsRegistry
   private readonly indexConfig: IndexConfig | undefined
   private readonly readDefault: ReadSpec
   private shellParser: ShellParser | null
@@ -182,7 +183,7 @@ export class Workspace {
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
-  readonly vfs: Ops
+  readonly vfs: Files
   private readonly toolTables = new Map<string | null, MirageToolOperations>()
   private readonly reads = new Map<string, FileVersionTracker>()
   private closed = false
@@ -322,7 +323,6 @@ export class Workspace {
       this.sessionManager,
       options.sessionId !== undefined,
     )
-    this.opsRegistry = options.ops ?? new OpsRegistry()
     this.shellParser = options.shellParser ?? null
     this.shellParserFactory = options.shellParserFactory ?? null
     this.agentId = options.agentId ?? null
@@ -405,8 +405,8 @@ export class Workspace {
     this.registry.mount(
       BIN_PREFIX,
       new BinViewVFS(
-        () => programs(this.opSession(), this.registry),
-        (name) => programNote(name, this.opSession(), this.registry),
+        () => programs(this.callSession(), this.registry),
+        (name) => programNote(name, this.callSession(), this.registry),
       ),
       MountMode.READ,
       DEFAULT_READ_SPEC,
@@ -424,7 +424,6 @@ export class Workspace {
     this.dispatcher = new Dispatcher(
       this.namespace,
       this.cache,
-      this.opsRegistry,
       this.registry.policies,
       this.drift,
       (write) => this.admitWrite(write),
@@ -453,9 +452,6 @@ export class Workspace {
     const defaultBase = this.baseProfile(null)
     this.sessionManager.defaultProfile =
       defaultBase === null ? null : compileProfile(defaultBase, this.profileName(null))
-    for (const vfs of [...this.registry.allMounts().map((m) => m.vfs), this.cache]) {
-      this.opsRegistry.registerVfs(vfs)
-    }
     this.registry.commandLimits = { ...options.commandLimits }
     for (const [prefix, limits] of Object.entries(normalized.commandLimits)) {
       const mount = this.registry.mountForPrefix(prefix)
@@ -467,7 +463,7 @@ export class Workspace {
     // ledger, which is its own; the sink is only the observer's copy.
     // It runs as the default session, as a bare `shell` does, so the
     // default profile confines it too.
-    this.vfs = new Ops(
+    this.vfs = new Files(
       (op, path, args, kwargs, report) => {
         if (this.isShuttingDown()) throw new Error('Workspace is closed')
         return this.dispatcher.dispatch(op, path, args, kwargs, report)
@@ -484,10 +480,9 @@ export class Workspace {
     )
     this.documents = new Documents(
       this.registry,
-      this.opsRegistry,
       this.vfs,
       this.sessionManager,
-      () => getCurrentSessionUnlessForeign(this.sessionManager) ?? this.opSession(),
+      () => getCurrentSessionUnlessForeign(this.sessionManager) ?? this.callSession(),
       (name) => compileProfile(this.baseProfile(name), name),
       () => this.ensureSessionsLoaded(),
       (path) => this.unmount(path),
@@ -584,7 +579,7 @@ export class Workspace {
   }
 
   /** The session an op runs under: the bound one, else the default. */
-  private opSession(): SessionState {
+  private callSession(): SessionState {
     return (
       getCurrentSessionFor(this.sessionManager) ??
       this.sessionManager.get(this.sessionManager.defaultId)
@@ -593,9 +588,11 @@ export class Workspace {
 
   /** Capture local adapter doors under this workspace's active or explicitly named session. */
   runtimeContext(sessionId?: string): RuntimeContext {
-    const session = sessionId === undefined ? this.opSession() : this.sessionManager.get(sessionId)
+    const session =
+      sessionId === undefined ? this.callSession() : this.sessionManager.get(sessionId)
     const scope = new ContextScope([
       ...captureSessionContext(session, this.sessionManager),
+      ...captureOpPolicies(),
       ...captureRecordingContext(),
     ])
     return captureBinding(
@@ -615,7 +612,7 @@ export class Workspace {
   spawn(request: SpawnRequest, sessionId?: string): ChildProcess {
     return this.spawnForSession(
       request,
-      sessionId === undefined ? this.opSession() : this.sessionManager.get(sessionId),
+      sessionId === undefined ? this.callSession() : this.sessionManager.get(sessionId),
     )
   }
 
@@ -666,6 +663,7 @@ export class Workspace {
     child.terminalOutput = true
     const scope = new ContextScope([
       ...captureSessionContext(child, this.sessionManager),
+      ...captureOpPolicies(),
       ...captureRecordingContext(),
     ])
     const input = new ProcessInput(),
@@ -729,7 +727,7 @@ export class Workspace {
   }
 
   // The sandboxed runtimes' sole data path (quickjs, pyodide, monty).
-  // Routes through the private dispatch continuation, not the raw Ops facade,
+  // Routes through the private dispatch continuation, not the raw Files facade,
   // so runtime journal replay stays open during close and sandbox I/O takes
   // the same path as shell commands — cache read-through on
   // reads, post-write invalidation, and mount-mode enforcement narrowed
@@ -742,17 +740,12 @@ export class Workspace {
   // its own, as an argument rather than ambient state.
   private buildWorkspaceBridge(issuer?: symbol): BridgeDispatchFn {
     const dispatch = (
-      opName: string,
+      name: string,
       path: string,
       args: readonly unknown[] = [],
       kwargs: OpKwargs = {},
     ): Promise<unknown> =>
-      this.dispatchInternal(
-        opName,
-        path,
-        args,
-        issuer === undefined ? kwargs : { ...kwargs, issuer },
-      )
+      this.dispatchInternal(name, path, args, issuer === undefined ? kwargs : { ...kwargs, issuer })
     return async (op, path, bytes, dst, attrs) => {
       switch (op) {
         case 'read': {
@@ -1274,8 +1267,7 @@ export class Workspace {
   }
 
   /**
-   * Add a mount to a running workspace. Registers the VFS's ops globally
-   * on this workspace's OpsRegistry so dispatch can find them.
+   * Add a mount to a running workspace.
    *
    * The runtime door runs the same read-policy verdict the constructor
    * does: a mount added here is no more able to declare a policy its
@@ -1307,7 +1299,6 @@ export class Workspace {
       vfsRef,
     })
     prepareAddedMount(this.registry, m, previous)
-    this.opsRegistry.registerVfs(vfs)
     return m
   }
 
@@ -1330,7 +1321,6 @@ export class Workspace {
     await unmountPrefix(
       {
         registry: this.registry,
-        opsRegistry: this.opsRegistry,
         sharedMounts: this.sharedMounts,
         isShuttingDown: () => this.isShuttingDown(),
       },
@@ -1358,7 +1348,7 @@ export class Workspace {
   }
 
   /**
-   * The op ledger. It lives on the `Ops` facade (python parity); these
+   * The op ledger. It lives on the `Files` facade (python parity); these
    * are thin delegates so the public workspace API keeps reading.
    */
   get records(): OpRecord[] {
@@ -1487,7 +1477,7 @@ export class Workspace {
     // unrestricted default instead.
     await this.ensureSessionsLoaded()
     const session = this.sessionManager.get(sessionId ?? this.sessionManager.defaultId)
-    return runWithSession(session, run, this.sessionManager)
+    return runWithSession(session, run, { owner: this.sessionManager })
   }
 
   /** The ambient session the op door keeps for a facade, or null. */
@@ -1517,18 +1507,18 @@ export class Workspace {
   }
 
   async dispatch(
-    opName: string,
+    name: string,
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     // Runs as the default session unless one is bound, like `ws.vfs`.
-    return this.bindSession(null, () => this.dispatchInternal(opName, path, args, kwargs))
+    return this.bindSession(null, () => this.dispatchInternal(name, path, args, kwargs))
   }
 
   private async dispatchInternal(
-    opName: string,
+    name: string,
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
@@ -1540,12 +1530,7 @@ export class Workspace {
     // enforcement, per-op commandLimits on the executing mount,
     // revisions, overlay stat, and post-write invalidation. The same
     // single path Python's Workspace.dispatch delegates to.
-    const [result] = await this.dispatcher.dispatch(
-      opName,
-      PathSpec.fromStrPath(path),
-      args,
-      kwargs,
-    )
+    const [result] = await this.dispatcher.dispatch(name, PathSpec.fromStrPath(path), args, kwargs)
     return result
   }
 
@@ -2043,7 +2028,6 @@ export class Workspace {
     }
     const copyAgentId = options.agentId ?? this.agentId
     if (copyAgentId !== null) opts.agentId = copyAgentId
-    opts.ops = options.ops ?? this.opsRegistry
     const parser = options.shellParser ?? this.shellParser
     if (parser !== null) opts.shellParser = parser
     const overrides: Record<string, Mount> = {}
@@ -2122,5 +2106,102 @@ export class Workspace {
       // teardown that raises must still close the door behind it.
       this.closed = true
     }
+  }
+}
+
+/**
+ * One session's doors, bound together.
+ *
+ * `shell` runs a line as the session, `vfs` is the file API run as it,
+ * `tools` the agent tools over both and `explain` the same doors as a dry
+ * run, so a host holds one object per agent and every door answers under the same profile: hides, mount
+ * modes, grants and standing decisions. Nothing is stored here; the session record stays with the
+ * session manager and `state` reads it. Obtained from
+ * `Workspace.session`, which creates the session or adopts it. A null id
+ * is the workspace's default session as it is when each call runs, the
+ * way `ws.vfs` and `ws.shell` follow it when a snapshot load or an attach
+ * re-keys it.
+ */
+export class Session {
+  private readonly ws: Workspace
+  private readonly id: string | null
+
+  constructor(ws: Workspace, sessionId: string | null) {
+    this.ws = ws
+    this.id = sessionId
+  }
+
+  get sessionId(): string {
+    return this.id ?? this.ws.defaultSessionId
+  }
+
+  /** The session record: cwd, env, modes, hides, decisions. */
+  get state(): SessionState {
+    return this.ws.getSession(this.sessionId)
+  }
+
+  /** The workspace's approval ledger, which this session's asked commands and ops are recorded in. */
+  get decisions(): Decisions {
+    return this.ws.decisions
+  }
+
+  /** The workspace's mounts, which the session's profile narrows. */
+  mounts(): readonly MountEntry[] {
+    return this.ws.mounts()
+  }
+
+  /** The file API run as this session. */
+  get vfs(): Files {
+    return this.id === null ? this.ws.vfs : this.ws.vfs.forSession(this.id)
+  }
+
+  /**
+   * This session's calls explained instead of run, under the same names:
+   * `explain.shell(line)`, `explain.vfs.<call>(...)`.
+   */
+  get explain(): Explainer {
+    return new Explainer((line, sessionId) => this.ws.explain(line, sessionId), this.id, this.vfs)
+  }
+
+  /** The agent tools run as this session: one table per session, shared by every caller in the process. */
+  get tools(): MirageToolOperations {
+    return this.ws.sessionTools(this.id)
+  }
+
+  /**
+   * Hydrate the workspace's sessions, so a stored one is known.
+   *
+   * @internal
+   */
+  loaded(): Promise<void> {
+    return this.ws.ensureSessionsLoaded()
+  }
+
+  /**
+   * The read history the session's agent tools share.
+   *
+   * @internal
+   */
+  reads(): Promise<FileVersionTracker> {
+    return this.ws.sessionReads(this.id)
+  }
+
+  /** Run a shell line as this session; `Workspace.shell` with the session fixed. */
+  shell(command: string, options: SessionExecuteOptions = {}): Promise<ExecuteResult> {
+    return this.ws.shell(command, this.id === null ? options : { ...options, sessionId: this.id })
+  }
+
+  /** The paths a pattern matches as this session; `Workspace.glob` with the session fixed. */
+  glob(pattern: string): Promise<string[]> {
+    return this.id === null ? this.ws.glob(pattern) : this.ws.glob(pattern, this.id)
+  }
+  /** Render this session's VFS Markdown, optionally at a virtual path. */
+  vfsMd(path?: string | PathSpec): Promise<string> {
+    return this.ws.vfsMd(path, { sessionId: this.sessionId })
+  }
+
+  /** Render this session's CLI skill, optionally at a virtual path. */
+  skillMd(path?: string | PathSpec): Promise<string> {
+    return this.ws.skillMd(path, { sessionId: this.sessionId })
   }
 }

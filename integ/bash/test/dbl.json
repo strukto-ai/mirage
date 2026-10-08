@@ -541,7 +541,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: conditional binary operator expected\n"
+        "stderr": "mirage: conditional binary operator expected\nmirage: syntax error near '-bogus'\n"
       }
     },
     {

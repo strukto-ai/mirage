@@ -86,6 +86,7 @@ function inv(
     texts,
     flags,
     stdin: stdin === undefined ? null : yieldBytes(new TextEncoder().encode(stdin)),
+    cwd: PathSpec.fromStrPath('/'),
     env: {},
     ...(doors !== undefined ? { doors } : {}),
   }

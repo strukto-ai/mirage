@@ -1,15 +1,9 @@
 {
- "baseline": 4040,
+ "baseline": 4002,
  "modules": {
-  "ops/registry": {
+  "policy/policies": {
    "typescript_only": {
-    "OpsRegistry": "Python keeps each mount's op table on its Mount (`Mount._ops`, `register_op`, the filetype-then-VFS cascade); TypeScript holds one OpsRegistry on the Workspace and scopes entries per VFS. Same lookup, held in a different place."
-   }
-  },
-  "ops/generic/factory": {
-   "python_only": {
-    "_make_pwrite": "Python builds every emitted op through a named `_make_*` closure builder; TypeScript writes the same closure inline in makeGenericOps, as it does for the module's older builders.",
-    "_make_emulated_pwrite": "The read/splice/write pwrite for a table without a native one, built by a named `_make_*` builder in Python and inline in makeGenericOps in TypeScript, like emulated append."
+    "captureOpPolicies": "A deferred TypeScript callback restores each async-local store it needs, as captureSessionContext and captureRecordingContext do; a Python contextvar travels with the copied context."
    }
   },
   "core/github/tree": {
@@ -336,13 +330,12 @@
     "sameAt": "Occurrences compare by reference in TypeScript, so finding a scope compares them field by field; Python's frozen dataclass equality does it."
    }
   },
-  "workspace/evaluation": {
+  "context/session_context": {
    "python_only": {
-    "set_current_evaluation": "Python binds evaluator and session ContextVars and returns their tokens; TypeScript runWithEvaluation scopes both around an async callback.",
-    "reset_current_evaluation": "Python restores the two ContextVar tokens explicitly; TypeScript runWithEvaluation restores both callback scopes on settlement."
+    "set_current_evaluation": "Python binds an evaluation with its session and returns the ContextVar token reset_current_session restores; TypeScript runWithEvaluation scopes the binding around an async callback."
    },
    "typescript_only": {
-    "runWithEvaluation": "TypeScript scopes evaluator storage and durable-session ancestry around a callback; Python set_current_evaluation/reset_current_evaluation use ContextVar tokens."
+    "runWithEvaluation": "TypeScript scopes the evaluation's session binding around a callback; Python set_current_evaluation returns a ContextVar token."
    }
   },
   "cli/vfs": {

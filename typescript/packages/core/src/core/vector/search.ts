@@ -63,7 +63,9 @@ export async function searchRowsOutput<A extends Accessor>(
 }
 
 /** Build a store's ranked search, one native ranking per batch. */
-export function makeSearch<A extends Accessor>(tree: VectorTree<A>): SearchOps<A> {
+export function makeSearch<A extends Accessor>(
+  tree: VectorTree<A>,
+): Required<Pick<SearchOps<A>, 'search' | 'searchMany'>> {
   async function searchMany(accessor: A, paths: PathSpec[], query: SearchQuery): Promise<string[]> {
     validateOptions(query, ['top_k', 'threshold', 'method'])
     const topK = intOption(query, 'top_k', tree.searchLimit(accessor))

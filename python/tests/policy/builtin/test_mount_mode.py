@@ -18,8 +18,8 @@ import pytest
 
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors.types import ReadOnlyError
-from mirage.ops.boundary import OpBoundary
 from mirage.policy import Policies
+from mirage.policy.boundary import Boundary
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -37,7 +37,7 @@ def _path(virtual: str) -> PathSpec:
 async def _admit(mount: MountEntry | None, path: PathSpec) -> None:
     # The dispatcher's own boundary: an owned path carries its mount's
     # prefix and mode, an unowned one an empty prefix and full write.
-    boundary = OpBoundary(
+    boundary = Boundary(
         Policies(),
         mount.prefix if mount is not None else "",
         mount.mode if mount is not None else MountMode.WRITE,

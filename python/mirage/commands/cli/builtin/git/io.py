@@ -18,9 +18,9 @@ from mirage.commands.cli.builtin.git.constants import PERMISSION_BITS, SYMLINK
 from mirage.commands.cli.builtin.git.errors import MountInWayError
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import eexist
-from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
+from mirage.view.types import LinkView, MountView, StatPath
 
 logger = logging.getLogger(__name__)
 

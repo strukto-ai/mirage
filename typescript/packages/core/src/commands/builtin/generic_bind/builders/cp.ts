@@ -14,13 +14,14 @@
 
 import { transferLinksOf } from '../../generic/crossmount/utils.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
-import type { StatOverlay } from '../../../../ops/types.ts'
+import type { StatOverlay } from '../../../../view/types.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { NativeCopy, PathSpec, PrimitiveCopy, StatFn } from '../../../../types.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { cpGeneric, parseFlags } from '../../generic/cp.ts'
 import { typedLink } from '../../utils/links.ts'
-import type { Builder, CommandIO } from '../adapter.ts'
+import type { GenericCommand } from '../adapter.ts'
+import type { CommandIO } from '../../../config.ts'
 import { requireOp, resolveGlobOf } from '../adapter.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
@@ -38,7 +39,7 @@ export function overlayableStat(
   return async (p) => statOverlay(p.virtual, await ops.stat(accessor, p, index))
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'cp',
   write: true,
   fn: async (ops, accessor, paths, _texts, opts) => {

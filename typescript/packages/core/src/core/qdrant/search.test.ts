@@ -16,7 +16,8 @@ import type { QdrantClient } from '@qdrant/js-client-rest'
 import { expect, it, vi } from 'vitest'
 
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
-import { IO } from '../../commands/builtin/qdrant/io.ts'
+import { ioFor } from '../../test-utils.ts'
+import { QdrantVFS } from '../../vfs/qdrant/qdrant.ts'
 import { searchResources } from '../../vfs/search.ts'
 import { resolveQdrantConfig, type QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { PathSpec } from '../../types.ts'
@@ -65,12 +66,12 @@ it('uses one native ranking for a batch and carries the requested limit', async 
     { id: 17, score: 0.81, payload: { text: 'answer' } },
   ])
   const root = new PathSpec({ virtual: '/data', directory: '/', vfsPath: '' })
-  const result = await searchResources(IO.search, accessor, [root, root], {
+  const result = await searchResources(ioFor(QdrantVFS, accessor).search, accessor, [root, root], {
     query: 'question',
     options: { top_k: 2, threshold: 0.5 },
   })
   expect(new TextDecoder().decode(result)).toBe('/data/17.txt:0.8100\nanswer\n')
   expect(query).toHaveBeenCalledOnce()
   expect(query.mock.calls[0]?.[1]).toMatchObject({ limit: 2 })
-  expect(IO.search?.meta?.grep).toBeUndefined()
+  expect(ioFor(QdrantVFS, accessor).search?.meta?.grep).toBeUndefined()
 })

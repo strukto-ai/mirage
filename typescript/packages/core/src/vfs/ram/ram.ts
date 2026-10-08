@@ -12,15 +12,35 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RAM_COMMANDS } from '../../commands/builtin/ram/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
-import { RAM_OPS } from '../../ops/ram/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import { PROMPT } from './prompt.ts'
 import { RAMStore, type RAMAttrs } from './store.ts'
+import type { PathSpec, FileStat, SetAttrFields } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { FindOptions } from '../base.ts'
+import type { DuEntries } from '../types.ts'
+import { readdir as ramReaddir } from '../../core/ram/readdir.ts'
+import { read as devAwareRead, readRange as devAwareReadRange } from '../../core/dev/read.ts'
+import { stat as devAwareStat } from '../../core/dev/stat.ts'
+import { readStream as devAwareStream } from '../../core/dev/stream.ts'
+import { exists as ramExists } from '../../core/ram/exists.ts'
+import { find as ramFind } from '../../core/ram/find.ts'
+import { size as ramDu, entries as ramDuAll } from '../../core/ram/du/index.ts'
+import { write as ramWrite } from '../../core/ram/write.ts'
+import { appendBytes as ramAppend } from '../../core/ram/append.ts'
+import { pwrite as ramPwrite } from '../../core/ram/pwrite.ts'
+import { create as ramCreate } from '../../core/ram/create.ts'
+import { mkdir as ramMkdir } from '../../core/ram/mkdir.ts'
+import { unlink as ramUnlink } from '../../core/ram/unlink.ts'
+import { rmdir as ramRmdir } from '../../core/ram/rmdir.ts'
+import { rmR as ramRmR } from '../../core/ram/rm.ts'
+import { rename as ramRename } from '../../core/ram/rename.ts'
+import { copy as ramCopy } from '../../core/ram/copy.ts'
+import { truncate as ramTruncate } from '../../core/ram/truncate.ts'
+import { setAttrs as ramSetAttrs } from '../../core/ram/set_attrs.ts'
+import { SCOPE_ERROR } from '../../core/ram/constants.ts'
 export interface RAMVFSState {
   type: string
   files?: Record<string, Uint8Array>
@@ -38,13 +58,101 @@ export class RAMVFS extends BaseVFS {
   readonly store = new RAMStore()
   override readonly accessor = new RAMAccessor(this.store)
   override readonly prompt = PROMPT
-  override ops(): readonly RegisteredOp[] {
-    return RAM_OPS
+  override readonly readsRanges: boolean = true
+
+  override readonly local: boolean = true
+
+  override readonly maxGlobMatches: number = SCOPE_ERROR
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return ramReaddir(this.accessor, path, index)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return RAM_COMMANDS
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    if (offset === 0 && size === null) return devAwareRead(this.accessor, path, index)
+    return devAwareReadRange(this.accessor, path, index, offset, size)
   }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return devAwareStat(this.accessor, path, index)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return devAwareStream(this.accessor, path, index)
+  }
+
+  override exists(path: PathSpec): Promise<boolean> {
+    return ramExists(this.accessor, path)
+  }
+
+  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
+    return ramFind(this.accessor, path, options)
+  }
+
+  override duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
+    return ramDu(this.accessor, path)
+  }
+
+  override duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
+    return ramDuAll(this.accessor, path)
+  }
+
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    return ramWrite(this.accessor, path, data)
+  }
+
+  override append(path: PathSpec, data: Uint8Array): Promise<void> {
+    return ramAppend(this.accessor, path, data)
+  }
+
+  override pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
+    return ramPwrite(this.accessor, path, data, offset)
+  }
+
+  override create(path: PathSpec): Promise<void> {
+    return ramCreate(this.accessor, path)
+  }
+
+  override mkdir(path: PathSpec, parents = false): Promise<void> {
+    return ramMkdir(this.accessor, path, parents)
+  }
+
+  override unlink(path: PathSpec): Promise<void> {
+    return ramUnlink(this.accessor, path)
+  }
+
+  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+    return ramRmdir(this.accessor, path)
+  }
+
+  override rmR(path: PathSpec): Promise<void> {
+    return ramRmR(this.accessor, path)
+  }
+
+  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
+    return ramRename(this.accessor, src, dst)
+  }
+
+  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
+    return ramCopy(this.accessor, src, dst)
+  }
+
+  override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
+    return ramTruncate(this.accessor, path, length, noCreate)
+  }
+
+  override setattr(
+    path: PathSpec,
+    fields: SetAttrFields,
+  ): Promise<Record<string, number | string>> {
+    return ramSetAttrs(this.accessor, path, fields)
+  }
+
   override getState(): RAMVFSState {
     const files: Record<string, Uint8Array> = {}
     for (const [k, v] of this.store.files) files[k] = v

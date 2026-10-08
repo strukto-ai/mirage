@@ -25,6 +25,8 @@ import * as statModule from '../../../core/mongodb/stat.ts'
 import { resolveMongoDBConfig } from '../../../vfs/mongodb/config.ts'
 import { PathSpec } from '../../../types.ts'
 import { MONGODB_CAT } from './cat.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { MongoDBVFSBase } from '../../../vfs/mongodb/mongodb.ts'
 
 const STUB_DRIVER = stubMongoDriver()
 
@@ -56,7 +58,7 @@ describe('mongodb cat error surfacing', () => {
       cmd.fn(accessor, [mk('users.jsonl')], [], {
         stdin: null,
         flags: {},
-        filetypeFns: null,
+        io: ioFor(MongoDBVFSBase, accessor),
         cwd: '/',
       }),
     ).rejects.toThrow(message)

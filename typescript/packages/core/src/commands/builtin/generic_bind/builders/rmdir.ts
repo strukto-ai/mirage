@@ -14,7 +14,7 @@
 
 import { UsageError } from '../../../errors.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { LinkView } from '../../../../ops/types.ts'
+import type { LinkView } from '../../../../view/types.ts'
 import { FileType, type PathSpec } from '../../../../types.ts'
 import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { mountPrefixOf, mountedPath, respelled } from '../../../../utils/key_prefix.ts'
@@ -23,7 +23,7 @@ import { rstripSlash } from '../../../../utils/slash.ts'
 import { formatRecords } from '../../utils/output.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 
 // `virtual` with its parent resolved through the namespace's links: rmdir(2)
@@ -73,7 +73,7 @@ export function ancestors(
   return chain
 }
 
-const rmdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const rmdir: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   if (paths.length === 0) {
     throw new UsageError("rmdir: missing operand\nTry 'rmdir --help' for more information.", 1)
   }
@@ -159,7 +159,7 @@ const rmdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   ]
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'rmdir',
   write: true,
   fn: rmdir,

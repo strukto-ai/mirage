@@ -45,15 +45,15 @@ from mirage.errors.types import FsCondition
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
-from mirage.ops.types import NamespaceView, SessionView, StatPath
 from mirage.policy import resolve_limit
-from mirage.process.types import ProcessView
+from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import runtime_for_language
 from mirage.runtime.types import CodeExecution, DispatchFn, ScriptSource
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
+from mirage.view.types import NamespaceView, SessionView, StatPath
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
@@ -179,7 +179,6 @@ async def _script_output(
     script: ScriptSource,
     runtime: LanguageRuntime,
     prog: str,
-    cwd: PathSpec,
 ) -> CommandOutput:
     """Render the invocation onto the selected runtime as one CodeExecution.
 
@@ -196,7 +195,6 @@ async def _script_output(
         script (ScriptSource): the install's embedded program.
         runtime (Runtime): the selected interpreter entry.
         prog (str): the installed head word, the program's own name.
-        cwd (PathSpec): the session's virtual working directory.
     """
     env = dict(inv.env)
     if inv.config is not None:
@@ -212,7 +210,7 @@ async def _script_output(
             args=list(inv.argv),
             prog=prog,
             script_cli=True,
-            cwd=cwd,
+            cwd=inv.cwd,
             env=env,
             stdin=stdin,
             flags=flags,
@@ -487,6 +485,7 @@ async def handle_cli(
         argv=tuple(argv),
         paths=tuple(parsed.paths),
         texts=tuple(parsed.texts),
+        cwd=PathSpec.from_str_path(session.cwd),
         flags=kw,
         stdin=stdin,
         env=env_snapshot(session),
@@ -523,12 +522,11 @@ async def handle_cli(
             leaf.script,
             runtime,
             prog,
-            PathSpec.from_str_path(session.cwd),
         )
     else:
         fn = leaf.fn
         if fn is None:
-            # validate_cli guarantees fn XOR subcommands XOR script and
+            # _validate_cli guarantees fn XOR subcommands XOR script and
             # walk only returns handler-bearing nodes as leaf; reaching
             # this is a bug.
             raise RuntimeError(

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize, type IOResult } from '../../../io/types.ts'
@@ -37,7 +38,7 @@ async function runMktemp(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
+    io: commandIo(vfs),
     cwd: '/',
   })
   if (result === null) return { out: '', vfs }
@@ -215,7 +216,7 @@ describe('mktemp names and routing', () => {
 // GNU creates exclusively and tries another name, so a taken name is never
 // written over. Mirrors test_phase_r_paths.py.
 describe('mktemp never reuses a taken name', () => {
-  const opts = { stdin: null, flags: {}, filetypeFns: null, cwd: '/data' } as CommandOpts
+  const opts = { stdin: null, flags: {}, cwd: '/data' } as CommandOpts
 
   it('draws again when a name is taken', async () => {
     const probed: string[] = []

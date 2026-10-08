@@ -27,28 +27,59 @@ from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import NamespaceView, ReaddirPath, SessionView, StatPath
-from mirage.process.types import ProcessView
+from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn, ExecPathFn, ShellFn
 from mirage.types import Limit, PathSpec
+from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
+from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
+from mirage.vfs.types import (
+    ContentSearchOps,
+    DuOps,
+    ExistsOp,
+    IsMountedOp,
+    MkdirOp,
+    OperationFn,
+    PairOp,
+    PathOp,
+    PwriteOp,
+    ReadBytesOp,
+    ReaddirOp,
+    ReadRangeOp,
+    ReadStreamOp,
+    ResolveGlobOp,
+    RmdirOp,
+    RmTreeOp,
+    SearchOps,
+    StatOp,
+    TruncateOp,
+    WriteOp,
+)
+from mirage.view.types import (
+    ChildMounts,
+    LinkTargetStat,
+    NamespaceView,
+    ReaddirPath,
+    SessionView,
+    StatPath,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class ExecContext:
-    """What the workspace hands ``Mount.execute_cmd`` for one command.
+    """What the workspace hands ``Mount.run_command`` for one command.
 
-    ``execute_cmd`` copies these fields onto ``CommandOpts``, next to
-    the facts only the mount knows (``mount_prefix``, ``index``,
-    ``filetype_fns``). Each field is named as on ``CommandOpts`` and
+    ``run_command`` copies these fields onto ``CommandOpts``, next to
+    the facts only the mount knows (``mount_prefix``, ``index``). Each
+    field is named as on ``CommandOpts`` and
     means the same; ``tests/commands/test_exec_context_parity.py``
     pins that.
 
     Args:
         limit_override (Limit | None): The caller's output limit, which
-            ``execute_cmd`` applies itself instead of forwarding.
+            ``run_command`` applies itself instead of forwarding.
         cwd (str): The working directory as a virtual path;
-            ``execute_cmd`` turns it into a PathSpec.
+            ``run_command`` turns it into a PathSpec.
     """
 
     limit_override: Limit | None = None
@@ -70,11 +101,73 @@ class ExecContext:
     argv: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, kw_only=True)
+class CommandIO:
+    """Backend capabilities consumed by command algorithms.
+
+    Built from a mount's VFS by ``command_io``: each slot is one of its
+    functions with the accessor commands still pass in front dropped,
+    and a function the VFS does not define is an absent slot. Command
+    admission guards these calls; POSIX policy hooks belong to the
+    filesystem dispatcher and are not part of this interface.
+
+    ``glob_children`` is the child names the namespace owes a directory
+    (nested mount roots and symlinks), and ``glob_target_stat`` what an
+    owed name points at, the namespace's own stat resolved through the
+    workspace. The factory stamps both per invocation from ``opts.ns``,
+    because they are session-scoped state and the adapter is built once
+    per backend; the target stat lets a trailing-slash glob follow a link
+    the way bash does instead of keeping every link it cannot see
+    through.
+    """
+
+    readdir: ReaddirOp
+    read_bytes: ReadBytesOp
+    stat: StatOp
+    read_stream: ReadStreamOp
+    is_mounted: IsMountedOp
+    read_range: ReadRangeOp | None = None
+    exists: ExistsOp | None = None
+    find: OperationFn | None = None
+    du: DuOps | None = None
+    write: WriteOp | None = None
+    append: WriteOp | None = None
+    pwrite: PwriteOp | None = None
+    create: PathOp | None = None
+    mkdir: MkdirOp | None = None
+    unlink: PathOp | None = None
+    rmdir: RmdirOp | None = None
+    rm_r: RmTreeOp | None = None
+    rename: PairOp | None = None
+    copy: PairOp | None = None
+    dir_copy: PairOp | None = None
+    truncate: TruncateOp | None = None
+    set_attrs: OperationFn | None = None
+    streams_bytes: bool = False
+    local: bool = True
+    max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
+    max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
+    search: SearchOps | None = None
+    content_search: ContentSearchOps | None = None
+    glob_children: ChildMounts | None = None
+    glob_target_stat: LinkTargetStat | None = None
+
+    @property
+    def resolve_glob(self) -> ResolveGlobOp:
+        return make_resolve_glob(
+            self.readdir,
+            self.max_glob_matches,
+            self.glob_children,
+            self.stat,
+            self.glob_target_stat,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class CommandOpts:
     """Everything a command handler gets besides its operands.
 
-    ``Mount.execute_cmd`` builds one per invocation and passes it as
+    ``Mount.run_command`` builds one per invocation and passes it as
     the handler's fourth argument. A handler reads the fields it needs
     and ignores the rest.
 
@@ -84,11 +177,10 @@ class CommandOpts:
             through a spec-bound ``FlagView``.
         cwd (PathSpec): The working directory.
         mount_prefix (str): The prefix of the mount running the command.
-        filetype_fns (Mapping[str, CommandFn] | None): Handlers of the
-            same command for one file extension, so a generic can hand
-            an operand to one; None inside such a handler.
         command (str | None): The command name the mount runs.
         index (IndexCacheStore): The mount's index cache.
+        io (CommandIO | None): The mount's backend table, built from its
+            VFS; None outside a mount.
         dispatch (DispatchFn | None): The workspace op dispatcher.
         session_id (str | None): The calling session.
         env (dict[str, str] | None): A snapshot of the session
@@ -123,9 +215,9 @@ class CommandOpts:
     flags: Mapping[str, FlagValue] = field(default_factory=dict)
     cwd: PathSpec = ROOT_CWD
     mount_prefix: str = ""
-    filetype_fns: Mapping[str, "CommandFn"] | None = None
     command: str | None = None
     index: IndexCacheStore = NULL_INDEX
+    io: CommandIO | None = None
     dispatch: DispatchFn | None = None
     session_id: str | None = None
     env: dict[str, str] | None = None
@@ -163,7 +255,7 @@ class CommandFn(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class RegisteredCommand:
+class Command:
     """One command as a mount registers it.
 
     Args:
@@ -192,7 +284,7 @@ class RegisteredCommand:
     limit: Limit | None = None
     path_guarded: bool = False
 
-    def with_overrides(self, *, fn: CommandFn) -> "RegisteredCommand":
+    def with_overrides(self, *, fn: CommandFn) -> "Command":
         """A copy with the handler replaced, to register a customized
         builtin on one mount.
 
@@ -256,7 +348,7 @@ def command(
     """Register the decorated handler as a command of one or more VFSes.
 
     The decorator returns the handler wrapped to answer ``--help`` and
-    ``--version``, with one ``RegisteredCommand`` per VFS in its
+    ``--version``, with one ``Command`` per VFS in its
     ``_registered_commands`` attribute.
 
     Args:
@@ -279,7 +371,7 @@ def command(
         registrations = list(getattr(wrapped, "_registered_commands", []))
         for vfs_name in vfs if isinstance(vfs, list) else [vfs]:
             registrations.append(
-                RegisteredCommand(
+                Command(
                     name=name,
                     spec=full_spec,
                     vfs=vfs_name,
@@ -297,43 +389,43 @@ def command(
     return decorator
 
 
-CommandSource: TypeAlias = RegisteredCommand | Callable[..., Any]
+CommandSource: TypeAlias = Command | Callable[..., Any]
 
 
 def registered_commands(
     items: Iterable[CommandSource],
-) -> list[RegisteredCommand]:
+) -> list[Command]:
     """The registrations of *items*, in order.
 
     Args:
-        items (Iterable[CommandSource]): ``RegisteredCommand`` values
+        items (Iterable[CommandSource]): ``Command`` values
             and ``@command``-decorated functions.
 
     Raises:
         TypeError: An item is neither.
     """
-    values: list[RegisteredCommand] = []
+    values: list[Command] = []
     for item in items:
-        if isinstance(item, RegisteredCommand):
+        if isinstance(item, Command):
             values.append(item)
             continue
         registrations = getattr(item, "_registered_commands", None)
         if registrations is None or not all(
-            isinstance(r, RegisteredCommand) for r in registrations
+            isinstance(r, Command) for r in registrations
         ):
             raise TypeError(
-                "a command catalog takes RegisteredCommand values "
+                "a command catalog takes Command values "
                 "and @command-decorated functions"
             )
         values.extend(registrations)
     return values
 
 
-class CommandCatalog(Sequence[RegisteredCommand]):
+class CommandCatalog(Sequence[Command]):
     """A fixed list of commands, looked up by name and file extension.
 
     Args:
-        items (Iterable[CommandSource]): ``RegisteredCommand`` values
+        items (Iterable[CommandSource]): ``Command`` values
             and ``@command``-decorated functions; a later one wins a
             lookup.
     """
@@ -348,27 +440,21 @@ class CommandCatalog(Sequence[RegisteredCommand]):
         return len(self._items)
 
     @overload
-    def __getitem__(self, index: int) -> RegisteredCommand: ...
+    def __getitem__(self, index: int) -> Command: ...
 
     @overload
-    def __getitem__(self, index: slice) -> Sequence[RegisteredCommand]: ...
+    def __getitem__(self, index: slice) -> Sequence[Command]: ...
 
-    def __getitem__(
-        self, index: int | slice
-    ) -> RegisteredCommand | Sequence[RegisteredCommand]:
+    def __getitem__(self, index: int | slice) -> Command | Sequence[Command]:
         return self._items[index]
 
-    def __iter__(self) -> Iterator[RegisteredCommand]:
+    def __iter__(self) -> Iterator[Command]:
         return iter(self._items)
 
-    def get(
-        self, name: str, filetype: str | None = None
-    ) -> RegisteredCommand | None:
+    def get(self, name: str, filetype: str | None = None) -> Command | None:
         return self._by_key.get((name, filetype))
 
-    def require(
-        self, name: str, filetype: str | None = None
-    ) -> RegisteredCommand:
+    def require(self, name: str, filetype: str | None = None) -> Command:
         found = self.get(name, filetype)
         if found is None:
             raise KeyError(

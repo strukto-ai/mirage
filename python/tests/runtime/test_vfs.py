@@ -53,10 +53,10 @@ class ListingVFS(RuntimeVFS):
     def _wait(self, pending):
         return asyncio.run(pending)
 
-    async def _op(self, op, path, **kwargs):
-        if op == "readdir":
+    async def _call(self, name, path, **kwargs):
+        if name == "readdir":
             return list(self._listing)
-        if op == "stat":
+        if name == "stat":
             self.stat_calls.append(path)
             if kwargs.get("nofollow"):
                 self.unfollowed.append(path)
@@ -66,7 +66,7 @@ class ListingVFS(RuntimeVFS):
             if isinstance(st, Exception):
                 raise st
             return st
-        raise NotImplementedError(op)
+        raise NotImplementedError(name)
 
 
 class RecordingVFS(RuntimeVFS):
@@ -102,7 +102,7 @@ class WorldVFS(RuntimeVFS):
     def _wait(self, pending):
         return asyncio.run(pending)
 
-    async def _op(self, op, path, **kwargs):
+    async def _call(self, name, path, **kwargs):
         if self.refuse is not None:
             raise self.refuse
         raise FileNotFoundError(path)
@@ -204,12 +204,12 @@ class ViewVFS(RuntimeVFS):
     def _wait(self, pending):
         return asyncio.run(pending)
 
-    async def _op(self, op, path, **kwargs):
-        if op == "stat":
+    async def _call(self, name, path, **kwargs):
+        if name == "stat":
             if path in ("/data/a.txt", "/.bash_history"):
                 return FileStat(name=path, size=1, type=FileType.FILE)
             raise FileNotFoundError(path)
-        if op == "readdir" and path in ("/", "/parent", "/.bash_history"):
+        if name == "readdir" and path in ("/", "/parent", "/.bash_history"):
             return []
         raise FileNotFoundError(path)
 

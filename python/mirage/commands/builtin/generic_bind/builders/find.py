@@ -22,14 +22,13 @@ from mirage.commands.builtin.generic.find import (
     find_walk_generic,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     overlaid_stat,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.namespace_view import paths_scoped
 from mirage.types import FileStat, PathSpec
+from mirage.view.namespace_view import paths_scoped
 
 
 async def _dir_is_empty(
@@ -116,4 +115,4 @@ async def find(
     )
 
 
-BUILDER = Builder("find", find)
+BUILDER = GenericCommand("find", find)

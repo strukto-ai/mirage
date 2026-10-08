@@ -15,15 +15,12 @@
 import dataclasses
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mirage.context import reset_explaining, set_explaining
-from mirage.ops import Ops
 from mirage.policy import ShellExplanation, VfsExplanation
 from mirage.policy.errors import Explained
-
-if TYPE_CHECKING:
-    from mirage.workspace.workspace.workspace import Workspace
+from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
 
@@ -42,15 +39,19 @@ class Explainer:
     refuses.
 
     Args:
-        ws (Workspace): the workspace the session lives in.
+        explain (Callable[[str, str], Awaitable[ShellExplanation]]): the
+            workspace's line explainer, ``Workspace.explain``.
         session_id (str | None): the session; None for the default one.
-        vfs (Ops): the session's VFS facade.
+        vfs (Files): the session's ``ws.vfs``.
     """
 
     def __init__(
-        self, ws: "Workspace", session_id: str | None, vfs: Ops
+        self,
+        explain: Callable[[str, str], Awaitable[ShellExplanation]],
+        session_id: str | None,
+        vfs: Files,
     ) -> None:
-        self._ws = ws
+        self._explain = explain
         self._session_id = session_id
         self._vfs = vfs
 
@@ -61,7 +62,7 @@ class Explainer:
         Args:
             line (str): the line, as the agent would type it.
         """
-        return await self._ws.explain(line, self._session_id or "")
+        return await self._explain(line, self._session_id or "")
 
     @property
     def vfs(self) -> "VfsExplainer":
@@ -92,10 +93,10 @@ class VfsExplainer:
     decides reads the restored state.
 
     Args:
-        vfs (Ops): the session's VFS facade.
+        vfs (Files): the session's ``ws.vfs``.
     """
 
-    def __init__(self, vfs: Ops) -> None:
+    def __init__(self, vfs: Files) -> None:
         self._vfs = vfs
 
     async def read(

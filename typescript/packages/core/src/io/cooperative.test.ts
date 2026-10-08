@@ -47,7 +47,6 @@ describe('cooperative processing', () => {
             stdin: source(),
             flags: {},
             cwd: '/',
-            filetypeFns: null,
             signal: controller.signal,
           },
           source,
@@ -68,7 +67,6 @@ it('preserves UTF-8 and words across bounded chunks', async () => {
     {
       stdin: ENC.encode(text),
       cwd: '/',
-      filetypeFns: null,
       flags: { lines: true, words: true, bytes: true, chars: true, max_line_length: true },
     },
     async function* () {

@@ -12,10 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.mongodb.cat import cat
 from mirage.commands.builtin.mongodb.grep import grep
-from mirage.commands.builtin.mongodb.io import IO as _IO
 from mirage.commands.builtin.mongodb.rg import rg
 from mirage.commands.builtin.mongodb.tail import tail
 from mirage.commands.builtin.mongodb.wc import wc
@@ -23,9 +22,8 @@ from mirage.commands.builtin.mongodb.wc import wc
 _MONGODB_OVERRIDES = {"cat", "grep", "rg", "tail", "wc"}
 
 COMMANDS = [
-    *make_generic_commands(
+    *generic_commands(
         "mongodb",
-        _IO,
         overrides=_MONGODB_OVERRIDES,
     ),
     cat,

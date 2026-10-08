@@ -17,12 +17,12 @@ from collections.abc import Sequence
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io import IOResult
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.errors import ArithError
 from mirage.types import PathSpec, word_text
 from mirage.utils.path import resolve_path
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import (
     COUNT_WORD_RE,
     IDENTIFIER_RE,
@@ -256,14 +256,29 @@ def refusal(cmd: str, exc: PolicyDenied) -> Result:
     )
 
 
+def readonly_line(cmd: str, name: str) -> str:
+    """The shell's own readonly refusal line, checked before the door.
+
+    ``declare``, ``local`` and ``typeset`` name themselves in it
+    (``bash: declare: R: readonly variable``); every other writer
+    refuses in the assignment's voice (``bash: R: readonly variable``).
+
+    Args:
+        cmd (str): the writer's name.
+        name (str): the frozen variable.
+    """
+    voice = f"{cmd}: " if cmd in ("declare", "local", "typeset") else ""
+    return f"bash: {voice}{name}: readonly variable"
+
+
 def readonly_refusal(cmd: str, name: str) -> Result:
-    """Render the shell's own readonly refusal, checked before the door.
+    """Render the readonly refusal (``readonly_line``) as the result.
 
     Args:
         cmd (str): builtin name for the node.
         name (str): the frozen variable.
     """
-    err = encode_text(f"bash: {name}: readonly variable\n")
+    err = encode_text(readonly_line(cmd, name) + "\n")
     return (
         None,
         IOResult(exit_code=1, stderr=err),
@@ -318,7 +333,7 @@ def is_valid_name(name: str) -> bool:
 
 
 def is_count_word(word: str) -> bool:
-    """Whether the word is a number as bash's ``legal_number`` reads it,
+    """Whether the word is a number as bash's builtins read one,
     which is what ``shift``, ``return``, ``exit``, ``break`` and
     ``continue`` accept: blanks around an optionally signed run of
     digits that fits in 64 bits.
@@ -352,7 +367,7 @@ def builtin_error(name: str, message: str) -> bytes:
 
 def numeric_operands(args: list[str]) -> list[str]:
     """The words a numeric builtin reads: a leading ``--`` ends its
-    options, as bash's ``get_numeric_arg`` skips it.
+    options, and bash skips it before it reads the number.
 
     Args:
         args (list[str]): words after the builtin name.

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RegisteredOp } from '../../ops/registry.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
 import { shiftPerformanceNow } from '../../cache/_test_util.ts'
@@ -377,18 +376,13 @@ describe('github listings respect the mount ttl', () => {
     const vfs = await vfsOf()
     const w = await wsOf(vfs, { policy: ReadPolicy.BOUNDED, ttl: 2 })
     try {
-      const glob = vfs.ops().find((op) => op.name === 'glob')
-      if (glob === undefined) throw new Error('GitHub serves no glob op')
-      w.mount('/gh').registerFns([
-        {
-          ...glob,
-          fn: async (...args) => {
-            const found = await glob.fn(...args)
-            vi.setSystemTime(Date.now() + 3000)
-            return found
-          },
-        } satisfies RegisteredOp,
-      ])
+      const mount = w.mount('/gh')
+      const glob = mount.glob.bind(mount)
+      mount.glob = async (path, index) => {
+        const found = await glob(path, index)
+        vi.setSystemTime(Date.now() + 3000)
+        return found
+      }
       expect(await out(w, 'echo /gh/*/')).toBe('/gh/docs/\n')
       vi.restoreAllMocks()
       gh.set('docs/c.txt', 'charlie\n')

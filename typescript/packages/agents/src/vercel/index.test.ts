@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { Ops } from '@struktoai/mirage-core/ops/ops'
-import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
+import { Files } from '@struktoai/mirage-core/workspace/files'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
@@ -22,9 +21,7 @@ import { mirageTools } from './index.ts'
 
 function mkWs(): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  for (const op of ram.ops()) ops.register(op)
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 }
 
 async function callTool<T>(t: unknown, input: unknown): Promise<T> {
@@ -122,7 +119,7 @@ describe('vercel mirageTools.read media', () => {
   it('reads text whose name has no extension as numbered lines, without a stat', async () => {
     const ws = mkWs()
     await ws.vfs.write('/NOTES', new TextEncoder().encode('one\ntwo\nthree\n'))
-    const stat = vi.spyOn(Ops.prototype, 'stat')
+    const stat = vi.spyOn(Files.prototype, 'stat')
     const r = await callTool<Answer>(mirageTools(ws).read, { path: '/NOTES', offset: 1, limit: 1 })
     const stats = stat.mock.calls.length
     stat.mockRestore()

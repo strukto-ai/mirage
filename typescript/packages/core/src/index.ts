@@ -29,8 +29,6 @@ export { Accessor } from './accessor/base.ts'
 export { IndexEntry } from './cache/index/config.ts'
 export type { RedisIndexConfig } from './cache/index/config.ts'
 export { RedisIndexCacheStore } from './cache/index/redis.ts'
-export type { CommandIO } from './commands/builtin/generic_bind/index.ts'
-export { streamFromBytes } from './commands/builtin/utils/wrap.ts'
 export { AIRTABLE } from './commands/cli/builtin/airtable/index.ts'
 export { DISCORD } from './commands/cli/builtin/discord/index.ts'
 export { GH } from './commands/cli/builtin/gh/index.ts'
@@ -47,7 +45,6 @@ export type { CommandFnResult } from './commands/config.ts'
 export { CommandSpec, Operand, Option, SPECS, specOf } from './commands/spec/index.ts'
 export { MemoryOAuthClientProvider } from './core/notion/client.ts'
 export { IOResult } from './io/types.ts'
-export { OpsRegistry } from './ops/registry.ts'
 export type {
   Action,
   CommandContext,
@@ -63,21 +60,9 @@ export { normalizeDatabricksVolumeConfig } from './vfs/databricks_volume/config.
 export { DevVFS } from './vfs/dev/dev.ts'
 export { DifyVFS } from './vfs/dify/dify.ts'
 export { AirtableVFS } from './vfs/airtable/airtable.ts'
-export {
-  checkDriverContract,
-  checkReadContract,
-  DriverOps,
-  type ReadFixture,
-} from './vfs/testing.ts'
-export { VFSAdapter } from './vfs/adapter.ts'
-export type {
-  NativeReadOps,
-  ReadOps,
-  WriteOps,
-  SearchOps,
-  SearchQuery,
-  DuOps,
-} from './vfs/types.ts'
+export { checkReadContract, type ReadFixture } from './vfs/testing.ts'
+export { vfsCall } from './vfs/call.ts'
+export { Effect, type SearchQuery, Target } from './vfs/types.ts'
 export { Mem0VFS } from './vfs/mem0/mem0.ts'
 export { OneDriveVFS } from './vfs/onedrive/onedrive.ts'
 export { QdrantVFS } from './vfs/qdrant/qdrant.ts'
@@ -127,5 +112,5 @@ export { ContentDriftError } from './workspace/snapshot/drift.ts'
 export { toStateDict } from './workspace/snapshot/state.ts'
 export { S3WorkspaceStateStore } from './workspace/store/s3.ts'
 export { Workspace } from './workspace/workspace/workspace.ts'
-export { Session, type SessionExecuteOptions } from './workspace/workspace/handle.ts'
+export { Session, type SessionExecuteOptions } from './workspace/workspace/workspace.ts'
 export type { MountSpec } from './workspace/workspace/workspace.ts'

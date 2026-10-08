@@ -15,6 +15,5 @@
 import { unlink } from '../../../core/gsheets/unlink.ts'
 import { VFSName } from '../../../types.ts'
 import { makeRm } from '../generic/rm_cmd.ts'
-import { IO } from './io.ts'
 
-export const GSHEETS_RM = makeRm(VFSName.GSHEETS, IO, unlink)
+export const GSHEETS_RM = makeRm(VFSName.GSHEETS, unlink)

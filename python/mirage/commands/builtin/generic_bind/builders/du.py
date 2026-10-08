@@ -22,13 +22,13 @@ from mirage.commands.builtin.generic.du import (
     ComputeSize,
     du_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
-from mirage.commands.config import CommandOpts
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountView
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
 from mirage.vfs.types import DuEntries
+from mirage.view.types import MountView
 
 
 @dataclass(slots=True)
@@ -240,4 +240,4 @@ async def du(
     )
 
 
-BUILDER = Builder("du", du)
+BUILDER = GenericCommand("du", du)

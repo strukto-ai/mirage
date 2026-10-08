@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { OpsRegistry } from '../../../ops/registry.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
@@ -33,7 +32,6 @@ async function runDate(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
   })
   if (result === null) return ''
@@ -53,7 +51,6 @@ async function runDateIo(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
   })
   if (result === null) return ['', '', 0]
@@ -117,7 +114,6 @@ async function runDateEnv(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
     env,
   })
@@ -185,7 +181,6 @@ async function runDateStderr(d: string): Promise<[string, number]> {
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin: null,
     flags: { date: d },
-    filetypeFns: null,
     cwd: '/',
   })
   if (result === null) throw new Error('date returned no result')
@@ -216,12 +211,7 @@ describe('date output formats through the shell', () => {
   async function makeWs(): Promise<Workspace> {
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
-    return new Workspace(
-      { '/ram': ram },
-      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-    )
+    return new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, shellParser: parser })
   }
 
   it.each([

@@ -27,10 +27,11 @@ import {
 import { ArithError, DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { type ShellValue, VarAttr } from '../../shell/variable.ts'
+import { appended, type ShellValue, VarAttr } from '../../shell/variable.ts'
+import { sessionEntry } from '../session/session.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
-import type { SessionView } from '../../ops/types.ts'
+import type { SessionView } from '../../view/types.ts'
 import { wordText } from '../../types.ts'
 import { assignmentStatus } from '../executor/statement.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
@@ -93,9 +94,14 @@ async function fatalIndexLiteral(
   }
 }
 
-async function assignVar(view: SessionView, key: string, value: ShellValue): Promise<void> {
+async function assignVar(
+  view: SessionView,
+  key: string,
+  value: ShellValue,
+  assigned: ReadonlySet<number | string> | null = null,
+): Promise<void> {
   try {
-    await view.set(key, value)
+    await view.set(key, value, true, assigned)
   } catch (err) {
     if (err instanceof PolicyDenied) {
       throw new DiscardSignal(encodeText(`${err.message}\n`))
@@ -209,6 +215,8 @@ export async function executeAssignment(
   // slicing the subscript out of the source.
   const key = deref(session, spelled) || spelled
   const append = node.children.some((c) => c.type === '+=')
+  // `+=` on an integer adds, element by element too (`appended`).
+  const integer = sessionEntry(session.vars, key)?.attrs.has(VarAttr.Integer) === true
   if (session.readonlyVars.has(key)) {
     // A bare assignment to a readonly variable is a variable-assignment
     // error: the rest of the line is discarded (builtins like `export`
@@ -236,26 +244,22 @@ export async function executeAssignment(
     if (heldMap !== undefined) {
       const { map, badWords } = buildAssocLiteral(heldMap, items, append)
       await assignVar(view, key, map)
-      if (badWords.length > 0) {
-        const errBytes = encodeText(
-          badWords
-            .map(
-              (word) =>
-                `bash: ${key}: '${word}': must use subscript when assigning associative array`,
-            )
-            .join('\n') + '\n',
-        )
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: errBytes }),
-          new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
-        ]
-      }
+      // A plain word in a keyed literal is dropped with a warning and the
+      // assignment still succeeds; unlike a declaration's, this voice does
+      // not quote the word (pinned on 5.2.37).
+      const errBytes = encodeText(
+        badWords
+          .map(
+            (word) =>
+              `bash: ${key}: ${word}: must use subscript when assigning associative array\n`,
+          )
+          .join(''),
+      )
       const mapCode = assignmentStatus(context.frame, subSeq)
       return [
         null,
-        new IOResult({ exitCode: mapCode }),
-        new ExecutionNode({ command: text, exitCode: mapCode }),
+        new IOResult({ exitCode: mapCode, stderr: errBytes.length > 0 ? errBytes : null }),
+        new ExecutionNode({ command: text, exitCode: mapCode, stderr: errBytes }),
       ]
     }
     let held: ShellArray | null = session.arrays[key] ?? null
@@ -312,8 +316,8 @@ export async function executeAssignment(
       // The subscript is the key: no arithmetic, `m[1+1]` writes the
       // key "1+1".
       const newMap = { ...heldMap }
-      newMap[subText] = append ? (heldMap[subText] ?? '') + val : val
-      await assignVar(view, key, newMap)
+      newMap[subText] = append ? appended(heldMap[subText] ?? '', val, integer) : val
+      await assignVar(view, key, newMap, new Set([subText]))
       const mapCode = assignmentStatus(context.frame, subSeq)
       return [
         null,
@@ -336,8 +340,8 @@ export async function executeAssignment(
       const nameText = text.slice(0, eq).replace(/\+$/, '')
       throw new DiscardSignal(encodeText(`bash: ${nameText}: bad array subscript\n`))
     }
-    arraySet(arr, idx, append ? arrayGet(arr, idx) + val : val)
-    await assignVar(view, key, arr)
+    arraySet(arr, idx, append ? appended(arrayGet(arr, idx), val, integer) : val)
+    await assignVar(view, key, arr, new Set([idx]))
     const subCode = assignmentStatus(context.frame, subSeq)
     return [
       null,
@@ -351,25 +355,18 @@ export async function executeAssignment(
     // `m=x` on an associative array writes the literal key "0" and
     // keeps every other key, as bash does.
     const newMap = { ...heldMap }
-    newMap['0'] = append ? (heldMap['0'] ?? '') + val : val
-    await assignVar(view, key, newMap)
+    newMap['0'] = append ? appended(heldMap['0'] ?? '', val, integer) : val
+    await assignVar(view, key, newMap, new Set(['0']))
   } else if (heldArr !== undefined) {
     // `a=x` writes element 0 and keeps the rest; `a+=x` appends onto
     // element 0.
     const newArr = [...heldArr]
-    arraySet(newArr, 0, append ? arrayGet(newArr, 0) + val : val)
-    await assignVar(view, key, newArr)
+    arraySet(newArr, 0, append ? appended(arrayGet(newArr, 0), val, integer) : val)
+    await assignVar(view, key, newArr, new Set([0]))
   } else {
-    const heldVar = session.vars[key]
-    let newVal: string
-    if (append && heldVar?.attrs.has(VarAttr.Integer) === true) {
-      // `n+=3` on an integer name adds: the door evaluates `old + new`,
-      // so `declare -i n=5; n+=3` stores 8, not 53.
-      newVal = `${session.env[key] ?? '0'} + (${val})`
-    } else {
-      newVal = append ? (session.env[key] ?? '') + val : val
-    }
-    await assignVar(view, key, newVal)
+    // `n+=3` on an integer name adds: `declare -i n=5; n+=3` stores 8,
+    // not 53.
+    await assignVar(view, key, append ? appended(session.env[key] ?? '', val, integer) : val)
   }
   // Reassigning OPTIND (even to its current value) restarts the getopts
   // scan, matching bash's internal char pointer.

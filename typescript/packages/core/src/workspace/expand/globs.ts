@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { childMountNames, namespaceNames } from '../../ops/namespace_view.ts'
+import { childMountNames, namespaceNames } from '../../view/namespace_view.ts'
 import { sessionVisibility } from '../../context/session_context.ts'
-import type { NamespaceLinks } from '../../ops/config.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
@@ -193,7 +193,7 @@ async function levelMatches(
   await owner.ensureReady()
   const prefix = rstripSlash(owner.prefix)
   const out: string[] = []
-  if (owner.hasOp('glob')) {
+  if (owner.answers('glob')) {
     const spec = new PathSpec({
       virtual: real,
       directory: real,
@@ -383,7 +383,7 @@ async function isDirectory(
     await owner.ensureReady()
     row =
       registry.opStat === null
-        ? await owner.executeOp('stat', real)
+        ? await owner.call('stat', real)
         : await registry.opStat(owner, PathSpec.fromStrPath(real, mountKey(real, prefix)))
   } catch (err) {
     if (isFsError(err)) return false
@@ -441,7 +441,7 @@ export async function resolveGlobs(
       const linked = !midPath && listingDir(links, directory) !== directory
       const extra =
         midPath || linked ? [] : namespaceChildren(registry, links, directory, item.pattern)
-      if (!linked && !mount.hasOp('glob') && extra.length === 0) {
+      if (!linked && !mount.answers('glob') && extra.length === 0) {
         result.push(item)
         continue
       }

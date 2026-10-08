@@ -16,7 +16,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from mirage.commands.config import CommandCatalog, RegisteredCommand, command
+from mirage.commands.config import Command, CommandCatalog, command
 from mirage.commands.spec import CommandSpec
 
 
@@ -40,7 +40,7 @@ def test_catalog_iterates_definitions_and_resolves_decorated_commands():
 
 
 def test_catalog_accepts_registered_command_values():
-    registered = RegisteredCommand(
+    registered = Command(
         name="cat", spec=CommandSpec(), vfs="s3", filetype=None, fn=_handler
     )
     catalog = CommandCatalog([registered])
@@ -67,7 +67,7 @@ def test_catalog_is_a_snapshot_of_its_source():
 
 
 def test_registered_command_is_immutable():
-    registered = RegisteredCommand(
+    registered = Command(
         name="cat", spec=CommandSpec(), vfs="s3", filetype=None, fn=_handler
     )
 
@@ -76,7 +76,7 @@ def test_registered_command_is_immutable():
 
 
 def test_with_overrides_returns_an_independent_definition():
-    original = RegisteredCommand(
+    original = Command(
         name="cat", spec=CommandSpec(), vfs="s3", filetype=None, fn=_handler
     )
 

@@ -12,12 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
+import { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import type { Command } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { HfBucketsAccessor } from '../../../accessor/hf_buckets.ts'
-import { IO } from './io.ts'
 
-export const HF_BUCKETS_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<HfBucketsAccessor>(VFSName.HF_BUCKETS, IO),
-]
+export const HF_BUCKETS_COMMANDS: readonly Command[] = [...genericCommands(VFSName.HF_BUCKETS)]

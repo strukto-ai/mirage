@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
-import { pathsScoped } from '../../../ops/namespace_view.ts'
+import { pathsScoped } from '../../../view/namespace_view.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 
 import type { SearchQuery } from '../../../vfs/types.ts'
@@ -21,7 +21,7 @@ import { IOResult } from '../../../io/types.ts'
 import { utf8Locale } from '../../../shell/bytes.ts'
 import { isEfbig, isFsError } from '../../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, CommandOpts, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 
@@ -37,7 +37,7 @@ import {
 } from '../grep_pushdown.ts'
 import { PATTERN_KEYS, matcherSyntax, patternArg } from '../grep_pattern.ts'
 import { formatRecords } from '../utils/output.ts'
-import { resolveGlobOf, type CommandIO } from './adapter.ts'
+import { resolveGlobOf } from './adapter.ts'
 
 type GenericScan = (
   paths: PathSpec[],

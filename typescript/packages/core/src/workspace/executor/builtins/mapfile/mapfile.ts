@@ -19,7 +19,7 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { arraySet, type ShellArray } from '../../../../shell/array.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
-import type { SessionView } from '../../../../ops/types.ts'
+import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { sessionView, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -116,8 +116,8 @@ export async function handleMapfile(
     arraySet(arr, index, text)
     stored++
     if (callback !== null && stored % quantum === 0) {
-      // The record is data, not source: bash builds the callback line
-      // with `sh_single_quote`, so a record reading `x; rm f` arrives as
+      // The record is data, not source: bash single-quotes it in the
+      // callback line, so a record reading `x; rm f` arrives as
       // one argument rather than running a second command.
       const io = await executeFn(`${callback} ${String(index)} ${singleQuote(text)}`, {
         sessionId: session.sessionId,

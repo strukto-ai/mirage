@@ -44,7 +44,6 @@ from mirage.commands.spec.standard import standard_request
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView, StatPath
 from mirage.policy import resolve_limit, resolve_producer
 from mirage.policy.types import HandOff
 from mirage.runtime.routing import RouteDecision
@@ -54,6 +53,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
+from mirage.view.types import NamespaceView, StatPath
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.cli import (
     CLIContext,
@@ -222,7 +222,7 @@ async def handle_command(
     """Execute a simple command.
 
     Parts are already classified: strings for text,
-    PathSpec for paths. Dispatches to mount.execute_cmd. ``execute_fn``
+    PathSpec for paths. Dispatches to mount.run_command. ``execute_fn``
     runs a line in the session, which is how find's ``-exec`` runs its
     command. ``sink`` is where a function body writes its statements.
     """

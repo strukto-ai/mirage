@@ -24,6 +24,7 @@ import { emojiList } from './emoji_list.ts'
 import { listPins } from './list_pins.ts'
 import { readMessages } from './read_messages.ts'
 import { sendMessage } from './send_message.ts'
+import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
 
 const DEC = new TextDecoder()
 
@@ -58,7 +59,7 @@ function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
 }
 
 function makeInv(config: unknown, flags: CLIInvocation['flags']): CLIInvocation {
-  return { config, argv: [], paths: [], texts: [], flags, stdin: null, env: {} }
+  return cliInvocation({ config, flags })
 }
 
 const VERBS = [

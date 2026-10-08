@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { OpKwargs } from '../../view/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { applyIo } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -23,7 +24,6 @@ import { getExtension } from '../../commands/resolve.ts'
 import { IOResult, type OpReport } from '../../io/types.ts'
 import {
   eacces,
-  erofs,
   eexist,
   einval,
   enoent,
@@ -42,19 +42,17 @@ import {
 import { type FsError } from '../../errors/types.ts'
 import { Policies, PolicyDenied } from '../../policy/index.ts'
 import type { Decisions } from '../../policy/decisions.ts'
-import { OpBoundary } from '../../ops/boundary.ts'
+import { Boundary } from '../../policy/boundary.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { CycleError, norm, parent, posixNormpath } from '../../utils/path.ts'
-import type { EntryGate } from '../../types.ts'
+import type { Visibility } from '../../types.ts'
+import type { EntryGate } from '../../policy/types.ts'
 import { record, runWithMountContext, runWithRevisions, startOp } from '../../observe/context.ts'
-import { wrapOpStream } from '../mount/mount.ts'
+import { wrapStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import type { OpsRegistry } from '../../ops/registry.ts'
-import { type OpKwargs } from '../../ops/registry.ts'
-import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
-import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
+import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import {
@@ -84,13 +82,14 @@ import {
   HIDDEN_CREATE_OPS,
   LINK_ENTRY_OPS,
   NAMESPACE_TABLE_OPS,
+  NO_FOLLOW_OPS,
   POLICY_WRITE_OPS,
   SERIAL_WRITE_OPS,
   SETATTR_KEYS,
+  STAMP_WRITE_OPS,
   XATTR_OPS,
 } from './constants.ts'
 import {
-  effectivePathMode,
   explaining,
   getCurrentSession,
   hiddenRefusal,
@@ -105,9 +104,9 @@ import { encodeText } from '../../shell/bytes.ts'
  * appending (`true >> f`): it may create the file, but it leaves an existing
  * one's times as they were. Mirrors Python's `_appends_nothing`.
  */
-function appendsNothing(opName: string, args: readonly unknown[]): boolean {
+function appendsNothing(name: string, args: readonly unknown[]): boolean {
   const data = args[0]
-  return opName === 'append' && data instanceof Uint8Array && data.byteLength === 0
+  return name === 'append' && data instanceof Uint8Array && data.byteLength === 0
 }
 
 /**
@@ -172,6 +171,26 @@ function judge(gate: EntryGate, ...paths: readonly unknown[]): void {
   for (const virtual of new Set(specs.map((p) => p.virtual))) gate.check(virtual)
 }
 
+/**
+ * A custom function's other path arguments, by position or keyword; a
+ * rename's destination is walked on its own. Mirrors Python's `_operands`.
+ */
+function operands(
+  name: string,
+  args: readonly unknown[] | undefined,
+  kwargs: Record<string, unknown> | undefined,
+): [number | string, PathSpec][] {
+  if (name === 'rename') return []
+  const found: [number | string, PathSpec][] = []
+  ;(args ?? []).forEach((value, at) => {
+    if (value instanceof PathSpec) found.push([at, value])
+  })
+  for (const [key, value] of Object.entries(kwargs ?? {})) {
+    if (value instanceof PathSpec) found.push([key, value])
+  }
+  return found
+}
+
 /** The byte window a read asked for, whole file when it asked none. */
 function readWindow(kwargs: OpKwargs | undefined): [number, number | null] {
   return [
@@ -230,17 +249,58 @@ function followOrLoop(
   }
 }
 
+/**
+ * One op on its way through the door, as the stages hand it on. Mirrors
+ * Python's `_Call`.
+ */
+interface Call {
+  readonly name: string
+  /** The op's path: walked, then followed. */
+  path: PathSpec
+  /** The path as the caller named it. */
+  readonly typed: PathSpec
+  /** A rename's walked destination. */
+  readonly dst: PathSpec | null
+  /** The op's positional arguments; the operand walk replaces path ones. */
+  args: readonly unknown[] | undefined
+  /** The op's arguments; `follow` consumes `nofollow`. */
+  kwargs: Record<string, unknown> | undefined
+  /** The session's view, read once at the door. */
+  readonly vis: Visibility | null
+  readonly ruleGate: EntryGate | null
+  readonly report: OpReport | undefined
+  readonly issuer: symbol | undefined
+  /** Whether the op acts on the final name itself. */
+  readonly noFollow: boolean
+  /**
+   * Whether policy judges the op a write: set from the op's name by the
+   * walk, and from the VFS's own declaration at admission.
+   */
+  write: boolean
+}
+
+/** Whether the caller asked for the stored bytes, no renderer. */
+function rawRead(call: Call): boolean {
+  return call.kwargs?.filetype === null
+}
+
+/** The filetype a read is rendered as, null for none. */
+function readType(call: Call): string | null {
+  const requested = call.kwargs?.filetype
+  if (requested === undefined) return getExtension(call.path.virtual)
+  return typeof requested === 'string' ? requested : null
+}
+
 /** Runs a write once the workspace admits it. */
 type AdmitWrite = <T>(write: () => Promise<T>) => Promise<T>
 
 export class Dispatcher {
   private readonly namespace: Namespace
   private readonly cache: FileCache & BaseVFS
-  private readonly opsRegistry: OpsRegistry
   private readonly policies: Policies
   // The snapshot drift queue rides along because this is the one door:
   // a strict restore's pending fingerprint checks must run before ANY
-  // op can touch a mount, and FUSE and the op facade reach here
+  // op can touch a mount, and FUSE and `ws.vfs` reach here
   // without passing Workspace.dispatch.
   private readonly drift: DriftQueue | null
   // So does the workspace's write admission, which holds a write while a
@@ -257,7 +317,6 @@ export class Dispatcher {
   constructor(
     namespace: Namespace,
     cache: FileCache & BaseVFS,
-    opsRegistry: OpsRegistry,
     policies?: Policies,
     drift?: DriftQueue,
     admitWrite?: AdmitWrite,
@@ -265,12 +324,11 @@ export class Dispatcher {
   ) {
     this.namespace = namespace
     this.cache = cache
-    this.opsRegistry = opsRegistry
     this.policies = policies ?? new Policies()
     this.drift = drift ?? null
     this.admitWrite = admitWrite ?? null
     this.decisions = decisions ?? null
-    this.reconciler = new Reconciler(cache, namespace, opsRegistry)
+    this.reconciler = new Reconciler(cache, namespace)
   }
 
   /**
@@ -281,40 +339,111 @@ export class Dispatcher {
    * still lists and stats. Null for any other op, or when the
    * namespace knows nothing at `virtual`.
    */
-  private namespaceResult(opName: string, virtual: string): string[] | FileStat | null {
+  private namespaceResult(name: string, virtual: string): string[] | FileStat | null {
     const vis = sessionVisibility()
-    if (opName === 'readdir') {
+    if (name === 'readdir') {
       return namespaceListing(vis, this.namespace.mountPrefixes(), this.namespace, virtual)
     }
-    if (opName === 'stat') {
+    if (name === 'stat') {
       return namespaceStat(vis, this.namespace.mountPrefixes(), this.namespace, virtual)
     }
     return null
   }
 
-  dispatch: DispatchFn = (opName, path, args, kwargs, report) => {
+  dispatch: DispatchFn = (name, path, args, kwargs, report) => {
     const run = (): ReturnType<DispatchFn> =>
-      this.dispatchAdmitted(opName, path, args, kwargs, report)
-    if (this.admitWrite === null || !POLICY_WRITE_OPS.has(opName)) return run()
+      this.dispatchAdmitted(name, path, args, kwargs, report)
+    if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return run()
     return this.admitWrite(run)
   }
 
-  private dispatchAdmitted: DispatchFn = async (opName, path, args, kwargs, report) => {
+  private dispatchAdmitted: DispatchFn = async (name, path, args, kwargs, report) => {
     // The caller's own mark on the op, lifted before any gate fires so
     // each one is told whose op it judges.
     const [issuer, stripped] = takeIssuer(kwargs)
     // withDispatchRuleGuard's mark, never forwarded to an op.
     const { ruleGate, ...unmarked } = (stripped ?? {}) as { ruleGate?: EntryGate | null }
     kwargs = ruleGate === undefined ? stripped : unmarked
+    await this.prepare()
+    const call = await this.walk(name, path, args, kwargs, ruleGate ?? null, report, issuer)
+    await this.refuseRename(call)
+    if (this.tableAnswers(name, call.path.virtual, call.kwargs)) {
+      return [
+        await this.tableCall(name, call.path, call.args ?? [], call.kwargs ?? {}, report, issuer),
+        new IOResult(),
+      ]
+    }
+    this.follow(call)
+    await this.walkOperands(call)
+    if (XATTR_OPS.has(name)) {
+      return [
+        await this.answerXattr(name, call.path, call.kwargs ?? {}, report, issuer),
+        new IOResult(),
+      ]
+    }
+    if (name === 'statfs') return [await this.statfs(call.path, issuer), new IOResult()]
+    const owner = this.namespace.tryMountFor(call.path.virtual)
+    const boundary = this.boundary(owner)
+    if (owner !== null) {
+      await this.refuseCrossMount(call, owner)
+      await this.admit(call, owner, boundary)
+    }
+    let resolved: [BaseVFS, PathSpec, MountMode]
+    try {
+      resolved = await this.namespace.resolve(call.path.virtual, false)
+    } catch (err) {
+      return [await this.answerUnmounted(call, err), new IOResult()]
+    }
+    const [vfs, scope, mode] = resolved
+    // resolve() above already threw for a path outside every mount, so
+    // this lookup cannot miss.
+    const mount = this.namespace.mountFor(call.path.virtual)
+    if (mount !== owner) throw ebusy(call.path.virtual)
+    if (
+      name === 'rmdir' &&
+      this.namespace.linkStatsBelow(call.path.virtual).some(([link]) => pathVisible(call.vis, link))
+    ) {
+      throw enotempty(call.path.virtual)
+    }
+    await mount.ensureReady()
+    const cached = await this.serveCached(call, mount, vfs, boundary)
+    if (cached !== null) {
+      return [cached, new IOResult({ reads: { [call.path.virtual]: cached } })]
+    }
+    const [answer, renameDst, fullArgs] = await this.callBackend(call, mount, vfs, scope, mode)
+    const result = this.filter(call, answer)
+    if (
+      (DISPATCH_WRITE_OPS.has(name) || (call.write && !POLICY_WRITE_OPS.has(name))) &&
+      !SERIAL_WRITE_OPS.has(name)
+    ) {
+      await this.settleWrite(
+        name,
+        call.path,
+        renameDst,
+        fullArgs,
+        operands(name, call.args, call.kwargs),
+      )
+    }
+    // The transfer already happened, so a limit changes what the caller
+    // receives, not what the backend moved; the report above already
+    // carries the moved count.
+    return [await boundary.complete(name, call.path, call.write, result), new IOResult()]
+  }
+
+  /**
+   * Load the namespace and run what a snapshot restore left owed.
+   *
+   * Pending fingerprint checks from a strict snapshot restore run before
+   * the op can touch a mount, whichever surface called: FUSE and `ws.vfs`
+   * come straight here, so a drain that lived any higher would let a
+   * first write clobber drifted state. drain() clears pending before it
+   * stats, so its own probes cannot recurse into it. A dry run leaves them
+   * pending, its policies' reads included: the check is no policy's
+   * answer, and the op that does run still owes it. Mirrors Python's
+   * Dispatcher._prepare.
+   */
+  private async prepare(): Promise<void> {
     await this.namespace.ensureLoaded()
-    // Pending fingerprint checks from a strict snapshot restore run
-    // before the op can touch a mount, whichever surface called: FUSE
-    // and the op facade come straight here, so a drain that lived any
-    // higher would let a first write clobber drifted state. drain()
-    // clears pending before it stats, so its own probes cannot recurse
-    // into it. A dry run leaves them pending, its policies' reads included:
-    // the check is no policy's answer, and the op that does run still owes
-    // it.
     if (this.drift?.pending === true && explaining() === null) {
       // Resolve backend IDs afresh without consulting the restored index.
       await this.drift.drain(this.namespace, async (p) => {
@@ -324,16 +453,37 @@ export class Dispatcher {
         return stat
       })
     }
-    // Hidden paths answer before anything else can: the typed path is
-    // checked so a link inside hidden space cannot be followed out of
-    // it, the followed path is re-checked so a visible link cannot
-    // lead in, and a rename destination is a create.
+  }
+
+  /**
+   * Walk the op's path, as the kernel does before a call sees it.
+   *
+   * Hidden paths answer before anything else can: the typed path is
+   * checked so a link inside hidden space cannot be followed out of it,
+   * the followed path is re-checked (`follow`) so a visible link cannot
+   * lead in, and a rename destination is a create. Every link above the
+   * final name is then followed, whatever the op does with the name:
+   * command dispatch walks the operands it classifies, and this is the
+   * same walk for every other caller (a relative word ln resolves itself,
+   * `ws.vfs`, a runtime's os.symlink), so a link made, read or
+   * removed under a linked directory lands in the directory the link
+   * names. Mirrors Python's Dispatcher._walk.
+   */
+  private async walk(
+    name: string,
+    path: PathSpec,
+    args: readonly unknown[] | undefined,
+    kwargs: Record<string, unknown> | undefined,
+    ruleGate: EntryGate | null,
+    report: OpReport | undefined,
+    issuer: symbol | undefined,
+  ): Promise<Call> {
     const vis = sessionVisibility()
     if (!pathVisible(vis, path.virtual)) {
-      throw hiddenRefusal(vis, path.virtual, HIDDEN_CREATE_OPS.has(opName))
+      throw hiddenRefusal(vis, path.virtual, HIDDEN_CREATE_OPS.has(name))
     }
     let dstArg = args?.[0]
-    if (opName === 'rename' && dstArg instanceof PathSpec && !pathVisible(vis, dstArg.virtual)) {
+    if (name === 'rename' && dstArg instanceof PathSpec && !pathVisible(vis, dstArg.virtual)) {
       throw hiddenRefusal(vis, dstArg.virtual, true)
     }
     // An operand the walk already refused (the empty name, a link loop)
@@ -348,299 +498,346 @@ export class Dispatcher {
     // dots away and reaches `f` through a missing `nope/..`, the typed
     // spelling (`dotted`) does not. A trailing slash is part of that
     // spelling: `x/` must be a directory, so a create of one is EISDIR
-    // before anything is looked up. Mirrors Python's Dispatcher.dispatch.
-    if (FILE_CREATE_OPS.has(opName) && path.dotted?.endsWith('/') === true) throw eisdir(path)
-    const renamed = opName === 'rename' && dstArg instanceof PathSpec ? dstArg : null
+    // before anything is looked up.
+    if (FILE_CREATE_OPS.has(name) && path.dotted?.endsWith('/') === true) throw eisdir(path)
+    const renamed = name === 'rename' && dstArg instanceof PathSpec ? dstArg : null
     if (path.dotted !== null || (renamed !== null && renamed.dotted !== null)) {
       const walkStat = dispatchStat(this.dispatch)
       const follow = (virtual: string): string => this.namespace.follow(virtual)
       const refusal =
-        (await dotRefusal(walkStat, path, follow, ENTRY_CREATE_OPS.has(opName))) ??
+        (await dotRefusal(walkStat, path, follow, ENTRY_CREATE_OPS.has(name))) ??
         (renamed !== null ? await dotRefusal(walkStat, renamed, follow) : null)
       if (refusal !== null) throw refusal
     }
-    // The kernel walks a path before the call sees it: every link above
-    // the final name is followed, whatever the op then does with the name.
-    // Command dispatch walks the operands it classifies; this is the same
-    // walk for every other caller (a relative word ln resolves itself, the
-    // op facade, a runtime's os.symlink), so a link made, read or removed
-    // under a linked directory lands in the directory the link names, not
-    // under a name nothing else would look up.
     const [typed, typedDst] = [path, dstArg]
-    path = this.walked(path, HIDDEN_CREATE_OPS.has(opName))
-    if (opName === 'rename' && dstArg instanceof PathSpec) {
+    path = this.walked(path, HIDDEN_CREATE_OPS.has(name))
+    if (name === 'rename' && dstArg instanceof PathSpec) {
       dstArg = this.walked(dstArg, true)
       args = [dstArg, ...(args ?? []).slice(1)]
     }
     // The command's gate judges each spelling, as handed in and as walked,
     // once both walks have answered for hidden space: here for an op on the
-    // name itself, below the follow for the rest.
-    const noFollow = NO_FOLLOW_OPS.has(opName) || kwargs?.nofollow === true
-    if (ruleGate != null && noFollow) judge(ruleGate, typed, path, typedDst, dstArg)
-    if (opName === 'rename' && dstArg instanceof PathSpec) {
-      // A rename re-anchors everything below its source while the hides
-      // stay where they are written, so hidden content would land at
-      // paths the session can see. Destroying hidden content is silent
-      // (rmR, the remnant rmdir below); relocating it into view is
-      // refused. Only a directory has anything below it to re-anchor,
-      // so a file source passes.
-      if (
-        moveReveals(vis, path.virtual, dstArg.virtual) &&
-        (await this.movedSourceIsDir(path, issuer))
-      ) {
-        throw eacces(path.virtual)
-      }
+    // name itself, in `follow` for the rest.
+    const noFollow = NO_FOLLOW_OPS.has(name) || kwargs?.nofollow === true
+    if (ruleGate !== null && noFollow) judge(ruleGate, typed, path, typedDst, dstArg)
+    return {
+      name,
+      path,
+      typed,
+      dst: name === 'rename' && dstArg instanceof PathSpec ? dstArg : null,
+      args,
+      kwargs,
+      vis,
+      ruleGate,
+      report,
+      issuer,
+      noFollow,
+      write: POLICY_WRITE_OPS.has(name),
     }
+  }
+
+  /**
+   * Refuse a rename the namespace forbids before any backend runs.
+   *
+   * A rename re-anchors everything below its source while the hides stay
+   * where they are written, so hidden content would land at paths the
+   * session can see. Destroying hidden content is silent (rmR, the remnant
+   * rmdir); relocating it into view is refused. Only a directory has
+   * anything below it to re-anchor, so a file source passes. rename(2)
+   * also replaces a destination directory only when it is empty, and the
+   * node table is half of what empty means here: a link is invisible to
+   * every backend, so a destination the backend reads as empty can still
+   * hold one. Left to the backend the rename succeeded and the purge then
+   * deleted the link with it, losing namespace state silently where POSIX
+   * promises ENOTEMPTY. Mirrors Python's Dispatcher._refuse_rename.
+   */
+  private async refuseRename(call: Call): Promise<void> {
+    const dst = call.dst
+    if (dst === null) return
     if (
-      opName === 'rename' &&
-      dstArg instanceof PathSpec &&
-      this.namespace.linkStatsBelow(dstArg.virtual).length > 0
+      moveReveals(call.vis, call.path.virtual, dst.virtual) &&
+      (await this.movedSourceIsDir(call.path, call.issuer))
     ) {
-      // rename(2) replaces a destination directory only when it is empty, and
-      // the node table is half of what empty means here: a link is invisible to
-      // every backend, so a destination the backend reads as empty can still
-      // hold one. Left to the backend the rename succeeded and the purge below
-      // then deleted the link with it, losing namespace state silently where
-      // POSIX promises ENOTEMPTY.
-      throw enotempty(dstArg.virtual)
+      throw eacces(call.path.virtual)
     }
-    if (this.tableAnswers(opName, path.virtual, kwargs)) {
-      return [
-        await this.namespaceTableOp(opName, path, args ?? [], kwargs ?? {}, report, issuer),
-        new IOResult(),
-      ]
-    }
-    // `nofollow` is the caller's AT_SYMLINK_NOFOLLOW: an op that acts on
-    // a link entry itself (chown -h writing the link's own attrs) keeps
-    // the typed path. Consumed here, never forwarded.
-    const nofollow = kwargs?.nofollow === true
-    if (nofollow) {
-      const rest = { ...kwargs }
+    if (this.namespace.linkStatsBelow(dst.virtual).length > 0) throw enotempty(dst.virtual)
+  }
+
+  /**
+   * Follow the final name, unless the op acts on the name itself.
+   *
+   * `nofollow` is the caller's AT_SYMLINK_NOFOLLOW: an op that acts on a
+   * link entry itself (chown -h writing the link's own attrs) keeps the
+   * typed path. Consumed here, never forwarded. Mirrors Python's
+   * Dispatcher._follow.
+   */
+  private follow(call: Call): void {
+    const nofollow = call.kwargs?.nofollow === true
+    if (call.kwargs !== undefined && 'nofollow' in call.kwargs) {
+      const rest = { ...call.kwargs }
       delete rest.nofollow
-      kwargs = rest
+      call.kwargs = rest
     }
-    let p = path
-    if (!NO_FOLLOW_OPS.has(opName) && !nofollow) {
-      const followed = followOrLoop(this.namespace, path, true)
-      if (followed !== path.virtual) {
-        p = PathSpec.fromStrPath(followed)
-        if (!pathVisible(vis, p.virtual)) {
-          throw hiddenRefusal(vis, p.virtual, HIDDEN_CREATE_OPS.has(opName))
+    const walked = call.path
+    if (!NO_FOLLOW_OPS.has(call.name) && !nofollow) {
+      const followed = followOrLoop(this.namespace, call.path, true)
+      if (followed !== call.path.virtual) {
+        call.path = PathSpec.fromStrPath(followed)
+        if (!pathVisible(call.vis, call.path.virtual)) {
+          throw hiddenRefusal(call.vis, call.path.virtual, HIDDEN_CREATE_OPS.has(call.name))
         }
       }
     }
-    if (ruleGate != null && !noFollow) judge(ruleGate, typed, path, p)
-    if (XATTR_OPS.has(opName)) {
-      return [await this.xattrOp(opName, p, kwargs ?? {}, report, issuer), new IOResult()]
-    }
-    if (opName === 'statfs') return [await this.statfs(p, issuer), new IOResult()]
-    const resolvedOwner = this.namespace.tryMountFor(p.virtual)
-    const opWrite = POLICY_WRITE_OPS.has(opName)
-    const boundary = this.boundary(resolvedOwner)
-    if (resolvedOwner !== null) {
-      // A mount is a filesystem boundary: rename(2) moves a name within one
-      // and answers EXDEV across two, before any permission is weighed, so
-      // `mv` falls back to copy and unlink instead of the source's backend
-      // taking the destination for one of its keys. It resolves both parent
-      // directories first, so a missing one is ENOENT (ENOTDIR through a
-      // file) ahead of EXDEV.
-      if (
-        opName === 'rename' &&
-        dstArg instanceof PathSpec &&
-        this.namespace.tryMountFor(dstArg.virtual) !== resolvedOwner
-      ) {
-        throw (
-          (await this.parentRefusal(p, issuer)) ??
-          (await this.parentRefusal(dstArg, issuer)) ??
-          exdev(p)
-        )
+    if (call.ruleGate !== null && !call.noFollow)
+      judge(call.ruleGate, call.typed, walked, call.path)
+  }
+
+  /**
+   * Walk and follow each other path argument the way the path is: the same
+   * hides, spelling checks and rule gate apply, and the followed spelling
+   * replaces it. Mirrors Python's Dispatcher._walk_operands.
+   */
+  private async walkOperands(call: Call): Promise<void> {
+    for (const [at, typed] of operands(call.name, call.args, call.kwargs)) {
+      const other = await this.walk(call.name, typed, [], {}, call.ruleGate, undefined, call.issuer)
+      this.follow(other)
+      const landed = other.path
+      if (typeof at === 'number') {
+        call.args = (call.args ?? []).map((value, i) => (i === at ? landed : value))
+      } else {
+        call.kwargs = { ...call.kwargs, [at]: landed }
       }
-      // Admission policies fire at the door, before the warm-cache early
-      // return below: a cached read must be refused exactly like a cold
-      // one, or the cache becomes a policy bypass. This dispatcher is the
-      // one door in TypeScript: shell internals, programmatic access, the
-      // op facade, and FUSE all end up here.
-      await boundary.admit(
-        opName,
-        p,
-        opWrite,
-        {
-          create: HIDDEN_CREATE_OPS.has(opName),
-          subtree: opName === 'rename',
-          final: opName !== 'rename',
-        },
-        issuer,
+    }
+  }
+
+  /**
+   * Answer EXDEV for a rename between two mounts.
+   *
+   * A mount is a filesystem boundary: rename(2) moves a name within one and
+   * answers EXDEV across two, before any permission is weighed, so `mv`
+   * falls back to copy and unlink instead of the source's backend taking
+   * the destination for one of its keys. It resolves both parent
+   * directories first, so a missing one is ENOENT (ENOTDIR through a file)
+   * ahead of EXDEV. Mirrors Python's Dispatcher._refuse_cross_mount.
+   */
+  private async refuseCrossMount(call: Call, owner: MountEntry): Promise<void> {
+    // A function runs on one backend, so every path it is handed must be
+    // on the mount that serves it.
+    for (const [, other] of operands(call.name, call.args, call.kwargs)) {
+      if (this.namespace.tryMountFor(other.virtual) !== owner) throw exdev(other)
+    }
+    const dst = call.dst
+    if (dst === null || this.namespace.tryMountFor(dst.virtual) === owner) return
+    throw (
+      (await this.parentRefusal(call.path, call.issuer)) ??
+      (await this.parentRefusal(dst, call.issuer)) ??
+      exdev(call.path)
+    )
+  }
+
+  /**
+   * Run admission for an op on a mounted path.
+   *
+   * Admission policies fire at the door, before the warm-cache early
+   * return: a cached read must be refused exactly like a cold one, or the
+   * cache becomes a policy bypass. This dispatcher is the one door in
+   * TypeScript: shell internals, programmatic access, `ws.vfs`, and
+   * FUSE all end up here. A rename's destination is a create there: it
+   * passes the same gate as the source, so a path rule holds against
+   * moving into a protected scope (or onto the directory that holds one)
+   * the way it holds against writing there, under the mode of the mount
+   * that owns it. Mirrors Python's Dispatcher._admit.
+   */
+  private async admit(call: Call, mount: MountEntry, boundary: Boundary): Promise<void> {
+    // A function the VFS declares a write is judged as one, whatever its
+    // name: the POSIX names are known here, a custom one only to the VFS
+    // that defines it.
+    call.write = call.write || mount.writes(call.name)
+    await boundary.admit(
+      call.name,
+      call.path,
+      call.write,
+      {
+        create: HIDDEN_CREATE_OPS.has(call.name),
+        subtree: call.name === 'rename',
+        final: call.name !== 'rename',
+      },
+      call.issuer,
+    )
+    if (call.dst !== null) {
+      await this.boundary(this.namespace.tryMountFor(call.dst.virtual)).admit(
+        call.name,
+        call.dst,
+        true,
+        { create: true, subtree: true },
+        call.issuer,
       )
-      // A rename's destination is a create there: it passes the same gate
-      // as the source, so a path rule holds against moving into a
-      // protected scope (or onto the directory that holds one) the way it
-      // holds against writing there, under the mode of the mount that
-      // owns it.
-      if (opName === 'rename' && dstArg instanceof PathSpec) {
-        await this.boundary(this.namespace.tryMountFor(dstArg.virtual)).admit(
-          opName,
-          dstArg,
-          true,
-          { create: true, subtree: true },
-          issuer,
-        )
-      }
     }
-    let resolved: [BaseVFS, PathSpec, MountMode]
-    try {
-      resolved = await this.namespace.resolve(p.virtual, false)
-    } catch (err) {
-      // No mount serves the path, but the namespace may still know a
-      // directory there (a deeper mount, a link). No mount means no
-      // cache to keep straight and no owning prefix (the gates see ''),
-      // but admission still fires: a policy that bounds readdir or stat
-      // by path must cover the synthetic answer too. A real but
-      // ungranted mount is the same case: a granted mount below it
-      // already put this path's name in a listing, so walking down to
-      // the grant must answer, and the merged names are
-      // session-filtered individually, so nothing of the mount's own
-      // content leaks.
-      // A setattr with no owning mount lands in the overlay (a link
-      // above every mount still takes chown -h), gated exactly like
-      // the mounted overlay write; an ungranted mount is not that
-      // case and keeps the canonical denial.
-      const bare = this.boundary(null)
-      if (opName === 'setattr' && isMissingPath(err)) {
-        await bare.admit(opName, p, true, {}, issuer)
-        const stored = await this.overlaySetattr(p, kwargs ?? {})
-        memoryAnswered(report)
-        await bare.complete(opName, p, true, stored)
-        return [stored, new IOResult()]
-      }
-      const eligible = isMissingPath(err)
-      let fallback = eligible ? this.namespaceResult(opName, p.virtual) : null
-      if (fallback === null) throw err
-      if (opName === 'readdir' && Array.isArray(fallback)) {
-        fallback = visibleEntries(fallback, p.virtual)
-      }
-      const fallbackWrite = POLICY_WRITE_OPS.has(opName)
-      await bare.admit(opName, p, fallbackWrite, {}, issuer)
-      // A synthetic namespace answer (a directory that exists only
-      // because a mount or a link sits below it) contacts nothing, so
-      // attributing it to the mount that lexically owns the path would
-      // invent a network op against that backend. Stamped before the
-      // gate and the cap, so whatever they throw cannot erase it.
-      memoryAnswered(report)
-      const gated = await bare.complete(opName, p, fallbackWrite, fallback)
-      return [gated, new IOResult()]
+    for (const [, other] of operands(call.name, call.args, call.kwargs)) {
+      await boundary.admit(call.name, other, call.write, {}, call.issuer)
     }
-    const [vfs, scope, mode] = resolved
-    // resolve() above already threw for a path outside every mount, so
-    // this lookup cannot miss.
-    const mount = this.namespace.mountFor(p.virtual)
-    if (mount !== resolvedOwner) throw ebusy(p.virtual)
-    const mountPrefix = mount.prefix
+  }
+
+  /**
+   * Answer an op on a path no mount serves.
+   *
+   * The namespace may still know a directory there (a deeper mount, a
+   * link). No mount means no cache to keep straight and no owning prefix
+   * (the gates see ''), but admission still fires: a policy that bounds
+   * readdir or stat by path must cover the synthetic answer too. A real but
+   * ungranted mount is the same case: a granted mount below it already put
+   * this path's name in a listing, so walking down to the grant must
+   * answer, and the merged names are session-filtered individually, so
+   * nothing of the mount's own content leaks. A setattr with no owning
+   * mount lands in the overlay (a link above every mount still takes
+   * chown -h), gated exactly like the mounted overlay write; an ungranted
+   * mount is not that case and keeps the canonical denial. Mirrors Python's
+   * Dispatcher._answer_unmounted.
+   */
+  private async answerUnmounted(call: Call, err: unknown): Promise<unknown> {
+    const bare = this.boundary(null)
+    if (call.name === 'setattr' && isMissingPath(err)) {
+      await bare.admit(call.name, call.path, true, {}, call.issuer)
+      const stored = await this.overlaySetattr(call.path, call.kwargs ?? {})
+      memoryAnswered(call.report)
+      await bare.complete(call.name, call.path, true, stored)
+      return stored
+    }
+    let fallback = isMissingPath(err) ? this.namespaceResult(call.name, call.path.virtual) : null
+    if (fallback === null) throw err
+    if (call.name === 'readdir' && Array.isArray(fallback)) {
+      fallback = visibleEntries(fallback, call.path.virtual)
+    }
+    await bare.admit(call.name, call.path, call.write, {}, call.issuer)
+    // A synthetic namespace answer (a directory that exists only because a
+    // mount or a link sits below it) contacts nothing, so attributing it to
+    // the mount that lexically owns the path would invent a network op
+    // against that backend. Stamped before the gate and the cap, so
+    // whatever they throw cannot erase it.
+    memoryAnswered(call.report)
+    return bare.complete(call.name, call.path, call.write, fallback)
+  }
+
+  /** Whether a filetype renderer answers this read on `vfs`; asked each
+   * time, since a renderer can land while the read runs. */
+  private rendersRead(call: Call, mount: MountEntry): boolean {
+    return mount.renders(readType(call))
+  }
+
+  /**
+   * Answer a read from the file cache, or null to read the backend.
+   *
+   * The file cache holds what commands read, keyed on the path alone. A
+   * raw read, or a read through a filetype renderer (whoever registered
+   * it), asks for a different value under the same key, so it is neither
+   * served from that cache nor kept in it. The cache holds the whole
+   * object, so a ranged read is answered by slicing it, never by handing
+   * back the whole file: the window is what the caller asked for instead
+   * of the file, and git reads pack indexes this way. sliceWindow is the
+   * same helper the ranged read op falls back to, so warm and cold agree.
+   * Mirrors Python's Dispatcher._serve_cached.
+   */
+  private async serveCached(
+    call: Call,
+    mount: MountEntry,
+    vfs: BaseVFS,
+    boundary: Boundary,
+  ): Promise<Uint8Array | null> {
+    if (!vfs.cachesReads || rawRead(call) || !DISPATCH_READ_OPS.has(call.name)) return null
+    const cached = await this.cache.get(call.path.virtual)
     if (
-      opName === 'rmdir' &&
-      this.namespace.linkStatsBelow(p.virtual).some(([link]) => pathVisible(vis, link))
+      cached === null ||
+      !(await this.reconciler.mayServeCached(mount, call.path.virtual)) ||
+      this.rendersRead(call, mount) ||
+      mount.retiring ||
+      this.namespace.tryMountFor(call.path.virtual) !== mount
     ) {
-      throw enotempty(p.virtual)
+      return null
     }
-    const caches = vfs.cachesReads
-    // The file cache holds what commands read, keyed on the path alone. A
-    // raw read, or a read through a filetype renderer (whoever registered
-    // it), asks for a different value under the same key, so it is neither
-    // served from that cache nor kept in it. The renderer read still gets
-    // the freshness check, so a path the backend reports gone fails.
-    // Mirrors Python's Dispatcher.dispatch.
-    await mount.ensureReady()
-    const raw = kwargs?.filetype === null
+    mount.refuseKeywords(call.name, call.kwargs ?? {})
+    const [offset, size] = readWindow(call.kwargs)
+    const window = sliceWindow(cached, offset, size)
+    // Nothing crossed the network, and neither a gate nor a hard cap leaves
+    // the caller able to tell: without the stamp a refused warm read is
+    // recorded against the backend and counted as traffic that never
+    // happened.
+    memoryAnswered(call.report, window.byteLength)
+    return (await boundary.complete(call.name, call.path, call.write, window)) as Uint8Array
+  }
+
+  /**
+   * The cache manager a cold read fills, or null to keep nothing.
+   *
+   * A cold read keeps the whole file it fetched for the next reader,
+   * through the mount's own manager, the one a command's read fills: a
+   * write racing the fetch retires its generation, so the bytes it read
+   * are not kept. A ranged read comes from the store only where the store
+   * can serve one; elsewhere the read op would fetch the whole file and
+   * slice it for every range, so the whole file is read once, kept, and
+   * each range sliced from it. The op is resolved only once the mount is
+   * ready, so a renderer can land after this check; the fill asks again
+   * before it keeps anything. Mirrors Python's Dispatcher._filler.
+   */
+  private filler(call: Call, mount: MountEntry, vfs: BaseVFS): CacheManager | null {
+    const [offset, size] = readWindow(call.kwargs)
+    const whole = offset === 0 && size === null
+    return vfs.cachesReads &&
+      !rawRead(call) &&
+      DISPATCH_READ_OPS.has(call.name) &&
+      size !== 0 &&
+      (whole || !mount.readsRanges(call.path.virtual)) &&
+      !this.rendersRead(call, mount)
+      ? mount.cacheManager
+      : null
+  }
+
+  /**
+   * Run the op on its mount and stamp what it moved.
+   *
+   * Returns the op's answer with the rename destination and the arguments
+   * the backend received, which the write's settling reads. Mirrors
+   * Python's Dispatcher._call.
+   */
+  private async callBackend(
+    call: Call,
+    mount: MountEntry,
+    vfs: BaseVFS,
+    scope: PathSpec,
+    mode: MountMode,
+  ): Promise<[unknown, PathSpec | null, readonly unknown[]]> {
+    const { name, path: p, kwargs, report } = call
+    const mountPrefix = mount.prefix
+    const filler = this.filler(call, mount, vfs)
     const filetype = getExtension(p.virtual)
-    const requested = kwargs?.filetype
-    const readType =
-      requested === undefined ? filetype : typeof requested === 'string' ? requested : null
-    const rendersRead = (): boolean =>
-      readType !== null && this.opsRegistry.find('read', vfs, readType) !== null
     const [readOffset, readSize] = readWindow(kwargs)
     const whole = readOffset === 0 && readSize === null
-    if (caches && !raw && DISPATCH_READ_OPS.has(opName)) {
-      const cached = await this.cache.get(p.virtual)
-      if (
-        cached !== null &&
-        (await this.reconciler.mayServeCached(mount, p.virtual)) &&
-        !rendersRead() &&
-        !mount.retiring &&
-        this.namespace.tryMountFor(p.virtual) === mount
-      ) {
-        // The cache holds the whole object, so a ranged read is answered
-        // by slicing it, never by handing back the whole file: the
-        // window is what the caller asked for instead of the file, and
-        // git reads pack indexes this way. sliceWindow is the same
-        // helper the ranged read op falls back to, so warm and cold
-        // agree. Mirrors Python's Dispatcher.dispatch.
-        const window = sliceWindow(cached, readOffset, readSize)
-        // Nothing crossed the network, and neither a gate nor a hard
-        // cap leaves the caller able to tell: without the stamp a
-        // refused warm read is recorded against the backend and counted
-        // as traffic that never happened.
-        memoryAnswered(report, window.byteLength)
-        const served = (await boundary.complete(opName, p, opWrite, window)) as Uint8Array
-        return [served, new IOResult({ reads: { [p.virtual]: served } })]
-      }
-    }
-    // A cold read keeps the whole file it fetched for the next reader,
-    // through the mount's own manager, the one a command's read fills: a
-    // write racing the fetch retires its generation, so the bytes it read
-    // are not kept. A ranged read comes from the store only where the store
-    // can serve one; elsewhere the read op would fetch the whole file and
-    // slice it for every range, so the whole file is read once, kept, and
-    // each range sliced from it. The op is resolved only once the mount is
-    // ready, so a renderer can land after this check; the fill asks again
-    // before it keeps anything. Mirrors Python's Dispatcher.dispatch.
-    const filler =
-      caches &&
-      !raw &&
-      DISPATCH_READ_OPS.has(opName) &&
-      readSize !== 0 &&
-      (whole || !this.opsRegistry.readsRanges(vfs, filetype)) &&
-      !rendersRead()
-        ? mount.cacheManager
-        : null
-    if (this.opsRegistry.find(opName, vfs)?.write === true) {
-      if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
-        throw erofs(p, `mount at '${p.virtual}' is read-only`)
-      }
-      // A rename mutates its destination too, so both endpoints answer.
-      const wDst = opName === 'rename' && args?.[0] instanceof PathSpec ? args[0] : null
-      if (wDst !== null && effectivePathMode(wDst.virtual, mountPrefix, mode) === MountMode.READ) {
-        throw erofs(wDst, `mount at '${wDst.virtual}' is read-only`)
-      }
-    }
     // Ops registered under a rendered filetype (gdocs/gsheets/gslides/
     // gmail reads) resolve by the path's extension; Python reaches them
-    // because its dispatcher routes through Mount.execute_op, which
+    // because its dispatcher routes through Mount.call, which
     // stamps the filetype. Stamp it here the same way.
+    // Every path argument beside the path (a rename's destination, a
+    // custom function's other paths) is addressed against the same mount.
+    const prefix = rstripSlash(mountPrefix)
+    const keyed = (value: unknown): unknown =>
+      value instanceof PathSpec
+        ? new PathSpec({
+            virtual: value.virtual,
+            directory: value.virtual.slice(0, value.virtual.lastIndexOf('/')) || '/',
+            vfsPath: mountKey(value.virtual, prefix),
+          })
+        : value
     const fullKwargs: OpKwargs = {
-      ...(kwargs ?? {}),
+      ...Object.fromEntries(Object.entries(kwargs ?? {}).map(([key, v]) => [key, keyed(v)])),
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
     }
-    let fullArgs = args ?? []
-    const renameDst = opName === 'rename' && fullArgs[0] instanceof PathSpec ? fullArgs[0] : null
-    if (renameDst !== null) {
-      // Ops.rename addresses both endpoints against the source's mount,
-      // mirroring the Python dispatcher: a caller-supplied dst built
-      // from the virtual path alone would otherwise reach the backend
-      // untranslated.
-      fullArgs = [
-        new PathSpec({
-          virtual: renameDst.virtual,
-          directory: renameDst.virtual.slice(0, renameDst.virtual.lastIndexOf('/')) || '/',
-          vfsPath: mountKey(renameDst.virtual, rstripSlash(mountPrefix)),
-        }),
-        ...fullArgs.slice(1),
-      ]
-    }
+    const renameDst = name === 'rename' && call.args?.[0] instanceof PathSpec ? call.args[0] : null
+    const fullArgs = (call.args ?? []).map(keyed)
     // Per-op command limits bind to the executing (post-follow)
     // mount, and the timeout window covers only the backend op — cache
     // probes and post-write invalidation stay outside the budget —
-    // mirroring Python's Mount.execute_op.
-    const opOverride = mount.commandLimits.get(opName) ?? null
+    // mirroring Python's Mount.call.
+    const opOverride = mount.commandLimits.get(name) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
     let result
     try {
@@ -649,27 +846,27 @@ export class Dispatcher {
           const answer = await runWithMountContext(
             () =>
               runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () => {
-                const call = Promise.resolve(
-                  opName === 'setattr'
+                const pending = Promise.resolve(
+                  name === 'setattr'
                     ? this.applySetattr(mount, vfs, scope, p, opKwargs)
-                    : this.opsRegistry.call(opName, vfs, vfs.accessor, scope, fullArgs, opKwargs),
+                    : mount.callKeyed(name, scope, fullArgs, opKwargs),
                 )
-                onCall?.(call)
-                return runWithTimeout(call, opTimeout, opName)
+                onCall?.(pending)
+                return runWithTimeout(pending, opTimeout, name)
               }),
             mount.mountId,
           )
-          return wrapOpStream(answer, mount.mountId, mount.activity)
+          return wrapStream(answer, mount.mountId, mount.activity)
         })
       if (filler !== null) {
         const kept = await filler.fill(
           p,
           () => run(wholeRead(fullKwargs)),
-          () => !rendersRead(),
+          () => !this.rendersRead(call, mount),
         )
         result =
           whole || !(kept instanceof Uint8Array) ? kept : sliceWindow(kept, readOffset, readSize)
-      } else if (SERIAL_WRITE_OPS.has(opName)) {
+      } else if (SERIAL_WRITE_OPS.has(name)) {
         // Held by the store's own object, so one store mounted twice is one
         // file, and a rename holds both of its names, taken in one order so
         // two renames between the same pair cannot deadlock. What the write
@@ -677,19 +874,18 @@ export class Dispatcher {
         // attributes) changes under the same hold: a chain of renames
         // finishing out of order would move one name's attributes onto
         // another.
-        const prefix = rstripSlash(mountPrefix)
         const keys = [...new Set([p.virtual, ...(renameDst !== null ? [renameDst.virtual] : [])])]
-          .map((name) => `${String(this.storeId(vfs))}:${mountKey(name, prefix)}`)
+          .map((virtual) => `${String(this.storeId(vfs))}:${mountKey(virtual, prefix)}`)
           .sort(compareCodePoints)
         result = await this.holdWrite(
           keys,
           opTimeout,
-          opName,
-          `${opName} ${p.virtual}`,
+          name,
+          `${name} ${p.virtual}`,
           (onCall) => run(fullKwargs, onCall),
           async (value) => {
             served(report, value)
-            await this.settleWrite(opName, p, renameDst, fullArgs)
+            await this.settleWrite(name, p, renameDst, fullArgs, operands(name, call.args, kwargs))
           },
         )
       } else {
@@ -697,14 +893,14 @@ export class Dispatcher {
       }
     } catch (err) {
       const code = (err as { code?: string }).code
-      if (opName === 'rmdir' && (code === 'ENOTEMPTY' || code === 'EEXIST')) {
-        await this.rmdirRemnants(vfs, scope, mountPrefix, mode, err, issuer)
+      if (name === 'rmdir' && (code === 'ENOTEMPTY' || code === 'EEXIST')) {
+        await this.rmdirRemnants(vfs, scope, mountPrefix, mode, err, call.issuer)
         result = null
       } else {
         const fallback =
-          isMissingPath(err) || isEnotdir(err) ? this.namespaceResult(opName, p.virtual) : null
+          isMissingPath(err) || isEnotdir(err) ? this.namespaceResult(name, p.virtual) : null
         if (fallback === null) {
-          await this.reconciler.onOpMissing(mount, opName, p.virtual, err)
+          await this.reconciler.onEnoent(mount, name, p.virtual, err)
           throw err
         }
         result = fallback
@@ -715,23 +911,33 @@ export class Dispatcher {
     // cap do next: stamped here so a failure in any of them cannot
     // erase a transfer the backend already made.
     served(report, result)
-    if (opName === 'readdir' && Array.isArray(result)) {
-      result = visibleEntries(
-        mergeReaddir(vis, result, this.namespace.mountPrefixes(), this.namespace, p.virtual),
-        p.virtual,
+    return [result, renameDst, fullArgs]
+  }
+
+  /**
+   * Merge the namespace into a backend answer and drop hidden names.
+   *
+   * A listing gains the child mounts and links the namespace holds below
+   * it and loses every name the session hides; a stat gains the attribute
+   * overlay recorded at its path. Mirrors Python's Dispatcher._filter.
+   */
+  private filter(call: Call, result: unknown): unknown {
+    if (call.name === 'readdir' && Array.isArray(result)) {
+      return visibleEntries(
+        mergeReaddir(
+          call.vis,
+          result,
+          this.namespace.mountPrefixes(),
+          this.namespace,
+          call.path.virtual,
+        ),
+        call.path.virtual,
       )
     }
-    if (DISPATCH_WRITE_OPS.has(opName) && !SERIAL_WRITE_OPS.has(opName)) {
-      await this.settleWrite(opName, p, renameDst, fullArgs)
+    if (call.name === 'stat' && result instanceof FileStat) {
+      return mergeOverlayStat(this.namespace.metaFor(call.path.virtual), result)
     }
-    if (opName === 'stat' && result instanceof FileStat) {
-      result = mergeOverlayStat(this.namespace.metaFor(p.virtual), result)
-    }
-    // The transfer already happened, so a limit changes what the caller
-    // receives, not what the backend moved; the report above already
-    // carries the moved count.
-    result = await boundary.complete(opName, p, opWrite, result)
-    return [result, new IOResult()]
+    return result
   }
 
   /**
@@ -752,7 +958,7 @@ export class Dispatcher {
    * Args:
    *   keys: the names to hold, in the one order every writer takes them.
    *   timeout: the op's timeout in seconds, or null for none.
-   *   opName: the op, for the timeout's error.
+   *   name: the function, for the timeout's error.
    *   label: the op and path, for a late failure's report.
    *   call: runs the op, handing over the store's own call once it starts.
    *   after: the bookkeeping, run while the caller still waits.
@@ -760,7 +966,7 @@ export class Dispatcher {
   private async holdWrite(
     keys: readonly string[],
     timeout: number | null,
-    opName: string,
+    name: string,
     label: string,
     call: (onCall: (storeCall: Promise<unknown>) => void) => Promise<unknown>,
     after: (value: unknown) => Promise<void>,
@@ -813,7 +1019,7 @@ export class Dispatcher {
       value = await runWithTimeout(
         entered.then(() => answer),
         timeout,
-        opName,
+        name,
       )
     } catch (err) {
       if (turn.started && !turn.settled) turn.late = true
@@ -833,21 +1039,23 @@ export class Dispatcher {
    * Dispatcher._settle_write.
    */
   private async settleWrite(
-    opName: string,
+    name: string,
     p: PathSpec,
     renameDst: PathSpec | null,
     args: readonly unknown[],
+    others: readonly [number | string, PathSpec][],
   ): Promise<void> {
-    const opened = appendsNothing(opName, args)
-    const observed = STAMP_WRITE_OPS.has(opName) && !opened ? Date.now() / 1000 : null
+    const opened = appendsNothing(name, args)
+    const observed = STAMP_WRITE_OPS.has(name) && !opened ? Date.now() / 1000 : null
     await this.invalidateAfterWriteByPath(p.virtual, observed, !opened)
-    if (opName === 'unlink' || opName === 'rmdir') {
+    for (const [, other] of others) await this.invalidateAfterWriteByPath(other.virtual)
+    if (name === 'unlink' || name === 'rmdir') {
       // The name no longer holds that file, so what was set on it
       // (overlay mode and owner, extended attributes) goes with it, as
       // the shell's rm already drops it: a file created there next
       // starts bare on every surface.
       await this.namespace.dropOverlay(p.virtual)
-      if (opName === 'rmdir') {
+      if (name === 'rmdir') {
         // The link check ran before the backend was asked, so a visible
         // link below now was created since: it is younger than this
         // rmdir, lands after it in the serial order (a link synthesizes
@@ -921,8 +1129,8 @@ export class Dispatcher {
    * prefix and mode, or for a path above every mount an empty prefix and
    * full write, governed by `/` (`MountModePolicy`). Mirrors Python's
    * Dispatcher._boundary. */
-  private boundary(mount: MountEntry | null): OpBoundary {
-    return new OpBoundary(
+  private boundary(mount: MountEntry | null): Boundary {
+    return new Boundary(
       this.policies,
       mount?.prefix ?? '',
       mount?.mode ?? MountMode.WRITE,
@@ -933,32 +1141,32 @@ export class Dispatcher {
 
   /**
    * The door's own channel for internal walks: the TS twin of Python's
-   * Mount.execute_op plus the dispatcher-side duties around it. The
+   * Mount.call plus the dispatcher-side duties around it. The
    * same mode fence, index stamping and mount-prefix context normal
    * dispatch applies, plus the boundary's admission and completion for
-   * writes (Python's `_MountChannel` holds the same `OpBoundary`) and the
-   * dispatcher's own write invalidation, because raw registry calls
-   * run outside the cache context dispatch establishes, so the cores'
+   * writes (Python's `_MountChannel` holds the same `Boundary`) and the
+   * dispatcher's own write invalidation, because a raw mount call
+   * runs outside the cache context dispatch establishes, so the cores'
    * invalidation cannot land. Invalidation runs even when the op
    * fails: a missing-path failure means the tree changed under the
    * walk, and the walk's own earlier listing is exactly the entry that
    * must not survive. Only the visibility filter stays off, which is
    * what lets a remnant walk see hidden entries. Every internal
-   * registry call in this class routes through here; a bare
-   * opsRegistry.call outside dispatch is a bug.
+   * backend call in this class routes through here; a bare
+   * `callKeyed` outside dispatch is a bug.
    */
   private async fencedCall(
     vfs: BaseVFS,
     mountPrefix: string,
     mode: MountMode,
-    opName: string,
+    name: string,
     spec: PathSpec,
     issuer?: symbol,
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     const mount = this.namespace.mountFor(spec.virtual)
-    const write = this.opsRegistry.find(opName, vfs)?.write === true
-    const boundary = new OpBoundary(this.policies, mountPrefix, mode, sessionId(), this.decisions)
+    const write = mount.writes(name)
+    const boundary = new Boundary(this.policies, mountPrefix, mode, sessionId(), this.decisions)
     if (write) {
       // The same pre-vfs admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
@@ -968,26 +1176,26 @@ export class Dispatcher {
       // caller folds the denial into its original refusal, so a
       // policy's protection of a hidden path never surfaces as its own
       // denial.
-      await boundary.admit(opName, spec, true, { checkHidden: false }, issuer)
+      await boundary.admit(name, spec, true, { checkHidden: false }, issuer)
     }
     // The fence reruns backend ops outside `dispatch`, so the revision
     // pins have to ride here as on the main path above, or a cascade
     // read answers from the wrong version of a revision-pinned mount.
-    // Python's twin gets both bindings from `Mount.execute_op`.
+    // Python's twin gets both bindings from `Mount.call`.
     await mount.ensureReady()
     try {
       const result = await mount.use(async () => {
         const answer = await runWithMountContext(
           () =>
             runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
-              this.opsRegistry.call(opName, vfs, vfs.accessor, spec, [], {
+              mount.callKeyed(name, spec, [], {
                 ...this.indexKwargs(mount),
                 ...kwargs,
               }),
             ),
           mount.mountId,
         )
-        return wrapOpStream(answer, mount.mountId, mount.activity)
+        return wrapStream(answer, mount.mountId, mount.activity)
       })
       // A deletion is not completed through postVfs, which could only
       // refuse after the entry is gone and strand the cascade.
@@ -1004,7 +1212,7 @@ export class Dispatcher {
    * path already. The path's filetype is stamped as dispatch stamps it,
    * so an op registered for one filetype answers here too. A
    * trailing-slash glob classifies a match with it, the twin of Python's
-   * `owner.execute_op("stat")`, so a trailing-slash glob and `stat` read
+   * `owner.call("stat")`, so a trailing-slash glob and `stat` read
    * the same op table.
    */
   opStat(mount: MountEntry, path: PathSpec): Promise<unknown> {
@@ -1161,13 +1369,13 @@ export class Dispatcher {
   }
 
   private tableAnswers(
-    opName: string,
+    name: string,
     virtual: string,
     kwargs: Record<string, unknown> | undefined,
   ): boolean {
-    if (NAMESPACE_TABLE_OPS.has(opName)) return true
-    if (!LINK_ENTRY_OPS.has(opName)) return false
-    if (opName === 'stat' && kwargs?.nofollow !== true) return false
+    if (NAMESPACE_TABLE_OPS.has(name)) return true
+    if (!LINK_ENTRY_OPS.has(name)) return false
+    if (name === 'stat' && kwargs?.nofollow !== true) return false
     return this.namespace.isLink(virtual)
   }
 
@@ -1180,7 +1388,7 @@ export class Dispatcher {
    * (the same ownership rule the link read filter uses), session grants
    * and both gates run, and the write leaves an OpRecord — a scoped
    * kernel mount refuses exactly like a scoped shell. The turf's mode
-   * gates the write too (`MountModePolicy` at the `OpBoundary`), so a
+   * gates the write too (`MountModePolicy` at the `Boundary`), so a
    * read-only mount or grant answers EROFS for a link exactly as for a
    * file; a link above every mount is bare namespace structure, gated
    * with an empty prefix and governed by `/`. A rename's
@@ -1189,8 +1397,8 @@ export class Dispatcher {
    * `stat` of a path the node table holds a link for. Mirrors Python's
    * Dispatcher._namespace_table_op.
    */
-  private async namespaceTableOp(
-    opName: string,
+  private async tableCall(
+    name: string,
     path: PathSpec,
     args: readonly unknown[],
     kwargs: OpKwargs,
@@ -1200,20 +1408,20 @@ export class Dispatcher {
     const timer = startOp()
     const mount = this.namespace.tryMountFor(path.virtual)
     const boundary = this.boundary(mount)
-    const write = POLICY_WRITE_OPS.has(opName)
+    const write = POLICY_WRITE_OPS.has(name)
     await boundary.admit(
-      opName,
+      name,
       path,
       write,
-      { create: HIDDEN_CREATE_OPS.has(opName), final: opName !== 'rename' },
+      { create: HIDDEN_CREATE_OPS.has(name), final: name !== 'rename' },
       issuer,
     )
     let target: string
     let result: string | FileStat | null = null
-    if (opName === 'unlink') {
+    if (name === 'unlink') {
       target = this.namespace.readlink(path.virtual) ?? ''
       await this.namespace.unlink(path.virtual)
-    } else if (opName === 'rename') {
+    } else if (name === 'rename') {
       target = this.namespace.readlink(path.virtual) ?? ''
       const dst = args[0]
       if (!(dst instanceof PathSpec)) throw new Error('rename op requires dst')
@@ -1222,7 +1430,7 @@ export class Dispatcher {
       // rename. It is then replaced as rename(2) replaces it: any node
       // the table holds at that name (a link, an attr overlay) goes.
       const dstMount = this.namespace.tryMountFor(dst.virtual)
-      await this.boundary(dstMount).admit(opName, dst, true, { create: true }, issuer)
+      await this.boundary(dstMount).admit(name, dst, true, { create: true }, issuer)
       // The name the link moves to must have a directory above it, as for
       // a new link: the table alone would file it under an absent parent
       // and synthesize the directories above it.
@@ -1236,7 +1444,7 @@ export class Dispatcher {
       }
       await this.namespace.unlink(dst.virtual)
       await this.namespace.rename(path.virtual, dst.virtual)
-    } else if (opName === 'symlink') {
+    } else if (name === 'symlink') {
       target = String(kwargs.target)
       // symlink(2) refuses an occupied name and a name its parent cannot
       // hold, and the door is the only place that can tell: the node table
@@ -1248,7 +1456,7 @@ export class Dispatcher {
       const refusal = await this.symlinkRefusal(path, issuer)
       if (refusal !== null) throw refusal
       await this.namespace.symlink(path.virtual, target, Date.now() / 1000)
-    } else if (opName === 'stat') {
+    } else if (name === 'stat') {
       const row = this.namespace.linkStatAt(path.virtual)
       if (row === null) throw enoent(path)
       target = this.namespace.readlink(path.virtual) ?? ''
@@ -1259,9 +1467,9 @@ export class Dispatcher {
       target = found
       result = found
     }
-    record(opName, path.virtual, VFSName.RAM, encodeText(target).byteLength, timer)
+    record(name, path.virtual, VFSName.RAM, encodeText(target).byteLength, timer)
     memoryAnswered(report)
-    return (await boundary.complete(opName, path, write, result)) as string | FileStat | null
+    return (await boundary.complete(name, path, write, result)) as string | FileStat | null
   }
 
   /**
@@ -1320,7 +1528,7 @@ export class Dispatcher {
     if (normDir(mount.prefix) === normDir(path.virtual)) return [true, null]
     let listing: readonly string[] | null
     try {
-      const row = (await this.probeOp('stat', resolved, issuer)) as FileStat | null
+      const row = (await this.probeRead('stat', resolved, issuer)) as FileStat | null
       if (row !== null && row.type !== FileType.DIRECTORY) return [true, null]
       listing = await this.parentListing(path.virtual, issuer)
     } catch (err) {
@@ -1407,7 +1615,7 @@ export class Dispatcher {
     if (mount === null) return null
     if (normDir(mount.prefix) === normDir(virtual)) return FileType.DIRECTORY
     const resolved = await this.namespace.resolve(virtual, false)
-    const row = (await this.probeOp('stat', resolved, issuer)) as FileStat | null
+    const row = (await this.probeRead('stat', resolved, issuer)) as FileStat | null
     if (row !== null) return row.type
     const listing = await this.parentListing(virtual, issuer)
     return listing !== null && lists(listing, virtual) ? FileType.DIRECTORY : null
@@ -1427,7 +1635,7 @@ export class Dispatcher {
     const above = trimmed.slice(0, cut) || '/'
     if (this.namespace.tryMountFor(above) === null) return null
     const resolved = await this.namespace.resolve(above, false)
-    const entries = await this.probeOp('readdir', resolved, issuer)
+    const entries = await this.probeRead('readdir', resolved, issuer)
     return Array.isArray(entries) ? entries.map(String) : null
   }
 
@@ -1444,33 +1652,34 @@ export class Dispatcher {
    * which registered op answers, so a probe that omitted them would ask
    * a different question than the door does and report a rendered path
    * as absent. Python needs no twin of that half: its dispatcher routes
-   * through `Mount.execute_op`, which stamps both itself.
+   * through `Mount.call`, which stamps both itself.
    *
    * Args:
-   *   opName: the op to run, `stat` or `readdir`.
+   *   name: the function to run, `stat` or `readdir`.
    *   resolved: what the namespace resolved the path to.
    *   issuer: the mark on the op being served, carried to the probe's
    *     gate so the probe is judged as its caller's.
    */
-  private async probeOp(
-    opName: string,
+  private async probeRead(
+    name: string,
     resolved: [BaseVFS, PathSpec, MountMode],
     issuer?: symbol,
   ): Promise<unknown> {
-    const [vfs, scope] = resolved
+    const [, scope] = resolved
     const mount = this.namespace.tryMountFor(scope.virtual)
+    if (mount === null) return null
     const boundary = this.boundary(mount)
-    await boundary.admit(opName, scope, false, {}, issuer)
-    await mount?.ensureReady()
+    await boundary.admit(name, scope, false, {}, issuer)
+    await mount.ensureReady()
     const filetype = getExtension(scope.virtual)
     try {
-      const call = () =>
-        this.opsRegistry.call(opName, vfs, vfs.accessor, scope, [], {
+      const result = await mount.use(() =>
+        mount.callKeyed(name, scope, [], {
           ...this.indexKwargs(mount),
           ...(filetype !== null ? { filetype } : {}),
-        })
-      const result = await (mount === null ? call() : mount.use(call))
-      return await boundary.complete(opName, scope, false, result)
+        }),
+      )
+      return await boundary.complete(name, scope, false, result)
     } catch (err) {
       // Final on every channel: a plain file above the path means nothing
       // can be at it or under it, and symlink(2) and readlink(2) answer
@@ -1479,7 +1688,7 @@ export class Dispatcher {
       // The "nothing here" set exactly, plus a backend with no such op:
       // a miss on one channel is not absence on its own, so the caller
       // tries the other.
-      if (isMissError(err) || isMissingOp(err, opName)) return null
+      if (isMissError(err) || isMissingOp(err, name)) return null
       throw err
     }
   }
@@ -1497,7 +1706,7 @@ export class Dispatcher {
    * writable turf. Mirrors Python's Dispatcher._xattr_op.
    *
    * Args:
-   *   opName: `getxattr`, `listxattr`, `setxattr` or `removexattr`.
+   *   name: `getxattr`, `listxattr`, `setxattr` or `removexattr`.
    *   path: the path, already followed unless the caller asked for its
    *     link node itself.
    *   kwargs: `name` for all but listxattr, `value` and the
@@ -1505,8 +1714,8 @@ export class Dispatcher {
    *   report: the caller's report.
    *   issuer: the mark on the op being served.
    */
-  private async xattrOp(
-    opName: string,
+  private async answerXattr(
+    name: string,
     path: PathSpec,
     kwargs: OpKwargs,
     report: OpReport | undefined,
@@ -1515,36 +1724,36 @@ export class Dispatcher {
     const timer = startOp()
     const mount = this.namespace.tryMountFor(path.virtual)
     const boundary = this.boundary(mount)
-    const write = POLICY_WRITE_OPS.has(opName)
-    await boundary.admit(opName, path, write, {}, issuer)
+    const write = POLICY_WRITE_OPS.has(name)
+    await boundary.admit(name, path, write, {}, issuer)
     await this.xattrTarget(mount, path)
     const stored = this.namespace.xattrs(path.virtual)
-    const name = typeof kwargs.name === 'string' ? kwargs.name : ''
+    const attr = typeof kwargs.name === 'string' ? kwargs.name : ''
     let result: Uint8Array | string[] | null = null
-    if (opName === 'listxattr') {
+    if (name === 'listxattr') {
       result = [...stored.keys()].sort(compareCodePoints)
-    } else if (opName === 'getxattr') {
-      const found = stored.get(name)
+    } else if (name === 'getxattr') {
+      const found = stored.get(attr)
       if (found === undefined) throw noXattr(path.virtual)
       result = found
-    } else if (opName === 'setxattr') {
-      if (kwargs.create === true && stored.has(name)) throw eexist(path.virtual)
-      if (kwargs.replace === true && !stored.has(name)) throw noXattr(path.virtual)
+    } else if (name === 'setxattr') {
+      if (kwargs.create === true && stored.has(attr)) throw eexist(path.virtual)
+      if (kwargs.replace === true && !stored.has(attr)) throw noXattr(path.virtual)
       const value = kwargs.value instanceof Uint8Array ? kwargs.value : new Uint8Array()
-      await this.namespace.setXattr(path.virtual, name, value)
+      await this.namespace.setXattr(path.virtual, attr, value)
     } else {
-      if (!stored.has(name)) throw noXattr(path.virtual)
-      await this.namespace.removeXattr(path.virtual, name)
+      if (!stored.has(attr)) throw noXattr(path.virtual)
+      await this.namespace.removeXattr(path.virtual, attr)
     }
     record(
-      opName,
+      name,
       path.virtual,
       VFSName.RAM,
       result instanceof Uint8Array ? result.byteLength : 0,
       timer,
     )
     report?.served(null, null)
-    return boundary.complete(opName, path, write, result)
+    return boundary.complete(name, path, write, result)
   }
 
   /**
@@ -1585,12 +1794,12 @@ export class Dispatcher {
     let stat: FileStat | null = null
     let missing: unknown = null
     if (mount !== null) {
-      const [vfs, scope] = await this.namespace.resolve(path.virtual, false)
+      const [, scope] = await this.namespace.resolve(path.virtual, false)
       await mount.ensureReady()
       const filetype = getExtension(scope.virtual)
       try {
         const found = await mount.use(() =>
-          this.opsRegistry.call('stat', vfs, vfs.accessor, scope, [], {
+          mount.callKeyed('stat', scope, [], {
             ...this.indexKwargs(mount),
             ...(filetype !== null ? { filetype } : {}),
           }),
@@ -1599,7 +1808,7 @@ export class Dispatcher {
       } catch (err) {
         if (!isMissingPath(err) && !isEnotdir(err)) throw err
         missing = err
-        await this.reconciler.onOpMissing(mount, 'stat', path.virtual, err)
+        await this.reconciler.onEnoent(mount, 'stat', path.virtual, err)
       }
     }
     if (stat !== null || this.namespaceResult('stat', path.virtual) instanceof FileStat) return
@@ -1625,13 +1834,13 @@ export class Dispatcher {
     p: PathSpec,
     kwargs: OpKwargs,
   ): Promise<Record<string, number | string>> {
-    if (this.namespace.isLink(p.virtual) || this.opsRegistry.find('setattr', vfs) === null) {
+    if (this.namespace.isLink(p.virtual) || !mount.answers('setattr')) {
       // No backend inode answers for the path here, so nothing would
       // refuse a missing one: the overlay would stamp it.
       await this.xattrTarget(mount, p)
       return this.overlaySetattr(p, kwargs)
     }
-    const raw = await this.opsRegistry.call('setattr', vfs, vfs.accessor, scope, [], kwargs)
+    const raw = await mount.callKeyed('setattr', scope, [], kwargs)
     const residual = raw as Record<string, number | string>
     const applied = SETATTR_KEYS.filter(
       (key) => kwargs[key] !== undefined && kwargs[key] !== null && !(key in residual),

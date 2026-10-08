@@ -51,7 +51,7 @@ import {
   type VfsExplanation,
 } from '@struktoai/mirage-core/policy/types'
 import type { RouteContext } from '@struktoai/mirage-core/runtime/routing/types'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { answered as answeredCall, checked } from '@struktoai/mirage-server/io_serde'
 import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'

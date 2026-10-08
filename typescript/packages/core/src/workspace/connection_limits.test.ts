@@ -15,7 +15,6 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode, OnExceed } from '../types.ts'
@@ -35,9 +34,6 @@ beforeAll(async () => {
 async function buildWs(): Promise<Workspace> {
   const a = new RAMVFS()
   const b = new RAMVFS()
-  const reg = new OpsRegistry()
-  reg.registerVfs(a)
-  reg.registerVfs(b)
   const ws = new Workspace(
     {
       '/a/': [a, MountMode.WRITE, { cat: new Limit({ maxLines: 4 }) }],
@@ -45,7 +41,6 @@ async function buildWs(): Promise<Workspace> {
     },
     {
       mode: MountMode.WRITE,
-      ops: reg,
       shellParser: parser,
     },
   )

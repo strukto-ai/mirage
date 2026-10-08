@@ -19,11 +19,11 @@ import io
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.ops.registry import op
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.runtime.python.host.file import MirageFile
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
+from tests.fixtures.vfs_io import render
 
 from .conftest import make_ops_with_dir
 
@@ -265,7 +265,6 @@ class TestMirageFile:
             MirageFile(ops, "/data/dir/f.txt", "rb", **{argument: "utf-8"})
 
 
-@op("read", vfs="ram", filetype=".tally")
 async def _read_tally(accessor, path: PathSpec, **kwargs) -> bytes:
     return b"RENDERED"
 
@@ -294,8 +293,10 @@ class TestChunks:
     def test_a_writable_open_starts_from_the_stored_bytes(self):
         # Its flush stores what it holds, so starting from the rendering
         # stored the rendering over the file.
-        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-        ws.mount("/data/").register_fns([_read_tally])
+        ws = Workspace(
+            {"/data/": render(RAMVFS(), ".tally", _read_tally)},
+            mode=MountMode.WRITE,
+        )
         _write(ws.vfs, "/data/books.tally", b"STORED")
         with MirageFile(ws.vfs, "/data/books.tally", "r") as f:
             assert f.read() == "RENDERED"

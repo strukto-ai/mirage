@@ -1,10 +1,7 @@
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from mirage.process.child import ChildProcess
+from typing import Any
 
 from mirage.types import PathSpec
 
@@ -30,26 +27,6 @@ class ProcessInfo:
     failure: str | None = None
     parent_pid: int | None = None
     group_id: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class ProcessView:
-    """Process operations scoped to one session incarnation and its profile.
-
-    An absent or invisible PID returns None. Seeing a process grants no
-    output access; stopping one the view sees but may not stop raises
-    PermissionError (EPERM). The view carries no reference to mutable
-    tasks.
-    """
-
-    list: Callable[[], tuple[ProcessInfo, ...]]
-    get: Callable[[int], ProcessInfo | None]
-    check_spawn: Callable[[], None]
-    probe: Callable[[int], bool]
-    terminate: Callable[[int], bool]
-    wait: Callable[[int], Awaitable[ProcessInfo | None]]
-    depth: int = 0
-    spawn: Callable[["SpawnRequest"], "ChildProcess"] | None = None
 
 
 ProcessRunner = Callable[[], Coroutine[Any, Any, int]]

@@ -23,6 +23,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
 from mirage.cache.index.config import Evicted
 from mirage.cache.index.factory import build_index
 from mirage.cache.manager import CacheManager
+from mirage.commands.builtin.backends import commands_for
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.context import (
     effective_path_mode,
@@ -31,9 +32,8 @@ from mirage.context import (
 )
 from mirage.errors.fs import no_mount
 from mirage.errors.types import NoMountError
-from mirage.ops.config import OpsMount
 from mirage.policy import Decisions, MountRootPolicy, OutputCapPolicy, Policies
-from mirage.process.types import ProcessView
+from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import WorkspaceRuntime
 from mirage.types import Limit, MountMode, PathSpec, ReadPolicy, ReadSpec
@@ -43,6 +43,7 @@ from mirage.vfs.dev import DevVFS
 from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session.session import SessionState
+from mirage.workspace.types import MountRow
 
 DEV_PREFIX = "/dev/"
 
@@ -202,7 +203,7 @@ class MountRegistry:
         is read at call time because ``attach_file_cache`` runs before
         ``set_reconciler``, and a manager with none trusts its cache.
 
-        A retiring mount answers False rather than probing: ``execute_op``
+        A retiring mount answers False rather than probing: ``call``
         raises EBUSY once teardown has started, and ``owns_path`` cannot
         catch that on its own because it is read before several awaits.
         False sends the caller to a cold read, which is exactly where
@@ -357,10 +358,9 @@ class MountRegistry:
         )
         if alias is not None:
             m.activity = alias.activity
-        m.register_fns(vfs.commands())
+        m.register_commands(commands_for(vfs))
         for cmd in GENERAL_COMMANDS:
             m.register_general(cmd)
-        m.register_fns(vfs.ops())
         if self._file_cache is not None:
             self._attach_manager(m)
         self._mounts.append(m)
@@ -645,16 +645,13 @@ class MountRegistry:
     def visible_mounts(self) -> list[MountEntry]:
         return [m for m in self._mounts if m.visible is None or m.visible()]
 
-    def ops_mounts(self) -> list[OpsMount]:
-        """Build OpsMount list from registered mounts for Ops layer."""
+    def mount_rows(self) -> list[MountRow]:
+        """One row per registered mount, for the ``Files`` facade."""
         return [
-            OpsMount(
+            MountRow(
                 prefix=m.prefix,
                 resource_type=m.vfs.name,
-                accessor=m.vfs.accessor,
-                index=m.index_store,
                 mode=m.mode,
-                ops=m.vfs.ops(),
                 sizes_always_known=m.vfs.sizes_always_known,
             )
             for m in self._mounts

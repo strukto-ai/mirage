@@ -25,13 +25,13 @@ import pytest_asyncio
 
 from mirage.fuse.core import MountCore
 from mirage.observe import OpRecord
-from mirage.ops.registry import op
 from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.stat_view import DIR_SIZE, mtime_ns
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import render
 
 
 @pytest_asyncio.fixture
@@ -306,7 +306,6 @@ async def test_rename_across_mounts_reports_exdev():
     assert core.read("/data/x.txt", 100, 0, None) == b"body"
 
 
-@op("read", vfs="ram", filetype=".tally")
 async def _read_tally(accessor, path: PathSpec, **kwargs) -> bytes:
     return b"RENDERED-AND-MUCH-LONGER"
 
@@ -328,11 +327,11 @@ async def test_o_trunc_open_hydrates_through_the_renderer():
     # An O_TRUNC open of a size-unknown file whose extension renders must
     # serve the rendered body of the now-empty file, not raw emptiness.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    ws.mount("/data/").register_fns([_read_tally])
+    render(ws.mount("/data/").vfs, ".tally", _read_tally)
     await ws.shell("tee /data/books.tally", stdin=b"0123456789")
     core = MountCore(_Sizeless(ws.vfs))
     fh = core.open("/data/books.tally", os.O_WRONLY | os.O_TRUNC)
-    assert core._run(core._ops.read("/data/books.tally", raw=True)) == b""
+    assert core._run(core._files.read("/data/books.tally", raw=True)) == b""
     rendered = b"RENDERED-AND-MUCH-LONGER"
     assert core.getattr("/data/books.tally", fh)["st_size"] == len(rendered)
     assert core.read("/data/books.tally", 100, 0, fh) == rendered
@@ -341,7 +340,7 @@ async def test_o_trunc_open_hydrates_through_the_renderer():
 
 def _tally_core() -> MountCore:
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    ws.mount("/data/").register_fns([_read_tally])
+    render(ws.mount("/data/").vfs, ".tally", _read_tally)
     return MountCore(ws.vfs)
 
 
@@ -448,7 +447,7 @@ async def test_buffered_write_flush_lands_in_the_stored_bytes():
     fh = core.open("/data/books.tally")
     core.write("/data/books.tally", b"XY", 4, fh)
     core.release(fh)
-    stored = core._run(core._ops.read("/data/books.tally", raw=True))
+    stored = core._run(core._files.read("/data/books.tally", raw=True))
     assert stored == b"0123XY6789"
 
 

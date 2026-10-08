@@ -18,7 +18,6 @@ import { cliSpecFor } from '../../../commands/cli/specs.ts'
 import { specOf } from '../../../commands/spec/builtins.ts'
 import { CommandSpec, Option } from '../../../commands/spec/types.ts'
 import { DeviceInput } from '../../../io/types.ts'
-import { OpsRegistry } from '../../../ops/registry.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
@@ -116,9 +115,7 @@ describe('pathFlagScopes', () => {
 describe('programTokens', () => {
   it('walks a CLI verb path and keeps the rest raw', async () => {
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
-    const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, ops })
+    const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
     try {
       ws.registerCli('git', cliSpecFor('git'))
       const reg = ws.registry

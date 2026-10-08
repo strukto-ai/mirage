@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CLISpec } from '../../commands/cli/types.ts'
-import { RegisteredCommand } from '../../commands/config.ts'
+import { Command } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -172,7 +172,7 @@ describe('the ambient session is scoped to its workspace', () => {
     const wsA = await makeWs()
     const wsB = await makeTwoMounts()
     const seen: string[] = []
-    const rc = new RegisteredCommand({
+    const rc = new Command({
       name: 'crossprobe',
       spec: PROBE_SPEC,
       vfs: VFSName.RAM,
@@ -208,7 +208,7 @@ describe('the ambient session is scoped to its workspace', () => {
       },
     )
     open.push(ws)
-    const rc = new RegisteredCommand({
+    const rc = new Command({
       name: 'policyprobe',
       spec: PROBE_SPEC,
       vfs: VFSName.RAM,

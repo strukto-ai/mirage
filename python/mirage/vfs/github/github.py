@@ -15,15 +15,16 @@
 from typing import Any
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.commands.builtin.github import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.constants import COMMIT_SHA
+from mirage.core.github.constants import COMMIT_SHA, SCOPE_ERROR
+from mirage.core.github.read import read as _read
+from mirage.core.github.readdir import readdir as _readdir
+from mirage.core.github.stat import stat as _stat
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.core.github.watch import build_delta_hook
-from mirage.ops.github import OPS as GITHUB_VFS_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import ListingVersion, VFSName
+from mirage.types import FileStat, ListingVersion, PathSpec, VFSName
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.github.prompt import PROMPT
 from mirage.watch.base import DeltaHook
@@ -69,6 +70,8 @@ class GitHubVFS(BaseVFS):
     # VFS.
     index_ttl: float = 86_400
     prompt: str = PROMPT
+
+    max_glob_matches: int | None = SCOPE_ERROR
 
     def __init__(
         self,
@@ -142,11 +145,25 @@ class GitHubVFS(BaseVFS):
         super().__init__()
         self.listings_pin = _pin_of(ref)
 
-    def ops(self) -> list[RegisteredOp]:
-        return GITHUB_VFS_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

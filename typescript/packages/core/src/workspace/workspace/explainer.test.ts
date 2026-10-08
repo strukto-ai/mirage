@@ -26,8 +26,7 @@ import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
-import { Session } from './handle.ts'
-import { Workspace } from './workspace.ts'
+import { Session, Workspace } from './workspace.ts'
 
 const PROFILE = {
   mounts: { '/data': 'write', '/ro': 'read' },

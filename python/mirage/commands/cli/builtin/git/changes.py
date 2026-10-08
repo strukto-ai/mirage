@@ -40,9 +40,9 @@ from mirage.commands.cli.builtin.git.types import (
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
 from mirage.errors.constants import MISS_ERRORS
-from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.view.types import LinkView, StatPath
 
 UNCHANGED = " "
 MODIFIED = "M"

@@ -15,7 +15,7 @@
 import { specOf } from '../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { SessionView } from '../../../ops/types.ts'
+import type { SessionView } from '../../../view/types.ts'
 import type { PolicyDenied } from '../../../policy/errors.ts'
 import type { ArithError } from '../../../shell/errors.ts'
 import { PathSpec, wordText } from '../../../types.ts'
@@ -213,7 +213,7 @@ export async function expandOperands(
     const spec = item instanceof PathSpec ? item : PathSpec.fromStrPath(item)
     if (spec.pattern !== null) {
       const mount = namespace.mountFor(spec.virtual)
-      if (mount.hasOp('glob')) {
+      if (mount.answers('glob')) {
         const prefix = rstripSlash(mount.prefix)
         const withPrefix = new PathSpec({
           virtual: spec.virtual,
@@ -261,9 +261,20 @@ export function refusal(cmd: string, err: PolicyDenied): Result {
   ]
 }
 
-/** Render the shell's own readonly refusal, checked before the door. */
+/**
+ * The shell's own readonly refusal line, checked before the door.
+ * `declare`, `local` and `typeset` name themselves in it (`bash: declare: R:
+ * readonly variable`); every other writer refuses in the assignment's voice
+ * (`bash: R: readonly variable`).
+ */
+export function readonlyLine(cmd: string, name: string): string {
+  const voice = cmd === 'declare' || cmd === 'local' || cmd === 'typeset' ? `${cmd}: ` : ''
+  return `bash: ${voice}${name}: readonly variable`
+}
+
+/** Render the readonly refusal (`readonlyLine`) as the result. */
 export function readonlyRefusal(cmd: string, name: string): Result {
-  const encoded = encodeText(`bash: ${name}: readonly variable\n`)
+  const encoded = encodeText(`${readonlyLine(cmd, name)}\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: encoded }),
@@ -311,8 +322,8 @@ export function builtinError(name: string, message: string): Uint8Array {
 }
 
 /**
- * The words a numeric builtin reads: a leading `--` ends its options, as
- * bash's `get_numeric_arg` skips it. Mirrors Python's numeric_operands.
+ * The words a numeric builtin reads: a leading `--` ends its options, and
+ * bash skips it before it reads the number. Mirrors Python's numeric_operands.
  */
 export function numericOperands(args: readonly string[]): readonly string[] {
   return args[0] === '--' ? args.slice(1) : args

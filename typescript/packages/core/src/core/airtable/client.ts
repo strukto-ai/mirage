@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { AirtableAccessor } from '../../accessor/airtable.ts'
-import type { ErrorOf } from '../../types.ts'
-import { apiRequest, type RetryPolicy } from '../api/client.ts'
+import { apiRequest, type RetryPolicy, type ErrorOf } from '../api/client.ts'
 import { cursorItems, offsetCursor, type PageShape } from '../api/paginate.ts'
 import { MAX_BATCH, META_KEY, PAGE_SIZE } from './constants.ts'
 import { AirtableApiError, errorParts } from './errors.ts'

@@ -4,6 +4,7 @@ import { GitHubApiError } from '../../../../core/github/client.ts'
 import { search } from '../../../../core/github/search.ts'
 import { materialize } from '../../../../io/types.ts'
 import { searchSpec } from './search.ts'
+import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
 
 vi.mock('../../../../core/github/search.ts', () => ({ search: vi.fn(() => Promise.resolve([])) }))
 
@@ -44,16 +45,15 @@ describe('search qualifiers match native gh', () => {
   it.each(cases)('%s', async (kind, flags, expected) => {
     const leaf = searchSpec().subcommands.find((item) => item.name === kind)
     if (!leaf?.fn) throw new Error('missing search handler')
-    await leaf.fn({
-      config: { token: 't' },
-      argv: ['search', kind, 'two words'],
-      paths: [],
-      texts: ['two words'],
-      flags: { ...flags, limit: '30', json: 'url' },
-      stdin: null,
-      env: {},
-      spec: leaf,
-    })
+    await leaf.fn(
+      cliInvocation({
+        config: { token: 't' },
+        argv: ['search', kind, 'two words'],
+        texts: ['two words'],
+        flags: { ...flags, limit: '30', json: 'url' },
+        spec: leaf,
+      }),
+    )
     expect(vi.mocked(search).mock.lastCall?.[2]).toBe(expected)
   })
 })
@@ -86,16 +86,15 @@ describe('a failed search reads as gh words it', () => {
     vi.mocked(search).mockRejectedValueOnce(new GitHubApiError(message, status, body, URL))
     const leaf = searchSpec().subcommands.find((item) => item.name === 'issues')
     if (!leaf?.fn) throw new Error('missing search handler')
-    const result = await leaf.fn({
-      config: { token: 't' },
-      argv: ['search', 'issues', 'needle'],
-      paths: [],
-      texts: ['needle'],
-      flags: { limit: '30' },
-      stdin: null,
-      env: {},
-      spec: leaf,
-    })
+    const result = await leaf.fn(
+      cliInvocation({
+        config: { token: 't' },
+        argv: ['search', 'issues', 'needle'],
+        texts: ['needle'],
+        flags: { limit: '30' },
+        spec: leaf,
+      }),
+    )
     if (result === null) throw new Error('missing search result')
     const io = result[1]
     expect(result[0]).toBeNull()

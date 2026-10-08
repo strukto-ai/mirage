@@ -37,7 +37,6 @@ from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import (
     byte_view,
@@ -47,6 +46,7 @@ from mirage.shell.bytes import (
 )
 from mirage.shell.join import shell_join
 from mirage.types import FileType, PathSpec
+from mirage.view.types import NamespaceView
 
 STDIN_NAMES = frozenset({"-", "/dev/stdin"})
 

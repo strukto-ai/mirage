@@ -57,8 +57,8 @@ export function storedFunctionText(name: string, source: string, parser?: ParseS
 
 /**
  * A function as `declare -f` and `type` print it. bash prints its own
- * rendering of the parsed definition, not the text that was typed
- * (print_cmd.c): a body of statements one per line with four-space indents,
+ * rendering of the parsed definition, not the text that was typed: a
+ * body of statements one per line with four-space indents,
  * `;` between them, `elif` as an `if` nested in `else`, redirects respelled
  * after the words (`>&2` is `1>&2`), `$'...'` decoded into single quotes,
  * and every substitution's command printed the same way. Mirrors Python's

@@ -134,6 +134,43 @@ def pipeline_transparent(node: Any) -> bool:
     return kind in _PIPELINE_TRANSPARENT_KINDS
 
 
+_SIMPLE_COMMAND_KINDS = frozenset(
+    {
+        NodeKind.COMMAND,
+        NodeKind.DECLARATION,
+        NodeKind.UNSET,
+        NodeKind.VAR_ASSIGN,
+        NodeKind.VAR_ASSIGNS,
+    }
+)
+
+
+def simple_command(node: Any) -> bool:
+    """Whether a statement is a simple command: a command word, a
+    function call or a declaration, not a compound command.
+
+    A child shell forked to run one (a pipeline stage, a ``&`` job) is
+    that command, so an error that ends it reports the status the shell
+    itself would exit with (``: ${U?} &`` is 127); a compound command
+    forked the same way reports a subshell's (``{ : ${U?}; } &`` is 1).
+
+    Args:
+        node (Any): tree-sitter node of the statement.
+    """
+    kind = node_kind(node)
+    if kind == NodeKind.REDIRECT:
+        inner = next(
+            (
+                child
+                for child in node.named_children
+                if child.type not in REDIRECT_NODE_TYPES
+            ),
+            None,
+        )
+        return inner is None or simple_command(inner)
+    return kind in _SIMPLE_COMMAND_KINDS
+
+
 def node_kind(node: Any) -> NodeKind:
     """Classify a tree-sitter node into the shared statement kind.
 

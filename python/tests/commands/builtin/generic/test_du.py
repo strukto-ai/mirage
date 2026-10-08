@@ -8,13 +8,12 @@ from mirage.commands.builtin.generic.du import (
     rollup,
     to_virtual,
 )
-from mirage.commands.builtin.generic_bind import CommandIO
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import SizedRun
-from mirage.ops.types import LinkView, MountView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import DuOps
+from mirage.view.types import LinkView, MountView
 
 
 async def _ok(value):

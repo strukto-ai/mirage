@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { evaluateArith } from './arith.ts'
-import { ArithError, UnboundVariable } from './errors.ts'
+import { ArithError, ReadonlyError, UnboundVariable } from './errors.ts'
 import type { ElementOps } from './types.ts'
 
 describe('evaluateArith', () => {
@@ -163,7 +163,8 @@ describe('evaluateArith elements', () => {
   it('keeps evaluation order across bare and subscripted targets', () => {
     // A bare name aliases element 0, so `a[0]=1, a=2` must land a=2
     // last and `a=2, a[0]=1` must land a[0]=1 last; a target written
-    // twice is recorded once, at its last write.
+    // twice is recorded each time, so a refusal partway keeps the writes
+    // before it.
     const ops = fakeElements()
     const writes = (expr: string) =>
       evaluateArith(expr, {}, 0, ops).writes.map((w) => [w.name, w.key, w.value])
@@ -176,6 +177,7 @@ describe('evaluateArith elements', () => {
       ['arr', '0', '1'],
     ])
     expect(writes('arr = 1, arr[0] = 2, arr = 3')).toEqual([
+      ['arr', null, '1'],
       ['arr', '0', '2'],
       ['arr', null, '3'],
     ])
@@ -193,6 +195,32 @@ describe('evaluateArith elements', () => {
     expect(result.value).toBe(7n)
     expect(result.writes[0]?.value).toBe('8')
     expect(evaluateArith('m["a"] - 1', {}, 0, ops).value).toBe(6n)
+  })
+
+  it('stops at a frozen name after the writes before it', () => {
+    // bash: `(( X=5, R=3, X=6 ))` with R readonly binds X=5 and stops; a
+    // refusal inside a subscript is marked, since it ends the shell.
+    const frozen = (name: string) => (name === 'R' ? name : null)
+    const refused = (expr: string): ReadonlyError => {
+      try {
+        evaluateArith(expr, {}, 0, fakeElements(), null, null, false, frozen)
+      } catch (err) {
+        if (err instanceof ReadonlyError) return err
+        throw err
+      }
+      throw new Error(`${expr} was not refused`)
+    }
+    const plain = refused('X=5, R=3, X=6')
+    expect([plain.varName, plain.inSubscript, plain.writes]).toEqual([
+      'R',
+      false,
+      [{ name: 'X', key: null, value: '5' }],
+    ])
+    const element = refused('x=1, arr[R=3]')
+    expect([element.inSubscript, element.writes]).toEqual([
+      true,
+      [{ name: 'x', key: null, value: '1' }],
+    ])
   })
 
   it('refuses subscripts with no element callbacks', () => {
@@ -252,7 +280,10 @@ describe('a variable evaluated as an expression', () => {
     expect(first.writes.map((w) => [w.name, w.value])).toEqual([['y', '5']])
     const second = evaluateArith('y=1, x, y', { x: 'y+=1' })
     expect(second.value).toBe(2n)
-    expect(second.writes.map((w) => [w.name, w.value])).toEqual([['y', '2']])
+    expect(second.writes.map((w) => [w.name, w.value])).toEqual([
+      ['y', '1'],
+      ['y', '2'],
+    ])
   })
 })
 

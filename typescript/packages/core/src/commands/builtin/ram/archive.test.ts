@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { RAM_COMMANDS } from './index.ts'
-import { type CommandOpts, type RegisteredCommand } from '../../config.ts'
+import { type CommandOpts, type Command } from '../../config.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import type { LinkView } from '../../../ops/types.ts'
+import type { LinkView } from '../../../view/types.ts'
 import { FileStat, FileType, LINK_TARGET_KEY, PathSpec, MountMode } from '../../../types.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { readTar } from '../tar_helper.ts'
@@ -83,7 +84,7 @@ interface CmdResult {
 }
 
 async function runCmd(
-  reg: readonly RegisteredCommand[],
+  reg: readonly Command[],
   vfs: RAMVFS,
   paths: PathSpec[],
   flags: CommandOpts['flags'],
@@ -96,7 +97,7 @@ async function runCmd(
   const result = await cmd.fn(vfs.accessor, paths, texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
+    io: commandIo(vfs),
     cwd: '/',
     mountPrefix,
     ...(links !== null ? { ns: { links } } : {}),

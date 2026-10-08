@@ -22,7 +22,9 @@ from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.mongodb.grep import grep
 from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
+from mirage.vfs.mongodb import MongoDBVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
+from tests.fixtures.vfs_io import io_for
 
 
 @pytest.fixture
@@ -81,7 +83,11 @@ async def test_grep_m1_short_circuits_after_first_match(accessor, _stat_reads):
             accessor,
             [_path()],
             ["FOUND"],
-            CommandOpts(index=NULL_INDEX, flags={"m": "1"}),
+            CommandOpts(
+                io=io_for(MongoDBVFS, accessor),
+                index=NULL_INDEX,
+                flags={"m": "1"},
+            ),
         )
         data = await _drain(source)
     assert b"FOUND" in data

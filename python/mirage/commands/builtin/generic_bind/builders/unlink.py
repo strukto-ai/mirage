@@ -14,11 +14,11 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     Operation,
+    require_op,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.errors.constants import FS_ERRORS
@@ -78,7 +78,7 @@ async def unlink(
             ).encode(),
         )
     try:
-        await ops.require(Operation.UNLINK)(accessor, p)
+        await require_op(ops, Operation.UNLINK)(accessor, p)
     except FS_ERRORS as exc:
         return None, IOResult(
             exit_code=1,
@@ -89,4 +89,4 @@ async def unlink(
     return None, IOResult(writes={p.mount_path: b""})
 
 
-BUILDER = Builder("unlink", unlink, write=True)
+BUILDER = GenericCommand("unlink", unlink, write=True)

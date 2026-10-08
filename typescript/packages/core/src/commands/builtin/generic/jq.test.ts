@@ -72,7 +72,6 @@ async function ranOver(
   const opts = {
     stdin: null,
     flags: { compact_output: true, ...flags },
-    filetypeFns: null,
     cwd: '/',
     vfs: { kind: 'ram' } as never,
   } as CommandOpts
@@ -465,7 +464,6 @@ describe('jq flag-file readers', () => {
         compact_output: true,
         [option]: option === 'from_file' ? path : ['x', path],
       },
-      filetypeFns: null,
       cwd: '/d',
       vfs: { kind: 'ram' } as never,
     } as CommandOpts
@@ -485,7 +483,6 @@ describe('jq flag-file readers', () => {
         const opts = {
           stdin: streamed ? yieldBytes(stdin) : stdin,
           flags: { [option]: option === 'from_file' ? path : ['x', path] },
-          filetypeFns: null,
           cwd: '/',
           vfs: { kind: 'ram' } as never,
         } as CommandOpts
@@ -591,7 +588,6 @@ describe("jq's option loop", () => {
     const opts = {
       stdin: null,
       flags: parsedFlags(...words),
-      filetypeFns: null,
       cwd: '/',
       vfs: { kind: 'ram' } as never,
     } as CommandOpts
@@ -645,7 +641,6 @@ describe('jqGeneric over malformed input', () => {
       const opts = {
         stdin: null,
         flags,
-        filetypeFns: null,
         cwd: '/',
         vfs: { kind: 'ram' } as never,
       } as CommandOpts

@@ -1,8 +1,8 @@
 import asyncio
 
-from mirage.ops.ram import OPS as RAM_OPS
-from mirage.ops.registry import RegisteredOp
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 
 
@@ -21,14 +21,12 @@ class VersionedVFS(RAMVFS):
         self,
         kind: str = "none",
         remote: str | None = "v1",
-        has_stat: bool = True,
     ) -> None:
         """Args:
         kind (str): the listing version the mount declares, by value;
             "none" keeps the class default.
         remote (str | None): the fingerprint every stat answers unless
             ``remotes`` names the path.
-        has_stat (bool): whether the mount registers a stat op at all.
         """
         super().__init__()
         if kind != "none":
@@ -39,17 +37,10 @@ class VersionedVFS(RAMVFS):
         self.hold: asyncio.Event | None = None
         self.sent = asyncio.Event()
         self.stats: list[str] = []
-        self._has_stat = has_stat
 
-    def ops(self) -> list[RegisteredOp]:
-        rest = [o for o in RAM_OPS if o.name != "stat"]
-        if not self._has_stat:
-            return rest
-        return rest + [
-            RegisteredOp(name="stat", vfs="ram", filetype=None, fn=self._stat)
-        ]
-
-    async def _stat(self, accessor, path: PathSpec, **kwargs) -> FileStat:
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
         self.stats.append(path.virtual)
         self.sent.set()
         if self.hold is not None:
@@ -61,3 +52,9 @@ class VersionedVFS(RAMVFS):
             type=FileType.DIRECTORY,
             fingerprint=self.remotes.get(path.virtual, self.remote),
         )
+
+
+class StatlessVersionedVFS(VersionedVFS):
+    """A versioned mount that answers no stat at all."""
+
+    stat = BaseVFS.stat

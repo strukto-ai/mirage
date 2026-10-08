@@ -12,88 +12,186 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.base import Policy
-from mirage.policy.builtin import (
-    DEFAULT_COMMAND_LIMITS,
-    FALLBACK_LIMIT,
-    MountRootPolicy,
-    OutputCapPolicy,
-    PermissionsPolicy,
-    resolve_limit,
-    resolve_producer,
-)
-from mirage.policy.constants import (
-    DEFAULT_ASK_REASON,
-    DEFAULT_DENY_REASON,
-    POLICY_DENIED_EXIT,
-)
-from mirage.policy.decisions import (
-    AskHandler,
-    Decisions,
-    ask_rule,
-    covers,
-    decision_id,
-)
-from mirage.policy.errors import PolicyDenied, PolicyError
-from mirage.policy.policies import (
-    Policies,
-    describe_refusal,
-    policy_denied,
-    post_execute_gate,
-    post_vfs_gate,
-    pre_session_gate,
-    pre_vfs_gate,
-    refusal_of,
-    render_deny,
-    render_pending,
-    says_why,
-)
-from mirage.policy.profile import (
-    CommandsBlock,
-    CompiledProfile,
-    MountCommandsBlock,
-    PathsBlock,
-    ProfileMount,
-    SessionProfile,
-    VarsBlock,
-)
-from mirage.policy.script import ScriptPolicy
-from mirage.policy.types import (
-    VALIDITY,
-    Abandoned,
-    Action,
-    AdmissionRules,
-    Ask,
-    Claim,
-    Claimant,
-    CommandContext,
-    CommandExplanation,
-    CommandRule,
-    Decision,
-    Deny,
-    DenyScope,
-    ExecuteResultContext,
-    Explanation,
-    HandOff,
-    Limit,
-    MountRootQuery,
-    Occurrence,
-    Outcome,
-    Pending,
-    ProfileScript,
-    Route,
-    Scope,
-    SessionCommandsQuery,
-    SessionContext,
-    SessionDecisionsQuery,
-    SessionScriptsQuery,
-    ShellExplanation,
-    ShellNode,
-    ShellOperand,
-    VfsContext,
-    VfsExplanation,
-    VfsResultContext,
-)
+import importlib
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mirage.policy.base import Policy
+    from mirage.policy.builtin import (
+        DEFAULT_COMMAND_LIMITS,
+        FALLBACK_LIMIT,
+        MountRootPolicy,
+        OutputCapPolicy,
+        PermissionsPolicy,
+        resolve_limit,
+        resolve_producer,
+    )
+    from mirage.policy.constants import (
+        DEFAULT_ASK_REASON,
+        DEFAULT_DENY_REASON,
+        POLICY_DENIED_EXIT,
+    )
+    from mirage.policy.decisions import (
+        AskHandler,
+        Decisions,
+        ask_rule,
+        covers,
+        decision_id,
+    )
+    from mirage.policy.errors import (
+        PolicyDenied,
+        PolicyError,
+    )
+    from mirage.policy.policies import (
+        Policies,
+        describe_refusal,
+        policy_denied,
+        post_execute_gate,
+        post_vfs_gate,
+        pre_session_gate,
+        pre_vfs_gate,
+        refusal_of,
+        render_deny,
+        render_pending,
+        says_why,
+    )
+    from mirage.policy.profile import (
+        CommandsBlock,
+        CompiledProfile,
+        MountCommandsBlock,
+        PathsBlock,
+        ProfileMount,
+        SessionProfile,
+        VarsBlock,
+    )
+    from mirage.policy.script import ScriptPolicy
+    from mirage.policy.types import (
+        VALIDITY,
+        Abandoned,
+        Action,
+        AdmissionRules,
+        Ask,
+        Claim,
+        Claimant,
+        CommandContext,
+        CommandExplanation,
+        CommandRule,
+        Decision,
+        Deny,
+        DenyScope,
+        ExecuteResultContext,
+        Explanation,
+        HandOff,
+        Limit,
+        MountRootQuery,
+        Occurrence,
+        Outcome,
+        Pending,
+        ProfileScript,
+        Route,
+        Scope,
+        SessionCommandsQuery,
+        SessionContext,
+        SessionDecisionsQuery,
+        SessionScriptsQuery,
+        ShellExplanation,
+        ShellNode,
+        ShellOperand,
+        VfsContext,
+        VfsExplanation,
+        VfsResultContext,
+    )
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.policy.base": ("Policy",),
+    "mirage.policy.builtin": (
+        "DEFAULT_COMMAND_LIMITS",
+        "FALLBACK_LIMIT",
+        "MountRootPolicy",
+        "OutputCapPolicy",
+        "PermissionsPolicy",
+        "resolve_limit",
+        "resolve_producer",
+    ),
+    "mirage.policy.constants": (
+        "DEFAULT_ASK_REASON",
+        "DEFAULT_DENY_REASON",
+        "POLICY_DENIED_EXIT",
+    ),
+    "mirage.policy.decisions": (
+        "AskHandler",
+        "Decisions",
+        "ask_rule",
+        "covers",
+        "decision_id",
+    ),
+    "mirage.policy.errors": (
+        "PolicyDenied",
+        "PolicyError",
+    ),
+    "mirage.policy.policies": (
+        "Policies",
+        "describe_refusal",
+        "policy_denied",
+        "post_execute_gate",
+        "post_vfs_gate",
+        "pre_session_gate",
+        "pre_vfs_gate",
+        "refusal_of",
+        "render_deny",
+        "render_pending",
+        "says_why",
+    ),
+    "mirage.policy.profile": (
+        "CommandsBlock",
+        "CompiledProfile",
+        "MountCommandsBlock",
+        "PathsBlock",
+        "ProfileMount",
+        "SessionProfile",
+        "VarsBlock",
+    ),
+    "mirage.policy.script": ("ScriptPolicy",),
+    "mirage.policy.types": (
+        "VALIDITY",
+        "Abandoned",
+        "Action",
+        "AdmissionRules",
+        "Ask",
+        "Claim",
+        "Claimant",
+        "CommandContext",
+        "CommandExplanation",
+        "CommandRule",
+        "Decision",
+        "Deny",
+        "DenyScope",
+        "ExecuteResultContext",
+        "Explanation",
+        "HandOff",
+        "Limit",
+        "MountRootQuery",
+        "Occurrence",
+        "Outcome",
+        "Pending",
+        "ProfileScript",
+        "Route",
+        "Scope",
+        "SessionCommandsQuery",
+        "SessionContext",
+        "SessionDecisionsQuery",
+        "SessionScriptsQuery",
+        "ShellExplanation",
+        "ShellNode",
+        "ShellOperand",
+        "VfsContext",
+        "VfsExplanation",
+        "VfsResultContext",
+    ),
+}
+_MODULE_OF = {
+    name: module for module, names in _EXPORTS.items() for name in names
+}
 
 __all__ = [
     "Abandoned",
@@ -168,3 +266,12 @@ __all__ = [
     "VarsBlock",
     "VfsExplanation",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    module = _MODULE_OF.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value

@@ -16,9 +16,9 @@ from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.commands.builtin.generic.cat import cat_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
+    mount_io,
     resolve_or_empty,
 )
-from mirage.commands.builtin.mongodb.io import IO
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.mongodb.read import stream_any
@@ -33,12 +33,14 @@ async def cat(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    resolved = await resolve_or_empty(
+        mount_io(opts), accessor, paths, opts.index
+    )
     return await cat_generic(
         resolved,
         list(texts),
         opts,
-        bound_op(IO.stat, accessor, opts.index),
+        bound_op(mount_io(opts).stat, accessor, opts.index),
         bound_op(stream_any, accessor, opts.index),
-        local=IO.local,
+        local=mount_io(opts).local,
     )

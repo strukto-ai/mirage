@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { runWithSession } from '../../context/session_context.ts'
-import { OpBoundary } from '../../ops/boundary.ts'
+import { Boundary } from '../boundary.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountEntry } from '../../workspace/mount/mount.ts'
@@ -32,11 +32,7 @@ function path(virtual: string): PathSpec {
 // The dispatcher's own boundary: an owned path carries its mount's prefix
 // and mode, an unowned one an empty prefix and full write.
 async function admit(mount: MountEntry | null, target: PathSpec): Promise<void> {
-  const boundary = new OpBoundary(
-    new Policies(),
-    mount?.prefix ?? '',
-    mount?.mode ?? MountMode.WRITE,
-  )
+  const boundary = new Boundary(new Policies(), mount?.prefix ?? '', mount?.mode ?? MountMode.WRITE)
   await boundary.admit('symlink', target, true, { create: true })
 }
 

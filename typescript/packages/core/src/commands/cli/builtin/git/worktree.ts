@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
-import type { LinkView, StatPath } from '../../../../ops/types.ts'
+import type { LinkView, StatPath } from '../../../../view/types.ts'
 import { GIT_DIR } from './constants.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
 import { basename, readNames, readOptional } from './io.ts'

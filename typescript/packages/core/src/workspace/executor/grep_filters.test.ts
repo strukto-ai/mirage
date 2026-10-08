@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../fixtures/workspace_fixture.ts'
@@ -32,9 +31,7 @@ async function makeWs(): Promise<Workspace> {
   r.store.dirs.add('/sub')
   r.store.files.set('/sub/inner.tex', ENC.encode('score 7\n'))
   r.store.files.set('/data.parquet', ENC.encode('score binary\n'))
-  const registry = new OpsRegistry()
-  registry.registerVfs(r)
-  return new Workspace({ '/': r }, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
+  return new Workspace({ '/': r }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 describe('grep --include/--exclude/--exclude-dir and -a', () => {

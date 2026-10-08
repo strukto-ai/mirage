@@ -20,21 +20,25 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.commands.builtin.discord.grep import grep
-from mirage.commands.builtin.discord.io import IO as DISCORD_IO
 from mirage.commands.builtin.discord.rg import rg
 from mirage.commands.config import CommandOpts
+from mirage.core.discord.read import read as core_read
+from mirage.core.discord.readdir import readdir as core_readdir
+from mirage.core.discord.stat import stat as core_stat
 from mirage.core.time_range import TimeRange
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.discord import DiscordVFS
+from tests.fixtures.vfs_io import io_for
 
 
 def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
     """The command's IO with the given slots faked; the rest stay real."""
     real = {
-        "readdir": DISCORD_IO.readdir,
-        "stat": DISCORD_IO.stat,
-        "read_bytes": DISCORD_IO.read_bytes,
+        "readdir": core_readdir,
+        "stat": core_stat,
+        "read_bytes": core_read,
     }
     return SimpleNamespace(**{**real, **slots})
 
@@ -70,7 +74,10 @@ async def test_discord_grep_resolves_ids_without_index():
         },
     ):
         out, io = await grep(
-            accessor, paths, ["hello"], CommandOpts(flags={"w": True})
+            accessor,
+            paths,
+            ["hello"],
+            CommandOpts(io=io_for(DiscordVFS, accessor), flags={"w": True}),
         )
     assert fake_search.await_count == 1
     assert fake_search.await_args.args[1] == "g_123"
@@ -105,7 +112,9 @@ async def test_discord_rg_channel_dir_uses_native_search():
             accessor,
             [_channel_path()],
             ["hello"],
-            CommandOpts(flags={"word_regexp": True}),
+            CommandOpts(
+                io=io_for(DiscordVFS, accessor), flags={"word_regexp": True}
+            ),
         )
     assert fake_search.await_count == 1
     assert io.exit_code == 0
@@ -131,7 +140,6 @@ async def test_discord_grep_on_a_time_scoped_mount_skips_native_search():
         grep.__wrapped__.__globals__,
         {
             "search_guild": fake_search,
-            "IO": _io(resolve_glob=AsyncMock(return_value=paths)),
             "grep_generic": fake_scan,
         },
     ):
@@ -139,7 +147,10 @@ async def test_discord_grep_on_a_time_scoped_mount_skips_native_search():
             accessor,
             paths,
             ["hello"],
-            CommandOpts(flags={"w": True, "r": True}),
+            CommandOpts(
+                io=_io(resolve_glob=AsyncMock(return_value=paths)),
+                flags={"w": True, "r": True},
+            ),
         )
     fake_search.assert_not_awaited()
     fake_scan.assert_awaited_once()

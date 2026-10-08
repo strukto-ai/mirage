@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { xxdGeneric } from '../../generic/xxd.ts'
-import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const xxd: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const xxd: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const write = requireOp(ops.write, 'write')
   const pwrite = ops.pwrite
@@ -30,7 +30,7 @@ const xxd: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'xxd',
   read: true,
   fn: xxd,

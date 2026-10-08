@@ -13,9 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { lsGeneric } from '../../generic/ls.ts'
-import { type Builder, overlaidStat, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import {
+  type GenericCommand,
+  overlaidStat,
+  resolveGlobOf,
+  type GenericCommandFn,
+} from '../adapter.ts'
 
-const ls: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const ls: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return lsGeneric(
@@ -26,7 +31,7 @@ const ls: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'ls',
   fn: ls,
 }

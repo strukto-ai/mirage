@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithEvaluation, type EvaluationContext } from '../../../evaluation.ts'
+import type { EvaluationContext } from '../../../evaluation.ts'
 
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { quoteText } from '../../../../commands/quote.ts'
-import { runAsProgram } from '../../../../context/session_context.ts'
+import { runAsProgram, runWithEvaluation } from '../../../../context/session_context.ts'
 import { renderHelp } from '../../../../commands/spec/help.ts'
 import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
 import {

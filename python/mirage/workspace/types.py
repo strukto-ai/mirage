@@ -18,12 +18,31 @@ from typing import Any
 
 from mirage.io import IOResult
 from mirage.observe import OpRecord
-from mirage.types import PathSpec
+from mirage.types import MountMode, PathSpec
 
 # Runs one text line in a session (`execute_fn(line, session_id=...)`):
 # what `eval`, `source`, `xargs` and find's `-exec` hand their inner
 # line to.
 ExecuteLine = Callable[..., Awaitable[IOResult]]
+
+
+@dataclass
+class MountRow:
+    """What the ``Files`` facade knows about one mount.
+
+    Args:
+        prefix (str): the mount prefix.
+        resource_type (str): the VFS name, recorded on each op.
+        mode (MountMode): the mount's access mode.
+        sizes_always_known (bool): mirrors ``BaseVFS.sizes_always_known``;
+            read by the fskit mount guard, which cannot serve a VFS that
+            sizes files only on read.
+    """
+
+    prefix: str
+    resource_type: str
+    mode: MountMode
+    sizes_always_known: bool = False
 
 
 @dataclass

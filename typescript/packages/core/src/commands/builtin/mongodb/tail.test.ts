@@ -41,6 +41,8 @@ import { resolveMongoDBConfig } from '../../../vfs/mongodb/config.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { MONGODB_TAIL } from './tail.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { MongoDBVFSBase } from '../../../vfs/mongodb/mongodb.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -83,7 +85,7 @@ async function run(
   const result = await cmd.fn(accessor, paths, [], {
     stdin: null,
     flags,
-    filetypeFns: null,
+    io: ioFor(MongoDBVFSBase, accessor),
     cwd: '/',
     ...(signal === undefined ? {} : { signal }),
   })

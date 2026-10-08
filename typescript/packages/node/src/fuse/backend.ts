@@ -86,7 +86,7 @@ export function checkMountpoint(backend: MountBackend, mountpoint: string): void
 
 /**
  * Mounts under `rootPrefix` whose files cannot be sized without reading
- * them. Mirrors Python's `Ops.unsized_mounts`.
+ * them. Mirrors Python's `Files.unsized_mounts`.
  */
 export function unsizedMounts(ws: Workspace, rootPrefix = ''): [string, string][] {
   const root = rstripSlash(rootPrefix)
@@ -125,7 +125,7 @@ export function checkSizes(backend: MountBackend, ws: Workspace, rootPrefix = ''
 
 /**
  * Mounts that accept writes, in mount resolution order. Mirrors Python's
- * `Ops.writable_mounts`.
+ * `Files.writable_mounts`.
  */
 export function writableMounts(ws: Workspace, rootPrefix = ''): [string, string][] {
   const root = rstripSlash(rootPrefix)

@@ -19,6 +19,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
+from mirage.shell.errors import ExitSignal
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -46,13 +47,17 @@ async def handle_eval(
         call_stack (CallStack | None): the caller's frames.
     """
     script = " ".join(args)
-    io = await execute_fn(
-        script,
-        session_id=session.session_id,
-        stdin=stdin,
-        sink=sink,
-        call_stack=call_stack,
-    )
+    try:
+        io = await execute_fn(
+            script,
+            session_id=session.session_id,
+            stdin=stdin,
+            sink=sink,
+            call_stack=call_stack,
+        )
+    except ExitSignal as sig:
+        sig.sourced = True
+        raise
     return io.stdout, io, ExecutionNode(command="eval", exit_code=io.exit_code)
 
 

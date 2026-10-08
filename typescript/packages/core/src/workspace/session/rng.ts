@@ -22,15 +22,19 @@ import {
   RANDOM_ZERO_SEED,
 } from '../../shell/constants.ts'
 
-/** A first seed for a session that was never assigned one: the clock,
- * stirred with the session id so two sessions born in one tick differ. */
+let started = 0
+
+/** A first seed for a generator never assigned one: the clock, stirred
+ * with the session id and a count of the generators started, so two
+ * started in one tick differ, as bash's mixes in each shell's own pid. */
 export function initialSeed(sessionId: string): number {
   let hash = 0
   for (const ch of sessionId) hash = (Math.imul(hash, 31) + (ch.codePointAt(0) ?? 0)) >>> 0
-  return ((Date.now() % RANDOM_MODULUS) ^ hash) >>> 0
+  started += 1
+  return ((Date.now() % RANDOM_MODULUS) ^ hash ^ Math.imul(started, 0x9e3779b1)) >>> 0
 }
 
-/** One step of bash's generator (`intrand32`): Park-Miller through
+/** One step of bash's RANDOM generator: Park-Miller through
  * Schrage's method, a zero state stepping from the fixed seed. */
 export function stepState(state: number): number {
   const ret = state === 0 ? RANDOM_ZERO_SEED : state
@@ -40,14 +44,14 @@ export function stepState(state: number): number {
   return step < 0 ? step + RANDOM_M : step
 }
 
-/** The `$RANDOM` value a state renders as (`brand`): the two 16-bit
+/** The `$RANDOM` value a state renders as in bash: the two 16-bit
  * halves folded, keeping 15 bits. */
 export function valueOf(state: number): number {
   return ((state >>> 16) ^ (state & 0xffff)) & RANDOM_MAX
 }
 
 /** One `$RANDOM` draw: step until the value differs from the last one,
- * as bash's `get_random` does, and return the new state with it. `last`
+ * as bash does, and return the new state with it. `last`
  * is 0 after a seed. */
 export function draw(state: number, last: number): [number, number] {
   for (;;) {

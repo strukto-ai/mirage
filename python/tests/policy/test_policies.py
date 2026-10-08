@@ -43,6 +43,11 @@ from mirage.policy import (
     says_why,
 )
 from mirage.policy.mixin import SessionScopedMixin
+from mirage.policy.policies import (
+    get_op_policies,
+    reset_op_policies,
+    set_op_policies,
+)
 from mirage.policy.rule import RulePolicy
 from mirage.policy.types import SessionContext
 from mirage.runtime.routing import RouteContext
@@ -545,3 +550,14 @@ async def test_remove_by_identity_refreshes_hooks_and_keeps_admission_order():
     assert not policies.wants("pre_command")
     assert not policies.remove(first)
     assert await policies.pre_command(_ctx("weird")) is None
+
+
+def test_the_op_policies_binding_is_scoped_to_one_command():
+    assert get_op_policies() is None
+    policies = Policies([])
+    token = set_op_policies(policies)
+    try:
+        assert get_op_policies() is policies
+    finally:
+        reset_op_policies(token)
+    assert get_op_policies() is None

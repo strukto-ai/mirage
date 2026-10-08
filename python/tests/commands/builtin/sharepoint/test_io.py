@@ -3,8 +3,9 @@ import pytest
 import mirage.core.msgraph.client as graph_client
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.sharepoint.io import IO
 from mirage.types import PathSpec
+from mirage.vfs.sharepoint import SharePointVFS
+from tests.fixtures.vfs_io import vfs_over
 
 _API = "https://graph.microsoft.com/v1.0"
 _GRAPH = {
@@ -35,5 +36,10 @@ async def test_du_walks_the_namespace_levels(monkeypatch, key):
     monkeypatch.setattr(graph_client, "_request", _request)
     accessor = SharePointAccessor(SharePointConfig(access_token="tok"))
     path = PathSpec.from_str_path("/sp/" + key if key else "/sp", key)
-    assert await IO.du.size(accessor, path, RAMIndexCacheStore()) == 7
+    assert (
+        await vfs_over(SharePointVFS, accessor).du_size(
+            path, RAMIndexCacheStore()
+        )
+        == 7
+    )
     assert seen == list(_GRAPH)

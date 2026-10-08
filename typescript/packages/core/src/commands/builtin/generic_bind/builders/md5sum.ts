@@ -13,15 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { md5sumGeneric } from '../../generic/md5sum.ts'
-import { type Builder, dirAwareStream, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import {
+  type GenericCommand,
+  dirAwareStream,
+  resolveGlobOf,
+  type GenericCommandFn,
+} from '../adapter.ts'
 
-const md5sum: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const md5sum: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return md5sumGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'md5sum',
   read: true,
   fn: md5sum,

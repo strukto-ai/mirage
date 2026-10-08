@@ -71,7 +71,7 @@ async def test_warm_read_stays_on_real_mount(tmp_path):
     disk = DiskVFS(root=str(tmp_path))
     disk.caches_reads = True
     ws = Workspace({"/": disk}, mode=MountMode.READ)
-    ws.mount("/").register_fns([stat_zzz_disk])
+    ws.mount("/").register_commands([stat_zzz_disk])
 
     first = await ws.shell("stat /example.zzz")
     second = await ws.shell("stat /example.zzz")
@@ -84,7 +84,7 @@ async def test_warm_read_stays_on_real_mount(tmp_path):
 
 @pytest.mark.asyncio
 async def test_cross_mount_read_serves_cache(tmp_path):
-    """A cross-mount read relays each operand through ``execute_op``, and the
+    """A cross-mount read relays each operand through ``call``, and the
     op-layer read-through serves a warm operand from cache. Proven under
     `bounded`
     by mutating the file out-of-band: the cross-mount read still returns the

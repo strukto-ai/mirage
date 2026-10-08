@@ -107,9 +107,7 @@ async def test_a_listed_ctag_never_answers_for_a_changed_file():
             # no request of its own, so there is a stale row to trust.
             mount = ws.mount("/m")
             items = graph.count("item")
-            listed = await mount.execute_op(
-                "stat", "/m/a.txt", index=mount.index
-            )
+            listed = await mount.call("stat", "/m/a.txt", index=mount.index)
             assert (listed.fingerprint, graph.count("item")) == ("c1", items)
             assert await _out(ws, f"cat {SCOPED}") == OLD
             graph.write(DRIVE_ID, "a.txt", NEW)

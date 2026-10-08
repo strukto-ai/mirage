@@ -14,11 +14,7 @@
 
 import { BaseVFS } from '../base.ts'
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
-import { QDRANT_COMMANDS } from '../../commands/builtin/qdrant/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 
-import { QDRANT_OPS } from '../../ops/qdrant/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 import { VFSName } from '../../types.ts'
 import {
   type QdrantConfigRedacted,
@@ -28,6 +24,11 @@ import {
   type QdrantConfigResolved,
 } from './config.ts'
 import { PROMPT } from './prompt.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import type { SearchQuery } from '../types.ts'
+import { readdir, read, stat, SEARCH } from '../../core/qdrant/tree.ts'
 
 export interface QdrantVFSOptions {
   config: QdrantConfig
@@ -69,11 +70,37 @@ export class QdrantVFS extends BaseVFS {
     }
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return QDRANT_OPS
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return readdir(this.accessor, path, index)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return QDRANT_COMMANDS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await read(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return stat(this.accessor, path, index)
+  }
+
+  override search(
+    path: PathSpec,
+    query: SearchQuery,
+    index?: IndexCacheStore,
+  ): Promise<string[] | null> {
+    return SEARCH.search(this.accessor, path, query, index)
+  }
+
+  override searchMany(
+    paths: PathSpec[],
+    query: SearchQuery,
+    index?: IndexCacheStore,
+  ): Promise<string[] | null> {
+    return SEARCH.searchMany(this.accessor, paths, query, index)
   }
 }

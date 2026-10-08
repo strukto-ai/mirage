@@ -102,7 +102,7 @@ async function rgFull(
   if (options.fileType !== null) flags.type = [options.fileType]
   if (options.globPattern !== null) flags.glob = [options.globPattern]
   if (label !== null) flags.with_filename = true
-  const opts = { stdin: null, flags, filetypeFns: null, cwd: '/' } as unknown as CommandOpts
+  const opts = { stdin: null, flags, cwd: '/' } as unknown as CommandOpts
   const operand = new PathSpec({ virtual: path, directory: path, vfsPath: path.slice(1) })
   const [out, result] = (await rgGeneric(
     [operand],

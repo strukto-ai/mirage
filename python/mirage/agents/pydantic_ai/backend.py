@@ -34,9 +34,9 @@ from mirage.agents.pydantic_ai.convert import (
     stat_to_entry,
 )
 from mirage.errors.fs import ebusy
-from mirage.ops.ops import Ops
 from mirage.types import FileType
 from mirage.utils.path import MAX_SYMLINK_HOPS, CycleError
+from mirage.workspace.files import Files
 from mirage.workspace.tools.tool_operations import ensure_parents
 from mirage.workspace.workspace import Session, Workspace
 
@@ -47,7 +47,7 @@ DANGLING = (errno.ENOENT, errno.ENOTDIR, errno.ELOOP)
 
 
 async def _doomed(
-    ws: Workspace, vfs: Ops, path: str
+    ws: Workspace, vfs: Files, path: str
 ) -> list[tuple[str, bool]]:
     st = await vfs.stat(path, nofollow=True)
     if ws.registry.is_mount_root(path):
@@ -61,7 +61,7 @@ async def _doomed(
     return doomed
 
 
-async def _link(vfs: Ops, path: str) -> str | None:
+async def _link(vfs: Files, path: str) -> str | None:
     try:
         return await vfs.readlink(path)
     except OSError as exc:
@@ -74,7 +74,7 @@ async def _link(vfs: Ops, path: str) -> str | None:
 class MirageWorkspaceBackend:
     """A Mirage session as the environment a Pydantic AI run works in.
 
-    Commands run in Mirage's shell and files go through its op facade,
+    Commands run in Mirage's shell and files go through its ``ws.vfs``,
     both as the session, so its profile judges every call. A command
     runs in a clone of the session at its working directory, as a
     subshell does: a ``cd`` or an ``export`` in one command does not

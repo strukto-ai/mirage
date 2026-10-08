@@ -70,7 +70,7 @@ class PosixErrno:
 class OperationNotSupportedError(OSError):
     """A mount was asked for an op its backend does not register.
 
-    Raised at the op-resolution boundary (``Mount.execute_op``) so a
+    Raised at the op-resolution boundary (``Mount.call``) so a
     capability gap surfaces as a recoverable filesystem error
     (ENOTSUP, "Operation not supported") instead of an internal
     AttributeError: the backend behaves like a filesystem that does not
@@ -81,7 +81,7 @@ class OperationNotSupportedError(OSError):
 class ReadOnlyError(PermissionError):
     """A write into a region whose mode stops below ``w``.
 
-    Raised by the mode gate (``Mount.execute_op``) with ``errno.EROFS``
+    Raised by the mode gate (``Mount.call``) with ``errno.EROFS``
     stamped and the op's path as ``filename``, so a command chokepoint
     renders ``<cmd>: <path>: Read-only file system`` and a kernel
     adapter reports EROFS: the below-mode voice, distinct from both the

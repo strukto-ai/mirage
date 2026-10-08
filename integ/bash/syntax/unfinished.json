@@ -1,0 +1,419 @@
+{
+  "cases": [
+    {
+      "id": "syntax_unfinished_subshell",
+      "seq": 1338217,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; (echo a",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_input_reports_end_of_file",
+      "seq": 1338218,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( for l in '(echo a' '{ echo a' 'if true; then echo a' 'while true; do echo a' 'case a in' 'f() {' 'for i in 1; do' 'echo a |' 'echo a &&' 'if true; then echo a; else' 'case x in a) echo'; do bash -c \"echo ran; $l\"; echo $?; done )",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n2\n2\n2\n2\n2\n2\n2\n2\n2\n2\n",
+        "stderr": "mirage: syntax error: unexpected end of file\nmirage: syntax error: unexpected end of file\nmirage: syntax error: unexpected end of file\nmirage: syntax error: unexpected end of file\nmirage: syntax error: unexpected end of file\nmirage: syntax error: unexpected end of file\nmirage: syntax error: unexpected end of file\nmirage: syntax error: unexpected end of file\nmirage: syntax error: unexpected end of file\nmirage: syntax error: unexpected end of file\nmirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unexpected_token_before_end_of_input",
+      "seq": 1338219,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( for l in 'if then' 'if ;' 'echo x (' 'if true; then else' 'while ) ; do' 'case x in a) echo;; b' 'fi; echo a |' 'fi; x=(1 2' 'fi; echo \"abc' ') ; x=(1 2' '(( x=(1<2) )); fi' 'then() { echo x; }'; do bash -c \"$l\"; echo $?; done )",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n2\n2\n2\n2\n2\n2\n2\n2\n2\n2\n2\n",
+        "stderr": "mirage: syntax error near 'then'\nmirage: syntax error near ';'\nmirage: syntax error near '('\nmirage: syntax error near 'else'\nmirage: syntax error near ')'\nmirage: syntax error near 'newline'\nmirage: syntax error near 'fi'\nmirage: syntax error near 'fi'\nmirage: syntax error near 'fi'\nmirage: syntax error near ')'\nmirage: syntax error near 'fi'\nmirage: syntax error near 'then'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_array_errors_exit_1",
+      "seq": 1338220,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( for l in 'x=(1 2' 'if true; then x+=(1 2' 'x=(1 \"a' 'x=(1 2; fi' 'x=(1 2 | cat' 'x=(1 2 >f' 'x=(1 (2' 'x=((1+2))' 'echo $(x=(1 2; )' 'echo $(x=(1 2)'; do bash -c \"$l\"; echo $?; done )",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n1\n1\n1\n1\n1\n1\n1\n2\n",
+        "stderr": "mirage: unexpected EOF while looking for matching `)'\nmirage: unexpected EOF while looking for matching `)'\nmirage: unexpected EOF while looking for matching `\"'\nmirage: syntax error near ';'\nmirage: syntax error near '|'\nmirage: syntax error near '>'\nmirage: syntax error near '('\nmirage: syntax error near '('\nmirage: syntax error near ';'\nmirage: unexpected EOF while looking for matching `)'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_array_error_discards_an_eval_line",
+      "seq": 1338221,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( eval 'x=(1 2'; echo no ); echo \"rc=$?\"; ( eval 'x=(1 2; echo b'; echo no ); echo \"rc=$?\"; ( eval 'x=(1 (2'; echo no ); echo \"rc=$?\"; ( eval 'fi; x=(1 2'; echo \"after $?\" ); echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nafter 2\nrc=0\n",
+        "stderr": "mirage: unexpected EOF while looking for matching `)'\nmirage: syntax error near ';'\nmirage: syntax error near '('\nmirage: syntax error near 'fi'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_alias_closers_at_end_of_input",
+      "seq": 1338222,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( shopt -s expand_aliases; alias fi=true; eval 'fi; echo a |'; echo \"rc=$?\"; eval 'if fi; then'; echo \"rc=$?\"; alias fi='{ fi'; eval 'fi'; echo \"rc=$?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\n",
+        "stderr": "mirage: syntax error: unexpected end of file\nmirage: syntax error: unexpected end of file\nmirage: syntax error near 'fi'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_array_substitution_closes_where_bash_does",
+      "seq": 1338223,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( for l in 'x=($( (echo a); echo b )); fi' 'x=($(case a in a) echo a;; esac); fi' 'x=($( (echo a) )' 'echo $( (echo a); echo b ); x=(1 2'; do bash -c \"$l\"; echo $?; done )",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n1\n1\n1\n",
+        "stderr": "mirage: syntax error near 'fi'\nmirage: syntax error near ';'\nmirage: unexpected EOF while looking for matching `)'\nmirage: unexpected EOF while looking for matching `)'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_error_in_eval_returns_to_its_caller",
+      "seq": 1338224,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "f() { eval 'x=($( (echo a); echo b )); fi'; echo \"after $?\"; }; f; echo \"rc=$?\"; eval 'x=(1 2'; echo \"after $?\"; g() { eval 'x=(1 (2'; echo \"in g $?\"; }; g; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "after 2\nrc=0\nafter 1\nin g 1\nrc=0\n",
+        "stderr": "mirage: syntax error near 'fi'\nmirage: unexpected EOF while looking for matching `)'\nmirage: syntax error near '('\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_error_in_a_substitution_exits_the_shell",
+      "seq": 1338225,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "bash -c 'eval \"echo \\$(fi)\"; echo after'; echo \"rc=$?\"; f() { eval 'echo $(fi)'; echo \"after $?\"; }; ( f ); echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=127\nrc=1\n",
+        "stderr": "mirage: syntax error near 'fi'\nmirage: syntax error near 'fi'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_continued_openers_join",
+      "seq": 1338227,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "x=\\\n(1 2); echo \"${x[1]}\" $\\\n(echo a) $\\\n((1+2)); cat <\\\n(echo b)",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 a 3\nb\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_quoted_delimiter_keeps_its_continuation",
+      "seq": 1338228,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<'EO\\\nF'\nbody\nEOF\nfi",
+      "expect": {
+        "exit": 0,
+        "stdout": "body\nEOF\nfi\n",
+        "stderr": "mirage: line 5: warning: here-document at line 2 delimited by end-of-file (wanted `EO\\\nF')\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_compound_before_a_closer",
+      "seq": 1338229,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( for l in '{ { echo x; } }' '{ if true; then echo y; fi }' '{ for i in 1 2; do echo $i; done }' 'f() { { echo f; } }; f'; do bash -c \"$l\"; done )",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\ny\n1\n2\nf\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_array_is_status_1",
+      "seq": 1338232,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; x=(1 2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mirage: unexpected EOF while looking for matching `)'\n"
+      }
+    }
+  ]
+}

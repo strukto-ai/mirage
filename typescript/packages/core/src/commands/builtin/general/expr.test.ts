@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { OpsRegistry } from '../../../ops/registry.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
@@ -31,7 +30,6 @@ async function runExpr(texts: string[]): Promise<{ out: string; err: string; exi
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags: {},
-    filetypeFns: null,
     cwd: '/',
   })
   if (result === null) return { out: '', err: '', exitCode: -1 }
@@ -74,7 +72,6 @@ async function runExprByteView(texts: string[]): Promise<{ out: string; exitCode
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags: {},
-    filetypeFns: null,
     cwd: '/',
   })
   if (result === null) throw new Error('expr answered nothing')
@@ -710,12 +707,7 @@ describe('expr through the shell', () => {
   async function makeWs(): Promise<Workspace> {
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
-    return new Workspace(
-      { '/ram': ram },
-      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-    )
+    return new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, shellParser: parser })
   }
 
   it.each([

@@ -12,14 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProcessView } from '../process/types.ts'
+import type { ProcessView } from '../process/view.ts'
 import { captureSessionContext } from '../context/session_context.ts'
+import { captureOpPolicies } from '../policy/policies.ts'
 import { captureRecordingContext } from '../observe/context.ts'
-import type { NamespaceView, SessionView } from '../ops/types.ts'
+import type { NamespaceView, SessionView } from '../view/types.ts'
 import { PathSpec } from '../types.ts'
 import { ContextScope } from '../utils/context_scope.ts'
 import type { MountResolver } from './resolver.ts'
-import type { BridgeDispatchFn, RuntimeContext } from './types.ts'
+import type { BridgeDispatchFn } from './types.ts'
+
+/** Local workspace doors captured for one execution, never guest globals. */
+export interface RuntimeContext {
+  readonly binding: WorkspaceBinding
+  readonly dispatch: BridgeDispatchFn
+  readonly resolver: MountResolver
+  readonly ns: NamespaceView
+  readonly sessionView: SessionView | null
+  readonly cwd: PathSpec
+  readonly env: Readonly<Record<string, string>>
+  readonly scope: ContextScope
+  readonly processes: ProcessView | null
+}
 
 /** Live workspace connection; capture creates views scoped to one execution. */
 export class WorkspaceBinding {
@@ -44,7 +58,11 @@ export function captureBinding(
     cwd?: PathSpec
     env?: Readonly<Record<string, string>>
   } = {},
-  scope = new ContextScope([...captureSessionContext(), ...captureRecordingContext()]),
+  scope = new ContextScope([
+    ...captureSessionContext(),
+    ...captureOpPolicies(),
+    ...captureRecordingContext(),
+  ]),
 ): RuntimeContext {
   const source = views.ns ?? {}
   const links = source.links

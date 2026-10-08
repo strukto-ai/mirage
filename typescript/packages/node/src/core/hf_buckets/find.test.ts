@@ -14,10 +14,11 @@
 
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { resolveGlobOf } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { ioFor } from '@struktoai/mirage-core/test-utils'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { IO } from '../../commands/builtin/hf_buckets/io.ts'
+import { HfBucketsVFS } from '../../vfs/hf_buckets/hf_buckets.ts'
 import { size, entries } from './du/index.ts'
 import { DRIVER } from './driver.ts'
 import { exists } from './exists.ts'
@@ -25,7 +26,9 @@ import { find } from './find.ts'
 import { fakeHfOperator, installFakeOperator } from './mock.ts'
 import { stat } from './stat.ts'
 
-const resolveGlob = resolveGlobOf(IO)
+function resolveGlob(accessor: HfBucketsAccessor, paths: PathSpec[]): Promise<PathSpec[]> {
+  return resolveGlobOf(ioFor(HfBucketsVFS, accessor))(accessor, paths)
+}
 
 async function accessorWith(
   files: Record<string, string | Buffer>,

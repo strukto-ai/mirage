@@ -758,3 +758,37 @@ export interface VfsExplanation extends Explanation {
   /** The errno name the call would throw (`EACCES`, `EROFS`), empty when it would run. */
   readonly error: string
 }
+
+/**
+ * What a command's own I/O asks before touching an entry it reached
+ * below its operands.
+ *
+ * The admission gate judges the paths a line names; a walk (`grep -r`,
+ * `find`, `du`, `cp -r`, `tar`) then reaches entries no rule has seen.
+ * The dispatcher binds the admitted command's gate to the session
+ * context for the command's run, and the commands tier reads it there,
+ * so the tier that enforces the rules never imports the tier that
+ * states them. `scoped` is whether a path rule in force reads this
+ * command's paths at all, or a coded or scripted preVfs policy speaks
+ * for its session; a native walk (a backend's own find or du)
+ * yields to the guarded readdir walk while it is set, so each entry
+ * passes the gate. `check` throws when a rule in force refuses the entry
+ * for the running command and returns when the command may touch it.
+ */
+export interface EntryGate {
+  readonly scoped: boolean
+  /**
+   * The ask rules this line runs under a grant for. Read by the op
+   * doors, which see the same entries from below and would otherwise
+   * re-derive a verdict that knows nothing of the nod the gate already
+   * took.
+   */
+  readonly granted: readonly CommandRule[]
+  check(virtual: string): void
+  /** True exactly where `check` would throw, for a door that declines instead (the read cache). */
+  refuses(virtual: string): boolean
+  /** Whether anything at or under this path could be refused for the
+   * running command, so a native walk there gives way to the guarded one;
+   * per operand, unlike `scoped`. */
+  scopes(virtual: string): boolean
+}

@@ -19,6 +19,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any, Callable, ClassVar
 
+from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.config import HomeConfig, RuntimeConfig
 from mirage.runtime.errors import EvalError
 from mirage.runtime.js.base import JsRuntime
@@ -30,7 +31,6 @@ from mirage.runtime.types import (
     FilesystemOperation,
     RunArgs,
     RunResult,
-    RuntimeContext,
     RuntimeReach,
     ScriptSource,
 )

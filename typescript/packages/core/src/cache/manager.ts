@@ -392,7 +392,7 @@ export class CacheManager {
    * the mount-relative spelling `mountKey` produces on the way there.
    *
    * Only `virtual` is read, and the key is rebuilt against this manager's own
-   * prefix, exactly as `Mount.executeOp` rebuilds one before handing a path to
+   * prefix, exactly as `Mount.call` rebuilds one before handing a path to
    * a backend. The caller's `vfsPath` is deliberately ignored: it is not
    * a fact this class can trust, because `PathSpec.fromStrPath` fabricates one
    * ("assumed root-mounted") for any caller that does not know its mount.

@@ -18,8 +18,8 @@ from mirage.commands.builtin.utils.wrap import (
     mount_parent_readdir,
     mount_parent_stat,
 )
-from mirage.ops.types import MountView
 from mirage.types import ContentType, FileStat, FileType
+from mirage.view.types import MountView
 
 
 def _mounts(

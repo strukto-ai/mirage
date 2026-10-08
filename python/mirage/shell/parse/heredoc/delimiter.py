@@ -49,6 +49,18 @@ def ansi_c_end(token: str, start: int) -> int:
     return len(token)
 
 
+def _joined(token: str, index: int) -> int:
+    """Where a word's next character is once continued lines are joined.
+
+    Args:
+        token (str): the word.
+        index (int): where to look.
+    """
+    while token.startswith("\\\n", index):
+        index += 2
+    return index
+
+
 def literal_construct_end(token: str, start: int) -> int | None:
     """Skip a substitution-shaped delimiter fragment without quote removal.
 
@@ -82,7 +94,8 @@ def clean_delimiter(token: str) -> str:
     quotes, and only ``$``, `````, ``"`` and itself inside double quotes,
     so ``"E\\$F"`` names ``E$F`` while ``"E\\xF"`` keeps its backslash.
     A ``$`` that is neither quoted nor escaped opens a dollar-quoted
-    section instead of naming itself, wherever in the word it sits:
+    section instead of naming itself, wherever in the word it sits and a
+    continued line between it and its quote included:
     ``$'A\\tB'`` names the word its ANSI-C escapes build, and ``$"A"``
     names its double-quoted content, which is what a locale carrying no
     translation for it gives back. Every other ``$`` is literal, since a
@@ -124,13 +137,17 @@ def clean_delimiter(token: str) -> str:
                 out.append(token[index])
             else:
                 out.append(char)
-        elif char == "$" and token[index + 1 : index + 2] == "'":
-            end = ansi_c_end(token, index + 2)
-            out.append(decode_ansi_c(token[index + 2 : end]))
-            index = end
-        elif char == "$" and token[index + 1 : index + 2] == '"':
-            quote = '"'
-            index += 1
+        elif char == "$" and (
+            token[(after := _joined(token, index + 1)) : after + 1]
+            in ("'", '"')
+        ):
+            if token[after] == "'":
+                end = ansi_c_end(token, after + 1)
+                out.append(decode_ansi_c(token[after + 1 : end]))
+                index = end
+            else:
+                quote = '"'
+                index = after
         elif char in ("'", '"'):
             quote = char
         elif char == "\\" and token[index + 1 : index + 2] == "\n":

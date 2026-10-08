@@ -15,7 +15,6 @@
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
 import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/gmail/scope.ts'
 import { formatGrepResults, searchMessages } from '../../../core/gmail/search.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
@@ -26,6 +25,7 @@ import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_pattern.ts'
 import { pushdownOperand, textSearchResults } from '../grep_pushdown.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { mountIo } from '../generic_bind/adapter.ts'
 
 // Gmail search answers with whole messages and the push-down prints that
 // answer verbatim, so it can stand in for a scan only when the line names one
@@ -49,7 +49,7 @@ async function grep(
   const fl = new FlagView(opts.flags, specOf('grep'))
   // Output-shaping flags, a glob operand and a multi-operand line all need
   // the generic grep over rendered files; see SEARCH_HONORED above.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const [scan, scoped] = scanIo(mountIo(opts), opts.ns, opts.mountPrefix)
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   if (pattern !== null && operand !== null && fl.asBool('w')) {
     const match = detectScope(operand)

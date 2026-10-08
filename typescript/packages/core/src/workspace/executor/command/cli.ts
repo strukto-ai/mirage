@@ -20,13 +20,13 @@ import {
 import { missCondition } from '../../mount/namespace/probe.ts'
 import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
-import type { ProcessView } from '../../../process/types.ts'
+import type { ProcessView } from '../../../process/view.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
 import { CLISpec, type CLIInvocation, type CLIDoors } from '../../../commands/cli/types.ts'
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import { verbVisible } from '../../lookup/lookup.ts'
 import { type DispatchFn, type ScriptSource } from '../../../runtime/types.ts'
-import type { NamespaceView, SessionView, StatPath } from '../../../ops/types.ts'
+import type { NamespaceView, SessionView, StatPath } from '../../../view/types.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle, Operand, type FlagValue } from '../../../commands/spec/types.ts'
 import { PartialOutputError, UsageError, CommandTimeoutError } from '../../../commands/errors.ts'
@@ -131,7 +131,6 @@ async function scriptOutput(
   script: ScriptSource,
   runtime: LanguageRuntime,
   prog: string,
-  cwd: PathSpec,
   timeout: number | null,
   signal: AbortSignal,
 ): Promise<[Uint8Array | null, IOResult]> {
@@ -149,7 +148,7 @@ async function scriptOutput(
     args: [...inv.argv],
     prog,
     scriptCli: true,
-    cwd,
+    cwd: inv.cwd,
     env,
     stdin,
     signal,
@@ -359,6 +358,7 @@ export async function handleCli(
     argv,
     paths,
     texts,
+    cwd: PathSpec.fromStrPath(session.cwd),
     flags,
     stdin,
     env: envSnapshot(session),
@@ -392,15 +392,7 @@ export async function handleCli(
         new ExecutionNode({ command: cmdStr, exitCode: 127, stderr }),
       ]
     }
-    body = scriptOutput(
-      inv,
-      leaf.script,
-      runtime,
-      prog,
-      PathSpec.fromStrPath(session.cwd),
-      timeout,
-      abort.signal,
-    )
+    body = scriptOutput(inv, leaf.script, runtime, prog, timeout, abort.signal)
   } else {
     const fn = leaf.fn
     if (fn === null) {

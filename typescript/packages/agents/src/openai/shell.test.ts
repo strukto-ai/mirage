@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import type { WorkspaceOptions } from '@struktoai/mirage-core/workspace/workspace/types'
@@ -22,9 +21,7 @@ import { MirageShell } from './shell.ts'
 
 function mkWs(extra: Partial<WorkspaceOptions> = {}): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  for (const op of ram.ops()) ops.register(op)
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops, ...extra })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ...extra })
 }
 
 describe('MirageShell', () => {

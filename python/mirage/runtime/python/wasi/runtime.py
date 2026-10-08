@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, ClassVar
 
+from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.config import HomeConfig, RuntimeConfig
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
@@ -25,7 +26,6 @@ from mirage.runtime.types import (
     FilesystemOperation,
     RunArgs,
     RunResult,
-    RuntimeContext,
     RuntimeReach,
     ScriptSource,
 )

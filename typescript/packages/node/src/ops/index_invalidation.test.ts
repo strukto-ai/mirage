@@ -105,7 +105,7 @@ describe('dispatcher evicts both subtrees after a rename', () => {
   })
 })
 
-describe('the op facade evicts the index like the shell does', () => {
+describe('ws.vfs evicts the index like the shell does', () => {
   it('caches the listing in the first place, so the evictions below mean something', async () => {
     // Non-vacuity guard. These backends used to be handed no index at
     // all, which made every test in this file pass for the wrong
