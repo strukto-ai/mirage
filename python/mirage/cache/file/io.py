@@ -210,7 +210,17 @@ async def apply_io(
     records: list[OpRecord] | None = None,
 ) -> None:
     # A path both read and written is dropped: neither side is the file.
-    kept = [p for p in io.cache if p not in io.reads or p not in io.writes]
+    # A read at the door reaches here as the backend's read record, and
+    # counts once it follows the path's last write: the door kept what the
+    # backend held by then, which need not be the bytes sent.
+    read_after: set[str] = set()
+    for rec in records or ():
+        if rec.op in WRITE_FINGERPRINT_OPS:
+            read_after.discard(rec.path)
+        elif rec.op in READ_FINGERPRINT_OPS:
+            read_after.add(rec.path)
+    read = set(io.reads) | read_after
+    kept = [p for p in io.cache if p not in read or p not in io.writes]
     cache_set = set(kept)
     for path in kept:
         if cache_facts is not None and not cache_facts(path).cacheable:

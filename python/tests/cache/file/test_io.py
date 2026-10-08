@@ -480,6 +480,21 @@ async def test_claimed_written_bytes_take_the_verdict(
         assert not await cache.exists("/s3/f.txt")
 
 
+@pytest.mark.asyncio
+async def test_a_path_read_at_the_door_and_written_keeps_nothing(cache):
+    # SharePoint rewrites an uploaded Office file, so the bytes `tee` sent
+    # are not the file the door read back and kept; the read's record is
+    # what tells apply_io the line read the path too.
+    await cache.set("/s3/f.pptx", b"abc<meta/>")
+    io = IOResult(writes={"/s3/f.pptx": b"abc"}, cache=["/s3/f.pptx"])
+    records = [
+        _record("write", "/s3/f.pptx", "etag-put-2", 3, b"abc"),
+        _read_record("/s3/f.pptx", "etag-put-2"),
+    ]
+    await cache_io.apply_io(cache, io, records=records)
+    assert not await cache.exists("/s3/f.pptx")
+
+
 # ── the mount's staleness bound reaches the entry ───────────────────────
 
 

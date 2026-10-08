@@ -57,7 +57,7 @@
         "exit": 2,
         "stdout": "/data/warmwalk/open.txt:secret open\n",
         "stderr": "grep: /data/warmwalk/locked.txt: Permission denied\ngrep: /data/warmwalk/sealed.txt: Permission denied\n",
-        "check": "[\"/data/warmwalk/open.txt\"]\n"
+        "check": "[]\n"
       },
       "check": {
         "read_paths": true

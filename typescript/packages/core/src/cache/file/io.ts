@@ -174,7 +174,17 @@ export async function applyIo(
   records?: readonly OpRecord[],
 ): Promise<void> {
   // A path both read and written is dropped: neither side is the file.
-  const kept = io.cache.filter((p) => !(p in io.reads) || !(p in io.writes))
+  // A read at the door reaches here as the backend's read record, and
+  // counts once it follows the path's last write: the door kept what the
+  // backend held by then, which need not be the bytes sent.
+  const read = new Set(Object.keys(io.reads))
+  const readAfter = new Set<string>()
+  for (const rec of records ?? []) {
+    if (WRITE_FINGERPRINT_OPS.has(rec.op)) readAfter.delete(rec.path)
+    else if (READ_FINGERPRINT_OPS.has(rec.op)) readAfter.add(rec.path)
+  }
+  for (const p of readAfter) read.add(p)
+  const kept = io.cache.filter((p) => !read.has(p) || !(p in io.writes))
   const cacheSet = new Set(kept)
   for (const path of kept) {
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
