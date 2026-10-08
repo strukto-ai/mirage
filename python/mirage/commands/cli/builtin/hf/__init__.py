@@ -303,7 +303,7 @@ HF = CLISpec(
             write=True,
             positional=(
                 REPO_ID,
-                Operand(type="str", name="LOCAL_PATH"),
+                Operand(type="path", name="LOCAL_PATH"),
                 Operand(type="str", name="PATH_IN_REPO"),
             ),
             options=(

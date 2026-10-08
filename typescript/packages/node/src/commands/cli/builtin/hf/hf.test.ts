@@ -31,7 +31,7 @@ import { HF } from './index.ts'
 import { createCmd, tagCreateCmd, tagDeleteCmd, tagListCmd } from './repo.ts'
 import { whoamiCmd } from './auth.ts'
 import { downloadCmd, refuseVariadic, selected } from './download.ts'
-import { inRepoBase, keep, uploadCmd } from './upload.ts'
+import { inRepoBase, uploadCmd } from './upload.ts'
 
 const createRepoMock = vi.hoisted(() => vi.fn())
 const createTagMock = vi.hoisted(() => vi.fn())
@@ -390,20 +390,6 @@ describe('operand and glob selection', () => {
   it('drops directories from a whole-repo download', () => {
     expect(selected(tree, [], [], [])).toEqual(['a.txt', 'sub/b.json'])
   })
-
-  it('narrows with include and then exclude', () => {
-    expect(selected(tree, [], ['sub/*'], [])).toEqual(['sub/b.json'])
-    expect(selected(tree, [], [], ['sub/*'])).toEqual(['a.txt'])
-  })
-
-  it('applies the same globs to an upload', () => {
-    const rows = [
-      { name: 'a.txt', data: new Uint8Array() },
-      { name: 'b.json', data: new Uint8Array() },
-    ]
-    expect(keep(rows, ['*.json'], []).map((r) => r.name)).toEqual(['b.json'])
-    expect(keep(rows, [], ['*.json']).map((r) => r.name)).toEqual(['a.txt'])
-  })
 })
 
 describe('where an upload lands', () => {
@@ -434,23 +420,26 @@ describe('where an upload lands', () => {
     }),
   } as unknown as CLIDoors
 
-  const additions = (): { path: string }[] =>
-    (commitMock.mock.calls[0]?.[1] as { additions: { path: string }[] }).additions
+  const additions = async (local: string, ...inRepo: string[]): Promise<string[]> => {
+    await uploadCmd({
+      ...inv(['acme/widget', ...inRepo], {}, CONFIG, doors),
+      paths: [PathSpec.fromStrPath(local)],
+    })
+    const call = commitMock.mock.calls[0]?.[1] as { additions: { path: string }[] }
+    return call.additions.map((add) => add.path)
+  }
 
   beforeEach(() => commitMock.mockReset())
 
   it('puts a file AT path_in_repo', async () => {
-    await uploadCmd(inv(['acme/widget', '/work/a.txt', 'docs'], {}, CONFIG, doors))
-    expect(additions()[0]?.path).toBe('docs')
+    expect(await additions('/work/a.txt', 'docs')).toEqual(['docs'])
   })
 
   it('spreads a directory UNDER path_in_repo', async () => {
-    await uploadCmd(inv(['acme/widget', '/work', 'docs'], {}, CONFIG, doors))
-    expect(additions().map((a) => a.path)).toEqual(['docs/a.txt', 'docs/sub/b.txt'])
+    expect(await additions('/work', 'docs')).toEqual(['docs/a.txt', 'docs/sub/b.txt'])
   })
 
   it('falls back to the basename when path_in_repo is absent', async () => {
-    await uploadCmd(inv(['acme/widget', '/work/a.txt'], {}, CONFIG, doors))
-    expect(additions()[0]?.path).toBe('a.txt')
+    expect(await additions('/work/a.txt')).toEqual(['a.txt'])
   })
 })

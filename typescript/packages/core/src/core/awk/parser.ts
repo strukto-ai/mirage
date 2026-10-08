@@ -14,7 +14,7 @@
 
 import { byteView } from '../../shell/bytes.ts'
 import { AwkSyntaxError } from './errors.ts'
-import { TokKind, tokenize, type Token } from './lexer.ts'
+import { BUILTIN_ARITY, TokKind, tokenize, type Token } from './lexer.ts'
 import {
   GetlineKind,
   RedirKind,
@@ -58,6 +58,8 @@ const CONCAT_START_KINDS: ReadonlySet<TokKind> = new Set([
 ])
 
 const CONCAT_START_OPS: ReadonlySet<string> = new Set(['$', '(', '++', '--', '!'])
+
+const GRAMMAR_BUILTINS: ReadonlySet<string> = new Set(['gsub', 'length', 'match', 'split', 'sub'])
 
 export class Parser {
   private readonly toks: Token[]
@@ -478,13 +480,7 @@ export class Parser {
     if (tok.kind === TokKind.KEYWORD && tok.text === 'getline') return this.parseGetline(null)
     if (tok.kind === TokKind.BUILTIN) {
       this.pos += 1
-      if (this.atOp('(')) {
-        this.pos += 1
-        const args = this.parseExprList(')')
-        this.eatOp(')')
-        return { type: 'BuiltinCall', name: tok.text, args }
-      }
-      return { type: 'BuiltinCall', name: tok.text, args: [] }
+      return { type: 'BuiltinCall', name: tok.text, args: this.parseBuiltinArgs(tok.text) }
     }
     if (tok.kind === TokKind.FUNC_NAME) {
       this.pos += 1
@@ -504,6 +500,57 @@ export class Parser {
       return { type: 'Var', name: tok.text }
     }
     throw this.error('expected an expression')
+  }
+
+  /**
+   * Parse a builtin's argument list and check its count, as mawk does.
+   *
+   * Only `length` may go without parentheses. `length`, `match`, `split`,
+   * `sub` and `gsub` are grammar rules in mawk 1.3.4, so a surplus or
+   * missing argument is a syntax error at the token that breaks the rule
+   * (`match(s, re, arr)`, gawk's array form, stops at its second comma).
+   * Every other builtin takes a free list that is then counted against its
+   * bounds.
+   *
+   * @param name - the builtin's name.
+   */
+  private parseBuiltinArgs(name: string): Expr[] {
+    if (!this.atOp('(')) {
+      if (name === 'length') return []
+      throw this.error("expected '('")
+    }
+    this.pos += 1
+    const arity = BUILTIN_ARITY[name]
+    if (arity === undefined) throw new Error(`awk: ${name} is not a builtin`)
+    const [least, most] = arity
+    if (!GRAMMAR_BUILTINS.has(name)) {
+      const args = this.parseExprList(')')
+      this.eatOp(')')
+      const count = String(args.length)
+      if (args.length < least) {
+        throw new AwkSyntaxError(
+          `awk: not enough arguments in call to ${name}: ${count} (need ${String(least)})`,
+        )
+      }
+      if (args.length > most) {
+        throw new AwkSyntaxError(
+          `awk: too many arguments in call to ${name}: ${count} (maximum ${String(most)})`,
+        )
+      }
+      return args
+    }
+    const items: Expr[] = []
+    this.skipNewlines()
+    while (items.length < most) {
+      if (items.length >= least && this.atOp(')')) break
+      if (items.length > 0) {
+        this.eatOp(',')
+        this.skipNewlines()
+      }
+      items.push(this.parseExpr(P_ASSIGN))
+    }
+    this.eatOp(')')
+    return items
   }
 
   // `$` binds tighter than every binary operator, so `$NF-1` is

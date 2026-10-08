@@ -1,6 +1,11 @@
 {
- "baseline": 4002,
+ "baseline": 3998,
  "modules": {
+  "commands/builtin/generic/iconv_multibyte": {
+   "typescript_only": {
+    "logger": "An opt-in diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes."
+   }
+  },
   "policy/policies": {
    "typescript_only": {
     "captureOpPolicies": "A deferred TypeScript callback restores each async-local store it needs, as captureSessionContext and captureRecordingContext do; a Python contextvar travels with the copied context."

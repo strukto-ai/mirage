@@ -14,6 +14,7 @@
 
 import type { ErrnoCodes, FSHost, FSType } from './fs/types.ts'
 import { PyodideUnavailableError } from './errors.ts'
+import { sealNetwork, type NetworkHost } from './network.ts'
 
 const noopIo = (): void => undefined
 
@@ -56,6 +57,7 @@ export interface PyodideInterface {
   setInterruptBuffer?: (buffer: Int32Array | Uint8Array) => void
   FS: PyodideFS
   ERRNO_CODES: ErrnoCodes
+  _module?: NetworkHost
 }
 
 function isNode(): boolean {
@@ -107,12 +109,9 @@ export async function loadPyodideRuntime(
     envHome() ??
     (await resolveNodeIndexURL()) ??
     (isNode() ? null : PYODIDE_CDN_URL)
-  // A null-prototype jsglobals seals the guest's `js` module: `import
-  // js` still resolves, but the host globalThis (js.process, js.fetch,
-  // js.process.env) is not reachable through it, so guest code has no
-  // host-environment or network door around the workspace bridge. This
-  // is what makes the runtime's reach='workspace' claim true and matches the
-  // docstring's "no network" promise; pyodide's own internals capture
+  // A null-prototype jsglobals empties the guest's `js` module: `import
+  // js` still resolves, but js.process, js.fetch and the rest of the host
+  // globalThis are not attributes of it. pyodide's own internals capture
   // the globals they need at load time, not through this object.
   const opts: Record<string, unknown> = {
     stdout: noopIo,
@@ -126,8 +125,12 @@ export async function loadPyodideRuntime(
   }
   if (indexURL !== null) opts.indexURL = indexURL
   try {
-    const runtime = await mod.loadPyodide(opts)
-    return runtime as PyodideInterface
+    const runtime = (await mod.loadPyodide(opts)) as PyodideInterface
+    // Emscripten's SOCKFS would carry a guest socket over a WebSocket to
+    // the host; sealNetwork makes it refuse instead. A build it cannot
+    // seal reports pyodide unavailable, like any failed initialization.
+    sealNetwork(runtime._module ?? {}, runtime.FS, runtime.ERRNO_CODES)
+    return runtime
   } catch (err) {
     throw new PyodideUnavailableError(
       `python3: failed to initialize pyodide runtime: ${err instanceof Error ? err.message : String(err)}`,

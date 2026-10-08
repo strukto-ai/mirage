@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { createHash } from 'node:crypto'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { apiUrl, hubPost, hubPostNdjson, revSegment } from './client.ts'
 import { COMMIT_CHUNK, DEFAULT_COMMIT_MESSAGE, PREUPLOAD_SAMPLE_BYTES } from './constants.ts'
@@ -26,6 +27,19 @@ const REGULAR = 'regular'
 export interface Addition {
   path: string
   data: Uint8Array
+}
+
+interface UploadInfo {
+  mode: string
+  oid: string | undefined
+  ignore: boolean
+}
+
+/** Hash bytes the way the preupload endpoint identifies their content. */
+export function contentOid(data: Uint8Array, mode: string): string {
+  const hash = createHash(mode === REGULAR ? 'sha1' : 'sha256')
+  if (mode === REGULAR) hash.update(`blob ${String(data.byteLength)}\0`)
+  return hash.update(data).digest('hex')
 }
 
 /**
@@ -55,20 +69,20 @@ export function commitUrl(accessor: HfHubAccessor, revision?: string): string {
 }
 
 /**
- * Ask the Hub how each file must be uploaded.
+ * Ask the Hub how each file must be uploaded and what it replaces.
  *
  * The Hub decides regular-vs-LFS-vs-Xet from the repository's
  * `.gitattributes` and the file's size, so it is asked rather than guessed. It
  * only needs the first bytes to sniff the type, which is why a sample rather
  * than the content is sent.
  */
-export async function uploadModes(
+export async function preupload(
   accessor: HfHubAccessor,
   additions: Addition[],
   revision?: string,
-): Promise<Map<string, string>> {
-  const modes = new Map<string, string>()
-  if (additions.length === 0) return modes
+): Promise<Map<string, UploadInfo>> {
+  const info = new Map<string, UploadInfo>()
+  if (additions.length === 0) return info
   const rev = revision ?? accessor.revision
   const url = apiUrl(
     accessor.endpoint,
@@ -76,9 +90,15 @@ export async function uploadModes(
     accessor.repoId,
     `/preupload/${revSegment(rev)}`,
   )
+  const ignoreFile = additions.find((add) => add.path === '.gitignore')
+  const gitIgnore =
+    ignoreFile === undefined
+      ? undefined
+      : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(ignoreFile.data)
   for (let start = 0; start < additions.length; start += COMMIT_CHUNK) {
     const chunk = additions.slice(start, start + COMMIT_CHUNK)
     const body = {
+      ...(gitIgnore === undefined ? {} : { gitIgnore }),
       files: chunk.map((add) => ({
         path: add.path,
         sample: b64(add.data.slice(0, PREUPLOAD_SAMPLE_BYTES)),
@@ -89,14 +109,20 @@ export async function uploadModes(
     const rows = (data as { files?: unknown }).files
     for (const row of Array.isArray(rows) ? rows : []) {
       if (typeof row !== 'object' || row === null) continue
-      const item = row as { path?: unknown; uploadMode?: unknown }
-      modes.set(
-        typeof item.path === 'string' ? item.path : '',
-        typeof item.uploadMode === 'string' ? item.uploadMode : REGULAR,
-      )
+      const item = row as {
+        path?: unknown
+        uploadMode?: unknown
+        oid?: unknown
+        shouldIgnore?: unknown
+      }
+      info.set(typeof item.path === 'string' ? item.path : '', {
+        mode: typeof item.uploadMode === 'string' ? item.uploadMode : REGULAR,
+        oid: typeof item.oid === 'string' ? item.oid : undefined,
+        ignore: item.shouldIgnore === true,
+      })
     }
   }
-  return modes
+  return info
 }
 
 /**
@@ -108,7 +134,6 @@ export async function uploadModes(
 export function payload(
   additions: Addition[],
   deletions: string[],
-  folders: string[],
   message: string,
   description = '',
   parent = '',
@@ -123,14 +148,12 @@ export function payload(
     })
   }
   for (const path of deletions) lines.push({ key: 'deletedFile', value: { path } })
-  for (const path of folders) lines.push({ key: 'deletedFolder', value: { path } })
   return new TextEncoder().encode(lines.map((line) => `${JSON.stringify(line)}\n`).join(''))
 }
 
 export interface CommitOptions {
   additions?: Addition[]
   deletions?: string[]
-  folders?: string[]
   message?: string
   description?: string
   createPr?: boolean
@@ -147,23 +170,28 @@ export interface CommitOptions {
 export async function commit(
   accessor: HfHubAccessor,
   options: CommitOptions = {},
-): Promise<Record<string, unknown>> {
-  const adds = options.additions ?? []
-  const modes = await uploadModes(accessor, adds, options.revision)
-  const heavy = adds
-    .filter((add) => (modes.get(add.path) ?? REGULAR) !== REGULAR)
-    .map((add) => add.path)
-    .sort(compareCodePoints)
+): Promise<Record<string, unknown> | undefined> {
+  const info = await preupload(accessor, options.additions ?? [], options.revision)
+  const adds: Addition[] = []
+  const heavy: string[] = []
+  for (const add of options.additions ?? []) {
+    const remote = info.get(add.path)
+    const mode = add.data.length === 0 ? REGULAR : (remote?.mode ?? REGULAR)
+    if (remote?.ignore === true || remote?.oid === contentOid(add.data, mode)) continue
+    adds.push(add)
+    if (mode !== REGULAR) heavy.push(add.path)
+  }
+  heavy.sort(compareCodePoints)
   if (heavy.length > 0) {
     throw new LfsRequiredError(
       `${accessor.repoId}: the Hub requires an LFS upload for ${heavy.join(', ')}; ` +
         'write it with `hf upload` instead',
     )
   }
+  if (adds.length === 0 && (options.deletions?.length ?? 0) === 0) return undefined
   const body = payload(
     adds,
     options.deletions ?? [],
-    options.folders ?? [],
     options.message ?? DEFAULT_COMMIT_MESSAGE,
     options.description ?? '',
   )

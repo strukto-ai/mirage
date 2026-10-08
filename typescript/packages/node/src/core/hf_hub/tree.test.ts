@@ -21,6 +21,8 @@ import { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { HfHubError } from './client.ts'
 import {
   collect,
+  deletionsFor,
+  filterRepoPaths,
   refillSnapshot,
   fetchPath,
   fetchTree,
@@ -507,5 +509,33 @@ describe('refillSnapshot at the head', () => {
     const get = vi.spyOn(client, 'hubGetResponse')
     await expect(refillSnapshot(accessor(), new RAMIndexCacheStore(), '/m')).rejects.toThrow('boom')
     expect(get).not.toHaveBeenCalled()
+  })
+})
+
+describe('upstream glob patterns', () => {
+  // huggingface_hub's filter_repo_objects: fnmatch over the whole path, so
+  // `*` crosses `/`, and a trailing `/` names a folder.
+  const files = ['.gitattributes', 'a.txt', 'data/b.json', 'data/sub/c.json', 'sub/d.bin']
+
+  it.each([
+    [['*.txt'], [], ['a.txt']],
+    [['data/*.json'], [], ['data/b.json', 'data/sub/c.json']],
+    [['data/'], [], ['data/b.json', 'data/sub/c.json']],
+    [['**'], ['*.json'], ['.gitattributes', 'a.txt', 'sub/d.bin']],
+    [[], ['sub/'], ['.gitattributes', 'a.txt', 'data/b.json', 'data/sub/c.json']],
+  ])('include %j exclude %j keeps %j', (include, exclude, kept) => {
+    expect(filterRepoPaths(files, include, exclude)).toEqual(kept)
+  })
+
+  it.each([
+    [['**'], '', ['a.txt', 'data/b.json', 'data/sub/c.json', 'sub/d.bin']],
+    [['*.json'], '', ['data/b.json', 'data/sub/c.json']],
+    [['sub/'], '', ['sub/d.bin']],
+    [['*.json'], 'data', ['data/b.json', 'data/sub/c.json']],
+    [['sub/*'], 'data', ['data/sub/c.json']],
+    [['nothing*'], '', []],
+    [[], '', []],
+  ])('deletes %j under %j as %j', (patterns, base, doomed) => {
+    expect(deletionsFor(files, patterns, base)).toEqual(doomed)
   })
 })

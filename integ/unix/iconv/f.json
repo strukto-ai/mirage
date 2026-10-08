@@ -133,10 +133,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'x\\n' | iconv -f bogus -t ascii; echo rc=$?; printf 'x\\n' | iconv -f utf-8 -t bogus; echo rc=$?; printf 'x\\n' | iconv -f bogus -t nope; echo rc=$?",
+      "command": "printf 'x\\n' | iconv -f bogus -t ascii; echo rc=$?; printf 'x\\n' | iconv -f utf-8 -t bogus; echo rc=$?; printf 'x\\n' | iconv -f bogus -t nope; echo rc=$?; printf 'x\\n' | iconv -f $'bo\\xffgus' -t ascii 2>&1 | cat -v",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\nrc=1\nrc=1\n",
+        "stdout": "rc=1\nrc=1\nrc=1\niconv: conversion from `boM-^?gus' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\n",
         "stderr": "iconv: conversion from `bogus' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion to `bogus' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversions from `bogus' and to `nope' are not supported\nTry `iconv --help' or `iconv --usage' for more information.\n"
       }
     },
@@ -269,11 +269,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a' | iconv -f utf-8 -t UCS2 | od -An -tx1; printf 'a' | iconv -f utf-8 -t UCS-2BE | od -An -tx1; printf 'a' | iconv -f utf-8 -t ISO88591; printf 'a' | iconv -f US -t CSISOLATIN1; echo; printf '\\360\\237\\230\\200' | iconv -f utf-8 -t UCS-2; echo rc=$?; printf 'a' | iconv -f utf-8 -t LATIN-1; echo rc=$?; printf 'a' | iconv -f UTF_8 -t ascii; echo rc=$?",
+      "command": "printf 'a' | iconv -f utf-8 -t UCS2 | od -An -tx1; printf 'a' | iconv -f utf-8 -t UCS-2BE | od -An -tx1; printf 'a' | iconv -f utf-8 -t ISO88591; printf 'a' | iconv -f US -t CSISOLATIN1; echo; printf '\\360\\237\\230\\200' | iconv -f utf-8 -t UCS-2; echo rc=$?; printf 'a' | iconv -f utf-8 -t LATIN-1; echo rc=$?; printf 'a' | iconv -f UTF_8 -t ascii; echo rc=$?; for n in SJIS// SJIS/ SJIS/// 'S JIS' 'SJIS!' SJIS, 's(jis)' 'SJIS/!' UTF-8//; do printf a | iconv -f \"$n\" -t \"$n\"; done; echo; for n in S_JIS /SJIS ſjis ascıı; do printf a | iconv -f utf-8 -t \"$n\"; echo rc=$?; done",
       "expect": {
         "exit": 0,
-        "stdout": " 61 00\n 00 61\naa\nrc=1\nrc=1\nrc=1\n",
-        "stderr": "iconv: illegal input sequence at position 0\niconv: conversion to `LATIN-1' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion from `UTF_8' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\n"
+        "stdout": " 61 00\n 00 61\naa\nrc=1\nrc=1\nrc=1\naaaaaaaaa\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "iconv: illegal input sequence at position 0\niconv: conversion to `LATIN-1' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion from `UTF_8' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion to `S_JIS' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion to `/SJIS' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion to `ſjis' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion to `ascıı' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\n"
       }
     }
   ]

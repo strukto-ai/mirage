@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { fnmatch } from './fnmatch.ts'
+import { fnmatch, fnmatchcase } from './fnmatch.ts'
 
 const NAMES = [
   '',
@@ -77,6 +77,13 @@ const GOLDEN: [string, string[]][] = [
   ['*[5X]', ['file5', 'fileX']],
 ]
 
+// The rows where a leading ^ is a class member, as CPython reads it.
+const CARET_GOLDEN: [string, string[]][] = [
+  ['[^abc]', ['a', 'b', '^']],
+  ['[^]a]', []],
+  ['[!^]', ['a', 'b', 'd', '!', '-', 'z', '[', ']']],
+]
+
 describe('fnmatch matches CPython fnmatch.fnmatchcase', () => {
   for (const [pattern, hits] of GOLDEN) {
     it(`pattern ${JSON.stringify(pattern)}`, () => {
@@ -84,6 +91,33 @@ describe('fnmatch matches CPython fnmatch.fnmatchcase', () => {
       for (const name of NAMES) expect(fnmatch(name, pattern)).toBe(expected.has(name))
     })
   }
+})
+
+describe('fnmatchcase is CPython fnmatch.fnmatchcase exactly', () => {
+  const caretRows = new Set(['[^abc]'])
+  for (const [pattern, hits] of [
+    ...GOLDEN.filter(([pattern]) => !caretRows.has(pattern)),
+    ...CARET_GOLDEN,
+  ]) {
+    it(`pattern ${JSON.stringify(pattern)}`, () => {
+      const expected = new Set(hits)
+      for (const name of NAMES) expect(fnmatchcase(name, pattern)).toBe(expected.has(name))
+    })
+  }
+})
+
+// A character is a code point, as in a Python str: `?` and a class take a
+// whole surrogate pair, and a range compares code points.
+describe.each([fnmatch, fnmatchcase])('%o matches code points', (matcher) => {
+  it.each([
+    ['😀.txt', '?.txt', true],
+    ['😀.txt', '[😀😁].txt', true],
+    ['\ue000', '[a-😀]', true],
+    ['😀', '[!a]', true],
+    ['a😀b', 'a??b', false],
+  ])('%j against %j is %s', (name, pattern, expected) => {
+    expect(matcher(name, pattern)).toBe(expected)
+  })
 })
 
 describe('fnmatch edge semantics', () => {

@@ -80,9 +80,9 @@ Xet object store behind [HF Buckets](/python/vfs/hf_buckets).
 | `hf auth list` | the stored tokens |
 | `hf repo create <id>` | create a repo; `--repo-type`, `--private`, `--space_sdk`, `--exist-ok` |
 | `hf repo tag create\|list\|delete` | git tags on a repo |
-| `hf repo-files delete <id> <glob>` | delete paths in one commit |
+| `hf repo-files delete <id> <glob>...` | delete the files the globs match, in one commit |
 | `hf download <id> [file...]` | fetch to `--local-dir` or the cache |
-| `hf upload <id> <local> [path]` | upload a file or directory as one commit |
+| `hf upload <id> [local] [path]` | upload a file or directory as one commit |
 | `hf env`, `hf version` | the endpoint and version in use |
 
 There is no `hf auth login` or `logout`, and that is deliberate rather than
@@ -107,3 +107,21 @@ sha-pinned download writes no ref, which is what the real binary does.
 `--revision` takes a branch, a tag or a commit sha. `--include` and
 `--exclude` take globs, and `--force-download` refetches rather than reusing
 the cached blob.
+
+## Paths and globs
+
+A local path (`hf upload`'s source, `--local-dir`, `--cache-dir`, a relative
+`HF_HUB_CACHE` or `HF_HOME`) resolves against the working directory, so
+`cd /work && hf upload acme/model checkpoints` reads `/work/checkpoints`.
+With no source, `hf upload acme/model` reads `./model`, as upstream does.
+
+`--include`, `--exclude`, `--delete` and `repo-files delete` take upstream's
+globs: Python's fnmatch over the whole repo path, so `*` crosses `/`, `[!a]`
+negates a class while `^` is an ordinary character, and a pattern ending in
+`/` names a folder. A folder upload never sends `.git` or
+`.cache/huggingface`; a single-file upload ignores the three flags, with a
+warning for each. The deletion globs match the repo's listing (`--delete`
+relative to the upload's path in the repo, sparing the files the commit
+re-adds), so `hf repo-files delete acme/model '*.txt'` deletes every text
+file. `.gitattributes` is never deleted, and a commit that would change
+nothing is skipped with upstream's warning.

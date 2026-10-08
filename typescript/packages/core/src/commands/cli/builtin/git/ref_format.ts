@@ -14,6 +14,7 @@
 
 import { byteChar } from '../../../../shell/bytes.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { strverscmp } from '../../../../utils/strverscmp.ts'
 import { charWidth } from '../../../../utils/width.ts'
 import { FormatUsageError, GitError, UnparsableFormatError } from './errors.ts'
 import { fieldValue, parseField } from './ref_fields.ts'
@@ -43,55 +44,6 @@ const TCL_ESCAPES: ReadonlyMap<string, string> = new Map([
   ['\t', '\\t'],
   ['\v', '\\v'],
 ])
-
-// glibc strverscmp's automaton, which git's versioncmp keeps: a state per kind
-// of run (none, integral, fractional, leading zeros), and what the first
-// differing pair of characters decides in each.
-const S_N = 0
-const S_I = 3
-const S_F = 6
-const S_Z = 9
-const CMP = 2
-const LEN = 3
-const NEXT_STATE = [S_N, S_I, S_Z, S_N, S_I, S_I, S_N, S_F, S_F, S_N, S_F, S_Z]
-const RESULT_TYPE = [
-  CMP,
-  CMP,
-  CMP,
-  CMP,
-  LEN,
-  CMP,
-  CMP,
-  CMP,
-  CMP,
-  CMP,
-  -1,
-  -1,
-  1,
-  LEN,
-  LEN,
-  1,
-  LEN,
-  LEN,
-  CMP,
-  CMP,
-  CMP,
-  CMP,
-  CMP,
-  CMP,
-  CMP,
-  CMP,
-  CMP,
-  CMP,
-  1,
-  1,
-  -1,
-  CMP,
-  CMP,
-  -1,
-  CMP,
-  CMP,
-]
 
 /**
  * `find_next`: where the next `%(` starts, -1 for none; a `%%` is a quoted
@@ -289,47 +241,18 @@ function swapPrereleases(
   return first >= 0 ? -1 : 1
 }
 
-function digitClass(char: string): number {
-  return (char === '0' ? 1 : 0) + (char >= '0' && char <= '9' ? 1 : 0)
-}
-
-/** A C string's character at `i`, NUL past its end. */
-function charAt(text: string, i: number): string {
-  return i < text.length ? (text[i] ?? '\0') : '\0'
-}
-
-const isDigit = (char: string): boolean => char >= '0' && char <= '9'
-
-/** git's `versioncmp`: compare as versions, `v1.9` before `v1.10`. */
+/**
+ * git's `versioncmp`: glibc's `strverscmp`, unless a `versionsort.suffix`
+ * around the first difference decides.
+ */
 export function versioncmp(a: string, b: string, suffixes: readonly string[] = []): number {
-  let i = 0
-  let c1 = charAt(a, 0)
-  let c2 = charAt(b, 0)
-  let state = S_N + digitClass(c1)
-  while (c1 === c2) {
-    if (c1 === '\0') return 0
-    state = NEXT_STATE[state] ?? S_N
-    i += 1
-    c1 = charAt(a, i)
-    c2 = charAt(b, i)
-    state += digitClass(c1)
-  }
-  const diff = c1.charCodeAt(0) - c2.charCodeAt(0)
-  if (suffixes.length) {
-    const swapped = swapPrereleases(a, b, i, suffixes)
+  if (suffixes.length > 0 && a !== b) {
+    let off = 0
+    while (a[off] === b[off]) off += 1
+    const swapped = swapPrereleases(a, b, off, suffixes)
     if (swapped !== null) return swapped
   }
-  const result = RESULT_TYPE[state * 3 + digitClass(c2)] ?? CMP
-  if (result === CMP) return diff
-  if (result === LEN) {
-    let k = i + 1
-    while (isDigit(charAt(a, k))) {
-      if (!isDigit(charAt(b, k))) return 1
-      k += 1
-    }
-    return isDigit(charAt(b, k)) ? -1 : diff
-  }
-  return result
+  return strverscmp(a, b)
 }
 
 function asciiLower(text: string): string {

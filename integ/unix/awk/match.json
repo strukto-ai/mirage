@@ -373,6 +373,40 @@
         "stdout": "0\n\na\nb\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "awk_counts_builtin_arguments_as_mawk_does",
+      "seq": 16100201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo 'id=42 name=Ada' | awk '{ if (match($0, /id=([0-9]+) name=([A-Za-z]+)/, m)) print \"id\", m[1], \"name\", m[2] }'; echo rc=$?; awk 'BEGIN{print split(\"a b\", x, \" \", s)}'; echo rc=$?; awk 'BEGIN{print \"never\"; print substr(\"abc\", 1, 1, 1)}'; echo rc=$?; awk 'BEGIN{srand; print \"never\"}'; echo rc=$?; awk \"BEGIN{print length(sprintf(\\\"%s\\\"$(printf ', %s' $(seq 254))))}\"; echo rc=$?; awk \"BEGIN{print length(sprintf(\\\"%s\\\"$(printf ', %s' $(seq 255))))}\"; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\nrc=2\n1\nrc=0\nrc=2\n",
+        "stderr": "awk: syntax error at ',': expected ')'\nawk: syntax error at ',': expected ')'\nawk: too many arguments in call to substr: 4 (maximum 3)\nawk: syntax error at ';': expected '('\nawk: too many arguments in call to sprintf: 256 (maximum 255)\n"
+      }
     }
   ]
 }

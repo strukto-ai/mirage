@@ -51,30 +51,33 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
   'while',
 ])
 
-export const BUILTIN_FUNCS: ReadonlySet<string> = new Set([
-  'atan2',
-  'close',
-  'cos',
-  'exp',
-  'fflush',
-  'gsub',
-  'index',
-  'int',
-  'length',
-  'log',
-  'match',
-  'rand',
-  'sin',
-  'split',
-  'sprintf',
-  'sqrt',
-  'srand',
-  'sub',
-  'substr',
-  'system',
-  'tolower',
-  'toupper',
-])
+// mawk 1.3.4's builtin functions, each with the fewest and the most
+// arguments it takes. A word named here lexes as a builtin, and the parser
+// counts its arguments against the bounds.
+export const BUILTIN_ARITY: Readonly<Record<string, readonly [number, number]>> = {
+  atan2: [2, 2],
+  close: [1, 1],
+  cos: [1, 1],
+  exp: [1, 1],
+  fflush: [0, 1],
+  gsub: [2, 3],
+  index: [2, 2],
+  int: [1, 1],
+  length: [0, 1],
+  log: [1, 1],
+  match: [2, 2],
+  rand: [0, 0],
+  sin: [1, 1],
+  split: [2, 3],
+  sprintf: [1, 255],
+  sqrt: [1, 1],
+  srand: [0, 1],
+  sub: [2, 3],
+  substr: [2, 3],
+  system: [1, 1],
+  tolower: [1, 1],
+  toupper: [1, 1],
+}
 
 const THREE_CHAR_OPS = ['**=']
 
@@ -271,7 +274,7 @@ export class Lexer {
     while (this.pos < this.src.length && WORD_CHARS.includes(this.at())) this.pos += 1
     const word = this.src.slice(start, this.pos)
     if (KEYWORDS.has(word)) return token(TokKind.KEYWORD, word, word)
-    if (BUILTIN_FUNCS.has(word)) return token(TokKind.BUILTIN, word, word)
+    if (Object.hasOwn(BUILTIN_ARITY, word)) return token(TokKind.BUILTIN, word, word)
     // A NAME glued directly to `(` is a call; a space makes it
     // concatenation with a parenthesised expression instead.
     if (this.at() === '(') return token(TokKind.FUNC_NAME, word, word)

@@ -38,7 +38,8 @@ export function repoTypeOf(fl: FlagView): string {
  * an accessor is a value object here, holding the endpoint, the credential
  * and which repository is being addressed, so `hf` gets the mount's tree walk
  * and commit builder for free. It reaches no mount, which is what keeps this
- * an account CLI.
+ * an account CLI. A verb reads paths and sizes, never the per-file commit a
+ * mount's mtimes come from, so the walk lists bare.
  */
 export function hubFor(
   inv: CLIInvocation,
@@ -53,13 +54,10 @@ export function hubFor(
       ...(config.token !== undefined ? { token: config.token } : {}),
       endpoint: config.endpoint,
       revision: revision === undefined || revision === '' ? DEFAULT_REVISION : revision,
+      expandCommits: false,
     },
     repoType,
   )
-}
-
-function result(text: string): [ByteSource, IOResult] {
-  return [yieldBytes(new TextEncoder().encode(text)), new IOResult()]
 }
 
 /**
@@ -79,8 +77,12 @@ export function requireOperands(inv: CLIInvocation, names: readonly string[]): v
   }
 }
 
-export function textOut(text: string): [ByteSource, IOResult] {
-  return result(text)
+export function textOut(text: string, stderr = ''): [ByteSource, IOResult] {
+  const encoder = new TextEncoder()
+  return [
+    yieldBytes(encoder.encode(text)),
+    new IOResult(stderr === '' ? {} : { stderr: encoder.encode(stderr) }),
+  ]
 }
 
 /**

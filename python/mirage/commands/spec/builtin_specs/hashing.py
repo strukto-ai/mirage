@@ -175,6 +175,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-t", type="str"),
             Option(short="-c"),
             Option(short="-o", type="path"),
+            Option(short="-l", long="--list"),
         ),
         rest=Operand(type="path"),
     ),
