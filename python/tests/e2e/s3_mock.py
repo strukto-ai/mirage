@@ -56,8 +56,8 @@ def _bare(etag: str) -> str:
     return etag.strip('"')
 
 
-def _sent(kwargs: dict[str, object]) -> dict[str, str]:
-    return {k: str(kwargs[k]) for k in _CONDITION_KEYS if k in kwargs}
+def _sent(kwargs: dict[str, str]) -> dict[str, str]:
+    return {k: kwargs[k] for k in _CONDITION_KEYS if k in kwargs}
 
 
 _CONDITION_KEYS = ("IfMatch", "IfNoneMatch", "CopySourceIfMatch")
@@ -214,8 +214,8 @@ class MultiBucketS3Client:
     def _require(
         self,
         current: bytes | None,
-        if_match: object,
-        if_none_match: object,
+        if_match: str | None,
+        if_none_match: str | None,
     ) -> None:
         # Quotes are stripped on both sides so the fake accepts either
         # spelling; which one the driver sends is the driver's contract,
@@ -226,7 +226,7 @@ class MultiBucketS3Client:
         # (user guide, "Conditional write behavior").
         if if_match is not None and current is None:
             raise _mock_s3_error("NoSuchKey")
-        if if_match is not None and _bare(str(if_match)) != _bare(
+        if if_match is not None and _bare(if_match) != _bare(
             self._etag(current)
         ):
             raise _mock_s3_error("PreconditionFailed", 412)
@@ -309,7 +309,7 @@ class MultiBucketS3Client:
         )
 
     async def put_object(
-        self, Bucket: str, Key: str, Body: bytes, **kwargs: object
+        self, Bucket: str, Key: str, Body: bytes, **kwargs: str
     ) -> dict:
         self.calls["put_object"] += 1
         self.bucket_calls["put_object", Bucket] += 1
@@ -330,7 +330,7 @@ class MultiBucketS3Client:
         return resp
 
     async def delete_object(
-        self, Bucket: str, Key: str, **kwargs: object
+        self, Bucket: str, Key: str, **kwargs: str
     ) -> None:
         self.calls["delete_object"] += 1
         self.bucket_calls["delete_object", Bucket] += 1
@@ -341,7 +341,7 @@ class MultiBucketS3Client:
         self._objects(Bucket).pop(Key, None)
 
     async def copy_object(
-        self, Bucket: str, CopySource: dict, Key: str, **kwargs: object
+        self, Bucket: str, CopySource: dict, Key: str, **kwargs: str
     ) -> dict:
         # Deliberately lenient: a self-copy is accepted, the way a
         # non-AWS S3-compatible store might. That is what makes the
@@ -355,7 +355,7 @@ class MultiBucketS3Client:
         if src_key not in src_objects:
             return {}
         source_match = kwargs.get("CopySourceIfMatch")
-        if source_match is not None and _bare(str(source_match)) != _bare(
+        if source_match is not None and _bare(source_match) != _bare(
             self._etag(src_objects[src_key])
         ):
             raise _mock_s3_error("PreconditionFailed", 412)

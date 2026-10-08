@@ -1,4 +1,4 @@
-import { MountBackend } from '@struktoai/mirage-core/types'
+import { MountBackend, WritePolicy } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { describe, expect, it, vi } from 'vitest'
 import { KernelMounts } from './kernel_mounts.ts'
@@ -34,7 +34,7 @@ vi.mock('../fuse.ts', () => ({
 
 describe('KernelMounts.exposed', () => {
   it('follows add, remove and close', async () => {
-    const ws = { getSession: (id: string) => id } as unknown as Workspace
+    const ws = { getSession: (id: string) => id, mounts: () => [] } as unknown as Workspace
     const mounts = new KernelMounts(ws)
     await mounts.add('/s3', '/mnt/one', undefined, MountBackend.FSKIT)
     await mounts.add('/s3', '/mnt/two', 'agent')
@@ -56,7 +56,7 @@ describe('KernelMounts.exposed', () => {
   it('holds an exposure while its setup is pending, and drops a failed one', async () => {
     // A conditional mount added while setup is in flight must already see
     // the exposure, or it slips under the kernel mount.
-    const ws = { getSession: (id: string) => id } as unknown as Workspace
+    const ws = { getSession: (id: string) => id, mounts: () => [] } as unknown as Workspace
     const mounts = new KernelMounts(ws)
     const pending = mounts.add('/s3', '/mnt/slow')
     expect(mounts.exposed()).toEqual([['/s3', MountBackend.FUSE]])
@@ -72,7 +72,7 @@ describe('KernelMounts.exposed', () => {
   it('keeps a later expose of the key when an earlier one fails', async () => {
     // Two exposes of one prefix overlap; the first failing after the second
     // came up must not roll back the second's live records.
-    const ws = { getSession: (id: string) => id } as unknown as Workspace
+    const ws = { getSession: (id: string) => id, mounts: () => [] } as unknown as Workspace
     const mounts = new KernelMounts(ws)
     const first = mounts.add('/s3', '/mnt/slowfail')
     await mounts.add('/s3', '/mnt/two')
@@ -83,7 +83,7 @@ describe('KernelMounts.exposed', () => {
 
   it('lists no mount when two overlapping exposes of the key both fail', async () => {
     // The later failure must not put back the earlier, dead one.
-    const ws = { getSession: (id: string) => id } as unknown as Workspace
+    const ws = { getSession: (id: string) => id, mounts: () => [] } as unknown as Workspace
     const mounts = new KernelMounts(ws)
     const first = mounts.add('/s3', '/mnt/slowfail')
     const second = mounts.add('/s3', '/mnt/slowerfail')
@@ -98,7 +98,7 @@ describe('KernelMounts.exposed', () => {
     async (teardown) => {
       // A setup waiting behind another of its key must not come up after
       // the workspace closed or the prefix was removed.
-      const ws = { getSession: (id: string) => id } as unknown as Workspace
+      const ws = { getSession: (id: string) => id, mounts: () => [] } as unknown as Workspace
       const mounts = new KernelMounts(ws)
       const first = mounts.add('/s3', '/mnt/slow')
       const second = mounts.add('/s3', '/mnt/two')
@@ -109,4 +109,20 @@ describe('KernelMounts.exposed', () => {
       expect(mounts.mountpoints).toEqual({})
     },
   )
+
+  it('refuses a queued setup when a conditional mount arrived while it waited', async () => {
+    // The refusal is judged when a setup starts, not when it was queued.
+    const table: { prefix: string; write: WritePolicy }[] = []
+    const ws = { getSession: (id: string) => id, mounts: () => table } as unknown as Workspace
+    const mounts = new KernelMounts(ws)
+    const first = mounts.add('/s3', '/mnt/slowfail')
+    const arrived = first.catch(() => {
+      table.push({ prefix: '/s3/', write: WritePolicy.CONDITIONAL })
+    })
+    const second = mounts.add('/s3', '/mnt/two')
+    await arrived
+    await expect(second).rejects.toThrow('write: conditional cannot be exposed')
+    expect(mounts.exposed()).toEqual([])
+    expect(mounts.mountpoints).toEqual({})
+  })
 })

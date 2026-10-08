@@ -13,6 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountBackend } from '@struktoai/mirage-core/types'
+import {
+  conditionalOverlap,
+  kernelRefusal,
+} from '@struktoai/mirage-core/workspace/mount/write_policy'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { FuseManager } from '../fuse.ts'
 
@@ -84,6 +88,10 @@ export class KernelMounts {
     sessionId: string | undefined,
     backend: MountBackend | undefined,
   ): Promise<string> {
+    // Judged as the setup starts: a queued one starts after others settle.
+    const conditional = conditionalOverlap(this.workspace.mounts(), prefix)
+    if (conditional !== null)
+      throw new Error(kernelRefusal(conditional, backend ?? MountBackend.FUSE))
     const session = sessionId !== undefined ? this.workspace.getSession(sessionId) : undefined
     const priorManager = this.managers.get(key)
     const priorMountpoint = this.mountpointsMap.get(key)
