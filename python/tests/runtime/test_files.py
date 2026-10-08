@@ -404,14 +404,14 @@ def test_stat_projects_one_struct_for_every_surface():
     assert st.mtime_ns > 0
 
 
-def test_stat_reports_an_unknown_stamp_as_epoch_zero():
+def test_stat_reports_an_unknown_stamp_as_none():
     vfs = ListingVFS(
         listing=[],
         stats={
             "/data/a.txt": FileStat(name="a.txt", size=1, type=FileType.FILE)
         },
     )
-    assert vfs.stat("/data/a.txt").mtime_ns == 0
+    assert vfs.stat("/data/a.txt").mtime_ns is None
 
 
 def test_stat_projects_character_type_bits_and_logical_device_numbers():
@@ -426,7 +426,7 @@ def test_stat_projects_character_type_bits_and_logical_device_numbers():
         },
     )
     assert vfs.stat("/dev/zero") == VFSStat(
-        size=0, is_dir=False, mode=CHAR_MODE, mtime_ns=0, rdev=0x105
+        size=0, is_dir=False, mode=CHAR_MODE, rdev=0x105
     )
 
 

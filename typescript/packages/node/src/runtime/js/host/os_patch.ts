@@ -42,7 +42,8 @@ function mountedPath(ws: Workspace, p: string): boolean {
 
 async function mirageStat(vfs: RuntimeFiles, p: string): Promise<unknown> {
   const s = await vfs.stat(p)
-  const mtime = new Date(s.mtimeMs)
+  const mtime = new Date(s.mtimeMs ?? 0)
+  const atime = s.atimeMs === undefined ? mtime : new Date(s.atimeMs)
   return {
     isFile: () => !s.isDir,
     isDirectory: () => s.isDir,
@@ -54,16 +55,16 @@ async function mirageStat(vfs: RuntimeFiles, p: string): Promise<unknown> {
     size: s.size,
     mtime,
     mtimeMs: mtime.getTime(),
-    atime: mtime,
-    atimeMs: mtime.getTime(),
+    atime,
+    atimeMs: atime.getTime(),
     ctime: mtime,
     ctimeMs: mtime.getTime(),
     birthtime: mtime,
     birthtimeMs: mtime.getTime(),
     mode: s.mode,
     nlink: 1,
-    uid: 0,
-    gid: 0,
+    uid: s.uid ?? 0,
+    gid: s.gid ?? 0,
     rdev: 0,
     blksize: 0,
     blocks: 0,

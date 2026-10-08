@@ -31,6 +31,7 @@ from mirage.types import FileStat, PathSpec
 from mirage.utils.path import norm
 from mirage.utils.stat_view import (
     DIR_MODE,
+    atime_ns,
     content_size,
     device_rdev,
     is_dir,
@@ -65,16 +66,16 @@ def stat_row(fs: FileStat) -> VFSStat:
     Args:
         fs (FileStat): the row the door answered with.
     """
-    ns = mtime_ns(fs)
-    # A guest wire has no validity channel for a timestamp, so an
-    # unknown mtime and epoch zero both encode as 0 from here on.
     return VFSStat(
         size=content_size(fs),
         is_dir=is_dir(fs),
         mode=posix_mode(fs),
-        mtime_ns=0 if ns is None else ns,
+        mtime_ns=mtime_ns(fs),
         is_link=is_link(fs),
         rdev=device_rdev(fs),
+        atime_ns=atime_ns(fs),
+        uid=fs.uid if isinstance(fs.uid, int) else None,
+        gid=fs.gid if isinstance(fs.gid, int) else None,
     )
 
 
@@ -328,8 +329,7 @@ class RuntimeFiles:
         they are in a shell, while a withheld surface's files (history,
         the program view) stay unseen. A file's own row decides that,
         not its listing: the history mount lists its one file as empty
-        so a traversal never descends into it. 0 is the door's spelling
-        of an unknown mtime.
+        so a traversal never descends into it.
 
         Args:
             path (str): guest-absolute virtual path.
@@ -342,7 +342,7 @@ class RuntimeFiles:
             return None
         if self.listing_or_none(path) is None:
             return None
-        return VFSStat(size=0, is_dir=True, mode=DIR_MODE, mtime_ns=0)
+        return VFSStat(size=0, is_dir=True, mode=DIR_MODE)
 
     def listing_or_none(self, path: str) -> list[VFSEntry] | None:
         """The directory's unclassified rows, or None when it is not one.
@@ -464,7 +464,7 @@ class RuntimeFiles:
             is_dir=st.is_dir,
             is_link=row.is_link,
             mode=st.mode,
-            mtime_ns=st.mtime_ns,
+            mtime_ns=st.mtime_ns or 0,
             rdev=st.rdev,
         )
 

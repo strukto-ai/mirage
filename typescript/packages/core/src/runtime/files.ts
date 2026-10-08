@@ -16,6 +16,7 @@ import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { classify } from '../errors/index.ts'
 import { isMissingOp, isMissingPath } from '../errors/fs.ts'
 import {
+  atimeMs,
   contentSize,
   DIR_MODE,
   deviceRdev,
@@ -64,16 +65,18 @@ export function isUnclassified(entry: VFSEntry | VFSStat): boolean {
  * Emscripten fills an `FSAttr`. Mirrors python's `stat_row`.
  */
 function statRow(st: FileStat): VFSStat {
-  const ms = mtimeMs(st)
+  const mtime = mtimeMs(st)
+  const atime = atimeMs(st)
   return {
     size: contentSize(st),
     isDir: isDir(st),
-    // A guest wire has no validity channel for a timestamp, so an
-    // unknown mtime and epoch zero both encode as 0 from here on.
-    mtimeMs: ms ?? 0,
     mode: posixMode(st),
+    ...(mtime !== null ? { mtimeMs: mtime } : {}),
     ...(isLink(st) ? { isLink: true } : {}),
     ...(isCharDevice(st) ? { rdev: deviceRdev(st) } : {}),
+    ...(atime !== null ? { atimeMs: atime } : {}),
+    ...(typeof st.uid === 'number' ? { uid: st.uid } : {}),
+    ...(typeof st.gid === 'number' ? { gid: st.gid } : {}),
   }
 }
 
@@ -268,7 +271,7 @@ export class RuntimeFiles {
       return null
     }
     if ((await this.listingOrNull(path)) === null) return null
-    return { size: 0, isDir: true, mode: DIR_MODE, mtimeMs: 0 }
+    return { size: 0, isDir: true, mode: DIR_MODE }
   }
 
   /**
@@ -361,7 +364,17 @@ export class RuntimeFiles {
   private async classified(directory: string, row: VFSEntry): Promise<VFSEntry> {
     const mark = row.isLink === true ? { isLink: true } : {}
     try {
-      return { path: row.path, ...(await this.stat(row.path, row.isLink === true)), ...mark }
+      const st = await this.stat(row.path, row.isLink === true)
+      return {
+        path: row.path,
+        size: st.size,
+        isDir: st.isDir,
+        mode: st.mode,
+        mtimeMs: st.mtimeMs ?? 0,
+        ...(st.isLink === true ? { isLink: true } : {}),
+        ...(st.rdev !== undefined ? { rdev: st.rdev } : {}),
+        ...mark,
+      }
     } catch (err) {
       if (!isMissingPath(err)) {
         console.warn(`runtime files: readdir ${directory}: stat ${row.path}: ${String(err)}`)

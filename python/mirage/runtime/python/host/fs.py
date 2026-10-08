@@ -25,7 +25,7 @@ from typing import Any, cast
 from mirage.errors import FsCondition
 from mirage.errors.fs import eexist, fs_error
 from mirage.errors.posix import posix_errno, posix_phrase
-from mirage.runtime.files import RuntimeFiles
+from mirage.runtime.files import RuntimeFiles, stat_row
 from mirage.runtime.python.host.constants import (
     REFUSED_CALLS,
     ROUTED_CALLS,
@@ -41,10 +41,10 @@ from mirage.runtime.python.host.list import (
     leaf,
 )
 from mirage.runtime.python.host.stat import stat_result
-from mirage.types import FileStat
-from mirage.utils.dates import iso_timestamp, timestamp_iso
+from mirage.runtime.types import VFSStat
+from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import owner_prefix
-from mirage.utils.stat_view import LINK_MODE, content_size, is_dir, posix_mode
+from mirage.utils.stat_view import LINK_MODE
 from mirage.workspace.files import Files
 
 
@@ -152,47 +152,47 @@ class HostFs:
         mode: int,
         size: int,
         nlink: int,
-        uid: int | str | None,
-        gid: int | str | None,
-        atime: float | None,
-        mtime: float | None,
+        uid: int | None,
+        gid: int | None,
+        atime_ns: int | None,
+        mtime_ns: int | None,
     ) -> _real_os.stat_result:
-        """One `os.stat_result` from the fields a FileStat carries.
+        """One `os.stat_result` from the fields a stat row carries.
 
         Args:
             virtual (str): the path being statted (the inode's name).
             mode (int): st_mode, type bits included.
             size (int): st_size.
             nlink (int): st_nlink.
-            uid (int | str | None): owner from the overlay; a name or
-                None falls back to the host's own uid.
-            gid (int | str | None): group, read the same way.
-            atime (float | None): access time, None for unknown.
-            mtime (float | None): modification time, None for unknown.
+            uid (int | None): owner from the overlay; None falls back to
+                the host's own uid.
+            gid (int | None): group, read the same way.
+            atime_ns (int | None): access time, None for unknown.
+            mtime_ns (int | None): modification time, None for unknown.
         """
-        stamp = self._now if mtime is None else mtime
+        stamp = self._now if mtime_ns is None else mtime_ns / 1_000_000_000
         return stat_result(
             virtual,
             owner_prefix(self._files.mount_prefixes(), virtual) or "/",
             mode,
             size,
             nlink,
-            uid if isinstance(uid, int) else self._uid,
-            gid if isinstance(gid, int) else self._gid,
-            stamp if atime is None else atime,
+            self._uid if uid is None else uid,
+            self._gid if gid is None else gid,
+            stamp if atime_ns is None else atime_ns / 1_000_000_000,
             stamp,
         )
 
-    def _stat_of(self, virtual: str, st: FileStat) -> _real_os.stat_result:
+    def _stat_of(self, virtual: str, st: VFSStat) -> _real_os.stat_result:
         return self._result(
             virtual,
-            posix_mode(st),
-            content_size(st),
-            2 if is_dir(st) else 1,
+            st.mode,
+            st.size,
+            2 if st.is_dir else 1,
             st.uid,
             st.gid,
-            iso_timestamp(st.atime),
-            iso_timestamp(st.modified),
+            st.atime_ns,
+            st.mtime_ns,
         )
 
     def _link_target(self, virtual: str) -> str | None:
@@ -214,14 +214,14 @@ class HostFs:
 
     def _exists(self, virtual: str) -> bool:
         try:
-            self._door.call("stat", virtual)
+            self._door.stat(virtual)
             return True
         except (OSError, ValueError):
             return False
 
     def _isdir(self, virtual: str) -> bool:
         try:
-            return is_dir(self._door.call("stat", virtual))
+            return self._door.stat(virtual).is_dir
         except (OSError, ValueError):
             return False
 
@@ -237,7 +237,10 @@ class HostFs:
         virtual = self._virtual(path)
         if virtual is None:
             return cast(list[str] | list[bytes], self._host.listdir(path))
-        return [leaf(entry) for entry in self._door.call("readdir", virtual)]
+        return [
+            leaf(row.path)
+            for row in self._door.readdir(virtual, classify=False)
+        ]
 
     def scandir(self, path: Any = None) -> Any:
         """The directory as lazily-stattable entries.
@@ -253,8 +256,8 @@ class HostFs:
         if virtual is None:
             return self._host.scandir(path)
         entries = [
-            MountDirEntry(self, entry.rstrip("/"), entry.endswith("/"))
-            for entry in self._door.call("readdir", virtual)
+            MountDirEntry(self, row.path.rstrip("/"), row.is_dir)
+            for row in self._door.readdir(virtual, classify=False)
         ]
         return MountScandir(entries)
 
@@ -343,7 +346,7 @@ class HostFs:
             )
         if not follow_symlinks:
             return self.lstat(virtual)
-        return self._stat_of(virtual, self._door.call("stat", virtual))
+        return self._stat_of(virtual, self._door.stat(virtual))
 
     def lstat(
         self, path: Any, *, dir_fd: int | None = None
@@ -370,7 +373,7 @@ class HostFs:
             )
         target = self._link_target(virtual)
         if target is None:
-            return self._stat_of(virtual, self._door.call("stat", virtual))
+            return self._stat_of(virtual, self._door.stat(virtual))
         links = self._files.links
         row = None if links is None else links.link_stat_at(virtual)
         if row is None:
@@ -386,7 +389,7 @@ class HostFs:
                 None,
                 None,
             )
-        return self._stat_of(virtual, row)
+        return self._stat_of(virtual, stat_row(row))
 
     def access(
         self,

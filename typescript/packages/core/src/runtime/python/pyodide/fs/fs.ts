@@ -460,7 +460,7 @@ export class PyodideFs {
     node.unclassified = false
     this.nodes.retype(node, stat.mode)
     node.rdev = stat.rdev ?? 0
-    node.atime = node.mtime = node.ctime = stat.mtimeMs
+    node.atime = node.mtime = node.ctime = stat.mtimeMs ?? 0
     if (this.host.isFile(stat.mode) && node.loaded === false) node.usedBytes = stat.size
   }
 

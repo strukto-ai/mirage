@@ -99,13 +99,13 @@ describe('RuntimeFiles transport', () => {
     })
   })
 
-  it('reports an unknown stamp as epoch zero', async () => {
+  it('reports an unknown stamp as absent', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() =>
       Promise.resolve(
         new FileStat({ name: 'a.txt', size: 1, type: FileType.FILE, content: ContentType.TEXT }),
       ),
     )
-    expect((await new RuntimeFiles(dispatch).stat('/ram/a.txt')).mtimeMs).toBe(0)
+    expect((await new RuntimeFiles(dispatch).stat('/ram/a.txt')).mtimeMs).toBeUndefined()
   })
 
   it('projects character type bits and logical device numbers', async () => {
@@ -122,7 +122,6 @@ describe('RuntimeFiles transport', () => {
       size: 0,
       isDir: false,
       mode: CHAR_MODE,
-      mtimeMs: 0,
       rdev: 0x105,
     })
   })
@@ -138,7 +137,7 @@ describe('RuntimeFiles transport', () => {
     expect(dispatch).toHaveBeenCalledWith('stat', '/ram/lnk', undefined, undefined, {
       nofollow: true,
     })
-    expect(st).toEqual({ size: 8, isDir: false, mode: LINK_MODE, mtimeMs: 0, isLink: true })
+    expect(st).toEqual({ size: 8, isDir: false, mode: LINK_MODE, isLink: true })
   })
 
   // A backend that slash-marks its directories has already said what the

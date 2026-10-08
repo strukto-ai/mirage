@@ -53,9 +53,9 @@ export async function stat(
     setNum('rdev', st.rdev ?? 0)
     setNum('size', st.size)
     setNum('blocks', Math.ceil(st.size / 512))
-    setNum('atime', st.mtimeMs)
-    setNum('mtime', st.mtimeMs)
-    setNum('ctime', st.mtimeMs)
+    setNum('atime', st.mtimeMs ?? 0)
+    setNum('mtime', st.mtimeMs ?? 0)
+    setNum('ctime', st.mtimeMs ?? 0)
     ctx.setProp(tuple, 0, obj)
     obj.dispose()
   }
