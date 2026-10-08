@@ -45,6 +45,7 @@ def _stub(name: str) -> BaseVFS:
         vfs.config = S3Config(
             bucket="b", endpoint_url="https://s3.amazonaws.com"
         )
+        vfs._endpoint = vfs.config.endpoint_url
     return vfs
 
 
@@ -132,16 +133,19 @@ _MINIO = "http://127.0.0.1:9000"
 def test_an_s3_mount_is_judged_on_its_declared_endpoint(
     monkeypatch, env, declared, expected
 ):
-    # The declared endpoint, else the env.
-    for name in (
+    # The declared endpoint, else the env as it was when the mount was built.
+    names = (
         "AWS_ENDPOINT_URL",
         "AWS_ENDPOINT_URL_S3",
         "AWS_IGNORE_CONFIGURED_ENDPOINT_URLS",
-    ):
+    )
+    for name in names:
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     vfs = S3VFS(S3Config(bucket="b", region="us-east-1", **declared))
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
     want = (
         _CONDITIONS["s3+endpoint"]
         if expected == "s3+endpoint"

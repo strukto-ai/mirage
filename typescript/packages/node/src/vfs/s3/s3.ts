@@ -36,6 +36,21 @@ export interface S3VFSState {
   config: S3ConfigRedacted
 }
 
+/**
+ * The endpoint a mount declares, for its write-condition row: the config's,
+ * else AWS_ENDPOINT_URL_S3 or AWS_ENDPOINT_URL unless
+ * AWS_IGNORE_CONFIGURED_ENDPOINT_URLS is true. An endpoint set only in an AWS
+ * profile is not read.
+ */
+function declaredEndpoint(config: S3Config): string | undefined {
+  if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
+  const env = process.env
+  if (env.AWS_IGNORE_CONFIGURED_ENDPOINT_URLS?.toLowerCase() === 'true') return undefined
+  const endpoint = env.AWS_ENDPOINT_URL_S3 ?? ''
+  if (endpoint !== '') return endpoint
+  return env.AWS_ENDPOINT_URL !== '' ? env.AWS_ENDPOINT_URL : undefined
+}
+
 export class S3VFS extends S3VFSBase {
   override readonly name: string = VFSName.S3
   override readonly cachesReads: boolean = true
@@ -50,24 +65,11 @@ export class S3VFS extends S3VFSBase {
   override readonly accessor: S3Accessor
 
   /**
-   * The endpoint this mount declares, for its write-condition row: the
-   * config's, else AWS_ENDPOINT_URL_S3 or AWS_ENDPOINT_URL unless
-   * AWS_IGNORE_CONFIGURED_ENDPOINT_URLS is true. An endpoint set only in an
-   * AWS profile is not read. Mirrors python's `resolved_endpoint`.
+   * The endpoint this mount declared when it was built, fixed then so the
+   * load-time verdict and every later write judge the same endpoint.
+   * Mirrors python's `resolved_endpoint`.
    */
-  get resolvedEndpoint(): string | undefined {
-    if (this.config.endpoint !== undefined && this.config.endpoint !== '') {
-      return this.config.endpoint
-    }
-    const env = process.env
-    if (env.AWS_IGNORE_CONFIGURED_ENDPOINT_URLS?.toLowerCase() === 'true') return undefined
-    const endpoint = env.AWS_ENDPOINT_URL_S3 ?? ''
-    return endpoint !== ''
-      ? endpoint
-      : env.AWS_ENDPOINT_URL !== ''
-        ? env.AWS_ENDPOINT_URL
-        : undefined
-  }
+  readonly resolvedEndpoint: string | undefined
 
   constructor(config: S3Config) {
     super()
@@ -79,6 +81,7 @@ export class S3VFS extends S3VFSBase {
       delete cfg.keyPrefix
     }
     this.config = cfg
+    this.resolvedEndpoint = declaredEndpoint(cfg)
     const proxy = cfg.proxy
     this.accessor = new S3Accessor({
       ...cfg,

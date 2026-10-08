@@ -47,6 +47,26 @@ from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
 
 
+def _declared_endpoint(config: S3Config) -> str | None:
+    """The endpoint a mount declares, for its write-condition row.
+
+    The config's, else ``AWS_ENDPOINT_URL_S3`` or ``AWS_ENDPOINT_URL``
+    unless ``AWS_IGNORE_CONFIGURED_ENDPOINT_URLS`` is true. An endpoint
+    set only in an AWS profile is not read.
+
+    Args:
+        config (S3Config): the mount's config.
+    """
+    if config.endpoint_url:
+        return config.endpoint_url
+    env = os.environ
+    if env.get("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "").lower() == "true":
+        return None
+    return (
+        env.get("AWS_ENDPOINT_URL_S3") or env.get("AWS_ENDPOINT_URL") or None
+    )
+
+
 class S3VFS(BaseVFS):
     accessor: S3Accessor
     name: str = VFSName.S3
@@ -66,28 +86,15 @@ class S3VFS(BaseVFS):
         super().__init__()
         self.config = config
         self.accessor = S3Accessor(self.config)
+        self._endpoint = _declared_endpoint(config)
 
     def resolved_endpoint(self) -> str | None:
-        """The endpoint this mount declares, for its write-condition row.
+        """The endpoint this mount declared when it was built.
 
-        The config's, else ``AWS_ENDPOINT_URL_S3`` or ``AWS_ENDPOINT_URL``
-        unless ``AWS_IGNORE_CONFIGURED_ENDPOINT_URLS`` is true. An endpoint
-        set only in an AWS profile is not read. Mirrors TS
-        ``resolvedEndpoint``.
+        Fixed then, so the load-time verdict and every later write judge
+        the same endpoint. Mirrors TS ``resolvedEndpoint``.
         """
-        if self.config.endpoint_url:
-            return self.config.endpoint_url
-        env = os.environ
-        if (
-            env.get("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "").lower()
-            == "true"
-        ):
-            return None
-        return (
-            env.get("AWS_ENDPOINT_URL_S3")
-            or env.get("AWS_ENDPOINT_URL")
-            or None
-        )
+        return self._endpoint
 
     async def readdir(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

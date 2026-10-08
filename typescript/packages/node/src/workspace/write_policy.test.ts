@@ -124,10 +124,12 @@ describe('an s3 mount judged on its declared endpoint', () => {
     ],
     ['nothing configured', {}, AWS],
   ] as const)('%s', (_name, env, expected) => {
-    // The declared endpoint, else the env.
+    // The declared endpoint, else the env as it was when the mount was built.
     for (const n of names) Reflect.deleteProperty(process.env, n)
     for (const [n, v] of Object.entries(env)) process.env[n] = v
-    expect([...writeConditions(s3())].sort()).toEqual(expected)
+    const vfs = s3()
+    for (const n of names) Reflect.deleteProperty(process.env, n)
+    expect([...writeConditions(vfs)].sort()).toEqual(expected)
   })
 })
 
