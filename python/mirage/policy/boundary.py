@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class OpBoundary:
+class Boundary:
     """The POSIX policy boundary for dispatched filesystem operations.
 
     Args:

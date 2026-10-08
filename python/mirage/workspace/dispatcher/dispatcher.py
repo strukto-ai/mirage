@@ -51,13 +51,13 @@ from mirage.errors.fs import (
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record, start_op
 from mirage.observe.record import OpRecord
-from mirage.ops.boundary import OpBoundary
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
 from mirage.ops.namespace_view import (
     merge_readdir,
     namespace_listing,
     namespace_stat,
 )
+from mirage.policy.boundary import Boundary
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.types import EntryGate
 from mirage.shell.bytes import encode_text
@@ -242,7 +242,7 @@ class _MountChannel:
 
     Args:
         mount (MountEntry): the mount owning the subtree.
-        boundary (OpBoundary): the dispatcher's op boundary for that
+        boundary (Boundary): the dispatcher's op boundary for that
             mount; its admit raises to refuse a deletion. A deletion is
             not completed through post_vfs, which could only refuse
             after the entry is gone and strand the cascade.
@@ -251,7 +251,7 @@ class _MountChannel:
     """
 
     mount: MountEntry
-    boundary: OpBoundary
+    boundary: Boundary
     invalidate: Callable[[PathSpec], Awaitable[None]]
 
     async def readdir(self, spec: PathSpec) -> list[str]:
@@ -376,7 +376,7 @@ class Dispatcher:
         self._admit_write = admit_write
         self._writers = KeyLock()
 
-    def _boundary(self, mount: MountEntry | None) -> OpBoundary:
+    def _boundary(self, mount: MountEntry | None) -> Boundary:
         """The policy boundary for an op on a path ``mount`` owns.
 
         The mount's prefix and mode, or for a path above every mount an
@@ -387,7 +387,7 @@ class Dispatcher:
             mount (MountEntry | None): the mount owning the path, None
                 when no mount does.
         """
-        return OpBoundary(
+        return Boundary(
             self._namespace.registry.policies,
             mount.prefix if mount is not None else "",
             mount.mode if mount is not None else MountMode.WRITE,
@@ -727,7 +727,7 @@ class Dispatcher:
             refusal = refusal or await self._parent_refusal(dst)
             raise refusal or exdev(call.path)
 
-    async def _admit(self, call: _Call, mount: MountEntry) -> OpBoundary:
+    async def _admit(self, call: _Call, mount: MountEntry) -> Boundary:
         """Run admission for an op on a mounted path.
 
         Admission policies fire at the door, before the warm-cache early
@@ -743,7 +743,7 @@ class Dispatcher:
             mount (MountEntry): the mount serving its path.
 
         Returns:
-            OpBoundary: the boundary the op completes through.
+            Boundary: the boundary the op completes through.
         """
         # A function the VFS declares a write is judged as one, whatever
         # its name: the POSIX names are known here, a custom one only to
@@ -770,7 +770,7 @@ class Dispatcher:
         return boundary
 
     async def _serve_cached(
-        self, call: _Call, mount: MountEntry, boundary: OpBoundary
+        self, call: _Call, mount: MountEntry, boundary: Boundary
     ) -> bytes | None:
         """Answer a read from the file cache, or None to read the backend.
 
@@ -787,7 +787,7 @@ class Dispatcher:
         Args:
             call (_Call): the admitted op.
             mount (MountEntry): the mount serving its path.
-            boundary (OpBoundary): the boundary the op completes through.
+            boundary (Boundary): the boundary the op completes through.
         """
         if (
             not mount.vfs.caches_reads
@@ -1252,7 +1252,7 @@ class Dispatcher:
         reads for), session grants and both gates run, and the write
         leaves an OpRecord — a scoped kernel mount refuses exactly like
         a scoped shell. The turf's mode gates the write too
-        (``MountModePolicy`` at the ``OpBoundary``), so a read-only
+        (``MountModePolicy`` at the ``Boundary``), so a read-only
         mount or grant answers EROFS for a link exactly as for a file;
         a link above every mount is bare namespace structure, gated
         with an empty prefix and governed by ``/``. A rename's

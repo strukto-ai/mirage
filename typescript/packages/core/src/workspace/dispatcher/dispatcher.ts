@@ -43,7 +43,7 @@ import {
 import { type FsError } from '../../errors/types.ts'
 import { Policies, PolicyDenied } from '../../policy/index.ts'
 import type { Decisions } from '../../policy/decisions.ts'
-import { OpBoundary } from '../../ops/boundary.ts'
+import { Boundary } from '../../policy/boundary.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
@@ -598,7 +598,7 @@ export class Dispatcher {
    * the way it holds against writing there, under the mode of the mount
    * that owns it. Mirrors Python's Dispatcher._admit.
    */
-  private async admit(call: Call, mount: MountEntry, boundary: OpBoundary): Promise<void> {
+  private async admit(call: Call, mount: MountEntry, boundary: Boundary): Promise<void> {
     // A function the VFS declares a write is judged as one, whatever its
     // name: the POSIX names are known here, a custom one only to the VFS
     // that defines it.
@@ -688,7 +688,7 @@ export class Dispatcher {
     call: Call,
     mount: MountEntry,
     vfs: BaseVFS,
-    boundary: OpBoundary,
+    boundary: Boundary,
   ): Promise<Uint8Array | null> {
     if (!vfs.cachesReads || rawRead(call) || !DISPATCH_READ_OPS.has(call.name)) return null
     const cached = await this.cache.get(call.path.virtual)
@@ -1087,8 +1087,8 @@ export class Dispatcher {
    * prefix and mode, or for a path above every mount an empty prefix and
    * full write, governed by `/` (`MountModePolicy`). Mirrors Python's
    * Dispatcher._boundary. */
-  private boundary(mount: MountEntry | null): OpBoundary {
-    return new OpBoundary(
+  private boundary(mount: MountEntry | null): Boundary {
+    return new Boundary(
       this.policies,
       mount?.prefix ?? '',
       mount?.mode ?? MountMode.WRITE,
@@ -1102,7 +1102,7 @@ export class Dispatcher {
    * Mount.call plus the dispatcher-side duties around it. The
    * same mode fence, index stamping and mount-prefix context normal
    * dispatch applies, plus the boundary's admission and completion for
-   * writes (Python's `_MountChannel` holds the same `OpBoundary`) and the
+   * writes (Python's `_MountChannel` holds the same `Boundary`) and the
    * dispatcher's own write invalidation, because a raw mount call
    * runs outside the cache context dispatch establishes, so the cores'
    * invalidation cannot land. Invalidation runs even when the op
@@ -1124,7 +1124,7 @@ export class Dispatcher {
   ): Promise<unknown> {
     const mount = this.namespace.mountFor(spec.virtual)
     const write = mount.writes(name)
-    const boundary = new OpBoundary(this.policies, mountPrefix, mode, sessionId(), this.decisions)
+    const boundary = new Boundary(this.policies, mountPrefix, mode, sessionId(), this.decisions)
     if (write) {
       // The same pre-vfs admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
@@ -1346,7 +1346,7 @@ export class Dispatcher {
    * (the same ownership rule the link read filter uses), session grants
    * and both gates run, and the write leaves an OpRecord — a scoped
    * kernel mount refuses exactly like a scoped shell. The turf's mode
-   * gates the write too (`MountModePolicy` at the `OpBoundary`), so a
+   * gates the write too (`MountModePolicy` at the `Boundary`), so a
    * read-only mount or grant answers EROFS for a link exactly as for a
    * file; a link above every mount is bare namespace structure, gated
    * with an empty prefix and governed by `/`. A rename's
