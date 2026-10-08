@@ -198,6 +198,14 @@ jobs:
       - name: Symbol parity
         run: ./python/.venv/bin/python scripts/check_symbol_parity.py --strict
 
+      # One import direction: backends and what they are built from
+      # (accessor, cache, core, utils, view, vfs) never import commands or
+      # the workspace, and TypeScript loads no module in a loop. The
+      # excused edges and the type-only cycles are a ratchet like the two
+      # above.
+      - name: Import direction
+        run: ./python/.venv/bin/python scripts/check_import_direction.py --strict
+
       # Same ratchet, applied to battery coverage: a backend that cannot pass
       # a case is normally just deleted from its `targets`, which turns a
       # divergence into an omission nobody can see. This fails when a case
