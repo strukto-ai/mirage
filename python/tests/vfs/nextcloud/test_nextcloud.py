@@ -1,3 +1,4 @@
+from mirage.commands.builtin.backends import commands_for
 from mirage.vfs.nextcloud import NextcloudConfig, NextcloudVFS
 
 
@@ -39,7 +40,7 @@ def test_nextcloud_vfs_registers_commands():
         url="https://cloud.example.com/remote.php/dav/files/user/"
     )
     vfs = NextcloudVFS(config)
-    command_names = {rc.name for rc in vfs.commands()}
+    command_names = {rc.name for rc in commands_for(vfs)}
     assert "ls" in command_names
     assert "cat" in command_names
     assert "grep" in command_names

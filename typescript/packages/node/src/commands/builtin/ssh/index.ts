@@ -12,18 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
+import { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import type { Command, CommandIO } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { SSHAccessor } from '../../../accessor/ssh.ts'
-import { IO } from './io.ts'
 
 // Shell traversals need partial results and per-directory errors; the shared
 // readdir/stat walker owns those. Direct VFS aggregate methods remain strict.
-const walkIO = { ...IO }
-delete walkIO.find
-delete walkIO.du
+function walked(io: CommandIO): CommandIO {
+  const rest = { ...io }
+  delete rest.find
+  delete rest.du
+  return rest
+}
 
-export const SSH_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<SSHAccessor>(VFSName.SSH, walkIO),
-]
+export const SSH_COMMANDS: readonly Command[] = [...genericCommands(VFSName.SSH, { table: walked })]

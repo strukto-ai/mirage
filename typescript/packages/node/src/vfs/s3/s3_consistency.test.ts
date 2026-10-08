@@ -189,7 +189,7 @@ describe('S3 cache consistency (mocked)', () => {
   })
 
   it('a fan-out revalidates a descendant mount', async () => {
-    // The fan-out calls mount.executeCmd per leg, bypassing the registry's
+    // The fan-out calls mount.runCommand per leg, bypassing the registry's
     // pre-command reconcile entirely, so before the gate a descendant
     // mount's cached bytes were never revalidated at all.
     mock.store.set(BUCKET, 'p.txt', ENC.encode('v1\n'))
@@ -487,8 +487,9 @@ describe('S3 cache consistency (mocked)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
       await ws.shell('cat /s3/c.txt')
-      const real = ws.opsRegistry.call.bind(ws.opsRegistry)
-      vi.spyOn(ws.opsRegistry, 'call').mockImplementation((...args) =>
+      const mount = ws.mount('/s3')
+      const real = mount.callOp.bind(mount)
+      vi.spyOn(mount, 'callOp').mockImplementation((...args) =>
         args[0] === 'stat' ? Promise.reject(new TypeError('probe bug')) : real(...args),
       )
       const ls = await ws.shell('ls -l /s3/c.txt; echo survived')

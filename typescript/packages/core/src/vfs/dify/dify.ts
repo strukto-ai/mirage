@@ -14,11 +14,7 @@
 
 import { BaseVFS } from '../base.ts'
 import { DifyAccessor } from '../../accessor/dify.ts'
-import { DIFY_COMMANDS } from '../../commands/builtin/dify/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 
-import { DIFY_OPS } from '../../ops/dify/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 import { VFSName } from '../../types.ts'
 import {
   type DifyConfigRedacted,
@@ -28,6 +24,13 @@ import {
   type DifyConfigResolved,
 } from './config.ts'
 import { PROMPT } from './prompt.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { SearchQuery } from '../types.ts'
+import { DIFY_TREE } from '../../core/dify/tree.ts'
+import { read, readStream } from '../../core/dify/read.ts'
+import { stat } from '../../core/dify/stat.ts'
+import { searchResource, searchMany } from '../../core/dify/search.ts'
 
 export interface DifyVFSOptions {
   config: DifyConfig
@@ -67,11 +70,43 @@ export class DifyVFS extends BaseVFS {
     }
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return DIFY_OPS
+  override readonly readsRanges: boolean = true
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return DIFY_TREE.readdir(this.accessor, path, index)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return DIFY_COMMANDS
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    if (offset === 0 && size === null) return read(this.accessor, path, index)
+    return read(this.accessor, path, index, size === null ? { offset } : { offset, size })
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return stat(this.accessor, path, index)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return readStream(this.accessor, path, index)
+  }
+
+  override search(
+    path: PathSpec,
+    query: SearchQuery,
+    index?: IndexCacheStore,
+  ): Promise<string[] | null> {
+    return searchResource(this.accessor, path, query, index)
+  }
+
+  override searchMany(
+    paths: PathSpec[],
+    query: SearchQuery,
+    index?: IndexCacheStore,
+  ): Promise<string[] | null> {
+    return searchMany(this.accessor, paths, query, index)
   }
 }

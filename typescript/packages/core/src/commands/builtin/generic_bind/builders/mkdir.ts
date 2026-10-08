@@ -29,7 +29,7 @@ import { mountPrefixOf } from '../../../../utils/key_prefix.ts'
 import { CycleError, norm, parent, walkNodes } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import type { MkdirOp } from '../../../../vfs/types.ts'
-import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { missingOperandError } from '../../../spec/usage.ts'
 
 /**
@@ -198,7 +198,7 @@ export async function makeDirectory<A extends Accessor>(
   return null
 }
 
-const mkdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const mkdir: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const fl = new FlagView(opts.flags, specOf('mkdir'))
   const parents = fl.asBool('parents')
   const verbose = fl.asBool('verbose')
@@ -251,7 +251,7 @@ const mkdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   return [out, new IOResult({ stderr, exitCode: errors.length > 0 ? 1 : 0 })]
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'mkdir',
   write: true,
   fn: mkdir,

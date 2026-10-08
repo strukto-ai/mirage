@@ -17,12 +17,12 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tee import tee_generic as generic_tee
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     Operation,
     bound_op,
+    require_op,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -44,7 +44,7 @@ async def tee(
         paths,
         texts,
         read_stream=bound_op(ops.read_stream, accessor, opts.index),
-        write_bytes=partial(ops.require(Operation.WRITE), accessor),
+        write_bytes=partial(require_op(ops, Operation.WRITE), accessor),
         append_bytes=(None if append is None else partial(append, accessor)),
         stdin=opts.stdin,
         flags=opts.flags,
@@ -52,4 +52,4 @@ async def tee(
     )
 
 
-BUILDER = Builder("tee", tee, write=True)
+BUILDER = GenericCommand("tee", tee, write=True)

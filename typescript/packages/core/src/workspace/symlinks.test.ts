@@ -17,8 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -45,9 +44,7 @@ afterAll(() => {
 
 function buildWorkspace(): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  ops.registerVfs(ram)
-  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 const dec = (b: Uint8Array | null): string => (b === null ? '' : new TextDecoder().decode(b))
@@ -121,24 +118,21 @@ describe('symlinks (namespace-backed)', () => {
     // live collection as a directory. Refusing on either reading denied
     // the ordinary case of adding a link inside a mounted tree.
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
-    const real = ops.call.bind(ops)
-    ops.call = async (name, kind, accessor, path, args, kwargs) => {
-      if (name === 'stat') {
-        return new FileStat({
+    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
+    const stat = vi.spyOn(ram, 'stat').mockImplementation((path) =>
+      Promise.resolve(
+        new FileStat({
           name: rstripSlash(path.virtual).split('/').pop() ?? '/',
           type: FileType.DIRECTORY,
-        })
-      }
-      if (name === 'readdir') return ['tables', 'views']
-      return real(name, kind, accessor, path, args, kwargs)
-    }
-    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, ops, shellParser: parser })
+        }),
+      ),
+    )
+    const readdir = vi.spyOn(ram, 'readdir').mockResolvedValue(['tables', 'views'])
     const r = await ws.shell('ln -s /data/x /data/meta_link')
     expect(r.exitCode).toBe(0)
     expect(dec(r.stderr)).toBe('')
-    ops.call = real
+    stat.mockRestore()
+    readdir.mockRestore()
     expect(dec((await ws.shell('readlink /data/meta_link')).stdout)).toBe('/data/x\n')
     await ws.close()
   })
@@ -161,13 +155,10 @@ describe('symlinks (namespace-backed)', () => {
     // used to move the node itself, which made it the one write in the
     // shell no admission policy could see.
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
     const ws = new Workspace(
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        ops,
         shellParser: parser,
         policies: [
           {

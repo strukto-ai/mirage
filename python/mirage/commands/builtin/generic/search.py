@@ -10,7 +10,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 from mirage.vfs.search import search_resources
-from mirage.vfs.types import SearchOps, SearchQuery
+from mirage.vfs.types import SearchQuery
 
 
 def semantic_options(fl: FlagView) -> dict[str, JsonValue]:
@@ -37,7 +37,6 @@ def semantic_options(fl: FlagView) -> dict[str, JsonValue]:
 
 def make_search(
     vfs: str,
-    capability: SearchOps | None,
     options: Callable[[FlagView], dict[str, JsonValue]] = semantic_options,
     *,
     name: str = "search",
@@ -49,7 +48,6 @@ def make_search(
 
     Args:
         vfs (str): VFS name the command registers under.
-        capability (SearchOps | None): the backend's resource search.
         options (Callable[[FlagView], dict[str, JsonValue]]): the search
             options for one invocation.
         name (str): the head word the command answers to.
@@ -65,7 +63,7 @@ def make_search(
             raise UsageError("search: query is required")
         fl = FlagView(opts.flags, spec=SPECS["search"])
         output = await search_resources(
-            capability,
+            opts.io.search if opts.io is not None else None,
             accessor,
             default_paths(paths, opts.cwd),
             SearchQuery(texts[0], options=options(fl)),

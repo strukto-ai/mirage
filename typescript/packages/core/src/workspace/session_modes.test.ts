@@ -14,7 +14,6 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { runWithSession } from '../context/session_context.ts'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMSessionStore } from './session/ram.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { FileType, MountMode, type FileStat } from '../types.ts'
@@ -48,8 +47,6 @@ async function makeGrantsWorkspace(
     root.store.files.set('/root.txt', ENC.encode('top\n'))
     mounts['/'] = root
   }
-  const registry = new OpsRegistry()
-  for (const r of Object.values(mounts)) registry.registerVfs(r)
   const modes = options.modes ?? {}
   const specs = Object.fromEntries(
     Object.entries(mounts).map(([prefix, r]) => [
@@ -59,7 +56,6 @@ async function makeGrantsWorkspace(
   )
   const ws = new Workspace(specs, {
     mode: MountMode.WRITE,
-    ops: registry,
     shellParser: parser,
   })
   open.push(ws)
@@ -224,12 +220,9 @@ describe('structure below a mount whose own content is hidden', () => {
     base.store.files.set('/top.txt', ENC.encode('TOP\n'))
     const inner = new RAMVFS()
     inner.store.files.set('/deep.txt', ENC.encode('needle\n'))
-    const registry = new OpsRegistry()
-    registry.registerVfs(base)
-    registry.registerVfs(inner)
     const ws = new Workspace(
       { '/base': base, '/base/inner': inner },
-      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
     open.push(ws)
     return ws
@@ -304,11 +297,9 @@ describe('nested mount disclosure', () => {
     const priv = new RAMVFS()
     base.store.files.set('/top.txt', ENC.encode('public\n'))
     priv.store.files.set('/secret.txt', ENC.encode('SECRET\n'))
-    const registry = new OpsRegistry()
-    for (const r of [base, priv]) registry.registerVfs(r)
     const ws = new Workspace(
       { '/base': base, '/base/private': priv },
-      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
     open.push(ws)
     return ws

@@ -17,7 +17,6 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import {
   MountMode,
-  OpsRegistry,
   S3VFS,
   Workspace,
   type S3Config,
@@ -52,9 +51,7 @@ const s3Config: S3Config = {
   secretAccessKey: requireEnv('AWS_SECRET_ACCESS_KEY'),
 }
 const s3 = new S3VFS(s3Config)
-const ops = new OpsRegistry()
-for (const op of s3.ops()) ops.register(op)
-const ws = new Workspace({ '/s3/': s3 }, { mode: MountMode.READ, ops })
+const ws = new Workspace({ '/s3/': s3 }, { mode: MountMode.READ })
 
 const resourceLoader = new DefaultResourceLoader({
   cwd: process.cwd(),

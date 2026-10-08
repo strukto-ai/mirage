@@ -19,7 +19,7 @@ import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { eacces, enoent } from '../../../../errors/fs.ts'
-import type { CommandIO } from '../adapter.ts'
+import type { CommandIO } from '../../../config.ts'
 import { BUILDER } from './unlink.ts'
 
 const DEC = new TextDecoder()

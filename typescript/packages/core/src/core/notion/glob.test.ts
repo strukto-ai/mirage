@@ -17,10 +17,11 @@ import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import type { NotionTransport } from './client.ts'
 import { NotionAccessor } from '../../accessor/notion.ts'
-import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
-import { IO } from '../../commands/builtin/notion/io.ts'
+import { makeResolveGlob } from '../../utils/glob_walk.ts'
+import { readdir as notionReaddir } from './readdir.ts'
+import { stat as notionStat } from './stat.ts'
 
-const resolveNotionGlob = resolveGlobOf(IO)
+const resolveNotionGlob = makeResolveGlob(notionReaddir, undefined, undefined, notionStat)
 
 class FakeTransport implements NotionTransport {
   public readonly invocations: { name: string; args: Record<string, unknown> }[] = []

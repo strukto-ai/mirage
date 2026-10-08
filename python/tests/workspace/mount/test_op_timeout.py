@@ -20,6 +20,7 @@ from mirage import MountMode, Workspace
 from mirage.commands.errors import CommandTimeoutError
 from mirage.types import Limit
 from mirage.vfs.ram import RAMVFS
+from tests.fixtures.vfs_io import override
 
 
 async def _slow_op(accessor, scope, *args, **kwargs):
@@ -43,14 +44,14 @@ async def _ws_mount():
 async def test_vfs_op_honors_per_mount_timeout(monkeypatch):
     mount = await _ws_mount()
     mount.command_limits["stat"] = Limit(timeout_seconds=0.05)
-    monkeypatch.setattr(mount._ops[("stat", None)], "fn", _slow_op)
+    override(mount.vfs, "stat", _slow_op)
     with pytest.raises(CommandTimeoutError):
-        await mount.execute_op("stat", "/data/f.txt")
+        await mount.call("stat", "/data/f.txt")
 
 
 @pytest.mark.asyncio
 async def test_vfs_op_unconfigured_is_not_timed(monkeypatch):
     mount = await _ws_mount()
-    monkeypatch.setattr(mount._ops[("stat", None)], "fn", _slowish_op)
-    result = await mount.execute_op("stat", "/data/f.txt")
+    override(mount.vfs, "stat", _slowish_op)
+    result = await mount.call("stat", "/data/f.txt")
     assert result == "ok"

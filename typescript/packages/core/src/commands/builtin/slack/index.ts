@@ -12,18 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SlackAccessor } from '../../../accessor/slack.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 import { SLACK_GREP } from './grep.ts'
-import { IO } from './io.ts'
 import { SLACK_RG } from './rg.ts'
 
 const SLACK_OVERRIDES = new Set(['grep', 'rg'])
 
-export const SLACK_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<SlackAccessor>(VFSName.SLACK, IO, {
+export const SLACK_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.SLACK, {
     overrides: SLACK_OVERRIDES,
   }),
   ...SLACK_GREP,

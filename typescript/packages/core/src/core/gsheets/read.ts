@@ -89,11 +89,3 @@ async function readFile(
 }
 
 export const read = makeRead<GSheetsAccessor>(detectScope, { file: readFile })
-
-export async function* readStream(
-  accessor: GSheetsAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await read(accessor, path, index)
-}

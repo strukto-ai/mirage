@@ -448,7 +448,7 @@ def test_snapshot_false_mount_still_serves_a_verified_cache():
 def test_fanout_revalidates_a_descendant_mount():
     """A cross-mount walk reaches each leg through that leg's own manager.
 
-    The fan-out calls `mount.execute_cmd` directly, bypassing the
+    The fan-out calls `mount.run_command` directly, bypassing the
     registry's pre-command reconcile entirely, so before the gate a
     descendant mount's cached bytes were never revalidated at all.
     """
@@ -509,7 +509,7 @@ def test_a_flaky_probe_costs_a_refetch_not_the_walk():
             await ws.shell("cat /s3/a.txt")
             await ws.shell("cat /s3/b.txt")
             mount = ws.namespace.mount_for("/s3/a.txt")
-            real = mount.execute_op
+            real = mount.call
 
             async def flaky(op, path, **kwargs):
                 if (
@@ -520,7 +520,7 @@ def test_a_flaky_probe_costs_a_refetch_not_the_walk():
                     raise OSError(errno.EIO, "backend stat unavailable")
                 return await real(op, path, **kwargs)
 
-            mount.execute_op = flaky
+            mount.call = flaky
             result = await ws.shell("grep -r v /s3/")
             await ws.close()
             return result.exit_code, result.stdout
@@ -570,14 +570,14 @@ def test_a_routing_probe_failure_never_takes_the_line():
         with patch_s3_session(session):
             await ws.shell("cat /s3/a.txt")
             mount = ws.namespace.mount_for("/s3/a.txt")
-            real = mount.execute_op
+            real = mount.call
 
             async def broken(op, path, **kwargs):
                 if op == "stat":
                     raise TypeError("probe bug")
                 return await real(op, path, **kwargs)
 
-            mount.execute_op = broken
+            mount.call = broken
             results = []
             for line in (
                 "ls -l /s3/a.txt; echo survived",

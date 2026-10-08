@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../accessor/base.ts'
-import { type EntryGate, PathSpec, type ReadBytesFn, type ReadStreamFn } from '../types.ts'
+import { PathSpec, type ReadBytesFn, type ReadStreamFn } from '../types.ts'
+import type { EntryGate } from '../policy/types.ts'
 import type { IndexCacheStore } from './index/store.ts'
 import { type CacheInvalidator, activeCacheManager } from './context.ts'
 import { getAdmission } from '../context/session_context.ts'

@@ -13,9 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { S3VFS } from './s3/s3.ts'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-import { remapCommandsVfs, remapOpsVfs } from '@struktoai/mirage-core/vfs/s3/remap'
 import {
   parseConfigWithSchema,
   redactConfigWithSchema,
@@ -161,8 +158,8 @@ export interface S3AliasVFSState<TRedacted> {
 /**
  * The shared body of every S3-compatible provider VFS (MinIO, Ceph,
  * R2, Wasabi, ...). Each is an {@link S3VFS} reached through a
- * provider-shaped config, so all it owns is its `name`, that config, and
- * ops/commands retagged from `s3` onto the name. A subclass supplies its
+ * provider-shaped config, so all it owns is its `name` and that config;
+ * the mount serves S3's commands under the name. A subclass supplies its
  * prompt as a plain field and hands the varying pieces to `super`.
  *
  * `toS3Config` and `redact` arrive as functions rather than as an
@@ -175,8 +172,6 @@ export interface S3AliasVFSState<TRedacted> {
 export abstract class S3AliasVFS<TConfig, TRedacted extends S3ConfigRedacted> extends S3VFS {
   override readonly name: string
   readonly aliasConfig: TConfig
-  private readonly aliasOps: readonly RegisteredOp[]
-  private readonly aliasCommands: readonly RegisteredCommand[]
   private readonly redactAlias: (config: TConfig) => TRedacted
 
   protected constructor(
@@ -189,16 +184,6 @@ export abstract class S3AliasVFS<TConfig, TRedacted extends S3ConfigRedacted> ex
     this.name = name
     this.aliasConfig = config
     this.redactAlias = redact
-    this.aliasOps = remapOpsVfs(super.ops(), name)
-    this.aliasCommands = remapCommandsVfs(super.commands(), name)
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return this.aliasOps
-  }
-
-  override commands(): readonly RegisteredCommand[] {
-    return this.aliasCommands
   }
 
   override getState(): Promise<S3AliasVFSState<TRedacted>> {

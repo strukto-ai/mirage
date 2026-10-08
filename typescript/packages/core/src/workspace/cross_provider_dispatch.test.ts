@@ -13,10 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { RegisteredCommand } from '../commands/config.ts'
+import { Command } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, VFSName } from '../types.ts'
 import { getTestParser, stderrStr } from './fixtures/workspace_fixture.ts'
@@ -31,16 +30,14 @@ const noopFn = (): Promise<[Uint8Array, IOResult]> =>
 
 async function makeWs(mounts: Record<string, RAMVFS>): Promise<Workspace> {
   const parser = await getTestParser()
-  const registry = new OpsRegistry()
-  for (const r of Object.values(mounts)) registry.registerVfs(r)
-  return new Workspace(mounts, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
+  return new Workspace(mounts, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 function seed(r: RAMVFS, path: string, content: string): void {
   r.store.files.set(path, ENC.encode(content))
 }
 
-function registerOnAll(ws: Workspace, prefixes: string[], rc: RegisteredCommand): void {
+function registerOnAll(ws: Workspace, prefixes: string[], rc: Command): void {
   for (const p of prefixes) {
     const mount = ws.registry.mountForPrefix(p)
     mount.register(rc)
@@ -54,7 +51,7 @@ describe('cross-VFS dispatch (port of test_cross_provider_dispatch.py)', () => {
     seed(m1, '/a.txt', 'aaa\n')
     seed(m2, '/b.txt', 'bbb\n')
     const ws = await makeWs({ '/m1': m1, '/m2': m2 })
-    const rc = new RegisteredCommand({
+    const rc = new Command({
       name: 'nocross',
       spec: SPEC,
       vfs: VFSName.RAM,
@@ -73,7 +70,7 @@ describe('cross-VFS dispatch (port of test_cross_provider_dispatch.py)', () => {
     seed(m1, '/a.txt', 'aaa\n')
     seed(m2, '/b.txt', 'bbb\n')
     const ws = await makeWs({ '/m1': m1, '/m2': m2 })
-    const rc = new RegisteredCommand({
+    const rc = new Command({
       name: 'nocross',
       spec: SPEC,
       vfs: VFSName.RAM,
@@ -104,7 +101,7 @@ describe('cross-VFS dispatch (port of test_cross_provider_dispatch.py)', () => {
     seed(m1, '/a.txt', 'aaa\n')
     seed(m2, '/b.txt', 'bbb\n')
     const ws = await makeWs({ '/m1': m1, '/m2': m2 })
-    const rc = new RegisteredCommand({
+    const rc = new Command({
       name: 'nocross',
       spec: SPEC,
       vfs: VFSName.RAM,
@@ -124,7 +121,7 @@ describe('cross-VFS dispatch (port of test_cross_provider_dispatch.py)', () => {
     seed(m2, '/b.txt', 'b')
     seed(m3, '/c.txt', 'c')
     const ws = await makeWs({ '/m1': m1, '/m2': m2, '/m3': m3 })
-    const rc = new RegisteredCommand({
+    const rc = new Command({
       name: 'nocross',
       spec: SPEC,
       vfs: VFSName.RAM,

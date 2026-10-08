@@ -228,7 +228,7 @@ export async function runClaiming(
 }
 
 // Run one already-parsed command on the mount that owns its paths. The shared
-// single-mount execution tail: mount resolution, session-mode checks, executeCmd,
+// single-mount execution tail: mount resolution, session-mode checks, runCommand,
 // filesystem-error formatting, ls/find post-processing, and read/write key
 // prefixing. handleCommand uses it for the normal path, and passes it (bound)
 // to the cross-mount runners so each operand executes natively on its owning
@@ -309,7 +309,7 @@ export async function runOnMount(
   if (signal?.aborted === true) throw makeAbortError(signal)
   try {
     return await runClaiming(rstripSlash(mount.prefix), () =>
-      mount.executeCmd(cmdName, paths, texts, flags, {
+      mount.runCommand(cmdName, paths, texts, flags, {
         stdin: opts.stdin ?? null,
         cwd: session.cwd,
         dispatch,

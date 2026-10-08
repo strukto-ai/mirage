@@ -12,12 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
+import { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import type { Command } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { OPFSAccessor } from '../../../accessor/opfs.ts'
-import { IO } from './io.ts'
 
-export const OPFS_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<OPFSAccessor>(VFSName.OPFS, IO),
-]
+export const OPFS_COMMANDS: readonly Command[] = [...genericCommands(VFSName.OPFS, { local: true })]

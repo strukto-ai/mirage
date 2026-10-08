@@ -21,8 +21,8 @@ import { PathSpec } from '../../../../types.ts'
 import { decodeBase64 } from '../../../../utils/base64.ts'
 import { RAMStore } from '../../../../vfs/ram/store.ts'
 import type { CommandOpts } from '../../../config.ts'
-import { IO } from '../../ram/io.ts'
-import type { CommandIO } from '../adapter.ts'
+import { ioFor } from '../../../../test-utils.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { BUILDER } from './unzip.ts'
 
 const DEC = new TextDecoder()
@@ -48,7 +48,7 @@ async function run(
     await write(accessor, PathSpec.fromStrPath('/a/b.txt'), ENC.encode(before))
   }
   const result = await BUILDER.fn(
-    IO as CommandIO,
+    ioFor(RAMVFS, accessor),
     accessor,
     [PathSpec.fromStrPath('/m.zip')],
     [],

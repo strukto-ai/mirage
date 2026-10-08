@@ -14,11 +14,7 @@
 
 import { BaseVFS } from '../base.ts'
 import { ChromaAccessor } from '../../accessor/chroma.ts'
-import { CHROMA_COMMANDS } from '../../commands/builtin/chroma/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 
-import { CHROMA_OPS } from '../../ops/chroma/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 import { VFSName } from '../../types.ts'
 import {
   type ChromaConfigRedacted,
@@ -28,6 +24,14 @@ import {
   type ChromaConfigResolved,
 } from './config.ts'
 import { PROMPT } from './prompt.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import type { SearchQuery } from '../types.ts'
+import { CHROMA_TREE } from '../../core/chroma/tree.ts'
+import { read, readStream } from '../../core/chroma/read.ts'
+import { stat } from '../../core/chroma/stat.ts'
+import { searchResource, searchMany } from '../../core/chroma/search.ts'
 
 export interface ChromaVFSOptions {
   config: ChromaConfig
@@ -71,11 +75,41 @@ export class ChromaVFS extends BaseVFS {
     }
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return CHROMA_OPS
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return CHROMA_TREE.readdir(this.accessor, path, index)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return CHROMA_COMMANDS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await read(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return stat(this.accessor, path, index)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return readStream(this.accessor, path, index)
+  }
+
+  override search(
+    path: PathSpec,
+    query: SearchQuery,
+    index?: IndexCacheStore,
+  ): Promise<string[] | null> {
+    return searchResource(this.accessor, path, query, index)
+  }
+
+  override searchMany(
+    paths: PathSpec[],
+    query: SearchQuery,
+    index?: IndexCacheStore,
+  ): Promise<string[] | null> {
+    return searchMany(this.accessor, paths, query, index)
   }
 }

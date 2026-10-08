@@ -25,11 +25,7 @@ from mirage.version import __version__ as __version__
 if TYPE_CHECKING:
     from mirage.accessor.base import Accessor
     from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
-    from mirage.commands.builtin.generic_bind import (
-        CommandIO,
-        make_generic_commands,
-    )
-    from mirage.commands.builtin.utils.wrap import stream_from_bytes
+    from mirage.commands.builtin.generic_bind import generic_commands
     from mirage.commands.cli import (
         CLIDoors,
         CLIInvocation,
@@ -47,8 +43,6 @@ if TYPE_CHECKING:
     )
     from mirage.commands.spec.types import UsageStyle
     from mirage.io import IOResult
-    from mirage.ops.generic import OpsTable, make_generic_ops
-    from mirage.ops.registry import RegisteredOp, op
     from mirage.policy import (
         Action,
         Ask,
@@ -72,7 +66,7 @@ if TYPE_CHECKING:
     )
     from mirage.policy.types import VfsContext
     from mirage.runtime.base import Runtime
-    from mirage.runtime.binding import WorkspaceBinding
+    from mirage.runtime.binding import RuntimeContext, WorkspaceBinding
     from mirage.runtime.config import RuntimeConfig
     from mirage.runtime.constants import EXTERNAL_COMMANDS
     from mirage.runtime.errors import UnsupportedExecutionError
@@ -97,7 +91,6 @@ if TYPE_CHECKING:
         RunArgs,
         RunResult,
         RuntimeCapabilities,
-        RuntimeContext,
         ShellExecution,
     )
     from mirage.secrets.registry import known_sources, register_secrets
@@ -119,24 +112,18 @@ if TYPE_CHECKING:
         make_resolve_glob,
     )
     from mirage.utils.ids import new_session_id, new_workspace_id, uuid7
-    from mirage.vfs.adapter import VFSAdapter
     from mirage.vfs.base import BaseVFS
+    from mirage.vfs.call import vfs_call
     from mirage.vfs.disk import DiskVFS
     from mirage.vfs.ram import RAMVFS
     from mirage.vfs.registry import build_vfs, known_vfs_names, register_vfs
     from mirage.vfs.testing import (
-        DriverOps,
         ReadFixture,
-        check_driver_contract,
         check_read_contract,
     )
     from mirage.vfs.types import (
-        DuOps,
-        NativeReadOps,
-        ReadOps,
-        SearchOps,
+        Effect,
         SearchQuery,
-        WriteOps,
     )
     from mirage.workspace import (
         ExecutionNode,
@@ -211,38 +198,26 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.utils.ids": ("new_session_id", "new_workspace_id", "uuid7"),
     "mirage.accessor.base": ("Accessor",),
     "mirage.cache.index": ("NULL_INDEX", "IndexCacheStore", "IndexConfig"),
-    "mirage.commands.builtin.generic_bind": (
-        "CommandIO",
-        "make_generic_commands",
-    ),
-    "mirage.commands.builtin.utils.wrap": ("stream_from_bytes",),
+    "mirage.commands.builtin.generic_bind": ("generic_commands",),
     "mirage.commands.errors": ("UsageError",),
     "mirage.commands.spec.types": ("UsageStyle",),
     "mirage.io": ("IOResult",),
-    "mirage.ops.generic": ("OpsTable", "make_generic_ops"),
-    "mirage.ops.registry": ("RegisteredOp", "op"),
     "mirage.policy.types": ("VfsContext",),
     "mirage.vfs.base": ("BaseVFS",),
     "mirage.vfs.testing": (
-        "DriverOps",
         "ReadFixture",
-        "check_driver_contract",
         "check_read_contract",
     ),
-    "mirage.vfs.adapter": ("VFSAdapter",),
+    "mirage.vfs.call": ("vfs_call",),
     "mirage.vfs.types": (
-        "DuOps",
-        "NativeReadOps",
-        "ReadOps",
-        "SearchOps",
+        "Effect",
         "SearchQuery",
-        "WriteOps",
     ),
     "mirage.vfs.registry": ("build_vfs", "known_vfs_names", "register_vfs"),
     "mirage.runtime.base": ("Runtime",),
     "mirage.runtime.config": ("RuntimeConfig",),
     "mirage.runtime.constants": ("EXTERNAL_COMMANDS",),
-    "mirage.runtime.binding": ("WorkspaceBinding",),
+    "mirage.runtime.binding": ("RuntimeContext", "WorkspaceBinding"),
     "mirage.runtime.errors": ("UnsupportedExecutionError",),
     "mirage.runtime.language": ("LanguageRuntime",),
     "mirage.runtime.mixin": (
@@ -264,7 +239,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "ShellExecution",
         "ProcessExecution",
         "ExecutionRequest",
-        "RuntimeContext",
         "RuntimeCapabilities",
         "FilesystemOperation",
     ),
@@ -279,9 +253,7 @@ _MODULE_OF = {
 }
 
 __all__ = [
-    "DriverOps",
     "ReadFixture",
-    "check_driver_contract",
     "check_read_contract",
     "__version__",
     "Workspace",
@@ -314,7 +286,6 @@ __all__ = [
     "Ask",
     "BaseVFS",
     "CLIDoors",
-    "CommandIO",
     "CommandSpec",
     "ContentType",
     "DEFAULT_MAX_GLOB_MATCHES",
@@ -331,13 +302,9 @@ __all__ = [
     "VfsExplanation",
     "FileType",
     "FlagView",
-    "VFSAdapter",
-    "SearchOps",
     "SearchQuery",
-    "DuOps",
-    "ReadOps",
-    "NativeReadOps",
-    "WriteOps",
+    "Effect",
+    "vfs_call",
     "IOResult",
     "IndexCacheStore",
     "IndexConfig",
@@ -347,12 +314,10 @@ __all__ = [
     "ProcessExecutorMixin",
     "NULL_INDEX",
     "VfsContext",
-    "OpsTable",
     "Outcome",
     "PathSpec",
     "PolicyDenied",
     "PolicyError",
-    "RegisteredOp",
     "RemoteSandbox",
     "VFSName",
     "RouteContext",
@@ -385,14 +350,11 @@ __all__ = [
     "known_vfs_names",
     "known_runtimes",
     "known_sources",
-    "make_generic_commands",
-    "make_generic_ops",
+    "generic_commands",
     "make_resolve_glob",
-    "op",
     "register_vfs",
     "register_runtime",
     "register_secrets",
-    "stream_from_bytes",
 ]
 
 

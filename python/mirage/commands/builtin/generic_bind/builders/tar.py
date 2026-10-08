@@ -20,17 +20,17 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 )
 from mirage.commands.builtin.generic.tar import tar_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     Operation,
     bound_op,
+    require_op,
 )
 from mirage.commands.builtin.generic_bind.archive_io import (
     is_dir_of,
     relay_is_dir_of,
     walk_of,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -70,7 +70,7 @@ async def tar(
     archive_write = (
         transfer_primitives(opts.dispatch)["write"]
         if opts.dispatch is not None
-        else partial(ops.require(Operation.WRITE), accessor)
+        else partial(require_op(ops, Operation.WRITE), accessor)
     )
     return await tar_generic(
         resolved,
@@ -78,11 +78,11 @@ async def tar(
         opts,
         bound_op(ops.read_bytes, accessor, opts.index),
         archive_write,
-        partial(ops.require(Operation.MKDIR), accessor),
+        partial(require_op(ops, Operation.MKDIR), accessor),
         bound_op(ops.stat, accessor, opts.index),
         walk_of(ops, accessor, opts.index),
         is_dir_of(ops, accessor, opts.index),
     )
 
 
-BUILDER = Builder("tar", tar, write=True)
+BUILDER = GenericCommand("tar", tar, write=True)

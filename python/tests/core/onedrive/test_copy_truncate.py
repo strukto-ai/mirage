@@ -13,6 +13,8 @@ from mirage.core.msgraph.client import GraphError
 from mirage.core.onedrive.copy import copy
 from mirage.core.onedrive.truncate import truncate
 from mirage.types import PathSpec
+from mirage.vfs.onedrive.onedrive import OneDriveVFS
+from tests.fixtures.vfs_io import io_for
 
 
 def _accessor(**kw) -> OneDriveAccessor:
@@ -334,7 +336,11 @@ async def test_cp_recursive_uses_server_side_folder_copy():
             _accessor(),
             [src, dst],
             [],
-            CommandOpts(index=NULL_INDEX, flags={"r": True}),
+            CommandOpts(
+                io=io_for(OneDriveVFS, _accessor()),
+                index=NULL_INDEX,
+                flags={"r": True},
+            ),
         )
     assert set(io.writes) == {"/dst/a.txt", "/dst/sub/b.txt"}
 

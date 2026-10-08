@@ -36,6 +36,8 @@ import { resolvePostgresConfig } from '../../../vfs/postgres/config.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { POSTGRES_TAIL } from './tail.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { PostgresVFSBase } from '../../../vfs/postgres/postgres.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -70,10 +72,12 @@ async function run(
 ): Promise<AsyncIterable<Uint8Array> | Uint8Array | null> {
   const cmd = POSTGRES_TAIL[0]
   if (cmd === undefined) throw new Error('tail not registered')
-  const result = await cmd.fn(makeAccessor(), [ROWS], [], {
+  const accessor = makeAccessor()
+  const result = await cmd.fn(accessor, [ROWS], [], {
     stdin: null,
     flags,
     filetypeFns: null,
+    io: ioFor(PostgresVFSBase, accessor),
     cwd: '/',
     ...(signal === undefined ? {} : { signal }),
   })

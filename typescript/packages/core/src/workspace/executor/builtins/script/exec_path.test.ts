@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../../../../ops/registry.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../../../fixtures/workspace_fixture.ts'
@@ -26,12 +25,9 @@ async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
   const root = new RAMVFS()
   const work = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(root)
-  registry.registerVfs(work)
   return new Workspace(
     { '/': root, '/work/': work },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
 }
 
@@ -140,24 +136,15 @@ describe('direct path execution', () => {
     // seals the op layer.
     const parser = await getTestParser()
     const prod = new RAMVFS()
-    const seedOps = new OpsRegistry()
-    seedOps.registerVfs(prod)
-    const seed = new Workspace(
-      { '/data/': prod },
-      { mode: MountMode.WRITE, ops: seedOps, shellParser: parser },
-    )
+    const seed = new Workspace({ '/data/': prod }, { mode: MountMode.WRITE, shellParser: parser })
     await seed.shell('mkdir -p /data/prod')
     await seed.shell("printf 'echo leaked\\n' > /data/prod/run.sh")
     await seed.shell("printf 'echo fine\\n' > /data/ok.sh")
     const root = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(root)
-    ops.registerVfs(prod)
     const ws = new Workspace(
       { '/': root, '/data/': prod },
       {
         mode: MountMode.WRITE,
-        ops,
         shellParser: parser,
         profiles: {
           default: {

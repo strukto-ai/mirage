@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.bin.io import IO
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import generic_commands
 
-COMMANDS = make_generic_commands("bin", IO)
+COMMANDS = generic_commands("bin")

@@ -18,7 +18,6 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Channel } from '../shell/console/index.ts'
 import { JobStatus } from '../shell/job_table/index.ts'
@@ -45,9 +44,7 @@ afterAll(() => {
 
 function makeWs(): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  ops.registerVfs(ram)
-  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 function out(r: ExecuteResult): string {
@@ -423,7 +420,6 @@ describe('history snapshot rewind', () => {
     await ws.snapshot(path)
     const dst = await Workspace.load(path, {
       mode: MountMode.WRITE,
-      ops: new OpsRegistry(),
       shellParser: parser,
     })
     const mine = out(await dst.shell('history'))

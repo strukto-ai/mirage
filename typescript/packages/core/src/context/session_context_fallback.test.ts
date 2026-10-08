@@ -23,7 +23,6 @@ import {
   getAdmission,
   getCurrentSessionFor,
   getCurrentSession,
-  getOpPolicies,
   isProgramInvocation,
   mountGateFor,
   sessionVisibility,
@@ -33,7 +32,6 @@ import {
   runAsProgram,
   runWithAdmission,
   runWithMountGate,
-  runWithOpPolicies,
   runWithRedirectPaths,
   runWithSession,
   sessionUmask,
@@ -42,18 +40,16 @@ import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
 import { handleXargs } from '../workspace/executor/builtins/xargs/xargs.ts'
 import { seedVar, sessionView } from '../workspace/session/state.ts'
-import type { EntryGate } from '../types.ts'
 import { MountMode, PathSpec } from '../types.ts'
-import type { CommandRule } from '../policy/types.ts'
+import type { CommandRule, EntryGate } from '../policy/types.ts'
 import type { Policy } from '../policy/base.ts'
-import type { Policies } from '../policy/policies.ts'
+import { type Policies, runWithOpPolicies, getOpPolicies } from '../policy/policies.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
 import { SessionState } from '../workspace/session/session.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
-import { Session } from '../workspace/workspace/handle.ts'
-import { Workspace } from '../workspace/workspace/workspace.ts'
+import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 import { ContextScope } from '../utils/context_scope.ts'
 import { pathVisible } from '../utils/hidden.ts'

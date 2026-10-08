@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
@@ -21,45 +20,31 @@ import { Workspace } from './workspace/workspace.ts'
 
 async function twoMountWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const root = new RAMVFS()
   const r2 = new RAMVFS()
   const ram = new RAMVFS()
-  ops.registerVfs(root)
-  ops.registerVfs(r2)
-  ops.registerVfs(ram)
   return new Workspace(
     { '/': root, '/r2': r2, '/ram': ram },
-    { mode: MountMode.WRITE, ops, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
 }
 
 async function nestedWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const root = new RAMVFS()
   const data = new RAMVFS()
   const inner = new RAMVFS()
-  ops.registerVfs(root)
-  ops.registerVfs(data)
-  ops.registerVfs(inner)
   return new Workspace(
     { '/': root, '/data': data, '/data/inner': inner },
-    { mode: MountMode.WRITE, ops, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
 }
 
 async function singleMountWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const root = new RAMVFS()
   const r2 = new RAMVFS()
-  ops.registerVfs(root)
-  ops.registerVfs(r2)
-  return new Workspace(
-    { '/': root, '/r2': r2 },
-    { mode: MountMode.WRITE, ops, shellParser: parser },
-  )
+  return new Workspace({ '/': root, '/r2': r2 }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 // ════════════════════════════════════════════════════════════════════

@@ -14,8 +14,8 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.readlink import readlink_generic
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
-from mirage.commands.config import CommandOpts
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -34,4 +34,4 @@ async def readlink(
     return await readlink_generic(resolved, list(texts), opts)
 
 
-BUILDER = Builder("readlink", readlink)
+BUILDER = GenericCommand("readlink", readlink)

@@ -19,11 +19,12 @@ from typing import Any, TypeVar
 
 from mirage.concurrency.limiter import ConcurrencyLimiter
 from mirage.errors.types import OperationNotSupportedError
+from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import FlushStep
 from mirage.runtime.resolver import MountResolver
-from mirage.runtime.types import DispatchFn, RuntimeContext, VFSEntry, VFSStat
+from mirage.runtime.types import DispatchFn, VFSEntry, VFSStat
 from mirage.types import FileStat, PathSpec
 from mirage.utils.context_scope import ContextScope
 from mirage.utils.path import norm
@@ -185,7 +186,7 @@ class RuntimeVFS:
         try:
             return self._raw(op, path, **kwargs)
         except OperationNotSupportedError as exc:
-            # execute_op raises this for an op the mount's VFS does
+            # call raises this for an op the mount's VFS does
             # not register; guests spell that ENOTSUP.
             raise NotImplementedError(str(exc)) from exc
 

@@ -14,8 +14,7 @@
 
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
 import { read, readStream } from '../../../core/postgres/read.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
 import { stat as postgresStat } from '../../../core/postgres/stat.ts'
@@ -25,8 +24,6 @@ import { specOf } from '../../spec/builtins.ts'
 import { headGeneric } from '../generic/head.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { noteAfter, rowCapNotice } from '../utils/limit.ts'
-
-const resolveGlob = resolveGlobOf(IO)
 
 const NL = 0x0a
 
@@ -77,7 +74,9 @@ async function head(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+    paths.length > 0
+      ? await resolveGlobOf(mountIo(opts))(accessor, paths, opts.index ?? undefined)
+      : []
   const fl = new FlagView(opts.flags, specOf('head'))
   const nRaw = fl.asStr('lines') ?? null
   const lines = nRaw !== null ? Number.parseInt(nRaw, 10) : 10

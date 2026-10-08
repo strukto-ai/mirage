@@ -13,7 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ShellValue, type VarAttr } from '../shell/variable.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { FileStat, PathSpec, Visibility } from '../types.ts'
+
+/**
+ * The keywords an op carries through the door: the mount's index, the
+ * filetype a read resolves by (null asks for the stored bytes), and the
+ * op's own (`offset`, `size`, `parents`, `no_create`, the setattr fields).
+ */
+export interface OpKwargs {
+  index?: IndexCacheStore
+  filetype?: string | null
+  [k: string]: unknown
+}
 
 export type StatOverlay = (path: string, stat: FileStat) => FileStat
 
@@ -166,7 +178,7 @@ export interface LinkView {
 // symlinks, mount boundaries, the chmod/chown/touch attr overlay, and the
 // child names the namespace owes a directory. One view per plane means a
 // command that grows a new name-plane need reads another field instead of
-// threading a new keyword through `executeCmd` and every builder. A
+// threading a new keyword through `runCommand` and every builder. A
 // command opts in by reading `ns` off its opts; fields are absent when
 // the plane has nothing to offer (no links, no overlay) or outside a
 // workspace.

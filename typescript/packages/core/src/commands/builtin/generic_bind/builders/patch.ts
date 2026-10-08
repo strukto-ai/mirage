@@ -13,9 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { patchGeneric } from '../../generic/patch.ts'
-import { type Builder, dirAwareStat, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import {
+  type GenericCommand,
+  dirAwareStat,
+  requireOp,
+  resolveGlobOf,
+  type GenericCommandFn,
+} from '../adapter.ts'
 
-const patch: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const patch: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const write = requireOp(ops.write, 'write')
   const stat = dirAwareStat(ops, accessor, opts)
@@ -34,7 +40,7 @@ const patch: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'patch',
   write: true,
   fn: patch,

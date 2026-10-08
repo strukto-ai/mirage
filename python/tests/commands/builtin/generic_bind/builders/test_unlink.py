@@ -15,9 +15,8 @@
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.unlink import unlink
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.types import FileStat, FileType, PathSpec
 
 INDEX = RAMIndexCacheStore()

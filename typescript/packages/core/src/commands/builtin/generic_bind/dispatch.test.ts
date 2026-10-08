@@ -20,7 +20,6 @@ import { IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { runDispatch } from './dispatch.ts'
 import { FileType, MountMode, PathSpec } from '../../../types.ts'
-import type { RegisteredOp } from '../../../ops/registry.ts'
 import { eacces } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -158,14 +157,8 @@ it('charges each mount its own cap in a du walk', async () => {
 })
 
 class RefusedListing extends RAMVFS {
-  override ops(): readonly RegisteredOp[] {
-    return super
-      .ops()
-      .map((ro) =>
-        ro.name === 'readdir'
-          ? { ...ro, fn: (_a: unknown, path: PathSpec) => Promise.reject(eacces(path)) }
-          : ro,
-      )
+  override readdir(path: PathSpec): Promise<string[]> {
+    return Promise.reject(eacces(path))
   }
 }
 

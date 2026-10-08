@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
@@ -34,12 +33,7 @@ async function makeWs(): Promise<Workspace> {
   r.store.files.set('/subdir/file.txt', ENC.encode('hello'))
   r.store.files.set('/subdir/nested/deep.txt', ENC.encode('deep'))
 
-  const registry = new OpsRegistry()
-  registry.registerVfs(r)
-  return new Workspace(
-    { '/ram/': r },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  return new Workspace({ '/ram/': r }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 async function makeWsSpecial(): Promise<Workspace> {
@@ -49,12 +43,7 @@ async function makeWsSpecial(): Promise<Workspace> {
   r.store.dirs.add("/Zecheng's Server")
   r.store.files.set("/Zecheng's Server/image.png", ENC.encode('PNG'))
 
-  const registry = new OpsRegistry()
-  registry.registerVfs(r)
-  return new Workspace(
-    { '/ram/': r },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  return new Workspace({ '/ram/': r }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 async function runOut(ws: Workspace, cmd: string): Promise<string> {

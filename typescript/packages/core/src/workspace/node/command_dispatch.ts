@@ -21,8 +21,8 @@ import {
   redirectOpenerFor,
   redirectPathsFor,
   runWithAdmission,
-  runWithOpPolicies,
 } from '../../context/session_context.ts'
+import { runWithOpPolicies } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { guardDispatch, mergeSignals } from '../abort.ts'
@@ -702,7 +702,7 @@ async function runArgv(
 // Drop the refusal lines the command tier already wrote.
 //
 // A mount-mode refusal names the mount, not the operand, so the line the
-// node table wrote for a refused link is the very line Mount.executeCmd
+// node table wrote for a refused link is the very line Mount.runCommand
 // writes for the backend operands beside it on the same mount, and
 // `rm dlink file` would say it twice. Compared on the trimmed text, so a
 // trailing-newline difference between the two renderers cannot defeat

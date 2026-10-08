@@ -23,7 +23,9 @@ from mirage.commands.builtin.postgres.head import head
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
+from mirage.vfs.postgres import PostgresVFS
 from mirage.vfs.postgres.config import PostgresConfig
+from tests.fixtures.vfs_io import io_for
 
 ROWS = "/public/tables/users/rows.jsonl"
 
@@ -85,7 +87,11 @@ async def _head(
         accessor,
         [path],
         [],
-        CommandOpts(index=RAMIndexCacheStore(), flags={"lines": str(n)}),
+        CommandOpts(
+            io=io_for(PostgresVFS, accessor),
+            index=RAMIndexCacheStore(),
+            flags={"lines": str(n)},
+        ),
     )
     data = await materialize(out)
     return data, io.exit_code, await materialize(io.stderr)

@@ -12,12 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { GmailAccessor } from '../../../accessor/gmail.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 import { GMAIL_GREP } from './grep.ts'
-import { IO } from './io.ts'
 import { GMAIL_RG } from './rg.ts'
 
 const GMAIL_OVERRIDES = new Set(['grep', 'rg'])
@@ -25,8 +23,8 @@ const GMAIL_OVERRIDES = new Set(['grep', 'rg'])
 // Gmail verbs and API passthroughs live in the gws CLI
 // (commands/cli/builtin/gws), installed by name; the mount only serves
 // the filesystem surface.
-export const GMAIL_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<GmailAccessor>(VFSName.GMAIL, IO, {
+export const GMAIL_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.GMAIL, {
     overrides: GMAIL_OVERRIDES,
   }),
   ...GMAIL_GREP,

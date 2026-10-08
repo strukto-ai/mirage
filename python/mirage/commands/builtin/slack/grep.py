@@ -16,14 +16,13 @@ import logging
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.builtin.generic.grep import grep_generic
-from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.adapter import bound_op, mount_io
 from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import (
     pushdown_operand,
     text_search_results,
 )
-from mirage.commands.builtin.slack.io import IO
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
@@ -77,7 +76,7 @@ async def grep(
 
     # Output-shaping flags, a glob operand and a multi-operand line all need
     # the per-message scan; see SEARCH_HONORED above.
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, scoped = scan_io(mount_io(opts), opts.ns, opts.mount_prefix)
     operand = (
         None
         if scoped

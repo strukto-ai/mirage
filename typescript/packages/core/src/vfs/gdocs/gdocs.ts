@@ -14,18 +14,19 @@
 
 import { BaseVFS } from '../base.ts'
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
-import { GDOCS_COMMANDS } from '../../commands/builtin/gdocs/index.ts'
-
-import type { RegisteredCommand } from '../../commands/config.ts'
 
 import { TokenManager } from '../../core/google/client.ts'
-import { GDOCS_OPS } from '../../ops/gdocs/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 
 import { redactGDocsConfig, type GDocsConfig, type GDocsConfigRedacted } from './config.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { readdir as gdocsReaddir } from '../../core/gdocs/readdir.ts'
+import { read as gdocsRead } from '../../core/gdocs/read.ts'
+import { stat as gdocsStat } from '../../core/gdocs/stat.ts'
 
 export interface GDocsVFSState {
   type: string
@@ -50,12 +51,25 @@ export class GDocsVFS extends BaseVFS {
     this.accessor = new GDocsAccessor({ tokenManager: tm })
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return GDOCS_COMMANDS
+  override readonly renderers: Readonly<Record<string, string>> = { '.gdoc.json': 'readDoc' }
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return gdocsReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return GDOCS_OPS
+  /** Render the file as the JSON its `.gdoc.json` name holds. */
+  async readDoc(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await gdocsRead(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return gdocsStat(this.accessor, path, index)
   }
 
   override getState(): Promise<GDocsVFSState> {

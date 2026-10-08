@@ -17,13 +17,13 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.patch import patch_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     Operation,
     bound_op,
     dir_aware_stat,
+    require_op,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -51,9 +51,9 @@ async def patch(
         list(texts),
         opts,
         read_file,
-        partial(ops.require(Operation.WRITE), accessor),
+        partial(require_op(ops, Operation.WRITE), accessor),
         ops.is_mounted(accessor),
     )
 
 
-BUILDER = Builder("patch", patch, write=True)
+BUILDER = GenericCommand("patch", patch, write=True)

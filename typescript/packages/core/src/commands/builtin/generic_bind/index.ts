@@ -13,12 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export {
-  type Builder,
-  type BuilderFn,
-  type CommandIO,
+  type GenericCommand,
+  type GenericCommandFn,
+  commandIo,
+  mountIo,
+  overMountIo,
   overlaidStat,
-  rangeOf,
   resolveGlobOf,
 } from './adapter.ts'
 export { type DuOps, type ResolveGlobOp } from '../../../vfs/types.ts'
-export { type MakeGenericCommandsOptions, makeGenericCommands, scanIo } from './factory.ts'
+export { type GenericCommandsOptions, genericCommands, scanIo } from './factory.ts'

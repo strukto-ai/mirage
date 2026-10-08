@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
@@ -35,9 +34,7 @@ async function makeWs(): Promise<Workspace> {
   r.store.files.set('/data/p1.txt', ENC.encode('orange\n'))
   r.store.files.set('/data/p2.txt', ENC.encode('last\n'))
   r.store.files.set('/data/empty.txt', new Uint8Array())
-  const registry = new OpsRegistry()
-  registry.registerVfs(r)
-  return new Workspace({ '/': r }, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
+  return new Workspace({ '/': r }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 describe('grep -e pattern flag', () => {

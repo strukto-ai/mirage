@@ -20,6 +20,7 @@ import type { WorkspaceOptions } from '@struktoai/mirage-core/workspace/workspac
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/types'
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
+import './commands/builtin/backends.ts'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 import { ENGINE_WASM_BASE64, GRAMMAR_WASM_BASE64 } from './generated/wasm.ts'
 

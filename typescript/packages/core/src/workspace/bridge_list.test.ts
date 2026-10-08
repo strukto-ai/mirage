@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MontyRuntime } from '../runtime/python/monty/index.ts'
 import { PrefixResolver } from '../runtime/resolver.ts'
@@ -24,12 +23,10 @@ import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { FILE_MODE, LINK_MODE } from '../utils/stat_view.ts'
 
-function mkWorld(): { ws: Workspace; ops: OpsRegistry; vfs: RAMVFS } {
+function mkWorld(): { ws: Workspace; vfs: RAMVFS } {
   const vfs = new RAMVFS()
-  const ops = new OpsRegistry()
-  for (const op of vfs.ops()) ops.register(op)
-  const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, ops })
-  return { ws, ops, vfs }
+  const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
+  return { ws, vfs }
 }
 
 // The door a sandboxed runtime holds, over this workspace's own bridge
@@ -73,17 +70,9 @@ describe('runtime door readdir', () => {
     // does not fail the directory, the way a kernel readdir never stats.
     // It is not swallowed either: the row carries no mode, and the
     // guest's own stat of the entry asks again and gets the failure.
-    const { ws, ops, vfs } = mkWorld()
+    const { ws, vfs } = mkWorld()
     await ws.vfs.write('/data/a.txt', 'hi')
-    ops.register({
-      name: 'stat',
-      vfs: vfs.name,
-      filetype: null,
-      fn: () => {
-        throw new Error('401 Unauthorized')
-      },
-      write: false,
-    })
+    vfs.stat = () => Promise.reject(new Error('401 Unauthorized'))
     const door = doorOn(ws)
     expect(await door.readdir('/data')).toEqual([{ path: '/data/a.txt', size: 0, isDir: false }])
     await expect(door.stat('/data/a.txt')).rejects.toThrow('401 Unauthorized')
@@ -128,13 +117,10 @@ describe('runtime door readdir', () => {
 describe('a guest sees the marks the workspace wired', () => {
   it('answers is_symlink for a link the shell made', async () => {
     const vfs = new RAMVFS()
-    const ops = new OpsRegistry()
-    for (const op of vfs.ops()) ops.register(op)
     const ws = new Workspace(
       { '/data': vfs },
       {
         mode: MountMode.EXEC,
-        ops,
         shellParser: await getTestParser(),
         runtimes: [new MontyRuntime()],
       },

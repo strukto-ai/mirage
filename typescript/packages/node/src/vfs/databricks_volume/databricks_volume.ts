@@ -12,14 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { DatabricksVolumeVFSBase } from '@struktoai/mirage-core/vfs/databricks_volume/databricks_volume'
 import { DatabricksVolumeAccessor } from '@struktoai/mirage-core/accessor/databricks_volume'
-import { DATABRICKS_VOLUME_COMMANDS } from '@struktoai/mirage-core/commands/builtin/databricks_volume/index'
-
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-
-import { DATABRICKS_VOLUME_OPS } from '@struktoai/mirage-core/ops/databricks_volume/index'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 
 import { PROMPT } from '@struktoai/mirage-core/vfs/databricks_volume/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -54,7 +48,7 @@ async function resolveAuth(config: DatabricksVolumeConfig): Promise<[string, str
   return [host, token]
 }
 
-export class DatabricksVolumeVFS extends BaseVFS {
+export class DatabricksVolumeVFS extends DatabricksVolumeVFSBase {
   override readonly name: string = VFSName.DATABRICKS_VOLUME
   override readonly cachesReads: boolean = true
   // The Files API lists DirectoryEntry.file_size and stat HEADs report
@@ -75,14 +69,6 @@ export class DatabricksVolumeVFS extends BaseVFS {
     const [host, token] = await resolveAuth(config)
     const accessor = new DatabricksVolumeAccessor(config, host, token)
     return new DatabricksVolumeVFS(config, accessor)
-  }
-
-  override commands(): readonly RegisteredCommand[] {
-    return DATABRICKS_VOLUME_COMMANDS
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return DATABRICKS_VOLUME_OPS
   }
 
   override getState(): Promise<DatabricksVolumeVFSState> {

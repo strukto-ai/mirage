@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
 from mirage.vfs.hf_datasets import HfDatasetsConfig, HfDatasetsVFS
+from tests.fixtures.vfs_io import served
 
 
 def test_vfs_name():
@@ -25,7 +27,7 @@ def test_vfs_name():
 
 def test_vfs_registers_ops():
     r = HfDatasetsVFS(HfDatasetsConfig(repo_id="org/dataset"))
-    op_names = {o.name for o in r.ops()}
+    op_names = served(r)
     assert {"read", "readdir", "stat"} <= op_names
 
 
@@ -38,11 +40,11 @@ def test_vfs_registers_no_mutation_ops():
     what keeps the two agreeing.
     """
     r = HfDatasetsVFS(HfDatasetsConfig(repo_id="org/dataset"))
-    op_names = {o.name for o in r.ops()}
+    op_names = served(r)
     assert not {"write", "create", "unlink", "rm_r", "mkdir"} & op_names
 
 
 def test_vfs_registers_commands():
     r = HfDatasetsVFS(HfDatasetsConfig(repo_id="org/dataset"))
-    cmd_names = {c.name for c in r.commands()}
+    cmd_names = {c.name for c in commands_for(r)}
     assert {"cat", "ls", "grep", "stat", "gzip", "tar"} <= cmd_names

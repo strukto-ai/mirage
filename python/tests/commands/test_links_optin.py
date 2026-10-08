@@ -17,7 +17,7 @@ import inspect
 import pkgutil
 
 import mirage.commands.builtin as builtin
-from mirage.commands.config import RegisteredCommand
+from mirage.commands.config import Command
 
 # The families whose generics merge namespace symlinks (ls/stat/find/
 # du/file read `opts.ns.links`). Since CommandOpts carries the fact into
@@ -41,7 +41,7 @@ GENERIC_CALLS = {
 }
 
 
-def _registered() -> tuple[list[RegisteredCommand], list[str]]:
+def _registered() -> tuple[list[Command], list[str]]:
     """Every registered builtin command, plus modules that would not import.
 
     The failures are returned rather than skipped for the reason
@@ -49,7 +49,7 @@ def _registered() -> tuple[list[RegisteredCommand], list[str]]:
     registers nothing, so a command missing its delegation would pass
     this check by being absent rather than by being correct.
     """
-    found: list[RegisteredCommand] = []
+    found: list[Command] = []
     failed: list[str] = []
     seen: set[int] = set()
     for info in pkgutil.walk_packages(

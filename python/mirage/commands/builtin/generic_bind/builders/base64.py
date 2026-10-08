@@ -15,13 +15,12 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.base64_cmd import base64_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     bound_op,
     dir_aware_stat,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -43,4 +42,4 @@ async def base64(
     )
 
 
-BUILDER = Builder("base64", base64, read=True)
+BUILDER = GenericCommand("base64", base64, read=True)

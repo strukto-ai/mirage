@@ -25,13 +25,12 @@ from mirage.context import (
     redirect_opener_for,
     redirect_paths_for,
     reset_admission,
-    reset_op_policies,
     set_admission,
-    set_op_policies,
 )
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import PolicyDenied, resolve_limit, resolve_producer
+from mirage.policy.policies import reset_op_policies, set_op_policies
 from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import decode_text, encode_text
@@ -715,7 +714,7 @@ def unsaid(lines: list[str], said: bytes) -> list[str]:
 
     A mount-mode refusal names the mount, not the operand, so the line
     the node table wrote for a refused link is the very line
-    ``Mount.execute_cmd`` writes for the backend operands beside it on
+    ``Mount.run_command`` writes for the backend operands beside it on
     the same mount, and ``rm dlink file`` would say it twice. The tier
     writes it without a trailing newline, so the comparison is on the
     stripped text.

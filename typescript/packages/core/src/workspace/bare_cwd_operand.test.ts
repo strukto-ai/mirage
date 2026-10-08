@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
@@ -32,9 +31,7 @@ async function makeWs(): Promise<Workspace> {
   r.store.dirs.add('/sub')
   r.store.files.set('/a.txt', ENC.encode('hello\n'))
   r.store.files.set('/sub/b.txt', ENC.encode('hello\n'))
-  const registry = new OpsRegistry()
-  registry.registerVfs(r)
-  return new Workspace({ '/': r }, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
+  return new Workspace({ '/': r }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 describe('bare invocations default to the cwd', () => {

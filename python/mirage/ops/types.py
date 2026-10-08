@@ -194,7 +194,7 @@ class LinkView:
     Symlinks live in the workspace namespace and no backend can see
     them, so a command that must report them has to be handed the facts
     from above. Bundling them means a command that grows a new symlink
-    need does not also grow a new keyword on ``execute_cmd``, every
+    need does not also grow a new keyword on ``run_command``, every
     builder in the chain, and the generic; it reads another field off
     the view it already receives.
 
@@ -228,7 +228,7 @@ class NamespaceView:
     overlay, and the child names the namespace owes a directory. One
     view per plane means a command that grows a new name-plane need
     adds a field read, not a new keyword threaded through
-    ``execute_cmd``, every builder, and the generic.
+    ``run_command``, every builder, and the generic.
 
     Delivered as ``CommandOpts.ns`` to every command handler and as
     ``CLIDoors.ns`` to a CLI verb; a command opts in by reading the

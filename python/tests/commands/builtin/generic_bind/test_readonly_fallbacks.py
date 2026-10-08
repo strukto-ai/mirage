@@ -16,7 +16,6 @@ from functools import partial
 
 import pytest
 
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.du import du as du_builder
 from mirage.commands.builtin.generic_bind.builders.find import (
     find as find_builder,
@@ -25,7 +24,7 @@ from mirage.commands.builtin.generic_bind.builders.shuf import (
     shuf as shuf_builder,
 )
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import materialize
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 

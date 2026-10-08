@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
-import { IO } from '../../commands/builtin/chroma/io.ts'
+import { ioFor } from '../../test-utils.ts'
+import { ChromaVFS } from '../../vfs/chroma/chroma.ts'
 import { PathSpec } from '../../types.ts'
 import { searchResources } from '../../vfs/search.ts'
 
@@ -17,7 +18,7 @@ it('ranks a batch through SearchOps once and preserves the mount prefix', async 
     getCollection: () => Promise.resolve({ query }),
   } as unknown as ChromaAccessor
   const root = new PathSpec({ virtual: '/data', directory: '/', vfsPath: '' })
-  const result = await searchResources(IO.search, accessor, [root, root], {
+  const result = await searchResources(ioFor(ChromaVFS, accessor).search, accessor, [root, root], {
     query: 'question',
     options: { top_k: 2 },
   })
@@ -26,5 +27,5 @@ it('ranks a batch through SearchOps once and preserves the mount prefix', async 
   expect(query).toHaveBeenCalledWith(
     expect.objectContaining({ queryTexts: ['question'], nResults: 2 }),
   )
-  expect(IO.search?.meta?.grep).toBeUndefined()
+  expect(ioFor(ChromaVFS, accessor).search?.meta?.grep).toBeUndefined()
 })

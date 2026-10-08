@@ -31,7 +31,6 @@ export type { SharePointConfig } from '@struktoai/mirage-core/accessor/sharepoin
 export { Workspace } from './workspace.ts'
 export { OPFSVFS, type OPFSVFSOptions, type OPFSVFSState } from './vfs/opfs/opfs.ts'
 export { PROMPT as OPFS_PROMPT } from './vfs/opfs/prompt.ts'
-export { OPFS_OPS } from './ops/opfs/index.ts'
 export { OPFSAccessor } from './accessor/opfs.ts'
 export { OPFS_COMMANDS } from './commands/builtin/opfs/index.ts'
 export { S3VFS, type S3VFSState } from './vfs/s3/s3.ts'
@@ -279,7 +278,6 @@ export {
 export { RedisVFS, type RedisVFSOptions, type RedisVFSState } from './vfs/redis/redis.ts'
 export { UpstashRedisStore, type UpstashRedisStoreOptions } from './vfs/redis/store.ts'
 export { PROMPT as REDIS_PROMPT } from '@struktoai/mirage-core/vfs/redis/prompt'
-export { REDIS_OPS } from '@struktoai/mirage-core/ops/redis/index'
 export { REDIS_COMMANDS } from '@struktoai/mirage-core/commands/builtin/redis/index'
 export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 export {
@@ -296,9 +294,7 @@ export {
 // module so a consumer of this package needs no second dependency on
 // core to reach them (`@struktoai/mirage-core/<path>` works too).
 export { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-export { op, type RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-export { makeGenericOps } from '@struktoai/mirage-core/ops/generic/factory'
-export { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+export { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 export { FlagView } from '@struktoai/mirage-core/commands/spec/flag_view'
 export { type FlagValue, UsageStyle } from '@struktoai/mirage-core/commands/spec/types'
 export type { CLIDoors } from '@struktoai/mirage-core/commands/cli/types'

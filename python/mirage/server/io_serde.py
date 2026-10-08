@@ -35,7 +35,7 @@ from mirage.policy.types import (
 )
 from mirage.server.vfs_calls import BYTES, Args, VfsCall, schema_of
 from mirage.types import FileStat, JsonValue, Refusal
-from mirage.workspace.workspace.handle import Session
+from mirage.workspace.workspace.workspace import Session
 
 
 class CallArgsError(ValueError):

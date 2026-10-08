@@ -15,6 +15,7 @@
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import { fakeHfOperator, installFakeOperator } from '../../core/hf_buckets/mock.ts'
 import { HfBucketsVFS } from '../hf_buckets/hf_buckets.ts'
 import { HfModelsVFS } from './hf_models.ts'
@@ -25,13 +26,11 @@ import { HfModelsVFS } from './hf_models.ts'
 // traversal.
 const OPS = ['glob', 'read', 'readdir', 'stat']
 
-// The mount is read-only, so the byte-mutation ops are absent from the op
-// table exactly as they are from python's `_OPS`. The table is the
-// op-dispatcher channel, which a shell command bypasses: it answers
-// `dispatch('write', ...)` and the FUSE adapter, so asserting the absence
-// here is what keeps the two channels agreeing. See
-// commands/builtin/hf_hub/io.ts for why a Hub write belongs to the `hf` CLI
-// rather than to a POSIX write.
+// The mount is read-only, so the byte-mutation functions are absent exactly
+// as they are from python's. The op door, which a shell command bypasses,
+// answers `dispatch('write', ...)` and the FUSE adapter, so asserting the
+// absence here is what keeps the two channels agreeing. A Hub write belongs
+// to the `hf` CLI rather than to a POSIX write.
 const ABSENT_OPS = ['write', 'create', 'append', 'unlink', 'mkdir', 'rmdir', 'rename', 'truncate']
 
 function treePage(rows: unknown[]): Response {
@@ -48,23 +47,15 @@ afterEach(() => {
 describe('HfModelsVFS', () => {
   it('exposes the python-parity op table and flags', () => {
     const vfs = new HfModelsVFS({ repoId: 'ns/model' })
-    const names = vfs
-      .ops()
-      .filter((op) => op.vfs === vfs.name)
-      .map((op) => op.name)
-    expect([...new Set(names)].sort()).toEqual([...OPS].sort())
-    for (const op of ABSENT_OPS) expect(names).not.toContain(op)
+    const mount = new MountEntry({ prefix: '/', vfs })
+    for (const op of OPS) expect(mount.answers(op)).toBe(true)
+    for (const op of ABSENT_OPS) expect(mount.answers(op)).toBe(false)
     expect(vfs.name).toBe('hf_models')
     expect(vfs.cachesReads).toBe(true)
     expect(vfs.supportsSnapshot).toBe(true)
-    const optional = vfs as unknown as Record<string, unknown>
-    expect(optional.rename).toBeUndefined()
-    expect(optional.copy).toBeUndefined()
-    expect(optional.truncate).toBeUndefined()
-    expect(optional.rmdir).toBeUndefined()
-    expect(optional.writeFile).toBeUndefined()
-    expect(optional.mkdir).toBeUndefined()
-    expect(optional.unlink).toBeUndefined()
+    for (const fn of ['rename', 'copy', 'truncate', 'rmdir', 'mkdir', 'unlink']) {
+      expect(vfs.supports(fn)).toBe(false)
+    }
   })
 
   it('redacts the token in state', async () => {

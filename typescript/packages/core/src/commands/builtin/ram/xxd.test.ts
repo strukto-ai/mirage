@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
-import { OpsRegistry } from '../../../ops/registry.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 const RAM_XXD = RAM_COMMANDS.filter((c) => c.name === 'xxd' && c.filetype == null)
@@ -37,6 +37,7 @@ async function runXxd(
     stdin,
     flags,
     filetypeFns: null,
+    io: commandIo(vfs),
     cwd: '/',
   })
   if (result === null) return { out: '', outBytes: new Uint8Array(), exitCode: -1 }
@@ -48,6 +49,15 @@ async function runXxd(
         ? out
         : await materialize(out as AsyncIterable<Uint8Array>)
   return { out: DEC.decode(buf), outBytes: buf, exitCode: ioResult.exitCode }
+}
+
+// Renders `.tally` reads, as a VFS that ships a renderer does.
+class TallyRAMVFS extends RAMVFS {
+  override readonly renderers: Readonly<Record<string, string>> = { '.tally': 'readTally' }
+
+  readTally(): Promise<Uint8Array> {
+    return Promise.resolve(ENC.encode('RENDERED'))
+  }
 }
 
 describe('xxd', () => {
@@ -132,21 +142,11 @@ describe('xxd -r across mounts', () => {
     // The OUTFILE's mount renders .tally reads; -r writes into what the
     // store holds, never into a rendering of it. Mirrors Python's
     // test_xxd_reverse_across_mounts_writes_into_the_stored_bytes.
-    const source = new RAMVFS()
-    const target = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(source)
-    registry.registerVfs(target)
-    registry.register({
-      name: 'read',
-      vfs: 'ram',
-      filetype: '.tally',
-      write: false,
-      fn: () => Promise.resolve(ENC.encode('RENDERED')),
-    })
+    const source = new TallyRAMVFS()
+    const target = new TallyRAMVFS()
     const ws = new Workspace(
       { '/a': source, '/b': target },
-      { mode: MountMode.WRITE, ops: registry, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
     )
     try {
       await ws.shell('printf ABCDEFGH > /b/out.tally')

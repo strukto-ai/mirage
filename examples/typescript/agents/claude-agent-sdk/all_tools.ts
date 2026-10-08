@@ -26,7 +26,7 @@
 import { config as loadEnv } from 'dotenv'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { buildOptions } from '@struktoai/mirage-agents/claude-agent-sdk'
 
@@ -50,9 +50,7 @@ const EXPECTED = new Set(
 )
 
 const ram = new RAMVFS()
-const ops = new OpsRegistry()
-for (const op of ram.ops()) ops.register(op)
-const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 
 const options = await buildOptions(ws)
 options.model = 'claude-sonnet-4-6'

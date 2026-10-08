@@ -46,7 +46,7 @@
         "stdout": "3\t/data/due\n",
         "stderr": ""
       },
-      "note": "Accepted divergence: ram and redis answer du from one pass over the stored files, so a directory holding no file (/data/due/e, /data/due/g, /data/due/g/h) gets no row; GNU and the walk print 0 for each. See DuOps in vfs/types."
+      "note": "Accepted divergence: ram and redis answer du from one pass over the stored files, so a directory holding no file (/data/due/e, /data/due/g, /data/due/g/h) gets no row; GNU and the walk print 0 for each. See du_entries on BaseVFS."
     },
     {
       "id": "du_empty_dirs_with_files",

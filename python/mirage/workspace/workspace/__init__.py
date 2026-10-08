@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.workspace.handle import Session
-from mirage.workspace.workspace.workspace import VFSMount, Workspace
+from mirage.workspace.workspace.workspace import Session, VFSMount, Workspace
 
 __all__ = ["VFSMount", "Session", "Workspace"]

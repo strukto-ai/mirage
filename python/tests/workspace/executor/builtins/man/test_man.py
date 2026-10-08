@@ -16,7 +16,7 @@ import asyncio
 from unittest.mock import MagicMock
 
 from mirage.commands.cli.types import CLISpec
-from mirage.commands.config import RegisteredCommand
+from mirage.commands.config import Command
 from mirage.commands.spec.types import CommandSpec, Option
 from mirage.policy.types import AdmissionRules
 from mirage.workspace.cli.registry import CLIRegistry
@@ -31,7 +31,7 @@ from mirage.workspace.session import SessionState
 
 
 def _mk_cmd(name, spec, filetype=None, vfs="ram"):
-    return RegisteredCommand(
+    return Command(
         name=name,
         spec=spec,
         vfs=vfs,

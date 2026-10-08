@@ -15,12 +15,14 @@
 from typing import Any
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.commands.builtin.notion import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.notion.config import NotionConfig
-from mirage.ops.notion import OPS as NOTION_VFS_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import VFSName
+from mirage.core.notion.find import find as _find
+from mirage.core.notion.read import read as _read
+from mirage.core.notion.readdir import readdir as _readdir
+from mirage.core.notion.stat import stat as _stat
+from mirage.types import FileStat, PathSpec, VFSName
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.notion.prompt import PROMPT, WRITE_PROMPT
 
@@ -37,11 +39,33 @@ class NotionVFS(BaseVFS):
         self.config = config
         self.accessor = NotionAccessor(config)
 
-    def ops(self) -> list[RegisteredOp]:
-        return NOTION_VFS_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
+
+    async def find(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        **predicates: Any,
+    ) -> list[str]:
+        return await _find(self.accessor, path, index=index, **predicates)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

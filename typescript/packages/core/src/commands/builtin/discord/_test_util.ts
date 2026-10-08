@@ -20,7 +20,7 @@ import type {
   DiscordResponse,
   DiscordTransport,
 } from '../../../core/discord/client.ts'
-import { BaseVFS } from '../../../vfs/base.ts'
+import { DiscordVFSBase } from '../../../vfs/discord/discord.ts'
 
 export interface FakeCall {
   method: DiscordMethod
@@ -54,7 +54,7 @@ export class FakeDiscordTransport implements DiscordTransport {
   }
 }
 
-class FakeDiscordVFS extends BaseVFS implements DiscordResourceLike {
+class FakeDiscordVFS extends DiscordVFSBase implements DiscordResourceLike {
   override readonly name = 'discord'
   constructor(override readonly accessor: DiscordAccessor) {
     super()

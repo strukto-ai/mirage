@@ -14,14 +14,8 @@
 
 import { PythonRuntime } from '../base.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
-import type {
-  EvalResult,
-  EvalValue,
-  RunArgs,
-  RunResult,
-  RuntimeOptions,
-  RuntimeContext,
-} from '../../types.ts'
+import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../../types.ts'
+import type { RuntimeContext } from '../../binding.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import { unhonoredNotice, type InitFlags } from '../flags.ts'
 import { MontyExecution } from './execution.ts'

@@ -12,14 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { HistoryAccessor } from '../../../accessor/history.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 import { HISTORY_HISTORY } from './history.ts'
-import { IO } from './io.ts'
 
-export const HISTORY_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<HistoryAccessor>(VFSName.HISTORY, IO),
+export const HISTORY_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.HISTORY),
   ...HISTORY_HISTORY,
 ]

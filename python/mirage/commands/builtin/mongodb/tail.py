@@ -17,9 +17,9 @@ from mirage.commands.builtin.generic.tail import parse_flags, tail_generic
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
+    mount_io,
     resolve_or_empty,
 )
-from mirage.commands.builtin.mongodb.io import IO
 from mirage.commands.builtin.utils.limit import row_cap_notice
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
@@ -43,7 +43,9 @@ async def tail(
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=str(exc).encode())
     counts = parsed.counts
-    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    resolved = await resolve_or_empty(
+        mount_io(opts), accessor, paths, opts.index
+    )
     # Both fast paths query the collection by the names in the path, so
     # they run only for one the mount can see; anything else takes the
     # generic, which stats it through the same guard and reports it the
@@ -86,6 +88,6 @@ async def tail(
         resolved,
         list(texts),
         opts,
-        bound_op(IO.stat, accessor, opts.index),
+        bound_op(mount_io(opts).stat, accessor, opts.index),
         bound_op(stream_any, accessor, opts.index),
     )

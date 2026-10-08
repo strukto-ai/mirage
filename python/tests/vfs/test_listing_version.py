@@ -265,7 +265,7 @@ async def _check_contract(name: str) -> None:
         stored = (await store.list_dir(harness.key)).version
         assert stored is not None
         assert (await store.list_dir(harness.nested)).version is not None
-        remote = await mount.execute_op(
+        remote = await mount.call(
             "stat", harness.key, index=ListingCheckStore()
         )
         assert remote.fingerprint == stored
@@ -277,7 +277,7 @@ async def _check_contract(name: str) -> None:
         assert (checks, refills) == (harness.checks, 0)
         assert mount.vfs.listing_version == type(mount.vfs).listing_version
         harness.change()
-        moved = await mount.execute_op(
+        moved = await mount.call(
             "stat", harness.key, index=ListingCheckStore()
         )
         assert moved.fingerprint is not None

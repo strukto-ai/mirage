@@ -204,62 +204,16 @@ def check_capabilities(
             if key in exempt:
                 used.add(f"{name}:{key}")
                 continue
-            failures.append(
-                f"capabilities[{name}].{key}: "
-                f"python={a.get(key)!r} typescript={b.get(key)!r}"
-            )
-    return failures
-
-
-def check_command_io(
-    loaded: dict[str, dict[str, Any]],
-    aliases: dict[str, str],
-    language_only: set[str],
-    allowed: dict[str, dict[str, str]],
-    used: set[str],
-) -> list[str]:
-    """The wired ``CommandIO`` slots per backend.
-
-    The adapter's slot set is a hand-filled literal that nothing else
-    reads, so a backend can omit ``du`` or ``find`` and quietly fall back
-    to the capped readdir walk — a partial total and an exit 1 past the
-    cap — while its twin pushes the same query down to the API.
-
-    Args:
-        loaded (dict[str, dict[str, Any]]): the three VFS trees.
-        aliases (dict[str, str]): python command-package name to the
-            typescript one where the directories differ.
-        language_only (set[str]): backends present in one runtime only.
-        allowed (dict[str, dict[str, str]]): per-backend keys whose
-            divergence is documented, each mapped to its reason.
-        used (set[str]): collects the exemptions that fired.
-    """
-    py = {
-        aliases.get(name, name): entry
-        for name, entry in loaded["python"].get("command_io", {}).items()
-    }
-    ts = merge_variants(loaded, "command_io", language_only)
-    failures = _membership(py, ts, language_only, "command_io")
-    for name in sorted(set(py) & set(ts)):
-        a, b = py[name], ts[name]
-        exempt = allowed.get(name, {})
-        for key in sorted(set(a) | set(b)):
-            if a.get(key) == b.get(key):
-                continue
-            if key in exempt:
-                used.add(f"{name}:{key}")
-                continue
-            if key == "slots":
-                only_py = sorted(set(a["slots"]) - set(b["slots"]))
-                only_ts = sorted(set(b["slots"]) - set(a["slots"]))
+            if key == "functions":
+                only_py = sorted(set(a[key]) - set(b[key]))
+                only_ts = sorted(set(b[key]) - set(a[key]))
                 failures.append(
-                    f"command_io[{name}].slots: "
-                    f"python-only={only_py} "
-                    f"typescript-only={only_ts}"
+                    f"capabilities[{name}].functions: "
+                    f"python-only={only_py} typescript-only={only_ts}"
                 )
                 continue
             failures.append(
-                f"command_io[{name}].{key}: "
+                f"capabilities[{name}].{key}: "
                 f"python={a.get(key)!r} typescript={b.get(key)!r}"
             )
     return failures
@@ -642,8 +596,6 @@ def main() -> int:
     capability_exempt: dict[str, dict[str, str]] = exceptions[
         "vfs_capabilities"
     ]
-    io_exempt: dict[str, dict[str, str]] = exceptions["command_io"]
-    io_aliases: dict[str, str] = exceptions["command_io_aliases"]["python"]
     variant_exempt: dict[str, dict[str, dict[str, str]]] = exceptions[
         "variant_vfs_facts"
     ]
@@ -682,20 +634,17 @@ def main() -> int:
     )
     # Before python is compared against the merged typescript view, since
     # that merge prefers node and would otherwise discard the difference.
-    for table in ("capabilities", "command_io"):
-        failures.extend(
-            check_variant_facts(
-                trees, table, variant_exempt.get(table, {}), used_facts
-            )
-        )
     failures.extend(
-        check_capabilities(
-            trees, expansions, language_only, capability_exempt, used_facts
+        check_variant_facts(
+            trees,
+            "capabilities",
+            variant_exempt.get("capabilities", {}),
+            used_facts,
         )
     )
     failures.extend(
-        check_command_io(
-            trees, io_aliases, language_only, io_exempt, used_facts
+        check_capabilities(
+            trees, expansions, language_only, capability_exempt, used_facts
         )
     )
     failures.extend(
@@ -705,8 +654,7 @@ def main() -> int:
     )
     declared = {
         f"{name}:{key}"
-        for table in (capability_exempt, io_exempt)
-        for name, keys in table.items()
+        for name, keys in capability_exempt.items()
         for key in keys
     }
     declared |= {

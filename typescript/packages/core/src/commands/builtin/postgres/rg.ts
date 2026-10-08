@@ -19,8 +19,7 @@ import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { scanIo } from '../generic_bind/index.ts'
 import { runSearch } from '../generic_bind/search.ts'
-
-import { IO } from './io.ts'
+import { mountIo } from '../generic_bind/adapter.ts'
 
 export const POSTGRES_RG = command({
   name: 'rg',
@@ -28,7 +27,7 @@ export const POSTGRES_RG = command({
   spec: specOf('rg'),
   fn: (accessor: PostgresAccessor, paths, texts, opts) =>
     runSearch<PostgresAccessor>(
-      scanIo(IO, opts.ns, opts.mountPrefix)[0],
+      scanIo(mountIo(opts), opts.ns, opts.mountPrefix)[0],
       'rg',
       accessor,
       paths,

@@ -12,17 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator, Mapping
+from types import MappingProxyType
 from typing import Any
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.commands.builtin.mongodb import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
-from mirage.ops.mongodb import OPS as MONGODB_VFS_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import VFSName
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.hierarchy.search import make_search_op
+from mirage.core.mongodb.read import read as _read
+from mirage.core.mongodb.read import stream_any as _read_stream
+from mirage.core.mongodb.readdir import readdir as _readdir
+from mirage.core.mongodb.scope import detect_scope
+from mirage.core.mongodb.search import SEARCHERS
+from mirage.core.mongodb.stat import stat as _stat
+from mirage.types import FileStat, JsonValue, PathSpec, VFSName
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
 from mirage.vfs.mongodb.prompt import PROMPT
+from mirage.vfs.types import SearchQuery
+
+_search_fn = make_search_op(detect_scope, SEARCHERS, _stat)
 
 
 class MongoDBVFS(BaseVFS):
@@ -34,16 +44,47 @@ class MongoDBVFS(BaseVFS):
     index_ttl: float = 0
     prompt: str = PROMPT
 
+    search_meta: Mapping[str, JsonValue] = MappingProxyType(
+        {"grep": {"mode": "regex", "stream": True}}
+    )
+
     def __init__(self, config: MongoDBConfig) -> None:
         super().__init__()
         self.config = config
         self.accessor = MongoDBAccessor(self.config)
 
-    def ops(self) -> list[RegisteredOp]:
-        return MONGODB_VFS_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
+
+    def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path, index)
+
+    async def search(
+        self,
+        path: PathSpec,
+        query: SearchQuery,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[str] | None:
+        return await _search_fn(self.accessor, path, query, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

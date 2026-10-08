@@ -1,15 +1,9 @@
 {
- "baseline": 4040,
+ "baseline": 4008,
  "modules": {
-  "ops/registry": {
+  "policy/policies": {
    "typescript_only": {
-    "OpsRegistry": "Python keeps each mount's op table on its Mount (`Mount._ops`, `register_op`, the filetype-then-VFS cascade); TypeScript holds one OpsRegistry on the Workspace and scopes entries per VFS. Same lookup, held in a different place."
-   }
-  },
-  "ops/generic/factory": {
-   "python_only": {
-    "_make_pwrite": "Python builds every emitted op through a named `_make_*` closure builder; TypeScript writes the same closure inline in makeGenericOps, as it does for the module's older builders.",
-    "_make_emulated_pwrite": "The read/splice/write pwrite for a table without a native one, built by a named `_make_*` builder in Python and inline in makeGenericOps in TypeScript, like emulated append."
+    "captureOpPolicies": "A deferred TypeScript callback restores each async-local store it needs, as captureSessionContext and captureRecordingContext do; a Python contextvar travels with the copied context."
    }
   },
   "core/github/tree": {

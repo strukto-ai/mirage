@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { command, RegisteredCommand } from './config.ts'
+import { command, Command } from './config.ts'
 import { CommandSpec } from './spec/types.ts'
 import { IOResult } from '../io/types.ts'
 
@@ -21,7 +21,7 @@ const noopFn = (): Promise<[Uint8Array, IOResult]> =>
   Promise.resolve([new Uint8Array(), new IOResult()])
 
 describe('command() registers multiple mounts', () => {
-  it('returns one RegisteredCommand per VFS when passed an array', () => {
+  it('returns one Command per VFS when passed an array', () => {
     const cmds = command({
       name: 'cat',
       vfs: ['gdocs', 'gdrive'],
@@ -33,12 +33,12 @@ describe('command() registers multiple mounts', () => {
     expect(mounts).toContain('gdocs')
     expect(mounts).toContain('gdrive')
     for (const c of cmds) {
-      expect(c).toBeInstanceOf(RegisteredCommand)
+      expect(c).toBeInstanceOf(Command)
       expect(c.name).toBe('cat')
     }
   })
 
-  it('single-VFS string still produces one RegisteredCommand', () => {
+  it('single-VFS string still produces one Command', () => {
     const cmds = command({
       name: 'ls',
       vfs: 'disk',

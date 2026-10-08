@@ -22,8 +22,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.email.io import IO as EMAIL_IO
 from mirage.commands.config import CommandOpts
+from mirage.core.email.read import read as core_read
+from mirage.core.email.readdir import readdir as core_readdir
+from mirage.core.email.stat import stat as core_stat
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -32,9 +34,9 @@ from mirage.utils.key_prefix import mount_key
 def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
     """The command's IO with the given slots faked; the rest stay real."""
     real = {
-        "readdir": EMAIL_IO.readdir,
-        "stat": EMAIL_IO.stat,
-        "read_bytes": EMAIL_IO.read_bytes,
+        "readdir": core_readdir,
+        "stat": core_stat,
+        "read_bytes": core_read,
     }
     return SimpleNamespace(**{**real, **slots})
 
@@ -76,7 +78,6 @@ async def test_rg_multi_pattern_skips_imap_search():
             "search_messages": AsyncMock(
                 side_effect=AssertionError("imap search ran")
             ),
-            "IO": _io(resolve_glob=fake_resolve),
             "rg_generic": fake_generic,
         },
     ):
@@ -85,7 +86,9 @@ async def test_rg_multi_pattern_skips_imap_search():
             [_path()],
             [],
             CommandOpts(
-                index=RAMIndexCacheStore(), flags={"regexp": ["ada", "ben"]}
+                io=_io(resolve_glob=fake_resolve),
+                index=RAMIndexCacheStore(),
+                flags={"regexp": ["ada", "ben"]},
             ),
         )
 
@@ -102,16 +105,20 @@ async def test_rg_single_pattern_uses_imap_search():
         rg.__wrapped__.__globals__,
         {
             "search_messages": search,
-            "IO": _io(
-                resolve_glob=AsyncMock(side_effect=AssertionError("glob ran")),
-            ),
         },
     ):
         _, io = await rg(
             accessor,
             [_path()],
             ["ada"],
-            CommandOpts(index=RAMIndexCacheStore()),
+            CommandOpts(
+                io=_io(
+                    resolve_glob=AsyncMock(
+                        side_effect=AssertionError("glob ran")
+                    ),
+                ),
+                index=RAMIndexCacheStore(),
+            ),
         )
 
     assert io.exit_code == 1
@@ -130,7 +137,6 @@ async def test_rg_message_file_operand_defers_to_generic():
         rg.__wrapped__.__globals__,
         {
             "search_messages": search,
-            "IO": _io(resolve_glob=AsyncMock(return_value=[])),
             "rg_generic": generic,
         },
     ):
@@ -138,7 +144,11 @@ async def test_rg_message_file_operand_defers_to_generic():
             accessor,
             [msg],
             ["foo"],
-            CommandOpts(index=RAMIndexCacheStore(), flags={}),
+            CommandOpts(
+                io=_io(resolve_glob=AsyncMock(return_value=[])),
+                index=RAMIndexCacheStore(),
+                flags={},
+            ),
         )
     search.assert_not_awaited()
     generic.assert_awaited_once()
@@ -154,16 +164,20 @@ async def test_rg_regex_hands_the_server_its_required_literal():
         rg.__wrapped__.__globals__,
         {
             "search_messages": search,
-            "IO": _io(
-                resolve_glob=AsyncMock(side_effect=AssertionError("glob ran")),
-            ),
         },
     ):
         _, io = await rg(
             accessor,
             [_path()],
             ["worker.3"],
-            CommandOpts(index=RAMIndexCacheStore()),
+            CommandOpts(
+                io=_io(
+                    resolve_glob=AsyncMock(
+                        side_effect=AssertionError("glob ran")
+                    ),
+                ),
+                index=RAMIndexCacheStore(),
+            ),
         )
     assert io.exit_code == 1
     assert search.await_args.kwargs["text"] == "worker"

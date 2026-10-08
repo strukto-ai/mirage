@@ -18,12 +18,10 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.shuf import NO_WRITE_OP, parse_flags
 from mirage.commands.builtin.generic.shuf import shuf_generic as generic_shuf
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
-    Operation,
+    GenericCommand,
     bound_op,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -82,7 +80,7 @@ async def _shuf(
         paths = []
     # Only ``-o`` writes, so a read-only backend still serves plain shuf.
     # Requiring the write op here would break every read-only backend.
-    write_op = ops.operation(Operation.WRITE)
+    write_op = ops.write
     return await generic_shuf(
         paths,
         texts,
@@ -100,4 +98,4 @@ async def _shuf(
     )
 
 
-BUILDER = Builder("shuf", shuf, read=True)
+BUILDER = GenericCommand("shuf", shuf, read=True)

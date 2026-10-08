@@ -12,12 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.dev.io import IO as _IO
-from mirage.commands.builtin.dev.io import STREAMING_IO as _STREAMING_IO
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from dataclasses import replace
 
+from mirage.commands.builtin.generic_bind import generic_commands
+from mirage.commands.config import CommandIO
+from mirage.core.dev.stream import read_stream
+
+
+def _endless(io: CommandIO) -> CommandIO:
+    return replace(io, read_stream=read_stream)
+
+
+# /dev is a RAM mount whose read and stat know the two synthetic
+# character devices. Commands that consume a whole input read a finite
+# stream, while the two bounded streaming commands opt into the endless
+# source.
 COMMANDS = [
-    *make_generic_commands(
-        "ram", _IO, ops_overrides={"cat": _STREAMING_IO, "head": _STREAMING_IO}
+    *generic_commands(
+        "ram",
+        adapt={"cat": _endless, "head": _endless},
+        local=True,
     ),
 ]
