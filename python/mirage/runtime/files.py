@@ -78,7 +78,7 @@ def stat_row(fs: FileStat) -> VFSStat:
     )
 
 
-class RuntimeVFS:
+class RuntimeFiles:
     """The mount-facing op vocabulary a sandboxed runtime encodes into.
 
     One instruction set (read/write/append/stat/readdir/create/truncate/
@@ -126,7 +126,7 @@ class RuntimeVFS:
         self._limiter = ConcurrencyLimiter(LISTING_ENTRY_CONCURRENCY)
 
     @classmethod
-    def of(cls, context: RuntimeContext) -> "RuntimeVFS":
+    def of(cls, context: RuntimeContext) -> "RuntimeFiles":
         """The file door every engine builds from its execution context.
 
         Args:
@@ -444,7 +444,7 @@ class RuntimeVFS:
             )
         except ABSENT_PATH as exc:
             logger.debug(
-                "runtime vfs: readdir %s: stat %s: %s",
+                "runtime files: readdir %s: stat %s: %s",
                 directory,
                 row.path,
                 exc,
@@ -452,7 +452,7 @@ class RuntimeVFS:
             return row
         except Exception as exc:
             logger.warning(
-                "runtime vfs: readdir %s: stat %s: %s",
+                "runtime files: readdir %s: stat %s: %s",
                 directory,
                 row.path,
                 exc,

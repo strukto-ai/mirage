@@ -15,7 +15,7 @@
 import { Buffer } from 'node:buffer'
 import { createRequire } from 'node:module'
 import { workspaceBridge } from '@struktoai/mirage-core/runtime/binding'
-import { RuntimeVFS } from '@struktoai/mirage-core/runtime/vfs'
+import { RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 const requireCjs = createRequire(import.meta.url)
@@ -40,7 +40,7 @@ function mountedPath(ws: Workspace, p: string): boolean {
   return true
 }
 
-async function mirageStat(vfs: RuntimeVFS, p: string): Promise<unknown> {
+async function mirageStat(vfs: RuntimeFiles, p: string): Promise<unknown> {
   const s = await vfs.stat(p)
   const mtime = new Date(s.mtimeMs)
   return {
@@ -84,7 +84,7 @@ function leaf(entry: string): string {
  * the real native fs. CJS-friendly; for ESM code you still need to use
  * `ws.vfs.*` directly since ESM bindings are frozen.
  *
- * The patched calls ride the runtimes' file door (`RuntimeVFS`) over
+ * The patched calls ride the runtimes' file door (`RuntimeFiles`) over
  * `ws.vfs.dispatch`, so they run as the facade's session and land in
  * `ws.vfs.records`, as Python's `with ws:` block does.
  *
@@ -92,7 +92,7 @@ function leaf(entry: string): string {
  */
 export function patchNodeFs(ws: Workspace): () => void {
   const originalFs: FsLike = { ...(fs as unknown as FsLike) }
-  const vfs = new RuntimeVFS(
+  const vfs = new RuntimeFiles(
     workspaceBridge((name, path, args, kwargs) => ws.vfs.dispatch(name, path, args, kwargs)),
   )
 

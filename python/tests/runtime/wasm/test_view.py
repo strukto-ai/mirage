@@ -19,9 +19,9 @@ import time
 
 import pytest
 
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSStat
-from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.constants import (
     FT_DIR,
@@ -42,7 +42,7 @@ from mirage.view.namespace_view import merge_readdir
 LINK_MTIME = "2026-07-16T00:00:00Z"
 
 
-class FakeVFS(RuntimeVFS):
+class FakeVFS(RuntimeFiles):
     """Core double: real routing and flush logic, fake dispatch.
 
     Only `_raw` is replaced, so the prefix table, the cross-mount rename

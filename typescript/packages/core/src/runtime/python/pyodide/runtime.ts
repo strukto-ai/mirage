@@ -36,7 +36,7 @@ import {
   type PyodideInterrupter,
 } from './interrupt.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
-import { RuntimeVFS } from '../../vfs.ts'
+import { RuntimeFiles } from '../../files.ts'
 import { applyMutation, createJournal, type MutationJournal } from './fs/journal.ts'
 import { preloadInto } from './fs/preload.ts'
 import { PyodideFs } from './fs/fs.ts'
@@ -254,7 +254,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private readonly packages: readonly string[]
   private readonly packageBaseUrl: string | null
   private readonly lockFileURL: string | null
-  private vfs: RuntimeVFS | null = null
+  private vfs: RuntimeFiles | null = null
   private readonly journal: MutationJournal = createJournal()
   private readonly mounted = new Set<string>()
   private readonly mountedFilesystems = new Map<string, PyodideFs>()
@@ -371,7 +371,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     opts: { inputs?: Record<string, EvalValue>; session?: string },
     context?: RuntimeContext,
   ): Promise<EvalResult> {
-    this.vfs = context !== undefined ? RuntimeVFS.of(context) : null
+    this.vfs = context !== undefined ? RuntimeFiles.of(context) : null
     const worker = await this.ensureWorker(context)
     if (worker !== null && context !== undefined) {
       return (await worker.execute(
@@ -753,7 +753,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   }
 
   private async runOne(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
-    this.vfs = context !== undefined ? RuntimeVFS.of(context) : null
+    this.vfs = context !== undefined ? RuntimeFiles.of(context) : null
     const worker = await this.ensureWorker(context)
     if (worker !== null && context !== undefined) {
       const { cwd, signal, ...rest } = args

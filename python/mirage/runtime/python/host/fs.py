@@ -25,6 +25,7 @@ from typing import Any, cast
 from mirage.errors import FsCondition
 from mirage.errors.fs import eexist, fs_error
 from mirage.errors.posix import posix_errno, posix_phrase
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.host.constants import (
     REFUSED_CALLS,
     ROUTED_CALLS,
@@ -40,7 +41,6 @@ from mirage.runtime.python.host.list import (
     leaf,
 )
 from mirage.runtime.python.host.stat import stat_result
-from mirage.runtime.vfs import RuntimeVFS
 from mirage.types import FileStat
 from mirage.utils.dates import iso_timestamp, timestamp_iso
 from mirage.utils.path import owner_prefix
@@ -93,7 +93,7 @@ class HostFs:
         self, files: Files, loop: asyncio.AbstractEventLoop | None
     ) -> None:
         self._files = files
-        self._door = RuntimeVFS(files.dispatch, loop)
+        self._door = RuntimeFiles(files.dispatch, loop)
         # The host functions as they were when this router was built.
         # `patch_process` installs these wrappers onto the real os
         # module itself, so a wrapper that read `os.listdir` at call

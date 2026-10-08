@@ -22,7 +22,7 @@ import { epochToIso } from '../../../utils/dates.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { FileHandle, FileTable, type OpenMode } from '../../handles/index.ts'
 import { applyOpen } from '../../open.ts'
-import type { RuntimeVFS } from '../../vfs.ts'
+import type { RuntimeFiles } from '../../files.ts'
 import type { VFSStat } from '../../types.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 
@@ -83,7 +83,7 @@ export function fromGuestText(ctx: QuickJSAsyncContext, handle: QuickJSHandle): 
  */
 export function installQuickJsFs(
   ctx: QuickJSAsyncContext,
-  vfs: RuntimeVFS | null,
+  vfs: RuntimeFiles | null,
 ): () => Promise<string[]> {
   const table = new FileTable<FileHandle>()
   // qjs-libc's fopen opens a directory for reading, and every read of it

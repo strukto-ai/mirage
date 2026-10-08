@@ -200,7 +200,7 @@ export class Files {
 
   /**
    * `Workspace.dispatch` as this facade runs it: as its session, and
-   * recorded on `records`. The door `RuntimeVFS` drives for node's
+   * recorded on `records`. The door `RuntimeFiles` drives for node's
    * patched `fs` (`patchNodeFs`), a facade caller like FUSE. Mirrors
    * Python's `Files.dispatch`.
    */
@@ -395,7 +395,7 @@ export class Files {
   /**
    * Append bytes to a file through the mount's append op (the python
    * facade's `append`). No whole-file fallback here: that is
-   * RuntimeVFS's business, where a guest holds the full buffer; an
+   * RuntimeFiles's business, where a guest holds the full buffer; an
    * embedder calling the facade gets the mount's real answer.
    */
   async append(path: string, data: Uint8Array, sessionId?: string): Promise<void> {

@@ -417,7 +417,7 @@
   },
   "runtime/binding": {
    "typescript_only": {
-    "workspaceBridge": "The TypeScript guest bridge takes fixed op names, string paths and positional payloads, so one converter maps it onto a workspace-shaped dispatch for the workspace and for patchNodeFs; Python's RuntimeVFS passes keyword arguments straight to DispatchFn, so there is nothing to convert."
+    "workspaceBridge": "The TypeScript guest bridge takes fixed op names, string paths and positional payloads, so one converter maps it onto a workspace-shaped dispatch for the workspace and for patchNodeFs; Python's RuntimeFiles passes keyword arguments straight to DispatchFn, so there is nothing to convert."
    }
   }
  }

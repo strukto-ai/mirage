@@ -15,7 +15,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { loadPyodideRuntime, type PyodideInterface } from '../loader.ts'
 import { PrefixResolver } from '../../../resolver.ts'
-import { RuntimeVFS } from '../../../vfs.ts'
+import { RuntimeFiles } from '../../../files.ts'
 import { applyMutation, createJournal, type MutationJournal } from './journal.ts'
 import { preloadInto } from './preload.ts'
 import { changedAttrs, PyodideFs } from './fs.ts'
@@ -41,7 +41,7 @@ interface Call {
 
 describe('PyodideFs', () => {
   let py: PyodideInterface
-  let vfs: RuntimeVFS
+  let vfs: RuntimeFiles
   let journal: MutationJournal
   const calls: Call[] = []
   const mounts: string[] = []
@@ -205,7 +205,7 @@ describe('PyodideFs', () => {
     }
     // The link source is the double's own name plane, which is what a
     // workspace hands its runtimes: link names per directory.
-    vfs = new RuntimeVFS(
+    vfs = new RuntimeFiles(
       dispatch,
       new PrefixResolver(
         () => mounts,

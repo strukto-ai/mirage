@@ -1,5 +1,5 @@
 import type { ChildProcess } from '../../../../process/child.ts'
-import { RuntimeVFS } from '../../../vfs.ts'
+import { RuntimeFiles } from '../../../files.ts'
 import { resolvePath } from '../../../../utils/path.ts'
 import { classify } from '../../../../errors/index.ts'
 import type { RuntimeContext } from '../../../binding.ts'
@@ -167,7 +167,7 @@ export class GuestProcessTable {
     }
     if (request.op === 'resolve' || request.op === 'spawn') {
       if (request.op === 'spawn') this.context.processes?.checkSpawn()
-      const vfs = RuntimeVFS.of(this.context)
+      const vfs = RuntimeFiles.of(this.context)
       const head = request.argv?.[0]
       if (typeof head !== 'string' || !head)
         throw Object.assign(new Error('empty executable'), { code: 'ENOENT' })

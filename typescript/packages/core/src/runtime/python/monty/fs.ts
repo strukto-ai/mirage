@@ -16,7 +16,7 @@ import { classify } from '../../../errors/index.ts'
 import { normDir } from '../../../utils/slash.ts'
 import { parseMode } from '../../handles/mode.ts'
 import { applyOpen } from '../../open.ts'
-import type { RuntimeVFS } from '../../vfs.ts'
+import type { RuntimeFiles } from '../../files.ts'
 import type { MontyFsBits } from './loader.ts'
 import { MAX_URANDOM_BYTES, NOT_A_LINK } from './constants.ts'
 import { asGuestError, guestError } from './errors.ts'
@@ -152,7 +152,7 @@ const STRUCTURE = new Set(['Path.mkdir', 'Path.iterdir', 'Path.stat'])
  * default refusal. Every path goes to the file door, and nothing is
  * kept aside: structure is open (a listing, whether a name is a
  * directory or a link) and content goes only through the runtime's
- * view (`RuntimeVFS.serves`: the announced mounts and what a link
+ * view (`RuntimeFiles.serves`: the announced mounts and what a link
  * reaches), so a guest lists what a shell lists and reads and writes
  * nothing the view withholds. The python twin answers the same way.
  * Declining is reserved for an operation this door does not implement.
@@ -175,9 +175,9 @@ export class MontyFs {
   private readonly notHandled: symbol
   private readonly fileHandle: MontyFsBits['MontyFileHandle']
   private readonly env: Record<string, string>
-  private readonly door: RuntimeVFS | null
+  private readonly door: RuntimeFiles | null
 
-  constructor(bits: MontyFsBits, env: Record<string, string>, door: RuntimeVFS | null) {
+  constructor(bits: MontyFsBits, env: Record<string, string>, door: RuntimeFiles | null) {
     this.bits = bits
     this.notHandled = bits.NOT_HANDLED
     this.fileHandle = bits.MontyFileHandle
@@ -247,7 +247,7 @@ export class MontyFs {
     path: string,
     args: unknown[],
     kwargs: Record<string, unknown>,
-    door: RuntimeVFS,
+    door: RuntimeFiles,
   ): unknown {
     switch (name) {
       case 'open':
@@ -306,7 +306,7 @@ export class MontyFs {
    * comes out as itself (NOT_A_LINK), which is what CPython's own
    * `Path.is_symlink` does.
    */
-  private isLink(path: string, door: RuntimeVFS): Promise<boolean> {
+  private isLink(path: string, door: RuntimeFiles): Promise<boolean> {
     return door.readlink(path).then(
       () => true,
       (caught: unknown) => {
@@ -317,7 +317,7 @@ export class MontyFs {
     )
   }
 
-  private async open(path: string, mode: string, door: RuntimeVFS): Promise<unknown> {
+  private async open(path: string, mode: string, door: RuntimeFiles): Promise<unknown> {
     // Handle first, as monty's own engine does: a malformed mode must
     // raise before any side effect lands on the mount.
     const handle = new this.fileHandle(path, mode)
@@ -326,7 +326,7 @@ export class MontyFs {
   }
 
   /** Replace a file; the return is python's: characters for text, bytes for bytes. */
-  private async write(path: string, data: unknown, door: RuntimeVFS): Promise<number> {
+  private async write(path: string, data: unknown, door: RuntimeFiles): Promise<number> {
     const bytes = payloadBytes(data)
     await door.write(path, bytes)
     return typeof data === 'string' ? textLength(data) : bytes.length
@@ -339,7 +339,7 @@ export class MontyFs {
    * door falls back to a whole-file write only for the mount without
    * one. The return is python's: characters for text, bytes for bytes.
    */
-  private async append(path: string, data: unknown, door: RuntimeVFS): Promise<number> {
+  private async append(path: string, data: unknown, door: RuntimeFiles): Promise<number> {
     const tail = payloadBytes(data)
     await door.append(path, tail)
     return typeof data === 'string' ? textLength(data) : tail.length
@@ -356,7 +356,7 @@ export class MontyFs {
   private async mkdir(
     path: string,
     kwargs: Record<string, unknown>,
-    door: RuntimeVFS,
+    door: RuntimeFiles,
   ): Promise<null> {
     const row = await door.viewStat(path)
     if (row !== null && !isDirRow(row)) throw guestError('EEXIST', path)

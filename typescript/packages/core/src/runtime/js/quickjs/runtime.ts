@@ -19,7 +19,7 @@ import { JsRuntime } from '../base.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
 import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../../types.ts'
 import type { RuntimeContext } from '../../binding.ts'
-import { RuntimeVFS } from '../../vfs.ts'
+import { RuntimeFiles } from '../../files.ts'
 import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
 import { cwdPreamble } from './execution.ts'
 import BOOTSTRAP from '../../../generated/quickjs.ts'
@@ -103,7 +103,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     const timedOut = this.installInterrupt(runtime, args.signal, args.timeoutSeconds)
     try {
       this.installGlobals(ctx, args, out, err, exit)
-      const vfs = context !== undefined ? RuntimeVFS.of(context) : null
+      const vfs = context !== undefined ? RuntimeFiles.of(context) : null
       const closeAll = installQuickJsFs(ctx, vfs)
 
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
@@ -201,8 +201,8 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       })
       // Same filesystem surface as run(): an attached workspace serves
       // std.open/os.readdir, so a JS policy script can read mounted
-      // content (the python evaluator gets this via run()'s RuntimeVFS).
-      const vfs = context !== undefined ? RuntimeVFS.of(context) : null
+      // content (the python evaluator gets this via run()'s RuntimeFiles).
+      const vfs = context !== undefined ? RuntimeFiles.of(context) : null
       const closeAll = installQuickJsFs(ctx, vfs)
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {

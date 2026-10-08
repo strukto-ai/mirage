@@ -133,7 +133,7 @@ export function captureBinding(
  * workspace's own for a guest, `ws.vfs.dispatch` for node's patched
  * `fs`. A read is the rendered one unless its `raw` attr asks for the
  * stored bytes, and its `offset`/`size` attrs ask for a byte range,
- * matching Python's `RuntimeVFS.read`.
+ * matching Python's `RuntimeFiles.read`.
  */
 export function workspaceBridge(
   dispatch: (
@@ -221,7 +221,7 @@ export function workspaceBridge(
       }
       case 'readdir':
         // The names as the door merged them, nothing resolved: the
-        // runtime door (`RuntimeVFS.readdir`) stats each entry and
+        // runtime door (`RuntimeFiles.readdir`) stats each entry and
         // marks the links, so a row is built in one tier and in one
         // shape in both languages.
         return ((await dispatch('readdir', path)) as string[] | null) ?? []

@@ -20,7 +20,7 @@ from mirage import (
 )
 from mirage.commands.builtin.grep_pushdown import grep_search_options
 from mirage.commands.builtin.utils.lines import split_lines
-from mirage.runtime.vfs import RuntimeVFS
+from mirage.runtime.files import RuntimeFiles
 
 
 class NotesAccessor(Accessor):
@@ -215,7 +215,7 @@ async def main() -> None:
         reader = await ws.session("reader", {"/notes": MountMode.READ})
         assert await reader.vfs.read("/latest") == expected
 
-        runtime = RuntimeVFS(ws.dispatch, asyncio.get_running_loop())
+        runtime = RuntimeFiles(ws.dispatch, asyncio.get_running_loop())
         assert await asyncio.to_thread(runtime.read, "/latest") == expected
         assert not (await asyncio.to_thread(runtime.stat, "/latest")).is_dir
         refused = await ws.shell("echo changed > /notes/welcome.txt")

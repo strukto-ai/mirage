@@ -4,7 +4,7 @@
  "directories": {
   "python_only": {
    "runtime/wasm": "The wasmtime WASI host. npm ships quickjs-emscripten and pyodide with their own hosts and python has no equivalent, so there is nothing to mirror. CLAUDE.md says do not port it.",
-   "runtime/python/host": "The `with ws:` door: the host interpreter's own builtins.open, io.open and os functions patched onto a workspace (fs, open, file, list, stat, constants), plus the re-entrancy bypass (host_io) the mount path sets so a backend serving an op reaches the host. Both ride the runtimes' file door (runtime/vfs RuntimeVFS) over ws.vfs. Its node twin is the one module runtime/js/host/os_patch (patchNodeFs, excused there): an npm consumer holds promises, not file objects, so file, open and the stat and listing shapes have nothing to mirror, and node needs no host_io because the patch swaps only the CommonJS fs object's methods and promises getter, which every node backend's ESM node:fs/promises import never reaches (pinned by os_patch.test.ts, 'a disk root at its own prefix does not re-enter').",
+   "runtime/python/host": "The `with ws:` door: the host interpreter's own builtins.open, io.open and os functions patched onto a workspace (fs, open, file, list, stat, constants), plus the re-entrancy bypass (host_io) the mount path sets so a backend serving an op reaches the host. Both ride the runtimes' file API (runtime/files RuntimeFiles) over ws.vfs. Its node twin is the one module runtime/js/host/os_patch (patchNodeFs, excused there): an npm consumer holds promises, not file objects, so file, open and the stat and listing shapes have nothing to mirror, and node needs no host_io because the patch swaps only the CommonJS fs object's methods and promises getter, which every node backend's ESM node:fs/promises import never reaches (pinned by os_patch.test.ts, 'a disk root at its own prefix does not re-enter').",
    "bridge": "sync.py exists to run an event loop on a worker thread for the FUSE callbacks, which python needs because its FUSE loop is threaded and node's is not.",
    "agents/agno": "Ecosystem split: agno is a python-only framework.",
    "agents/openai_agents": "Twin of the typescript agents/openai: the python package is named after the openai-agents SDK and the npm subpath after @openai/agents, so the two never pair by name. Each module added to both sides is excused under modules.agents/openai.",
@@ -39,7 +39,7 @@
   "runtime/js/quickjs": {
    "typescript_only": {
     "errors": "The preview1 errno table and QuickJsUnavailableError for the Emscripten callbacks: the same guest-visible numbers Python's runtime/wasm/errors.py keeps for every WASI guest, which Python QuickJS uses.",
-    "fs": "The QuickJS Emscripten host callbacks over RuntimeVFS. Python QuickJS is a WASI guest whose file callbacks are the shared runtime/wasm/fs.py host, which is already excused.",
+    "fs": "The QuickJS Emscripten host callbacks over RuntimeFiles. Python QuickJS is a WASI guest whose file callbacks are the shared runtime/wasm/fs.py host, which is already excused.",
     "list": "Encodes directory entries as QuickJS Emscripten handles. Python QuickJS gets preview1 dirents from the shared runtime/wasm/list.py.",
     "loader": "Imports the optional quickjs-emscripten npm package. Python QuickJS locates qjs-wasi.wasm on disk and runs it on the shared runtime/wasm host, whose runtime/wasm/loader.py imports wasmtime.",
     "stat": "Encodes stat results as QuickJS Emscripten handles. Python QuickJS gets preview1 filestats from the shared runtime/wasm/stat.py."
@@ -194,7 +194,7 @@
   },
   "runtime/js/host": {
    "typescript_only": {
-    "os_patch": "patchNodeFs, the node twin of python's `with ws:` door: it swaps node's own fs methods onto a workspace, the way runtime/python/host patches the host interpreter's builtins.open, io.open and os functions (excused there as a directory), and both ride RuntimeVFS over ws.vfs. The python door is a package of its own (fs, open, file, list, stat, constants, host_io), so the two cannot pair by name; node needs only this one module, for the reasons that directory's entry gives."
+    "os_patch": "patchNodeFs, the node twin of python's `with ws:` door: it swaps node's own fs methods onto a workspace, the way runtime/python/host patches the host interpreter's builtins.open, io.open and os functions (excused there as a directory), and both ride RuntimeFiles over ws.vfs. The python door is a package of its own (fs, open, file, list, stat, constants, host_io), so the two cannot pair by name; node needs only this one module, for the reasons that directory's entry gives."
    }
   }
  }

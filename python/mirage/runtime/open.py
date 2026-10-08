@@ -24,7 +24,7 @@ from mirage.runtime.types import VFSEntry, VFSStat
 class OpenSurface(Protocol):
     """What an open asks of the filesystem it lands on.
 
-    The file door answers for the mounts (``RuntimeVFS``, a guest's and
+    The file door answers for the mounts (``RuntimeFiles``, a guest's and
     a ``with ws:`` block's alike), and the wasm router for a guest's
     whole tree, its build directory included (``WasmView``).
     """

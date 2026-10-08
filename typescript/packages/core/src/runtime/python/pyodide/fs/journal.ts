@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type RuntimeVFS } from '../../../vfs.ts'
+import { type RuntimeFiles } from '../../../files.ts'
 import type { SetAttrFields } from '../../../../types.ts'
 import { concat } from '../../../../io/cachable_iterator.ts'
 
@@ -205,12 +205,12 @@ export function createJournal(): MutationJournal {
  *   vfs: the runtime's mount vocabulary to apply through.
  *   mutation: the journal entry to apply.
  */
-export async function applyMutation(vfs: RuntimeVFS, mutation: MirageMutation): Promise<void> {
+export async function applyMutation(vfs: RuntimeFiles, mutation: MirageMutation): Promise<void> {
   switch (mutation.kind) {
     case 'create':
       return vfs.create(mutation.path)
     // The journal recorded only the tail, so the whole file is not
-    // available here; RuntimeVFS.append reads the base itself when the
+    // available here; RuntimeFiles.append reads the base itself when the
     // mount has no append op.
     case 'append':
       return vfs.append(mutation.path, mutation.bytes)

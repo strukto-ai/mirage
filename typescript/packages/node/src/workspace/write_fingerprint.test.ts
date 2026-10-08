@@ -209,7 +209,7 @@ describe('object-store write fingerprint (mocked S3)', () => {
   })
 
   it('a later runtime write drops the claimed bytes', async () => {
-    // The in-process QuickJS runtime writes through RuntimeVFS, inside
+    // The in-process QuickJS runtime writes through RuntimeFiles, inside
     // the runtime command, which claims nothing.
     const got = await writeThenRead(
       [

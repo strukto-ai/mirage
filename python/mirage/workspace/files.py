@@ -282,7 +282,7 @@ class Files:
         self, name: str, path: PathSpec, /, **kwargs: Any
     ) -> tuple[Any, IOResult]:
         """``Workspace.dispatch`` as this facade runs it: as its session,
-        and recorded on ``records``. The door ``RuntimeVFS`` drives for a
+        and recorded on ``records``. The door ``RuntimeFiles`` drives for a
         ``with ws:`` block, which is a facade caller like FUSE. The
         IOResult is empty: a facade op's account is its record.
 

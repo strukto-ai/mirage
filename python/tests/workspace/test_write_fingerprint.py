@@ -280,7 +280,7 @@ def test_a_later_unclaimed_write_drops_the_claimed_bytes():
 
 
 def test_a_later_runtime_write_drops_the_claimed_bytes():
-    # The in-process python3 runtime writes through RuntimeVFS, inside
+    # The in-process python3 runtime writes through RuntimeFiles, inside
     # the runtime command, which claims nothing.
     stored, served, again, _ = _write_then_read(
         [

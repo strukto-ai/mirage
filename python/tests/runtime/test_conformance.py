@@ -54,7 +54,7 @@ class CountingDispatch:
     The seam for the append row: every runtime takes the dispatch as an
     injected callable, so byte accounting needs no new hook. Supports
     the full op vocabulary the runtimes emit, which both tiers now
-    reach through RuntimeVFS.
+    reach through RuntimeFiles.
 
     Args:
         files (dict[str, bytes]): initial virtual file contents.

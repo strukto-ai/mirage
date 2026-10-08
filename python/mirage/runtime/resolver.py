@@ -27,7 +27,7 @@ class MountResolver(Protocol):
     whoever owns the tables so a consumer never re-implements the
     longest-prefix rule or reaches for a link table it cannot import.
     Answers use the table's own prefix spelling; a surface with a
-    spelling convention of its own (``RuntimeVFS``) re-spells on its
+    spelling convention of its own (``RuntimeFiles``) re-spells on its
     side of the seam.
     """
 

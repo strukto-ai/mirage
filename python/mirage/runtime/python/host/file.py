@@ -22,10 +22,10 @@ from typing import TYPE_CHECKING, Self
 
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import FsCondition
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import FileHandle
 from mirage.runtime.handles.mode import parse_mode
 from mirage.runtime.open import apply_open
-from mirage.runtime.vfs import RuntimeVFS
 from mirage.workspace.files import Files
 
 if TYPE_CHECKING:
@@ -106,7 +106,7 @@ class MirageFile:
         newline: str | None = None,
     ) -> None:
         self._closed = True
-        self._door = RuntimeVFS(files.dispatch, loop)
+        self._door = RuntimeFiles(files.dispatch, loop)
         self._path = path
         self._mode = mode
         self._facts = parse_mode(mode)

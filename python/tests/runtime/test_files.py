@@ -21,10 +21,10 @@ import pytest
 from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.constants import LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import FlushStep
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSEntry, VFSStat
-from mirage.runtime.vfs import RuntimeVFS
 from mirage.types import DEVICE_NUMBERS_KEY, ContentType, FileStat, FileType
 from mirage.utils.stat_view import (
     CHAR_MODE,
@@ -35,7 +35,7 @@ from mirage.utils.stat_view import (
 )
 
 
-class ListingVFS(RuntimeVFS):
+class ListingVFS(RuntimeFiles):
     """Core double for the readdir lifting: canned listing and stats."""
 
     def __init__(self, listing, stats, links=()):
@@ -69,7 +69,7 @@ class ListingVFS(RuntimeVFS):
         raise NotImplementedError(name)
 
 
-class RecordingVFS(RuntimeVFS):
+class RecordingVFS(RuntimeFiles):
     """Core with a recorded dispatch, so the routing under test is real."""
 
     def __init__(self, prefixes=(), no_append=()):
@@ -88,7 +88,7 @@ class RecordingVFS(RuntimeVFS):
         return b"" if op == "read" else None
 
 
-class WorldVFS(RuntimeVFS):
+class WorldVFS(RuntimeFiles):
     """Core over an empty world, or one where every op is refused."""
 
     def __init__(self, refuse=None):
@@ -175,7 +175,7 @@ def test_serves_scopes_to_the_mounts_and_an_unscoped_door_serves_all():
 def test_serves_a_path_reached_through_a_link_outside_every_mount():
     # The dispatcher follows a link outside every mount, so what is
     # reached through one is the workspace's too.
-    door = RuntimeVFS(
+    door = RuntimeFiles(
         dispatch=None,
         loop=None,
         resolver=PrefixResolver(
@@ -191,7 +191,7 @@ def test_serves_a_path_reached_through_a_link_outside_every_mount():
 F = "/data/f"
 
 
-class ViewVFS(RuntimeVFS):
+class ViewVFS(RuntimeFiles):
     """Core over /data, with a withheld file and a listed-only directory."""
 
     def __init__(self):
@@ -282,7 +282,7 @@ def test_readdir_keeps_the_listing_when_one_stat_fails(caplog):
             "/data/bad.txt": RuntimeError("upstream 502 Bad Gateway"),
         },
     )
-    with caplog.at_level(logging.WARNING, logger="mirage.runtime.vfs"):
+    with caplog.at_level(logging.WARNING, logger="mirage.runtime.files"):
         assert vfs.readdir("/data/") == [
             VFSEntry(
                 path="/data/a.txt",
@@ -297,9 +297,9 @@ def test_readdir_keeps_the_listing_when_one_stat_fails(caplog):
     assert [
         r.getMessage()
         for r in caplog.records
-        if r.name == "mirage.runtime.vfs"
+        if r.name == "mirage.runtime.files"
     ] == [
-        "runtime vfs: readdir /data/: stat /data/bad.txt: "
+        "runtime files: readdir /data/: stat /data/bad.txt: "
         "upstream 502 Bad Gateway"
     ]
 
@@ -489,7 +489,7 @@ def test_readdir_marks_nothing_without_a_link_source():
     ]
 
 
-class NoAppendVFS(RuntimeVFS):
+class NoAppendVFS(RuntimeFiles):
     """Core over a mount that registers write but not append (S3)."""
 
     def __init__(self, files):
@@ -604,7 +604,7 @@ def test_setattr_forwards_nofollow_for_the_dash_h_family():
 @pytest.mark.asyncio
 async def test_call_hops_from_a_worker_thread_to_the_workspace_loop():
     dispatch = RecordingDispatch()
-    vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
+    vfs = RuntimeFiles(dispatch, asyncio.get_running_loop())
     data = await asyncio.to_thread(vfs.read, "/data/f.txt")
     assert data == b"payload"
     assert dispatch.seen == [("read", "/data/f.txt")]
@@ -613,7 +613,7 @@ async def test_call_hops_from_a_worker_thread_to_the_workspace_loop():
 @pytest.mark.asyncio
 async def test_an_unregistered_op_surfaces_numbered_enotsup():
     dispatch = RecordingDispatch(raises=OperationNotSupportedError("mkdir"))
-    vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
+    vfs = RuntimeFiles(dispatch, asyncio.get_running_loop())
     with pytest.raises(OperationNotSupportedError) as caught:
         await asyncio.to_thread(vfs.mkdir, "/data/sub")
     assert caught.value.errno == errno.ENOTSUP
@@ -638,7 +638,7 @@ async def test_readdir_is_one_hop_that_stats_at_most_the_cap_at_once():
         in_flight -= 1
         return FileStat(name=path.virtual, size=1, type=FileType.FILE), None
 
-    vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
+    vfs = RuntimeFiles(dispatch, asyncio.get_running_loop())
     entries = await asyncio.to_thread(vfs.readdir, "/ram/")
     assert [entry.path for entry in entries] == names
     assert peak == LISTING_ENTRY_CONCURRENCY

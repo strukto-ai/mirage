@@ -17,9 +17,9 @@ from typing import Any
 
 from mirage.errors.fs import einval, enoent, exdev
 from mirage.runtime.constants import ABSENT_PATH
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import FlushStep
 from mirage.runtime.types import VFSEntry, VFSStat
-from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm.build import BuildDir
 from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.constants import READONLY_HINT
@@ -35,7 +35,7 @@ class WasmView:
     the workspace mounts. A mount prefix always wins, anything else
     falls to the build, and a path neither side holds is ENOENT.
 
-    Its second job is shape. `RuntimeVFS` answers in virtual paths
+    Its second job is shape. `RuntimeFiles` answers in virtual paths
     and one `VFSStat` per path; preview1 asks in `(name, filetype)`
     pairs and errno, and its filestat record has no mode field at all,
     so the type bits are read out of the mode and the rest is dropped.
@@ -45,7 +45,7 @@ class WasmView:
     Args:
         config (WasmFsConfig | dict | None): the knobs, chiefly which
             build directory to serve. None means no build directory.
-        core (RuntimeVFS | None): the shared mount op vocabulary. None
+        core (RuntimeFiles | None): the shared mount op vocabulary. None
             means no workspace is attached and only the build is
             visible.
     """
@@ -53,7 +53,7 @@ class WasmView:
     def __init__(
         self,
         config: WasmFsConfig | dict[str, Any] | None = None,
-        core: RuntimeVFS | None = None,
+        core: RuntimeFiles | None = None,
     ) -> None:
         self.config = WasmFsConfig.coerce(config)
         root = self.config.host_root
@@ -123,17 +123,17 @@ class WasmView:
         if self._serving_build(path) is not None:
             raise PermissionError(READONLY_HINT)
 
-    def _require_core(self) -> RuntimeVFS:
+    def _require_core(self) -> RuntimeFiles:
         if self._core is None:
             raise FileNotFoundError("no workspace mounts are reachable")
         return self._core
 
-    def _content_core(self, path: str) -> RuntimeVFS:
+    def _content_core(self, path: str) -> RuntimeFiles:
         """The door for a content call on `path`, inside the view only.
 
         Structure is open (a stat, a listing or a readlink answers for
         any path the workspace has), but content goes only through the
-        runtime's view (``RuntimeVFS.serves``), the rule every guest
+        runtime's view (``RuntimeFiles.serves``), the rule every guest
         door keeps: a guest reads and writes nothing the view
         withholds, such as the shell's history.
 
@@ -190,7 +190,7 @@ class WasmView:
         """The door's own stat, or ENOENT when no workspace is attached.
 
         A path outside the view still answers as structure: a directory
-        row when the workspace lists it (``RuntimeVFS.view_stat``).
+        row when the workspace lists it (``RuntimeFiles.view_stat``).
 
         Args:
             path (str): guest-absolute path.
@@ -225,7 +225,7 @@ class WasmView:
         Asked of a path with no row. The build directory holds rows for
         everything it holds, so a path it serves never lists here, and
         neither does a path outside the view: its stat already answered
-        the directory row ``RuntimeVFS.view_stat`` finds. The history
+        the directory row ``RuntimeFiles.view_stat`` finds. The history
         mount lists its one file as empty, and that file is withheld, not
         a directory.
 

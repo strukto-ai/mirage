@@ -15,7 +15,7 @@
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import type { BridgeDispatchFn } from '../../types.ts'
 import { ContentType, FileStat, FileType } from '../../../types.ts'
-import { RuntimeVFS } from '../../vfs.ts'
+import { RuntimeFiles } from '../../files.ts'
 import { MontyFs } from './index.ts'
 import type { GuestStat } from './stat.ts'
 import { PrefixResolver } from '../../resolver.ts'
@@ -54,7 +54,7 @@ function accessOn(
   return new MontyFs(
     BITS,
     env,
-    new RuntimeVFS(
+    new RuntimeFiles(
       dispatch,
       new PrefixResolver(
         () => mounts,

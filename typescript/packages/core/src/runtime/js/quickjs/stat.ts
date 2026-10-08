@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
-import type { RuntimeVFS } from '../../vfs.ts'
+import type { RuntimeFiles } from '../../files.ts'
 import type { VFSStat } from '../../types.ts'
 import { WASI, errnoFor } from './errors.ts'
 
 export async function stat(
   ctx: QuickJSAsyncContext,
-  vfs: RuntimeVFS | null,
+  vfs: RuntimeFiles | null,
   path: string,
 ): Promise<QuickJSHandle> {
   let st: VFSStat | null = null

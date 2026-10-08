@@ -17,7 +17,7 @@ import { EvalError } from '../../../errors.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
 import type { BridgeDispatchFn, EvalResult, RunResult } from '../../../types.ts'
 import type { RuntimeContext } from '../../../binding.ts'
-import { RuntimeVFS } from '../../../vfs.ts'
+import { RuntimeFiles } from '../../../files.ts'
 import { applyMutation } from '../fs/journal.ts'
 import type { FlushFailure } from '../fs/types.ts'
 import { failureText } from './failure.ts'
@@ -152,7 +152,7 @@ export class PyodideWorkerClient {
     signal?: AbortSignal,
   ): Promise<RunResult | EvalResult> {
     if (this.failure !== null) throw this.failure
-    const vfs = RuntimeVFS.of(context)
+    const vfs = RuntimeFiles.of(context)
     const { dispatch, scope } = context
     const responses = new Set<Promise<void>>()
     const processes = new GuestProcessTable(
@@ -237,7 +237,7 @@ export class PyodideWorkerClient {
 
   private async operation(
     request: VfsRequest,
-    vfs: RuntimeVFS,
+    vfs: RuntimeFiles,
     dispatch: BridgeDispatchFn,
     processes: GuestProcessTable,
   ): Promise<unknown> {

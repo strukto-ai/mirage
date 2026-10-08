@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { isMissingPath } from '../../../../errors/fs.ts'
-import { isUnclassified, type RuntimeVFS } from '../../../vfs.ts'
+import { isUnclassified, type RuntimeFiles } from '../../../files.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
 
 export interface FSLike {
@@ -68,7 +68,7 @@ function applyMeta(fs: FSLike, entry: VFSEntry): void {
   if (entry.mtimeMs !== undefined) fs.utime?.(entry.path, entry.mtimeMs, entry.mtimeMs)
 }
 
-async function preloadEntry(fs: FSLike, vfs: RuntimeVFS, entry: VFSEntry): Promise<void> {
+async function preloadEntry(fs: FSLike, vfs: RuntimeFiles, entry: VFSEntry): Promise<void> {
   // A namespace symlink is copied as a link, never followed: stat
   // reports the target, so a directory link would copy its whole
   // subtree here and a cyclic one would never terminate. The target is
@@ -166,7 +166,7 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeVFS, entry: VFSEntry): Promi
  *   vfs: the runtime's mount vocabulary to read through.
  *   prefix: the mount prefix to walk.
  */
-export async function preloadInto(fs: FSLike, vfs: RuntimeVFS, prefix: string): Promise<void> {
+export async function preloadInto(fs: FSLike, vfs: RuntimeFiles, prefix: string): Promise<void> {
   const prefixWithSlash = prefix.endsWith('/') ? prefix : prefix + '/'
   const prefixWithoutSlash = prefixWithSlash.slice(0, -1)
   fs.mkdirTree(prefixWithoutSlash)
