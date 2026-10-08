@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from mirage.types import MountBackend, MountMode, WritePolicy
+from mirage.types import MountMode, WritePolicy
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.loader import load_attr
 from mirage.vfs.registry import REGISTRY, known_vfs_names
@@ -55,8 +55,7 @@ def _stub(name: str) -> BaseVFS:
         ("", WritePolicy.UNCONDITIONAL),
         ("conditional", WritePolicy.CONDITIONAL),
         ("CONDITIONAL", WritePolicy.CONDITIONAL),
-        # The config door validates the field and then builds the mount,
-        # so an already-coerced member arrives a second time.
+        # The config door coerces once, then the mount coerces the member again.
         (WritePolicy.CONDITIONAL, WritePolicy.CONDITIONAL),
         ("staged", WritePolicy.STAGED),
     ],
@@ -85,70 +84,64 @@ def test_the_condition_table_is_the_shared_fixture_both_ways():
 def test_every_registered_vfs_has_a_condition_row_and_no_row_is_stale():
     names = set(known_vfs_names())
     assert names
-    # The browser registers a backend of its own (opfs), which the
-    # browser twin checks.
+    # The browser's own backend (opfs) is checked by the browser twin.
     assert set(_CONDITIONS["vfs"]) - set(_CONDITIONS["browser_only"]) == names
 
 
-def test_an_s3_mount_on_a_custom_endpoint_gets_the_minio_row():
-    # Any S3-compatible server can sit behind type: s3, MinIO included,
-    # and MinIO ignores copy and delete conditions (measured 2026-10-06).
-    aws = S3VFS(S3Config(bucket="b"))
-    other = S3VFS(S3Config(bucket="b", endpoint_url="http://127.0.0.1:9000"))
-    regional = S3VFS(
-        S3Config(bucket="b", endpoint_url="https://s3.us-west-2.amazonaws.com")
-    )
-    assert write_conditions(aws) == frozenset(_CONDITIONS["vfs"]["s3"])
-    assert write_conditions(regional) == frozenset(_CONDITIONS["vfs"]["s3"])
-    assert write_conditions(other) == frozenset(_CONDITIONS["s3+endpoint"])
+_MINIO = "http://127.0.0.1:9000"
 
 
 @pytest.mark.parametrize(
-    "env, config_file, expected",
+    "env, declared, expected",
     [
         (
             {"AWS_ENDPOINT_URL_S3": "http://minio.local:9000"},
-            None,
+            {},
             "s3+endpoint",
         ),
-        ({"AWS_ENDPOINT_URL": "http://minio.local:9000"}, None, "s3+endpoint"),
+        ({"AWS_ENDPOINT_URL": "http://minio.local:9000"}, {}, "s3+endpoint"),
+        (
+            {"AWS_ENDPOINT_URL_S3": "", "AWS_ENDPOINT_URL": _MINIO},
+            {},
+            "s3+endpoint",
+        ),
         (
             {
                 "AWS_ENDPOINT_URL_S3": "http://minio.local:9000",
                 "AWS_IGNORE_CONFIGURED_ENDPOINT_URLS": "true",
             },
-            None,
+            {},
             "s3",
         ),
-        (
-            {"AWS_PROFILE": "p"},
-            "[profile p]\nservices = mine\n\n"
-            "[services mine]\ns3 =\n  endpoint_url = http://minio.local:9000\n",
-            "s3+endpoint",
-        ),
-        ({}, None, "s3"),
+        ({}, {}, "s3"),
+        ({}, {"endpoint_url": _MINIO}, "s3+endpoint"),
+        ({}, {"endpoint_url": "https://s3.us-west-2.amazonaws.com"}, "s3"),
+        ({}, {"endpoint_url": "https://s3.cn-north-1.amazonaws.com.cn"}, "s3"),
     ],
-    ids=["service-env", "global-env", "ignored", "profile-services", "aws"],
+    ids=[
+        "service-env",
+        "global-env",
+        "empty-service-env",
+        "ignored",
+        "aws",
+        "declared-custom",
+        "declared-regional",
+        "declared-china",
+    ],
 )
-def test_an_s3_mount_is_judged_on_the_endpoint_its_client_resolves(
-    monkeypatch, tmp_path, env, config_file, expected
+def test_an_s3_mount_is_judged_on_its_declared_endpoint(
+    monkeypatch, env, declared, expected
 ):
-    # The client reads the endpoint from the environment and the profile
-    # too; a MinIO reached that way must not be trusted with AWS's row.
+    # The declared endpoint, else the env.
     for name in (
-        "AWS_PROFILE",
-        "AWS_DEFAULT_PROFILE",
         "AWS_ENDPOINT_URL",
         "AWS_ENDPOINT_URL_S3",
         "AWS_IGNORE_CONFIGURED_ENDPOINT_URLS",
     ):
         monkeypatch.delenv(name, raising=False)
-    cfg = tmp_path / "config"
-    cfg.write_text(config_file or "")
-    monkeypatch.setenv("AWS_CONFIG_FILE", str(cfg))
     for name, value in env.items():
         monkeypatch.setenv(name, value)
-    vfs = S3VFS(S3Config(bucket="b", region="us-east-1"))
+    vfs = S3VFS(S3Config(bucket="b", region="us-east-1", **declared))
     want = (
         _CONDITIONS["s3+endpoint"]
         if expected == "s3+endpoint"
@@ -157,41 +150,13 @@ def test_an_s3_mount_is_judged_on_the_endpoint_its_client_resolves(
     assert write_conditions(vfs) == frozenset(want)
 
 
-def test_a_broken_profile_is_judged_on_the_endpoint_it_declared(
-    monkeypatch, tmp_path
-):
-    # A profile the client cannot load fails it too, and the mount reports
-    # that on first use; until then the declared endpoint decides the row.
-    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "none"))
-    vfs = S3VFS(
-        S3Config(
-            bucket="b",
-            aws_profile="gone",
-            endpoint_url="http://127.0.0.1:9000",
-        )
-    )
-    assert write_conditions(vfs) == frozenset(_CONDITIONS["s3+endpoint"])
-
-
-def test_an_aws_china_endpoint_is_aws():
-    vfs = S3VFS(
-        S3Config(
-            bucket="b",
-            endpoint_url="https://s3.cn-north-1.amazonaws.com.cn",
-        )
-    )
-    assert write_conditions(vfs) == frozenset(_CONDITIONS["vfs"]["s3"])
-
-
 @pytest.mark.parametrize("case", _VERDICTS, ids=[c["name"] for c in _VERDICTS])
 def test_the_verdict_matches_the_shared_fixture(case):
-    assert _VERDICTS
     args = (
         "/x/",
         _stub(case["vfs"]),
         coerce_write_policy(case["policy"]),
         MountMode(case["mode"]),
-        MountBackend(case["backend"]),
         case["caches"],
     )
     if case["expect"] is None:

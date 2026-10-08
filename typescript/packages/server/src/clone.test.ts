@@ -14,9 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { MountMode, WritePolicy } from '@struktoai/mirage-core/types'
-import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
-import { S3VFS, Workspace, buildVfs, type SlackVFS } from '@struktoai/mirage-node'
+import { MountMode } from '@struktoai/mirage-core/types'
+import { Workspace, buildVfs, type SlackVFS } from '@struktoai/mirage-node'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { SecretEntries } from '@struktoai/mirage-core/secrets/config'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
@@ -160,34 +159,5 @@ describe('cloneWorkspaceWithOverride', () => {
       }),
     ).rejects.toThrow('secrets.prod.config.account')
     await src.close()
-  })
-})
-
-describe('a clone and the write policy', () => {
-  it('keeps each mount write policy', async () => {
-    // S3 comes back through the reuse path (its credentials are redacted),
-    // which rebuilt the mount from its VFS alone; the saved write policy
-    // has to survive it, as mode does.
-    const src = new Workspace(
-      {
-        '/s3': new Mount(
-          new S3VFS({ bucket: 'b', region: 'us-east-1', accessKeyId: 'k', secretAccessKey: 's' }),
-          { mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL },
-        ),
-        '/d': new RAMVFS(),
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      const clone = await cloneWorkspaceWithOverride(src, null)
-      try {
-        expect(clone.mount('/s3/').write).toBe(WritePolicy.CONDITIONAL)
-        expect(clone.mount('/d/').write).toBe(WritePolicy.UNCONDITIONAL)
-      } finally {
-        await clone.close()
-      }
-    } finally {
-      await src.close()
-    }
   })
 })

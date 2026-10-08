@@ -660,12 +660,6 @@ describe('configToWorkspaceArgs', () => {
       '/s3': ['fuse', undefined],
     })
     expect('kernelMounts' in withFuse.options).toBe(false)
-    // The mount itself carries no backend: the node constructor auto-mounts a
-    // kernel backend, and the caller mounts kernelMounts, so carrying both
-    // would expose the mount twice.
-    for (const prefix of ['/data', '/s3']) {
-      expect(withFuse.mounts[prefix]?.options.backend).toBeUndefined()
-    }
     const withoutFuse = await configToWorkspaceArgs(
       loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } } }),
     )
@@ -1699,9 +1693,7 @@ describe('mount index block', () => {
   })
 })
 
-// Each mount keeps its own neighbours (read, mode, index) at non-default
-// values, so a door that rebuilt the mount around the new key, instead of
-// setting it, loses them and fails here.
+// Non-default neighbours fail a door that rebuilds the mount around the key.
 describe('mount write block', () => {
   it.each([
     ['neither', undefined, undefined, WritePolicy.UNCONDITIONAL],

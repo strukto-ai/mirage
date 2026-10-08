@@ -60,7 +60,7 @@ def _sent(kwargs: dict[str, str]) -> dict[str, str]:
     return {k: kwargs[k] for k in _CONDITION_KEYS if k in kwargs}
 
 
-_CONDITION_KEYS = ("IfMatch", "IfNoneMatch", "CopySourceIfMatch")
+_CONDITION_KEYS = ("IfMatch", "CopySourceIfMatch")
 
 MUTATIONS = ("put_object", "copy_object", "delete_object", "delete_objects")
 
@@ -171,15 +171,10 @@ class MultiBucketS3Client:
         self.undeletable: set[str] = set()
         # Rows per list_objects_v2 page; None answers in one page.
         self.page_size: int | None = None
-        # Every request in order, with the condition parameters it sent:
-        # what a conditional-write test reads to learn which version went
-        # out, rather than a count that HEAD+PUT would also satisfy.
+        # Every request in order, with the condition parameters it sent.
         self.ledger: list[tuple[str, dict[str, str]]] = []
         self._hooks: dict[str, list[Callable[[], Awaitable[None] | None]]] = {}
-        # Raise on a mutation that carries no condition: every write on a
-        # conditional mount must carry one, so a route that bypasses the
-        # policy fails here instead of passing silently. A marker key
-        # (trailing slash) is exempt, because rmdir is unconditional.
+        # Raise on a mutation sent without a condition, except a marker key.
         self.tripwire = False
 
     def before(
@@ -211,19 +206,8 @@ class MultiBucketS3Client:
         ):
             raise AssertionError(f"unconditioned {op} of {key!r}")
 
-    def _require(
-        self,
-        current: bytes | None,
-        if_match: str | None,
-        if_none_match: str | None,
-    ) -> None:
-        # Quotes are stripped on both sides so the fake accepts either
-        # spelling; which one the driver sends is the driver's contract,
-        # tested there, not a guess the fake should pin.
-        if if_none_match == "*" and current is not None:
-            raise _mock_s3_error("PreconditionFailed", 412)
-        # AWS answers an If-Match on a key that is gone with 404, not 412
-        # (user guide, "Conditional write behavior").
+    def _require(self, current: bytes | None, if_match: str | None) -> None:
+        # AWS answers an If-Match on a key that is gone with 404, not 412.
         if if_match is not None and current is None:
             raise _mock_s3_error("NoSuchKey")
         if if_match is not None and _bare(if_match) != _bare(
@@ -314,11 +298,7 @@ class MultiBucketS3Client:
         self.calls["put_object"] += 1
         self.bucket_calls["put_object", Bucket] += 1
         await self._enter("put_object", Key, _sent(kwargs))
-        self._require(
-            self._objects(Bucket).get(Key),
-            kwargs.get("IfMatch"),
-            kwargs.get("IfNoneMatch"),
-        )
+        self._require(self._objects(Bucket).get(Key), kwargs.get("IfMatch"))
         self._objects(Bucket)[Key] = Body
         # Real PutObject answers the stored object's ETag, so the token a
         # write stamps is the one head_object reports next -- suffix
@@ -337,7 +317,7 @@ class MultiBucketS3Client:
         await self._enter("delete_object", Key, _sent(kwargs))
         current = self._objects(Bucket).get(Key)
         if current is not None:
-            self._require(current, kwargs.get("IfMatch"), None)
+            self._require(current, kwargs.get("IfMatch"))
         self._objects(Bucket).pop(Key, None)
 
     async def copy_object(
@@ -359,11 +339,7 @@ class MultiBucketS3Client:
             self._etag(src_objects[src_key])
         ):
             raise _mock_s3_error("PreconditionFailed", 412)
-        self._require(
-            self._objects(Bucket).get(Key),
-            kwargs.get("IfMatch"),
-            kwargs.get("IfNoneMatch"),
-        )
+        self._require(self._objects(Bucket).get(Key), kwargs.get("IfMatch"))
         data = src_objects[src_key]
         self._objects(Bucket)[Key] = data
         return {"CopyObjectResult": {"ETag": f'"{self._etag(data)}"'}}
@@ -375,8 +351,7 @@ class MultiBucketS3Client:
         self.calls["delete_objects"] += 1
         self.bucket_calls["delete_objects", Bucket] += 1
         listed = Delete.get("Objects", [])
-        # Judged per key: a marker is exempt, but an untagged file key in
-        # the same batch still trips, whichever key comes first.
+        # Judged per key: a marker never exempts an untagged file key.
         bare = [
             o["Key"]
             for o in listed

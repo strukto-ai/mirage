@@ -211,8 +211,7 @@ def test_the_index_takes_in_records_appended_after_a_lookup():
 
 
 def test_the_index_reads_each_record_once():
-    # Records are only appended to, so one already taken in is not read
-    # again: a lookup costs the records since the last one.
+    # Append-only: a lookup costs the records since the last one.
     records = [_op("read", "/a")]
     index = RecordIndex(records)
     index.newest_version("/a")

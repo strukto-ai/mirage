@@ -1,8 +1,13 @@
+import tomllib
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, Mock
 
+import botocore.session
 import pytest
 from botocore.exceptions import ClientError
+from packaging.requirements import Requirement
+from packaging.version import Version
 
 from mirage.cache.context import WriteCondition
 from mirage.core.object_store.driver import ConditionLost
@@ -56,14 +61,20 @@ async def test_a_matched_write_loses_only_on_its_key(case):
 
 
 @pytest.mark.asyncio
-async def test_a_copy_keeps_its_own_error_when_the_source_probe_fails():
-    # The probe only decides which side a 404 names; failing, it must not
-    # stand in for the copy's own error.
+@pytest.mark.parametrize(
+    "code, status",
+    [("AccessDenied", 403), ("404", 404)],
+    ids=["probe-fails", "source-gone"],
+)
+async def test_a_copy_keeps_its_own_error_whatever_the_source_probe_finds(
+    code, status
+):
+    # The probe only decides which side a 404 names; it never stands in for it.
     missing = client_error("NoSuchKey", 404, "CopyObject")
     client = Mock()
     client.copy_object = AsyncMock(side_effect=missing)
     client.head_object = AsyncMock(
-        side_effect=client_error("AccessDenied", 403, "CopyObject")
+        side_effect=client_error(code, status, "HeadObject")
     )
     conn = S3Conn(client, S3Config(bucket="b"))
     with pytest.raises(ClientError) as raised:
@@ -71,16 +82,39 @@ async def test_a_copy_keeps_its_own_error_when_the_source_probe_fails():
     assert raised.value is missing
 
 
-@pytest.mark.asyncio
-async def test_a_copy_whose_source_is_gone_keeps_its_own_error():
-    # A 404 with the source gone names the source, not a lost version.
-    missing = client_error("NoSuchKey", 404, "CopyObject")
-    client = Mock()
-    client.copy_object = AsyncMock(side_effect=missing)
-    client.head_object = AsyncMock(
-        side_effect=client_error("404", 404, "HeadObject")
-    )
-    conn = S3Conn(client, S3Config(bucket="b"))
-    with pytest.raises(ClientError) as raised:
-        await DRIVER.copy_if(conn, "src", "dst", WriteCondition(if_match="v1"))
-    assert raised.value is missing
+# CopyObject If-Match arrived in botocore 1.40.61; older models reject it.
+_BOTOCORE_FLOOR = Version("1.40.61")
+
+
+def test_the_s3_model_carries_every_condition_the_driver_sends():
+    model = botocore.session.get_session().get_service_model("s3")
+    members = {
+        shape: set(model.shape_for(shape).members)
+        for shape in (
+            "PutObjectRequest",
+            "CopyObjectRequest",
+            "DeleteObjectRequest",
+            "ObjectIdentifier",
+        )
+    }
+    assert {"IfMatch"} <= members["PutObjectRequest"]
+    assert {"IfMatch", "CopySourceIfMatch"} <= members["CopyObjectRequest"]
+    assert {"IfMatch"} <= members["DeleteObjectRequest"]
+    assert {"ETag"} <= members["ObjectIdentifier"]
+
+
+@pytest.mark.parametrize("extra", ["s3", "r2", "gcs", "oci", "aws-sm"])
+def test_every_s3_extra_admits_no_botocore_below_the_floor(extra):
+    pyproject = Path(__file__).parents[3] / "pyproject.toml"
+    extras = tomllib.loads(pyproject.read_text())["project"][
+        "optional-dependencies"
+    ]
+    floors = [
+        Requirement(r).specifier
+        for r in extras[extra]
+        if Requirement(r).name == "botocore"
+    ]
+    assert floors and not any(
+        spec.contains(Version("1.40.60")) for spec in floors
+    ), extras[extra]
+    assert all(spec.contains(_BOTOCORE_FLOOR) for spec in floors)

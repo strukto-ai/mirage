@@ -290,8 +290,7 @@ describe('a version kept without bytes', () => {
   })
 
   it('replaces bytes past their bound with a version', async () => {
-    // Past its bound the entry vouches for nothing, as Redis's expired data
-    // key does; the version the line saw since is the one to keep.
+    // Past its bound the entry vouches for nothing; keep the version seen since.
     const c = new RAMFileCacheStore()
     await c.set('/a', encode('old'), { fingerprint: 'v1', ttl: 0 })
     await c.setVersions({ '/a': 'v2' })
@@ -327,8 +326,7 @@ describe('a version kept without bytes', () => {
   })
 
   it('answers the version of an expired entry', async () => {
-    // The token stays true for the bytes that were read, which is all a
-    // conditional write's condition says.
+    // The token stays true for the bytes read, all a condition says.
     vi.useFakeTimers()
     try {
       const c = new RAMFileCacheStore()

@@ -1364,9 +1364,7 @@ def test_a_mount_index_block_becomes_its_mount_index(block, built):
     assert kwargs["mounts"]["/b"].index is None
 
 
-# Each mount keeps its own neighbours (read, mode, index) at non-default
-# values, so a door that rebuilt the mount around the new key, instead of
-# setting it, loses them and fails here.
+# Non-default neighbours fail a door that rebuilds the mount around the key.
 @pytest.mark.parametrize(
     "workspace, block, expected",
     [

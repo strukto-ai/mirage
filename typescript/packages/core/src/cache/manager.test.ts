@@ -357,8 +357,7 @@ describe('CacheManager read gate', () => {
     ['/data/x.txt', 'cached'],
     ['/data/x.txt/', null],
   ] as const)('serves the spelling %s as %s', async (dotted, served) => {
-    // GNU reads `f/` as ENOTDIR for a plain file, which only the backend
-    // read answers; the cache key has already dropped the slash.
+    // GNU's ENOTDIR for `f/` comes from the backend; the cache key drops the slash.
     const [cache, index] = await withEntry()
     const manager = new CacheManager(cache, index, '/data/', true)
     const path = new PathSpec({
@@ -954,9 +953,7 @@ describe('a cold read bigger than the cache', () => {
 
 describe('version lookups in one line', () => {
   it('index the line a bounded number of times, not once per write', async () => {
-    // Each write looks its version up in the line's one index, absorbing
-    // only the records since the last lookup; building one per write made
-    // a loop over one file quadratic.
+    // One index per line, absorbing only new records; one per write was quadratic.
     const manager = new CacheManager(new RAMFileCacheStore(), null, '/data/', true)
     const path = PathSpec.fromStrPath('/data/f')
     built.length = 0

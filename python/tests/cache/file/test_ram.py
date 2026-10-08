@@ -433,8 +433,7 @@ async def test_a_version_never_replaces_bytes_written_since():
 
 @pytest.mark.asyncio
 async def test_a_version_replaces_bytes_past_their_bound():
-    # Past its bound the entry vouches for nothing, as Redis's expired data
-    # key does; the version the line saw since is the one to keep.
+    # Past its bound the entry vouches for nothing; keep the version seen since.
     cache = RAMFileCacheStore()
     await cache.set("/a", b"old", fingerprint="v1", ttl=0)
     await cache.set_versions({"/a": "v2"})
@@ -462,8 +461,7 @@ async def test_fingerprints_answers_each_key_in_order():
 
 @pytest.mark.asyncio
 async def test_an_expired_entry_still_answers_its_version():
-    # The token stays true for the bytes that were read, which is all a
-    # conditional write's condition says.
+    # The token stays true for the bytes read, all a condition says.
     cache = RAMFileCacheStore()
     await cache.set("/a", b"x", fingerprint="v1", ttl=1)
     cache._entries["/a"].cached_at -= 10

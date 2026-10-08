@@ -125,6 +125,27 @@ async def test_rename_onto_nondir_parent_reports_not_a_directory():
 
 
 @pytest.mark.asyncio
+async def test_a_failed_operand_is_named_as_typed():
+    # GNU (coreutils 9.7) keeps the trailing slash when the operand itself
+    # failed: mv: cannot move 'd/' to 'nonexist/sub/'.
+    files = {"/d/a.txt": b"A"}
+    stat, _ = _make_backend(files, {"/d"})
+
+    async def rename(src, dst) -> None:
+        raise enoent(dst)
+
+    _, io = await mv_generic(
+        [_spec(p) for p in ["/d/", "/gone/x/"]],
+        strategy=NativeMove(rename=rename),
+        stat=stat,
+        flags=MvFlags(),
+    )
+    assert io.stderr == (
+        b"mv: cannot move '/d/' to '/gone/x/': No such file or directory\n"
+    )
+
+
+@pytest.mark.asyncio
 async def test_rename_failure_keeps_moving_remaining_sources():
     files = {"/a.txt": b"AAA", "/b.txt": b"BBB"}
     stat, real_rename = _make_backend(files, {"/d"})

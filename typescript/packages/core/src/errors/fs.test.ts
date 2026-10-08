@@ -86,16 +86,8 @@ describe('the constructors', () => {
     expect(fsStrerror(null)).toBeNull()
   })
 
-  it('renders a stale write as the read-it-again remedy', () => {
-    expect(fsStrerror(staleWrite('/s3/f'))).toBe(
-      'changed since it was read; read it again before writing',
-    )
-  })
-
   it('leaves a kernel ESTALE its own words', () => {
-    // The stale-write phrase is mirage's, carried by its own code: a real
-    // ESTALE from a disk or NFS mount is not a lost conditional write and
-    // must not be told to read the file again.
+    // A real ESTALE from disk or NFS is no lost conditional write.
     const err = Object.assign(new Error('Stale file handle'), { code: 'ESTALE' })
     expect(classify(err)).toBeNull()
     expect(fsStrerror(err)).toBeNull()

@@ -270,8 +270,7 @@ describe('a conditional write on the fallback storage', () => {
   }
 
   it("agrees with itself across one mount's nested frames", async () => {
-    // A command's frame and its op door's frame are the same mount, so
-    // they are not "overlapping lines" and the write keeps its version.
+    // A command's frame and its op door's are one mount, so the version stays.
     const [entry, path] = await conditional()
     const cond = await runWithWriteContext(entry.writeContext(), () =>
       runWithWriteContext(entry.writeContext(), () => writeCondition(path, 'write')),

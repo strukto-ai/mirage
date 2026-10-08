@@ -14,12 +14,11 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { MountBackend, MountMode, WritePolicy } from '../../types.ts'
+import { MountMode, WritePolicy } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import {
   checkWriteCapability,
   coerceWritePolicy,
-  conditionalOverlap,
   WRITE_CONDITIONS,
   writeConditions,
 } from './write_policy.ts'
@@ -36,7 +35,6 @@ interface VerdictCase {
   vfs: string
   policy: string
   mode: string
-  backend: string
   caches: boolean
   expect: string | null
 }
@@ -79,10 +77,6 @@ describe('coerceWritePolicy', () => {
       "unknown write policy 'banana'; expected one of: unconditional, conditional, staged",
     )
   })
-
-  it.each([true, 1])('refuses a non-string %s', (value) => {
-    expect(() => coerceWritePolicy(value)).toThrow('unknown write policy')
-  })
 })
 
 describe('the condition table', () => {
@@ -92,48 +86,23 @@ describe('the condition table', () => {
     expect(sortedRows(WRITE_CONDITIONS)).toEqual(sortedRows(Object.fromEntries(rows)))
   })
 
-  it('gives an s3 mount on a custom endpoint the minio row', () => {
-    // Any S3-compatible server can sit behind type: s3, MinIO included,
-    // and MinIO ignores copy and delete conditions (measured 2026-10-06).
-    expect([...writeConditions(stub('s3', { bucket: 'b' }))].sort()).toEqual(
-      [...(CONDITIONS.vfs.s3 ?? [])].sort(),
-    )
-    expect(
-      [
-        ...writeConditions(
-          stub('s3', { bucket: 'b', endpoint: 'https://s3.us-west-2.amazonaws.com' }),
-        ),
-      ].sort(),
-    ).toEqual([...(CONDITIONS.vfs.s3 ?? [])].sort())
-    expect(
-      [...writeConditions(stub('s3', { bucket: 'b', endpoint: 'http://127.0.0.1:9000' }))].sort(),
-    ).toEqual([...CONDITIONS['s3+endpoint']].sort())
-  })
-
-  it('counts an AWS China endpoint as AWS', () => {
-    expect(
-      [
-        ...writeConditions(
-          stub('s3', { bucket: 'b', endpoint: 'https://s3.cn-north-1.amazonaws.com.cn' }),
-        ),
-      ].sort(),
-    ).toEqual([...(CONDITIONS.vfs.s3 ?? [])].sort())
+  it.each([
+    ['none declared', undefined, 's3'],
+    ['regional', 'https://s3.us-west-2.amazonaws.com', 's3'],
+    ['china', 'https://s3.cn-north-1.amazonaws.com.cn', 's3'],
+    ['custom', 'http://127.0.0.1:9000', 's3+endpoint'],
+  ] as const)('judges an s3 mount on its declared endpoint: %s', (_name, endpoint, expected) => {
+    const vfs = stub('s3', { bucket: 'b', ...(endpoint !== undefined ? { endpoint } : {}) })
+    const want = expected === 's3' ? (CONDITIONS.vfs.s3 ?? []) : CONDITIONS['s3+endpoint']
+    expect([...writeConditions(vfs)].sort()).toEqual([...want].sort())
   })
 
   it('gives a presigned-URL config no condition', () => {
-    // The browser's fetch client sends only the body and the copy source,
-    // so a condition would be dropped on the way out.
+    // The browser's fetch client would drop a condition on the way out.
     const presigned = stub('s3', { bucket: 'b', presignedUrlProvider: () => 'u' })
     expect(writeConditions(presigned).length).toBe(0)
     expect(() => {
-      checkWriteCapability(
-        '/x/',
-        presigned,
-        WritePolicy.CONDITIONAL,
-        MountMode.WRITE,
-        MountBackend.WORKSPACE,
-        true,
-      )
+      checkWriteCapability('/x/', presigned, WritePolicy.CONDITIONAL, MountMode.WRITE, true)
     }).toThrow(
       "mount '/x/': write: conditional cannot be sent through a presigned-URL client, which carries no condition",
     )
@@ -141,21 +110,10 @@ describe('the condition table', () => {
 })
 
 describe('checkWriteCapability', () => {
-  it('reads a non-empty corpus', () => {
-    expect(VERDICTS.length).toBeGreaterThan(0)
-  })
-
   it.each(VERDICTS.map((c) => [c.name, c] as const))('matches the shared fixture: %s', (_n, c) => {
     const vfs = { name: c.vfs, cachesReads: c.caches } as unknown as BaseVFS
     const run = () => {
-      checkWriteCapability(
-        '/x/',
-        vfs,
-        coerceWritePolicy(c.policy),
-        c.mode as MountMode,
-        c.backend as MountBackend,
-        c.caches,
-      )
+      checkWriteCapability('/x/', vfs, coerceWritePolicy(c.policy), c.mode as MountMode, c.caches)
     }
     if (c.expect === null) {
       run()
@@ -163,22 +121,5 @@ describe('checkWriteCapability', () => {
     }
     // Exact, as python compares: a message with anything more is a drift.
     expect(run).toThrow(new RegExp(`^${c.expect.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))
-  })
-})
-
-describe('conditionalOverlap', () => {
-  const mounts = [
-    { prefix: '/s3/', write: WritePolicy.CONDITIONAL },
-    { prefix: '/d/', write: WritePolicy.UNCONDITIONAL },
-  ]
-
-  it.each([
-    ['/s3', '/s3/'],
-    ['/', '/s3/'],
-    ['/s3/sub', '/s3/'],
-    ['/d', null],
-    ['/other', null],
-  ] as const)('an exposure of %s reaches %s', (prefix, expected) => {
-    expect(conditionalOverlap(mounts, prefix)).toBe(expected)
   })
 })

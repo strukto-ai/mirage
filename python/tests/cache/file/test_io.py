@@ -698,9 +698,7 @@ async def test_claimed_written_bytes_take_the_verdict(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("side", ["reads", "writes"])
 async def test_bytes_bigger_than_the_cache_are_not_kept(side):
-    # Bytes bigger than the whole cache, if kept, would flush every warm
-    # entry and then themselves; on Redis they would upload the whole
-    # payload to a shared server. The stale copy goes, too.
+    # Bytes bigger than the cache would flush it; the stale copy goes too.
     cache = RAMFileCacheStore(cache_limit=10)
     await cache.set("/s3/warm", b"abc")
     await cache.set("/s3/big", b"old")
@@ -711,25 +709,21 @@ async def test_bytes_bigger_than_the_cache_are_not_kept(side):
 
 
 @pytest.mark.asyncio
-async def test_a_fill_the_store_refuses_never_fails_the_line(refusing_store):
-    # The write already landed; a cache that cannot hold the bytes is no
-    # reason to report it failed, nor to skip the evictions after it.
-    cache = refusing_store()
-    await RAMFileCacheStore.set(cache, "/s3/f", b"old")
-    await RAMFileCacheStore.set(cache, "/s3/other", b"old")
-    io = IOResult(writes={"/s3/f": b"new", "/s3/other": b"x"}, cache=["/s3/f"])
+@pytest.mark.parametrize(
+    "down, written", [(False, ["/s3/f", "/s3/other"]), (True, ["/s3/f"])]
+)
+async def test_a_store_that_refuses_never_fails_the_line(
+    refusing_store, down, written
+):
+    # The write landed: a refused fill, or a refused drop too, is no failure.
+    cache = refusing_store(down=down)
+    for path in written:
+        await RAMFileCacheStore.set(cache, path, b"old")
+    io = IOResult(writes={p: b"new" for p in written}, cache=["/s3/f"])
     await cache_io.apply_io(cache, io)
-    assert not await cache.exists("/s3/f")
-    assert not await cache.exists("/s3/other")
-
-
-@pytest.mark.asyncio
-async def test_a_store_that_is_down_never_fails_the_line(refusing_store):
-    # Nor does a server that refuses the drop of the stale copy as well.
-    cache = refusing_store(down=True)
-    await RAMFileCacheStore.set(cache, "/s3/f", b"old")
-    io = IOResult(writes={"/s3/f": b"new"}, cache=["/s3/f"])
-    await cache_io.apply_io(cache, io)
+    if not down:
+        assert not await cache.exists("/s3/f")
+        assert not await cache.exists("/s3/other")
 
 
 # ── the mount's staleness bound reaches the entry ───────────────────────
@@ -784,8 +778,7 @@ async def test_apply_io_skips_a_path_its_mount_does_not_cache():
 
 @pytest.mark.asyncio
 async def test_apply_io_indexes_the_line_once(monkeypatch):
-    # Every per-path lookup reads one index; rebuilding it per path made a
-    # line over N files cost N passes over its records.
+    # One index for every per-path lookup; one per path cost N passes.
     built = []
     real = cache_io.RecordIndex.__init__
 
@@ -832,8 +825,7 @@ class _RemovingStore(RAMFileCacheStore):
 
 @pytest.mark.asyncio
 async def test_apply_io_sees_a_removal_recorded_while_it_runs():
-    # A background job shares the line's records; an rm it finishes while
-    # the cache is being filled must keep the removed file out of the cache.
+    # An rm a background job finishes mid-fill keeps the file out of the cache.
     records = [_record("read", "/s3/a", "va"), _record("read", "/s3/b", "vb")]
     cache = _RemovingStore(records, "/s3/b")
     io = IOResult(

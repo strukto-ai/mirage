@@ -228,33 +228,33 @@ def _s3() -> S3VFS:
     return S3VFS(S3Config(bucket="b"))
 
 
-@pytest.mark.asyncio
-async def test_an_added_mount_is_judged_on_the_write_policy_it_names():
-    # The wire string, as an embedder writes it, not the enum: the
-    # programmatic door has to coerce before it judges.
-    ws = Workspace({}, mode=MountMode.WRITE)
-    try:
-        entry = ws.add_mount(
-            "/s3", _s3(), MountMode.WRITE, write="conditional"
-        )
-        assert entry.write is WritePolicy.CONDITIONAL
-        with pytest.raises(ValueError, match="gridfs does not"):
-            ws.add_mount(
-                "/g",
-                GridFSVFS(GridFSConfig(uri="mongodb://x", database="d")),
-                MountMode.WRITE,
-                write="conditional",
-            )
-    finally:
-        await ws.close()
+def _gridfs() -> GridFSVFS:
+    return GridFSVFS(GridFSConfig(uri="mongodb://x", database="d"))
 
 
 @pytest.mark.asyncio
-async def test_an_added_mount_inherits_the_workspace_write_policy():
-    ws = Workspace({}, mode=MountMode.WRITE, write="conditional")
+@pytest.mark.parametrize(
+    "options, vfs, write, expected",
+    [
+        ({}, _s3, "conditional", WritePolicy.CONDITIONAL),
+        ({}, _gridfs, "conditional", "gridfs does not"),
+        ({"write": "conditional"}, _s3, None, WritePolicy.CONDITIONAL),
+        ({"cache_limit": 0}, _s3, "conditional", "caches reads"),
+    ],
+    ids=["names", "cannot-honour", "inherits", "keeps-nothing"],
+)
+async def test_an_added_mount_is_judged_on_its_write_policy(
+    options, vfs, write, expected
+):
+    # The wire string, not the enum: the programmatic door coerces first.
+    ws = Workspace({}, mode=MountMode.WRITE, **options)
     try:
-        entry = ws.add_mount("/s3", _s3(), MountMode.WRITE)
-        assert entry.write is WritePolicy.CONDITIONAL
+        if isinstance(expected, WritePolicy):
+            entry = ws.add_mount("/m", vfs(), MountMode.WRITE, write=write)
+            assert entry.write is expected
+        else:
+            with pytest.raises(ValueError, match=expected):
+                ws.add_mount("/m", vfs(), MountMode.WRITE, write=write)
     finally:
         await ws.close()
 
@@ -272,88 +272,11 @@ async def test_host_built_mounts_stay_unconditional_under_a_conditional_default(
         await ws.close()
 
 
-def test_a_mount_with_no_cache_room_cannot_be_conditional():
+@pytest.mark.asyncio
+async def test_a_conditional_mount_needs_a_cache_that_keeps_reads():
     # A zero cache limit keeps nothing, so no write would have a version.
     with pytest.raises(ValueError, match="caches reads"):
         Workspace(
             {"/s3": Mount(_s3(), mode=MountMode.WRITE, write="conditional")},
             cache_limit=0,
         )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("exposed", ["/s3", "/", "/s3/sub"])
-async def test_a_conditional_mount_is_never_exposed_through_fuse(exposed):
-    # A kernel mount added at runtime skips the constructor's check.
-    ws = Workspace(
-        {"/s3": Mount(_s3(), mode=MountMode.WRITE, write="conditional")},
-        mode=MountMode.WRITE,
-    )
-    try:
-        with pytest.raises(ValueError, match="'/s3/'.*backend fuse"):
-            ws.add_fuse_mount(exposed)
-        assert ws.fuse_mountpoints == {}
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("exposed", ["/", "/s3/", "/s3/sub/"])
-async def test_a_conditional_mount_is_never_added_under_a_kernel_mount(
-    exposed,
-):
-    # The other order of the refusal above: the kernel mount came first.
-    ws = Workspace({}, mode=MountMode.WRITE)
-    ws._kernel_mounts.exposed = lambda: [(exposed, MountBackend.FUSE)]
-    try:
-        with pytest.raises(ValueError, match="'/s3/'.*backend fuse"):
-            ws.add_mount("/s3", _s3(), MountMode.WRITE, write="conditional")
-        assert "/s3/" not in [m.prefix for m in ws.mounts()]
-        ws.add_mount("/s3", _s3(), MountMode.WRITE)
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "vfs, mode, message",
-    [
-        (RAMVFS, MountMode.WRITE, "backend fuse"),
-        (_s3, MountMode.READ, "needs a writable mount"),
-    ],
-    ids=["the backend before the conditions", "read-only before the backend"],
-)
-async def test_a_mount_under_a_kernel_mount_names_faults_in_verdict_order(
-    vfs, mode, message
-):
-    # The order the shared verdict table pins for the mount door.
-    ws = Workspace({}, mode=MountMode.WRITE)
-    ws._kernel_mounts.exposed = lambda: [("/", MountBackend.FUSE)]
-    try:
-        with pytest.raises(ValueError, match=message):
-            ws.add_mount("/x", vfs(), mode, write="conditional")
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_kernel_mount_elsewhere_leaves_a_conditional_mount_alone():
-    ws = Workspace({}, mode=MountMode.WRITE)
-    ws._kernel_mounts.exposed = lambda: [("/other/", MountBackend.FUSE)]
-    try:
-        entry = ws.add_mount(
-            "/s3", _s3(), MountMode.WRITE, write="conditional"
-        )
-        assert entry.write is WritePolicy.CONDITIONAL
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_add_mount_refuses_conditional_when_the_cache_keeps_nothing():
-    ws = Workspace({}, mode=MountMode.WRITE, cache_limit=0)
-    try:
-        with pytest.raises(ValueError, match="caches reads"):
-            ws.add_mount("/s3", _s3(), MountMode.WRITE, write="conditional")
-    finally:
-        await ws.close()

@@ -221,8 +221,7 @@ describe('RecordIndex.newestVersion', () => {
   })
 
   it('reads each record once', () => {
-    // Records are only appended to, so one already taken in is not read
-    // again: a lookup costs the records since the last one.
+    // Append-only: a lookup costs the records since the last one.
     const records = [op('read', '/a')]
     const index = new RecordIndex(records)
     index.newestVersion('/a')

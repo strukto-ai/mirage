@@ -418,9 +418,7 @@ describe('a nested line', () => {
     // there could label bytes it never described.
     const ws = await cachingRamWorkspace()
     open.push(ws)
-    // Seeded through the ops API, which keeps no copy, so both cats below
-    // read the backend and record it; a redirect would now keep its bytes
-    // and serve them from the cache.
+    // Seeded via the ops API (no copy kept), so both cats read the backend.
     await ws.vfs.write('/r/f', new TextEncoder().encode('a\n'))
     const captured = captureMarks(ws)
     const line = 'cat /r/f; echo b | tee /r/g; x=$(cat /r/f; echo c | tee /r/h)'

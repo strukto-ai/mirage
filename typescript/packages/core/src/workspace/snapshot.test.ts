@@ -944,11 +944,11 @@ describe('the read policy survives a snapshot round trip', () => {
     await restored.close()
   })
 
-  it('refuses a v3 snapshot', async () => {
+  it.each([3, 4])('refuses a v%i snapshot', async (version) => {
     const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
     const state = await toStateDict(ws)
     await ws.close()
-    expect(() => buildMountArgs({ ...state, version: 3 })).toThrow(/v3 not supported/)
+    expect(() => buildMountArgs({ ...state, version })).toThrow(`v${String(version)} not supported`)
   })
 
   // The absent-version hole, newly reachable: every key the loader read
@@ -965,7 +965,7 @@ describe('the read policy survives a snapshot round trip', () => {
   // Both doors, or the same bytes get two answers: buildMountArgs builds
   // a workspace from the state, applyStateDict restores into one that
   // exists and is what `version checkout` and the sandbox hydrate call.
-  it('refuses a v3 snapshot at the applyStateDict door too', async () => {
+  it.each([3, 4])('refuses a v%i snapshot at the applyStateDict door too', async (version) => {
     const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
     const state = await toStateDict(ws)
     await ws.close()
@@ -977,8 +977,8 @@ describe('the read policy survives a snapshot round trip', () => {
       // refused checkout would already have wiped the live cache while
       // still rejecting, so the rejection alone does not pin the order.
       await expect(
-        applyStateDict(target, { ...state, version: 3 }, { replaceCache: true }),
-      ).rejects.toThrow(/v3 not supported/)
+        applyStateDict(target, { ...state, version }, { replaceCache: true }),
+      ).rejects.toThrow(`v${String(version)} not supported`)
       expect(await target.cache.exists('/d/live.txt')).toBe(true)
     } finally {
       await target.close()

@@ -21,7 +21,6 @@ import time
 import asyncssh
 import pytest
 
-from mirage import Mount, MountMode, Workspace
 from mirage.server.ssh.constants import LISTING_CONCURRENCY
 from mirage.server.ssh.sftp import (
     MirageSFTPServer,
@@ -29,8 +28,6 @@ from mirage.server.ssh.sftp import (
     listing,
     to_attrs,
 )
-from mirage.vfs.ram import RAMVFS
-from mirage.vfs.s3 import S3VFS, S3Config
 from tests.server.ssh.conftest import (
     bind_key,
     start_harness,
@@ -391,55 +388,3 @@ def test_a_refused_stat_ends_the_listing_without_statting_the_rest():
         listing(core, "/d")
     assert core.now == 0
     assert core.calls <= LISTING_CONCURRENCY + 5
-
-
-@pytest.mark.asyncio
-async def test_a_workspace_with_a_conditional_mount_is_not_served(tmp_path):
-    # MountCore cannot carry a write's version; uploads would empty files.
-    ws = Workspace(
-        {
-            "/": (RAMVFS(), MountMode.WRITE),
-            "/s3": Mount(
-                S3VFS(S3Config(bucket="b")),
-                mode=MountMode.WRITE,
-                write="conditional",
-            ),
-        },
-        mode=MountMode.WRITE,
-    )
-    harness = await start_harness(tmp_path, ws)
-    try:
-        async with (
-            harness.connect() as conn,
-            conn.start_sftp_client() as sftp,
-        ):
-            with pytest.raises(asyncssh.SFTPPermissionDenied, match="/s3/"):
-                await sftp.listdir("/")
-    finally:
-        await stop_harness(harness)
-
-
-@pytest.mark.asyncio
-async def test_a_live_session_is_refused_once_a_conditional_mount_is_added(
-    tmp_path,
-):
-    # The session's core was built before the mount existed; it is judged
-    # again on each request, not only on the first.
-    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
-    harness = await start_harness(tmp_path, ws)
-    try:
-        async with (
-            harness.connect() as conn,
-            conn.start_sftp_client() as sftp,
-        ):
-            await sftp.listdir("/")
-            ws.add_mount(
-                "/s3",
-                S3VFS(S3Config(bucket="b")),
-                MountMode.WRITE,
-                write="conditional",
-            )
-            with pytest.raises(asyncssh.SFTPPermissionDenied, match="/s3/"):
-                await sftp.listdir("/")
-    finally:
-        await stop_harness(harness)

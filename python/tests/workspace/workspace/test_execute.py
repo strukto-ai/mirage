@@ -708,9 +708,7 @@ async def test_a_nested_line_applies_against_only_the_writes_since_it_began():
     # read token there could label bytes it never described.
     ws = caching_ram_workspace()
     try:
-        # Seeded through the ops API, which keeps no copy, so both cats
-        # below read the backend and record it; a redirect would now keep
-        # its bytes and serve them from the cache.
+        # Seeded via the ops API (no copy kept), so both cats read the backend.
         await ws.vfs.write("/r/f", b"a\n")
         captured = capture_marks(ws)
         line = "cat /r/f; echo b | tee /r/g; x=$(cat /r/f; echo c | tee /r/h)"

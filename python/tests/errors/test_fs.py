@@ -108,17 +108,8 @@ def test_fs_strerror_reads_a_bare_class_and_nothing_else():
     assert fs_strerror(OSError(errno.EIO, "Input/output error", "/d")) is None
 
 
-def test_a_stale_write_renders_the_read_it_again_remedy():
-    exc = stale_write(PathSpec.from_str_path("/s3/f"))
-    assert fs_strerror(exc) == (
-        "changed since it was read; read it again before writing"
-    )
-
-
 def test_a_kernel_estale_keeps_its_own_words():
-    # The stale-write phrase is mirage's, carried by a class: a real
-    # ESTALE from a disk or NFS mount is not a lost conditional write and
-    # must not be told to read the file again.
+    # A real ESTALE from disk or NFS is no lost conditional write.
     exc = OSError(errno.ESTALE, "Stale file handle", "/disk/f")
     assert classify(exc) is None
     assert fs_strerror(exc) is None

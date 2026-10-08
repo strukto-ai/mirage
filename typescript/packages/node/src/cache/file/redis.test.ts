@@ -408,30 +408,34 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect(new TextDecoder().decode((await cache.get('/a')) ?? new Uint8Array())).toBe('drained')
   })
 
-  it('lets a kept version outlive its bytes bound', async () => {
-    await cache.set('/a', new TextEncoder().encode('x'), { fingerprint: 'v1', ttl: 60 })
+  const KEPT = [60, VERSION_TTL] as const
+  const FOREVER = [-2, -1] as const
+  it.each([
+    ['outlives its bytes', 'set', 60, KEPT, [0, 60]],
+    ['bytes forever', 'set', undefined, FOREVER, FOREVER],
+    [
+      'bytes longer',
+      'set',
+      VERSION_TTL * 2,
+      [VERSION_TTL, 2 * VERSION_TTL],
+      [VERSION_TTL, 2 * VERSION_TTL],
+    ],
+    ['alone', null, undefined, KEPT, [-3, -2]],
+    ['late drain', 'add', 60, KEPT, [0, 60]],
+  ] as const)('only ever raises a version bound: %s', async (_name, fill, ttl, meta, data) => {
+    // Raise-only: outlives its bytes, never shortens them (-1: no expiry).
+    const x = new TextEncoder().encode('x')
+    if (fill === 'set')
+      await cache.set('/a', x, { fingerprint: 'v1', ...(ttl !== undefined ? { ttl } : {}) })
     await cache.setVersions({ '/a': 'v1' })
+    if (fill === 'add') expect(await cache.add('/a', x, { fingerprint: 'v1', ttl })).toBe(true)
     const c = await ttlClient(cache)
-    expect(await c.ttl(`${prefix}meta:/a`)).toBeGreaterThan(60)
-    expect(await c.ttl(`${prefix}meta:/a`)).toBeLessThanOrEqual(VERSION_TTL)
-    expect(await c.ttl(`${prefix}data:/a`)).toBeGreaterThan(0)
-  })
-
-  it('bounds a version kept alone', async () => {
-    await cache.setVersions({ '/a': 'v1' })
-    const c = await ttlClient(cache)
-    expect(await c.ttl(`${prefix}meta:/a`)).toBeGreaterThan(60)
-    expect(await c.ttl(`${prefix}meta:/a`)).toBeLessThanOrEqual(VERSION_TTL)
-  })
-
-  it('never lets a late drain shorten a version', async () => {
-    await cache.setVersions({ '/a': 'v1' })
-    expect(
-      await cache.add('/a', new TextEncoder().encode('x'), { fingerprint: 'v1', ttl: 60 }),
-    ).toBe(true)
-    const c = await ttlClient(cache)
-    expect(await c.ttl(`${prefix}meta:/a`)).toBeGreaterThan(60)
-    expect(await c.ttl(`${prefix}data:/a`)).toBeLessThanOrEqual(60)
+    const metaTtl = await c.ttl(`${prefix}meta:/a`)
+    const dataTtl = await c.ttl(`${prefix}data:/a`)
+    expect(metaTtl).toBeGreaterThan(meta[0])
+    expect(metaTtl).toBeLessThanOrEqual(meta[1])
+    expect(dataTtl).toBeGreaterThan(data[0])
+    expect(dataTtl).toBeLessThanOrEqual(data[1])
   })
 
   it('keeps many versions in one round trip', async () => {

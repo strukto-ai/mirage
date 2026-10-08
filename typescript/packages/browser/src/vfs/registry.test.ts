@@ -296,8 +296,7 @@ describe('browser registry: trello', () => {
 })
 
 describe('the write-condition table covers the browser registry', () => {
-  // The browser registers a subset of the node backends; each one still
-  // needs its row in the shared table (integ/fixtures/write/conditions.json).
+  // Each browser backend needs its row in integ/fixtures/write/conditions.json.
   const fixture = JSON.parse(
     readFileSync(
       fileURLToPath(
@@ -307,8 +306,7 @@ describe('the write-condition table covers the browser registry', () => {
     ),
   ) as { vfs: Record<string, string[]> }
 
-  // Captured as the describe is collected, before any test registers a
-  // backend of its own.
+  // Captured before any test registers a backend of its own.
   const names = knownVfsNames()
 
   it('has a row for every registered VFS', () => {

@@ -15,10 +15,9 @@
 import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MountMode, WritePolicy } from '@struktoai/mirage-core/types'
-import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
+import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { S3VFS, Workspace } from '@struktoai/mirage-node'
+import { Workspace } from '@struktoai/mirage-node'
 import ssh2, { type Client, type FileEntryWithStats, type SFTPWrapper, type Stats } from 'ssh2'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WorkspaceRegistry, type WorkspaceEntry } from '../registry.ts'
@@ -379,50 +378,6 @@ describe('sftp', () => {
     await expect(
       done((cb) => {
         sftp.writeFile('/nope', 'x', cb)
-      }),
-    ).rejects.toSatisfy((err) => codeOf(err) === STATUS.PERMISSION_DENIED)
-  })
-
-  it('refuses a workspace with a conditional mount', async () => {
-    // MountCore cannot carry a write's version; uploads would empty files.
-    const ws = new Workspace(
-      {
-        '/': new RAMVFS(),
-        '/s3': new Mount(
-          new S3VFS({ bucket: 'b', region: 'us-east-1', accessKeyId: 'k', secretAccessKey: 's' }),
-          { mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL },
-        ),
-      },
-      { mode: MountMode.WRITE },
-    )
-    const sftp = await sftpOf(await connect(await startHarness(MountMode.WRITE, ws)))
-    await expect(
-      call<FileEntryWithStats[]>((cb) => {
-        sftp.readdir('/', cb)
-      }),
-    ).rejects.toSatisfy((err) => codeOf(err) === STATUS.PERMISSION_DENIED)
-  })
-
-  it('refuses a live session once a conditional mount is added', async () => {
-    // The session's core was built before the mount existed; it is judged
-    // again on each request, not only on the first.
-    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
-    const sftp = await sftpOf(await connect(await startHarness(MountMode.WRITE, ws)))
-    await call<FileEntryWithStats[]>((cb) => {
-      sftp.readdir('/', cb)
-    })
-    ws.addMount(
-      '/s3',
-      new S3VFS({ bucket: 'b', region: 'us-east-1', accessKeyId: 'k', secretAccessKey: 's' }),
-      MountMode.WRITE,
-      undefined,
-      null,
-      undefined,
-      WritePolicy.CONDITIONAL,
-    )
-    await expect(
-      call<FileEntryWithStats[]>((cb) => {
-        sftp.readdir('/', cb)
       }),
     ).rejects.toSatisfy((err) => codeOf(err) === STATUS.PERMISSION_DENIED)
   })

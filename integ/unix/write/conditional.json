@@ -98,13 +98,22 @@
         },
         {
           "command": "cat /data/wp3new.txt /data/wp3.txt"
+        },
+        {
+          "mutate": {
+            "path": "/data/wp3c.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "echo r > /data2/wp3r.txt; cp /data2/wp3r.txt /data/wp3c.txt; echo $?; cat /data/wp3c.txt"
         }
       ],
-      "note": "With no version a write is a create (If-None-Match: *): a new name is written, a name the shadow already wrote is refused.",
+      "note": "With no version a write goes out plain: a new name is written, and so is a name mirage never read, by a redirect or a cp from another mount.",
       "expect": {
         "exit": 0,
-        "stdout": "0\n1\nx\nv1\n",
-        "stderr": "/data/wp3.txt: changed since it was read; read it again before writing\n"
+        "stdout": "0\n0\nx\ny\n0\nr\n",
+        "stderr": ""
       }
     },
     {
@@ -119,14 +128,26 @@
       "write": "conditional",
       "scenario": [
         {
-          "command": "echo a > /data/wp4.txt; echo b > /data/wp4.txt; cat /data/wp4.txt"
+          "command": "echo a > /data/wp4.txt"
+        },
+        {
+          "mutate": {
+            "path": "/data/wp4.txt",
+            "content": "theirs\n"
+          }
+        },
+        {
+          "command": "echo b > /data/wp4.txt; echo $?"
+        },
+        {
+          "command": "cat /data/wp4.txt"
         }
       ],
-      "note": "The first redirect keeps its bytes and the version its PUT returned, so the second redirect on the same line writes against it.",
+      "note": "A redirect keeps the version its own PUT returned, so after another writer changes the file the next redirect carries If-Match and is refused; a plain write would land.",
       "expect": {
         "exit": 0,
-        "stdout": "b\n",
-        "stderr": ""
+        "stdout": "1\ntheirs\n",
+        "stderr": "/data/wp4.txt: changed since it was read; read it again before writing\n"
       }
     },
     {
@@ -180,13 +201,24 @@
           }
         },
         {
-          "command": "echo x > /data/wp6.txt; cat /data/wp6.txt"
+          "command": "cat /data/wp6.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/wp6.txt > /dev/null; echo B > /data/wp6.txt"
+          }
+        },
+        {
+          "command": "echo A > /data/wp6.txt; echo $?"
+        },
+        {
+          "command": "cat /data/wp6.txt"
         }
       ],
-      "note": "The guard: the same blind overwrite that write_conditional_without_a_version refuses goes through when the mount is unconditional.",
+      "note": "The guard for write_conditional_refuses_a_stale_write: the same steps on an unconditional mount send no condition, so the stale overwrite lands.",
       "expect": {
         "exit": 0,
-        "stdout": "x\n",
+        "stdout": "v1\n0\nA\n",
         "stderr": ""
       }
     },
@@ -208,24 +240,42 @@
           }
         },
         {
-          "command": "grep -c v /data/wp7.txt"
+          "mutate": {
+            "path": "/data/wp7h.txt",
+            "content": "v1\n"
+          }
         },
         {
-          "command": "echo z > /data/wp7.txt; echo $?"
+          "command": "grep -c v /data/wp7.txt; head -n1 /data/wp7h.txt"
         },
         {
-          "command": "cat /data/wp7.txt"
+          "mutate": {
+            "path": "/data/wp7.txt",
+            "content": "v2\n"
+          }
+        },
+        {
+          "mutate": {
+            "path": "/data/wp7h.txt",
+            "content": "v2\n"
+          }
+        },
+        {
+          "command": "echo z > /data/wp7.txt; echo $?; echo z > /data/wp7h.txt; echo $?"
+        },
+        {
+          "command": "cat /data/wp7.txt /data/wp7h.txt"
         }
       ],
-      "note": "grep keeps no bytes, but the version it read is kept apart, so the next line's overwrite carries If-Match and lands rather than asking for create-only.",
+      "note": "grep and head keep no bytes, but the version each read is kept, so a later line's overwrite of a changed file carries If-Match and is refused.",
       "expect": {
         "exit": 0,
-        "stdout": "1\n0\nz\n",
-        "stderr": ""
+        "stdout": "1\nv1\n1\n1\nv2\nv2\n",
+        "stderr": "/data/wp7.txt: changed since it was read; read it again before writing\n/data/wp7h.txt: changed since it was read; read it again before writing\n"
       }
     },
     {
-      "id": "write_conditional_empties_only_a_read_file",
+      "id": "write_conditional_empties_an_unread_file_plain",
       "seq": 310077,
       "targets": [
         "s3",
@@ -248,51 +298,22 @@
           "command": "cat /data/wp8.txt"
         },
         {
-          "command": "truncate -s 0 /data/wp8.txt; echo $?"
-        },
-        {
-          "command": "wc -c < /data/wp8.txt"
-        }
-      ],
-      "note": "Emptying a file is a whole-file write: on a file never read it asks for create-only and the store refuses it; after a read it carries that version and lands.",
-      "expect": {
-        "exit": 0,
-        "stdout": "1\nv1\n0\n0\n",
-        "stderr": "truncate: cannot open '/data/wp8.txt' for writing: changed since it was read; read it again before writing\n"
-      }
-    },
-    {
-      "id": "write_conditional_mv_on_a_custom_endpoint_is_refused",
-      "seq": 310078,
-      "targets": [
-        "s3",
-        "s3-prefix"
-      ],
-      "read": "bounded",
-      "ttl": 600,
-      "write": "conditional",
-      "scenario": [
-        {
           "mutate": {
-            "path": "/data/wp9.txt",
-            "content": "v1\n"
+            "command": "cat /data/wp8.txt > /dev/null; echo v2 > /data/wp8.txt"
           }
         },
         {
-          "command": "cat /data/wp9.txt"
+          "command": "truncate -s 0 /data/wp8.txt; echo $?"
         },
         {
-          "command": "mv /data/wp9.txt /data/wp9b.txt; echo $?"
-        },
-        {
-          "command": "cat /data/wp9.txt; ls /data/wp9b.txt"
+          "command": "cat /data/wp8.txt"
         }
       ],
-      "note": "The integ s3 targets are a local endpoint, not AWS's, so the mount gets the custom-endpoint row (put and create only): mirage refuses the mv's copy and delete itself, before anything moves. The read-version pin of a file mv on AWS's row is pinned by the e2e mv-src-read rows.",
+      "note": "Emptying a file is a whole-file write: never read, it goes out plain; after a read it carries the version, so emptying a file changed since is refused.",
       "expect": {
-        "exit": 2,
-        "stdout": "v1\n1\nv1\n",
-        "stderr": "mv: cannot move '/data/wp9.txt' to '/data/wp9b.txt': Operation not supported\nls: cannot access '/data/wp9b.txt': No such file or directory\n"
+        "exit": 0,
+        "stdout": "0\n1\nv2\n",
+        "stderr": "truncate: cannot open '/data/wp8.txt' for writing: changed since it was read; read it again before writing\n"
       }
     },
     {
@@ -323,14 +344,18 @@
           "command": "rm /seaweedfs/n1.txt; echo $?"
         },
         {
-          "command": "cat /seaweedfs/n1.txt"
+          "command": "rm /seaweedfs/n1.txt; echo $?"
+        },
+        {
+          "command": "cat /seaweedfs/n1.txt; rm /seaweedfs/n1.txt; echo $?"
         }
       ],
       "expect": {
         "exit": 0,
-        "stdout": "v1\n1\nB\n",
-        "stderr": "rm: cannot remove '/seaweedfs/n1.txt': changed since it was read; read it again before writing\n"
-      }
+        "stdout": "v1\n1\n1\nB\n0\n",
+        "stderr": "rm: cannot remove '/seaweedfs/n1.txt': changed since it was read; read it again before writing\nrm: cannot remove '/seaweedfs/n1.txt': changed since it was read; read it again before writing\n"
+      },
+      "note": "A refused delete keeps the version it lost on, so a second rm is refused too; a read lets the next rm through."
     },
     {
       "id": "write_conditional_refuses_a_file_deleted_since_read",
@@ -367,7 +392,8 @@
         "exit": 0,
         "stdout": "v1\n1\n0\nC\n",
         "stderr": "/seaweedfs/n3.txt: changed since it was read; read it again before writing\n"
-      }
+      },
+      "note": "A write over a file deleted since its read is refused; gone, it keeps no version, so the retry goes out plain."
     },
     {
       "id": "write_conditional_lost_path_is_not_recached",
@@ -469,14 +495,18 @@
           "command": "cat /data/n13.txt; rm /data/n13.txt; echo $?; mv /data/n13.txt /data2/n13.txt; echo $?; ls /data2/n13.txt"
         },
         {
+          "command": "mv /data/n13.txt /data/n13b.txt; echo $?; ls /data/n13b.txt"
+        },
+        {
           "command": "cat /data/n13.txt"
         }
       ],
       "expect": {
         "exit": 0,
-        "stdout": "v1\n1\n1\nv1\n",
-        "stderr": "rm: cannot remove '/data/n13.txt': Operation not supported\nmv: cannot move '/data/n13.txt' to '/data2/n13.txt': Operation not supported\nls: cannot access '/data2/n13.txt': No such file or directory\n"
-      }
+        "stdout": "v1\n1\n1\n1\nv1\n",
+        "stderr": "rm: cannot remove '/data/n13.txt': Operation not supported\nmv: cannot move '/data/n13.txt' to '/data2/n13.txt': Operation not supported\nls: cannot access '/data2/n13.txt': No such file or directory\nmv: cannot move '/data/n13.txt' to '/data/n13b.txt': Operation not supported\nls: cannot access '/data/n13b.txt': No such file or directory\n"
+      },
+      "note": "The integ s3 targets are a local endpoint, so the mount gets the custom-endpoint row (put only): mirage refuses rm and every mv out of it, within the mount or across, before anything moves."
     },
     {
       "id": "write_conditional_minio_refuses_mv_out_takes_cp_in",
@@ -681,12 +711,117 @@
         },
         {
           "command": "echo x >> /data/n18b.txt; echo $?; cat /data/n18b.txt"
+        },
+        {
+          "mutate": {
+            "path": "/data/n18c.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "sed -i s/v1/v2/ /data/n18c.txt; echo $?; cat /data/n18c.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/n18.txt > /dev/null; echo v2 > /data/n18.txt"
+          }
+        },
+        {
+          "command": "echo z > /data/n18.txt; echo $?"
         }
       ],
       "expect": {
         "exit": 0,
-        "stdout": "0\n1\n0\nv1\nx\n",
-        "stderr": ""
+        "stdout": "0\n1\n0\nv1\nx\n0\nv2\n1\n",
+        "stderr": "/data/n18.txt: changed since it was read; read it again before writing\n"
+      },
+      "note": "truncate, >> and sed -i read the file themselves, so each lands on a file mirage never read; an overwrite after another writer changed the file then carries the version mirage holds and is refused."
+    },
+    {
+      "id": "write_conditional_refusal_stays_until_a_read",
+      "seq": 310090,
+      "targets": [
+        "s3",
+        "s3-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/wp20.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/wp20.txt"
+        },
+        {
+          "mutate": {
+            "path": "/data/wp20.txt",
+            "content": "v2\n"
+          }
+        },
+        {
+          "command": "echo x > /data/wp20.txt; echo $?"
+        },
+        {
+          "command": "echo x > /data/wp20.txt; echo $?"
+        },
+        {
+          "command": "cat /data/wp20.txt; echo y > /data/wp20.txt; echo $?; cat /data/wp20.txt"
+        }
+      ],
+      "note": "A refused write keeps the version it lost on, so a retry without a read is refused again rather than going out plain over the newer file; a read lets the next write through.",
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n1\n1\nv2\n0\ny\n",
+        "stderr": "/data/wp20.txt: changed since it was read; read it again before writing\n/data/wp20.txt: changed since it was read; read it again before writing\n"
+      }
+    },
+    {
+      "id": "write_conditional_cross_mount_mv_names_a_changed_source",
+      "seq": 310091,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/seaweedfs/m1.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /seaweedfs/m1.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /seaweedfs/m1.txt > /dev/null; echo B > /seaweedfs/m1.txt"
+          }
+        },
+        {
+          "command": "mv /seaweedfs/m1.txt /raw/m1.txt; echo $?; cat /raw/m1.txt /seaweedfs/m1.txt"
+        },
+        {
+          "mutate": {
+            "path": "/seaweedfs/m2.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "mv /seaweedfs/m2.txt /minio/m2.txt; echo $?; cat /minio/m2.txt; ls /seaweedfs/m2.txt"
+        }
+      ],
+      "note": "A cross-mount mv copies, then deletes the source on the version it read; a source changed since is kept and named, as GNU mv names a source it cannot remove. Moving into the minio row is a put, so it is taken.",
+      "expect": {
+        "exit": 2,
+        "stdout": "v1\n1\nv1\nB\n0\nv1\n",
+        "stderr": "mv: cannot remove '/seaweedfs/m1.txt': changed since it was read; read it again before writing\nls: cannot access '/seaweedfs/m2.txt': No such file or directory\n"
       }
     }
   ]

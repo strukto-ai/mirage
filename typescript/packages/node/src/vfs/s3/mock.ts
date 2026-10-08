@@ -86,7 +86,7 @@ function preconditionFailed(): Error {
   return err
 }
 
-const CONDITION_KEYS = ['IfMatch', 'IfNoneMatch', 'CopySourceIfMatch'] as const
+const CONDITION_KEYS = ['IfMatch', 'CopySourceIfMatch'] as const
 
 export const MUTATIONS: ReadonlySet<string> = new Set([
   'PutObject',
@@ -212,20 +212,13 @@ export interface S3Mock {
     input?: Partial<TInput>,
   ): number
   resetCalls(): void
-  /**
-   * Every request in order with the condition parameters it sent: what a
-   * conditional-write test reads to learn which version went out, rather
-   * than a count that HEAD+PUT would also satisfy.
-   */
+  /** Every request in order with the condition parameters it sent. */
   ledger: [string, Record<string, string>][]
   /** Run `hook` once, just before the next `op` request lands. */
   before(op: string, hook: () => void | Promise<void>): void
   /** Drop every hook not yet run, so one a test left queued fires in no other. */
   clearHooks(): void
-  /**
-   * Throw on a mutation that carries no condition. A marker key (trailing
-   * slash) is exempt, because rmdir is unconditional.
-   */
+  /** Throw on a mutation sent without a condition, except a marker key. */
   tripwire: boolean
   /** Keys DeleteObjects refuses with AccessDenied in its body, as python's `undeletable`. */
   undeletable: Set<string>
@@ -273,12 +266,8 @@ export function installS3Mock(
       throw new Error(`unconditioned ${op} of '${key}'`)
     }
   }
-  // Quotes are stripped on both sides so the fake accepts either spelling;
-  // which one the driver sends is the driver's contract, not the fake's.
+  // AWS answers an If-Match on a key that is gone with 404, not 412.
   const require = (current: Uint8Array | undefined, input: Conditions): void => {
-    if (input.IfNoneMatch === '*' && current !== undefined) throw preconditionFailed()
-    // AWS answers an If-Match on a key that is gone with 404, not 412 (user
-    // guide, "Conditional write behavior").
     if (input.IfMatch !== undefined) {
       if (current === undefined) throw notFound()
       if (bare(input.IfMatch) !== bare(etag(current))) throw preconditionFailed()
@@ -330,15 +319,13 @@ export function installS3Mock(
           input.Delimiter === '/'
             ? paginateDirectory(objects, prefix)
             : paginateFlat(objects, prefix)
-        // Real S3 continues after the last key it sent, so a key deleted
-        // between pages never shifts the next one.
+        // Real S3 continues after the last key it sent.
         const after = input.ContinuationToken
         const rows = (full.Contents ?? []).filter((c) => after === undefined || c.Key > after)
         const size = input.Delimiter === '/' ? null : state.pageSize
         const truncated = size !== null && rows.length > size
         const page = { ...full, Contents: truncated ? rows.slice(0, size) : rows }
-        // Real S3 lists each object's ETag, which a per-key conditional delete
-        // reads its versions off.
+        // Real S3 lists each object's ETag, which a conditional delete reads.
         return Promise.resolve({
           Contents: page.Contents.map((c) => {
             const data = objects.get(c.Key)
@@ -389,16 +376,14 @@ export function installS3Mock(
       async (input: { Bucket: string; Delete: { Objects?: { Key: string; ETag?: string }[] } }) => {
         count('DeleteObjects')
         const listed = input.Delete.Objects ?? []
-        // Judged per key: a marker is exempt, but an untagged file key in the
-        // same batch still trips, whichever key comes first.
+        // Judged per key: a marker never exempts an untagged file key.
         const untagged = listed.filter((o) => o.ETag === undefined && !o.Key.endsWith('/'))
         const tags = listed.filter((o) => o.ETag !== undefined).map((o) => String(o.ETag))
         const tagged = tags.length > 0 && untagged.length === 0 ? { ETag: tags.join(',') } : {}
         await enter('DeleteObjects', untagged[0]?.Key ?? listed[0]?.Key ?? '', tagged)
         const deleted: { Key: string }[] = []
         const errors: { Key: string; Code: string; Message: string }[] = []
-        // A refused key comes back in the body of a 200, not as a throw,
-        // which is what real DeleteObjects does (AWS, measured 2026-10-06).
+        // A refused key comes back in the body of a 200, as real DeleteObjects does.
         for (const obj of listed) {
           const current = store.get(input.Bucket, obj.Key)
           if (

@@ -596,41 +596,42 @@ async def test_a_version_kept_without_bytes_is_never_read(cache):
     assert await cache.get("/a") == b"drained"
 
 
-@pytest.mark.asyncio
-async def test_a_kept_version_outlives_its_bytes_bound(cache):
-    await cache.set("/a", b"x", fingerprint="v1", ttl=60)
-    await cache.set_versions({"/a": "v1"})
-    assert 60 < await _meta_ttl(cache, "/a") <= VERSION_TTL
-    assert 0 < await _data_ttl(cache, "/a") <= 60
+_FOREVER, _GONE = (-2, -1), (-3, -2)
+_KEPT = (60, VERSION_TTL)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "ttl", [None, VERSION_TTL * 2], ids=["unbounded", "longer"]
+    "fill, ttl, meta, data",
+    [
+        ("set", 60, _KEPT, (0, 60)),
+        ("set", None, _FOREVER, _FOREVER),
+        (
+            "set",
+            VERSION_TTL * 2,
+            (VERSION_TTL, 2 * VERSION_TTL),
+            (VERSION_TTL, 2 * VERSION_TTL),
+        ),
+        (None, None, _KEPT, _GONE),
+        ("add", 60, _KEPT, (0, 60)),
+    ],
+    ids=[
+        "outlives-bytes",
+        "bytes-forever",
+        "bytes-longer",
+        "alone",
+        "late-drain",
+    ],
 )
-async def test_a_version_never_shortens_its_bytes_bound(cache, ttl):
-    # Raise-only: bytes that live longer than a version, or forever, keep
-    # their meta key as long as their data key.
-    await cache.set("/a", b"x", fingerprint="v1", ttl=ttl)
+async def test_a_version_bound_only_ever_raises(cache, fill, ttl, meta, data):
+    # Raise-only: outlives its bytes, never shortens them (-1: no expiry).
+    if fill == "set":
+        await cache.set("/a", b"x", fingerprint="v1", ttl=ttl)
     await cache.set_versions({"/a": "v1"})
-    meta = await _meta_ttl(cache, "/a")
-    data = await _data_ttl(cache, "/a")
-    assert (meta == -1) if ttl is None else (meta > VERSION_TTL)
-    assert (meta == -1) is (data == -1)
-
-
-@pytest.mark.asyncio
-async def test_a_version_kept_alone_is_bounded(cache):
-    await cache.set_versions({"/a": "v1"})
-    assert 60 < await _meta_ttl(cache, "/a") <= VERSION_TTL
-
-
-@pytest.mark.asyncio
-async def test_a_late_drain_never_shortens_a_version(cache):
-    await cache.set_versions({"/a": "v1"})
-    assert await cache.add("/a", b"x", fingerprint="v1", ttl=60)
-    assert 60 < await _meta_ttl(cache, "/a") <= VERSION_TTL
-    assert 0 < await _data_ttl(cache, "/a") <= 60
+    if fill == "add":
+        assert await cache.add("/a", b"x", fingerprint="v1", ttl=ttl)
+    assert meta[0] < await _meta_ttl(cache, "/a") <= meta[1]
+    assert data[0] < await _data_ttl(cache, "/a") <= data[1]
 
 
 @pytest.mark.asyncio
@@ -645,8 +646,7 @@ async def test_versions_go_out_in_one_round_trip(cache, monkeypatch):
     monkeypatch.setattr(Pipeline, "execute", counted)
     await cache.set_versions({"/a": "v1", "/b": "v2", "/c": "v3"})
     assert sent == [3]
-    # One version goes out as one EVALSHA: a pipeline holding a script
-    # first asks SCRIPT EXISTS, a second round trip.
+    # One version is one EVALSHA; a scripted pipeline costs a SCRIPT EXISTS.
     await cache.set_versions({"/d": "v4"})
     assert sent == [3]
     # Past KEY_BATCH keys the next batch is a pipeline of its own.

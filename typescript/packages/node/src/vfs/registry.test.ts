@@ -577,10 +577,7 @@ describe('buildVfs colon reference', () => {
 })
 
 describe('the write-condition table covers the registry', () => {
-  // integ/fixtures/write/conditions.json names every VFS once; a backend
-  // added here without a row would mount write: conditional under whatever
-  // its name happened to match, so every registered name needs one, and a
-  // row naming nothing registered is stale.
+  // Every registered VFS needs one conditions.json row, and no row is stale.
   const fixture = JSON.parse(
     readFileSync(
       fileURLToPath(
@@ -590,8 +587,7 @@ describe('the write-condition table covers the registry', () => {
     ),
   ) as { vfs: Record<string, string[]>; browser_only: string[] }
 
-  // Captured as the describe is collected, before any test registers a
-  // backend of its own.
+  // Captured before any test registers a backend of its own.
   const names = knownVfsNames()
 
   it('has a row for every registered VFS and none that is stale', () => {

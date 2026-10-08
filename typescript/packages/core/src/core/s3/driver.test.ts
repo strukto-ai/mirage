@@ -73,31 +73,20 @@ describe('a missing bucket', () => {
       sent.push(cmd.input.CopySource ? 'copy' : 'other')
       return Promise.reject(err)
     })
-    await expect(DRIVER.putIf?.(conn, 'k', new Uint8Array([1]), { ifMatch: 'v1' })).rejects.toBe(
-      err,
-    )
-    sent.length = 0
     await expect(DRIVER.copyIf?.(conn, 'src', 'dst', { ifMatch: 'v1' })).rejects.toBe(err)
     expect(sent).toEqual(['copy'])
   })
 })
 
 describe('a conditioned copy', () => {
-  it('keeps its own error when the source probe fails', async () => {
-    // The probe only decides which side a 404 names; failing, it must not
-    // stand in for the copy's own error.
+  it.each([
+    ['the source probe fails', 'AccessDenied', 403],
+    ['the source is gone', 'NotFound', 404],
+  ] as const)('keeps its own error when %s', async (_name, code, status) => {
+    // The probe only decides which side a 404 names; it never stands in for it.
     const missing = sdkError('NoSuchKey', 404)
     const conn = failing((cmd) =>
-      Promise.reject(cmd.input.CopySource !== undefined ? missing : sdkError('AccessDenied', 403)),
-    )
-    await expect(DRIVER.copyIf?.(conn, 'src', 'dst', { ifMatch: 'v1' })).rejects.toBe(missing)
-  })
-
-  it('keeps its own error when the source is gone', async () => {
-    // A 404 with the source gone names the source, not a lost version.
-    const missing = sdkError('NoSuchKey', 404)
-    const conn = failing((cmd) =>
-      Promise.reject(cmd.input.CopySource !== undefined ? missing : sdkError('NotFound', 404)),
+      Promise.reject(cmd.input.CopySource !== undefined ? missing : sdkError(code, status)),
     )
     await expect(DRIVER.copyIf?.(conn, 'src', 'dst', { ifMatch: 'v1' })).rejects.toBe(missing)
   })

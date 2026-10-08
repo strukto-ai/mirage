@@ -171,9 +171,7 @@ describe('what the cache will hold', () => {
   it.each(['reads', 'writes'] as const)(
     'keeps no bytes bigger than the cache: %s',
     async (side) => {
-      // Bytes bigger than the whole cache, if kept, would flush every warm
-      // entry and then themselves; on Redis they would upload the whole
-      // payload to a shared server. The stale copy goes, too.
+      // Bytes bigger than the cache would flush it; the stale copy goes too.
       const cache = new RAMFileCacheStore({ limit: 10 })
       await cache.set('/s3/warm', ENC.encode('abc'))
       await cache.set('/s3/big', ENC.encode('old'))
@@ -187,26 +185,23 @@ describe('what the cache will hold', () => {
     },
   )
 
-  it('never fails the line on a fill the store refuses', async () => {
-    // The write already landed; a cache that cannot hold the bytes is no
-    // reason to report it failed, nor to skip the evictions after it.
-    const cache = new RefusingStore()
-    await RAMFileCacheStore.prototype.set.call(cache, '/s3/f', ENC.encode('old'))
-    await RAMFileCacheStore.prototype.set.call(cache, '/s3/other', ENC.encode('old'))
+  it.each([
+    [false, ['/s3/f', '/s3/other']],
+    [true, ['/s3/f']],
+  ] as const)('never fails the line on a store that refuses (down=%s)', async (down, written) => {
+    // The write landed: a refused fill, or a refused drop too, is no failure.
+    const cache = new RefusingStore(down)
+    for (const path of written)
+      await RAMFileCacheStore.prototype.set.call(cache, path, ENC.encode('old'))
     const io = new IOResult({
-      writes: { '/s3/f': ENC.encode('new'), '/s3/other': ENC.encode('x') },
+      writes: Object.fromEntries(written.map((p) => [p, ENC.encode('new')])),
       cache: ['/s3/f'],
     })
     await applyIo(cache, io)
-    expect(await cache.exists('/s3/f')).toBe(false)
-    expect(await cache.exists('/s3/other')).toBe(false)
-  })
-
-  it('never fails the line on a store that is down', async () => {
-    // Nor does a server that refuses the drop of the stale copy as well.
-    const cache = new RefusingStore(true)
-    await RAMFileCacheStore.prototype.set.call(cache, '/s3/f', ENC.encode('old'))
-    await applyIo(cache, new IOResult({ writes: { '/s3/f': ENC.encode('new') }, cache: ['/s3/f'] }))
+    if (!down) {
+      expect(await cache.exists('/s3/f')).toBe(false)
+      expect(await cache.exists('/s3/other')).toBe(false)
+    }
   })
 })
 
@@ -713,8 +708,7 @@ describe('applyIo bound stamping', () => {
 
 describe('version lookups', () => {
   it('indexes the line once', async () => {
-    // Every per-path lookup reads one index; rebuilding it per path made a
-    // line over N files cost N passes over its records.
+    // One index for every per-path lookup; one per path cost N passes.
     const paths = Array.from({ length: 50 }, (_, i) => `/s3/f${String(i)}`)
     const records = paths.map((p, i) => readRecord(p, `v${String(i)}`))
     const io = new IOResult({
@@ -755,8 +749,7 @@ class RemovingStore extends RAMFileCacheStore {
 
 describe('records appended while applying', () => {
   it('keeps a file removed while the cache fills out of the cache', async () => {
-    // A background job shares the line's records; an rm it finishes while
-    // the cache is being filled must keep the removed file out of the cache.
+    // An rm a background job finishes mid-fill keeps the file out of the cache.
     const records = [readRecord('/s3/a', 'va'), readRecord('/s3/b', 'vb')]
     const cache = new RemovingStore(records, '/s3/b')
     const io = new IOResult({
