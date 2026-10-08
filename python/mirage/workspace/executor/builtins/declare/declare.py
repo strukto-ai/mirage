@@ -34,6 +34,7 @@ from mirage.workspace.executor.builtins.shared import (
     is_valid_name,
     readonly_refusal,
     refusal,
+    require_view,
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
@@ -480,7 +481,9 @@ def handle_declare_functions(
     attribute, that line (``function_lines``); a missing name is
     ``not found``, exit 1. Without ``-p``, ``-r`` freezes the named
     functions as ``readonly -f`` does, ``-x`` marks them for export and
-    ``+x`` takes the mark off, printing nothing; with no attribute
+    ``+x`` takes the mark off, printing nothing; a ``+`` letter wins over
+    its ``-`` twin, and ``+r`` refuses a frozen function, which then
+    keeps every attribute (``readonly function``, exit 1); with no attribute
     ``-F NAME`` prints the name and ``-f NAME`` the body, and a missing
     name is exit 1 with no message. With no names every function lists
     as ``-p`` prints it; ``-r`` or ``-x`` narrows the list to the
@@ -499,17 +502,30 @@ def handle_declare_functions(
     missing = [name for name in names if name not in session.functions]
     code = 1 if missing else 0
     if names and not printing and (wanted or plus & {"r", "x"}):
+        frozen = [
+            name
+            for name in present
+            if "r" in plus and name in session.readonly_functions
+        ]
         for name in present:
-            if "r" in flags:
+            if name in frozen:
+                continue
+            if "r" in flags - plus:
                 session.readonly_functions.add(name)
-            if "x" in flags:
-                session.exported_functions.add(name)
-            elif "x" in plus:
+            if "x" in plus:
                 session.exported_functions.discard(name)
+            elif "x" in flags:
+                session.exported_functions.add(name)
+        code = 1 if missing or frozen else 0
+        err = encode_text(
+            "".join(
+                f"bash: {cmd}: {name}: readonly function\n" for name in frozen
+            )
+        )
         return (
             None,
-            IOResult(exit_code=code),
-            ExecutionNode(command=cmd, exit_code=code),
+            IOResult(exit_code=code, stderr=err or None),
+            ExecutionNode(command=cmd, exit_code=code, stderr=err),
         )
     if not names:
         present = [
@@ -535,19 +551,24 @@ def handle_declare_functions(
     )
 
 
-def mark_functions(
+async def mark_functions(
     cmd: str,
     session: SessionState,
     marked: set[str],
     names: list[str],
     on: bool,
+    state: SessionView | None = None,
+    arrays: list[tuple[str, bool, list[str]]] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run ``readonly -f`` or ``export -f``: mark functions, or list them.
 
     A name that is not a function is ``not a function``, exit 1, and the
     other operands are still marked (or, with ``on`` False, unmarked).
-    With no names the marked functions print as bodies, each followed by
-    its ``declare`` line.
+    An array literal (``export -f ARR=(a b)``) still stores first, with
+    no attribute, and its name is then checked like the others, as bash
+    assigns it before it looks for the function. With no names the
+    marked functions print as bodies, each followed by its ``declare``
+    line.
 
     Args:
         cmd (str): the builtin's own name for a diagnostic.
@@ -555,7 +576,18 @@ def mark_functions(
         marked (set[str]): the session's set of marked functions.
         names (list[str]): the function names, empty to list.
         on (bool): set the mark rather than clear it.
+        state (SessionView | None): the session plane's gated door, for
+            the array literals.
+        arrays (list[tuple[str, bool, list[str]]] | None): staged
+            ``(name, append, items)`` literals from the declaration.
     """
+    if arrays:
+        refused = await store_staged_arrays(
+            cmd, session, require_view(state), arrays, fatal=True
+        )
+        if refused is not None:
+            return refused
+        names = names + [name for name, _, _ in arrays]
     if not names:
         listed = sorted(name for name in marked if name in session.functions)
         lines = function_lines(session, listed, True, True)

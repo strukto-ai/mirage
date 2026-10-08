@@ -469,10 +469,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( getopts ab opt -ab; bash -c 'getopts xy opt -xy; echo \"$opt $OPTIND\"'; export OPTIND=5 OPTERR=0; bash -c 'echo \"$OPTIND $OPTERR\"' )",
+      "command": "( getopts ab opt -ab; bash -c 'getopts xy opt -xy; echo \"$opt $OPTIND\"'; export OPTIND=5 OPTERR=0; bash -c 'declare -p OPTIND; OPTIND+=1; echo \"$OPTIND $OPTERR\"' )",
       "expect": {
         "exit": 0,
-        "stdout": "x 1\n1 1\n",
+        "stdout": "x 1\ndeclare -ix OPTIND=\"1\"\n2 1\n",
         "stderr": ""
       }
     },

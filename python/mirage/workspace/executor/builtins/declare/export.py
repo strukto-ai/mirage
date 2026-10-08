@@ -98,8 +98,14 @@ async def handle_export(
     # `export -n K=v` assigns and unexports.
     on = "n" not in flags
     if "f" in flags:
-        return mark_functions(
-            "export", session, session.exported_functions, names, on
+        return await mark_functions(
+            "export",
+            session,
+            session.exported_functions,
+            names,
+            on,
+            state,
+            arrays,
         )
     # -p with names is ignored for display; bare / -p alone print.
     if not names and not arrays:

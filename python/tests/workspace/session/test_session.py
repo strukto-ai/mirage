@@ -633,7 +633,7 @@ def test_new_shell_starts_from_the_environment():
     assert child.vars == {
         "OUT": ShellVar("o", exported),
         "TOKEN": ShellVar(None, exported, token),
-        "OPTIND": ShellVar("1", exported),
+        "OPTIND": ShellVar("1", exported | {VarAttr.INTEGER}),
         "RANDOM": ShellVar("42", exported),
         "PWD": ShellVar("/w", exported),
         "PATH": ShellVar("/usr/bin"),

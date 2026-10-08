@@ -273,7 +273,7 @@ describe('SessionState.newShell', () => {
     expect(child.vars).toEqual({
       OUT: makeVar('o', exported),
       TOKEN: { value: null, attrs: exported, managed: token },
-      OPTIND: makeVar('1', exported),
+      OPTIND: makeVar('1', new Set([VarAttr.Integer, VarAttr.Export])),
       RANDOM: makeVar('42', exported),
       PWD: makeVar('/w', exported),
       PATH: makeVar('/usr/bin'),

@@ -677,11 +677,15 @@ export class SessionState {
     for (const [name, v] of Object.entries(this.vars)) {
       if (!v.attrs.has(VarAttr.Export) || name === 'IFS') continue
       if (typeof v.value !== 'string' && v.managed === undefined) continue
-      vars[name] = {
-        value: sessionEntry(STARTUP_VALUES, name) ?? v.value,
-        attrs: new Set([VarAttr.Export]),
-        ...(v.managed === undefined ? {} : { managed: v.managed }),
-      }
+      const start = sessionEntry(STARTUP_VALUES, name)
+      vars[name] =
+        start === undefined
+          ? {
+              value: v.value,
+              attrs: new Set([VarAttr.Export]),
+              ...(v.managed === undefined ? {} : { managed: v.managed }),
+            }
+          : makeVar(start.value, new Set([...start.attrs, VarAttr.Export]))
     }
     const functions = Object.fromEntries(
       Object.entries(this.functions).filter(([name]) => this.exportedFunctions.has(name)),

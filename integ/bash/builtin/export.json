@@ -537,15 +537,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( nbf() { :; }; nbg() { :; }; export -f nbf; export -f; declare -F | grep ' nb'; declare -pfx nbf; declare -pF nbf; export -f nbnosuch nbx=1; echo \"rc=$? [${nbx-unset}]\"; readonly -f nbg; declare +x -f nbf; declare -fx nbg nbnone; echo rc=$?; declare -F | grep ' nb' )",
+      "command": "( nbf() { :; }; nbg() { :; }; export -f nbf; export -f; declare -F | grep ' nb'; declare -pfx nbf; declare -pF nbf; export -f nbnosuch nbx=1; echo \"rc=$? [${nbx-unset}]\"; readonly -f nbg; declare +x -f nbf; declare -fx nbg nbnone; echo rc=$?; declare -F | grep ' nb' ); ( export -f nbarr=(a b); echo \"rc=$? ${nbarr[1]}\"; declare -p nbarr; readonly -f nbro=(c); echo \"rc=$?\"; declare -p nbro )",
       "expect": {
         "exit": 0,
-        "stdout": "nbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\ndeclare -f nbg\nnbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\nrc=1 [unset]\nrc=1\ndeclare -f nbf\ndeclare -frx nbg\n",
-        "stderr": "bash: export: nbnosuch: not a function\nbash: export: nbx=1: not a function\n"
+        "stdout": "nbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\ndeclare -f nbg\nnbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\nrc=1 [unset]\nrc=1\ndeclare -f nbf\ndeclare -frx nbg\nrc=1 b\ndeclare -a nbarr=([0]=\"a\" [1]=\"b\")\nrc=1\ndeclare -a nbro=([0]=\"c\")\n",
+        "stderr": "bash: export: nbnosuch: not a function\nbash: export: nbx=1: not a function\nbash: export: nbarr: not a function\nbash: readonly: nbro: not a function\n"
       }
     },
     {
-      "id": "declare_p_f_prints_without_marking",
+      "id": "declare_f_p_prints_and_plus_clears",
       "seq": 609266,
       "targets": [
         "ram",
@@ -571,11 +571,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( nbp() { :; }; declare -pfx nbp; declare -pFr nbp; bash -c 'declare -F' | grep -c nbp; nbp() { echo redefined; }; nbp; declare -fp nbnosuch nbp; echo \"rc=$?\" ); env -i bash -c 'nbp() { :; }; nbq() { :; }; export -f nbp; declare +x -F; declare +r -F; declare -xF'",
+      "command": "( nbp() { :; }; declare -pfx nbp; declare -pFr nbp; bash -c 'declare -F' | grep -c nbp; nbp() { echo redefined; }; nbp; declare -fp nbnosuch nbp; echo \"rc=$?\" ); env -i bash -c 'nbp() { :; }; nbq() { :; }; export -f nbp; declare +x -F; declare +r -F; declare -xF'; ( nbp() { :; }; nbq() { :; }; readonly -f nbp; export -f nbp nbq; declare -frx +rx nbp nbq; echo \"rc=$?\"; declare -F | grep ' nb' )",
       "expect": {
         "exit": 0,
-        "stdout": "nbp () \n{ \n    :\n}\ndeclare -f nbp\n0\nredefined\nnbp () \n{ \n    echo redefined\n}\nrc=1\ndeclare -fx nbp\ndeclare -f nbq\ndeclare -fx nbp\ndeclare -f nbq\ndeclare -fx nbp\n",
-        "stderr": "bash: declare: nbnosuch: not found\n"
+        "stdout": "nbp () \n{ \n    :\n}\ndeclare -f nbp\n0\nredefined\nnbp () \n{ \n    echo redefined\n}\nrc=1\ndeclare -fx nbp\ndeclare -f nbq\ndeclare -fx nbp\ndeclare -f nbq\ndeclare -fx nbp\nrc=1\ndeclare -frx nbp\ndeclare -f nbq\n",
+        "stderr": "bash: declare: nbnosuch: not found\nbash: declare: nbp: readonly function\n"
       }
     }
   ]

@@ -881,23 +881,26 @@ class SessionState:
         Args:
             None
         """
+        exported = frozenset({VarAttr.EXPORT})
+        variables: dict[str, ShellVar] = {}
+        for name, var in self.vars.items():
+            if VarAttr.EXPORT not in var.attrs or name == "IFS":
+                continue
+            if not isinstance(var.value, str) and var.managed is None:
+                continue
+            start = STARTUP_VALUES.get(name)
+            variables[name] = (
+                ShellVar(var.value, exported, var.managed)
+                if start is None
+                else ShellVar(start.value, start.attrs | exported)
+            )
         functions = {
             name: source
             for name, source in self.functions.items()
             if name in self.exported_functions
         }
         child = self.fork(
-            vars={
-                name: ShellVar(
-                    STARTUP_VALUES.get(name, var.value),
-                    frozenset({VarAttr.EXPORT}),
-                    var.managed,
-                )
-                for name, var in self.vars.items()
-                if VarAttr.EXPORT in var.attrs
-                and name != "IFS"
-                and (isinstance(var.value, str) or var.managed is not None)
-            },
+            vars=variables,
             functions=functions,
             exported_functions=set(functions),
             readonly_functions=set(),

@@ -26,7 +26,7 @@ import { conversionScalar, setAttr, shadowLocal, subscriptIndex } from '../../..
 import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { arithRefusal, isValidName, readonlyRefusal, refusal } from '../shared.ts'
+import { arithRefusal, isValidName, readonlyRefusal, refusal, requireView } from '../shared.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { ANSI_C_ESCAPES, BARE_KEY_RE, CONTROL_RE, SUBSCRIPT_RE } from './constants.ts'
 import type { Result } from '../types.ts'
@@ -400,9 +400,11 @@ export function functionLines(
  * attribute line, `-f NAME` the body and, for a function with an attribute,
  * that line (`functionLines`); a missing name is `not found`, exit 1.
  * Without `-p`, `-r` freezes the named functions as `readonly -f` does, `-x`
- * marks them for export and `+x` takes the mark off, printing nothing; with
- * no attribute `-F NAME` prints the name and `-f NAME` the body, and a
- * missing name is exit 1 with no message. With no names every function
+ * marks them for export and `+x` takes the mark off, printing nothing; a `+`
+ * letter wins over its `-` twin, and `+r` refuses a frozen function, which
+ * then keeps every attribute (`readonly function`, exit 1); with no
+ * attribute `-F NAME` prints the name and `-f NAME` the body, and a missing
+ * name is exit 1 with no message. With no names every function
  * lists as `-p` prints it; `-r` or `-x` narrows the list to the functions
  * holding either attribute, and a `+` attribute does not.
  */
@@ -420,15 +422,21 @@ export function handleDeclareFunctions(
   const missing = names.filter((name) => !(name in session.functions))
   const code = missing.length > 0 ? 1 : 0
   if (names.length > 0 && !printing && (wanted.length > 0 || plus.has('r') || plus.has('x'))) {
+    const frozen = present.filter((name) => plus.has('r') && session.readonlyFunctions.has(name))
     for (const name of present) {
-      if (flags.has('r')) session.readonlyFunctions.add(name)
-      if (flags.has('x')) session.exportedFunctions.add(name)
-      else if (plus.has('x')) session.exportedFunctions.delete(name)
+      if (frozen.includes(name)) continue
+      if (flags.has('r') && !plus.has('r')) session.readonlyFunctions.add(name)
+      if (plus.has('x')) session.exportedFunctions.delete(name)
+      else if (flags.has('x')) session.exportedFunctions.add(name)
     }
+    const status = missing.length > 0 || frozen.length > 0 ? 1 : 0
+    const err = encodeText(
+      frozen.map((name) => `bash: ${cmd}: ${name}: readonly function\n`).join(''),
+    )
     return [
       null,
-      new IOResult({ exitCode: code }),
-      new ExecutionNode({ command: cmd, exitCode: code }),
+      new IOResult({ exitCode: status, stderr: err.byteLength > 0 ? err : null }),
+      new ExecutionNode({ command: cmd, exitCode: status, stderr: err }),
     ]
   }
   if (names.length === 0) {
@@ -460,17 +468,35 @@ export function handleDeclareFunctions(
 /**
  * Run `readonly -f` or `export -f`: mark functions, or list them. A name
  * that is not a function is `not a function`, exit 1, and the other operands
- * are still marked (or, with `on` false, unmarked). With no names the marked
- * functions print as bodies, each followed by its `declare` line.
+ * are still marked (or, with `on` false, unmarked). An array literal
+ * (`export -f ARR=(a b)`) still stores first, with no attribute, and its name
+ * is then checked like the others, as bash assigns it before it looks for
+ * the function. With no names the marked functions print as bodies, each
+ * followed by its `declare` line.
  */
-export function markFunctions(
+export async function markFunctions(
   cmd: string,
   session: SessionState,
   marked: Set<string>,
   names: readonly string[],
   on: boolean,
+  state: SessionView | null = null,
+  arrays: { name: string; append: boolean; items: string[] }[] | null = null,
   parser?: ParseScope,
-): Result {
+): Promise<Result> {
+  if (arrays !== null && arrays.length > 0) {
+    const refused = await storeStagedArrays(
+      cmd,
+      session,
+      requireView(state),
+      arrays,
+      null,
+      true,
+      true,
+    )
+    if (refused !== null) return refused
+    names = [...names, ...arrays.map(({ name }) => name)]
+  }
   if (names.length === 0) {
     const listed = [...marked].filter((name) => name in session.functions).sort(compareCodePoints)
     const lines = functionLines(session, listed, true, true, parser)

@@ -74,7 +74,16 @@ export async function handleExport(
   // `export -n K=v` assigns and unexports.
   const on = !flags.has('n')
   if (flags.has('f'))
-    return markFunctions('export', session, session.exportedFunctions, names, on, parser)
+    return markFunctions(
+      'export',
+      session,
+      session.exportedFunctions,
+      names,
+      on,
+      state,
+      arrays,
+      parser,
+    )
   if (names.length === 0 && (arrays === null || arrays.length === 0)) {
     const lines = exportLines(session)
     const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')

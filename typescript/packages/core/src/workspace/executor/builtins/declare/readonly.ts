@@ -106,7 +106,16 @@ export async function handleReadonly(
     ]
   }
   if (flags.has('f'))
-    return markFunctions('readonly', session, session.readonlyFunctions, names, true, parser)
+    return markFunctions(
+      'readonly',
+      session,
+      session.readonlyFunctions,
+      names,
+      true,
+      state,
+      arrays,
+      parser,
+    )
   if (names.length === 0 && (arrays === null || arrays.length === 0)) {
     const lines = readonlyLines(session, flags)
     const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')

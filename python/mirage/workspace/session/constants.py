@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.variable import ShellVar, VarAttr
+
 # The profile a session is created from when none is named and the
 # workspace defines one of this name.
 DEFAULT_PROFILE = "default"
@@ -78,9 +80,13 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "_function_sites",
 )
 
-# What a new shell sets these to whatever its environment holds, as
-# bash's startup does; an exported one keeps its export mark.
-STARTUP_VALUES: dict[str, str] = {"OPTIND": "1", "OPTERR": "1"}
+# What a new shell starts these at whatever its environment holds, as
+# bash's startup does (OPTIND an integer); an exported one keeps its
+# export mark.
+STARTUP_VALUES: dict[str, ShellVar] = {
+    "OPTIND": ShellVar("1", frozenset({VarAttr.INTEGER})),
+    "OPTERR": ShellVar("1"),
+}
 
 # State that belongs to the line being executed, not to the shell, so a
 # fork starts it fresh: the errexit marker and the running function's

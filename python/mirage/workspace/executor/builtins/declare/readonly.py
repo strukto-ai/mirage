@@ -127,8 +127,14 @@ async def handle_readonly(
             ExecutionNode(command="readonly", exit_code=2, stderr=err),
         )
     if "f" in flags:
-        return mark_functions(
-            "readonly", session, session.readonly_functions, names, on=True
+        return await mark_functions(
+            "readonly",
+            session,
+            session.readonly_functions,
+            names,
+            True,
+            state,
+            arrays,
         )
     if not names and not arrays:
         lines = _readonly_lines(session, flags)
