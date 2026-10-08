@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.commands.builtin.find_eval import (
+from mirage.core.generic.find_eval import (
     And,
     Name,
     Not,

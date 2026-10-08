@@ -16,7 +16,7 @@ import errno
 import functools
 import posixpath
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime
@@ -26,7 +26,6 @@ from mirage.cache.file import io as cache_io
 from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
-from mirage.commands.resolve import get_extension
 from mirage.context import (
     explaining,
     get_current_session,
@@ -49,7 +48,8 @@ from mirage.errors.fs import (
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
-from mirage.observe.context import record, start_op
+from mirage.io.stream import close_quietly
+from mirage.observe.context import command_records, record, start_op
 from mirage.observe.record import OpRecord
 from mirage.policy.boundary import Boundary
 from mirage.policy.errors import PolicyDenied, PolicyError
@@ -67,6 +67,7 @@ from mirage.types import (
     VFSName,
     Visibility,
 )
+from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError, norm, norm_dir, owner_prefix, parent
@@ -134,6 +135,64 @@ def _served(report: OpReport | None, result: Any) -> None:
             None,
             len(result) if isinstance(result, (bytes, bytearray)) else None,
         )
+
+
+async def _primed(
+    stream: AsyncIterator[bytes], report: OpReport | None
+) -> AsyncIterator[bytes]:
+    """Pull a stream's first chunk now and answer the stream from there.
+
+    A read that fails at its start (a missing file, a refused request)
+    then fails at the call, where the door handles it, rather than in
+    the hands of whoever pulls the stream later.
+
+    Args:
+        stream (AsyncIterator[bytes]): the streamed read.
+        report (OpReport | None): the caller's report.
+    """
+    iterator = stream.__aiter__()
+    try:
+        head = [await iterator.__anext__()]
+    except StopAsyncIteration:
+        head = []
+    except BaseException:
+        await close_quietly(iterator)
+        raise
+    resumed = _resumed(head, iterator, report)
+    await resumed.__anext__()
+    return resumed
+
+
+async def _resumed(
+    head: list[bytes],
+    iterator: AsyncIterator[bytes],
+    report: OpReport | None,
+) -> AsyncIterator[bytes]:
+    """The chunks already pulled, then the rest of the stream.
+
+    ``_primed`` runs it to its empty first step, inside the ``try``, so a
+    caller that closes it before pulling still closes the stream. The
+    stream completes when its last chunk is pulled or it is closed, so
+    that is when the caller's report is stamped, with the bytes the
+    store moved.
+
+    Args:
+        head (list[bytes]): what was pulled before the caller asked.
+        iterator (AsyncIterator[bytes]): the stream after them.
+        report (OpReport | None): the caller's report.
+    """
+    moved = sum(len(chunk) for chunk in head)
+    try:
+        yield b""
+        for chunk in head:
+            yield chunk
+        async for chunk in iterator:
+            moved += len(chunk)
+            yield chunk
+    finally:
+        await close_quietly(iterator)
+        if report is not None:
+            report.served(None, moved)
 
 
 def _appends_nothing(name: str, kwargs: dict[str, Any]) -> bool:
@@ -349,6 +408,7 @@ class _Call:
         no_follow (bool): whether the op acts on the final name itself.
         write (bool): whether policy judges the op a write: its POSIX
             name, or the effect the mount's VFS declares for it.
+        stream (bool): whether a read is answered as it is pulled.
     """
 
     name: str
@@ -361,6 +421,7 @@ class _Call:
     report: OpReport | None
     no_follow: bool
     write: bool
+    stream: bool = False
 
     @property
     def raw(self) -> bool:
@@ -521,8 +582,11 @@ class Dispatcher:
     ) -> tuple[Any, IOResult]:
         # with_dispatch_rule_guard's mark, never forwarded to an op.
         rule_gate: EntryGate | None = kwargs.pop("rule_gate", None)
+        # The door's own keyword: a read answered as it is pulled.
+        stream = name == "read" and bool(kwargs.pop("stream", False))
         await self._prepare()
         call = await self._walk(name, path, kwargs, rule_gate, report)
+        call.stream = stream
         await self._refuse_rename(call)
         if self._table_answers(name, call.path.virtual, kwargs):
             return (
@@ -945,6 +1009,8 @@ class Dispatcher:
         try:
             if call.name == "setattr":
                 result = await self._apply_setattr(mount, call.path, kwargs)
+            elif self._streams(call, mount):
+                return await self._open_stream(call, mount, filler)
             elif filler is not None:
                 offset, size = call.window
                 kept = await filler.fill(
@@ -992,6 +1058,52 @@ class Dispatcher:
             # them cannot erase a transfer the backend already made.
             _served(call.report, result)
         return result
+
+    def _streams(self, call: _Call, mount: MountEntry) -> bool:
+        """Whether a read is answered as it is pulled.
+
+        A whole read of stored bytes streams through the VFS's own
+        ``read_stream``. A window, a rendering, a VFS with no stream and
+        a post_vfs policy that may read the result each get the whole
+        bytes instead, which are a stream of one chunk.
+
+        Args:
+            call (_Call): the admitted read.
+            mount (MountEntry): the mount serving its path.
+        """
+        return (
+            call.stream
+            and call.window == (0, None)
+            and mount.vfs.supports("read_stream")
+            and not call.renders_read(mount)
+            and not self._namespace.registry.policies.reads_results()
+        )
+
+    async def _open_stream(
+        self,
+        call: _Call,
+        mount: MountEntry,
+        filler: CacheManager | None,
+    ) -> AsyncIterator[bytes]:
+        """Open a streamed read, its first chunk pulled before it returns.
+
+        A cold read fills the cache as it is pulled.
+
+        Args:
+            call (_Call): the admitted read.
+            mount (MountEntry): the mount serving its path.
+            filler (CacheManager | None): the manager a cold read fills.
+        """
+        with command_records() as records:
+            stream = mount.read_stream(call.path.virtual)
+        if filler is not None:
+            stream = filler.fill_stream(
+                call.path,
+                stream,
+                records,
+                keep=lambda: not call.renders_read(mount),
+            )
+        return await _primed(stream, call.report)
 
     async def _serial_write(self, call: _Call, mount: MountEntry) -> Any:
         """Run a write with its names held, one writer at a time per name.

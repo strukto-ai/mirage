@@ -40,8 +40,8 @@ import {
   startBasename,
   unrespellRaw,
   type PredNode,
-} from '../find_eval.ts'
-import { printfKind } from '../find_printf.ts'
+} from '../../../core/generic/find_eval.ts'
+import { printfKind } from '../../../core/generic/find_eval.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { linkResults } from '../../../core/generic/find.ts'

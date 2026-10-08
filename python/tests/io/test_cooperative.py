@@ -5,7 +5,7 @@ import pytest
 
 from mirage.commands.builtin.generic.wc import wc
 from mirage.commands.builtin.utils.limit import run_with_timeout
-from mirage.commands.errors import CommandTimeoutError
+from mirage.errors.types import CommandTimeoutError
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.workspace.evaluation import EvaluationContext
 

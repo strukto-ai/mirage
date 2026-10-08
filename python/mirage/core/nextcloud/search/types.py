@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Generic, TypeAlias, TypeVar
 from xml.etree import ElementTree
 
-from mirage.commands.builtin.find_eval import PredNode
+from mirage.core.generic.find_eval import PredNode
 from mirage.types import FindType
 
 Bound = TypeVar("Bound", int, float)

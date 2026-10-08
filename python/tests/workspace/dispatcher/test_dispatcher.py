@@ -14,14 +14,17 @@
 
 import asyncio
 import errno
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.commands.errors import LimitExceededError
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, posix_errno
-from mirage.errors.types import ReadOnlyError
+from mirage.errors.types import CommandTimeoutError, ReadOnlyError
+from mirage.io import OpReport
 from mirage.policy import (
     Action,
     CommandRule,
@@ -37,11 +40,14 @@ from mirage.types import (
     FileStat,
     FileType,
     HiddenPaths,
+    Limit,
     MountMode,
+    OnExceed,
     PathSpec,
     Visibility,
 )
 from mirage.utils.ranges import slice_window, splice_window
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -1547,3 +1553,204 @@ async def test_offset_writes_through_two_mounts_of_one_store_all_land():
         )
         got, _ = await ws.dispatch("read", PathSpec.from_str_path("/b/f"))
         assert bytes(got) == b"A12B45C78D"
+
+
+class Tape(BaseVFS):
+    """A cached store whose stream hands out 10-byte chunks, counting
+    each one the backend delivered."""
+
+    name = "tape"
+    caches_reads = True
+
+    def __init__(self, delay: float = 0.0) -> None:
+        super().__init__()
+        self.files = {"a.txt": b"0123456789" * 5}
+        self.delay = delay
+        self.pulled = 0
+        self.reads = 0
+        self.closed = False
+
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return [f"/tape/{name}" for name in self.files]
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        key = path.vfs_path.strip("/")
+        if not key:
+            return FileStat(name="/", type=FileType.DIRECTORY)
+        if key not in self.files:
+            raise FileNotFoundError(path.virtual)
+        return FileStat(
+            name=key, type=FileType.FILE, size=len(self.files[key])
+        )
+
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        self.reads += 1
+        return self.files[path.vfs_path.strip("/")]
+
+    async def write(
+        self, path: PathSpec, data: bytes, index: IndexCacheStore = NULL_INDEX
+    ) -> None:
+        self.files[path.vfs_path.strip("/")] = data
+
+    async def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        key = path.vfs_path.strip("/")
+        if key not in self.files:
+            raise FileNotFoundError(path.virtual)
+        data = self.files[key]
+        try:
+            for at in range(0, len(data), 10):
+                await asyncio.sleep(self.delay)
+                self.pulled += 1
+                yield data[at : at + 10]
+        finally:
+            self.closed = True
+
+
+class ReadsResults(Policy):
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
+        return None
+
+
+TAPE = PathSpec.from_str_path("/tape/a.txt")
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_read_arrives_as_pulled_and_fills_the_cache():
+    tape = Tape()
+    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+        report = OpReport()
+        stream, _ = await ws.dispatch("read", TAPE, stream=True, report=report)
+        assert tape.pulled == 1
+        assert not report.completed
+        chunks = [chunk async for chunk in stream]
+        assert chunks == [b"0123456789"] * 5
+        assert (report.completed, report.bytes) == (True, 50)
+        warm, _ = await ws.dispatch("read", TAPE)
+        assert warm == b"0123456789" * 5
+        assert tape.reads == 0
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_read_fails_at_the_call():
+    with Workspace({"/tape/": Tape()}, mode=MountMode.WRITE) as ws:
+        report = OpReport()
+        with pytest.raises(FileNotFoundError):
+            await ws.dispatch(
+                "read",
+                PathSpec.from_str_path("/tape/missing.txt"),
+                stream=True,
+                report=report,
+            )
+        assert not report.completed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policies,kwargs",
+    [([], {"offset": 5}), ([], {"size": 4}), ([ReadsResults()], {})],
+)
+async def test_a_window_or_a_policy_that_reads_results_gets_whole_bytes(
+    policies, kwargs
+):
+    tape = Tape()
+    with Workspace(
+        {"/tape/": tape}, mode=MountMode.WRITE, policies=policies
+    ) as ws:
+        got, _ = await ws.dispatch("read", TAPE, stream=True, **kwargs)
+        assert isinstance(got, bytes)
+        assert tape.pulled == 0
+
+
+@pytest.mark.asyncio
+async def test_each_pull_gets_the_whole_timeout():
+    tape = Tape(delay=0.05)
+    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+        ws.namespace.mount_for("/tape/a.txt").command_limits["read"] = Limit(
+            timeout_seconds=0.2
+        )
+        stream, _ = await ws.dispatch("read", TAPE, stream=True)
+        got = []
+        async for chunk in stream:
+            got.append(chunk)
+            await asyncio.sleep(0.1)
+        assert len(got) == 5
+        tape.delay = 0.5
+        with pytest.raises(CommandTimeoutError):
+            await ws.dispatch(
+                "read",
+                PathSpec.from_str_path("/tape/a.txt"),
+                stream=True,
+                filetype=None,
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("on_exceed", [OnExceed.TRUNCATE, OnExceed.ERROR])
+async def test_a_capped_stream_stops_at_the_cap(on_exceed):
+    tape = Tape()
+    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+        ws.namespace.mount_for("/tape/a.txt").command_limits["read"] = Limit(
+            max_bytes=15, on_exceed=on_exceed
+        )
+        stream, _ = await ws.dispatch("read", TAPE, stream=True, filetype=None)
+        got = b""
+        if on_exceed is OnExceed.ERROR:
+            with pytest.raises(LimitExceededError):
+                async for chunk in stream:
+                    got += chunk
+        else:
+            async for chunk in stream:
+                got += chunk
+        assert got == b"012345678901234"
+        assert tape.pulled == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cap", [None, Limit(max_bytes=15)])
+async def test_a_stream_closed_before_its_first_pull_closes_and_keeps_nothing(
+    cap,
+):
+    tape = Tape()
+    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+        if cap is not None:
+            ws.namespace.mount_for("/tape/a.txt").command_limits["read"] = cap
+        stream, _ = await ws.dispatch("read", TAPE, stream=True)
+        await stream.aclose()
+        assert (tape.pulled, tape.closed) == (1, True)
+        await ws.dispatch("read", TAPE)
+        assert tape.reads == 1
+
+
+@pytest.mark.asyncio
+async def test_a_write_during_a_stream_keeps_none_of_it():
+    tape = Tape()
+    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+        stream, _ = await ws.dispatch("read", TAPE, stream=True)
+        await ws.dispatch("write", TAPE, data=b"new")
+        assert [chunk async for chunk in stream][0] == b"0123456789"
+        got, _ = await ws.dispatch("read", TAPE)
+        assert (got, tape.reads) == (b"new", 1)
+
+
+@pytest.mark.asyncio
+async def test_a_stream_past_the_drain_budget_keeps_nothing():
+    tape = Tape()
+    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+        manager = ws.namespace.mount_for("/tape/a.txt").cache_manager
+        manager._file_cache.max_drain_bytes = 20
+        stream, _ = await ws.dispatch("read", TAPE, stream=True)
+        assert len(b"".join([chunk async for chunk in stream])) == 50
+        await ws.dispatch("read", TAPE)
+        assert tape.reads == 1

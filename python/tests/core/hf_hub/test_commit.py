@@ -21,11 +21,29 @@ import pytest
 from mirage.core.hf_hub.commit import (
     Addition,
     LfsRequiredError,
+    UploadInfo,
     commit,
     commit_url,
     payload,
-    upload_modes,
+    preupload,
 )
+from mirage.core.hf_hub.constants import COMMIT_CHUNK
+
+
+@pytest.fixture
+def mock_post():
+    with patch(
+        "mirage.core.hf_hub.commit.hub_post", return_value={"files": []}
+    ) as mock:
+        yield mock
+
+
+@pytest.fixture
+def mock_ndjson():
+    with patch(
+        "mirage.core.hf_hub.commit.hub_post_ndjson", return_value={}
+    ) as mock:
+        yield mock
 
 
 def _lines(raw: bytes):
@@ -46,7 +64,7 @@ def test_commit_url_encodes_a_revision_holding_a_slash(accessor):
 
 
 def test_payload_puts_the_header_first():
-    lines = _lines(payload([], [], [], "msg", "body"))
+    lines = _lines(payload([], [], "msg", "body"))
     assert lines[0] == {
         "key": "header",
         "value": {"summary": "msg", "description": "body"},
@@ -54,62 +72,53 @@ def test_payload_puts_the_header_first():
 
 
 def test_payload_base64_encodes_a_file():
-    lines = _lines(payload([Addition("a.txt", b"hi")], [], [], "m"))
+    lines = _lines(payload([Addition("a.txt", b"hi")], [], "m"))
     assert lines[1]["key"] == "file"
     assert lines[1]["value"]["encoding"] == "base64"
     assert base64.b64decode(lines[1]["value"]["content"]) == b"hi"
     assert lines[1]["value"]["path"] == "a.txt"
 
 
-def test_payload_spells_files_and_folders_with_different_keys():
-    """The Hub distinguishes them, and sending a folder as deletedFile
-    reports that no file by that name exists."""
-    lines = _lines(payload([], ["a.txt"], ["d"], "m"))
+def test_payload_spells_a_deletion_as_a_deleted_file():
+    lines = _lines(payload([], ["a.txt"], "m"))
     assert lines[1] == {"key": "deletedFile", "value": {"path": "a.txt"}}
-    assert lines[2] == {"key": "deletedFolder", "value": {"path": "d"}}
 
 
 def test_payload_carries_a_parent_commit_when_given():
-    lines = _lines(payload([], [], [], "m", parent="abc"))
+    lines = _lines(payload([], [], "m", parent="abc"))
     assert lines[0]["value"]["parentCommit"] == "abc"
 
 
 def test_payload_omits_the_parent_when_absent():
-    assert "parentCommit" not in _lines(payload([], [], [], "m"))[0]["value"]
+    assert "parentCommit" not in _lines(payload([], [], "m"))[0]["value"]
 
 
 def test_payload_is_newline_delimited():
-    raw = payload([Addition("a", b"x")], ["b"], [], "m")
+    raw = payload([Addition("a", b"x")], ["b"], "m")
     assert raw.endswith(b"\n")
     assert len(raw.splitlines()) == 3
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post")
-async def test_upload_modes_sends_a_sample_not_the_content(
-    mock_post, accessor
-):
+async def test_preupload_sends_a_sample_not_the_content(mock_post, accessor):
     mock_post.return_value = {
         "files": [{"path": "a.txt", "uploadMode": "regular"}]
     }
-    modes = await upload_modes(accessor, [Addition("a.txt", b"x" * 2000)])
+    modes = await preupload(accessor, [Addition("a.txt", b"x" * 2000)])
     body = mock_post.await_args.args[2]
     sample = base64.b64decode(body["files"][0]["sample"])
     assert len(sample) == 512
     assert body["files"][0]["size"] == 2000
-    assert modes == {"a.txt": "regular"}
+    assert modes == {"a.txt": UploadInfo()}
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post")
-async def test_upload_modes_asks_nothing_for_no_additions(mock_post, accessor):
-    assert await upload_modes(accessor, []) == {}
+async def test_preupload_asks_nothing_for_no_additions(mock_post, accessor):
+    assert await preupload(accessor, []) == {}
     mock_post.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post_ndjson")
-@patch("mirage.core.hf_hub.commit.hub_post")
 async def test_commit_refuses_a_file_the_hub_wants_via_lfs(
     mock_post, mock_ndjson, accessor
 ):
@@ -124,8 +133,6 @@ async def test_commit_refuses_a_file_the_hub_wants_via_lfs(
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post_ndjson")
-@patch("mirage.core.hf_hub.commit.hub_post")
 async def test_commit_posts_ndjson_for_a_regular_file(
     mock_post, mock_ndjson, accessor
 ):
@@ -139,33 +146,111 @@ async def test_commit_posts_ndjson_for_a_regular_file(
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post_ndjson")
-@patch("mirage.core.hf_hub.commit.hub_post")
-async def test_commit_can_open_a_pull_request(
-    mock_post, mock_ndjson, accessor
+@pytest.mark.parametrize("create_pr", [False, True])
+async def test_delete_only_commit_skips_preupload(
+    mock_post, mock_ndjson, accessor, create_pr
 ):
-    mock_post.return_value = {"files": []}
-    mock_ndjson.return_value = {}
-    await commit(accessor, deletions=["a.txt"], create_pr=True)
-    assert mock_ndjson.await_args.args[3] == {"create_pr": "1"}
-
-
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post_ndjson")
-@patch("mirage.core.hf_hub.commit.hub_post")
-async def test_a_delete_only_commit_skips_the_preupload_probe(
-    mock_post, mock_ndjson, accessor
-):
-    mock_ndjson.return_value = {}
-    await commit(accessor, deletions=["a.txt"])
+    await commit(accessor, deletions=["a.txt"], create_pr=create_pr)
+    assert mock_ndjson.await_args.args[3] == (
+        {"create_pr": "1"} if create_pr else None
+    )
     mock_post.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.hf_hub.commit.hub_post")
-async def test_upload_modes_encodes_a_revision_holding_a_slash(
+async def test_preupload_encodes_a_revision_holding_a_slash(
     mock_post, accessor
 ):
-    mock_post.return_value = {"files": []}
-    await upload_modes(accessor, [Addition("a.txt", b"x")], "feature/foo")
+    await preupload(accessor, [Addition("a.txt", b"x")], "feature/foo")
     assert mock_post.await_args.args[1].endswith("/preupload/feature%2Ffoo")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode,data,oid",
+    [
+        ("regular", b"hi", "32f95c0d1244a78b2be1bab8de17906fabb2c4a8"),
+        (
+            "lfs",
+            b"hi",
+            "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4",
+        ),
+        ("lfs", b"", "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"),
+        (
+            "regular",
+            b"\x00\xff" + b"x" * 600,
+            "e3e299f367bb91e875a9717da73dc05badb1fe7e",
+        ),
+    ],
+)
+async def test_unchanged_content_skips_commit(
+    mock_post, mock_ndjson, accessor, mode, data, oid
+):
+    mock_post.return_value = {
+        "files": [{"path": "same", "uploadMode": mode, "oid": oid}]
+    }
+    assert await commit(accessor, additions=[Addition("same", data)]) is None
+    mock_ndjson.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "paths,expected",
+    [
+        (
+            ("same", "changed", "new", "ignored"),
+            [
+                ("file", "changed"),
+                ("file", "new"),
+                ("deletedFile", "obsolete"),
+            ],
+        ),
+        (("same",), [("deletedFile", "obsolete")]),
+    ],
+)
+async def test_commit_keeps_only_changed_operations(
+    mock_post, mock_ndjson, accessor, paths, expected
+):
+    mock_post.return_value = {
+        "files": [
+            {
+                "path": "same",
+                "uploadMode": "regular",
+                "oid": "32f95c0d1244a78b2be1bab8de17906fabb2c4a8",
+            },
+            {"path": "changed", "uploadMode": "regular", "oid": "old"},
+            {"path": "new", "uploadMode": "regular"},
+            {"path": "ignored", "uploadMode": "lfs", "shouldIgnore": True},
+        ]
+    }
+    await commit(
+        accessor,
+        additions=[Addition(path, b"hi") for path in paths],
+        deletions=["obsolete"],
+    )
+    operations = _lines(mock_ndjson.await_args.args[2])[1:]
+    assert [(op["key"], op["value"]["path"]) for op in operations] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path,content",
+    [
+        (".gitignore", "# µ\n" + "*.bin\n" * 100),
+        (".gitignore", ""),
+        ("sub/.gitignore", "*"),
+    ],
+)
+async def test_preupload_sends_root_gitignore_with_every_chunk(
+    mock_post, accessor, path, content
+):
+    additions = [Addition(f"part-{i}", b"x") for i in range(COMMIT_CHUNK)]
+    additions.append(Addition(path, content.encode()))
+    await preupload(accessor, additions)
+    assert mock_post.await_count == 2
+    for call in mock_post.await_args_list:
+        body = call.args[2]
+        if path == ".gitignore":
+            assert body["gitIgnore"] == content
+        else:
+            assert "gitIgnore" not in body

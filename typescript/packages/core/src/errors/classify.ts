@@ -14,7 +14,7 @@
 
 import { CODE_ARMS } from './constants.ts'
 import { posixPhrase } from './posix.ts'
-import type { FsCondition } from './types.ts'
+import { CommandTimeoutError, type FsCondition } from './types.ts'
 
 /**
  * Name the condition an error reports, if the vocabulary names one.
@@ -46,4 +46,15 @@ export function failureText(err: unknown): string {
   const condition = classify(err)
   if (condition !== null) return posixPhrase(condition)
   return err instanceof Error ? err.message : String(err)
+}
+
+// What a listing reports against the one entry whose stat failed, and walks
+// past: GNU's ls and find carry on from any failed stat below an operand,
+// whatever the errno, so a dropped connection or a 5xx on a mount whose stat
+// is a request costs that entry alone. Only what ends the whole command
+// still ends it: the line's abort and its timeout. Mirrors Python's
+// is_entry_error.
+export function isEntryError(err: unknown): boolean {
+  if (err instanceof CommandTimeoutError) return false
+  return (err as { name?: unknown } | null)?.name !== 'AbortError'
 }

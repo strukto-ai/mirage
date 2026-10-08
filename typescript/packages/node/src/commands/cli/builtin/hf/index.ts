@@ -259,7 +259,7 @@ export const HF = new CLISpec({
       write: true,
       positional: [
         REPO_ID,
-        new Operand({ type: 'str', name: 'LOCAL_PATH' }),
+        new Operand({ type: 'path', name: 'LOCAL_PATH' }),
         new Operand({ type: 'str', name: 'PATH_IN_REPO' }),
       ],
       options: [

@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.commands.builtin.find_eval import And, Name, Path, Type
+from mirage.core.generic.find_eval import And, Name, Path, Type
 from mirage.core.nextcloud.find import find
 from mirage.core.nextcloud.search import SearchEntry
 from mirage.types import FindType, PathSpec

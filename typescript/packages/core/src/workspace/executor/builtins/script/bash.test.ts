@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { parseBashArgs } from './bash.ts'
+import type { BashArgs } from './types.ts'
 
 describe('parseBashArgs', () => {
   it('ends option parsing at a script file operand', () => {
@@ -71,8 +72,12 @@ describe('parseBashArgs', () => {
     expect(parsed.settings).toEqual([['pipefail', true]])
   })
 
-  it('consumes a long option value', () => {
-    expect(parseBashArgs(['--rcfile', 'rc', 'run.sh']).path).toBe('run.sh')
+  describe.each(['--rcfile', '--init-file'])('%s', (option) => {
+    it.each(['rc', '', '--version', '--help'])('consumes its value %j', (value) => {
+      const parsed = parseBashArgs([option, value, 'run.sh'])
+      expect(parsed.path).toBe('run.sh')
+      expect(parsed.help || parsed.version).toBe(false)
+    })
   })
 
   it('reports an unsupported short option', () => {
@@ -86,4 +91,22 @@ describe('parseBashArgs', () => {
   it('reports -c with no value', () => {
     expect(parseBashArgs(['-c']).needsValue).toBe('-c')
   })
+
+  // bash 5.2.37 on debian:stable-slim: long options lead, then short.
+  it.each([
+    [['--version', '--help'], 'help', true],
+    [
+      ['--posix', '--verbose', '-c', ':'],
+      'settings',
+      [
+        ['posix', true],
+        ['verbose', true],
+      ],
+    ],
+  ] as [string[], keyof BashArgs, unknown][])(
+    'reads %j long options first',
+    (args, field, expected) => {
+      expect(parseBashArgs(args)[field]).toEqual(expected)
+    },
+  )
 })

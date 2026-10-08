@@ -1,6 +1,6 @@
 import { RAMIndexCacheStore } from '../cache/index/ram.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import { getExtension } from '../commands/resolve.ts'
+import { getExtension } from '../utils/filetype.ts'
 import { isEnoent } from '../errors/fs.ts'
 import { type PathSpec, FileType } from '../types.ts'
 import type { BaseVFS } from './base.ts'

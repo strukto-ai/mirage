@@ -22,12 +22,12 @@ from typing import Any
 
 from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
 from mirage.commands.builtin.utils.strftime import gnu_strftime
-from mirage.commands.errors import CommandTimeoutError
 from mirage.context import (
     program_invocation,
     reset_current_session,
     set_current_evaluation,
 )
+from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.stream import close_quietly

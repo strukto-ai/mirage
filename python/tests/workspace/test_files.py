@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+import tracemalloc
 from dataclasses import replace
 
 import pytest
@@ -29,6 +30,7 @@ from mirage.policy import (
     VfsResultContext,
 )
 from mirage.types import FileType, HiddenPaths, MountMode, Visibility
+from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
 from mirage.workspace import Session
@@ -719,3 +721,40 @@ class TestPerCallSession:
             assert run(ws.vfs.exists("/data/secret.txt")) is True
         finally:
             run(ws.close())
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_read_is_recorded_once_it_ends():
+    ws = Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/r/a.txt", b"x" * 100)
+        before = len(ws.vfs.records)
+        stream = await ws.vfs.read_stream("/r/a.txt")
+        assert len(ws.vfs.records) == before
+        assert b"".join([chunk async for chunk in stream]) == b"x" * 100
+        stream = await ws.vfs.read_stream("/r/a.txt")
+        await stream.aclose()
+        assert [(r.op, r.bytes) for r in ws.vfs.records[before:]] == [
+            ("read", 100),
+            ("read", 100),
+        ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_read_holds_one_chunk_at_a_time(tmp_path):
+    (tmp_path / "big.bin").write_bytes(b"\0" * (16 * 1024 * 1024))
+    ws = Workspace({"/d/": DiskVFS(root=str(tmp_path))}, mode=MountMode.READ)
+    try:
+        tracemalloc.start()
+        stream = await ws.vfs.read_stream("/d/big.bin")
+        total = 0
+        async for chunk in stream:
+            total += len(chunk)
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        assert total == 16 * 1024 * 1024
+        assert peak < 1024 * 1024
+    finally:
+        await ws.close()

@@ -14,7 +14,7 @@
 
 import { activeCacheManager } from '../../cache/context.ts'
 import { isEacces, isEnoent } from '../../errors/fs.ts'
-import { isEntryError } from '../../commands/errors.ts'
+import { isEntryError } from '../../errors/classify.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../vfs/base.ts'
@@ -33,13 +33,13 @@ import {
   type FindEntry,
   type PredNode,
   keep,
-} from '../../commands/builtin/find_eval.ts'
+} from './find_eval.ts'
 import { FileType, PathSpec, type FileStat } from '../../types.ts'
 import type { LinkView } from '../../view/types.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { DIR_SIZE, contentSize } from '../../utils/stat_view.ts'
-import { printfKind } from '../../commands/builtin/find_printf.ts'
+import { printfKind } from './find_eval.ts'
 
 export interface WalkFindDeps {
   readdir: (spec: PathSpec, index?: IndexCacheStore) => Promise<string[]>

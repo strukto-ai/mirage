@@ -2,8 +2,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
-from mirage.commands.resolve import get_extension
 from mirage.types import FileType, PathSpec
+from mirage.utils.filetype import get_extension
 from mirage.vfs.base import BaseVFS
 
 

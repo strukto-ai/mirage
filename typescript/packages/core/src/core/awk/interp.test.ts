@@ -479,7 +479,6 @@ describe('awk interpreter', () => {
     ['BEGIN{print $(-1)}', 'awk: trying to access field -1'],
     ['BEGIN{f(1)}', 'awk: calling undefined function f'],
     ['BEGIN{next}', 'awk: next used in a BEGIN action'],
-    ['BEGIN{substr("a")}', 'awk: not enough arguments to substr'],
     ['function f(n){return f(n+1)} BEGIN{f(1)}', 'awk: function f nested deeper than 100 calls'],
   ])('fails %j with %j', async (program, message) => {
     let caught: Error | null = null

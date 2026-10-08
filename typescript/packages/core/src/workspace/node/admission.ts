@@ -37,13 +37,7 @@ import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
 import { commandNodes } from '../../runtime/routing/index.ts'
-import {
-  getParts,
-  getRedirects,
-  getText,
-  literalWord,
-  splitEnvPrefix,
-} from '../../shell/helpers.ts'
+import { getParts, getRedirects, literalWord, splitEnvPrefix } from '../../shell/helpers.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
@@ -80,7 +74,7 @@ import {
 } from '../lookup/index.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
-import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.ts'
+import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
 import {
   argvFrame,
   type Frame,
@@ -136,6 +130,10 @@ const REDIRECT_CHAIN: ReadonlySet<string> = new Set([
   NodeType.PIPELINE,
   NodeType.NEGATED_COMMAND,
 ])
+
+// Why the gate refuses, under a rule, a command that runs lines it cannot
+// see into: a sourced file, a script, a bash option mirage does not read.
+export const UNREADABLE_LINES = 'runs lines the gate cannot read'
 
 /**
  * A command the gate let through, and what its own I/O may touch.
@@ -509,7 +507,8 @@ function refuse(name: string, reason: string): Refused {
   return { stderr, exitCode, refusal: refusalOf(deny) }
 }
 
-function unreadable(raw: string): string {
+/** Why the gate refuses a word only the runtime can expand. */
+export function unreadable(raw: string): string {
   return `cannot read ${raw} before the runtime expands it`
 }
 
@@ -623,7 +622,7 @@ async function admitWords(
   }
   for (const inner of innerLines(name, words.slice(1))) {
     if (!innerReadable(inner)) {
-      if (hasRules(rules)) return refuse(name, 'runs lines the gate cannot read')
+      if (hasRules(rules)) return refuse(name, UNREADABLE_LINES)
       continue
     }
     let innerRefusal: Refused | null
@@ -726,10 +725,7 @@ export async function admitLine(
   const scope = frame ?? rootFrame(root, handed?.origin ?? null)
   for (const node of commandNodes(root)) {
     const [, parts] = splitEnvPrefix(getParts(node))
-    const words: Word[] = parts.map((part) => ({
-      raw: getText(part),
-      text: literalWord(part, home),
-    }))
+    const words = parts.map((part) => readWord(part, home))
     if (words.length === 0) continue
     const refusal = await admitWords(
       words,

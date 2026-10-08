@@ -36,6 +36,7 @@ export interface StatCheck {
   read?: string
   offset?: number
   size?: number | null
+  stream?: boolean
 }
 
 export interface Case {
@@ -156,9 +157,20 @@ function checkField(st: HarnessStat, name: string): string {
  * names a path and a byte window, and prints what that window returned: no
  * shell command asks for one, because commands read whole files, so the
  * ranged read op is only reachable through the same door FUSE and `ws.vfs`
- * use.
+ * use. `read` with `stream` reads the stored bytes as the door streams them
+ * (no command does yet) and fails when they come back whole.
  */
 export async function statCheck(ws: ExecWorkspace, check: StatCheck): Promise<string> {
+  if (check.read !== undefined && check.stream === true) {
+    const stream = await ws.dispatch('read', check.read, [], { stream: true, filetype: null })
+    if (stream instanceof Uint8Array) throw new Error(`${check.read}: the read was not streamed`)
+    const decoder = new TextDecoder()
+    let text = ''
+    for await (const chunk of stream as AsyncIterable<Uint8Array>) {
+      text += decoder.decode(chunk, { stream: true })
+    }
+    return text + decoder.decode()
+  }
   if (check.read !== undefined) {
     const data = (await ws.dispatch('read', check.read, [], {
       offset: check.offset ?? 0,

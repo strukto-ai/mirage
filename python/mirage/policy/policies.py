@@ -34,6 +34,7 @@ from mirage.errors.types import FsCondition
 from mirage.policy.base import Policy
 from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
 from mirage.policy.builtin.mount_mode import MountModePolicy
+from mirage.policy.builtin.output_cap import OutputCapPolicy
 from mirage.policy.constants import POLICY_DENIED_EXIT
 from mirage.policy.decisions import Decisions
 from mirage.policy.errors import Explained, PolicyDenied, PolicyError
@@ -573,6 +574,18 @@ class Policies:
             hook (str): hook name (pre_command, pre_vfs, post_vfs).
         """
         return hook in self._wanted
+
+    def reads_results(self) -> bool:
+        """Whether a post_vfs policy may read an op's result.
+
+        The built-in output cap answers from the op and the mount alone;
+        any other hook, a subclass's override of the cap's included, may
+        read ``ctx.result``, so a streamed read reaches it read whole.
+        """
+        blind = (Policy.post_vfs, OutputCapPolicy.post_vfs)
+        return any(
+            type(policy).post_vfs not in blind for policy in self._policies
+        )
 
     async def wants_for(self, hook: str, session_id: str) -> bool:
         """True when some policy will speak at ``hook`` for this session.

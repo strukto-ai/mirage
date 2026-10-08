@@ -16,7 +16,7 @@ from functools import partial
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.find_eval import PredNode, start_basename
+from mirage.core.generic.find_eval import PredNode, start_basename
 from mirage.core.msgraph.drive import find_items
 from mirage.core.onedrive.client import drive_loc
 from mirage.core.onedrive.stat import stat

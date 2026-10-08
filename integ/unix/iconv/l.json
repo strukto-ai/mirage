@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "iconv_lists_the_charsets_it_converts",
+      "seq": 16100023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "iconv --list | grep -E '^(CP367|CP819|CP936|EUC-JP|EUC-KR|GB2312|GB13000|GB18030|GBK|ISO646-US|ISO8859-1|ISO88591|OSF00030010|OSF0004000A|SJIS|UCS-2|UCS-2BE|US-ASCII|US|UTF-8|UTF-16|UTF8|UTF16)//$'; iconv -l -f nosuch nofile | grep -c '^UTF-8//$'",
+      "expect": {
+        "exit": 0,
+        "stdout": "CP367//\nCP819//\nCP936//\nEUC-JP//\nEUC-KR//\nGB2312//\nGB13000//\nGB18030//\nGBK//\nISO646-US//\nISO8859-1//\nISO88591//\nOSF00030010//\nOSF0004000A//\nSJIS//\nUCS-2//\nUCS-2BE//\nUS-ASCII//\nUS//\nUTF-8//\nUTF-16//\nUTF8//\nUTF16//\n1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

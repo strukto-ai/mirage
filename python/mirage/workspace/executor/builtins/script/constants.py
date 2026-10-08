@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec import SPECS
+
 # GNU prints the refusal and the usage line together, both under the
 # builtin's own name as typed (`source` or `.`), and exits 2 without
 # ending the script.
@@ -27,17 +29,27 @@ SOURCE_USAGE = (
 # spellings cannot drift.
 BASH_START_FLAGS = frozenset({"c", "s", "l", "i"})
 
-# bash's long options, mapped to whether the option takes the next word.
-# A flat set of names to ignore cannot say that `--rcfile FILE` swallows
-# FILE, and read `bash --rcfile run.sh` as "run run.sh". Anything absent
-# is refused rather than mistaken for a script operand, which is what
-# made `bash --version` report a missing file.
+# These GNU Bash modes are recognized but not implemented. Help/version
+# outrank them; unknown options still fail during the long-option pass.
+BASH_UNSUPPORTED_LONG_OPTIONS = frozenset(
+    {
+        "debugger",
+        "dump-po-strings",
+        "dump-strings",
+        "pretty-print",
+        "restricted",
+    }
+)
+
+# True means the next word is a value. Derive supported options from the
+# spec so the parser and help cannot drift; Bash accepts one or two dashes.
 BASH_LONG_OPTIONS: dict[str, bool] = {
-    "--login": False,
-    "--noediting": False,
-    "--noprofile": False,
-    "--norc": False,
-    "--posix": False,
-    "--init-file": True,
-    "--rcfile": True,
+    **{
+        option.long[2:]: option.type == "str"
+        for option in SPECS["bash"].options
+        if option.long
+    },
+    **dict.fromkeys(
+        (*BASH_UNSUPPORTED_LONG_OPTIONS, "help", "version"), False
+    ),
 }

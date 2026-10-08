@@ -3,10 +3,14 @@ import time
 
 import pytest
 
-from mirage.commands.builtin.find_eval import (
+from mirage.commands.builtin.find_parse import parse_find_expression
+from mirage.commands.builtin.types import ExecAction, PrintfAction, RowAction
+from mirage.commands.errors import FindParseError
+from mirage.core.generic.find_eval import (
     Action,
     And,
     Empty,
+    FindEntry,
     Mtime,
     Name,
     Not,
@@ -18,9 +22,6 @@ from mirage.commands.builtin.find_eval import (
     eval_predicate,
     tree_has_action,
 )
-from mirage.commands.builtin.find_parse import parse_find_expression
-from mirage.commands.builtin.types import ExecAction, PrintfAction, RowAction
-from mirage.commands.errors import FindParseError
 
 
 def test_parse_not_name():
@@ -236,8 +237,6 @@ def test_invalid_numeric_arg_raises_find_parse_error(tokens):
 
 
 def _ent(name="a", kind="f"):
-    from mirage.commands.builtin.find_eval import FindEntry
-
     return FindEntry(key="/" + name, name=name, kind=kind, depth=1)
 
 

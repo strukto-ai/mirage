@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from fnmatch import fnmatch
+from operator import attrgetter
 
 from mirage.commands.cli.builtin.hf.accessor import (
     hub_for,
@@ -30,107 +30,79 @@ from mirage.core.hf_hub.admin import create_repo
 from mirage.core.hf_hub.client import repo_url
 from mirage.core.hf_hub.commit import Addition, commit
 from mirage.core.hf_hub.config import HfConfig
-from mirage.core.hf_hub.constants import DEFAULT_COMMIT_MESSAGE
+from mirage.core.hf_hub.constants import (
+    DEFAULT_COMMIT_MESSAGE,
+    DEFAULT_IGNORE_PATTERNS,
+    EMPTY_COMMIT_WARNING,
+)
+from mirage.core.hf_hub.tree import (
+    deletions_for,
+    fetch_tree,
+    filter_repo_paths,
+    repo_files,
+)
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
+from mirage.utils.quote import shell_quote
 
 
 async def collect(
     doors: CLIDoors, local: PathSpec
-) -> tuple[list[tuple[str, bytes]], bool]:
-    """Read a workspace file, or every file under a workspace directory.
+) -> tuple[list[Addition], bool]:
+    """Read workspace files as additions relative to the source.
 
-    Read through the op dispatcher rather than any filesystem of its
-    own: an account CLI has no mount, and the path the line named is an
-    unrelated workspace file, which is exactly what the dispatcher door
-    is for.
+    Walk one level at a time so symlink targets outside ``local`` retain
+    the names reached through the source directory.
 
     Args:
-        doors (CLIDoors): the workspace doors.
-        local (str): the virtual path to read.
+        doors (CLIDoors): the workspace dispatcher doors.
+        local (PathSpec): the resolved source file or directory.
 
     Returns:
-        tuple[list[tuple[str, bytes]], bool]: the (path relative to
-        ``local``, content) rows, and whether ``local`` was a directory.
-        The caller needs that second fact: upstream reads
-        ``path_in_repo`` as the destination FILE for a file source and as
-        the destination FOLDER for a directory one, so a file uploaded to
-        ``u.txt`` must land at ``u.txt`` and not at ``u.txt/u.txt``.
-
-    Raises:
-        UsageError: the path does not exist, or the line ran outside a
-            workspace, where there is no dispatcher to read through.
+        tuple[list[Addition], bool]: sorted files and whether the source
+        was a directory, which determines the destination semantics.
     """
     dispatch = doors.dispatch
     if dispatch is None:
         raise UsageError("hf upload: no workspace to read from")
-    spec = local
-    try:
-        stat, _ = await dispatch("stat", spec)
-    except (FileNotFoundError, NotADirectoryError) as exc:
-        raise UsageError(f"{local.raw_path}: {fs_strerror(exc)}") from None
+    stat, _ = await dispatch("stat", local)
     if getattr(stat, "type", None) is not FileType.DIRECTORY:
-        data, _ = await dispatch("read", spec)
-        return [
-            (posixpath.basename(local.virtual.rstrip("/")), bytes(data))
-        ], False
-    rows: list[tuple[str, bytes]] = []
-    pending = [local]
+        data, _ = await dispatch("read", local)
+        name = posixpath.basename(local.virtual.rstrip("/"))
+        return [Addition(name, bytes(data))], False
+    rows: list[Addition] = []
+    pending = [(local, "")]
     while pending:
-        current = pending.pop()
+        current, prefix = pending.pop()
         entries, _ = await dispatch("readdir", current)
         for entry in entries:
             child = current.join(entry)
+            name = posixpath.join(
+                prefix, posixpath.basename(child.virtual.rstrip("/"))
+            )
             child_stat, _ = await dispatch("stat", child)
             if getattr(child_stat, "type", None) is FileType.DIRECTORY:
-                pending.append(child)
+                pending.append((child, name))
                 continue
             data, _ = await dispatch("read", child)
-            rows.append(
-                (
-                    posixpath.relpath(
-                        child.virtual, local.virtual.rstrip("/")
-                    ),
-                    bytes(data),
-                )
-            )
-    return sorted(rows), True
+            rows.append(Addition(name, bytes(data)))
+    return sorted(rows, key=attrgetter("path")), True
 
 
 def keep(
-    rows: list[tuple[str, bytes]], include: list[str], exclude: list[str]
-) -> list[tuple[str, bytes]]:
+    rows: list[Addition], include: list[str], exclude: list[str]
+) -> list[Addition]:
     """Apply the line's --include and --exclude globs."""
-    if include:
-        rows = [
-            row
-            for row in rows
-            if any(fnmatch(row[0], pattern) for pattern in include)
-        ]
-    if exclude:
-        rows = [
-            row
-            for row in rows
-            if not any(fnmatch(row[0], pattern) for pattern in exclude)
-        ]
-    return rows
+    kept = set(filter_repo_paths([row.path for row in rows], include, exclude))
+    return [row for row in rows if row.path in kept]
 
 
 def in_repo_base(value: str) -> str:
-    """The repo-relative directory an upload's third operand names.
-
-    A Hub path is repo-relative with no leading slash and no ``.``
-    component, so the operand is normalized rather than used verbatim:
-    ``hf upload repo /local .`` means the repository root, and taking
-    the dot literally stored every file under ``./``, which is a path
-    the resolve endpoint then could not find.
+    """Normalize an upload destination; ``.`` means the repository root.
 
     Args:
-        value (str): the operand as typed.
-
-    Returns:
-        str: the base, "" for the repository root.
+        value (str): the repo-relative operand as typed.
 
     Raises:
         UsageError: the operand climbs out of the repository.
@@ -158,40 +130,59 @@ async def upload_cmd(
     if inv.doors is None or inv.doors.dispatch is None:
         raise UsageError("hf upload needs a workspace to read from")
     repo_id = inv.texts[0]
-    operands = list(inv.texts[1:])
+    # LOCAL_PATH is path-typed, so the parser resolved it against the cwd;
+    # without one, upstream's `_resolve_upload_paths` reads the file or
+    # folder named after the repository (`hf upload acme/model` reads
+    # `./model`) and refuses when there is none.
+    source = (
+        inv.paths[0]
+        if inv.paths
+        else PathSpec.from_str_path(repo_id.split("/")[-1], cwd=inv.cwd)
+    )
+    operands = [*(path.raw_path for path in inv.paths), *inv.texts[1:]]
     include = list(fl.as_list("include"))
     exclude = list(fl.as_list("exclude"))
     deletions = list(fl.as_list("delete"))
-    for patterns, flag in (
-        (include, "--include"),
-        (exclude, "--exclude"),
-        (deletions, "--delete"),
-    ):
+    pattern_flags = (
+        ("--include", include),
+        ("--exclude", exclude),
+        ("--delete", deletions),
+    )
+    for flag, patterns in pattern_flags:
         if patterns:
             refuse_variadic(operands, flag, patterns)
-    local = operands[0] if operands else "."
-    in_repo = operands[1] if len(operands) > 1 else ""
-    collected, from_dir = await collect(
-        inv.doors, PathSpec.from_str_path(local, cwd=inv.cwd)
-    )
-    rows = keep(collected, include, exclude)
-    if not rows:
-        raise UsageError(f"no files matched under {local}")
+    in_repo = inv.texts[1] if len(inv.texts) > 1 else ""
+    try:
+        collected, from_dir = await collect(inv.doors, source)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise UsageError(
+            f"{shell_quote(source.raw_path)}: {fs_strerror(exc)}"
+            if inv.paths
+            else f"'{source.raw_path}' is not a local file or folder. "
+            "Please set local_path explicitly."
+        ) from None
     base = in_repo_base(in_repo)
-    # A directory source spreads under `path_in_repo`; a file source lands
-    # AT it. Appending the basename either way stored `hf upload r f.txt
-    # f.txt` at `f.txt/f.txt`, which the tree then reported as a directory
-    # and `hf download` could not find at all.
-    additions = (
-        [
+    warnings = ""
+    # Folder contents spread under path_in_repo; a single file lands at it.
+    # Upstream applies filters only to folders and warns for single files.
+    if from_dir:
+        rows = keep(collected, include, [*exclude, *DEFAULT_IGNORE_PATTERNS])
+        additions = [
             Addition(
-                path=posixpath.join(base, name) if base else name, data=data
+                path=posixpath.join(base, row.path) if base else row.path,
+                data=row.data,
             )
-            for name, data in rows
+            for row in rows
         ]
-        if from_dir
-        else [Addition(path=base or rows[0][0], data=rows[0][1])]
-    )
+    else:
+        warnings = "".join(
+            f"Ignoring {flag} since a single file is uploaded.\n"
+            for flag, patterns in pattern_flags
+            if patterns
+        )
+        additions = [
+            Addition(path=base or row.path, data=row.data) for row in collected
+        ]
     repo_type = repo_type_of(fl)
     # Upstream creates the repository if it is missing and ignores
     # --private when it already exists, so the flag picks the visibility
@@ -207,14 +198,32 @@ async def upload_cmd(
     async with hub_for(
         inv, repo_id, repo_type, fl.as_str("revision")
     ) as accessor:
-        await commit(
+        # For a folder the --delete patterns match the repo's files under
+        # `path_in_repo`, and a file this commit re-adds is not deleted
+        # first. A commit that would change nothing is skipped, with
+        # upstream's create_commit warning.
+        added = {add.path for add in additions}
+        doomed = (
+            [
+                path
+                for path in deletions_for(
+                    repo_files(await fetch_tree(accessor)), deletions, base
+                )
+                if path not in added
+            ]
+            if from_dir and deletions
+            else []
+        )
+        reply = await commit(
             accessor,
             additions=additions,
-            deletions=deletions,
+            deletions=doomed,
             message=fl.as_str("commit_message") or DEFAULT_COMMIT_MESSAGE,
             description=fl.as_str("commit_description") or "",
             create_pr=bool(fl.as_bool("create_pr")),
         )
+        if reply is None:
+            warnings += EMPTY_COMMIT_WARNING
         home = repo_url(inv.config.endpoint, accessor.repo_type, repo_id)
         url = f"{home}/tree/{accessor.revision}/{base}".rstrip("/")
-        return text_out(f"{url}\n")
+        return text_out(f"{url}\n", warnings)

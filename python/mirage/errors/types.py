@@ -146,3 +146,17 @@ class DotWalkNotDir(DotWalkError, NotADirectoryError):
 
 class DotWalkLoop(DotWalkError):
     """ELOOP: a symbolic link loop stands in the path's walk."""
+
+
+class CommandTimeoutError(Exception):
+    """A command or op overran its timeout budget (exit 124).
+
+    Args:
+        command (str): the command or op name for the message.
+        seconds (float): the budget that was overrun.
+    """
+
+    def __init__(self, command: str, seconds: float) -> None:
+        super().__init__(f"{command}: timed out after {seconds}s")
+        self.command = command
+        self.seconds = seconds

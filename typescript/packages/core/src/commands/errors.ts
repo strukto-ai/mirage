@@ -42,30 +42,6 @@ export class PartialOutputError extends Error {
   }
 }
 
-// A command or op overran its timeout budget (exit 124).
-// Mirrors Python's mirage.commands.errors.CommandTimeoutError.
-export class CommandTimeoutError extends Error {
-  readonly command: string
-  readonly seconds: number
-  constructor(command: string, seconds: number) {
-    super(`${command}: timed out after ${String(seconds)}s`)
-    this.name = 'CommandTimeoutError'
-    this.command = command
-    this.seconds = seconds
-  }
-}
-
-// What a listing reports against the one entry whose stat failed, and walks
-// past: GNU's ls and find carry on from any failed stat below an operand,
-// whatever the errno, so a dropped connection or a 5xx on a mount whose stat
-// is a request costs that entry alone. Only what ends the whole command
-// still ends it: the line's abort and its timeout. Mirrors Python's
-// is_entry_error.
-export function isEntryError(err: unknown): boolean {
-  if (err instanceof CommandTimeoutError) return false
-  return (err as { name?: unknown } | null)?.name !== 'AbortError'
-}
-
 /**
  * A hard cap refused output the producer had already made.
  *

@@ -95,7 +95,7 @@ class CLIInvocation(Generic[ConfigT]):
     a script handler maps ``argv``/``stdin``/``env`` onto RunArgs, a
     native handler maps the same three onto a process. The record
     carries both views of the line: the process view (``argv``,
-    ``stdin``, ``env``) and the parsed view (``config``, ``paths``,
+    ``stdin``, ``env``, ``cwd``) and the parsed view (``config``, ``paths``,
     ``texts``, ``flags``), so a handler takes whichever its substrate
     can express and nothing is threaded through keyword injection.
 

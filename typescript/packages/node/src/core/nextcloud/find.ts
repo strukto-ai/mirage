@@ -4,8 +4,8 @@ import {
   optionsTree,
   startBasename,
   treeHasEmpty,
-} from '@struktoai/mirage-core/commands/builtin/find_eval'
-import type { FindEntry, PredNode } from '@struktoai/mirage-core/commands/builtin/find_eval'
+} from '@struktoai/mirage-core/core/generic/find_eval'
+import type { FindEntry, PredNode } from '@struktoai/mirage-core/core/generic/find_eval'
 import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'

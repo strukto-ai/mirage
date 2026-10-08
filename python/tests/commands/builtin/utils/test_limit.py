@@ -22,7 +22,7 @@ from mirage.commands.builtin.utils.limit import (
     maybe_with_timeout,
     run_with_timeout,
 )
-from mirage.commands.errors import CommandTimeoutError
+from mirage.errors.types import CommandTimeoutError
 from mirage.io.types import materialize
 from mirage.types import Limit, OnExceed
 

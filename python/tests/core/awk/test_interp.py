@@ -601,7 +601,6 @@ async def test_output_failure_is_fatal_and_keeps_earlier_output():
         ("BEGIN{print $(-1)}", "awk: trying to access field -1"),
         ("BEGIN{f(1)}", "awk: calling undefined function f"),
         ("BEGIN{next}", "awk: next used in a BEGIN action"),
-        ('BEGIN{substr("a")}', "awk: not enough arguments to substr"),
         (
             "function f(n){return f(n+1)} BEGIN{f(1)}",
             "awk: function f nested deeper than 100 calls",

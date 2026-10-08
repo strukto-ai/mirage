@@ -16,7 +16,7 @@ from functools import partial
 
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.find_eval import (
+from mirage.core.generic.find_eval import (
     FindEntry,
     PredNode,
     build_tree,
