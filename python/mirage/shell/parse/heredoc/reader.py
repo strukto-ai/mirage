@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse.heredoc import constants
 from mirage.shell.parse.heredoc.delimiter import (
@@ -24,7 +26,12 @@ from mirage.shell.parse.heredoc.line import (
     operator_line_end,
     quote_end,
 )
-from mirage.shell.parse.heredoc.types import BodyRead, Heredoc, HeredocOperator
+from mirage.shell.parse.heredoc.types import (
+    BodyRead,
+    Heredoc,
+    HeredocOperator,
+    HeredocPlan,
+)
 
 
 def delimiter_end(data: bytes, start: int) -> int | None:
@@ -153,7 +160,7 @@ def read_heredocs(
         line = (
             data.count(b"\n", 0, max(0, start - 1)) + 1
             if line_end == previous_line
-            else data.count(b"\n", 0, operator.word_start) + 1
+            else data.count(b"\n", 0, end) + 1
         )
         if (
             line_end == previous_line
@@ -180,6 +187,68 @@ def read_heredocs(
                 result.terminated,
                 line,
                 eof_line,
+            )
+        )
+    return documents
+
+
+def read_planned(data: bytes, plan: HeredocPlan) -> list[Heredoc]:
+    """Read the bodies the syntax reader found, where it found them and in
+    its order, which is bash's.
+
+    A body the reader ended at a substitution's ``)`` after its delimiter
+    holds the lines before that one.
+
+    Args:
+        data (bytes): untouched shell source.
+        plan (HeredocPlan): the line's heredoc plan.
+    """
+    documents: list[Heredoc] = []
+    for at, start, end in plan.order:
+        dash = data[at + 2 : at + 3] == b"-"
+        word = at + (3 if dash else 2)
+        while data[word : word + 1] in (b" ", b"\t") or data.startswith(
+            b"\\\n", word
+        ):
+            word += 2 if data[word : word + 1] == b"\\" else 1
+        word_end = delimiter_end(data, word)
+        if word_end is None:
+            continue
+        token = decode_text(data[word:word_end])
+        delimiter = clean_delimiter(token)
+        quoted = delimiter_quoted(token)
+        result = read_body(data, start, encode_text(delimiter), quoted, dash)
+        if result.end > end:
+            cut = data.rfind(b"\n", 0, end) + 1
+            result = replace(
+                read_body(
+                    data[:cut], start, encode_text(delimiter), quoted, dash
+                ),
+                end=end,
+                terminated=True,
+            )
+        if documents and documents[-1].end == start:
+            previous = documents[-1]
+            line = (
+                previous.eof_line
+                if not previous.terminated
+                else data.count(b"\n", 0, max(0, start - 1)) + 1
+            )
+        else:
+            line = data.count(b"\n", 0, word_end) + 1
+        documents.append(
+            Heredoc(
+                at,
+                word_end,
+                delimiter,
+                quoted,
+                start,
+                result.end,
+                result.body,
+                result.offsets,
+                result.terminated,
+                line,
+                max(result.eof_line, line),
             )
         )
     return documents

@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SyntaxDiagnostic } from './types.ts'
-
 import type { ShellNode, TSNodeLike } from '../types.ts'
 
 interface Resource {
@@ -40,14 +38,12 @@ export class ParsedProgram {
   readonly root: ProgramNode
   private readonly resource: Resource
   private released = false
-  private diagnosed: readonly SyntaxDiagnostic[] | null = null
 
   constructor(
     readonly original: string,
     root: ShellNode,
     readonly offsets: readonly number[],
     dispose: () => void,
-    private readonly diagnose: () => readonly SyntaxDiagnostic[] = () => [],
   ) {
     this.resource = { references: 1, dispose }
     this.root = new ProgramNode(root, this)
@@ -56,13 +52,6 @@ export class ParsedProgram {
 
   get references(): number {
     return this.resource.references
-  }
-
-  /** The line's syntax errors, found when first read. */
-  get diagnostics(): readonly SyntaxDiagnostic[] {
-    this.check()
-    this.diagnosed ??= this.diagnose()
-    return this.diagnosed
   }
 
   check(): void {
@@ -94,8 +83,11 @@ export class ParsedProgram {
   }
 }
 
-/** A node of a parsed program; every read checks the program is still held. */
+/** A node of a parsed program; every read checks the program is still held.
+ * The wrappers of a node's children are built once and kept, as in Python. */
 export class ProgramNode implements ShellNode {
+  private kids: ProgramNode[] | undefined
+  private named: ProgramNode[] | undefined
   constructor(
     private readonly borrowed: ShellNode,
     readonly program: ParsedProgram,
@@ -115,6 +107,9 @@ export class ProgramNode implements ShellNode {
   }
   get sourceText() {
     return this.node.sourceText ?? this.node.text
+  }
+  get inlined() {
+    return this.node.inlined
   }
   get type(): string {
     return this.node.type
@@ -153,10 +148,14 @@ export class ProgramNode implements ShellNode {
     return this.wrap(this.node.child(index))
   }
   get children(): ProgramNode[] {
-    return this.node.children.map((node) => new ProgramNode(node, this.program))
+    const node = this.node
+    this.kids ??= node.children.map((child) => new ProgramNode(child, this.program))
+    return [...this.kids]
   }
   get namedChildren(): ProgramNode[] {
-    return this.node.namedChildren.map((node) => new ProgramNode(node, this.program))
+    const node = this.node
+    this.named ??= node.namedChildren.map((child) => new ProgramNode(child, this.program))
+    return [...this.named]
   }
   private wrap(node: ShellNode | null): ProgramNode | null {
     return node === null ? null : new ProgramNode(node, this.program)

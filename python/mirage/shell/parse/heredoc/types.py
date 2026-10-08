@@ -50,6 +50,23 @@ class Heredoc:
 
 
 @dataclass(frozen=True, slots=True)
+class HeredocPlan:
+    """The heredocs bash reads in a line, as its reader takes them.
+
+    Attributes:
+        order (tuple[tuple[int, int, int], ...]): each heredoc's ``<<``
+            and where its body starts and ends (past its terminator), in
+            the order bash reads the bodies.
+        closes (tuple[tuple[int, tuple[int, ...]], ...]): each
+            substitution that closes with bodies still to read: its ``)``
+            and those heredocs' ``<<``, which bash warns of.
+    """
+
+    order: tuple[tuple[int, int, int], ...]
+    closes: tuple[tuple[int, tuple[int, ...]], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class HeredocSource:
     """Lowered source plus a map back to original byte locations."""
 
@@ -57,6 +74,7 @@ class HeredocSource:
     source: bytes
     offsets: tuple[int, ...]
     documents: tuple[tuple[int, Heredoc], ...]
+    closes: tuple[tuple[int, tuple[int, ...]], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,7 +1,6 @@
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from mirage.shell.parse.types import SyntaxDiagnostic
 from mirage.shell.types import TSNodeLike
 
 
@@ -17,32 +16,16 @@ class ParsedProgram:
         original (str): the line as typed.
         root (TSNodeLike): the parsed tree.
         offsets (tuple[int, ...]): ``source_offsets(original, root)``.
-        diagnose (Callable[[], tuple[SyntaxDiagnostic, ...]]): finds the
-            line's syntax errors, run once on the first read.
     """
 
     def __init__(
-        self,
-        original: str,
-        root: TSNodeLike,
-        offsets: tuple[int, ...],
-        diagnose: Callable[[], tuple[SyntaxDiagnostic, ...]] = tuple,
+        self, original: str, root: TSNodeLike, offsets: tuple[int, ...]
     ) -> None:
-        self._diagnose = diagnose
-        self._diagnostics: tuple[SyntaxDiagnostic, ...] | None = None
         self.original = original
         self.offsets = offsets
         self.references = 1
         self._released = False
         self.root = ProgramNode(root, self)
-
-    @property
-    def diagnostics(self) -> tuple[SyntaxDiagnostic, ...]:
-        """The line's syntax errors, found when first read."""
-        self.check()
-        if self._diagnostics is None:
-            self._diagnostics = self._diagnose()
-        return self._diagnostics
 
     def check(self) -> None:
         if self.references == 0:
@@ -70,14 +53,22 @@ class ParsedProgram:
 class ProgramNode:
     """A node of a parsed program; every read checks the program is held.
 
+    The wrappers of a node's children are built once and kept, so a walk
+    pays for each wrapper one time, and the attributes walks read most go
+    straight to the node.
+
     Args:
         node (TSNodeLike): the node it reads.
         program (ParsedProgram): the program the node belongs to.
     """
 
+    __slots__ = ("_node", "program", "_children", "_named")
+
     def __init__(self, node: TSNodeLike, program: ParsedProgram) -> None:
         self._node = node
         self.program = program
+        self._children: list[ProgramNode] | None = None
+        self._named: list[ProgramNode] | None = None
 
     def __getattr__(self, name: str) -> Any:
         self.program.check()
@@ -87,19 +78,58 @@ class ProgramNode:
         return None if node is None else ProgramNode(node, self.program)
 
     @property
+    def type(self) -> str:
+        self.program.check()
+        return self._node.type
+
+    @property
+    def text(self) -> bytes | None:
+        self.program.check()
+        return self._node.text
+
+    @property
+    def start_byte(self) -> int:
+        self.program.check()
+        return self._node.start_byte
+
+    @property
+    def end_byte(self) -> int:
+        self.program.check()
+        return self._node.end_byte
+
+    @property
+    def is_named(self) -> bool:
+        self.program.check()
+        return self._node.is_named
+
+    @property
+    def is_missing(self) -> bool:
+        self.program.check()
+        return self._node.is_missing
+
+    @property
+    def has_error(self) -> bool:
+        self.program.check()
+        return self._node.has_error
+
+    @property
     def children(self) -> list["ProgramNode"]:
         self.program.check()
-        return [
-            ProgramNode(node, self.program) for node in self._node.children
-        ]
+        if self._children is None:
+            self._children = [
+                ProgramNode(node, self.program) for node in self._node.children
+            ]
+        return list(self._children)
 
     @property
     def named_children(self) -> list["ProgramNode"]:
         self.program.check()
-        return [
-            ProgramNode(node, self.program)
-            for node in self._node.named_children
-        ]
+        if self._named is None:
+            self._named = [
+                ProgramNode(node, self.program)
+                for node in self._node.named_children
+            ]
+        return list(self._named)
 
     @property
     def parent(self) -> "ProgramNode | None":
@@ -117,11 +147,8 @@ class ProgramNode:
         return self._wrap(self._node.prev_sibling)
 
     def child(self, index: int) -> "ProgramNode | None":
-        self.program.check()
-        children = self._node.children
-        return (
-            self._wrap(children[index]) if 0 <= index < len(children) else None
-        )
+        children = self.children
+        return children[index] if 0 <= index < len(children) else None
 
     def child_by_field_name(self, name: str) -> "ProgramNode | None":
         self.program.check()

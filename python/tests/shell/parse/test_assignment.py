@@ -14,7 +14,6 @@ from mirage.shell.parse.parse import parse_program
 def test_assignment_recovery_keeps_source_and_siblings(line):
     program = parse_program(line)
     try:
-        assert not program.diagnostics
         pending = [program.root]
         raw = line.encode()
         while pending:
