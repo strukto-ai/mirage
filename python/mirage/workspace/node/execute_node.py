@@ -1498,12 +1498,12 @@ async def _execute_node(
 
     # ── while / until ───────────────────────────
     if kind in (NodeKind.WHILE, NodeKind.UNTIL):
-        condition, body = get_while_parts(node)
+        test, body = get_while_parts(node)
         if kind == NodeKind.UNTIL:
             with cs.loop():
                 return await handle_until(
                     stream,
-                    condition,
+                    test,
                     body,
                     context,
                     stdin,
@@ -1516,7 +1516,7 @@ async def _execute_node(
         with cs.loop():
             return await handle_while(
                 stream,
-                condition,
+                test,
                 body,
                 context,
                 stdin,

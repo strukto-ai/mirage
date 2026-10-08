@@ -22,10 +22,8 @@ import type { HandOff } from '../../policy/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { type Policies } from '../../policy/index.ts'
-import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { ArithError, ExitSignal, ReadonlyError, ReturnSignal } from '../../shell/errors.ts'
 import { fd0Binding, finishStatement, recordStatus } from './statement.ts'
-import { pipelineTransparent } from '../../shell/node_kind.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
@@ -77,7 +75,8 @@ export class ContinueSignal extends Error {
  *
  * A statement ending in `&` is launched as a job through `runStatement`
  * rather than run inline; `jobTable` and `agentId` are the job plane it
- * needs.
+ * needs. `test` marks an `if`/`while`/`until` test, whose failures
+ * `set -e` ignores.
  */
 async function executeBody(
   executeNode: ExecuteNodeFn,
@@ -89,6 +88,7 @@ async function executeBody(
   agentId: string | null,
   handed: HandOff | null,
   decisions: Decisions | null,
+  test = false,
 ): Promise<Result> {
   const session = context.session
   const allStdout: (ByteSource | null)[] = []
@@ -115,6 +115,7 @@ async function executeBody(
       mergedIo = await mergedIo.merge(io)
       if (
         io.exitCode !== 0 &&
+        !test &&
         session.shellOptions.errexit === true &&
         !ERREXIT_EXEMPT_TYPES.has(cmd.type) &&
         !session.errexitImmune
@@ -138,7 +139,9 @@ async function executeBody(
 }
 
 function chainNonNull(sources: readonly (ByteSource | null)[]): ByteSource | null {
-  const nonNull = sources.filter((s): s is ByteSource => s !== null)
+  const nonNull = sources.filter(
+    (s): s is ByteSource => s !== null && !(s instanceof Uint8Array && s.byteLength === 0),
+  )
   if (nonNull.length === 0) return null
   return asyncChain(nonNull)
 }
@@ -197,16 +200,6 @@ export function ended(sig: Unwinding, simple = false): IOResult {
 }
 
 /**
- * What a condition wrote without streaming it (the diagnostic of a failed
- * `(( 1/0 ))`), settled so its status is final, or null when it wrote
- * nothing.
- */
-async function conditionOutput(stdout: ByteSource | null, io: IOResult): Promise<ByteSource | null> {
-  const written = await applyBarrier(stdout, io, BarrierPolicy.VALUE)
-  return written instanceof Uint8Array && written.byteLength === 0 ? null : written
-}
-
-/**
  * Take the diagnostic an `Unwinding` carries, for the redirects it was
  * written under to route. Mirrors Python's take_stderr.
  */
@@ -252,7 +245,7 @@ function collectLoopResult(
 
 export async function handleIf(
   executeNode: ExecuteNodeFn,
-  branches: readonly [TSNodeLike, TSNodeLike[]][],
+  branches: readonly [TSNodeLike[], TSNodeLike[]][],
   elseBody: TSNodeLike[] | null,
   context: EvaluationContext,
   stdin: ByteSource | null = null,
@@ -262,53 +255,39 @@ export async function handleIf(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<Result> {
-  const session = context.session
-  const bound = fd0Binding(session)
-  // What a condition wrote without streaming it stays, ahead of what the
-  // branch writes.
-  const leadStdout: (ByteSource | null)[] = []
-  let lead = new IOResult()
-  let chosen = elseBody
-  for (const [condition, body] of branches) {
-    const [condStdout, condIo] = await runStatement(
+  const run = (nodes: readonly TSNodeLike[], isTest = false): Promise<Result> =>
+    executeBody(
       executeNode,
-      condition,
+      nodes,
       context,
       stdin,
-      bound,
       callStack,
       jobTable,
       agentId,
       handed,
       decisions,
+      isTest,
     )
-    leadStdout.push(await conditionOutput(condStdout, condIo))
-    lead = await lead.merge(condIo)
-    recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
-    if (condIo.exitCode === 0) {
-      chosen = body
-      break
+  // What the tests wrote stays, ahead of what the branch writes.
+  const leadStdout: (ByteSource | null)[] = []
+  let lead = new IOResult()
+  try {
+    let chosen = elseBody ?? []
+    for (const [test, body] of branches) {
+      const [stdout, io] = await run(test, true)
+      leadStdout.push(stdout)
+      lead = await lead.merge(io)
+      if (io.exitCode === 0) {
+        chosen = body
+        break
+      }
     }
+    const [stdout, io, lastExec] = await run(chosen)
+    return [chainNonNull([...leadStdout, stdout]), await lead.merge(io), lastExec]
+  } catch (sig) {
+    if (!isUnwinding(sig)) throw sig
+    throw await carried(sig, chainNonNull(leadStdout), lead)
   }
-  if (chosen === null) {
-    return [
-      chainNonNull(leadStdout),
-      await lead.merge(new IOResult()),
-      new ExecutionNode({ exitCode: 0 }),
-    ]
-  }
-  const [stdout, io, lastExec] = await executeBody(
-    executeNode,
-    chosen,
-    context,
-    stdin,
-    callStack,
-    jobTable,
-    agentId,
-    handed,
-    decisions,
-  )
-  return [chainNonNull([...leadStdout, stdout]), await lead.merge(io), lastExec]
 }
 
 // `set -n` inside a loop body has to stop the *driver* too, not only the
@@ -386,7 +365,7 @@ export async function handleFor(
 
 async function conditionLoop(
   executeNode: ExecuteNodeFn,
-  condition: TSNodeLike,
+  test: readonly TSNodeLike[],
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -402,49 +381,35 @@ async function conditionLoop(
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
   let hitLimit = true
-  const bound = fd0Binding(session)
-  for (let i = 0; i < MAX_WHILE; i++) {
-    if (session.shellOptions.noexec === true) {
-      hitLimit = false
-      break
-    }
-    const [condStdout, condIo] = await runStatement(
+  const run = (nodes: readonly TSNodeLike[], isTest = false): Promise<Result> =>
+    executeBody(
       executeNode,
-      condition,
+      nodes,
       context,
       stdin,
-      bound,
       callStack,
       jobTable,
       agentId,
       handed,
       decisions,
+      isTest,
     )
-    allStdout.push(await conditionOutput(condStdout, condIo))
-    mergedIo = await mergedIo.merge(
-      new IOResult({ stderr: condIo.stderr, exitCode: mergedIo.exitCode }),
-    )
-    recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
-    if (breakOnZero && condIo.exitCode === 0) {
-      hitLimit = false
-      break
-    }
-    if (!breakOnZero && condIo.exitCode !== 0) {
+  for (let i = 0; i < MAX_WHILE; i++) {
+    if (session.shellOptions.noexec === true) {
       hitLimit = false
       break
     }
     try {
-      const [stdout, io] = await executeBody(
-        executeNode,
-        body,
-        context,
-        stdin,
-        callStack,
-        jobTable,
-        agentId,
-        handed,
-        decisions,
+      const [condStdout, condIo] = await run(test, true)
+      allStdout.push(condStdout)
+      mergedIo = await mergedIo.merge(
+        new IOResult({ stderr: condIo.stderr, exitCode: mergedIo.exitCode }),
       )
+      if ((condIo.exitCode === 0) === breakOnZero) {
+        hitLimit = false
+        break
+      }
+      const [stdout, io] = await run(body)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
     } catch (sig) {
@@ -576,7 +541,7 @@ export async function handleCfor(
 
 export function handleWhile(
   executeNode: ExecuteNodeFn,
-  condition: TSNodeLike,
+  test: readonly TSNodeLike[],
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   stdin: ByteSource | null = null,
@@ -588,7 +553,7 @@ export function handleWhile(
 ): Promise<Result> {
   return conditionLoop(
     executeNode,
-    condition,
+    test,
     body,
     context,
     stdin,
@@ -604,7 +569,7 @@ export function handleWhile(
 
 export function handleUntil(
   executeNode: ExecuteNodeFn,
-  condition: TSNodeLike,
+  test: readonly TSNodeLike[],
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   stdin: ByteSource | null = null,
@@ -616,7 +581,7 @@ export function handleUntil(
 ): Promise<Result> {
   return conditionLoop(
     executeNode,
-    condition,
+    test,
     body,
     context,
     stdin,

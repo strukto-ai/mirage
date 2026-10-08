@@ -1443,12 +1443,12 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
-    const [condition, body] = getWhileParts(node)
+    const [test, body] = getWhileParts(node)
     if (kind === NodeKind.UNTIL) {
       return callStack.loop(() =>
         handleUntil(
           stream,
-          condition,
+          test,
           body,
           context,
           stdin,
@@ -1463,7 +1463,7 @@ async function executeNodeBody(
     return callStack.loop(() =>
       handleWhile(
         stream,
-        condition,
+        test,
         body,
         context,
         stdin,

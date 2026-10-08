@@ -14,6 +14,7 @@
 
 import re
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from mirage.io import IOResult
@@ -23,7 +24,6 @@ from mirage.io.types import ByteSource, materialize
 from mirage.policy import Policies, PolicyDenied
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
-from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
@@ -35,7 +35,6 @@ from mirage.shell.errors import (
     ReturnSignal,
 )
 from mirage.shell.job_table import JobTable
-from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
@@ -67,12 +66,14 @@ async def _execute_body(
     agent_id: str | None,
     handed: HandOff | None,
     decisions: Decisions | None,
+    test: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a list of body commands sequentially.
 
     A statement ending in ``&`` is launched as a job through
     ``run_statement`` rather than run inline; ``job_table`` and
-    ``agent_id`` are the job plane it needs.
+    ``agent_id`` are the job plane it needs. ``test`` marks an
+    ``if``/``while``/``until`` test, whose failures ``set -e`` ignores.
     """
     session = context.session
     all_stdout: list[ByteSource | None] = []
@@ -105,6 +106,7 @@ async def _execute_body(
         merged_io = await merged_io.merge(io)
         if (
             io.exit_code != 0
+            and not test
             and session.shell_options.get("errexit")
             and cmd.type not in ERREXIT_EXEMPT_TYPES
             and not session.errexit_immune
@@ -129,7 +131,7 @@ class ContinueSignal(Exception):
 
 
 def _chain_streams(all_stdout: list[ByteSource | None]) -> ByteSource | None:
-    non_empty = [s for s in all_stdout if s is not None]
+    non_empty = [s for s in all_stdout if s not in (None, b"")]
     return async_chain(non_empty) if non_empty else None
 
 
@@ -190,20 +192,6 @@ def ended(sig: Exception, simple: bool = False) -> IOResult:
     )
 
 
-async def _condition_output(
-    stdout: ByteSource | None, io: IOResult
-) -> ByteSource | None:
-    """What a condition wrote without streaming it (the diagnostic of a
-    failed ``(( 1/0 ))``), settled so its status is final, or None when
-    it wrote nothing.
-
-    Args:
-        stdout (ByteSource | None): the condition's returned output.
-        io (IOResult): the condition's result.
-    """
-    return await apply_barrier(stdout, io, BarrierPolicy.VALUE) or None
-
-
 async def take_stderr(sig: Exception) -> bytes:
     """Take the diagnostic one of ``UNWINDING`` carries, for the
     redirects it was written under to route.
@@ -255,7 +243,7 @@ def _collect_loop_result(
 
 async def handle_if(
     execute_node: Callable[..., Any],
-    branches: list[tuple[TSNodeLike, list[TSNodeLike]]],
+    branches: list[tuple[list[TSNodeLike], list[TSNodeLike]]],
     else_body: list[TSNodeLike] | None,
     context: EvaluationContext,
     stdin: ByteSource | None = None,
@@ -265,53 +253,32 @@ async def handle_if(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    session = context.session
-    bound = fd0_binding(session)
-    # What a condition wrote without streaming it (the diagnostic of a
-    # failed `(( 1/0 ))`) stays, ahead of what the branch writes.
+    run = partial(
+        _execute_body,
+        execute_node,
+        context=context,
+        stdin=stdin,
+        call_stack=call_stack,
+        job_table=job_table,
+        agent_id=agent_id,
+        handed=handed,
+        decisions=decisions,
+    )
+    # What the tests wrote stays, ahead of what the branch writes.
     lead_stdout: list[ByteSource | None] = []
     lead = IOResult()
-    chosen = else_body
-    for condition, body in branches:
-        cond_stdout, cond_io, _ = await run_statement(
-            execute_node,
-            condition,
-            context,
-            stdin,
-            bound,
-            call_stack,
-            job_table,
-            agent_id,
-            handed,
-            decisions,
-        )
-        lead_stdout.append(await _condition_output(cond_stdout, cond_io))
-        lead = await lead.merge(cond_io)
-        record_status(
-            session,
-            cond_io.exit_code,
-            transparent=pipeline_transparent(condition),
-        )
-        if cond_io.exit_code == 0:
-            chosen = body
-            break
-    if chosen is None:
-        return (
-            _chain_streams(lead_stdout),
-            await lead.merge(IOResult()),
-            ExecutionNode(exit_code=0),
-        )
-    stdout, io, last_exec = await _execute_body(
-        execute_node,
-        chosen,
-        context,
-        stdin,
-        call_stack,
-        job_table,
-        agent_id,
-        handed,
-        decisions,
-    )
+    try:
+        for test, body in branches:
+            stdout, io, _ = await run(test, test=True)
+            lead_stdout.append(stdout)
+            lead = await lead.merge(io)
+            if io.exit_code == 0:
+                break
+        else:
+            body = else_body or []
+        stdout, io, last_exec = await run(body)
+    except UNWINDING as sig:
+        raise await carried(sig, _chain_streams(lead_stdout), lead)
     return (
         _chain_streams([*lead_stdout, stdout]),
         await lead.merge(io),
@@ -395,7 +362,7 @@ async def handle_for(
 
 async def _condition_loop(
     execute_node: Callable[..., Any],
-    condition: TSNodeLike,
+    test: list[TSNodeLike],
     body: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None,
@@ -411,50 +378,31 @@ async def _condition_loop(
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
     hit_limit = True
-    bound = fd0_binding(session)
+    run = partial(
+        _execute_body,
+        execute_node,
+        context=context,
+        stdin=stdin,
+        call_stack=call_stack,
+        job_table=job_table,
+        agent_id=agent_id,
+        handed=handed,
+        decisions=decisions,
+    )
     for _ in range(_MAX_WHILE):
         if session.shell_options.get("noexec"):
             hit_limit = False
             break
-        cond_stdout, cond_io, _ = await run_statement(
-            execute_node,
-            condition,
-            context,
-            stdin,
-            bound,
-            call_stack,
-            job_table,
-            agent_id,
-            handed,
-            decisions,
-        )
-        all_stdout.append(await _condition_output(cond_stdout, cond_io))
-        merged_io = await merged_io.merge(
-            IOResult(stderr=cond_io.stderr, exit_code=merged_io.exit_code)
-        )
-        record_status(
-            session,
-            cond_io.exit_code,
-            transparent=pipeline_transparent(condition),
-        )
-        if break_on_zero and cond_io.exit_code == 0:
-            hit_limit = False
-            break
-        if not break_on_zero and cond_io.exit_code != 0:
-            hit_limit = False
-            break
         try:
-            stdout, io, _ = await _execute_body(
-                execute_node,
-                body,
-                context,
-                stdin,
-                call_stack,
-                job_table,
-                agent_id,
-                handed,
-                decisions,
+            cond_stdout, cond_io, _ = await run(test, test=True)
+            all_stdout.append(cond_stdout)
+            merged_io = await merged_io.merge(
+                IOResult(stderr=cond_io.stderr, exit_code=merged_io.exit_code)
             )
+            if (cond_io.exit_code == 0) == break_on_zero:
+                hit_limit = False
+                break
+            stdout, io, _ = await run(body)
         except (BreakSignal, ContinueSignal) as sig:
             merged_io = await _absorbed(sig, all_stdout, merged_io)
             if isinstance(sig, BreakSignal):
@@ -575,7 +523,7 @@ async def handle_cfor(
 
 async def handle_while(
     execute_node: Callable[..., Any],
-    condition: TSNodeLike,
+    test: list[TSNodeLike],
     body: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None = None,
@@ -587,7 +535,7 @@ async def handle_while(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(
         execute_node,
-        condition,
+        test,
         body,
         context,
         stdin,
@@ -603,7 +551,7 @@ async def handle_while(
 
 async def handle_until(
     execute_node: Callable[..., Any],
-    condition: TSNodeLike,
+    test: list[TSNodeLike],
     body: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None = None,
@@ -615,7 +563,7 @@ async def handle_until(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(
         execute_node,
-        condition,
+        test,
         body,
         context,
         stdin,
