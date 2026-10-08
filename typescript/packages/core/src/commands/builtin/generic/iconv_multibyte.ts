@@ -14,6 +14,9 @@
 
 import { toHex } from '../../../utils/hex.ts'
 
+/** Opt in before conversion by assigning a debug sink; tables are cached after first use. */
+export const logger: { debug?: (message: string) => void } = {}
+
 export const ILLEGAL = -1
 export const CUT = -2
 
@@ -461,7 +464,7 @@ export function hostDecoder(spec: MultibyteSpec): TextDecoder | null {
       decoder = new TextDecoder(spec.codec, { fatal: true })
     } catch (error) {
       if (!(error instanceof RangeError)) throw error
-      console.debug(`iconv: no host decoder for ${spec.codec}: ${String(error)}`)
+      logger.debug?.(`iconv: no host decoder for ${spec.codec}: ${String(error)}`)
       decoder = null
     }
     DECODERS.set(spec, decoder)
@@ -496,7 +499,7 @@ export function multibyteTable(spec: MultibyteSpec): Table {
     table.set(k, cp)
   }
   if (firstError !== null)
-    console.debug(
+    logger.debug?.(
       `iconv: ${spec.codec} table skipped ${String(refused)} undecodable sequences; first: ${firstError}`,
     )
   for (const [k, cp] of spec.remapped) table.set(k, cp)

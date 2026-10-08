@@ -107,8 +107,10 @@ Mirage makes that socket layer refuse: `connect` and `sendto` raise
 code therefore fails fast instead of opening a host connection, and
 `urllib.request.urlopen` fails with
 `URLError: <urlopen error [Errno 40] Network unreachable>` for `http` and
-`https` alike. The numbers are Emscripten's (musl's), so compare against
-`errno.ENETUNREACH` rather than a literal. `socket.socket()`, a TCP `bind`
+`https` on newer builds. Pyodide 0.29.0 has no HTTPS handler, so its HTTPS
+failure instead has the string reason `unknown url type: https`. The
+numbers are Emscripten's (musl's), so compare an `OSError` reason's `errno`
+against `errno.ENETUNREACH` rather than a literal. `socket.socket()`, a TCP `bind`
 and name lookups still answer; lookups come from Emscripten's offline
 resolver, which hands out placeholder addresses. An `initModule` that
 calls Pyodide's `useNodeSockFS()` installs real sockets and, like any
