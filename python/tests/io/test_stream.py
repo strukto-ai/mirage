@@ -125,6 +125,25 @@ def test_async_chain_with_bytes():
     asyncio.run(run())
 
 
+def test_async_chain_closes_the_stream_it_leaves():
+    closed: list[str] = []
+
+    async def producer():
+        try:
+            yield b"a"
+            yield b"b"
+        finally:
+            closed.append("done")
+
+    async def run():
+        chain = async_chain([producer()])
+        assert await anext(chain) == b"a"
+        await chain.aclose()
+        assert closed == ["done"]
+
+    asyncio.run(run())
+
+
 def test_async_chain_empty():
     async def run():
         chunks = []
@@ -180,67 +199,6 @@ def test_close_quietly_swallows_exceptions():
 
     async def _run():
         await close_quietly(Bad())  # should not raise
-
-    asyncio.run(_run())
-
-
-def test_chain_cachables_live_pull_in_order():
-    from mirage.io.cachable_iterator import CachableAsyncIterator
-    from mirage.io.stream import chain_cachables
-
-    async def _run():
-        a = CachableAsyncIterator(_make_stream(b"a1", b"a2"))
-        b = CachableAsyncIterator(_make_stream(b"b1"))
-        chunks = [c async for c in chain_cachables(a, b)]
-        assert chunks == [b"a1", b"a2", b"b1"]
-
-    asyncio.run(_run())
-
-
-def test_chain_cachables_replays_drained_iterator():
-    from mirage.io.cachable_iterator import CachableAsyncIterator
-    from mirage.io.stream import chain_cachables
-
-    async def _run():
-        a = CachableAsyncIterator(_make_stream(b"a1", b"a2"))
-        b = CachableAsyncIterator(_make_stream(b"b1"))
-        assert await a.drain() == b"a1a2"
-        assert await b.drain() == b"b1"
-        chunks = [c async for c in chain_cachables(a, b)]
-        assert chunks == [b"a1", b"a2", b"b1"]
-
-    asyncio.run(_run())
-
-
-def test_chain_cachables_replays_partial_then_drained():
-    from mirage.io.cachable_iterator import CachableAsyncIterator
-    from mirage.io.stream import chain_cachables
-
-    async def _run():
-        a = CachableAsyncIterator(_make_stream(b"a1", b"a2", b"a3"))
-        b = CachableAsyncIterator(_make_stream(b"b1"))
-        chain = chain_cachables(a, b)
-        assert await chain.__anext__() == b"a1"
-        await a.drain()
-        await b.drain()
-        rest = [c async for c in chain]
-        assert rest == [b"a2", b"a3", b"b1"]
-
-    asyncio.run(_run())
-
-
-def test_chain_cachables_early_stop_leaves_later_untouched():
-    from mirage.io.cachable_iterator import CachableAsyncIterator
-    from mirage.io.stream import chain_cachables
-
-    async def _run():
-        a = CachableAsyncIterator(_make_stream(b"a1", b"a2"))
-        b = CachableAsyncIterator(_make_stream(b"b1"))
-        chain = chain_cachables(a, b)
-        assert await chain.__anext__() == b"a1"
-        await chain.aclose()
-        assert b.buffered_chunks == []
-        assert not b.exhausted
 
     asyncio.run(_run())
 

@@ -716,4 +716,5 @@ async def test_a_nested_line_applies_against_only_the_writes_since_it_began():
         await ws.close()
     (nested, _), (outer, _) = captured
     assert [m[:2] for m in nested] == [("write", "/r/h")]
-    assert [m[:2] for m in outer].count(("read", "/r/f")) == 2
+    # The nested cat is served the entry the first one kept.
+    assert [m[:2] for m in outer].count(("read", "/r/f")) == 1

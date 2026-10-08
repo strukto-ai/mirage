@@ -93,4 +93,3 @@ async def test_cat_generic_reports_a_refused_read_and_goes_on():
     assert await materialize(out) == b"b1\nb2\n"
     assert io.stderr == b"cat: /a.txt: File too large\n"
     assert io.exit_code == 1
-    assert list(io.reads) == ["/b.txt"]

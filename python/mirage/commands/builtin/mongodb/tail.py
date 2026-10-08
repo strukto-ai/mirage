@@ -23,7 +23,6 @@ from mirage.commands.builtin.generic_bind.adapter import (
 from mirage.commands.builtin.utils.limit import row_cap_notice
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
-from mirage.core.mongodb.read import stream_any
 from mirage.core.mongodb.readdir import documents_exist
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_tail, watch_stream
@@ -89,5 +88,5 @@ async def tail(
         list(texts),
         opts,
         bound_op(mount_io(opts).stat, accessor, opts.index),
-        bound_op(stream_any, accessor, opts.index),
+        bound_op(mount_io(opts).read_stream, accessor, opts.index),
     )

@@ -226,18 +226,17 @@ async def test_a_listed_ctag_never_answers_for_a_changed_file():
 
 
 @pytest.mark.asyncio
-async def test_a_streamed_read_stamps_its_ctag():
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_a_door_read_stamps_its_ctag(streamed):
     with serve(FakeGraph(drives={ME: {"a.txt": OLD}})) as graph:
         ws = _ws(_vfs(graph))
         try:
-            # Recorded, as a command's read is: the cTag reaches the cache
-            # through the recording.
-            scope = RecordingScope()
-            try:
+            if streamed:
                 stream = await ws.vfs.read_stream("/m/a.txt")
-                assert b"".join([chunk async for chunk in stream]) == OLD
-            finally:
-                scope.close()
+                data = b"".join([chunk async for chunk in stream])
+            else:
+                data = await ws.vfs.read("/m/a.txt")
+            assert data == OLD
             before = graph.fetches()
             assert await _out(ws, CAT) == OLD
             assert graph.fetches() == before

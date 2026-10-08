@@ -776,10 +776,9 @@ describe('op hooks bind at the op doors and the command tier', () => {
   })
 
   it('preVfs sees the session and prefix on lazy drains', async () => {
-    // VfsContext.prefix and .sessionId name the command's identity on
-    // the command tier exactly as at the op doors, including for a
-    // reader the pipeline drains after the gate scopes return (head
-    // binds a lazy stream); both ride the wrap-time capture.
+    // VfsContext.prefix and .sessionId name the command's identity at the
+    // op door, including for a reader the pipeline drains after the gate
+    // scopes return (head binds a lazy stream).
     const recorder = new IdentityRecorder()
     const ws = await makeSealedWs([recorder])
     expect((await ws.shell('cat /a/ok.txt')).exitCode).toBe(0)
@@ -787,7 +786,7 @@ describe('op hooks bind at the op doors and the command tier', () => {
     const reads = recorder.asked.filter(([, path]) => path === '/a/ok.txt')
     expect(reads.length).toBeGreaterThan(0)
     for (const [, , prefix, sessionId] of reads) {
-      expect(prefix).toBe('/a')
+      expect(prefix).toBe('/a/')
       expect(sessionId).toBe(ws.defaultSessionId)
     }
   })

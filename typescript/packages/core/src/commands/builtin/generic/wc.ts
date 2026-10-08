@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { isStdin, stdinStream } from '../utils/stream.ts'
-import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { guardInput } from '../utils/limit.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -249,7 +248,7 @@ export async function wcGeneric(
   opts: CommandOpts,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
+  stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]

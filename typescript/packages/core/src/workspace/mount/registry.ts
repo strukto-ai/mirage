@@ -36,11 +36,7 @@ import {
   ReadPolicy,
 } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
-import {
-  effectivePathMode,
-  getAdmission,
-  strongestModeUnder,
-} from '../../context/session_context.ts'
+import { effectivePathMode, strongestModeUnder } from '../../context/session_context.ts'
 import { MountEntry, type MountInit } from './mount.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
@@ -54,7 +50,6 @@ import { compareCodePoints } from '../../utils/sort.ts'
 // satisfies it structurally.
 interface ReadReconciler {
   reconcileRead(mount: MountEntry, path: string): Promise<void>
-  mayServeCached(mount: MountEntry, path: string): Promise<boolean>
   mayServeListing(mount: MountEntry, folder: string, version: string | null): Promise<boolean>
   onGone(gone: readonly Evicted[], excluded?: readonly string[]): Promise<void>
 }
@@ -174,34 +169,13 @@ export class MountRegistry {
   }
 
   /**
-   * Run the shared read verdict for one mount's cached entry.
-   *
-   * The file cache's door and the dispatcher's door ask the same question,
-   * so they ask the same function; a second verdict rule here is what let
-   * the two drift apart in the first place. The reconciler is read at call
-   * time because `attachFileCache` runs before `setReconciler`, and a
-   * manager with none trusts its cache.
-   *
-   * A retiring mount answers false rather than probing, sending the caller
-   * to a cold read — where `ownsPath` already sends it today. Unlike
-   * python there is no EBUSY to catch: this side's probe calls the ops
-   * registry directly and never enters `mount.use()`, so the synchronous
-   * `retiring` check is the whole guard.
-   */
-  private async mayServeCached(m: MountEntry, key: string): Promise<boolean> {
-    const reconciler = this.reconciler
-    if (reconciler === null) return true
-    if (m.retiring) return false
-    return reconciler.mayServeCached(m, key)
-  }
-
-  /**
    * Run the shared listing verdict for one mount's cached listing.
    *
-   * Mirrors `mayServeCached`: the reconciler is read at call time, and a
+   * The reconciler is read at call time because `attachFileCache` runs
+   * before `setReconciler`, and a manager with none trusts its listings. A
    * retiring mount answers false without asking. Python also answers false
-   * for EBUSY from a mount that began retiring mid-check; this side has no
-   * such path, for the same reason as the read gate.
+   * for EBUSY from a mount that began retiring mid-check; this side's probe
+   * never enters `mount.use()`, so the `retiring` check is the whole guard.
    */
   private async mayServeListing(
     m: MountEntry,
@@ -221,16 +195,9 @@ export class MountRegistry {
       m.prefix,
       m.vfs.cachesReads,
       (path) => !m.retiring && this.tryMountFor(path) === m,
-      // The cache is shared by every session: a warm entry the running
-      // command may not read goes cold to the guarded read, which refuses
-      // it, before any freshness probe.
-      (key) =>
-        getAdmission()?.refuses(key) === true
-          ? Promise.resolve(false)
-          : this.mayServeCached(m, key),
       m.read.ttl,
-      // Read at call time, as the gate is; a retiring mount's leftovers go
-      // with its teardown instead.
+      // Read at call time, as the listing gate is; a retiring mount's
+      // leftovers go with its teardown instead.
       async (gone) => {
         const reconciler = this.reconciler
         if (reconciler !== null && !m.retiring)

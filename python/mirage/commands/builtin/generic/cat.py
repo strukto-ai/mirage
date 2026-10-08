@@ -9,7 +9,6 @@ from mirage.commands.builtin.utils.operands import (
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
-    is_stdin,
     resolve_source,
     stdin_stat,
     stdin_stream,
@@ -20,8 +19,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
-from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.stream import async_chain, chain_cachables, ensure_stream
+from mirage.io.stream import async_chain, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -87,13 +85,11 @@ async def cat_generic(
 
     The wiring resolves globs and binds the backend ops; everything else
     lives here so factory builders and bespoke backend commands agree:
-    flag parsing, the per-operand report-and-continue split, caching
-    shape, and the stdin fallback. A single operand (and every operand on
-    a local backend) is teed through a CachableAsyncIterator returned AS
-    stdout so the cache fills as the consumer reads; multiple operands on
-    a non-local backend are materialized instead, because a joined stdout
-    is a different object from the per-file cachables and the cache-fill
-    drain would race the consumer on the same network stream.
+    flag parsing, the per-operand report-and-continue split, and the stdin
+    fallback. A single operand (and every operand on a local backend)
+    streams as the consumer reads; multiple operands on a non-local
+    backend are read one by one, so a read that fails after its stat is
+    reported and the next operand still prints.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
@@ -130,27 +126,10 @@ async def cat_generic(
             return source
 
         if len(readable) == 1:
-            p = readable[0]
-            cachable = CachableAsyncIterator(await source_for(p))
-            if not is_stdin(p):
-                io.reads[p.mount_path] = cachable
-                io.cache.append(p.mount_path)
-            source: ByteSource = cachable
+            source: ByteSource = await source_for(readable[0])
         elif local:
-            cachables = [
-                CachableAsyncIterator(await source_for(p)) for p in readable
-            ]
-            io.reads.update(
-                {
-                    p.mount_path: c
-                    for p, c in zip(readable, cachables)
-                    if not is_stdin(p)
-                }
-            )
-            io.cache.extend(p.mount_path for p in readable if not is_stdin(p))
-            source = chain_cachables(*cachables)
+            source = async_chain([await source_for(p) for p in readable])
         else:
-            reads: dict[str, ByteSource] = {}
             parts: list[bytes] = []
             for p in readable:
                 try:
@@ -161,11 +140,7 @@ async def cat_generic(
                     # operand, and the next operand still prints.
                     err += encode_text(fs_error_line("cat", p, exc))
                     continue
-                if not is_stdin(p):
-                    reads[p.mount_path] = data
                 parts.append(data)
-            io.reads.update(reads)
-            io.cache.extend(reads)
             source = async_chain(parts)
         if err:
             io.stderr = err

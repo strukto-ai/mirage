@@ -64,9 +64,9 @@ async def test_raw_read_leaves_an_unregistered_extension_alone():
 
 
 @pytest.mark.asyncio
-async def test_raw_read_is_not_served_from_the_file_cache():
-    # The file cache is keyed on the path alone, so a raw read of a path
-    # whose cached entry may be a rendering must not be served it.
+async def test_raw_read_is_served_from_the_file_cache():
+    # The file cache holds the stored bytes commands read, never a
+    # rendering, which is what a raw read asks for.
     ws = _workspace(_CachingRAM())
     await ws.vfs.write("/data/books.tally", b"STORED")
     # Distinct from both the stored and the rendered bytes, so a warm hit
@@ -76,7 +76,7 @@ async def test_raw_read_is_not_served_from_the_file_cache():
             reads={"/data/books.tally": b"CACHED"}, cache=["/data/books.tally"]
         )
     )
-    assert await ws.vfs.read("/data/books.tally", raw=True) == b"STORED"
+    assert await ws.vfs.read("/data/books.tally", raw=True) == b"CACHED"
 
 
 @pytest.mark.asyncio

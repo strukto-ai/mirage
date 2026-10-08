@@ -28,7 +28,6 @@ from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.mongodb.client import count_documents
-from mirage.core.mongodb.read import stream_any
 from mirage.core.mongodb.readdir import documents_exist
 from mirage.core.mongodb.scope import detect_scope
 from mirage.io.types import ByteSource, CountedRun, IOResult
@@ -85,5 +84,8 @@ async def wc(
             rows, WCCounts(lines=total), len(resolved), parsed
         ), IOResult(counted_runs=runs)
     return await wc_generic(
-        resolved, list(texts), opts, bound_op(stream_any, accessor, opts.index)
+        resolved,
+        list(texts),
+        opts,
+        bound_op(mount_io(opts).read_stream, accessor, opts.index),
     )

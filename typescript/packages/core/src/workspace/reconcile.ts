@@ -61,11 +61,10 @@ enum Verdict {
  * feeds both consumers with separate reactions: the file cache evicts and the
  * namespace GCs any orphaned attribute overlay.
  *
- * Three read paths call in: the cached-read gate (mayServeCached), which the
- * dispatcher and the file cache's own door both run, its main-op catch
- * (onEnoent) for cross-mount and programmatic reads, and the mount
- * registry's per-command reconcile (reconcileRead) for single-mount shell
- * reads. The re-stat goes through the ops registry (not mount.call,
+ * Three read paths call in: the dispatcher's cached-read gate
+ * (mayServeCached), its main-op catch (onEnoent), and the mount registry's
+ * per-command reconcile (reconcileRead) for the operands of a single-mount
+ * shell command. The re-stat goes through the ops registry (not mount.call,
  * whose op set omits stat). Reconcile state follows each consumer's store
  * (RAM local, Redis shared across runtimes), so this is a thin coordinator
  * holding references, not config.

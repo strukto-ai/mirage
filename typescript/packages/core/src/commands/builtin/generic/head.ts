@@ -14,7 +14,6 @@
 
 import { operandLabel } from '../utils/stream.ts'
 import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult } from '../../../io/types.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -177,7 +176,7 @@ export async function headGeneric(
   stream: Stream,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
+  stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]

@@ -313,74 +313,6 @@ describe('dirAwareStream', () => {
   })
 })
 
-describe('withCommandGuards', () => {
-  const spec = (virtual: string): PathSpec =>
-    new PathSpec({
-      virtual,
-      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-      vfsPath: virtual,
-      resolved: true,
-    })
-
-  function probeOps(calls: string[][]): CommandIO {
-    async function* stream(_a: Accessor, path: PathSpec): AsyncGenerator<Uint8Array> {
-      calls.push(['stream', path.virtual])
-      yield await Promise.resolve(new Uint8Array([1]))
-    }
-    return {
-      readdir: (_a, path) => {
-        calls.push(['readdir', path.virtual])
-        return Promise.resolve(['a'])
-      },
-      readBytes: (_a, path) => {
-        calls.push(['read', path.virtual])
-        return Promise.resolve(new Uint8Array([1]))
-      },
-      readStream: stream,
-      stat: (_a, path) => {
-        calls.push(['stat', path.virtual])
-        return Promise.resolve(
-          new FileStat({ name: 'k', type: FileType.FILE, content: ContentType.TEXT, size: 1 }),
-        )
-      },
-      isMounted: () => true,
-      copy: (_a, src, dst) => {
-        calls.push(['copy', src.virtual, dst.virtual])
-        return Promise.resolve()
-      },
-      unlink: (_a, path) => {
-        calls.push(['unlink', path.virtual])
-        return Promise.resolve()
-      },
-    }
-  }
-
-  it('command path restrictions apply before a warm serve', async () => {
-    const calls: string[][] = []
-    const ops = withCommandGuards({
-      ...probeOps(calls),
-      readBytes: () => Promise.resolve(new TextEncoder().encode('warm')),
-    })
-    await runWithAdmission(
-      {
-        scoped: true,
-        scopes: () => true,
-        granted: [],
-        check: (path) => {
-          if (path === '/data/secret') throw new Error('sealed')
-        },
-        refuses: (path) => path === '/data/secret',
-      },
-      async () => {
-        await expect(ops.readBytes(accessor, spec('/data/secret'))).rejects.toThrow('sealed')
-        expect(await ops.readBytes(accessor, spec('/data/open'))).toEqual(
-          new TextEncoder().encode('warm'),
-        )
-      },
-    )
-  })
-})
-
 // A keyed backend: no directory objects, so a read of one misses. Reads
 // throw `readError` for anything that is not a stored file, which is
 // what RAM/S3/Redis do for a directory (there is no key there) and what
@@ -585,16 +517,14 @@ describe('withPolicyGuard', () => {
     await runWithOpPolicies(new Policies([policy]), () =>
       runWithMountGate('/data', MountMode.WRITE, async () => {
         const ops = withPolicyGuard(raw)
-        await expect(ops.readBytes(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
-        expect(calls).not.toContainEqual(['read', '/data/secret'])
-        // The stream gates before its first chunk.
-        await expect(drain(ops.readStream(accessor, spec('/data/secret')))).rejects.toMatchObject(
-          SEALED,
-        )
-        expect(calls).not.toContainEqual(['stream', '/data/secret'])
+        // Content reads are the door's, which admits them itself.
+        expect(ops.readBytes).toBe(raw.readBytes)
+        expect(ops.readStream).toBe(raw.readStream)
         // stat is not a guarded slot: deny is present and refused.
         expect((await ops.stat(accessor, spec('/data/secret'))).size).toBe(1)
         // readdir asks about the directory it lists.
+        await expect(ops.readdir(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
+        expect(calls).not.toContainEqual(['readdir', '/data/secret'])
         expect(await ops.readdir(accessor, spec('/data/dir'))).toEqual(['a'])
         // A copy's source is a read; its destination is a write.
         const copy = ops.copy
@@ -606,8 +536,6 @@ describe('withPolicyGuard', () => {
         await unlink(accessor, spec('/data/gone'))
       }),
     )
-    expect(policy.asked).toContainEqual(['read_bytes', '/data/secret', false])
-    expect(policy.asked).toContainEqual(['read_stream', '/data/secret', false])
     expect(policy.asked).toContainEqual(['readdir', '/data/dir', false])
     expect(policy.asked).toContainEqual(['copy', '/data/src', false])
     expect(policy.asked).toContainEqual(['copy', '/data/dst', true])
@@ -615,40 +543,18 @@ describe('withPolicyGuard', () => {
     expect(policy.asked.some(([op]) => op === 'stat')).toBe(false)
   })
 
-  it('wrap-time capture covers late drains', async () => {
-    // head/tail/wc bind lazy readers the pipeline drains after dispatch
-    // has reset the context; the guard captured at wrap time still
-    // answers (livePolicyScope).
+  it('wrap-time capture covers late calls', async () => {
+    // A slot called after dispatch has reset the context is still admitted
+    // by the scope the guard captured at wrap time (livePolicyScope).
     const calls: string[][] = []
     const raw = probeOps(calls)
     const policy = new SealedRead('/data/secret')
     const ops = await runWithOpPolicies(new Policies([policy]), () =>
       Promise.resolve(withPolicyGuard(raw)),
     )
-    // Both the slot call and the drain happen outside the window now.
-    await expect(drain(ops.readStream(accessor, spec('/data/secret')))).rejects.toMatchObject(
-      SEALED,
-    )
-    expect(calls).not.toContainEqual(['stream', '/data/secret'])
-    await expect(ops.readBytes(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
-  })
-
-  it('admits before a warm serve', async () => {
-    // The guard wraps outside the cache tier (`finish` in the factory),
-    // so a warm reader below it never answers a refused read.
-    const calls: string[][] = []
-    const warm: CommandIO = {
-      ...probeOps(calls),
-      readBytes: () => Promise.resolve(new TextEncoder().encode('warm')),
-    }
-    const policy = new SealedRead('/data/secret')
-    await runWithOpPolicies(new Policies([policy]), async () => {
-      const ops = withPolicyGuard(warm)
-      await expect(ops.readBytes(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
-      expect(await ops.readBytes(accessor, spec('/data/open'))).toEqual(
-        new TextEncoder().encode('warm'),
-      )
-    })
+    // The slot call happens outside the window now.
+    await expect(ops.readdir(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
+    expect(calls).not.toContainEqual(['readdir', '/data/secret'])
   })
 })
 

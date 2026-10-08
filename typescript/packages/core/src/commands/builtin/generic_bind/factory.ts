@@ -12,11 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { streamFromBytes } from '../utils/wrap.ts'
 import { guardInput } from '../utils/limit.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
-import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
@@ -52,7 +50,7 @@ function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
   }
 }
 
-function withStatCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
+export function withStatCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return { ...ops, stat: cachedStat(ops.stat) }
 }
 
@@ -110,18 +108,6 @@ export function withSlashGuard<A extends Accessor>(ops: CommandIO<A>): CommandIO
   }
 }
 
-export function withReadCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
-  const readBytes = cacheAwareReadBytes(ops.readBytes)
-  return {
-    ...ops,
-    stat: cachedStat(ops.stat),
-    readStream: ops.streamsBytes
-      ? (a, p, i) => streamFromBytes(readBytes, a, p, i)
-      : cacheAwareReadStream(ops.readStream),
-    readBytes,
-  }
-}
-
 /**
  * The adapter a bespoke search command scans through, and whether a hide,
  * a path rule or a coded preVfs policy judges anything on its mount. The
@@ -130,8 +116,8 @@ export function withReadCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<
  * channel under a container). A judged command must not hand the
  * service's search the answer, since the service sees every entry, and
  * its scan reads the operands through the guards the generic builders
- * bind, over the read cache as theirs is, so a warm copy is served only
- * once the path is admitted; an unjudged one scans the raw adapter.
+ * bind; an unjudged one scans the mount's own table. Either reads its
+ * content at the door, which admits the path before a warm serve.
  * Mirrors Python's scan_io.
  */
 export function scanIo<A extends Accessor>(
@@ -141,16 +127,12 @@ export function scanIo<A extends Accessor>(
 ): [CommandIO<A>, boolean] {
   const scoped = ns?.scoped
   if (!scoped?.(rstripSlash(prefix ?? '') || '/')) return [ops, false]
-  return [withCommandGuards(withPolicyGuard(withReadCache(ops), prefix), prefix), true]
+  return [withCommandGuards(withPolicyGuard(withStatCache(ops), prefix), prefix), true]
 }
 
-// The builder tier's cache and slash wraps, chosen at registration from
+// The builder tier's stat and slash wraps, chosen at registration from
 // the builder's read/write kind and applied per invocation on top of
-// the path guards (mirror Python's _read_wraps/_stat_wraps/_write_wraps).
-function readWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
-  return withSlashGuard(withReadCache(ops))
-}
-
+// the path guards (mirror Python's _stat_wraps/_write_wraps).
 function statWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return withSlashGuard(withStatCache(ops))
 }
@@ -221,7 +203,7 @@ export function genericCommands(vfs: string, options: GenericCommandsOptions = {
     // Path guards are applied per invocation, over the stamped adapter,
     // inside the command closure below. The mount's table stays untouched
     // for the op door, which does its own enforcement.
-    const finish = b.read === true ? readWraps : b.write === true ? writeWraps : statWraps
+    const finish = b.write === true && b.read !== true ? writeWraps : statWraps
     // A nested mount's keys live in another VFS and no VFS
     // stores a symlink, so a glob resolved by one backend's readdir
     // misses both. The names are session-scoped, so the fact is stamped
@@ -240,10 +222,11 @@ export function genericCommands(vfs: string, options: GenericCommandsOptions = {
     // namespace has to mean an absent key rather than an undefined value.
     // Python's `glob_children` is `| None` and takes the uniform path.
     // Command path restrictions speak first, then the coded preVfs
-    // hooks, both outside the cache wraps (`finish`) so a refusal fires
-    // before a warm serve, the dispatcher's own order at the op door. A
-    // probe answer is served below them (withProbeAnswers on the raw
-    // adapter), so they still judge every path before it. The
+    // hooks, both outside the stat and slash wraps (`finish`). Content
+    // reads are the door's (withDoorReads on the mount's table), which
+    // judges them itself before a warm serve. A probe answer is served
+    // below the guards (withProbeAnswers on the raw adapter), so they
+    // still judge every path before it. The
     // invocation's mount prefix rides into its wrap-time scope for
     // readers drained after the gate scopes return. Under a hide or a
     // path rule the native subtree ops are set aside (scopedIo), so

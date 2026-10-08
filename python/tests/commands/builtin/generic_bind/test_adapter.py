@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import dataclasses
 import errno
 
 import pytest
@@ -441,20 +440,6 @@ def _policy_probe_ops(calls: list[tuple[str, ...]]) -> CommandIO:
 async def _probe_chunks(calls: list[tuple[str, ...]], path: PathSpec):
     calls.append(("stream", path.virtual))
     yield b"x"
-
-
-@pytest.mark.asyncio
-async def test_command_path_guard_admits_before_a_warm_serve(monkeypatch):
-    gate = _Gate("/data/secret")
-    monkeypatch.setattr(adapter, "get_admission", lambda: gate)
-    calls: list[tuple[str, ...]] = []
-    ops = with_command_guards(
-        dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
-    )
-    with pytest.raises(PermissionError):
-        await ops.read_bytes(NOOPAccessor(), _spec("/data/secret"))
-    assert await ops.read_bytes(NOOPAccessor(), _spec("/data/open")) == b"warm"
-    assert gate.asked == ["/data/secret", "/data/open"]
 
 
 async def _warm_read(accessor, path, index=None):
@@ -1168,18 +1153,16 @@ async def test_policy_guard_admits_slots_and_leaves_stat_alone():
     gtoken = set_mount_gate("/data", MountMode.WRITE)
     try:
         ops = with_policy_guard(raw)
-        with pytest.raises(PermissionError) as excinfo:
-            await ops.read_bytes(acc, _spec("/data/secret"))
-        assert excinfo.value.errno == errno.EACCES
-        assert ("read", "/data/secret") not in calls
-        # The stream gates before its first chunk.
-        with pytest.raises(PermissionError):
-            async for _ in ops.read_stream(acc, _spec("/data/secret")):
-                pass
-        assert ("stream", "/data/secret") not in calls
+        # Content reads are the door's, which admits them itself.
+        assert ops.read_bytes is raw.read_bytes
+        assert ops.read_stream is raw.read_stream
         # stat is not a guarded slot: deny is present and refused.
         assert (await ops.stat(acc, _spec("/data/secret"))).size == 1
         # readdir asks about the directory it lists.
+        with pytest.raises(PermissionError) as excinfo:
+            await ops.readdir(acc, _spec("/data/secret"))
+        assert excinfo.value.errno == errno.EACCES
+        assert ("readdir", "/data/secret") not in calls
         assert await ops.readdir(acc, _spec("/data/dir")) == ["a"]
         # A copy's source is a read; its destination is a write.
         await ops.copy(acc, _spec("/data/src"), _spec("/data/dst"))
@@ -1188,8 +1171,6 @@ async def test_policy_guard_admits_slots_and_leaves_stat_alone():
     finally:
         reset_mount_gate(gtoken)
         reset_op_policies(ptoken)
-    assert ("read_bytes", "/data/secret", False) in policy.asked
-    assert ("read_stream", "/data/secret", False) in policy.asked
     assert ("readdir", "/data/dir", False) in policy.asked
     assert ("copy", "/data/src", False) in policy.asked
     assert ("copy", "/data/dst", True) in policy.asked
@@ -1198,30 +1179,10 @@ async def test_policy_guard_admits_slots_and_leaves_stat_alone():
 
 
 @pytest.mark.asyncio
-async def test_policy_guard_admits_before_a_warm_serve():
-    # The guard wraps outside the cache tier (`finish` in the factory),
-    # so a warm reader below it never answers a refused read.
-    calls: list[tuple[str, ...]] = []
-    warm = dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
-    acc = NOOPAccessor()
-    policy = _SealedRead("/data/secret")
-    ptoken = set_op_policies(Policies([policy]))
-    gtoken = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        ops = with_policy_guard(warm)
-        with pytest.raises(PermissionError):
-            await ops.read_bytes(acc, _spec("/data/secret"))
-        assert await ops.read_bytes(acc, _spec("/data/open")) == b"warm"
-    finally:
-        reset_mount_gate(gtoken)
-        reset_op_policies(ptoken)
-
-
-@pytest.mark.asyncio
-async def test_policy_guard_wrap_time_capture_covers_late_drains():
-    # head/tail/wc bind lazy readers the pipeline drains after dispatch
-    # has reset the context; the guard captured at wrap time still
-    # answers (_live_policy_scope).
+async def test_policy_guard_wrap_time_capture_covers_late_calls():
+    # A slot called after dispatch has reset the context is still
+    # admitted by the scope the guard captured at wrap time
+    # (_live_policy_scope).
     calls: list[tuple[str, ...]] = []
     raw = _policy_probe_ops(calls)
     acc = NOOPAccessor()
@@ -1233,10 +1194,7 @@ async def test_policy_guard_wrap_time_capture_covers_late_drains():
     finally:
         reset_mount_gate(gtoken)
         reset_op_policies(ptoken)
-    # Both the slot call and the drain happen outside the window now.
+    # The slot call happens outside the window now.
     with pytest.raises(PermissionError):
-        async for _ in ops.read_stream(acc, _spec("/data/secret")):
-            pass
-    assert ("stream", "/data/secret") not in calls
-    with pytest.raises(PermissionError):
-        await ops.read_bytes(acc, _spec("/data/secret"))
+        await ops.readdir(acc, _spec("/data/secret"))
+    assert ("readdir", "/data/secret") not in calls

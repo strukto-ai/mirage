@@ -424,8 +424,9 @@ describe('a nested line', () => {
     expect((await ws.shell(line)).exitCode).toBe(0)
     const opPaths = (marks: Mark[] | undefined) => (marks ?? []).map(([op, path]) => [op, path])
     expect(opPaths(captured[0]?.[0])).toEqual([['write', '/r/h']])
+    // The nested cat is served the entry the first one kept.
     expect(
       opPaths(captured[1]?.[0]).filter(([op, path]) => op === 'read' && path === '/r/f'),
-    ).toHaveLength(2)
+    ).toHaveLength(1)
   })
 })

@@ -50,9 +50,11 @@ import { CycleError, norm, parent, posixNormpath } from '../../utils/path.ts'
 import type { Visibility } from '../../types.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import {
+  activeRecords,
   commandRecords,
   record,
   runWithMountContext,
+  runWithRecording,
   runWithRevisions,
   startOp,
 } from '../../observe/context.ts'
@@ -335,11 +337,6 @@ interface Call {
   write: boolean
   /** Whether a read is answered as it is pulled. */
   stream: boolean
-}
-
-/** Whether the caller asked for the stored bytes, no renderer. */
-function rawRead(call: Call): boolean {
-  return call.kwargs?.filetype === null
 }
 
 /** The filetype a read is rendered as, null for none. */
@@ -830,10 +827,11 @@ export class Dispatcher {
   /**
    * Answer a read from the file cache, or null to read the backend.
    *
-   * The file cache holds what commands read, keyed on the path alone. A
-   * raw read, or a read through a filetype renderer (whoever registered
-   * it), asks for a different value under the same key, so it is neither
-   * served from that cache nor kept in it. The cache holds the whole
+   * The file cache holds what commands read, keyed on the path alone: the
+   * stored bytes, which are the rendering for a VFS with no `read` of its
+   * own. A read through a filetype renderer (whoever registered it) asks
+   * for a different value under the same key, so it is neither served
+   * from that cache nor kept in it. The cache holds the whole
    * object, so a ranged read is answered by slicing it, never by handing
    * back the whole file: the window is what the caller asked for instead
    * of the file, and git reads pack indexes this way. sliceWindow is the
@@ -846,7 +844,7 @@ export class Dispatcher {
     vfs: BaseVFS,
     boundary: Boundary,
   ): Promise<Uint8Array | null> {
-    if (!vfs.cachesReads || rawRead(call) || !DISPATCH_READ_OPS.has(call.name)) return null
+    if (!vfs.cachesReads || !DISPATCH_READ_OPS.has(call.name)) return null
     const cached = await this.cache.get(call.path.virtual)
     if (
       cached === null ||
@@ -885,7 +883,6 @@ export class Dispatcher {
     const [offset, size] = readWindow(call.kwargs)
     const whole = offset === 0 && size === null
     return vfs.cachesReads &&
-      !rawRead(call) &&
       DISPATCH_READ_OPS.has(call.name) &&
       size !== 0 &&
       (whole || !mount.readsRanges(call.path.virtual)) &&
@@ -942,10 +939,20 @@ export class Dispatcher {
     // mirroring Python's Mount.call.
     const opOverride = mount.commandLimits.get(name) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
+    // A fill keeps the token its backend records with the read; a read
+    // outside a line (FUSE, ws.vfs) records into a scope of its own for that.
+    const recorded = <T>(fill: () => Promise<T>): Promise<T> =>
+      filler !== null && activeRecords() === undefined
+        ? runWithRecording(fill).then(([value]) => value)
+        : fill()
     let result
     try {
       if (this.streams(call, mount, vfs)) {
-        return [await this.openStream(call, mount, scope, filler), renameDst, fullArgs]
+        return [
+          await recorded(() => this.openStream(call, mount, scope, filler)),
+          renameDst,
+          fullArgs,
+        ]
       }
       const run = (opKwargs: OpKwargs, onCall?: (call: Promise<unknown>) => void) =>
         mount.use(async () => {
@@ -965,10 +972,12 @@ export class Dispatcher {
           return wrapStream(answer, mount.mountId, mount.activity)
         })
       if (filler !== null) {
-        const kept = await filler.fill(
-          p,
-          () => run(wholeRead(fullKwargs)),
-          () => !this.rendersRead(call, mount),
+        const kept = await recorded(() =>
+          filler.fill(
+            p,
+            () => run(wholeRead(fullKwargs)),
+            () => !this.rendersRead(call, mount),
+          ),
         )
         result =
           whole || !(kept instanceof Uint8Array) ? kept : sliceWindow(kept, readOffset, readSize)

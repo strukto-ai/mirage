@@ -49,7 +49,13 @@ from mirage.errors.fs import (
 )
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly
-from mirage.observe.context import command_records, record, start_op
+from mirage.observe.context import (
+    RecordingScope,
+    active_recorder,
+    command_records,
+    record,
+    start_op,
+)
 from mirage.observe.record import OpRecord
 from mirage.policy.boundary import Boundary
 from mirage.policy.errors import PolicyDenied, PolicyError
@@ -422,11 +428,6 @@ class _Call:
     no_follow: bool
     write: bool
     stream: bool = False
-
-    @property
-    def raw(self) -> bool:
-        """Whether the caller asked for the stored bytes, no renderer."""
-        return "filetype" in self.kwargs and self.kwargs["filetype"] is None
 
     @property
     def window(self) -> tuple[int, int | None]:
@@ -901,9 +902,10 @@ class Dispatcher:
     ) -> bytes | None:
         """Answer a read from the file cache, or None to read the backend.
 
-        The file cache holds what commands read, keyed on the path alone.
-        A raw read, or a read through a filetype renderer (whoever
-        registered it), asks for a different value under the same key, so
+        The file cache holds what commands read, keyed on the path alone:
+        the stored bytes, which are the rendering for a VFS with no
+        ``read`` of its own. A read through a filetype renderer (whoever
+        registered it) asks for a different value under the same key, so
         it is neither served from that cache nor kept in it. The cache
         holds the whole object, so a ranged read is answered by slicing
         it, never by handing back the whole file: the window is what the
@@ -916,11 +918,7 @@ class Dispatcher:
             mount (MountEntry): the mount serving its path.
             boundary (Boundary): the boundary the op completes through.
         """
-        if (
-            not mount.vfs.caches_reads
-            or call.raw
-            or call.name not in DISPATCH_READ_OPS
-        ):
+        if not mount.vfs.caches_reads or call.name not in DISPATCH_READ_OPS:
             return None
         cached = await self._cache.get(call.path.virtual)
         if (
@@ -965,7 +963,6 @@ class Dispatcher:
         offset, size = call.window
         if (
             mount.vfs.caches_reads
-            and not call.raw
             and call.name in DISPATCH_READ_OPS
             and size != 0
             and (
@@ -1006,6 +1003,12 @@ class Dispatcher:
                     vfs_path=mount_key(value.virtual, prefix),
                 )
         result: Any
+        # A fill keeps the token its backend records with the read; a
+        # read outside a line (FUSE, ws.vfs) records into a scope of its
+        # own for that.
+        scope = RecordingScope(
+            active=filler is not None and active_recorder() is None
+        )
         try:
             if call.name == "setattr":
                 result = await self._apply_setattr(mount, call.path, kwargs)
@@ -1057,6 +1060,8 @@ class Dispatcher:
             # output cap do next: stamped here so a failure in any of
             # them cannot erase a transfer the backend already made.
             _served(call.report, result)
+        finally:
+            scope.close()
         return result
 
     def _streams(self, call: _Call, mount: MountEntry) -> bool:

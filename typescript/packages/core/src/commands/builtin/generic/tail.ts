@@ -18,7 +18,6 @@ import { STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import { argmatchError } from '../../spec/usage.ts'
@@ -439,7 +438,7 @@ export async function tailGeneric(
   // what it is polling for is exactly the change the cached body does
   // not have yet.
   const backend = stream
-  stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
+  stream = stdinStream(stream, opts.stdin)
   if (typeof parsed === 'string')
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   const { counts, quiet: qFlag, verbose: vFlag, following } = parsed

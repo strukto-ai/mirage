@@ -15,7 +15,6 @@
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { countDocuments } from '../../../core/mongodb/client.ts'
 import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
-import { streamAny } from '../../../core/mongodb/read.ts'
 import { documentsExist } from '../../../core/mongodb/readdir.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
@@ -86,7 +85,9 @@ async function wc(
     const out: ByteSource | null = formatCountRows(rows, [total], resolved.length, parsed.total)
     return [out, new IOResult({ countedRuns: rows })]
   }
-  return wcGeneric(resolved, texts, opts, (p) => streamAny(accessor, p, opts.index ?? undefined))
+  return wcGeneric(resolved, texts, opts, (p) =>
+    mountIo(opts).readStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const MONGODB_WC = command({

@@ -12,133 +12,61 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Every read-content command funnels its file read through one of these
-// shared consumers, which wrap the injected reader with cacheAware* at the
-// choke point. A backend can therefore pass a RAW reader and warm reads
-// still serve from cache. These tests pin that guarantee: with a warm
-// manager active, the consumer must NOT call the backend reader.
-
-import { mountKey } from '../../utils/key_prefix.ts'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { runWithCacheManager } from '../../cache/context.ts'
-import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import { CacheManager } from '../../cache/manager.ts'
-import { materialize } from '../../io/types.ts'
-import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../config.ts'
-import { grepGeneric } from './generic/grep.ts'
-import { headGeneric } from './generic/head.ts'
-import { rgGeneric } from './generic/rg.ts'
-import { tailGeneric } from './generic/tail.ts'
-import { wcGeneric } from './generic/wc.ts'
+import { createShellParser } from '../../shell/parse/index.ts'
+import { MountMode, type PathSpec } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 
-const PAYLOAD = new TextEncoder().encode('alpha\nbeta\n')
+const require = createRequire(import.meta.url)
+const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
+const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
-class CountingStream {
-  calls = 0
-  stream = (_p: PathSpec): AsyncIterable<Uint8Array> => {
-    this.calls += 1
-    const data = PAYLOAD
-    return (async function* () {
-      await Promise.resolve()
-      yield data
-    })()
-  }
-}
-
-function spec(): PathSpec {
-  return new PathSpec({
-    virtual: '/s3/a.txt',
-    directory: '/s3/',
-    vfsPath: mountKey('/s3/a.txt', '/s3/'),
-  })
-}
-
-async function warmManager(): Promise<CacheManager> {
-  const cache = new RAMFileCacheStore()
-  await cache.set('/s3/a.txt', PAYLOAD)
-  return new CacheManager(cache, null, '/s3/', true)
-}
-
-function statOf(_p: PathSpec): Promise<FileStat> {
-  return Promise.resolve(
-    new FileStat({
-      name: 'a.txt',
-      size: PAYLOAD.length,
-      type: FileType.FILE,
-      content: ContentType.TEXT,
-    }),
-  )
-}
-
-function readdirOf(_p: PathSpec): Promise<string[]> {
-  return Promise.resolve([])
-}
-
-function opts(flags: Record<string, string | boolean | number | string[]> = {}): CommandOpts {
-  return {
-    stdin: null,
-    flags,
-    cwd: '/',
-  }
-}
-
-async function out(result: CommandFnResult): Promise<string> {
-  if (result === null) return ''
-  const [source] = result
-  if (source === null) return ''
-  return new TextDecoder().decode(await materialize(source))
-}
-
-describe('warm reads serve cache uniformly across shared consumers', () => {
-  it('headGeneric serves cache without the backend (built in-scope, drained after)', async () => {
-    const reader = new CountingStream()
-    const manager = await warmManager()
-    // Build in scope, drain outside: also pins eager capture in the multi path.
-    const result = await runWithCacheManager(manager, () =>
-      headGeneric([spec()], [], opts({ lines: '1' }), statOf, reader.stream),
+describe('a warm read command reads nothing from the backend', () => {
+  // Every read command reads at the door, which serves the warm entry
+  // whatever reader the command binds.
+  it.each([
+    'cat /c/a.txt',
+    'head -n 1 /c/a.txt',
+    'tail -n 1 /c/a.txt',
+    'wc -l /c/a.txt',
+    'grep alpha /c/a.txt',
+    'rg alpha /c/a.txt',
+  ])('%s', async (line) => {
+    const ram = new RAMVFS()
+    Object.assign(ram, { cachesReads: true })
+    const ws = new Workspace(
+      { '/c': ram },
+      {
+        mode: MountMode.WRITE,
+        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+      },
     )
-    expect(await out(result)).toBe('alpha\n')
-    expect(reader.calls).toBe(0)
-  })
-
-  it('tailGeneric serves cache without the backend', async () => {
-    const reader = new CountingStream()
-    const manager = await warmManager()
-    const result = await runWithCacheManager(manager, () =>
-      tailGeneric([spec()], [], opts({ n: '1' }), reader.stream, statOf),
-    )
-    expect(await out(result)).toBe('beta\n')
-    expect(reader.calls).toBe(0)
-  })
-
-  it('wcGeneric serves cache without the backend', async () => {
-    const reader = new CountingStream()
-    const manager = await warmManager()
-    const result = await runWithCacheManager(manager, () =>
-      wcGeneric([spec()], [], opts({ args_l: true }), reader.stream),
-    )
-    expect(await out(result)).toContain('2')
-    expect(reader.calls).toBe(0)
-  })
-
-  it('grepGeneric serves cache without the backend', async () => {
-    const reader = new CountingStream()
-    const manager = await warmManager()
-    const result = await runWithCacheManager(manager, () =>
-      grepGeneric('grep', [spec()], ['alpha'], opts(), statOf, readdirOf, reader.stream),
-    )
-    expect(await out(result)).toContain('alpha')
-    expect(reader.calls).toBe(0)
-  })
-
-  it('rgGeneric serves cache without the backend', async () => {
-    const reader = new CountingStream()
-    const manager = await warmManager()
-    const result = await runWithCacheManager(manager, () =>
-      rgGeneric([spec()], ['alpha'], opts(), statOf, readdirOf, reader.stream),
-    )
-    expect(await out(result)).toContain('alpha')
-    expect(reader.calls).toBe(0)
+    try {
+      await ws.shell("printf 'alpha\\nbeta\\n' > /c/a.txt")
+      await ws.shell('cat /c/a.txt')
+      const reads: string[] = []
+      const read = ram.read.bind(ram)
+      const readStream = ram.readStream.bind(ram)
+      Object.assign(ram, {
+        read: (path: PathSpec, ...rest: [IndexCacheStore?, number?, (number | null)?]) => {
+          reads.push(path.virtual)
+          return read(path, ...rest)
+        },
+        readStream: (path: PathSpec, index?: IndexCacheStore) => {
+          reads.push(path.virtual)
+          return readStream(path, index)
+        },
+      })
+      const out = await ws.shell(line)
+      expect(out.stdout.byteLength).toBeGreaterThan(0)
+      expect(out.exitCode).toBe(0)
+      expect(reads).toEqual([])
+    } finally {
+      await ws.close()
+    }
   })
 })

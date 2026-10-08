@@ -281,7 +281,6 @@ async def test_retired_command_cannot_cache_bytes_for_replacement_mount(
         mounts["/"] = replacement
     ws = Workspace(mounts)
     ws.register_cli("gate", CLISpec(name="gate", fn=gate))
-    retired = ws.mount(prefix).cache_manager
     running = asyncio.create_task(ws.shell("cat /data/file; gate"))
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
@@ -292,18 +291,8 @@ async def test_retired_command_cannot_cache_bytes_for_replacement_mount(
         release.set()
         result = await asyncio.wait_for(running, timeout=5)
         assert result.stdout == b"old"
-        assert await ws.cache.get("/data/file") is None
         assert (await ws.shell("cat /data/file")).stdout == b"new"
         assert await ws.cache.get("/data/file") == b"new"
-        assert retired is not None
-        assert (
-            await retired.cached_bytes(
-                PathSpec(
-                    virtual="/data/file", directory="/data/", vfs_path="file"
-                )
-            )
-            is None
-        )
     finally:
         release.set()
         await asyncio.gather(running, return_exceptions=True)

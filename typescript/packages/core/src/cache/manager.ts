@@ -28,14 +28,6 @@ import { IndexView } from './index/view.ts'
 import { withCacheMutation, latestFingerprint } from './file/io.ts'
 
 /**
- * Default read gate: trust the cache. A manager built outside a workspace
- * has no reconciler to ask.
- */
-function alwaysServe(_key: string): Promise<boolean> {
-  return Promise.resolve(true)
-}
-
-/**
  * Post-mutation cache coherence for one mount.
  *
  * A backend mutation has two cache consequences: the file-cache entry
@@ -52,11 +44,6 @@ export class CacheManager {
   private readonly prefix: string
   private readonly cachesReads: boolean
   private readonly ownsPath: (path: string) => boolean
-  // The read gate, injected because this class holds no mount and no
-  // dispatcher and `cache/context.ts` documents that dependency as one-way.
-  // Answers whether a warm entry may still be served.
-  private readonly mayServeCached: (key: string) => Promise<boolean>
-
   private readGeneration = 0
   private view: IndexView | null = null
   // Folder to the tick and the monotonic millisecond its listing was last
@@ -81,10 +68,9 @@ export class CacheManager {
     prefix: string,
     cachesReads: boolean,
     ownsPath: (path: string) => boolean = () => true,
-    mayServeCached: (key: string) => Promise<boolean> = alwaysServe,
     private readonly readTtl: number = DEFAULT_READ_TTL,
-    // Cleanup for a child a re-list found gone, injected for the same
-    // one-way reason as the read gate; undefined cleans nothing.
+    // Cleanup for a child a re-list found gone, injected because this class
+    // holds no mount and no dispatcher; undefined cleans nothing.
     private readonly onGone?: (gone: readonly Evicted[]) => Promise<void>,
     // The listing gate every view of this mount asks before serving a
     // cached listing; undefined serves them all.
@@ -96,7 +82,6 @@ export class CacheManager {
     this.prefix = rstripSlash(prefix)
     this.cachesReads = cachesReads
     this.ownsPath = ownsPath
-    this.mayServeCached = mayServeCached
   }
 
   /** Drain raw backend index access before mount cache eviction. */
@@ -422,42 +407,10 @@ export class CacheManager {
   }
 
   /**
-   * Return cached bytes for `path` if present and still valid.
-   *
-   * Never fetches content from the backend. The single read-cache check the
-   * shared read-through wrappers (`cache/read_through.ts`) read through, so
-   * warm reads are served from the file cache without the command knowing
-   * about it. No-op for local or non-caching mounts.
-   *
-   * This is the second of the two doors that serve cached bytes, and it is
-   * the one every shell read uses; the gate runs the same verdict function
-   * as the dispatcher's door, so the two cannot drift apart. Order is
-   * load-bearing: `exists` first, so a cold path costs no backend stat, and
-   * `get` only after the gate, so a STALE verdict's eviction is not raced by
-   * a fetch.
-   */
-  async cachedBytes(path: PathSpec): Promise<Uint8Array | null> {
-    const key = this.cacheKey(path)
-    const cache = this.readableCache(key)
-    if (cache === null) return null
-    if (!(await cache.exists(key))) return null
-    if (!(await this.mayServeCached(key))) return null
-    const cached = await cache.get(key)
-    return this.ownsPath(key) ? cached : null
-  }
-
-  /** Cache a complete backend read before a consumer transforms it. */
-  async readThrough(path: PathSpec, fetch: () => Promise<Uint8Array>): Promise<Uint8Array> {
-    const cached = await this.cachedBytes(path)
-    if (cached !== null) return cached
-    return this.fill(path, fetch)
-  }
-
-  /**
    * Run a cold whole-file read and keep its bytes for the next one.
    *
-   * The fill half of `readThrough`, for a door that probed the cache
-   * itself (the dispatcher's). A write that lands while the fetch runs
+   * For the dispatcher, which probed the cache itself. A write that lands
+   * while the fetch runs
    * retires the generation, so the bytes it read are not kept; an answer
    * that is not bytes is returned and kept nowhere. `keep`, when given, is
    * asked after the fetch with the cache's mutation lock held and has the

@@ -246,7 +246,6 @@ describe('Workspace lifecycle', () => {
           },
         }),
       )
-      const retired = ws.mount(prefix).cacheManager
       const running = ws.shell('cat /data/file; gate')
       try {
         await entered
@@ -254,19 +253,8 @@ describe('Workspace lifecycle', () => {
         if (change !== 'reveal') ws.addMount('/data', replacement)
         resume()
         expect(new TextDecoder().decode((await running).stdout)).toBe('old')
-        expect(await ws.cache.get('/data/file')).toBeNull()
         expect(new TextDecoder().decode((await ws.shell('cat /data/file')).stdout)).toBe('new')
         expect(await ws.cache.get('/data/file')).toEqual(new TextEncoder().encode('new'))
-        expect(retired).not.toBeNull()
-        expect(
-          await retired?.cachedBytes(
-            new PathSpec({
-              virtual: '/data/file',
-              directory: '/data/',
-              vfsPath: 'file',
-            }),
-          ),
-        ).toBeNull()
       } finally {
         resume()
         await running

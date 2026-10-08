@@ -27,7 +27,10 @@ from mirage.cache.index.config import IndexConfig
 from mirage.cache.index.factory import build_index
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
-from mirage.commands.builtin.generic_bind.adapter import command_io
+from mirage.commands.builtin.generic_bind.adapter import (
+    command_io,
+    with_door_reads,
+)
 from mirage.commands.builtin.utils.limit import (
     run_with_timeout,
     with_pull_timeout,
@@ -63,6 +66,7 @@ from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
     push_mount_context,
@@ -127,6 +131,8 @@ async def _command_output(
             if isinstance(exc, UsageError)
             else read_fail_exit_code(command, exc)
         )
+    finally:
+        await close_quietly(source)
 
 
 def _wrap_mount_streams(
@@ -950,7 +956,11 @@ class MountEntry:
             ),
             mount_prefix=mount_prefix,
             index=self.index,
-            io=self.io,
+            io=(
+                with_door_reads(self.io, context.dispatch)
+                if context.dispatch is not None
+                else self.io
+            ),
             dispatch=context.dispatch,
             session_id=context.session_id,
             env=context.env,
@@ -1244,8 +1254,10 @@ class MountEntry:
         filetype. That is what a read-modify-write needs: it hands
         whatever it read straight back to ``write``, which always stores,
         so reading a rendered form would store the rendering over the
-        file. TypeScript spells the same override
-        ``readFile(path, {raw: true})``.
+        file. A VFS with no ``read`` of its own (gdocs, gsheets, gslides)
+        stores the rendering, so its stored bytes are the renderer's.
+        TypeScript spells the same override ``readFile(path, {raw:
+        true})``.
 
         Args:
             name (str): operation name (e.g. "read", "stat").
@@ -1257,6 +1269,8 @@ class MountEntry:
                 if "filetype" in kwargs
                 else get_extension(path)
             )
+            if filetype is None and not self.vfs.supports("read"):
+                filetype = get_extension(path)
             levels = self._callers(name, filetype)
             if not levels:
                 raise enotsup(str(self.vfs.name), name, path)

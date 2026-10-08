@@ -54,6 +54,7 @@ from mirage.errors.fs import (
 )
 from mirage.errors.types import DotWalkError
 from mirage.io import IOResult
+from mirage.io.stream import close_quietly, ensure_stream, materialize
 from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, get_op_policies, pre_vfs_gate
 from mirage.runtime.types import DispatchFn
@@ -335,7 +336,6 @@ def command_io(vfs: BaseVFS) -> CommandIO:
             if streams
             else functools.partial(stream_from_bytes, read_bytes)
         ),
-        streams_bytes=not streams,
         read_range=read_bytes if vfs.reads_ranges else None,
         exists=slot("exists") or functools.partial(_exists_by_stat, vfs),
         find=slot("find"),
@@ -381,6 +381,75 @@ def command_io(vfs: BaseVFS) -> CommandIO:
             if vfs.supports("narrow_paths")
             else None
         ),
+    )
+
+
+async def _door_bytes(
+    dispatch: DispatchFn,
+    accessor: Accessor | None,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+    offset: int = 0,
+    size: int | None = None,
+) -> bytes:
+    """A command's whole or ranged read of the stored bytes, at the door.
+
+    Args:
+        dispatch (DispatchFn): the command's dispatcher.
+        accessor (Accessor | None): unused; the door finds the mount.
+        path (PathSpec): the file.
+        index (IndexCacheStore): unused; the mount brings its own.
+        offset (int): first byte of the window.
+        size (int | None): window length, None for the rest.
+    """
+    data, _ = await dispatch(
+        "read", path, filetype=None, offset=offset, size=size
+    )
+    return await materialize(data) or b""
+
+
+async def _door_stream(
+    dispatch: DispatchFn,
+    accessor: Accessor | None,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> AsyncIterator[bytes]:
+    """A command's streamed read of the stored bytes, at the door.
+
+    Opened at the first pull, as a backend stream is.
+
+    Args:
+        dispatch (DispatchFn): the command's dispatcher.
+        accessor (Accessor | None): unused; the door finds the mount.
+        path (PathSpec): the file.
+        index (IndexCacheStore): unused; the mount brings its own.
+    """
+    data, _ = await dispatch("read", path, stream=True, filetype=None)
+    source = ensure_stream(data)
+    try:
+        async for chunk in source:
+            yield chunk
+    finally:
+        await close_quietly(source)
+
+
+def with_door_reads(ops: CommandIO, dispatch: DispatchFn) -> CommandIO:
+    """Return ``ops`` whose content reads go through the dispatcher.
+
+    The door checks hides, the command's path rule, the mount's mode and
+    policy, serves a warm copy and fills a cold one, so a command's read
+    answers what the same read through ``ws.vfs`` or FUSE answers.
+
+    Args:
+        ops (CommandIO): the mount's table.
+        dispatch (DispatchFn): the command's dispatcher.
+    """
+    reader = functools.partial(_door_bytes, dispatch)
+    return replace(
+        ops,
+        read_bytes=reader,
+        read_stream=functools.partial(_door_stream, dispatch),
+        read_range=reader if ops.read_range is not None else None,
     )
 
 
@@ -581,6 +650,8 @@ async def _drain_refusing_dirs(
         if await _read_hit_a_dir(ops, accessor, index, path, exc):
             raise eisdir(path) from None
         raise
+    finally:
+        await close_quietly(source)
     if empty and await _read_hit_a_dir(ops, accessor, index, path, None):
         raise eisdir(path)
 
@@ -593,11 +664,6 @@ def _guarded_read_stream(
     index: IndexCacheStore = NULL_INDEX,
     **kwargs: Any,
 ) -> AsyncIterator[bytes]:
-    # A plain def, for the reason `cache_aware_read_stream`'s reader is
-    # one: the wrapped op may capture per-call scope, and the
-    # read-through cache reads the active CacheManager here. An async
-    # generator would defer that call to drain time, when the mount's
-    # cache-manager scope is already gone, so every warm read missed.
     return _drain_refusing_dirs(
         ops, accessor, index, path, fn(accessor, path, index, **kwargs)
     )
@@ -1191,13 +1257,10 @@ async def _walked_stream(
     """
     try:
         await admit()
-    except BaseException:
-        close = getattr(source, "aclose", None)
-        if close is not None:
-            await close()
-        raise
-    async for chunk in source:
-        yield chunk
+        async for chunk in source:
+            yield chunk
+    finally:
+        await close_quietly(source)
 
 
 def _walked_call(
@@ -1410,12 +1473,11 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
     def guarded_stream(
         accessor: Accessor, path: PathSpec, *args: Any, **kwargs: Any
     ) -> AsyncIterator[bytes]:
-        # The path restrictions now, the walk at the first pull, as
-        # TypeScript's walkedStream does: a reader that turns a failed
-        # open into its own words (awk's `cannot open`) relays the stream
-        # through its own handler, so a walk that already failed (a link
-        # loop) must surface where it drains.
-        _check_command_paths([path], "read_stream")
+        # The walk at the first pull, as TypeScript's walkedStream does:
+        # a reader that turns a failed open into its own words (awk's
+        # `cannot open`) relays the stream through its own handler, so a
+        # walk that already failed (a link loop) must surface where it
+        # drains. Hides and the path rule are the door's.
 
         async def admit() -> None:
             if path.walk_error is not None:
@@ -1433,8 +1495,12 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
         fn = special.get(slot, getattr(ops, slot))
         if fn is None or slot == "read_stream":
             continue
-        guarded = functools.partial(
-            _command_call, fn, slot, check_mode=slot != "mkdir"
+        guarded = (
+            fn
+            if slot in _READ_SLOTS
+            else functools.partial(
+                _command_call, fn, slot, check_mode=slot != "mkdir"
+            )
         )
         if slot == "exists":
             guarded = functools.partial(_guarded_exists, guarded)
@@ -1578,8 +1644,7 @@ async def _policy_call(
 
     Async, unlike the sync guards it wraps: the hooks are user
     coroutines. Every slot this wraps returns an awaitable, so the
-    shape is preserved; read_stream and readdir have their own
-    wrappers.
+    shape is preserved; readdir has its own wrapper.
 
     Args:
         scope (_PolicyScope): the wrap-time capture.
@@ -1627,77 +1692,14 @@ async def _policy_readdir(
     return entries
 
 
-def _policy_stream(
-    scope: _PolicyScope, fn: OperationFn, *args: Any, **kwargs: Any
-) -> Any:
-    """Read-stream admitted through pre_vfs before the first chunk.
-
-    A plain def for the reason ``_guarded_read_stream`` is one: the
-    inner op captures per-call scope eagerly (the read-through cache
-    reads the active manager here), so it is built now, which runs no
-    I/O; the admission itself is async, so it rides the returned
-    generator, before any byte is pulled.
-
-    Args:
-        scope (_PolicyScope): the wrap-time capture.
-        fn (OperationFn): the guarded backend read_stream.
-        *args: the call's positionals; the first PathSpec is the file
-            being read.
-        **kwargs: forwarded untouched.
-    """
-    policies, prefix, session_id = _live_policy_scope(scope)
-    spec = next((a for a in args if isinstance(a, PathSpec)), None)
-    if policies is None or spec is None:
-        return fn(*args, **kwargs)
-    return _policy_stream_drain(
-        policies, prefix, session_id, spec, fn(*args, **kwargs)
-    )
-
-
-async def _policy_stream_drain(
-    policies: Policies,
-    prefix: str,
-    session_id: str,
-    path: PathSpec,
-    source: AsyncIterator[bytes],
-) -> AsyncIterator[bytes]:
-    """Drain ``source`` once the read is admitted; close it if refused.
-
-    Args:
-        policies (Policies): the bound admission policies.
-        prefix (str): the executing mount's prefix.
-        session_id (str): the session the command runs under.
-        path (PathSpec): the file being read.
-        source (AsyncIterator[bytes]): the not-yet-started inner stream.
-    """
-    try:
-        await pre_vfs_gate(
-            policies,
-            "read_stream",
-            path,
-            False,
-            prefix,
-            session_id,
-            check_hidden=False,
-        )
-    except BaseException:
-        close = getattr(source, "aclose", None)
-        if close is not None:
-            await close()
-        raise
-    async for chunk in source:
-        yield chunk
-
-
 def with_policy_guard(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` whose content and mutation slots admit each
+    """Return ``ops`` whose mutation slots and readdir admit each
     PathSpec through the workspace's coded pre_vfs hooks.
 
-    The coded-policy arm of the guard chain, applied outside the cache
-    wraps so admission fires before a warm serve, the dispatcher's own
-    order. The surface is the path rules' plus readdir: content reads
-    (read_bytes, read_stream, read_range), every mutation slot, and
-    the directory a readdir lists. stat/exists stay unguarded as
+    The coded-policy arm of the guard chain. The surface is every
+    mutation slot and the directory a readdir lists; content reads go
+    through the dispatcher, which admits them itself
+    (``with_door_reads``). stat/exists stay unguarded as
     presence facts, the mode-000 shape the path rules already take, so
     a denied entry still lists and stats while the read of it is what
     fails; ``scoped_io`` drops the native find/du slots, so the walk
@@ -1714,11 +1716,8 @@ def with_policy_guard(ops: CommandIO) -> CommandIO:
     scope = _op_policy_scope()
     changes: dict[str, Any] = {
         "readdir": functools.partial(_policy_readdir, scope, ops.readdir),
-        "read_stream": functools.partial(
-            _policy_stream, scope, ops.read_stream
-        ),
     }
-    for slot in ("read_bytes", "read_range", *_MUTATIONS):
+    for slot in _MUTATIONS:
         access = _MUTATIONS.get(slot)
         fn = getattr(ops, slot)
         if fn is not None:

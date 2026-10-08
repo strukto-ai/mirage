@@ -78,13 +78,6 @@ function fakeManager(log: string[], name: string): CacheInvalidator {
       log.push(`${name}:subtree:${typeof path === 'string' ? path : path.virtual}`)
       return Promise.resolve()
     },
-    readThrough(_path, fetch: () => Promise<Uint8Array>) {
-      return fetch()
-    },
-    cachedBytes() {
-      return Promise.resolve(null)
-    },
-
     cachedSize(): Promise<number | null> {
       return Promise.resolve(null)
     },

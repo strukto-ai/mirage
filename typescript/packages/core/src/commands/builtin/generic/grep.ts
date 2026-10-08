@@ -21,7 +21,6 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { fsStrerror, isWalkError, walkRefusal } from '../../../errors/fs.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellOne } from '../../../utils/path.ts'
-import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
 import { IOResult } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
@@ -190,8 +189,8 @@ export async function grepGeneric(
   stream: Stream,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  const cachedStream = stdinStream(cacheAwareStream(stream), opts.stdin)
-  stream = (path) => guardInput(cachedStream(path), opts)
+  const operandStream = stdinStream(stream, opts.stdin)
+  stream = (path) => guardInput(operandStream(path), opts)
   const fl = new FlagView(opts.flags, specOf('grep'))
   const resolution = await resolvePattern(name, texts, opts.flags, paths, opts.mountPrefix, stream)
   if (resolution.error !== null || resolution.pattern === null)
