@@ -2413,11 +2413,14 @@ export async function openConsistency(
       throw new Error(`${command}: ${new TextDecoder().decode(result.stderr)}`)
     }
   }
-  const tee = (path: string, content: Uint8Array): Promise<void> =>
-    onShadow(`tee ${path} > /dev/null`, content)
+  // Through the op door, as python's mutate_write: a shell tee would cache
+  // its bytes on the shadow, which a later shadow line would then read stale.
+  const writeOut = async (path: string, content: Uint8Array): Promise<void> => {
+    await shadow.dispatch('write', path, [content])
+  }
   // A mount that cannot take a write (a Hub repo, where a change is a commit)
   // brings its own out-of-band change; every other one writes through the
-  // shadow's shell. A file an account CLI edits by id (a Google Doc through
+  // shadow's op door. A file an account CLI edits by id (a Google Doc through
   // gws) has no bytes to write, so its scenario names the line the shadow
   // runs: the same line on the read side would drop that side's own caches.
   // No fallback for a delete: a write is a fair stand-in for a write, but
@@ -2426,7 +2429,7 @@ export async function openConsistency(
     Promise.reject(new Error(`${target.id}: no delete mutator for ${path}`))
   return {
     ws: opened.ws,
-    mutate: opened.mutate ?? tee,
+    mutate: opened.mutate ?? writeOut,
     remove: opened.remove ?? refuse,
     mutateLine: (command) => onShadow(command),
     cleanup: opened.cleanup,
