@@ -36,7 +36,9 @@ class CallStack:
         # or a fork of one: a refused `${var:=word}` ends it with 2.
         self.paren = False
 
-    def fork(self, loops: bool = True, paren: bool | None = None) -> "CallStack":
+    def fork(
+        self, loops: bool = True, paren: bool | None = None
+    ) -> "CallStack":
         """The stack a child shell runs on, a copy of every frame.
 
         Args:

@@ -557,11 +557,7 @@ async function substitution(
   const session = context.session
   const prefix = foldedWhitespace(tsNode)
   if (tsNode.type === NT.ARITHMETIC_EXPANSION) {
-    return arithValue(
-      session,
-      view,
-      await expandArith(tsNode, context, executeFn, callStack, view),
-    )
+    return arithValue(session, view, await expandArith(tsNode, context, executeFn, callStack, view))
   }
   const rawSub = (tsNode.inlined ?? tsNode.sourceText ?? tsNode.text).slice(prefix.length)
   if (rawSub.startsWith('`') && rawSub.endsWith('`')) {

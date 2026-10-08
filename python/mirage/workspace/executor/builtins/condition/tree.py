@@ -19,8 +19,8 @@ from mirage.commands.builtin.utils.bre import (
     PosixSyntax,
     translate_ere,
 )
-from mirage.shell.errors import ArithError, ReadonlyError
 from mirage.shell.array import make_array
+from mirage.shell.errors import ArithError, ReadonlyError
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.posix import compile_posix_regex
 from mirage.workspace.executor.builtins.condition.constants import (
