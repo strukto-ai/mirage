@@ -28,7 +28,13 @@ import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { arithRefusal, isValidName, readonlyRefusal, refusal, requireView } from '../shared.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { ANSI_C_ESCAPES, BARE_KEY_RE, CONTROL_RE, SUBSCRIPT_RE } from './constants.ts'
+import {
+  ANSI_C_ESCAPES,
+  BARE_KEY_RE,
+  CONTROL_RE,
+  SUBSCRIPT_RE,
+  VISIBLE_SCOPE_BUILTINS,
+} from './constants.ts'
 import type { Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
@@ -101,7 +107,9 @@ export async function storeStagedArrays(
       }
       return readonlyRefusal(cmd, name)
     }
-    if (!globalScope) noteLocalArray(session, name)
+    // Inside a function `declare` and `local` make the name local; `export`
+    // and `readonly` assign the variable already visible.
+    if (!globalScope && !VISIBLE_SCOPE_BUILTINS.has(cmd)) noteLocalArray(session, name)
     try {
       await premark(view, name, shaping)
     } catch (err) {
@@ -483,6 +491,7 @@ export async function markFunctions(
   state: SessionView | null = null,
   arrays: { name: string; append: boolean; items: string[] }[] | null = null,
   parser?: ParseScope,
+  assoc = false,
 ): Promise<Result> {
   if (arrays !== null && arrays.length > 0) {
     const refused = await storeStagedArrays(
@@ -493,6 +502,8 @@ export async function markFunctions(
       null,
       true,
       true,
+      null,
+      assoc,
     )
     if (refused !== null) return refused
     names = [...names, ...arrays.map(({ name }) => name)]

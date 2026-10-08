@@ -24,6 +24,11 @@ EXPORT_FLAGS = frozenset("fnp")
 
 READONLY_FLAGS = frozenset("aAfp")
 
+# The declaration builtins that assign whichever variable is visible, a
+# function's local or else the global; `declare` and `local` make a new
+# local inside a function instead.
+VISIBLE_SCOPE_BUILTINS = frozenset({"export", "readonly"})
+
 ANSI_C_ESCAPES = {
     "\\": "\\\\",
     "'": "\\'",

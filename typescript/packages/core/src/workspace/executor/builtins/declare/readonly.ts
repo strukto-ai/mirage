@@ -115,6 +115,7 @@ export async function handleReadonly(
       state,
       arrays,
       parser,
+      assoc || flags.has('A'),
     )
   if (names.length === 0 && (arrays === null || arrays.length === 0)) {
     const lines = readonlyLines(session, flags)

@@ -135,6 +135,7 @@ async def handle_readonly(
             True,
             state,
             arrays,
+            assoc or "A" in flags,
         )
     if not names and not arrays:
         lines = _readonly_lines(session, flags)

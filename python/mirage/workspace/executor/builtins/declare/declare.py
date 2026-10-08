@@ -28,6 +28,7 @@ from mirage.workspace.executor.builtins.declare.constants import (
     ANSI_C_ESCAPES,
     BARE_KEY_RE,
     SUBSCRIPT_RE,
+    VISIBLE_SCOPE_BUILTINS,
 )
 from mirage.workspace.executor.builtins.shared import (
     arith_refusal,
@@ -93,8 +94,13 @@ async def store_staged_arrays(
     function-scoped `declare` refuse in the builtin's voice and the
     body keeps running (pinned on bash 5.2, debian:stable-slim).
 
+    Inside a function, ``declare`` and ``local`` make each name local;
+    ``export`` and ``readonly`` (``VISIBLE_SCOPE_BUILTINS``) assign the
+    variable already visible, so ``f() { export A=(1); }`` leaves ``A``
+    set after ``f`` returns.
+
     Args:
-        cmd (str): builtin name for refusal rendering.
+        cmd (str): builtin name for refusal rendering and scoping.
         session (SessionState): shell session state.
         view (SessionView): the session plane's gated door.
         arrays (list[tuple[str, bool, list[str]]]): staged
@@ -143,7 +149,8 @@ async def store_staged_arrays(
                     encode_text(f"bash: {name}: readonly variable\n")
                 )
             return readonly_refusal(cmd, name)
-        note_local_array(session, name)
+        if cmd not in VISIBLE_SCOPE_BUILTINS:
+            note_local_array(session, name)
         try:
             await premark(view, name, shaping)
         except PolicyDenied as exc:
@@ -559,6 +566,7 @@ async def mark_functions(
     on: bool,
     state: SessionView | None = None,
     arrays: list[tuple[str, bool, list[str]]] | None = None,
+    assoc: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run ``readonly -f`` or ``export -f``: mark functions, or list them.
 
@@ -580,10 +588,17 @@ async def mark_functions(
             the array literals.
         arrays (list[tuple[str, bool, list[str]]] | None): staged
             ``(name, append, items)`` literals from the declaration.
+        assoc (bool): the declaration carried ``-A``, so every literal
+            builds an associative map.
     """
     if arrays:
         refused = await store_staged_arrays(
-            cmd, session, require_view(state), arrays, fatal=True
+            cmd,
+            session,
+            require_view(state),
+            arrays,
+            fatal=True,
+            assoc=assoc,
         )
         if refused is not None:
             return refused

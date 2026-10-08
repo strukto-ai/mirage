@@ -20,6 +20,13 @@ export const EXPORT_FLAGS = new Set('fnp')
 
 export const READONLY_FLAGS = new Set('aAfp')
 
+/**
+ * The declaration builtins that assign whichever variable is visible, a
+ * function's local or else the global; `declare` and `local` make a new
+ * local inside a function instead.
+ */
+export const VISIBLE_SCOPE_BUILTINS: ReadonlySet<string> = new Set(['export', 'readonly'])
+
 export const ANSI_C_ESCAPES: Record<string, string> = {
   '\\': '\\\\',
   "'": "\\'",

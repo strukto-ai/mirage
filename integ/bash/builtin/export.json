@@ -537,10 +537,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( nbf() { :; }; nbg() { :; }; export -f nbf; export -f; declare -F | grep ' nb'; declare -pfx nbf; declare -pF nbf; export -f nbnosuch nbx=1; echo \"rc=$? [${nbx-unset}]\"; readonly -f nbg; declare +x -f nbf; declare -fx nbg nbnone; echo rc=$?; declare -F | grep ' nb' ); ( export -f nbarr=(a b); echo \"rc=$? ${nbarr[1]}\"; declare -p nbarr; readonly -f nbro=(c); echo \"rc=$?\"; declare -p nbro )",
+      "command": "( nbf() { :; }; nbg() { :; }; export -f nbf; export -f; declare -F | grep ' nb'; declare -pfx nbf; declare -pF nbf; export -f nbnosuch nbx=1; echo \"rc=$? [${nbx-unset}]\"; readonly -f nbg; declare +x -f nbf; declare -fx nbg nbnone; echo rc=$?; declare -F | grep ' nb' ); ( export -f nbarr=(a b); echo \"rc=$? ${nbarr[1]}\"; declare -p nbarr; readonly -f nbro=(c); echo \"rc=$?\"; declare -p nbro ); ( nbm() { :; }; nbrun() { export -f nbm2=(a b) 2>/dev/null; readonly -Af nbm=([alpha]=one [beta]=two); export nbpa=(c d); readonly nbpr=(e); }; nbrun; declare -p nbm2 nbm nbpa nbpr )",
       "expect": {
         "exit": 0,
-        "stdout": "nbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\ndeclare -f nbg\nnbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\nrc=1 [unset]\nrc=1\ndeclare -f nbf\ndeclare -frx nbg\nrc=1 b\ndeclare -a nbarr=([0]=\"a\" [1]=\"b\")\nrc=1\ndeclare -a nbro=([0]=\"c\")\n",
+        "stdout": "nbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\ndeclare -f nbg\nnbf () \n{ \n    :\n}\ndeclare -fx nbf\ndeclare -fx nbf\nrc=1 [unset]\nrc=1\ndeclare -f nbf\ndeclare -frx nbg\nrc=1 b\ndeclare -a nbarr=([0]=\"a\" [1]=\"b\")\nrc=1\ndeclare -a nbro=([0]=\"c\")\ndeclare -a nbm2=([0]=\"a\" [1]=\"b\")\ndeclare -A nbm=([alpha]=\"one\" [beta]=\"two\" )\ndeclare -ax nbpa=([0]=\"c\" [1]=\"d\")\ndeclare -ar nbpr=([0]=\"e\")\n",
         "stderr": "bash: export: nbnosuch: not a function\nbash: export: nbx=1: not a function\nbash: export: nbarr: not a function\nbash: readonly: nbro: not a function\n"
       }
     },
