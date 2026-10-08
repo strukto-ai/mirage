@@ -41,27 +41,30 @@ import {
   identifierRefusal,
   kindConflict,
   localAttrs,
-  namerefRefusal,
   operandParts,
   plusRefusal,
   premark,
+  referenceRefusal,
   scalarValue,
   stampMarks,
   startLocal,
   storeStagedArrays,
 } from './declare.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import type { DeclarationOperand } from './types.ts'
 import { sessionView } from '../../../session/state.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * Declare names in the running function's scope, or globally.
  *
- * Each operand is declared and marked before the next one runs, as bash
- * does: `declare -r R=1 R=2` freezes `R` at 1 and refuses the second write,
- * which fails the builtin while the later operands still declare. Array
- * literals store first, and the marks land on them once every literal has
- * stored (`storeStagedArrays`).
+ * bash's two passes (`storeStagedArrays`): every array literal stores
+ * first, then each operand in order is declared and marked before the next
+ * one runs, a literal's name at its own place. So `declare -r R=1 R=2`
+ * freezes `R` at 1 and refuses the second write, which fails the builtin
+ * while the later operands still declare, and `declare -r R=1 R=(2)` leaves
+ * `(1)`. `assignments` holds the operands in order: `NAME`, `NAME=value`,
+ * `NAME+=value` and staged array literals.
  *
  * `cmd` is the spelling that reached here: `declare` and `typeset` route
  * through this handler and must say their own name, not `local`. `shaping`
@@ -76,10 +79,9 @@ import { encodeText } from '../../../../shell/bytes.ts'
  * local from the value it shadows (`startLocal`).
  */
 export async function handleLocal(
-  assignments: string[],
+  assignments: readonly DeclarationOperand[],
   session: SessionState,
   state: SessionView | null = null,
-  arrays: { name: string; append: boolean; items: string[] }[] | null = null,
   cmd = 'local',
   kind: VarKind | null = null,
   shaping: ReadonlySet<VarAttr> = new Set(),
@@ -104,17 +106,16 @@ export async function handleLocal(
   }
   const view = requireView(state)
   const restore = globalScope
-    ? reachGlobal(session, [
-        ...assignments.map((a) => operandParts(a)[0]),
-        ...(arrays ?? []).map(({ name }) => name),
-      ])
+    ? reachGlobal(
+        session,
+        assignments.map((a) => (typeof a === 'string' ? operandParts(a)[0] : a.name)),
+      )
     : null
   try {
     return await declareOperands(
       assignments,
       session,
       view,
-      arrays ?? [],
       cmd,
       kind,
       shaping,
@@ -131,10 +132,9 @@ export async function handleLocal(
 
 /** Run `handleLocal`'s operands in the scope it settled on. */
 async function declareOperands(
-  assignments: readonly string[],
+  operands: readonly DeclarationOperand[],
   session: SessionState,
   view: SessionView,
-  arrays: readonly { name: string; append: boolean; items: string[] }[],
   cmd: string,
   kind: VarKind | null,
   shaping: ReadonlySet<VarAttr>,
@@ -146,13 +146,13 @@ async function declareOperands(
 ): Promise<Result> {
   const errors: string[] = []
   const warnings: string[] = []
-  const stored: string[] = []
+  const stored = new Set<number>()
   try {
     const refused = await storeStagedArrays(
       cmd,
       session,
       view,
-      arrays,
+      operands,
       errors,
       warnings,
       session.localVars === null,
@@ -162,33 +162,39 @@ async function declareOperands(
       locals === null,
       inherit,
     )
-    // The literals that stored take their marks even when a policy refused
-    // a later one.
-    for (const name of stored) {
-      const line = plusRefusal(cmd, session, view, name, plus)
-      if (line !== null) {
-        errors.push(line)
+    for (const [position, operand] of operands.entries()) {
+      let line: string | null
+      if (typeof operand === 'string') {
+        line =
+          refused !== null
+            ? null
+            : await declareOperand(
+                session,
+                view,
+                operand,
+                cmd,
+                kind,
+                shaping,
+                marks,
+                plus,
+                nameref,
+                locals,
+                inherit,
+              )
+      } else if (stored.has(position)) {
+        // A literal takes its marks at its place, even when a policy
+        // refused a later literal.
+        const name = operand.name
+        line = plusRefusal(cmd, session, view, name, plus)
+        if (line === null) {
+          await stampMarks(session, view, name, deref(session, name) || name, marks)
+        }
+      } else {
         continue
       }
-      await stampMarks(session, view, name, deref(session, name) || name, marks)
-    }
-    if (refused !== null) return refused
-    for (const assign of assignments) {
-      const line = await declareOperand(
-        session,
-        view,
-        assign,
-        cmd,
-        kind,
-        shaping,
-        marks,
-        plus,
-        nameref,
-        locals,
-        inherit,
-      )
       if (line !== null) errors.push(line)
     }
+    if (refused !== null) return refused
   } catch (err) {
     if (err instanceof PolicyDenied) return refusal(cmd, err)
     if (err instanceof ArithError) return arithRefusal(cmd, err)
@@ -223,11 +229,16 @@ async function declareOperand(
   const [key, append, given] = operandParts(assign)
   const fresh = locals !== null && !locals.has(key)
   if (given === null) {
-    if (nameref && view.isReadonly(key, false)) return readonlyLine(cmd, key)
     if (locals !== null) shadowLocal(session, locals, key)
     if (fresh) {
       const line = await freshLocal(session, view, cmd, key, inherit)
       if (line !== null) return line
+    }
+    if (nameref) {
+      const bad =
+        referenceRefusal(cmd, key, sessionEntry(session.vars, key), null) ??
+        (view.isReadonly(key, false) ? readonlyLine(cmd, key) : null)
+      if (bad !== null) return bad
     }
     const line = plusRefusal(cmd, session, view, key, plus)
     if (line !== null) return line
@@ -248,9 +259,9 @@ async function declareOperand(
   }
   let val = given
   if (nameref) {
-    const own = sessionEntry(session.vars, key)?.value
-    if (append && typeof own === 'string') val = own + val
-    const badRef = namerefRefusal(cmd, key, val)
+    const own = fresh ? undefined : sessionEntry(session.vars, key)
+    if (append && typeof own?.value === 'string') val = own.value + val
+    const badRef = referenceRefusal(cmd, key, own, val)
     if (badRef !== null) return badRef
   }
   if (view.isReadonly(key, !nameref)) return readonlyLine(cmd, key)

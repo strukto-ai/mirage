@@ -42,6 +42,9 @@ from mirage.workspace.executor.builtins.declare.constants import (
     SUBSCRIPT_RE,
     VISIBLE_SCOPE_BUILTINS,
 )
+from mirage.workspace.executor.builtins.declare.types import (
+    DeclarationOperand,
+)
 from mirage.workspace.executor.builtins.shared import (
     arith_refusal,
     is_valid_name,
@@ -54,6 +57,7 @@ from mirage.workspace.session.state import (
     conversion_scalar,
     deref,
     in_call_env,
+    outlive_call,
     set_attr,
     shadow_local,
     subscript_index,
@@ -355,17 +359,27 @@ async def store_staged_arrays(
     cmd: str,
     session: SessionState,
     view: SessionView,
-    arrays: list[tuple[str, bool, list[str]]],
+    operands: list[DeclarationOperand],
     errors: list[str],
     warnings: list[str],
     fatal: bool = False,
-    stored: list[str] | None = None,
+    stored: set[int] | None = None,
     kind: VarKind | None = None,
     shaping: frozenset[VarAttr] = frozenset(),
     global_scope: bool = False,
     inherit: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode] | None:
-    """Store a declaration's array literals through the session door.
+    """Store a declaration's array literals through the session door,
+    the first of bash's two passes over a declaration.
+
+    bash stores every literal before it runs any other operand, then
+    goes through all of them in order, assigning the plain values and
+    marking each name, a literal's included, at its own place: so
+    ``declare -r R=1 R=(2)`` stores ``(2)``, writes 1 over element 0 and
+    freezes ``R``, and a fatal literal leaves every other operand
+    undone (pinned on 5.2.37). Only the value-shaping attributes go on
+    before a literal stores (``shaping``); the caller's second pass puts
+    the rest on the names ``stored`` reports.
 
     The builtin owns the store; readonly is the shell's rule, checked
     per name before the door, and the door's gate covers the policy
@@ -382,16 +396,12 @@ async def store_staged_arrays(
     (``VISIBLE_SCOPE_BUILTINS``) assign the variable already visible, so
     ``f() { export A=(1); }`` leaves ``A`` set after ``f`` returns.
 
-    The caller marks the stored names once every literal has stored:
-    bash's ``readonly A=(1) A=(2)`` keeps ``(2)``, so a literal is not
-    refused by a mark the same declaration put on.
-
     Args:
         cmd (str): builtin name for refusal rendering and scoping.
         session (SessionState): shell session state.
         view (SessionView): the session plane's gated door.
-        arrays (list[tuple[str, bool, list[str]]]): staged
-            ``(name, append, items)`` literals from the declaration.
+        operands (list[DeclarationOperand]): the declaration's operands
+            in order; the staged literals among them store.
         errors (list[str]): filled with bash-voiced refusal lines for a
             readonly name or a kind conflict outside ``fatal``; the
             caller folds them into its exit status.
@@ -400,8 +410,8 @@ async def store_staged_arrays(
             GNU stores the valid elements and the status stays 0.
         fatal (bool): render a readonly refusal or a kind conflict as
             the fatal assignment error instead of a builtin failure.
-        stored (list[str] | None): filled with each name that actually
-            stored, in order. A declaration keeps its valid operands
+        stored (set[int] | None): filled with the position of each
+            literal that stored. A declaration keeps its valid operands
             when a sibling refuses, so the caller cannot read "what was
             written" off the aggregate exit status.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared. ``-A``
@@ -413,7 +423,9 @@ async def store_staged_arrays(
         shaping (frozenset[VarAttr]): the value-shaping attributes to
             put on each name before its literal stores.
         global_scope (bool): the declaration carried ``-g``, so no
-            local is started for the names.
+            local is started for the names, and a readonly name refuses
+            a literal fatally even inside a function (a kind conflict
+            there does not).
         inherit (bool): the declaration carried ``-I``, so a new local
             starts from the value it shadows.
 
@@ -426,9 +438,12 @@ async def store_staged_arrays(
     """
     scoped = not global_scope and cmd not in VISIBLE_SCOPE_BUILTINS
     local_vars = session._local_vars if scoped else None
-    for name, append, items in arrays:
+    for position, operand in enumerate(operands):
+        if isinstance(operand, str):
+            continue
+        name, append, items = operand
         if view.is_readonly(name):
-            if fatal:
+            if fatal or global_scope:
                 raise DiscardSignal(
                     encode_text(f"bash: {name}: readonly variable\n")
                 )
@@ -484,7 +499,7 @@ async def store_staged_arrays(
         except ArithError as exc:
             return arith_refusal(cmd, exc)
         if stored is not None:
-            stored.append(name)
+            stored.add(position)
     return None
 
 
@@ -529,9 +544,9 @@ def bash_declare_quote(value: str) -> str:
 
 
 def split_decl_flags(
-    args: list[str],
+    args: list[DeclarationOperand],
     allowed: frozenset[str],
-) -> tuple[set[str], list[str], str | None]:
+) -> tuple[set[str], list[DeclarationOperand], str | None]:
     """Split leading ``-xyz`` flag clusters from declaration operands.
 
     Returns:
@@ -542,6 +557,8 @@ def split_decl_flags(
     i = 0
     while i < len(args):
         tok = args[i]
+        if not isinstance(tok, str):
+            break
         if tok == "--":
             i += 1
             break
@@ -896,43 +913,41 @@ async def mark_functions(
     cmd: str,
     session: SessionState,
     marked: set[str],
-    names: list[str],
+    operands: list[DeclarationOperand],
     on: bool,
     state: SessionView | None = None,
-    arrays: list[tuple[str, bool, list[str]]] | None = None,
     kind: VarKind | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run ``readonly -f`` or ``export -f``: mark functions, or list them.
 
     A name that is not a function is ``not a function``, exit 1, and the
-    other operands are still marked (or, with ``on`` False, unmarked).
-    An array literal (``export -f ARR=(a b)``) still stores first, with
-    no attribute and its ``must use subscript`` warnings, and its name
-    is then checked like the others, as bash assigns it before it looks
-    for the function. With no names the
-    marked functions print as bodies, each followed by its ``declare``
-    line.
+    other operands are still marked (or, with ``on`` False, unmarked),
+    in the order typed. An array literal (``export -f ARR=(a b)``)
+    still stores first, with no attribute and its ``must use
+    subscript`` warnings, and its name is then checked at its place, as
+    bash assigns every literal before it looks for the functions. With
+    no names the marked functions print as bodies, each followed by its
+    ``declare`` line.
 
     Args:
         cmd (str): the builtin's own name for a diagnostic.
         session (SessionState): shell session state.
         marked (set[str]): the session's set of marked functions.
-        names (list[str]): the function names, empty to list.
+        operands (list[DeclarationOperand]): the function names and
+            staged literals in order, empty to list.
         on (bool): set the mark rather than clear it.
         state (SessionView | None): the session plane's gated door, for
             the array literals.
-        arrays (list[tuple[str, bool, list[str]]] | None): staged
-            ``(name, append, items)`` literals from the declaration.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
     """
     errors: list[str] = []
     warnings: list[str] = []
-    if arrays:
+    if not all(isinstance(operand, str) for operand in operands):
         refused = await store_staged_arrays(
             cmd,
             session,
             require_view(state),
-            arrays,
+            operands,
             errors,
             warnings,
             fatal=True,
@@ -940,7 +955,7 @@ async def mark_functions(
         )
         if refused is not None:
             return refused
-        names = names + [name for name, _, _ in arrays]
+    names = [o if isinstance(o, str) else o[0] for o in operands]
     if not names:
         listed = sorted(name for name in marked if name in session.functions)
         lines = function_lines(session, listed, True, True)
@@ -954,6 +969,143 @@ async def mark_functions(
         else:
             marked.discard(name)
     return declaration_result(cmd, errors, warnings)
+
+
+async def mark_variables(
+    cmd: str,
+    session: SessionState,
+    view: SessionView,
+    operands: list[DeclarationOperand],
+    attr: VarAttr,
+    on: bool,
+    kind: VarKind | None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Run ``export`` or ``readonly`` over its operands: assign each
+    value and put the keyword's mark on, or with ``on`` False take it
+    off (``export -n``).
+
+    bash's two passes (``store_staged_arrays``): every array literal
+    stores first, then each operand in order is assigned and marked, a
+    literal's name at its own place. So ``readonly R=1 R=2 X=3`` keeps
+    1, refuses the second write and still sets ``X``, and ``readonly
+    A=(1) A=(2)`` keeps ``(2)`` while a later ``A=3`` refuses.
+
+    Args:
+        cmd (str): the builtin's own name for a diagnostic.
+        session (SessionState): shell session state.
+        view (SessionView): the session plane's gated door.
+        operands (list[DeclarationOperand]): the operands in order.
+        attr (VarAttr): EXPORT or READONLY.
+        on (bool): set the mark rather than clear it.
+        kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    stored: set[int] = set()
+    refused = await store_staged_arrays(
+        cmd,
+        session,
+        view,
+        operands,
+        errors,
+        warnings,
+        fatal=True,
+        stored=stored,
+        kind=kind,
+    )
+    try:
+        for position, operand in enumerate(operands):
+            if isinstance(operand, str):
+                line = (
+                    None
+                    if refused is not None
+                    else await _mark_operand(
+                        cmd, session, view, operand, attr, on, kind
+                    )
+                )
+                if line is not None:
+                    errors.append(line)
+            elif position in stored:
+                # A literal is marked at its place, even when a policy
+                # refused a later literal.
+                name = operand[0]
+                await mark_written(
+                    session, view, name, deref(session, name), attr, on
+                )
+    except PolicyDenied as exc:
+        return refusal(cmd, exc)
+    except ArithError as exc:
+        return arith_refusal(cmd, exc)
+    if refused is not None:
+        return refused
+    return declaration_result(cmd, errors, warnings)
+
+
+async def _mark_operand(
+    cmd: str,
+    session: SessionState,
+    view: SessionView,
+    word: str,
+    attr: VarAttr,
+    on: bool,
+    kind: VarKind | None,
+) -> str | None:
+    """Assign and mark one ``export`` / ``readonly`` word.
+
+    A value of the other array kind is refused and the name is still
+    marked, as bash does. The bare form writes no value, so it marks
+    through the plane's no-value door rather than inventing an empty
+    string: on a new name that leaves it *unset* and marked, bash's own
+    third state (``export Z`` prints ``declare -x Z`` and stays out of
+    ``env``). Still gated, since marking is a session write: through
+    ``set_attr`` a deployment refusing ``AWS_*`` saw ``readonly
+    AWS_KEY`` exit 0 and freeze the name against every later write.
+
+    Args:
+        cmd (str): the builtin's own name for a diagnostic.
+        session (SessionState): shell session state.
+        view (SessionView): the session plane's gated door.
+        word (str): the operand.
+        attr (VarAttr): EXPORT or READONLY.
+        on (bool): set the mark rather than clear it.
+        kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
+
+    Returns:
+        The operand's refusal line, or None.
+
+    Raises:
+        PolicyDenied: the gate refused a write or a mark.
+        ArithError: an ``-i`` value did not evaluate.
+    """
+    bad_name = identifier_refusal(cmd, word)
+    if bad_name is not None:
+        return bad_name
+    key, append, val = operand_parts(word)
+    if val is not None and view.is_readonly(key):
+        return readonly_line(cmd, key)
+    held = held_value(session, key) if val is not None else None
+    conflict = kind_conflict(held, kind) if val is not None else None
+    if val is not None and conflict is None:
+        checked = deref(session, key)
+        target = session.vars.get(checked)
+        value, assigned = scalar_value(
+            held,
+            val,
+            kind,
+            append,
+            target is not None and VarAttr.INTEGER in target.attrs,
+        )
+        if kind is not None:
+            await drop_reference(session, view, key)
+        await view.set(key, value, assigned=assigned)
+        # Rides on the gate the `view.set` above passed, unless the
+        # write re-aimed a reference (`mark_written`).
+        await mark_written(session, view, key, checked, attr, on)
+    else:
+        await view.mark(key, attr, on)
+    if on:
+        outlive_call(session, key)
+    return None if conflict is None else f"bash: {cmd}: {key}: {conflict}"
 
 
 def note_local_array(session: SessionState, name: str) -> bool:
@@ -1009,3 +1161,35 @@ def nameref_refusal(cmd: str, name: str, target: str) -> str | None:
             "not allowed"
         )
     return None
+
+
+def reference_refusal(
+    cmd: str, name: str, own: ShellVar | None, target: str | None
+) -> str | None:
+    """The line a ``declare -n`` operand earns before anything else,
+    readonly included (pinned on 5.2.37).
+
+    An array cannot become a reference (``reference variable cannot be
+    an array``). A value names the target (``nameref_refusal``); a bare
+    ``declare -n NAME`` aims the name at the value it already holds, so
+    that value has to name a variable, though here it may name NAME
+    itself.
+
+    Args:
+        cmd (str): the builtin's spelling, for the diagnostic.
+        name (str): the reference being declared.
+        own (ShellVar | None): the record the operand lands on.
+        target (str | None): the value given, None for a bare name.
+    """
+    if own is not None and isinstance(own.value, (list, dict)):
+        return f"bash: {cmd}: {name}: reference variable cannot be an array"
+    if target is not None:
+        return nameref_refusal(cmd, name, target)
+    if (
+        own is None
+        or not isinstance(own.value, str)
+        or VarAttr.NAMEREF in own.attrs
+        or own.value == name
+    ):
+        return None
+    return nameref_refusal(cmd, name, own.value)

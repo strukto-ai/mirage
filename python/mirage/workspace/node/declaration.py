@@ -42,6 +42,9 @@ from mirage.workspace.executor.builtins.declare.declare import (
     kind_conflict,
     start_local,
 )
+from mirage.workspace.executor.builtins.declare.types import (
+    DeclarationOperand,
+)
 from mirage.workspace.expand import expand_node
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -197,11 +200,12 @@ async def execute_declaration(
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Execute one declaration statement (export/local/declare/readonly).
 
-    The executor only reads the operands: it expands them, sorts them
-    into option letters, plain names and staged array literals, then
-    hands the result to the builtin handler that owns the keyword, which
-    marks each operand with the attribute letters (`-x`, `-i`, `-l`) as
-    it lands, so `declare -rx X=1` keeps both marks.
+    The executor only reads the operands: it expands them and sorts out
+    the option letters, keeping the words and the staged array literals
+    in the order typed, then hands them to the builtin handler that owns
+    the keyword, which marks each operand with the attribute letters
+    (`-x`, `-i`, `-l`) at its place, so `declare -rx X=1` keeps both
+    marks.
 
     Args:
         node (Any): the tree-sitter ``declaration_command`` node.
@@ -216,10 +220,11 @@ async def execute_declaration(
     """
     session = context.session
     keyword = get_declaration_keyword(node)
-    assignments = []
     # Array literals are staged, not stored: `readonly -a a=(y)` on an
-    # already-readonly name has to fail with the old value intact.
-    staged: list[tuple[str, bool, list[str]]] = []
+    # already-readonly name has to fail with the old value intact. They
+    # keep their place among the words, since bash marks each name in
+    # the order typed.
+    operands: list[DeclarationOperand] = []
     # Option words are kept verbatim, in order, so `--` survives as an
     # end-of-options marker and the handlers can name the *first* bad
     # option letter the way bash does.
@@ -237,14 +242,14 @@ async def execute_declaration(
                 items = await expand_array_items(
                     val_nodes[0], context, execute_fn, registry, namespace, cs
                 )
-                staged.append(
+                operands.append(
                     (key.removesuffix("+"), key.endswith("+"), items)
                 )
                 continue
             expanded = await expand_node(
                 child, context, execute_fn, cs, view=view
             )
-            assignments.append(expanded)
+            operands.append(expanded)
         elif child.type in (
             NT.SIMPLE_EXPANSION,
             NT.EXPANSION,
@@ -297,8 +302,9 @@ async def execute_declaration(
                 # there.
                 plus_chars.update(expanded[1:])
             else:
-                assignments.append(expanded)
+                operands.append(expanded)
     cmd_word = "local" if keyword == NT.LOCAL else str(keyword)
+    words = [operand for operand in operands if isinstance(operand, str)]
     if keyword in (NT.LOCAL, "declare", "typeset"):
         refused = _declare_option_refusal(
             cmd_word, flag_chars, plus_chars, context
@@ -314,7 +320,7 @@ async def execute_declaration(
         # `-xf` exports, `-f NAME` prints the body, `-F NAME` prints the
         # name, and a missing name is exit 1 without a word.
         return handle_declare_functions(
-            cmd_word, session, flag_chars, assignments, frozenset(plus_chars)
+            cmd_word, session, flag_chars, words, frozenset(plus_chars)
         )
     # `-l` and `-u` cannot both hold; a cluster naming both sets
     # neither (pinned: `declare -lu s=aBc` prints `declare -- s`).
@@ -328,13 +334,13 @@ async def execute_declaration(
     # `-p` prints rather than declares, so it is answered before anything
     # declares (`declare -ap NAME` converts nothing); with no names, an
     # attribute letter lists the names carrying it, `-p` or not.
-    listing = not assignments and not staged
+    listing = not operands
     if (
         "p" in flag_chars
         or "p" in plus_chars
         or (listing and flag_chars & (LISTED_ATTRIBUTES | {"a", "A"}))
     ) and keyword in ("declare", "typeset"):
-        return await handle_declare_print(assignments, session, flag_chars)
+        return await handle_declare_print(words, session, flag_chars)
     conversion_errors: list[str] = []
     kind = declared_kind(flag_chars)
     if kind is not None and keyword not in VISIBLE_SCOPE_BUILTINS:
@@ -345,7 +351,7 @@ async def execute_declaration(
         # name while the rest of the operands still declare. `export`
         # and `readonly` leave a bare name's value alone.
         want_assoc = kind is VarKind.ASSOC
-        for bare in assignments:
+        for bare in words:
             if "=" in bare:
                 continue
             # Both branches below write array storage raw (the
@@ -400,14 +406,13 @@ async def execute_declaration(
     # only expands and stages.
     if keyword == "readonly":
         result = await handle_readonly(
-            flag_words + assignments,
+            [*flag_words, *operands],
             session,
             session_view(
                 session,
                 namespace.registry.policies,
                 diagnostics=context.frame.diagnostics,
             ),
-            arrays=staged,
             kind=kind,
         )
         return _merge_conversion_errors(result, conversion_errors)
@@ -418,14 +423,13 @@ async def execute_declaration(
     # `f() { local -r A=(x); }` freezes f's own A, not the caller's.
     if keyword in (NT.LOCAL, "declare", "typeset"):
         result = await handle_local(
-            assignments,
+            operands,
             session,
             session_view(
                 session,
                 namespace.registry.policies,
                 diagnostics=context.frame.diagnostics,
             ),
-            arrays=staged,
             # `declare`/`typeset` share this handler but have to name
             # themselves in a diagnostic rather than say `local`.
             cmd=cmd_word,
@@ -440,13 +444,12 @@ async def execute_declaration(
         return _merge_conversion_errors(result, conversion_errors)
     # Pass export flags through so -p / bare print and bad options work.
     result = await handle_export(
-        flag_words + assignments,
+        [*flag_words, *operands],
         session,
         session_view(
             session,
             namespace.registry.policies,
             diagnostics=context.frame.diagnostics,
         ),
-        arrays=staged,
     )
     return _merge_conversion_errors(result, conversion_errors)

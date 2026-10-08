@@ -13,33 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import { ArithError } from '../../../../shell/errors.ts'
-import { PolicyDenied } from '../../../../policy/errors.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
 import { VarAttr, type VarKind } from '../../../../shell/variable.ts'
-import { deref, outliveCall } from '../../../session/state.ts'
-import { sessionEntry, type SessionState } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { arithRefusal, readonlyLine, refusal, requireView } from '../shared.ts'
+import { requireView } from '../shared.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { READONLY_FLAGS, READONLY_USAGE } from './constants.ts'
 import {
-  declarationResult,
-  declareLine,
   declaredKind,
-  dropReference,
-  heldValue,
-  identifierRefusal,
-  kindConflict,
+  declareLine,
   kindListed,
   markFunctions,
-  markWritten,
-  operandParts,
-  scalarValue,
+  markVariables,
   splitDeclFlags,
-  storeStagedArrays,
 } from './declare.ts'
+import type { DeclarationOperand } from './types.ts'
 import type { Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import type { ParseScope } from '../../../../shell/parse/scope.ts'
@@ -66,10 +56,9 @@ function readonlyLines(session: SessionState, flags: Set<string>): string[] {
  * lists the frozen (`markFunctions`).
  */
 export async function handleReadonly(
-  assignments: string[],
+  assignments: readonly DeclarationOperand[],
   session: SessionState,
   state: SessionView | null = null,
-  arrays: { name: string; append: boolean; items: string[] }[] | null = null,
   kind: VarKind | null = null,
   parser?: ParseScope,
 ): Promise<Result> {
@@ -91,90 +80,13 @@ export async function handleReadonly(
       names,
       true,
       state,
-      arrays,
       parser,
       kind,
     )
-  if (names.length === 0 && (arrays === null || arrays.length === 0)) {
+  if (names.length === 0) {
     const lines = readonlyLines(session, flags)
     const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
   }
-  const view = requireView(state)
-  const errors: string[] = []
-  const warnings: string[] = []
-  if (arrays !== null && arrays.length > 0) {
-    // Frozen once every literal has stored: bash's `readonly A=(1) A=(2)`
-    // keeps `(2)`, and a later `A=3` refuses.
-    const stored: string[] = []
-    const refused = await storeStagedArrays(
-      'readonly',
-      session,
-      view,
-      arrays,
-      errors,
-      warnings,
-      true,
-      stored,
-      kind,
-    )
-    // The literals that stored are marked even when a policy refused a
-    // later one.
-    try {
-      for (const name of stored) {
-        await markWritten(session, view, name, deref(session, name) || name, VarAttr.Readonly)
-      }
-    } catch (err) {
-      if (err instanceof PolicyDenied) return refusal('readonly', err)
-      throw err
-    }
-    if (refused !== null) return refused
-  }
-  for (const assign of names) {
-    const badName = identifierRefusal('readonly', assign)
-    if (badName !== null) {
-      errors.push(badName)
-      continue
-    }
-    const [key, append, val] = operandParts(assign)
-    if (val !== null && view.isReadonly(key)) {
-      errors.push(readonlyLine('readonly', key))
-      continue
-    }
-    // A value of the other array kind is refused and the name is still
-    // frozen, as bash does.
-    const held = val !== null ? heldValue(session, key) : null
-    const conflict = val !== null ? kindConflict(held, kind) : null
-    if (conflict !== null) errors.push(`bash: readonly: ${key}: ${conflict}`)
-    if (val !== null && conflict === null) {
-      const checked = deref(session, key) || key
-      const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
-      const [value, assigned] = scalarValue(held, val, kind, append, integer)
-      try {
-        if (kind !== null) await dropReference(session, view, key)
-        await view.set(key, value, true, assigned)
-        // Rides on the gate the `view.set` above passed, unless the write
-        // re-aimed a reference (`markWritten`).
-        await markWritten(session, view, key, checked, VarAttr.Readonly)
-      } catch (err) {
-        if (err instanceof PolicyDenied) return refusal('readonly', err)
-        if (err instanceof ArithError) return arithRefusal('readonly', err)
-        throw err
-      }
-    } else {
-      // Gated, exactly as `export NAME` is. The bare form writes no
-      // value, so it has no `view.set` to ride on, and marking through
-      // `setAttr` walked straight past `preSession`: a deployment
-      // refusing `AWS_*` still saw `readonly AWS_KEY` exit 0, create the
-      // record, and freeze the name against every later legitimate write.
-      try {
-        await view.mark(key, VarAttr.Readonly, true)
-      } catch (err) {
-        if (err instanceof PolicyDenied) return refusal('readonly', err)
-        throw err
-      }
-    }
-    outliveCall(session, key)
-  }
-  return declarationResult('readonly', errors, warnings)
+  return markVariables('readonly', session, requireView(state), names, VarAttr.Readonly, true, kind)
 }

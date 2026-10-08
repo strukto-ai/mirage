@@ -48,6 +48,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import { conversionScalar, ensureVarVisible, seedVar, sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { expandArrayItems } from './assignment.ts'
+import type { DeclarationOperand } from '../executor/builtins/declare/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -180,11 +181,11 @@ function declaredMarks(
 /**
  * Execute one declaration statement (export/local/declare/readonly).
  *
- * The executor only reads the operands: it expands them, sorts them
- * into option letters, plain names and staged array literals, then
- * hands the result to the builtin handler that owns the keyword, which
- * marks each operand with the attribute letters (`-x`, `-i`, `-l`) as it
- * lands, so `declare -rx X=1` keeps both marks.
+ * The executor only reads the operands: it expands them and sorts out the
+ * option letters, keeping the words and the staged array literals in the
+ * order typed, then hands them to the builtin handler that owns the
+ * keyword, which marks each operand with the attribute letters (`-x`,
+ * `-i`, `-l`) at its place, so `declare -rx X=1` keeps both marks.
  */
 export async function executeDeclaration(
   node: TSNodeLike,
@@ -197,10 +198,11 @@ export async function executeDeclaration(
 ): Promise<Result> {
   const session = context.session
   const keyword = getDeclarationKeyword(node)
-  const assignments: string[] = []
   // Array literals are staged, not stored: `readonly -a a=(y)` on an
-  // already-readonly name has to fail with the old value intact.
-  const staged: { name: string; append: boolean; items: string[] }[] = []
+  // already-readonly name has to fail with the old value intact. They keep
+  // their place among the words, since bash marks each name in the order
+  // typed.
+  const operands: DeclarationOperand[] = []
   // Option words are kept verbatim, in order, so `--` survives as an
   // end-of-options marker and the handlers can name the *first* bad option
   // letter the way bash does.
@@ -217,7 +219,7 @@ export async function executeDeclaration(
         const eq = text.indexOf('=')
         const key = eq >= 0 ? text.slice(0, eq) : text
         const append = key.endsWith('+')
-        staged.push({
+        operands.push({
           name: append ? key.slice(0, -1) : key,
           append,
           items: await expandArrayItems(
@@ -231,7 +233,7 @@ export async function executeDeclaration(
         })
         continue
       }
-      assignments.push(
+      operands.push(
         await expandNode(
           child,
           context,
@@ -285,11 +287,12 @@ export async function executeDeclaration(
         // as an operand and refuses there.
         for (const ch of expanded.slice(1)) plusChars.add(ch)
       } else {
-        assignments.push(expanded)
+        operands.push(expanded)
       }
     }
   }
   const cmdWord = keyword === NT.LOCAL ? 'local' : keyword
+  const words = operands.filter((operand) => typeof operand === 'string')
   if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
     const refused = declareOptionRefusal(cmdWord, flagChars, plusChars)
     if (refused !== null) return refused
@@ -301,7 +304,7 @@ export async function executeDeclaration(
     // `-f`/`-F` select functions, not variables: `-rf` freezes, `-xf`
     // exports, `-f NAME` prints the body, `-F NAME` prints the name, and
     // a missing name is exit 1 without a word.
-    return handleDeclareFunctions(cmdWord, session, flagChars, assignments, plusChars, parser)
+    return handleDeclareFunctions(cmdWord, session, flagChars, words, plusChars, parser)
   }
   // `-l` and `-u` cannot both hold; a cluster naming both sets neither
   // (pinned: `declare -lu s=aBc` prints `declare -- s`).
@@ -313,14 +316,13 @@ export async function executeDeclaration(
   // declares (`declare -ap NAME` converts nothing); with no names, an
   // attribute letter lists the names carrying it, `-p` or not.
   const listing =
-    assignments.length === 0 &&
-    staged.length === 0 &&
+    operands.length === 0 &&
     [...flagChars].some((c) => LISTED_ATTRIBUTES.has(c) || c === 'a' || c === 'A')
   if (
     (flagChars.has('p') || plusChars.has('p') || listing) &&
     (keyword === 'declare' || keyword === 'typeset')
   ) {
-    return handleDeclarePrint(assignments, session, flagChars)
+    return handleDeclarePrint(words, session, flagChars)
   }
   const conversionErrors: string[] = []
   const kind = declaredKind(flagChars)
@@ -332,7 +334,7 @@ export async function executeDeclaration(
     // rest of the operands still declare. `export` and `readonly` leave
     // a bare name's value alone.
     const wantAssoc = kind === VarKind.Assoc
-    for (const bare of assignments) {
+    for (const bare of words) {
       if (bare.includes('=')) continue
       // Both branches below write array storage raw (the top-level
       // one migrates an existing scalar), so a hidden name refuses
@@ -374,10 +376,9 @@ export async function executeDeclaration(
   // only expands and stages.
   if (keyword === 'readonly') {
     const result = await handleReadonly(
-      [...flagWords, ...assignments],
+      [...flagWords, ...operands],
       session,
       sessionView(session, registry.policies, context.frame.diagnostics),
-      staged,
       kind,
       parser,
     )
@@ -390,10 +391,9 @@ export async function executeDeclaration(
   // `f() { local -r A=(x); }` freezes f's own A, not the caller's.
   if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
     const result = await handleLocal(
-      assignments,
+      operands,
       session,
       sessionView(session, registry.policies, context.frame.diagnostics),
-      staged,
       // `declare`/`typeset` share this handler but have to name
       // themselves in a diagnostic rather than say `local`.
       cmdWord,
@@ -409,10 +409,9 @@ export async function executeDeclaration(
   }
   // Pass export flags through so -p / bare print and illegal options work.
   const exportResult = await handleExport(
-    [...flagWords, ...assignments],
+    [...flagWords, ...operands],
     session,
     sessionView(session, registry.policies, context.frame.diagnostics),
-    staged,
     parser,
   )
   return mergeConversionErrors(exportResult, conversionErrors)

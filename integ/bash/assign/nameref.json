@@ -271,6 +271,40 @@
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=0\ndeclare -nr ref=\"T\"\ndeclare -- T=\"x\"\n",
         "stderr": "bash: declare: ref: readonly variable\nbash: unset: ref: cannot unset: readonly variable\nbash: declare: ref: readonly variable\nbash: declare: ref: readonly variable\n"
       }
+    },
+    {
+      "id": "nameref_bare_checks_the_held_value",
+      "seq": 940121,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( R=1; declare -n R; echo rc=$?; declare -p R; R2=T; declare -n R2; declare -p R2; A=(1); declare -n A; echo rc=$?; declare -A M=([k]=v); declare -n M; echo rc=$?; readonly R3=1; declare -n R3; echo rc=$?; readonly R4=T; declare -n R4; echo rc=$?; R5=R5; declare -n R5; echo rc=$?; R6=; declare -n R6; echo rc=$?; R7=1; f(){ local -n R7; echo rc=$?; declare -p R7; }; f; A2=(1); declare -n A2=T; echo rc=$? )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ndeclare -- R=\"1\"\ndeclare -n R2=\"T\"\nrc=1\nrc=1\nrc=1\nrc=1\nrc=0\nrc=1\nrc=0\ndeclare -n R7\nrc=1\n",
+        "stderr": "bash: declare: `1': invalid variable name for name reference\nbash: declare: A: reference variable cannot be an array\nbash: declare: M: reference variable cannot be an array\nbash: declare: `1': invalid variable name for name reference\nbash: declare: R4: readonly variable\nbash: declare: `': invalid variable name for name reference\nbash: declare: A2: reference variable cannot be an array\n"
+      }
     }
   ]
 }

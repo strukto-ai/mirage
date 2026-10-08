@@ -1323,6 +1323,74 @@
         "stdout": "Y=ab Z=c\nin=y W=ab\nout=a\ndeclare -a A=([0]=\"oldnew\" [1]=\"keep\")\ndeclare -x E=\"ab\"\ndeclare -r R=\"ab\"\nrc=1\nN=5 M=4\ndeclare -a A=([0]=\"xz\" [1]=\"y\")\ndeclare -a S=([0]=\"xy\")\ndeclare -A T=([0]=\"w\" [k]=\"v\" )\ndeclare -l L=\"abcd\"\nG=ac\nrc=1\n",
         "stderr": "bash: declare: R: readonly variable\nbash: declare: `1X+=a': not a valid identifier\n"
       }
+    },
+    {
+      "id": "declaration_literals_store_before_values",
+      "seq": 930439,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( declare -r R=1 R=(2); declare R2=1 R2=(2 3); declare R3=1 R3+=(2 3); declare R4=1 R4=([3]=x); declare -A M=([a]=1); declare M=1 M=([b]=2); declare -p R R2 R3 R4 M ); ( declare -ra A=(1) A=(2) A=3 A=(4); echo rc=$?; declare -r P=(1) P=2 P=(3); echo rc=$?; declare -rx Q=1 Q=(2) S=(3) S=4; echo rc=$?; declare -p A P Q S; R=1; declare R=(2) R=3 R+=(4); declare -p R ); ( export E=1 E=(2 3); readonly O=1 O=(2 3); declare -p E O; f(){ local L=1 L=(2 3); declare -p L; }; f )",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -ar R=([0]=\"1\")\ndeclare -a R2=([0]=\"1\" [1]=\"3\")\ndeclare -a R3=([0]=\"1\" [1]=\"3\")\ndeclare -a R4=([0]=\"1\" [3]=\"x\")\ndeclare -A M=([0]=\"1\" [b]=\"2\" )\nrc=1\nrc=1\nrc=1\ndeclare -ar A=([0]=\"4\")\ndeclare -ar P=([0]=\"3\")\ndeclare -arx Q=([0]=\"1\")\ndeclare -arx S=([0]=\"3\")\ndeclare -a R=([0]=\"3\" [1]=\"4\")\ndeclare -ax E=([0]=\"1\" [1]=\"3\")\ndeclare -ar O=([0]=\"1\" [1]=\"3\")\ndeclare -a L=([0]=\"1\" [1]=\"3\")\n",
+        "stderr": "bash: declare: A: readonly variable\nbash: declare: P: readonly variable\nbash: declare: S: readonly variable\n"
+      }
+    },
+    {
+      "id": "declaration_fatal_literal_skips_the_rest",
+      "seq": 930440,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'readonly R=1; declare -x S=(one) T=1 R=(two) U=(three)\ndeclare -p S; echo \"T=${T-unset} U=${U-unset}\"'; bash -c 'readonly R=1; readonly S=1 R=(two)\nS=x; echo \"S=$S\"'",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -a S=([0]=\"one\")\nT=unset U=unset\nS=x\n",
+        "stderr": "bash: R: readonly variable\nbash: R: readonly variable\n"
+      }
     }
   ]
 }

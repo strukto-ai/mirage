@@ -32,6 +32,7 @@ import {
   conversionScalar,
   deref,
   inCallEnv,
+  outliveCall,
   setAttr,
   shadowLocal,
   subscriptIndex,
@@ -50,6 +51,7 @@ import {
   VISIBLE_SCOPE_BUILTINS,
 } from './constants.ts'
 import type { Result } from '../types.ts'
+import type { DeclarationOperand } from './types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 export async function premark(
@@ -267,7 +269,17 @@ export function plusRefusal(
 }
 
 /**
- * Store a declaration's array literals through the session door.
+ * Store a declaration's array literals through the session door, the first
+ * of bash's two passes over a declaration.
+ *
+ * bash stores every literal before it runs any other operand, then goes
+ * through all of them in order, assigning the plain values and marking each
+ * name, a literal's included, at its own place: so `declare -r R=1 R=(2)`
+ * stores `(2)`, writes 1 over element 0 and freezes `R`, and a fatal literal
+ * leaves every other operand undone (pinned on 5.2.37). Only the
+ * value-shaping attributes go on before a literal stores (`shaping`); the
+ * caller's second pass puts the rest on the literals whose positions
+ * `stored` reports.
  *
  * The builtin owns the store; readonly is the shell's rule, checked per name
  * before the door, and the door's gate covers the policy half. Names are
@@ -277,7 +289,9 @@ export function plusRefusal(
  * `export`/`readonly` (and `declare` at top level) `fatal` abandons the rest
  * of the line, while `local` and a function-scoped `declare` refuse in the
  * builtin's voice into `errors` and the body keeps running (pinned on bash
- * 5.2, debian:stable-slim). Returns the refusal result, or null.
+ * 5.2, debian:stable-slim); under `-g` a readonly name refuses fatally even
+ * inside a function, a kind conflict does not. Returns the refusal result,
+ * or null.
  *
  * Inside a function `declare` and `local` make each name local, starting as
  * `startLocal` leaves it (with `-I`, the value it shadows); `export` and
@@ -289,20 +303,16 @@ export function plusRefusal(
  * `warnings` is filled with the `must use subscript` lines for the plain
  * words a keyed associative literal cannot take; GNU stores the valid
  * elements and the status stays 0.
- *
- * The caller marks the names `stored` reports once every literal has
- * stored: bash's `readonly A=(1) A=(2)` keeps `(2)`, so a literal is not
- * refused by a mark the same declaration put on.
  */
 export async function storeStagedArrays(
   cmd: string,
   session: SessionState,
   view: SessionView,
-  arrays: readonly { name: string; append: boolean; items: string[] }[],
+  operands: readonly DeclarationOperand[],
   errors: string[],
   warnings: string[],
   fatal = false,
-  stored: string[] | null = null,
+  stored: Set<number> | null = null,
   kind: VarKind | null = null,
   shaping: ReadonlySet<VarAttr> = new Set(),
   globalScope = false,
@@ -310,9 +320,12 @@ export async function storeStagedArrays(
 ): Promise<Result | null> {
   const scoped = !globalScope && !VISIBLE_SCOPE_BUILTINS.has(cmd)
   const locals = scoped ? session.localVars : null
-  for (const { name, append, items } of arrays) {
+  for (const [position, operand] of operands.entries()) {
+    if (typeof operand === 'string') continue
+    const { name, append, items } = operand
     if (view.isReadonly(name)) {
-      if (fatal) throw new DiscardSignal(encodeText(`bash: ${name}: readonly variable\n`))
+      if (fatal || globalScope)
+        throw new DiscardSignal(encodeText(`bash: ${name}: readonly variable\n`))
       errors.push(readonlyLine(cmd, name))
       continue
     }
@@ -362,7 +375,7 @@ export async function storeStagedArrays(
       if (err instanceof ArithError) return arithRefusal(cmd, err)
       throw err
     }
-    if (stored !== null) stored.push(name)
+    if (stored !== null) stored.add(position)
   }
   return null
 }
@@ -401,13 +414,14 @@ export function bashDeclareQuote(value: string): string {
 }
 
 export function splitDeclFlags(
-  args: string[],
+  args: readonly DeclarationOperand[],
   allowed: Set<string>,
-): { flags: Set<string>; names: string[]; bad: string | null } {
+): { flags: Set<string>; names: DeclarationOperand[]; bad: string | null } {
   const flags = new Set<string>()
   let i = 0
   while (i < args.length) {
     const tok = args[i] ?? ''
+    if (typeof tok !== 'string') break
     if (tok === '--') {
       i += 1
       break
@@ -728,31 +742,31 @@ export function handleDeclareFunctions(
 /**
  * Run `readonly -f` or `export -f`: mark functions, or list them. A name
  * that is not a function is `not a function`, exit 1, and the other operands
- * are still marked (or, with `on` false, unmarked). An array literal
- * (`export -f ARR=(a b)`) still stores first, with no attribute and its
- * `must use subscript` warnings, and its name is then checked like the
- * others, as bash assigns it before it looks for the function. With no names the marked functions print as bodies, each
+ * are still marked (or, with `on` false, unmarked), in the order typed. An
+ * array literal (`export -f ARR=(a b)`) still stores first, with no
+ * attribute and its `must use subscript` warnings, and its name is then
+ * checked at its place, as bash assigns every literal before it looks for
+ * the functions. With no names the marked functions print as bodies, each
  * followed by its `declare` line.
  */
 export async function markFunctions(
   cmd: string,
   session: SessionState,
   marked: Set<string>,
-  names: readonly string[],
+  operands: readonly DeclarationOperand[],
   on: boolean,
   state: SessionView | null = null,
-  arrays: { name: string; append: boolean; items: string[] }[] | null = null,
   parser?: ParseScope,
   kind: VarKind | null = null,
 ): Promise<Result> {
   const errors: string[] = []
   const warnings: string[] = []
-  if (arrays !== null && arrays.length > 0) {
+  if (operands.some((operand) => typeof operand !== 'string')) {
     const refused = await storeStagedArrays(
       cmd,
       session,
       requireView(state),
-      arrays,
+      operands,
       errors,
       warnings,
       true,
@@ -760,8 +774,8 @@ export async function markFunctions(
       kind,
     )
     if (refused !== null) return refused
-    names = [...names, ...arrays.map(({ name }) => name)]
   }
+  const names = operands.map((operand) => (typeof operand === 'string' ? operand : operand.name))
   if (names.length === 0) {
     const listed = [...marked].filter((name) => name in session.functions).sort(compareCodePoints)
     const lines = functionLines(session, listed, true, true, parser)
@@ -774,6 +788,102 @@ export async function markFunctions(
     else marked.delete(name)
   }
   return declarationResult(cmd, errors, warnings)
+}
+
+/**
+ * Run `export` or `readonly` over its operands: assign each value and put
+ * the keyword's mark on, or with `on` false take it off (`export -n`).
+ * bash's two passes (`storeStagedArrays`): every array literal stores first,
+ * then each operand in order is assigned and marked, a literal's name at its
+ * own place. So `readonly R=1 R=2 X=3` keeps 1, refuses the second write and
+ * still sets `X`, and `readonly A=(1) A=(2)` keeps `(2)` while a later `A=3`
+ * refuses.
+ */
+export async function markVariables(
+  cmd: string,
+  session: SessionState,
+  view: SessionView,
+  operands: readonly DeclarationOperand[],
+  attr: VarAttr,
+  on: boolean,
+  kind: VarKind | null,
+): Promise<Result> {
+  const errors: string[] = []
+  const warnings: string[] = []
+  const stored = new Set<number>()
+  const refused = await storeStagedArrays(
+    cmd,
+    session,
+    view,
+    operands,
+    errors,
+    warnings,
+    true,
+    stored,
+    kind,
+  )
+  try {
+    for (const [position, operand] of operands.entries()) {
+      if (typeof operand === 'string') {
+        const line =
+          refused !== null ? null : await markOperand(cmd, session, view, operand, attr, on, kind)
+        if (line !== null) errors.push(line)
+      } else if (stored.has(position)) {
+        // A literal is marked at its place, even when a policy refused a
+        // later literal.
+        const name = operand.name
+        await markWritten(session, view, name, deref(session, name) || name, attr, on)
+      }
+    }
+  } catch (err) {
+    if (err instanceof PolicyDenied) return refusal(cmd, err)
+    if (err instanceof ArithError) return arithRefusal(cmd, err)
+    throw err
+  }
+  return refused ?? declarationResult(cmd, errors, warnings)
+}
+
+/**
+ * Assign and mark one `export` / `readonly` word. A value of the other array
+ * kind is refused and the name is still marked, as bash does. The bare form
+ * writes no value, so it marks through the plane's no-value door rather than
+ * inventing an empty string: on a new name that leaves it *unset* and
+ * marked, bash's own third state (`export Z` prints `declare -x Z` and stays
+ * out of `env`). Still gated, since marking is a session write: through
+ * `setAttr` a deployment refusing `AWS_*` saw `readonly AWS_KEY` exit 0 and
+ * freeze the name against every later write. Returns the operand's refusal
+ * line, or null; a policy denial or an `-i` value that does not evaluate
+ * throws.
+ */
+async function markOperand(
+  cmd: string,
+  session: SessionState,
+  view: SessionView,
+  word: string,
+  attr: VarAttr,
+  on: boolean,
+  kind: VarKind | null,
+): Promise<string | null> {
+  const badName = identifierRefusal(cmd, word)
+  if (badName !== null) return badName
+  const [key, append, val] = operandParts(word)
+  if (val !== null && view.isReadonly(key)) return readonlyLine(cmd, key)
+  const held = val !== null ? heldValue(session, key) : null
+  const conflict = val !== null ? kindConflict(held, kind) : null
+  if (val !== null && conflict === null) {
+    const checked = deref(session, key) || key
+    const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
+    const [value, assigned] = scalarValue(held, val, kind, append, integer)
+    if (kind !== null) await dropReference(session, view, key)
+    await view.set(key, value, true, assigned)
+    // Rides on the gate the `view.set` above passed, unless the write
+    // re-aimed a reference (`markWritten`).
+    await markWritten(session, view, key, checked, attr, on)
+  } else {
+    await view.mark(key, attr, on)
+  }
+  if (on) outliveCall(session, key)
+  return conflict === null ? null : `bash: ${cmd}: ${key}: ${conflict}`
 }
 
 /**
@@ -808,4 +918,33 @@ export function namerefRefusal(cmd: string, name: string, target: string): strin
     return `bash: ${cmd}: ${name}: nameref variable self references not allowed`
   }
   return null
+}
+
+/**
+ * The line a `declare -n` operand earns before anything else, readonly
+ * included (pinned on 5.2.37). An array cannot become a reference
+ * (`reference variable cannot be an array`). A value names the target
+ * (`namerefRefusal`); a bare `declare -n NAME` (`target` null) aims the name
+ * at the value it already holds, so that value has to name a variable,
+ * though here it may name NAME itself.
+ */
+export function referenceRefusal(
+  cmd: string,
+  name: string,
+  own: ShellVar | undefined,
+  target: string | null,
+): string | null {
+  if (own !== undefined && own.value !== null && typeof own.value === 'object') {
+    return `bash: ${cmd}: ${name}: reference variable cannot be an array`
+  }
+  if (target !== null) return namerefRefusal(cmd, name, target)
+  if (
+    own === undefined ||
+    typeof own.value !== 'string' ||
+    own.attrs.has(VarAttr.Nameref) ||
+    own.value === name
+  ) {
+    return null
+  }
+  return namerefRefusal(cmd, name, own.value)
 }

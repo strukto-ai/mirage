@@ -611,6 +611,40 @@
         "stdout": "rc=1\ndeclare -ax S=([0]=\"1\")\ndeclare -ax X=([0]=\"1\" [1]=\"2\")\ndeclare -ax Y=([0]=\"9\" [1]=\"2\")\n---\ndeclare -Ax M=([k]=\"v\" )\nrc=2\ndeclare -ax S=([0]=\"1\")\ndeclare -ax Y=([0]=\"9\" [1]=\"2\")\ndeclare -x Z\n",
         "stderr": "bash: export: Y: cannot convert indexed to associative array\nbash: export: -r: invalid option\nexport: usage: export [-fn] [name[=value] ...] or export -p\n"
       }
+    },
+    {
+      "id": "export_f_reports_operands_in_order",
+      "seq": 609268,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( export -f X=1 ARR=(a b) Y; echo rc=$?; declare -p ARR; MAP(){ :; }; export -f MAP NO1 ARR2=(x) NO2; echo rc=$? )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ndeclare -a ARR=([0]=\"a\" [1]=\"b\")\nrc=1\n",
+        "stderr": "bash: export: X=1: not a function\nbash: export: ARR: not a function\nbash: export: Y: not a function\nbash: export: NO1: not a function\nbash: export: ARR2: not a function\nbash: export: NO2: not a function\n"
+      }
     }
   ]
 }

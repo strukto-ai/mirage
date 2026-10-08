@@ -1617,7 +1617,7 @@ describe('handleReturn / handleLocal', () => {
 
   it('handleLocal assigns to session.env under the declare spelling', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    await handleLocal(['X=1'], s, sessionView(s), null, 'declare')
+    await handleLocal(['X=1'], s, sessionView(s), 'declare')
     expect(s.env.X).toBe('1')
   })
 })

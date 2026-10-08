@@ -15,41 +15,27 @@
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
-from mirage.policy import PolicyDenied
 from mirage.shell.bytes import encode_text
-from mirage.shell.errors import ArithError
 from mirage.shell.variable import VarAttr, VarKind
 from mirage.workspace.executor.builtins.declare.constants import (
     READONLY_FLAGS,
     READONLY_USAGE,
 )
 from mirage.workspace.executor.builtins.declare.declare import (
-    declaration_result,
     declare_line,
     declared_kind,
-    drop_reference,
-    held_value,
-    identifier_refusal,
-    kind_conflict,
     kind_listed,
     mark_functions,
-    mark_written,
-    operand_parts,
-    scalar_value,
+    mark_variables,
     split_decl_flags,
-    store_staged_arrays,
 )
-from mirage.workspace.executor.builtins.shared import (
-    arith_refusal,
-    readonly_line,
-    refusal,
-    require_view,
+from mirage.workspace.executor.builtins.declare.types import (
+    DeclarationOperand,
 )
+from mirage.workspace.executor.builtins.shared import require_view
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
-    deref,
     env_is_readonly,
-    outlive_call,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -82,17 +68,16 @@ def _readonly_lines(session: SessionState, flags: set[str]) -> list[str]:
 
 
 async def handle_readonly(
-    assignments: list[str],
+    assignments: list[DeclarationOperand],
     session: SessionState,
     state: SessionView | None = None,
-    arrays: list[tuple[str, bool, list[str]]] | None = None,
     kind: VarKind | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Mark names readonly, or print them (``readonly -p`` / bare form).
 
     With no name operands, prints every readonly name as ``declare -p``
     does. Invalid options fail with status 2. ``-a`` / ``-A`` shape only
-    an assigned value (``scalar_value``, ``store_staged_arrays``): a bare
+    an assigned value (``scalar_value``, ``mark_variables``): a bare
     ``readonly -a NAME`` marks the name and converts nothing.
 
     ``-f`` freezes *functions*: a frozen one refuses redefinition and
@@ -119,90 +104,18 @@ async def handle_readonly(
             names,
             True,
             state,
-            arrays,
             kind,
         )
-    if not names and not arrays:
+    if not names:
         lines = _readonly_lines(session, flags)
         out = encode_text(("\n".join(lines) + "\n") if lines else "")
         return out, IOResult(), ExecutionNode(command="readonly", exit_code=0)
-    view = require_view(state)
-    errors: list[str] = []
-    warnings: list[str] = []
-    if arrays:
-        # Frozen once every literal has stored: bash's
-        # `readonly A=(1) A=(2)` keeps `(2)`, and a later `A=3` refuses.
-        stored: list[str] = []
-        refused = await store_staged_arrays(
-            "readonly",
-            session,
-            view,
-            arrays,
-            errors,
-            warnings,
-            fatal=True,
-            stored=stored,
-            kind=kind,
-        )
-        # The literals that stored are marked even when a policy refused
-        # a later one.
-        try:
-            for name in stored:
-                await mark_written(
-                    session, view, name, deref(session, name), VarAttr.READONLY
-                )
-        except PolicyDenied as exc:
-            return refusal("readonly", exc)
-        if refused is not None:
-            return refused
-    for assign in names:
-        bad_name = identifier_refusal("readonly", assign)
-        if bad_name is not None:
-            errors.append(bad_name)
-            continue
-        key, append, val = operand_parts(assign)
-        if val is not None and view.is_readonly(key):
-            errors.append(readonly_line("readonly", key))
-            continue
-        # A value of the other array kind is refused and the name is
-        # still frozen, as bash does.
-        held = held_value(session, key) if val is not None else None
-        conflict = kind_conflict(held, kind) if val is not None else None
-        if conflict is not None:
-            errors.append(f"bash: readonly: {key}: {conflict}")
-        if val is not None and conflict is None:
-            checked = deref(session, key)
-            target = session.vars.get(checked)
-            value, assigned = scalar_value(
-                held,
-                val,
-                kind,
-                append,
-                target is not None and VarAttr.INTEGER in target.attrs,
-            )
-            try:
-                if kind is not None:
-                    await drop_reference(session, view, key)
-                await view.set(key, value, assigned=assigned)
-                # Rides on the gate the `view.set` above passed, unless
-                # the write re-aimed a reference (`mark_written`).
-                await mark_written(
-                    session, view, key, checked, VarAttr.READONLY
-                )
-            except PolicyDenied as exc:
-                return refusal("readonly", exc)
-            except ArithError as exc:
-                return arith_refusal("readonly", exc)
-        else:
-            # Gated, exactly as `export NAME` is. The bare form writes no
-            # value, so it has no `view.set` to ride on, and marking
-            # through `set_attr` walked straight past `pre_session`: a
-            # deployment refusing `AWS_*` still saw `readonly AWS_KEY`
-            # exit 0, create the record, and freeze the name against
-            # every later legitimate write.
-            try:
-                await view.mark(key, VarAttr.READONLY, True)
-            except PolicyDenied as exc:
-                return refusal("readonly", exc)
-        outlive_call(session, key)
-    return declaration_result("readonly", errors, warnings)
+    return await mark_variables(
+        "readonly",
+        session,
+        require_view(state),
+        names,
+        VarAttr.READONLY,
+        True,
+        kind,
+    )

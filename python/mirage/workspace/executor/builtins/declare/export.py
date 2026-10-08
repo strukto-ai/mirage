@@ -15,7 +15,6 @@
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
-from mirage.policy import PolicyDenied
 from mirage.shell.bytes import encode_text
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.declare.constants import (
@@ -23,32 +22,21 @@ from mirage.workspace.executor.builtins.declare.constants import (
     EXPORT_USAGE,
 )
 from mirage.workspace.executor.builtins.declare.declare import (
-    declaration_result,
     declare_line,
     declared_kind,
-    drop_reference,
-    held_value,
-    identifier_refusal,
-    kind_conflict,
     kind_listed,
     mark_functions,
-    mark_written,
-    operand_parts,
-    scalar_value,
+    mark_variables,
     split_decl_flags,
-    store_staged_arrays,
 )
-from mirage.workspace.executor.builtins.shared import (
-    readonly_line,
-    refusal,
-    require_view,
+from mirage.workspace.executor.builtins.declare.types import (
+    DeclarationOperand,
 )
+from mirage.workspace.executor.builtins.shared import require_view
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
-    deref,
     exported_names,
-    outlive_call,
     session_view,
 )
 from mirage.workspace.types import ExecutionNode
@@ -85,10 +73,9 @@ def _export_lines(session: SessionState, flags: set[str]) -> list[str]:
 
 
 async def handle_export(
-    assignments: list[str],
+    assignments: list[DeclarationOperand],
     session: SessionState,
     state: SessionView | None = None,
-    arrays: list[tuple[str, bool, list[str]]] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Export names, or print them (``export -p`` / bare ``export``).
 
@@ -123,97 +110,18 @@ async def handle_export(
             names,
             on,
             state,
-            arrays,
             kind,
         )
     # -p with names is ignored for display; bare / -p alone print.
-    if not names and not arrays:
+    if not names:
         lines = _export_lines(session, flags)
         out = encode_text(("\n".join(lines) + "\n") if lines else "")
         return out, IOResult(), ExecutionNode(command="export", exit_code=0)
-    view = require_view(state)
-    errors: list[str] = []
-    warnings: list[str] = []
-    if arrays:
-        # `export ARR=(a b)` marks the array as surely as it marks a
-        # scalar: GNU prints `declare -ax ARR=([0]="a" [1]="b")`.
-        stored: list[str] = []
-        refused = await store_staged_arrays(
-            "export",
-            session,
-            view,
-            arrays,
-            errors,
-            warnings,
-            fatal=True,
-            stored=stored,
-            kind=kind,
-        )
-        # The literals that stored are marked even when a policy refused
-        # a later one.
-        try:
-            for name in stored:
-                await mark_written(
-                    session,
-                    view,
-                    name,
-                    deref(session, name),
-                    VarAttr.EXPORT,
-                    on,
-                )
-        except PolicyDenied as exc:
-            return refusal("export", exc)
-        if refused is not None:
-            return refused
-    for assign in names:
-        bad_name = identifier_refusal("export", assign)
-        if bad_name is not None:
-            errors.append(bad_name)
-            continue
-        key, append, val = operand_parts(assign)
-        if val is not None and view.is_readonly(key):
-            errors.append(readonly_line("export", key))
-            continue
-        # A value of the other array kind is refused and the name is
-        # still marked, as bash does.
-        held = held_value(session, key) if val is not None else None
-        conflict = kind_conflict(held, kind) if val is not None else None
-        if conflict is not None:
-            errors.append(f"bash: export: {key}: {conflict}")
-        if val is not None and conflict is None:
-            checked = deref(session, key)
-            target = session.vars.get(checked)
-            value, assigned = scalar_value(
-                held,
-                val,
-                kind,
-                append,
-                target is not None and VarAttr.INTEGER in target.attrs,
-            )
-            try:
-                if kind is not None:
-                    await drop_reference(session, view, key)
-                await view.set(key, value, assigned=assigned)
-                await mark_written(
-                    session, view, key, checked, VarAttr.EXPORT, on
-                )
-            except PolicyDenied as exc:
-                return refusal("export", exc)
-        else:
-            # The bare form writes no value, so it marks through the
-            # plane's no-value door rather than inventing an empty
-            # string. On a name that does not exist yet that leaves it
-            # *unset and exported*, which is bash's own third state --
-            # `export Z` prints `declare -x Z` and stays out of `env`
-            # until something gives it a value. Still gated: marking a
-            # hidden or policy-refused name is a session write.
-            try:
-                await view.mark(key, VarAttr.EXPORT, on)
-            except PolicyDenied as exc:
-                return refusal("export", exc)
-        if on:
-            outlive_call(session, key)
-    return declaration_result("export", errors, warnings)
+    # `export ARR=(a b)` marks the array as surely as it marks a scalar:
+    # GNU prints `declare -ax ARR=([0]="a" [1]="b")`.
+    return await mark_variables(
+        "export", session, require_view(state), names, VarAttr.EXPORT, on, kind
+    )
 
 
 async def export_builtin(call: BuiltinCall) -> Result:

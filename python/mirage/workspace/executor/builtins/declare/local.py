@@ -25,14 +25,17 @@ from mirage.workspace.executor.builtins.declare.declare import (
     identifier_refusal,
     kind_conflict,
     local_attrs,
-    nameref_refusal,
     operand_parts,
     plus_refusal,
     premark,
+    reference_refusal,
     scalar_value,
     stamp_marks,
     start_local,
     store_staged_arrays,
+)
+from mirage.workspace.executor.builtins.declare.types import (
+    DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.shared import (
     arith_refusal,
@@ -56,10 +59,9 @@ from mirage.workspace.types import ExecutionNode
 
 
 async def handle_local(
-    assignments: list[str],
+    assignments: list[DeclarationOperand],
     session: SessionState,
     state: SessionView | None = None,
-    arrays: list[tuple[str, bool, list[str]]] | None = None,
     cmd: str = "local",
     kind: VarKind | None = None,
     shaping: frozenset[VarAttr] = frozenset(),
@@ -71,18 +73,19 @@ async def handle_local(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Declare names in the running function's scope, or globally.
 
-    Each operand is declared and marked before the next one runs, as
-    bash does: ``declare -r R=1 R=2`` freezes ``R`` at 1 and refuses the
-    second write, which fails the builtin while the later operands
-    still declare. Array literals store first, and the marks land on
-    them once every literal has stored (``store_staged_arrays``).
+    bash's two passes (``store_staged_arrays``): every array literal
+    stores first, then each operand in order is declared and marked
+    before the next one runs, a literal's name at its own place. So
+    ``declare -r R=1 R=2`` freezes ``R`` at 1 and refuses the second
+    write, which fails the builtin while the later operands still
+    declare, and ``declare -r R=1 R=(2)`` leaves ``(1)``.
 
     Args:
-        assignments (list[str]): ``NAME`` / ``NAME=value`` operands.
+        assignments (list[DeclarationOperand]): the operands in order:
+            ``NAME``, ``NAME=value``, ``NAME+=value`` and staged array
+            literals.
         session (SessionState): shell session state.
         state (SessionView | None): the session plane's gated door.
-        arrays (list[tuple[str, bool, list[str]]] | None): staged array
-            literals from the declaration.
         cmd (str): the spelling that reached here, for diagnostics.
             ``declare`` and ``typeset`` route through this handler and
             must say their own name, not ``local``.
@@ -127,8 +130,10 @@ async def handle_local(
     restore = (
         reach_global(
             session,
-            [operand_parts(a)[0] for a in assignments]
-            + [name for name, _, _ in arrays or []],
+            [
+                operand_parts(a)[0] if isinstance(a, str) else a[0]
+                for a in assignments
+            ],
         )
         if global_scope
         else None
@@ -138,7 +143,6 @@ async def handle_local(
             assignments,
             session,
             view,
-            arrays or [],
             cmd,
             kind,
             shaping,
@@ -154,10 +158,9 @@ async def handle_local(
 
 
 async def _declare_operands(
-    assignments: list[str],
+    operands: list[DeclarationOperand],
     session: SessionState,
     view: SessionView,
-    arrays: list[tuple[str, bool, list[str]]],
     cmd: str,
     kind: VarKind | None,
     shaping: frozenset[VarAttr],
@@ -170,10 +173,9 @@ async def _declare_operands(
     """Run ``handle_local``'s operands in the scope it settled on.
 
     Args:
-        assignments (list[str]): ``NAME`` / ``NAME=value`` operands.
+        operands (list[DeclarationOperand]): the operands in order.
         session (SessionState): shell session state.
         view (SessionView): the session plane's gated door.
-        arrays (list[tuple[str, bool, list[str]]]): staged literals.
         cmd (str): the builtin's spelling, for diagnostics.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
         shaping (frozenset[VarAttr]): the ``-i -l -u`` attributes.
@@ -186,13 +188,13 @@ async def _declare_operands(
     """
     errors: list[str] = []
     warnings: list[str] = []
-    stored: list[str] = []
+    stored: set[int] = set()
     try:
         refused = await store_staged_arrays(
             cmd,
             session,
             view,
-            arrays,
+            operands,
             errors,
             warnings,
             fatal=session._local_vars is None,
@@ -202,32 +204,40 @@ async def _declare_operands(
             global_scope=local_vars is None,
             inherit=inherit,
         )
-        # The literals that stored take their marks even when a policy
-        # refused a later one.
-        for name in stored:
-            line = plus_refusal(cmd, session, view, name, plus)
+        for position, operand in enumerate(operands):
+            if isinstance(operand, str):
+                line = (
+                    None
+                    if refused is not None
+                    else await _declare_operand(
+                        session,
+                        view,
+                        operand,
+                        cmd,
+                        kind,
+                        shaping,
+                        marks,
+                        plus,
+                        nameref,
+                        local_vars,
+                        inherit,
+                    )
+                )
+            elif position in stored:
+                # A literal takes its marks at its place, even when a
+                # policy refused a later literal.
+                name = operand[0]
+                line = plus_refusal(cmd, session, view, name, plus)
+                if line is None:
+                    await stamp_marks(
+                        session, view, name, deref(session, name), marks
+                    )
+            else:
+                continue
             if line is not None:
                 errors.append(line)
-                continue
-            await stamp_marks(session, view, name, deref(session, name), marks)
         if refused is not None:
             return refused
-        for assign in assignments:
-            line = await _declare_operand(
-                session,
-                view,
-                assign,
-                cmd,
-                kind,
-                shaping,
-                marks,
-                plus,
-                nameref,
-                local_vars,
-                inherit,
-            )
-            if line is not None:
-                errors.append(line)
     except PolicyDenied as exc:
         return refusal(cmd, exc)
     except ArithError as exc:
@@ -282,12 +292,16 @@ async def _declare_operand(
     key, append, val = operand_parts(assign)
     fresh = local_vars is not None and key not in local_vars
     if val is None:
-        if nameref and view.is_readonly(key, False):
-            return readonly_line(cmd, key)
         if local_vars is not None:
             shadow_local(session, local_vars, key)
         if fresh:
             line = await _fresh_local(session, view, cmd, key, inherit)
+            if line is not None:
+                return line
+        if nameref:
+            line = reference_refusal(cmd, key, session.vars.get(key), None)
+            if line is None and view.is_readonly(key, False):
+                line = readonly_line(cmd, key)
             if line is not None:
                 return line
         line = plus_refusal(cmd, session, view, key, plus)
@@ -308,10 +322,10 @@ async def _declare_operand(
         await stamp_marks(session, view, key, None, marks, not nameref)
         return None
     if nameref:
-        own = session.vars.get(key)
+        own = None if fresh else session.vars.get(key)
         if append and own is not None and isinstance(own.value, str):
             val = own.value + val
-        bad_ref = nameref_refusal(cmd, key, val)
+        bad_ref = reference_refusal(cmd, key, own, val)
         if bad_ref is not None:
             return bad_ref
     if view.is_readonly(key, not nameref):
