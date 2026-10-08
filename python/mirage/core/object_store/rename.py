@@ -28,6 +28,7 @@ from mirage.core.object_store.driver import (
     ExistsFn,
     ObjectStoreDriver,
     PairFn,
+    keep_all_lost,
     keep_lost,
 )
 from mirage.errors.fs import enoent
@@ -145,6 +146,8 @@ def make_rename(
             try:
                 moved = await evict_after(move(conn), settle)
             except ConditionLost as exc:
+                if exc.error is not None:
+                    await keep_all_lost(src_spec, kpfx, exc)
                 key = exc.keys[0]
                 if key == kp.apply(kpfx, dst):
                     lost = dst_spec

@@ -31,6 +31,7 @@ import {
   type ObjectStoreDriver,
   type PairFn,
   ConditionLost,
+  keepAllLost,
   keepLost,
   requireHook,
 } from './driver.ts'
@@ -141,6 +142,7 @@ export function makeRename<A extends Accessor, C>(
         lost = kp.keyPath(src, kpfx, key)
         sent = err.versions.get(key) ?? null
       }
+      if (err.error !== null) await keepAllLost(src, kpfx, err)
       await keepLost(src, kpfx, err, key)
       // A landed copy left the destination unsure; a refused one left both
       // ends as they were, and the untouched one keeps the version the agent

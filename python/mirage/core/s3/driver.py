@@ -16,7 +16,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, NoReturn, TypeVar
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.context import KnownVersions, WriteCondition
@@ -477,6 +477,27 @@ async def _delete_batch(
     return lost, failed
 
 
+def _raise_lost_before(
+    lost: list[tuple[str, str]], exc: Exception
+) -> NoReturn:
+    """Raise a walk's later failure, carrying the keys it lost before it.
+
+    Args:
+        lost (list[tuple[str, str]]): keys lost so far, each with the
+            version it was measured on.
+        exc (Exception): the failure that stopped the walk.
+
+    Raises:
+        ConditionLost: some keys were lost before ``exc``.
+        Exception: ``exc``, when none were.
+    """
+    if lost:
+        raise ConditionLost(
+            [key for key, _ in lost], versions=dict(lost), error=exc
+        ) from exc
+    raise exc
+
+
 def _raise_kept(lost: list[tuple[str, str]], failed: list[str]) -> None:
     """Raise for the keys a prefix op kept.
 
@@ -504,10 +525,13 @@ async def _delete_prefix_if(
 ) -> None:
     lost: list[tuple[str, str]] = []
     failed: list[str] = []
-    async for listed in _known_pages(conn, pfx, known):
-        page_lost, page_failed = await _delete_batch(conn, listed)
-        lost += page_lost
-        failed += page_failed
+    try:
+        async for listed in _known_pages(conn, pfx, known):
+            page_lost, page_failed = await _delete_batch(conn, listed)
+            lost += page_lost
+            failed += page_failed
+    except Exception as exc:
+        _raise_lost_before(lost, exc)
     _raise_kept(lost, failed)
 
 
@@ -521,35 +545,44 @@ async def _move_prefix_if(
     found = False
     lost: list[tuple[str, str]] = []
     moved: list[tuple[str, str]] = []
-    async for listed in _known_pages(conn, src_pfx, known):
-        found = True
-        targets = {key: f"{dst_pfx}{key[len(src_pfx) :]}" for key, _ in listed}
-        held = await dst_known(list(targets.values()))
-        for key, token in listed:
-            dst_key = targets[key]
-            held_version = held.get(dst_key)
-            cond = WriteCondition(if_match=held_version)
-            try:
-                await conn.client.copy_object(
-                    Bucket=conn.config.bucket,
-                    CopySource={"Bucket": conn.config.bucket, "Key": key},
-                    Key=dst_key,
-                    CopySourceIfMatch=token,
-                    **_condition(cond),
-                )
-            except Exception as exc:
-                if not _lost_condition(exc, matched=True):
-                    raise
-                if held_version:
-                    loser = await _copy_loser(conn, key, dst_key, cond, token)
-                    named = loser.keys[0]
-                    lost.append((named, loser.versions.get(named, "")))
-                else:
-                    # A source gone (404) keeps no version: nothing newer to guard.
-                    lost.append((key, token if is_condition_lost(exc) else ""))
-                continue
-            moved.append((key, token))
-    delete_lost, failed = await _delete_batch(conn, moved)
+    try:
+        async for listed in _known_pages(conn, src_pfx, known):
+            found = True
+            targets = {
+                key: f"{dst_pfx}{key[len(src_pfx) :]}" for key, _ in listed
+            }
+            held = await dst_known(list(targets.values()))
+            for key, token in listed:
+                dst_key = targets[key]
+                held_version = held.get(dst_key)
+                cond = WriteCondition(if_match=held_version)
+                try:
+                    await conn.client.copy_object(
+                        Bucket=conn.config.bucket,
+                        CopySource={"Bucket": conn.config.bucket, "Key": key},
+                        Key=dst_key,
+                        CopySourceIfMatch=token,
+                        **_condition(cond),
+                    )
+                except Exception as exc:
+                    if not _lost_condition(exc, matched=True):
+                        raise
+                    if held_version:
+                        loser = await _copy_loser(
+                            conn, key, dst_key, cond, token
+                        )
+                        named = loser.keys[0]
+                        lost.append((named, loser.versions.get(named, "")))
+                    else:
+                        # A source gone (404) keeps no version: nothing newer to guard.
+                        lost.append(
+                            (key, token if is_condition_lost(exc) else "")
+                        )
+                    continue
+                moved.append((key, token))
+        delete_lost, failed = await _delete_batch(conn, moved)
+    except Exception as exc:
+        _raise_lost_before(lost, exc)
     _raise_kept(lost + delete_lost, failed)
     return found
 

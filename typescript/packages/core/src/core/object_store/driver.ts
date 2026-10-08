@@ -310,12 +310,15 @@ export class ConditionLost extends Error {
    * @param gone the object no longer exists, so no newer bytes are there
    *   for a retry to overwrite
    * @param versions the version each lost key was measured on, where the op knew it
+   * @param error a later failure that stopped a walk after these keys were
+   *   lost; the caller keeps their versions and throws it
    */
   constructor(
     readonly keys: readonly string[],
     readonly landed = false,
     readonly gone = false,
     readonly versions: ReadonlyMap<string, string> = new Map(),
+    readonly error: unknown = null,
   ) {
     super(`condition lost on '${keys[0] ?? ''}'`)
     this.name = 'ConditionLost'
@@ -335,6 +338,19 @@ export function refused(
  * Keep the version of each key a walk lost on, except `skip`, which the
  * refusal itself names and keeps. Mirrors python's `keep_lost`.
  */
+/**
+ * Keep every lost key's version, then throw the walk's later error. Mirrors
+ * python's `keep_all_lost`.
+ */
+export async function keepAllLost(
+  root: PathSpec,
+  keyPrefix: string,
+  err: ConditionLost,
+): Promise<never> {
+  await keepLost(root, keyPrefix, err, '')
+  throw err.error
+}
+
 export async function keepLost(
   root: PathSpec,
   keyPrefix: string,

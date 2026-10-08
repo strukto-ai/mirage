@@ -459,6 +459,24 @@ async function deleteBatch(
 }
 
 /**
+ * Throw a walk's later failure, carrying the keys it lost before it (as a
+ * ConditionLost), or the failure itself when none were. Mirrors python's
+ * `_raise_lost_before`.
+ */
+function raiseLostBefore(lost: readonly [string, string][], err: unknown): never {
+  if (lost.length > 0) {
+    throw new ConditionLost(
+      lost.map(([key]) => key),
+      false,
+      false,
+      new Map(lost),
+      err,
+    )
+  }
+  throw err
+}
+
+/**
  * Raise for the keys a prefix op kept: lost keys first, so the caller drops
  * their cached copies and keeps the versions they were measured on, then
  * keys the store refused. Mirrors Python's `_raise_kept`.
@@ -478,10 +496,14 @@ function raiseKept(lost: readonly [string, string][], failed: readonly string[])
 async function deletePrefixIf(conn: S3Conn, pfx: string, known: KnownVersions): Promise<void> {
   const lost: [string, string][] = []
   const failed: string[] = []
-  for await (const listed of knownPages(conn, pfx, known)) {
-    const [pageLost, pageFailed] = await deleteBatch(conn, listed)
-    lost.push(...pageLost)
-    failed.push(...pageFailed)
+  try {
+    for await (const listed of knownPages(conn, pfx, known)) {
+      const [pageLost, pageFailed] = await deleteBatch(conn, listed)
+      lost.push(...pageLost)
+      failed.push(...pageFailed)
+    }
+  } catch (err) {
+    raiseLostBefore(lost, err)
   }
   raiseKept(lost, failed)
 }
@@ -496,41 +518,47 @@ async function movePrefixIf(
   let found = false
   const lost: [string, string][] = []
   const moved: [string, string][] = []
-  for await (const listed of knownPages(conn, srcPfx, known)) {
-    found = true
-    const targets = new Map(listed.map(([key]) => [key, `${dstPfx}${key.slice(srcPfx.length)}`]))
-    const held = await dstKnown([...targets.values()])
-    for (const [key, token] of listed) {
-      const dstKey = targets.get(key) ?? key
-      const heldVersion = held.get(dstKey)
-      const cond: WriteCondition =
-        heldVersion !== undefined && heldVersion !== '' ? { ifMatch: heldVersion } : {}
-      try {
-        await conn.send(
-          new conn.mod.CopyObjectCommand({
-            Bucket: conn.config.bucket,
-            CopySource: `${conn.config.bucket}/${key}`,
-            Key: dstKey,
-            CopySourceIfMatch: token,
-            ...condition(cond),
-          }),
-        )
-      } catch (err) {
-        if (!lostCondition(err, true)) throw err
-        if (cond.ifMatch !== undefined) {
-          const loser = await copyLoser(conn, key, dstKey, cond, token)
-          const named = loser.keys[0] ?? key
-          lost.push([named, loser.versions.get(named) ?? ''])
-        } else {
-          // A source gone (404) keeps no version: nothing newer to guard.
-          lost.push([key, isConditionLost(err) ? token : ''])
+  let deleteLost: [string, string][]
+  let failed: string[]
+  try {
+    for await (const listed of knownPages(conn, srcPfx, known)) {
+      found = true
+      const targets = new Map(listed.map(([key]) => [key, `${dstPfx}${key.slice(srcPfx.length)}`]))
+      const held = await dstKnown([...targets.values()])
+      for (const [key, token] of listed) {
+        const dstKey = targets.get(key) ?? key
+        const heldVersion = held.get(dstKey)
+        const cond: WriteCondition =
+          heldVersion !== undefined && heldVersion !== '' ? { ifMatch: heldVersion } : {}
+        try {
+          await conn.send(
+            new conn.mod.CopyObjectCommand({
+              Bucket: conn.config.bucket,
+              CopySource: `${conn.config.bucket}/${key}`,
+              Key: dstKey,
+              CopySourceIfMatch: token,
+              ...condition(cond),
+            }),
+          )
+        } catch (err) {
+          if (!lostCondition(err, true)) throw err
+          if (cond.ifMatch !== undefined) {
+            const loser = await copyLoser(conn, key, dstKey, cond, token)
+            const named = loser.keys[0] ?? key
+            lost.push([named, loser.versions.get(named) ?? ''])
+          } else {
+            // A source gone (404) keeps no version: nothing newer to guard.
+            lost.push([key, isConditionLost(err) ? token : ''])
+          }
+          continue
         }
-        continue
+        moved.push([key, token])
       }
-      moved.push([key, token])
     }
+    ;[deleteLost, failed] = await deleteBatch(conn, moved)
+  } catch (err) {
+    raiseLostBefore(lost, err)
   }
-  const [deleteLost, failed] = await deleteBatch(conn, moved)
   raiseKept([...lost, ...deleteLost], failed)
   return found
 }

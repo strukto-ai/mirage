@@ -199,6 +199,9 @@ class ConditionLost(Exception):
             there for a retry to overwrite.
         versions (dict[str, str] | None): the version each lost key was
             measured on, where the op knew it.
+        error (Exception | None): a later failure that stopped a walk
+            after these keys were lost; the caller keeps their versions
+            and raises it.
     """
 
     def __init__(
@@ -207,12 +210,14 @@ class ConditionLost(Exception):
         landed: bool = False,
         gone: bool = False,
         versions: dict[str, str] | None = None,
+        error: Exception | None = None,
     ) -> None:
         super().__init__(f"condition lost on {keys[0] if keys else ''!r}")
         self.keys = keys
         self.landed = landed
         self.gone = gone
         self.versions = versions or {}
+        self.error = error
 
 
 async def refused(
@@ -228,6 +233,24 @@ async def refused(
     return await stale(
         path, gone=exc.gone, version=cond.if_match if cond else None
     )
+
+
+async def keep_all_lost(
+    root: PathSpec, key_prefix: str, exc: ConditionLost
+) -> None:
+    """Keep every lost key's version, then raise the walk's later error.
+
+    Args:
+        root (PathSpec): the walk's operand, for addressing its keys.
+        key_prefix (str): the mount's backend key prefix.
+        exc (ConditionLost): the refusal, carrying ``error``.
+
+    Raises:
+        Exception: ``exc.error``.
+    """
+    assert exc.error is not None
+    await keep_lost(root, key_prefix, exc, "")
+    raise exc.error
 
 
 async def keep_lost(

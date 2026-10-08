@@ -30,6 +30,7 @@ from mirage.core.object_store.driver import (
     ObjectStoreDriver,
     PathFn,
     RmdirFn,
+    keep_all_lost,
     keep_lost,
     refused,
 )
@@ -140,6 +141,8 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
             try:
                 await evict_after(op, settle)
             except ConditionLost as exc:
+                if exc.error is not None:
+                    await keep_all_lost(path_spec, kpfx, exc)
                 key = exc.keys[0]
                 await keep_lost(path_spec, kpfx, exc, key)
                 raise await stale(

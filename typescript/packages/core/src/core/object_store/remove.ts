@@ -32,6 +32,7 @@ import {
   type ObjectStoreDriver,
   type PathFn,
   ConditionLost,
+  keepAllLost,
   keepLost,
   refused,
   requireHook,
@@ -129,6 +130,7 @@ export function makeRemovePrefix<A extends Accessor, C>(
     } catch (err) {
       if (!(err instanceof ConditionLost)) throw err
       const key = err.keys[0] ?? ''
+      if (err.error !== null) await keepAllLost(path, kpfx, err)
       await keepLost(path, kpfx, err, key)
       throw await stale(kp.keyPath(path, kpfx, key), false, false, err.versions.get(key) ?? null)
     }
