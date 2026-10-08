@@ -167,22 +167,6 @@ def test_transformed_names_are_sorted_before_applying_count(key):
     )
 
 
-@pytest.mark.parametrize(
-    "a,b,sign",
-    [
-        ("v1.9", "v1.10", -1),
-        ("v1.10", "v1.9", 1),
-        ("v1.0", "v1.0", 0),
-        ("v2.0-rc1", "v2.0", 1),
-        ("a01", "a1", -1),
-        ("a", "b", -1),
-    ],
-)
-def test_versioncmp_orders_numbers_by_value(a, b, sign):
-    result = ref_format.versioncmp(a, b)
-    assert (result > 0) - (result < 0) == sign
-
-
 def test_a_prerelease_suffix_sorts_before_its_release():
     assert ref_format.versioncmp("v2.0-rc1", "v2.0", ("-rc",)) < 0
     assert ref_format.versioncmp("v2.0", "v2.0-rc1", ("-rc",)) > 0

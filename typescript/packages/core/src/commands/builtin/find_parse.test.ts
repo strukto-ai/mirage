@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { evalPredicate, treeHasAction } from './find_eval.ts'
+import { evalPredicate, treeHasAction } from '../../core/generic/find_eval.ts'
 import { FindParseError } from '../errors.ts'
 import { parseFindExpression } from './find_parse.ts'
 

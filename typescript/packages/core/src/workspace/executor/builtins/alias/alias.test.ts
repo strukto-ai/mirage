@@ -16,6 +16,7 @@
 // python/tests/workspace/executor/builtins/alias/test_alias.py.
 
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
 import { getTestParser, stdoutStr } from '../../../fixtures/workspace_fixture.ts'
@@ -123,4 +124,59 @@ describe('alias', () => {
     const io = await ws.shell('f')
     expect([stdoutStr(io), io.exitCode]).toEqual(['works\n', 0])
   })
+})
+
+const OWNERSHIP_CASES = (
+  JSON.parse(
+    readFileSync(
+      new URL('../../../../../../../../integ/bash/builtin/alias.json', import.meta.url),
+      'utf8',
+    ),
+  ) as {
+    cases: {
+      id: string
+      command: string
+      expect: { exit: number; stdout: string; stderr: string }
+    }[]
+  }
+).cases.filter((row) => row.id.startsWith('alias_ownership_'))
+
+// Bash 5.2.37, debian@sha256:5bc3287b25407c965a30f38e32603dc253a3869e1b12a21ac09bfc27fd8b13ce.
+it.each(OWNERSHIP_CASES)('preserves alias source ownership: $id', async (row) => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    const io = await ws.shell(row.command)
+    expect([io.exitCode, stdoutStr(io), new TextDecoder().decode(io.stderr)]).toEqual([
+      row.expect.exit,
+      row.expect.stdout,
+      row.expect.stderr,
+    ])
+  } finally {
+    await ws.close()
+  }
+})
+
+it('ends alias guards after a failed invocation', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    await ws.shell("shopt -s expand_aliases; alias e='echo A; e' fi='fi'")
+    expect((await ws.shell('e')).exitCode).toBe(127)
+    expect((await ws.shell('fi')).exitCode).toBe(2)
+    await ws.shell("alias e='echo OK;' fi='echo F;'")
+    for (const [line, out] of [
+      ['e e', 'OK\nOK\n'],
+      ['fi fi', 'F\nF\n'],
+    ] as const) {
+      const io = await ws.shell(line)
+      expect([stdoutStr(io), io.exitCode]).toEqual([out, 0])
+    }
+  } finally {
+    await ws.close()
+  }
 })

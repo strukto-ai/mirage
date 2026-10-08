@@ -26,13 +26,12 @@ from mirage.commands.builtin.types import (
 )
 from mirage.commands.builtin.utils.formatting import format_find_ls
 from mirage.commands.builtin.utils.identity import Identity
-from mirage.commands.errors import is_entry_error
 from mirage.context import (
     get_current_session,
     reset_program_invocation,
     set_program_invocation,
 )
-from mirage.errors.classify import failure_text
+from mirage.errors.classify import failure_text, is_entry_error
 from mirage.errors.fs import enoent
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition

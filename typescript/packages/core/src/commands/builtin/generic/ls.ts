@@ -39,7 +39,8 @@ import {
   timeOf,
   type BlockSizeRefusal,
 } from '../utils/formatting.ts'
-import { isEntryError, UsageError } from '../../errors.ts'
+import { UsageError } from '../../errors.ts'
+import { isEntryError } from '../../../errors/classify.ts'
 import { argmatchError, argmatchLine, usageHint } from '../../spec/usage.ts'
 import { type ArgmatchKind, argmatch } from '../../spec/argmatch.ts'
 import { identityOf, type Identity } from '../utils/identity.ts'

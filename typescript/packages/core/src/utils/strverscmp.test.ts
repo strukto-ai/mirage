@@ -12,21 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { getExtension } from './resolve.ts'
+import { expect, it } from 'vitest'
+import { strverscmp } from './strverscmp.ts'
 
-describe('getExtension', () => {
-  it.each([
-    ['file.txt', '.txt'],
-    ['data/file.parquet', '.parquet'],
-    ['folder/My Doc.gdoc.json', '.gdoc.json'],
-    ['folder/My Sheet.gsheet.json', '.gsheet.json'],
-    ['slides/My Slides.gslide.json', '.gslide.json'],
-    ['INBOX/2026-05-03/Hi__18f.gmail.json', '.gmail.json'],
-    ['Makefile', null],
-    ['dir.d/file', null],
-    [null, null],
-  ])('reads %s as %s', (path, extension) => {
-    expect(getExtension(path)).toBe(extension)
-  })
+it.each([
+  ['v1.0', 'v1.0', 0],
+  ['a', 'b', -1],
+  ['v1.9', 'v1.10', -1],
+  ['x10', 'x9z', 1],
+  ['alpha1', 'alpha001', 1],
+  ['part1_f012', 'part1_f01', 1],
+  ['foo.009', 'foo.0', -1],
+  ['a0b', 'a00b', 1],
+  ['v2.0-rc1', 'v2.0', 1],
+  ['ISO8859-1//', 'ISO88591//', -1],
+  ['4.010', '4.9', -1],
+  ['4..9', '4.9', -1],
+])('orders %s and %s as glibc does', (a, b, sign) => {
+  expect(Math.sign(strverscmp(a, b))).toBe(sign)
 })

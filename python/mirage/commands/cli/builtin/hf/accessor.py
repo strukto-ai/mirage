@@ -55,7 +55,9 @@ def hub_for(
     client: an accessor is a value object here, holding the endpoint,
     the credential and which repository is being addressed, so `hf` gets
     the mount's tree walk and commit builder for free. It reaches no
-    mount, which is what keeps this an account CLI.
+    mount, which is what keeps this an account CLI. A verb reads paths
+    and sizes, never the per-file commit a mount's mtimes come from, so
+    the walk lists bare.
 
     Args:
         inv (CLIInvocation[HfConfig]): the invocation.
@@ -71,6 +73,7 @@ def hub_for(
         token=inv.config.token,
         endpoint=inv.config.endpoint,
         revision=revision or DEFAULT_REVISION,
+        expand_commits=False,
     )
     return HfHubAccessor(config, repo_type=repo_type)
 
@@ -100,8 +103,10 @@ def require_operands(inv: CLIInvocation[HfConfig], names: list[str]) -> None:
         )
 
 
-def text_out(text: str) -> tuple[ByteSource | None, IOResult]:
-    return yield_bytes(text.encode()), IOResult()
+def text_out(
+    text: str, stderr: str = ""
+) -> tuple[ByteSource | None, IOResult]:
+    return yield_bytes(text.encode()), IOResult(stderr=stderr.encode() or None)
 
 
 def require_token(inv: CLIInvocation[HfConfig], what: str) -> None:

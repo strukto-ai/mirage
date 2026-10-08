@@ -14,7 +14,7 @@
 
 import type { EvaluationContext } from '../evaluation.ts'
 import { runWithAdmission } from '../../context/session_context.ts'
-import { CommandTimeoutError } from '../../commands/errors.ts'
+import { CommandTimeoutError } from '../../errors/types.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
 import { guardOutput } from '../../commands/builtin/utils/limit.ts'
 import { postExecuteGate, refusalOf, renderDeny } from '../../policy/index.ts'

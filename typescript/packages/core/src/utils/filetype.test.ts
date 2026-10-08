@@ -25,6 +25,7 @@ import {
   contentTypeForExtension,
   contentTypeForMime,
   contentTypeForPath,
+  getExtension,
   mimeTypeFor,
 } from './filetype.ts'
 
@@ -92,5 +93,21 @@ describe('mimeTypeFor', () => {
     expect(mimeTypeFor('notes.txt')).toBe('text/plain')
     expect(mimeTypeFor('archive.weird')).toBe('application/octet-stream')
     expect(mimeTypeFor('no_extension')).toBe('application/octet-stream')
+  })
+})
+
+describe('getExtension', () => {
+  it.each([
+    ['file.txt', '.txt'],
+    ['data/file.parquet', '.parquet'],
+    ['folder/My Doc.gdoc.json', '.gdoc.json'],
+    ['folder/My Sheet.gsheet.json', '.gsheet.json'],
+    ['slides/My Slides.gslide.json', '.gslide.json'],
+    ['INBOX/2026-05-03/Hi__18f.gmail.json', '.gmail.json'],
+    ['Makefile', null],
+    ['dir.d/file', null],
+    [null, null],
+  ])('reads %s as %s', (path, extension) => {
+    expect(getExtension(path)).toBe(extension)
   })
 })

@@ -19,6 +19,9 @@ does not expand), rewrites the head word into a fresh line so a value
 holding a pipe is a pipe, and reports through ``type``/``command -v``.
 """
 
+import json
+from pathlib import Path
+
 import pytest
 
 from mirage.types import MountMode
@@ -227,3 +230,50 @@ async def test_a_checked_out_function_does_not_read_the_replaced_site():
     await apply_state_dict(ws, state)
     assert await _run(ws, "f") == ("works\n", 0)
     await ws.close()
+
+
+OWNERSHIP_CASES = [
+    row
+    for row in json.loads(
+        (
+            Path(__file__).resolve().parents[6]
+            / "integ/bash/builtin/alias.json"
+        ).read_text()
+    )["cases"]
+    if row["id"].startswith("alias_ownership_")
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", OWNERSHIP_CASES, ids=lambda case: case["id"])
+async def test_alias_source_ownership(case):
+    # Bash 5.2.37, debian:stable-slim at digest
+    # sha256:5bc3287b25407c965a30f38e32603dc253a3869e1b12a21ac09bfc27fd8b13ce.
+    ws = _ws()
+    try:
+        io = await ws.shell(case["command"])
+        assert (
+            io.exit_code,
+            await io.stdout_str(),
+            await io.stderr_str(),
+        ) == (
+            case["expect"]["exit"],
+            case["expect"]["stdout"],
+            case["expect"]["stderr"],
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_alias_guards_end_after_a_failed_invocation():
+    ws = _ws()
+    try:
+        await ws.shell("shopt -s expand_aliases; alias e='echo A; e' fi='fi'")
+        assert (await ws.shell("e")).exit_code == 127
+        assert (await ws.shell("fi")).exit_code == 2
+        await ws.shell("alias e='echo OK;' fi='echo F;'")
+        assert await _run(ws, "e e") == ("OK\nOK\n", 0)
+        assert await _run(ws, "fi fi") == ("F\nF\n", 0)
+    finally:
+        await ws.close()

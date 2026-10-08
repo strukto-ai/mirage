@@ -15,6 +15,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from mirage.types import ContentType
 from mirage.utils.filetype import (
     CONTENT_BY_EXTENSION,
@@ -23,6 +25,7 @@ from mirage.utils.filetype import (
     content_type_for_extension,
     content_type_for_mime,
     content_type_for_path,
+    get_extension,
     mime_type_for,
 )
 
@@ -91,3 +94,21 @@ def test_mime_type_for_uses_the_fixed_table():
     assert mime_type_for("notes.txt") == "text/plain"
     assert mime_type_for("archive.weird") == "application/octet-stream"
     assert mime_type_for("no_extension") == "application/octet-stream"
+
+
+@pytest.mark.parametrize(
+    "path, extension",
+    [
+        ("file.txt", ".txt"),
+        ("data/file.parquet", ".parquet"),
+        ("folder/My Doc.gdoc.json", ".gdoc.json"),
+        ("folder/My Sheet.gsheet.json", ".gsheet.json"),
+        ("slides/My Slides.gslide.json", ".gslide.json"),
+        ("INBOX/2026-05-03/Hi__18f.gmail.json", ".gmail.json"),
+        ("Makefile", None),
+        ("dir.d/file", None),
+        (None, None),
+    ],
+)
+def test_get_extension(path, extension):
+    assert get_extension(path) == extension

@@ -166,7 +166,7 @@ export async function executeCommand(
   // expansion, textually, and reads the result as a fresh line: an alias
   // holding a pipe is a pipe. Only an unquoted plain word qualifies, and
   // `aliasValue` applies the rest of bash's rules (expand_aliases, the
-  // same-line mark, the no-second-expansion stack). The rewritten line
+  // same-line mark, the guards on inserted text). The rewritten line
   // runs through the same executor with the same call stack, so `$1`
   // inside a function still means the function's argument.
   const headNode = nonPrefixParts[0]
@@ -181,23 +181,20 @@ export async function executeCommand(
       session.parseCurrent,
       session.parseRow + (node.startPosition?.row ?? 0),
     ]
-    const source = getText(node)
-    const base = node.startIndex ?? 0
-    const rest = source.slice((headNode.endIndex ?? 0) - base)
-    const rewrite = aliasCommandText(session, head, rest, mark)
+    const rewrite = aliasCommandText(session, node, headNode, mark)
     if (rewrite !== null) {
-      const [rewritten, texts] = rewrite
-      let at = (headNode.startIndex ?? 0) - base
-      const line = source.slice(0, at) + rewritten
+      const [line, owners] = rewrite
+      const names = new Set(owners.flatMap((names) => [...names]))
+      const previous = session.aliasExpansion
       const scope = parser.fork()
       try {
         const ast = scope.parse(line)
-        const own = new Map<string, readonly [number, number]>()
-        for (const [alias, text] of texts) {
-          own.set(alias, [at, at + text.length])
-          at += text.length
-        }
-        const found = checkSyntax(line, expandingAliases(session), own) ?? findSyntaxIssue(ast)
+        const found =
+          checkSyntax(
+            line,
+            new Set([...expandingAliases(session), ...names]),
+            (name, at) => owners[at]?.has(name) ?? false,
+          ) ?? findSyntaxIssue(ast)
         if (found !== null) {
           const io = syntaxErrorResult(found)
           const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
@@ -207,7 +204,16 @@ export async function executeCommand(
             new ExecutionNode({ command: head, exitCode: io.exitCode, stderr: bad }),
           ]
         }
-        session.aliasStack.push(head)
+        const mapped = [...owners, new Set<string>()]
+        session.aliasExpansion = {
+          root: ast.id,
+          owners: scope.sourceOffsets(line, ast).map((i) => {
+            const owner = mapped[i]
+            if (owner === undefined) throw new Error('alias source offset is out of bounds')
+            return owner
+          }),
+          names,
+        }
         // The rewritten line is read from this node, so it runs as a line
         // of its own under the word that named it: each invocation of one
         // alias is a place of its own on the line (`c && c` asks twice, as
@@ -227,7 +233,7 @@ export async function executeCommand(
             expansion === null ? undefined : { handed: expansion },
           )
         } finally {
-          session.aliasStack.pop()
+          session.aliasExpansion = previous
           if (expansion !== null) registry.decisions.handUp(session.sessionId, expansion)
         }
       } finally {

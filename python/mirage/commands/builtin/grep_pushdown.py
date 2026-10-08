@@ -30,10 +30,10 @@ from mirage.commands.builtin.types import (
 )
 from mirage.commands.builtin.utils.paths import has_unresolved_glob
 from mirage.commands.builtin.utils.stream import is_stdin
-from mirage.commands.resolve import get_extension
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.types import PathSpec
+from mirage.utils.filetype import get_extension
 from mirage.vfs.types import SearchOps, SearchQuery
 
 

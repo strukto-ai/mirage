@@ -422,6 +422,8 @@ async function runPreparedLine(
       frame.writer,
       async () => {
         const parser = new ParseScope(await abortable(env.parser(), options.signal))
+        const previousAliasExpansion = effectiveSession.aliasExpansion
+        effectiveSession.aliasExpansion = null
         try {
           const root = argv === undefined ? parser.parse(command) : literalTree(argv)
           // Syntax gates before policy, mirroring bash: an unparsable line exits 2
@@ -719,6 +721,7 @@ async function runPreparedLine(
             env.sessions,
           )
         } finally {
+          effectiveSession.aliasExpansion = previousAliasExpansion
           parser.release()
         }
       },

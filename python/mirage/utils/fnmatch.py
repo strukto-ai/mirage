@@ -56,3 +56,18 @@ def fnmatch(name: str, pattern: str) -> bool:
         pattern (str): shell glob pattern.
     """
     return _stdlib_fnmatch.fnmatchcase(name, _normalize_negation(pattern))
+
+
+def fnmatchcase(name: str, pattern: str) -> bool:
+    """CPython's ``fnmatch.fnmatchcase``: a leading ``^`` is a class member.
+
+    What a Python tool matches with (huggingface_hub's
+    ``filter_repo_objects``), so a CLI that mimics one reads ``[^a]`` as
+    ``^`` or ``a`` rather than bash's negation. Mirrors the TypeScript
+    ``fnmatchcase``.
+
+    Args:
+        name (str): string to test.
+        pattern (str): fnmatch pattern.
+    """
+    return _stdlib_fnmatch.fnmatchcase(name, pattern)

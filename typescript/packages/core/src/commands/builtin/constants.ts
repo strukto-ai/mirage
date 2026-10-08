@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RowActionKind } from './types.ts'
+import type { RowActionKind } from '../../core/generic/find_eval.ts'
 import { sizeSuffixes } from './utils/size_suffix.ts'
 
 export enum PatternType {

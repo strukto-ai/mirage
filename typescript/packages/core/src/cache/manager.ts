@@ -14,10 +14,12 @@
 
 import { captureRead } from './context.ts'
 import { activeRecords } from '../observe/context.ts'
+import type { OpRecord } from '../observe/record.ts'
 import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
-import type { FileCache } from './file/mixin.ts'
+import { drainBudget, type FileCache } from './file/mixin.ts'
+import { concat } from '../io/cachable_iterator.ts'
 import type { IndexCacheStore } from './index/store.ts'
 import type { Evicted, IndexEntry } from './index/config.ts'
 import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
@@ -472,21 +474,84 @@ export class CacheManager {
     if (!(data instanceof Uint8Array)) return data
     const cache = this.readableCache(key)
     if (cache !== null) {
-      await withCacheMutation(cache, async () => {
-        if (
-          this.ownsPath(key) &&
-          generation === this.readGeneration &&
-          (keep === undefined || keep())
-        ) {
-          let fingerprint = latestFingerprint(records?.slice(start), key)
-          if (facts.length > 0) {
-            fingerprint = facts.every((fp) => fp === facts[0]) ? (facts[0] ?? null) : null
-          }
-          await cache.set(key, data, { fingerprint, ttl: this.readTtl })
-        }
-      })
+      await this.keepRead(cache, key, data, generation, keep, () =>
+        facts.length > 0
+          ? facts.every((fp) => fp === facts[0])
+            ? (facts[0] ?? null)
+            : null
+          : latestFingerprint(records?.slice(start), key),
+      )
     }
     return data
+  }
+
+  /**
+   * Pass a cold streamed read through and keep its bytes for the next one.
+   *
+   * The streamed twin of `fill`: the bytes are kept once the last chunk is
+   * pulled, under the same rules (a write that lands while the stream runs
+   * retires the generation, and `keep` has the last say), labelled with the
+   * token this stream's backend recorded (`records`). A stream closed early,
+   * or larger than the cache's drain budget, keeps nothing, so the cache never
+   * reads past what the caller pulled and never holds more than it could.
+   * Mirrors Python's `fill_stream`.
+   */
+  fillStream(
+    path: PathSpec,
+    source: AsyncIterable<Uint8Array>,
+    records: readonly OpRecord[],
+    keep?: () => boolean,
+  ): AsyncIterable<Uint8Array> {
+    const key = this.cacheKey(path)
+    const cache = this.readableCache(key)
+    if (cache === null) return source
+    return this.filling(cache, key, source, records, keep)
+  }
+
+  private async *filling(
+    cache: FileCache,
+    key: string,
+    source: AsyncIterable<Uint8Array>,
+    records: readonly OpRecord[],
+    keep: (() => boolean) | undefined,
+  ): AsyncGenerator<Uint8Array> {
+    const generation = this.readGeneration
+    const budget = drainBudget(cache)
+    let chunks: Uint8Array[] | null = []
+    let size = 0
+    for await (const chunk of source) {
+      if (chunks !== null) {
+        size += chunk.byteLength
+        chunks = size <= budget ? chunks : null
+        chunks?.push(chunk)
+      }
+      yield chunk
+    }
+    if (chunks !== null) {
+      await this.keepRead(cache, key, concat(chunks), generation, keep, () =>
+        latestFingerprint(records, key),
+      )
+    }
+  }
+
+  /** Store a cold read's bytes unless something since made them stale. */
+  private async keepRead(
+    cache: FileCache,
+    key: string,
+    data: Uint8Array,
+    generation: number,
+    keep: (() => boolean) | undefined,
+    token: () => string | null,
+  ): Promise<void> {
+    await withCacheMutation(cache, async () => {
+      if (
+        this.ownsPath(key) &&
+        generation === this.readGeneration &&
+        (keep === undefined || keep())
+      ) {
+        await cache.set(key, data, { fingerprint: token(), ttl: this.readTtl })
+      }
+    })
   }
 
   /**

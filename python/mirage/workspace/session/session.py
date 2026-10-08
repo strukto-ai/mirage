@@ -38,6 +38,7 @@ from mirage.shell.constants import (
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
 from mirage.shell.job_table import JobWaits
+from mirage.shell.types import AliasExpansion
 from mirage.shell.variable import (
     ManagedRef,
     ShellVar,
@@ -425,7 +426,7 @@ class SessionState:
     # of it, so the rule is kept as a mark: each program loop entered
     # gets a parse id, an alias remembers the (parse, row) it was
     # defined at, and a use on that same parse and row does not expand.
-    # `_alias_stack` names the aliases being expanded, so a value whose
+    # `_alias_expansion` tracks the text each alias inserted, so a value whose
     # first word is the alias itself (`alias ls='ls -1'`) stops there.
     # `exec` redirect-only state: where the shell's own stdout, stderr
     # and stdin point after a bare `exec > file` / `exec 2> file` /
@@ -470,7 +471,7 @@ class SessionState:
     _alias_marks: dict[str, tuple[int, int]] = field(
         default_factory=dict, repr=False
     )
-    _alias_stack: list[str] = field(default_factory=list, repr=False)
+    _alias_expansion: AliasExpansion | None = field(default=None, repr=False)
     # The aliases a running function's body expands, as its definition
     # saw them (``FunctionSite.aliases``); None reads the live table.
     _alias_view: dict[str, str] | None = field(default=None, repr=False)
@@ -862,7 +863,7 @@ class SessionState:
         child = self.fork()
         child._parse_current = self._parse_current
         child._parse_row = self._parse_row
-        child._alias_stack = list(self._alias_stack)
+        child._alias_expansion = self._alias_expansion
         child._local_vars = (
             None if self._local_vars is None else copy_locals(self._local_vars)
         )

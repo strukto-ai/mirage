@@ -19,13 +19,13 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
-from mirage.commands.errors import CommandTimeoutError
 from mirage.context import (
     get_current_evaluation,
     reset_refusal_sink,
     set_current_evaluation,
     set_refusal_sink,
 )
+from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope, active_records
@@ -664,6 +664,8 @@ async def run_prepared_line(
         # This coroutine is the line's whole task, so every statement
         # and every nested evaluation under it inherits the identity.
         set_line_writer(frame.writer)
+    previous_alias_expansion = effective_session._alias_expansion
+    effective_session._alias_expansion = None
     try:
         ast = (
             parse_scope.parse(command) if argv is None else literal_tree(argv)
@@ -1038,6 +1040,7 @@ async def run_prepared_line(
         # fingerprints/drift) and as observer op events. The command
         # event's exit_code says whether the line that emitted them
         # succeeded.
+        effective_session._alias_expansion = previous_alias_expansion
         parse_scope.release()
         scope.close()
         effective_session._alias_view = outer_view

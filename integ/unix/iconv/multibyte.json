@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "id": "iconv_decodes_the_multibyte_charsets_glibc_does",
+      "seq": 16100020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\261\\261\\276\\251\\n' | iconv -f GBK -t UTF-8; printf '\\261\\261\\276\\251\\n' | iconv -f gb2312 -t UTF-8; printf '\\261\\261\\276\\251\\200\\n' | iconv -f CP936 -t UTF-8; printf '\\224\\071\\374\\066\\n' | iconv -f GB18030 -t UTF-8; printf '\\307\\321\\261\\271\\n' | iconv -f EUC-KR -t UTF-8; printf '\\223\\372\\226{\\\\~\\261\\n' | iconv -f SHIFT_JIS -t UTF-8; printf '\\306\\374\\216\\261\\217\\260\\241\\n' | iconv -f EUC-JP -t UTF-8; printf '\\242\\343\\201\\060\\201\\060' | iconv -f GB18030 -t UTF-8 | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": "北京\n北京\n北京€\n😀\n한국\n日本¥‾ｱ\n日ｱ丂\n e2 82 ac c2 80\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "iconv_encodes_the_multibyte_charsets_glibc_does",
+      "seq": 16100021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '北京€\\n' | iconv -f UTF-8 -t GBK | od -An -tx1; printf '北京€\\n' | iconv -f UTF-8 -t GB18030 | od -An -tx1; printf '한국\\n' | iconv -f UTF-8 -t EUC-KR | od -An -tx1; printf '日本¥\\\\‾ｱ\\n' | iconv -f UTF-8 -t SJIS | od -An -tx1; printf '日ｱ丂\\n' | iconv -f UTF-8 -t EUC-JP | od -An -tx1; printf '\\360\\237\\230\\200' | iconv -f UTF-8 -t GB18030 | od -An -tx1; printf '北京\\n' | iconv -f UTF-8 -t gb2312 | od -An -tx1; printf '€' | iconv -f UTF-8 -t CP936 | od -An -tx1; printf '\\302\\200' | iconv -f UTF-8 -t GB18030 | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " b1 b1 be a9 80 0a\n b1 b1 be a9 a2 e3 0a\n c7 d1 b1 b9 0a\n 93 fa 96 7b 5c 5c 7e b1 0a\n c6 fc 8e b1 8f b0 a1 0a\n 94 39 fc 36\n b1 b1 be a9 0a\n 80\n 81 30 81 30\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "iconv_refuses_multibyte_input_as_glibc_does",
+      "seq": 16100022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\201 b' | iconv -f GBK -t UTF-8; echo \" rc=$?\"; printf 'a\\201 b' | iconv -c -f GBK -t UTF-8; echo \" rc=$?\"; printf '\\201\\060AA' | iconv -c -f GB18030 -t UTF-8; echo \" rc=$?\"; printf 'a\\261' | iconv -f GBK -t UTF-8; echo \" rc=$?\"; printf '\\251\\241\\260\\241' | iconv -c -f EUC-JP -t UTF-8; echo \" rc=$?\"; printf 'a\\303\\251b' | iconv -f UTF-8 -t EUC-KR; echo \" rc=$?\"; printf 'a\\241@b' | iconv -c -f GBK -t UTF-8; echo \" rc=$?\"; printf '\\201\\060' | iconv -f GB18030 -t UTF-8; echo \" rc=$?\"; printf '\\260Az' | iconv -c -f EUC-KR -t UTF-8; echo \" rc=$?\"; printf '\\201 ' | iconv -c -f SHIFT_JIS -t UTF-8; echo \" rc=$?\"; printf 'a\\360\\237\\230\\200b' | iconv -c -f UTF-8 -t GBK; echo \" rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "a rc=1\na b rc=1\nA rc=1\na rc=1\n＾ rc=1\na rc=1\nab rc=1\n rc=1\nz rc=1\n  rc=1\nab rc=1\n",
+        "stderr": "iconv: illegal input sequence at position 1\niconv: incomplete character or shift sequence at end of buffer\niconv: incomplete character or shift sequence at end of buffer\niconv: illegal input sequence at position 1\niconv: incomplete character or shift sequence at end of buffer\n"
+      }
+    }
+  ]
+}

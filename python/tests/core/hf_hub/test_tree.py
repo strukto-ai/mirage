@@ -23,10 +23,12 @@ from mirage.cache.index.view import IndexView
 from mirage.core.hf_hub.client import HfHubError
 from mirage.core.hf_hub.tree import (
     collect,
+    deletions_for,
     ensure_live_snapshot,
     ensure_tree,
     fetch_path,
     fetch_tree,
+    filter_repo_paths,
     index_rows,
     next_cursor,
     parse_entry,
@@ -625,3 +627,46 @@ def test_tree_url_takes_the_revision_it_is_given(accessor, prefixed):
     assert tree_url(accessor, HEAD).endswith(f"/tree/{HEAD}")
     assert tree_url(accessor).endswith("/tree/main")
     assert tree_url(prefixed, HEAD).endswith(f"/tree/{HEAD}/sub/dir")
+
+
+TREE_FILES = [
+    ".gitattributes",
+    "a.txt",
+    "data/b.json",
+    "data/sub/c.json",
+    "sub/d.bin",
+]
+
+
+@pytest.mark.parametrize(
+    "include,exclude,kept",
+    [
+        (["*.txt"], [], ["a.txt"]),
+        (["data/*.json"], [], ["data/b.json", "data/sub/c.json"]),
+        (["data/"], [], ["data/b.json", "data/sub/c.json"]),
+        (["**"], ["*.json"], [".gitattributes", "a.txt", "sub/d.bin"]),
+        (
+            [],
+            ["sub/"],
+            [".gitattributes", "a.txt", "data/b.json", "data/sub/c.json"],
+        ),
+    ],
+)
+def test_filter_repo_paths_is_upstreams_glob_rule(include, exclude, kept):
+    assert filter_repo_paths(TREE_FILES, include, exclude) == kept
+
+
+@pytest.mark.parametrize(
+    "patterns,base,doomed",
+    [
+        (["**"], "", ["a.txt", "data/b.json", "data/sub/c.json", "sub/d.bin"]),
+        (["*.json"], "", ["data/b.json", "data/sub/c.json"]),
+        (["sub/"], "", ["sub/d.bin"]),
+        (["*.json"], "data", ["data/b.json", "data/sub/c.json"]),
+        (["sub/*"], "data", ["data/sub/c.json"]),
+        (["nothing*"], "", []),
+        ([], "", []),
+    ],
+)
+def test_deletions_for_matches_the_listing(patterns, base, doomed):
+    assert deletions_for(TREE_FILES, patterns, base) == doomed

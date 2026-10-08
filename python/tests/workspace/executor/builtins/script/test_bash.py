@@ -1,3 +1,5 @@
+import pytest
+
 from mirage.workspace.executor.builtins.script import parse_bash_args
 
 
@@ -54,9 +56,12 @@ def test_parse_bash_args_applies_o_and_its_value():
     assert parsed.settings == (("pipefail", True),)
 
 
-def test_parse_bash_args_long_option_consumes_its_value():
-    parsed = parse_bash_args(["--rcfile", "rc", "run.sh"])
+@pytest.mark.parametrize("option", ["--rcfile", "--init-file"])
+@pytest.mark.parametrize("value", ["rc", "", "--version", "--help"])
+def test_parse_bash_args_long_option_consumes_its_value(option, value):
+    parsed = parse_bash_args([option, value, "run.sh"])
     assert parsed.path == "run.sh"
+    assert not parsed.help and not parsed.version
 
 
 def test_parse_bash_args_unsupported_short_option():
@@ -69,3 +74,19 @@ def test_parse_bash_args_unsupported_long_option():
 
 def test_parse_bash_args_dash_c_needs_a_value():
     assert parse_bash_args(["-c"]).needs_value == "-c"
+
+
+@pytest.mark.parametrize(
+    "args,field,expected",
+    [
+        (["--version", "--help"], "help", True),
+        (
+            ["--posix", "--verbose", "-c", ":"],
+            "settings",
+            (("posix", True), ("verbose", True)),
+        ),
+    ],
+)
+def test_parse_bash_args_reads_long_options_first(args, field, expected):
+    """bash 5.2.37 on debian:stable-slim: long options lead, then short."""
+    assert getattr(parse_bash_args(args), field) == expected

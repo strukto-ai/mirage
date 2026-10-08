@@ -53,6 +53,7 @@ import { type JobOutput, Terminal } from '../../shell/console/index.ts'
 import type { JobWaits } from '../../shell/job_table/index.ts'
 import type { MountMode } from '../../types.ts'
 import type { StatusWriter } from '../abort.ts'
+import type { AliasExpansion } from '../../shell/types.ts'
 
 /**
  * Read one entry of a session record, ignoring anything inherited from
@@ -432,11 +433,11 @@ export class SessionState {
   // vocabularies). Only names set away from their default are stored.
   shopts: Record<string, boolean> = {}
   // `alias NAME=VALUE` definitions, plus the parse/row each was defined
-  // at and the stack of aliases being expanded, so a use on the defining
+  // at and ownership of alias text, so a use on the defining
   // line does not expand and a self-referential value stops.
   aliases: Record<string, string> = {}
   aliasMarks = new Map<string, [number, number]>()
-  aliasStack: string[] = []
+  aliasExpansion: AliasExpansion | null = null
   // The aliases a running function's body expands, as its definition saw
   // them (`FunctionSite.aliases`); null reads the live table.
   aliasView: Readonly<Record<string, string>> | null = null
@@ -657,7 +658,7 @@ export class SessionState {
     const child = this.fork()
     child.parseCurrent = this.parseCurrent
     child.parseRow = this.parseRow
-    child.aliasStack = [...this.aliasStack]
+    child.aliasExpansion = this.aliasExpansion
     child.localVars = this.localVars === null ? null : copyLocals(this.localVars)
     child.localFrames = this.localFrames.map((frame) =>
       frame === this.localVars && child.localVars !== null ? child.localVars : copyLocals(frame),

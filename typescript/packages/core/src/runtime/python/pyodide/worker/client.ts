@@ -14,7 +14,7 @@
 
 import { PyodideUnavailableError } from '../errors.ts'
 import { EvalError } from '../../../errors.ts'
-import { CommandTimeoutError } from '../../../../commands/errors.ts'
+import { CommandTimeoutError } from '../../../../errors/types.ts'
 import type { BridgeDispatchFn, EvalResult, RunResult } from '../../../types.ts'
 import type { RuntimeContext } from '../../../binding.ts'
 import { RuntimeVFS } from '../../../vfs.ts'

@@ -18,8 +18,8 @@ import {
   emitStartPath,
   keep,
   startBasename,
-} from '@struktoai/mirage-core/commands/builtin/find_eval'
-import type { PredNode } from '@struktoai/mirage-core/commands/builtin/find_eval'
+} from '@struktoai/mirage-core/core/generic/find_eval'
+import type { PredNode } from '@struktoai/mirage-core/core/generic/find_eval'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { inMtimeWindow } from '@struktoai/mirage-core/utils/dates'
 import { norm } from '@struktoai/mirage-core/utils/path'

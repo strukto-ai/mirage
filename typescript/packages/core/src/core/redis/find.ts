@@ -18,8 +18,8 @@ import {
   emitStartPath,
   keep,
   startBasename,
-} from '../../commands/builtin/find_eval.ts'
-import type { PredNode } from '../../commands/builtin/find_eval.ts'
+} from '../generic/find_eval.ts'
+import type { PredNode } from '../generic/find_eval.ts'
 import type { PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'

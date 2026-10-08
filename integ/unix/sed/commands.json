@@ -715,6 +715,40 @@
       }
     },
     {
+      "id": "sed_v_compares_versions_as_strverscmp",
+      "seq": 16100024,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo x | sed 'v 09'; echo x | sed 'v 010'; echo x | sed 'v 4.010'; echo x | sed 'v 4..9'; echo x | sed 'v 4.10'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\nx\nx\nx\nrc=1\n",
+        "stderr": "sed: -e expression #1, char 6: expected newer version of sed\n"
+      }
+    },
+    {
       "id": "sed_missing_newline_print",
       "seq": 9960062,
       "targets": [

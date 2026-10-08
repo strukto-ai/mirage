@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../../../commands/spec/index.ts'
+
 // Startup letters bash has that `set` does not. `c` takes the program text
 // from the next word and `s` reads it from stdin; the rest have nothing to
 // configure in an embedded shell, which has no login profile, no rc file and
@@ -19,20 +21,27 @@
 // parseOptionWord already knows them, so the two spellings cannot drift.
 export const BASH_START_FLAGS = new Set(['c', 's', 'l', 'i'])
 
-// bash's long options, mapped to whether the option takes the next word. A
-// flat set of names to ignore cannot say that `--rcfile FILE` swallows FILE,
-// and read `bash --rcfile run.sh` as "run run.sh". Anything absent is refused
-// rather than mistaken for a script operand, which is what made
-// `bash --version` report a missing file.
-export const BASH_LONG_OPTIONS: Readonly<Record<string, boolean>> = Object.freeze({
-  '--login': false,
-  '--noediting': false,
-  '--noprofile': false,
-  '--norc': false,
-  '--posix': false,
-  '--init-file': true,
-  '--rcfile': true,
-})
+// These GNU Bash modes are recognized but not implemented. Help/version
+// outrank them; unknown options still fail during the long-option pass.
+export const BASH_UNSUPPORTED_LONG_OPTIONS = new Set([
+  'debugger',
+  'dump-po-strings',
+  'dump-strings',
+  'pretty-print',
+  'restricted',
+])
+
+// True means the next word is a value. Derive supported options from the
+// spec so the parser and help cannot drift; Bash accepts one or two dashes.
+export const BASH_LONG_OPTIONS: ReadonlyMap<string, boolean> = new Map([
+  ...specOf('bash').options.flatMap(({ long, type }): [string, boolean][] =>
+    long === null ? [] : [[long.slice(2), type === 'str']],
+  ),
+  ...[...BASH_UNSUPPORTED_LONG_OPTIONS, 'help', 'version'].map((name): [string, boolean] => [
+    name,
+    false,
+  ]),
+])
 
 // GNU prints the refusal and the usage line together, both under the
 // builtin's own name as typed (`source` or `.`), and exits 2 without ending

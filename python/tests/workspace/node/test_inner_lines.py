@@ -14,7 +14,14 @@
 
 import pytest
 
-from mirage.workspace.node.inner_lines import InnerLine, Word, inner_lines
+from mirage.shell.helpers import get_parts
+from mirage.shell.parse import parse
+from mirage.workspace.node.inner_lines import (
+    InnerLine,
+    Word,
+    inner_lines,
+    read_word,
+)
 
 
 def _words(*texts: str) -> list[Word]:
@@ -62,18 +69,20 @@ def _argv(inner: InnerLine) -> list[str]:
             ["/r", "-exec", "rm", "{}", ";", "-ok", "cat", "{}", "+"],
             [("argv", ["rm", "{}"], True), ("argv", ["cat", "{}"], True)],
         ),
-        # Lines the gate cannot read: a file, a program from stdin.
+        # Lines the gate cannot read: a file, a program from stdin, an
+        # option mirage refuses and a real bash takes.
         ("source", ["f.sh"], [("none", None, False)]),
         (".", ["f.sh"], [("none", None, False)]),
         ("sh", ["f.sh"], [("none", None, False)]),
         ("bash", [], [("none", None, False)]),
+        ("bash", ["--restricted", "-c", "rm /x"], [("none", None, False)]),
         ("./run.sh", ["a"], [("none", None, False)]),
-        # Nothing runs: a probe, a bare word, a usage error.
+        # Nothing runs: a probe, a bare word, a usage error, an answer.
         ("command", ["-v", "rm"], []),
         ("eval", [], []),
         ("env", ["A=1"], []),
         ("timeout", ["5"], []),
-        ("bash", ["--bogus"], []),
+        ("bash", ["--version", "-c", "rm /x"], []),
         ("cat", ["/x"], []),
     ],
 )
@@ -130,3 +139,37 @@ def test_inner_words_keep_what_the_gate_could_not_read():
     assert inner.argv[0] is dynamic
     (inner,) = inner_lines("eval", [Word("rm", "rm"), Word('"$p"', None)])
     assert inner.line == 'rm "$p"'
+    (inner,) = inner_lines("bash", [*_words("-c"), dynamic, *_words("rm /x")])
+    assert not inner.readable
+    assert inner_lines("bash", [*_words("--version"), dynamic]) == []
+    (inner,) = inner_lines("sh", [*_words("-c", "echo safe"), dynamic])
+    assert inner.line == "echo safe"
+
+
+@pytest.mark.parametrize(
+    "raw, stable",
+    [
+        ("$SKIP", False),
+        ('"$SKIP"', False),
+        ("missing-*", False),
+        ("missing-?", False),
+        ("missing-[ab]", False),
+        ("'missing-'*", False),
+        (r"missing-\\*", False),
+        ("@(x|y)", False),
+        ("!(x)", False),
+        ("{a,b}", False),
+        ("'missing-*'", True),
+        ('"missing-*"', True),
+        (r"missing-\*", True),
+        (r"missing-\[ab]", True),
+        ('missing-"*"', True),
+    ],
+)
+def test_shell_option_values_require_stable_words(raw, stable):
+    tree = parse(f"bash --rcfile {raw} --version -c 'rm /x'")
+    parts = get_parts(tree.named_children[0])
+    inner = inner_lines("bash", [read_word(part) for part in parts[1:]])
+    assert (inner == []) == stable
+    if not stable:
+        assert len(inner) == 1 and not inner[0].readable
