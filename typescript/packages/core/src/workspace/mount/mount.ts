@@ -16,6 +16,7 @@ import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
   effectiveMountMode,
+  requirePathsWritable,
   runWithMountGate,
   runWithWalkProbe,
   strongestModeUnder,
@@ -525,6 +526,24 @@ export class MountEntry {
     return effect !== undefined && WRITE_EFFECTS.includes(effect)
   }
 
+  /**
+   * Refuse a write the mount's mode no longer grants at any path. Admission
+   * judged the mode before the call waited for the mount and for its write
+   * lock; `setMountMode` can make the mount read-only in between, so the mode
+   * is read again as the backend call starts. A rename moves everything below
+   * its endpoints, so a read-only region below either refuses it. Mirrors
+   * Python's `require_writable`.
+   */
+  requireWritable(name: string, path: PathSpec, values: readonly unknown[]): void {
+    if (!this.writes(name)) return
+    requirePathsWritable(
+      [path, ...values.filter((value): value is PathSpec => value instanceof PathSpec)],
+      this.prefix,
+      this.mode,
+      name === 'rename',
+    )
+  }
+
   /** Refuse a keyword `name` does not take, as a cold call would. Mirrors Python's `refuse_keywords`. */
   refuseKeywords(name: string, kwargs: OpKwargs): void {
     taken(name, kwargs)
@@ -708,6 +727,7 @@ export class MountEntry {
     const levels = this.callers(name, filetype)
     if (levels.length === 0) throw enotsup(this.vfs.name, name, scope)
     taken(name, kwargs)
+    this.requireWritable(name, scope, [...args, ...Object.values(kwargs)])
     for (const call of levels) {
       const result = await call(scope, args, kwargs)
       if (result !== null && result !== undefined) return result
@@ -1048,12 +1068,6 @@ export class MountEntry {
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     return this.use(async (): Promise<unknown> => {
-      const filetype = kwargs.filetype === undefined ? getExtension(path) : kwargs.filetype
-      const levels = this.callers(name, filetype)
-      if (levels.length === 0) {
-        throw enotsup(this.vfs.name, name, path)
-      }
-      taken(name, kwargs)
       const mountPrefix = rstripSlash(this.prefix)
       const lastSlash = path.lastIndexOf('/')
       const scope = new PathSpec({
@@ -1072,17 +1086,14 @@ export class MountEntry {
       return runWithMountContext(
         () =>
           runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
-            for (const call of levels) {
-              const result = await runWithTimeout(
-                Promise.resolve(call(scope, args, effectiveKwargs)),
-                opTimeout,
-                name,
-              )
-              if (result !== null && result !== undefined) {
-                return wrapStream(result, this.mountId, this.activity)
-              }
-            }
-            return null
+            const result = await runWithTimeout(
+              this.callKeyed(name, scope, args, effectiveKwargs),
+              opTimeout,
+              name,
+            )
+            return result === null || result === undefined
+              ? null
+              : wrapStream(result, this.mountId, this.activity)
           }),
         this.mountId,
       )

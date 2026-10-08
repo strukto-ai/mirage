@@ -188,6 +188,13 @@ async def test_only_a_write_command_the_door_cannot_see_is_refused_up_front(
         assert calls == [1]
 
 
+async def _stat_tally(p: str | PathSpec) -> FileStat:
+    name = p if isinstance(p, str) else p.virtual
+    if name.endswith("dir.tally"):
+        return FileStat(name=name, type=FileType.DIRECTORY)
+    return FileStat(name=name, type=FileType.FILE, size=4)
+
+
 @pytest.mark.asyncio
 async def test_a_directory_does_not_route_to_a_filetype_handler():
     # A filetype handler is chosen from the operand's NAME, and a
@@ -209,14 +216,8 @@ async def test_a_directory_does_not_route_to_a_filetype_handler():
         fired.append(paths[0].virtual)
         return b"rendered\n", IOResult()
 
-    async def stat_path(p: str | PathSpec) -> FileStat:
-        name = p if isinstance(p, str) else p.virtual
-        if name.endswith("dir.tally"):
-            return FileStat(name=name, type=FileType.DIRECTORY)
-        return FileStat(name=name, type=FileType.FILE, size=4)
-
     mount.register_commands([plain, typed])
-    context = ExecContext(stat_path=stat_path)
+    context = ExecContext(stat_path=_stat_tally)
     await mount.run_command(
         "cat", [PathSpec.from_str_path("/dir.tally")], [], {}, context
     )

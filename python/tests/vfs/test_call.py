@@ -101,10 +101,11 @@ def test_a_mark_declares_and_an_override_keeps_it():
     assert declared(Shelf, "helper") is None
 
 
-def test_only_rename_declares_a_rename():
-    async def move(path: PathSpec, dst: PathSpec) -> None:
-        return None
+async def move(path: PathSpec, dst: PathSpec) -> None:
+    return None
 
+
+def test_only_rename_declares_a_rename():
     with pytest.raises(TypeError, match="move: only rename"):
         vfs_call(effect=Effect.RENAME)(move)
 

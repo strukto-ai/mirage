@@ -527,6 +527,28 @@ async def test_read_only_admission_precedes_backend_support_and_io(op):
 
 
 @pytest.mark.asyncio
+async def test_a_write_reads_the_mode_again_as_it_starts():
+    # Admission judged the mount writable before the write waited for
+    # the mount; made read-only meanwhile, the mount refuses the write
+    # as the backend call starts.
+    ram = RAMVFS()
+    with Workspace({"/rw": (ram, MountMode.WRITE)}) as ws:
+        mount = ws.namespace.mount_for("/rw/file")
+        ready = mount.ensure_ready
+
+        async def turn_read_only() -> None:
+            ws.set_mount_mode("/rw", MountMode.READ)
+            await ready()
+
+        mount.ensure_ready = turn_read_only
+        with pytest.raises(ReadOnlyError):
+            await ws.dispatch(
+                "write", PathSpec.from_str_path("/rw/file"), data=b"x"
+            )
+        assert not await ram.exists(PathSpec.from_str_path("/file"))
+
+
+@pytest.mark.asyncio
 async def test_a_rename_destination_is_judged_on_its_own_turf():
     # The endpoints need not share a turf, and each is scored against
     # its own prefix: a grant writing /rw but only reading /ro refuses,

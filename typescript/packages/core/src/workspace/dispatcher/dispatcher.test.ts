@@ -820,6 +820,30 @@ describe('shell mutations share read-only admission', () => {
   })
 })
 
+describe('a write reads the mode again as it starts', () => {
+  it('refuses a write whose mount turned read-only while it waited', async () => {
+    // Admission judged the mount writable before the write waited for the
+    // mount; made read-only meanwhile, the mount refuses the write as the
+    // backend call starts.
+    const ram = new RAMVFS()
+    const ws = new Workspace({ '/rw': ram }, { mode: MountMode.WRITE })
+    try {
+      const mount = ws.namespace.mountFor('/rw/file')
+      const ready = mount.ensureReady.bind(mount)
+      vi.spyOn(mount, 'ensureReady').mockImplementation(async () => {
+        ws.setMountMode('/rw', MountMode.READ)
+        await ready()
+      })
+      await expect(ws.dispatch('write', '/rw/file', [ENC.encode('x')])).rejects.toMatchObject({
+        code: 'EROFS',
+      })
+      expect(await ram.exists(PathSpec.fromStrPath('/file'))).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('rmdir namespace entries', () => {
   it.each([false, true])(
     'accounts for a directory containing only a link (hidden=%s)',

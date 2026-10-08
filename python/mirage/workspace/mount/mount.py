@@ -44,6 +44,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.context import (
     effective_mount_mode,
+    require_paths_writable,
     reset_mount_gate,
     reset_walk_probe,
     set_mount_gate,
@@ -672,6 +673,32 @@ class MountEntry:
         mark = declared(type(self.vfs), name)
         return mark is not None and mark.effect in WRITE_EFFECTS
 
+    def require_writable(
+        self, name: str, path: PathSpec, values: Iterable[Any]
+    ) -> None:
+        """Refuse a write the mount's mode no longer grants at any path.
+
+        Admission judged the mode before the call waited for the mount
+        and for its write lock; ``set_mount_mode`` can make the mount
+        read-only in between, so the mode is read again here, as the
+        backend call starts. A rename moves everything below its
+        endpoints, so a read-only region below either refuses it.
+
+        Args:
+            name (str): the function name.
+            path (PathSpec): the path the call names.
+            values (Iterable[Any]): the call's other arguments; each
+                PathSpec among them is a path it reaches.
+        """
+        if not self.writes(name):
+            return
+        require_paths_writable(
+            [path, *(v for v in values if isinstance(v, PathSpec))],
+            self.prefix,
+            self.mode,
+            subtree=name == "rename",
+        )
+
     def refuse_keywords(self, name: str, kwargs: dict[str, Any]) -> None:
         """Refuse a keyword ``name`` does not take, as a cold call would.
 
@@ -1229,6 +1256,9 @@ class MountEntry:
             levels = self._callers(name, filetype)
             if not levels:
                 raise enotsup(str(self.vfs.name), name, path)
+            self.require_writable(
+                name, PathSpec.from_str_path(path), kwargs.values()
+            )
 
             mount_prefix = self.prefix.rstrip("/")
             scope = PathSpec(
