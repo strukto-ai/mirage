@@ -283,6 +283,9 @@
    }
   },
   "config": {
+   "python_only": {
+    "_YamlLoader": "PyYAML needs a SafeLoader subclass to recognize exponent-only floats without changing yaml.safe_load globally; TypeScript's yaml package already uses YAML 1.2 exponent resolution. Both loaders read the shared YAML scalar fixture."
+   },
    "typescript_only": {
     "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same door."
    }

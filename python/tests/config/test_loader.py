@@ -911,6 +911,22 @@ def _shared_fixture_cases(name: str) -> list[dict]:
     return cases
 
 
+@pytest.mark.parametrize(
+    "case", _shared_fixture_cases("yaml"), ids=lambda case: case["name"]
+)
+def test_shared_yaml_scalars(case, tmp_path):
+    path = tmp_path / "workspace.yaml"
+    path.write_text(case["yaml"], encoding="utf-8")
+    if "config" not in case:
+        with pytest.raises(ValueError):
+            load_config(path)
+    else:
+        assert (
+            load_config(path).model_dump()
+            == load_config(case["config"]).model_dump()
+        )
+
+
 @pytest.mark.asyncio
 async def test_console_redis_block_builds_factory():
     cfg = load_config(

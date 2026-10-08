@@ -95,6 +95,30 @@ def _coerce_mount_mode(value):
 _VAR_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
 
 
+class _YamlLoader(yaml.SafeLoader):
+    """Resolve exponent numbers as TypeScript's YAML 1.2 loader does.
+
+    The remaining PyYAML resolvers stay unchanged, and this subclass
+    leaves ``yaml.safe_load`` untouched for other consumers.
+    """
+
+
+_YamlLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:float",
+    re.compile(r"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)[eE][+-]?[0-9]+$"),
+    list("+-0123456789."),
+)
+
+
+def _load_yaml(path: Path) -> Any:
+    """Read config scalars identically for validation and CLI transport.
+
+    Args:
+        path (Path): Workspace YAML or JSON file to read.
+    """
+    return yaml.load(path.read_text(encoding="utf-8"), Loader=_YamlLoader)
+
+
 class _EnvInterpolator:
     def __init__(self, env: dict[str, str], missing: list[str]) -> None:
         self.env = env
@@ -1034,8 +1058,7 @@ def load_config(
     """
     base: Path | None = None
     if isinstance(source, (str, Path)):
-        text = Path(source).read_text(encoding="utf-8")
-        raw = yaml.safe_load(text)
+        raw = _load_yaml(Path(source))
         base = Path(source).resolve().parent
     else:
         raw = dict(source)

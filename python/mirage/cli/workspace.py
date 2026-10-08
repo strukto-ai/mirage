@@ -19,7 +19,6 @@ from typing import Any
 from urllib.parse import quote
 
 import typer
-import yaml
 
 from mirage.cli.client import make_client
 from mirage.cli.output import (
@@ -31,10 +30,6 @@ from mirage.cli.output import (
 )
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspaces.")
-
-
-def _load_yaml(path: Path) -> dict[str, Any]:
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def resolve_config(path: Path) -> dict[str, Any]:
@@ -71,9 +66,9 @@ def _resolve_config_arg(path: Path) -> dict[str, Any]:
     the config module the same way so a spawn that loads no config
     never pays for it.
     """
-    from mirage.config import _absolutize_scripts, _interpolate_env
+    from mirage.config import _absolutize_scripts, _interpolate_env, _load_yaml
 
-    raw = _load_yaml(path)
+    raw = _load_yaml(path) or {}
     try:
         resolved = _interpolate_env(raw, dict(os.environ))
     except ValueError as e:

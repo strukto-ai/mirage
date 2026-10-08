@@ -1352,6 +1352,28 @@ describe('shared rejection fixture', () => {
   })
 })
 
+describe('shared YAML scalars', () => {
+  const path = new URL('../../../../integ/fixtures/config/yaml.json', import.meta.url)
+  const { cases } = JSON.parse(readFileSync(path, 'utf8')) as {
+    cases: { name: string; yaml: string; config?: Record<string, unknown> }[]
+  }
+
+  it.each(cases)('$name', ({ yaml, config }) => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-yaml-'))
+    const file = join(dir, 'workspace.yaml')
+    try {
+      writeFileSync(file, yaml)
+      if (config === undefined) {
+        expect(() => loadWorkspaceConfigFile(file)).toThrow()
+      } else {
+        expect(loadWorkspaceConfigFile(file)).toEqual(loadWorkspaceConfig(config))
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe.each(ACCEPTED_FIXTURES)('shared acceptance fixture: %s', (fixture) => {
   // The key tables are copied by hand from Python's models, so the drift
   // this catches is a field added there and never mirrored here: every
