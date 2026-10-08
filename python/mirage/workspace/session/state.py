@@ -176,7 +176,9 @@ def env_get(session: SessionState, name: str) -> str | None:
     )
 
 
-def env_is_readonly(session: SessionState, name: str) -> bool:
+def env_is_readonly(
+    session: SessionState, name: str, follow_ref: bool = True
+) -> bool:
     """Whether ``readonly`` has marked the name.
 
     A hidden name answers False: is_readonly speaks about the
@@ -186,8 +188,12 @@ def env_is_readonly(session: SessionState, name: str) -> bool:
     Args:
         session (SessionState): the session holding the readonly set.
         name (str): variable name.
+        follow_ref (bool): ask about what a ``declare -n`` reference
+            points at; a write to the reference itself (``declare -n
+            r=w``, ``unset -n r``) asks about the reference.
     """
-    name = deref(session, name)
+    if follow_ref:
+        name = deref(session, name)
     if var_hidden(session.visibility, name):
         return False
     var = session.vars.get(name)
@@ -799,6 +805,10 @@ class _IntegerCoercion:
 
     def __call__(self, text: str) -> str:
         session = self.session
+        # Inside a `declare -g` the expression still reads the
+        # function's scope, as bash's does (`local H=2; declare -gi
+        # G=H` stores 2), while the value lands on the global.
+        reach_again = _step_back(session)
         try:
             result = evaluate_arith(
                 text,
@@ -810,6 +820,8 @@ class _IntegerCoercion:
         except ArithError as exc:
             self.writes.extend(exc.writes)
             raise ArithError(f"{text}: {exc}") from exc
+        finally:
+            reach_again()
         self.writes.extend(result.writes)
         return str(result.value)
 
@@ -971,8 +983,9 @@ async def set_var(
     # rebuilds a frozenset over every variable in the session, and this
     # is the hot path every assignment takes. TypeScript's `setVar` has
     # always read the record directly. `ensure_var_visible` has already
-    # refused a hidden name, so the two answer identically here.
-    if env_is_readonly(session, name):
+    # refused a hidden name, so the two answer identically here. The name
+    # is resolved already: `declare -n r=w` on a frozen `r` refuses.
+    if env_is_readonly(session, name, follow_ref=False):
         raise ReadonlyVariableError(name)
     existing = session.vars.get(name)
     # Attributes belong to the name, not to the value, so a plain
@@ -1089,7 +1102,7 @@ async def unset_var(
         return
     # Same as `set_var`: the record, not the projection. The hidden
     # branch above has already returned, so the answers match.
-    if env_is_readonly(session, name):
+    if env_is_readonly(session, name, follow_ref=False):
         raise ReadonlyVariableError(name)
     await pre_session_gate(
         policies,
@@ -1144,6 +1157,75 @@ def _drop(session: SessionState, name: str) -> None:
         session.vars.pop(name, None)
     else:
         session.vars[name] = saved
+
+
+def _place(session: SessionState, name: str, var: ShellVar | None) -> None:
+    if var is None:
+        session.vars.pop(name, None)
+    else:
+        session.vars[name] = var
+
+
+def reach_global(
+    session: SessionState, names: list[str]
+) -> Callable[[], None]:
+    """Put each name's global record in place for a ``declare -g``, and
+    return the call that puts the running locals back.
+
+    Outside a function, or for a name no frame on the call path shadows,
+    the global record is already in place. Otherwise the running local
+    lives in ``session.vars`` and the global is what the *outermost*
+    shadowing frame saved, so the two swap for the declaration: its
+    writes, marks and kind checks reach the global, and the local comes
+    back untouched, which is what GNU shows (``local G=5; declare -gr
+    G=1`` leaves ``$G`` at 5 and writable in the function, 1 and frozen
+    outside, and a nested ``declare -g`` reaches past the caller's local
+    too). Arithmetic it runs still reads the locals (``_step_back``).
+
+    Args:
+        session (SessionState): shell session state.
+        names (list[str]): the declaration's operand names.
+    """
+    swapped: list[tuple[str, dict[str, ShellVar | None], ShellVar | None]]
+    swapped = []
+    for name in dict.fromkeys(names):
+        outer = next(
+            (frame for frame in session._local_frames if name in frame), None
+        )
+        if outer is None:
+            continue
+        swapped.append((name, outer, session.vars.get(name)))
+        _place(session, name, outer[name])
+    session._reached = swapped
+
+    def restore() -> None:
+        for name, outer, running in swapped:
+            outer[name] = session.vars.get(name)
+            _place(session, name, running)
+        session._reached = []
+
+    return restore
+
+
+def _step_back(session: SessionState) -> Callable[[], None]:
+    """Put the locals a running ``declare -g`` set aside back in place
+    for one arithmetic evaluation, and return the call that reaches the
+    globals again.
+
+    Args:
+        session (SessionState): shell session state.
+    """
+    reached = [
+        (name, session.vars.get(name)) for name, _, _ in session._reached
+    ]
+    for name, _, running in session._reached:
+        _place(session, name, running)
+
+    def again() -> None:
+        for name, var in reached:
+            _place(session, name, var)
+
+    return again
 
 
 def outlive_call(session: SessionState, name: str) -> None:

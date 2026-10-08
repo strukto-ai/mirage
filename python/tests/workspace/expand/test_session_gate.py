@@ -152,6 +152,27 @@ async def test_refused_offset_does_not_expand_length(guarded):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,name,expected",
+    [
+        ("readonly SAFE=(one) AWS_BLOCKED=(two)", "SAFE", "-ar"),
+        ("export SAFE=(one) AWS_BLOCKED=(two)", "SAFE", "-ax"),
+        ("declare -rx SAFE=(one) AWS_BLOCKED=(two)", "SAFE", "-arx"),
+    ],
+)
+async def test_a_refused_literal_leaves_the_stored_ones_marked(
+    guarded, line: str, name: str, expected: str
+):
+    # The literals store first and take their marks once they all have;
+    # a policy refusing a later one must not leave an earlier one stored
+    # but unfrozen.
+    result = await guarded.shell(line)
+    assert result.refusal and "not yours to set" in result.refusal.reason
+    shown = await guarded.shell(f"declare -p {name}")
+    assert shown.stdout == f'declare {expected} {name}=([0]="one")\n'.encode()
+
+
+@pytest.mark.asyncio
 async def test_a_fresh_local_assignment_asks_for_no_unset():
     # The new local's reset is the scope's bookkeeping, not a deletion
     # the line asked for; only the assignment is the gated write.

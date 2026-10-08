@@ -155,10 +155,12 @@ export function envGet(session: SessionState, name: string): string | null {
  *
  * A hidden name answers false: isReadonly speaks about the session's
  * visible world, and calling a name that reads as unset "readonly"
- * would leak it.
+ * would leak it. `followRef` asks about what a `declare -n` reference
+ * points at; a write to the reference itself (`declare -n r=w`,
+ * `unset -n r`) asks about the reference.
  */
-function envIsReadonly(session: SessionState, name: string): boolean {
-  const resolved = deref(session, name)
+function envIsReadonly(session: SessionState, name: string, followRef = true): boolean {
+  const resolved = followRef ? deref(session, name) : name
   if (varHidden(session.visibility, resolved)) return false
   const v = sessionEntry(session.vars, resolved)
   return v?.attrs.has(VarAttr.Readonly) ?? false
@@ -641,6 +643,10 @@ class IntegerCoercion {
 
   readonly run = (text: string): string => {
     const session = this.session
+    // Inside a `declare -g` the expression still reads the function's
+    // scope, as bash's does (`local H=2; declare -gi G=H` stores 2), while
+    // the value lands on the global.
+    const reachAgain = stepBack(session)
     try {
       const result = evaluateArith(
         text,
@@ -658,6 +664,8 @@ class IntegerCoercion {
         throw new ArithError(`${text}: ${err.message}`)
       }
       throw err
+    } finally {
+      reachAgain()
     }
   }
 }
@@ -695,7 +703,7 @@ async function setVar(
 ): Promise<void> {
   if (followRef) name = deref(session, name) || name
   ensureVarVisible(session, name)
-  if (envIsReadonly(session, name)) {
+  if (envIsReadonly(session, name, false)) {
     throw new ReadonlyVariableError(name)
   }
   // Attributes belong to the name, not to the value, so a plain
@@ -793,7 +801,7 @@ async function unsetVar(
 ): Promise<void> {
   if (followRef) name = deref(session, name) || name
   if (varHidden(session.visibility, name)) return
-  if (envIsReadonly(session, name)) {
+  if (envIsReadonly(session, name, false)) {
     throw new ReadonlyVariableError(name)
   }
   await preSessionGate(policies, {
@@ -807,6 +815,56 @@ async function unsetVar(
   drop(session, name)
   // bash: unsetting RANDOM strips its special meaning for good.
   if (name === RANDOM) session.randomSeed = RANDOM_UNSET
+}
+
+function place(session: SessionState, name: string, v: ShellVar | null): void {
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  if (v === null) delete session.vars[name]
+  else setSessionEntry(session.vars, name, v)
+}
+
+/**
+ * Put each name's global record in place for a `declare -g`, and return the
+ * call that puts the running locals back. Outside a function, or for a name
+ * no frame on the call path shadows, the global record is already in place.
+ * Otherwise the running local lives in `session.vars` and the global is
+ * what the *outermost* shadowing frame saved, so the two swap for the
+ * declaration: its writes, marks and kind checks reach the global, and the
+ * local comes back untouched, which is what GNU shows (`local G=5; declare
+ * -gr G=1` leaves `$G` at 5 and writable in the function, 1 and frozen
+ * outside, and a nested `declare -g` reaches past the caller's local too).
+ * Arithmetic it runs still reads the locals (`stepBack`).
+ */
+export function reachGlobal(session: SessionState, names: readonly string[]): () => void {
+  const swapped: [string, Map<string, ShellVar | null>, ShellVar | null][] = []
+  for (const name of new Set(names)) {
+    const outer = session.localFrames.find((frame) => frame.has(name))
+    if (outer === undefined) continue
+    swapped.push([name, outer, sessionEntry(session.vars, name) ?? null])
+    place(session, name, outer.get(name) ?? null)
+  }
+  session.reached = swapped
+  return () => {
+    for (const [name, outer, running] of swapped) {
+      outer.set(name, sessionEntry(session.vars, name) ?? null)
+      place(session, name, running)
+    }
+    session.reached = []
+  }
+}
+
+/**
+ * Put the locals a running `declare -g` set aside back in place for one
+ * arithmetic evaluation, and return the call that reaches the globals again.
+ */
+function stepBack(session: SessionState): () => void {
+  const reached = session.reached.map(
+    ([name]) => [name, sessionEntry(session.vars, name) ?? null] as const,
+  )
+  for (const [name, , running] of session.reached) place(session, name, running)
+  return () => {
+    for (const [name, v] of reached) place(session, name, v)
+  }
 }
 
 /** The innermost scope on the call path that saved `name`. */
@@ -1040,7 +1098,7 @@ export function sessionView(
     unset: (name, followRef = true) => unsetVar(session, policies, name, followRef),
     mark: (name, attr, on, followRef = true) =>
       markVar(session, policies, name, attr, on, followRef),
-    isReadonly: (name) => envIsReadonly(session, name),
+    isReadonly: (name, followRef = true) => envIsReadonly(session, name, followRef),
     profile: () => session.profile,
   }
 }

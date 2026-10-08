@@ -237,6 +237,40 @@
         "stdout": "declare -ax r1=([0]=\"new\")\ndeclare -Ar r2=([k]=\"v\" )\ndeclare -a r3=([0]=\"x\" [1]=\"y\")\ndeclare -a r4=([0]=\"z\")\ndeclare -n r5=\"T\"\ndeclare -nr r6=\"T\"\ndeclare -x T=\"5\"\n",
         "stderr": "bash: warning: r3: removing nameref attribute\nbash: warning: r4: removing nameref attribute\n"
       }
+    },
+    {
+      "id": "nameref_frozen_reference_refuses_reaiming",
+      "seq": 940120,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( T=old; U=new; declare -rn ref=T; declare -n ref=U; echo rc=$?; unset -n ref; echo rc=$?; declare +n ref; echo rc=$?; declare -n ref; echo rc=$?; ref=x; echo rc=$?; declare -p ref T )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=0\ndeclare -nr ref=\"T\"\ndeclare -- T=\"x\"\n",
+        "stderr": "bash: declare: ref: readonly variable\nbash: unset: ref: cannot unset: readonly variable\nbash: declare: ref: readonly variable\nbash: declare: ref: readonly variable\n"
+      }
     }
   ]
 }

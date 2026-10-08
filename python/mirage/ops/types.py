@@ -120,8 +120,13 @@ class EnvMark(Protocol):
     ) -> Awaitable[None]: ...
 
 
-# Whether `readonly` has marked the name.
-EnvIsReadonly = Callable[[str], bool]
+class EnvIsReadonly(Protocol):
+    """Whether ``readonly`` has marked the name; ``follow_ref`` asks
+    about a ``declare -n`` reference's target rather than itself."""
+
+    def __call__(self, name: str, follow_ref: bool = True) -> bool: ...
+
+
 # The name of the profile the session runs under, None for an
 # unrestricted session. What an owner-rendering command (ls -l, stat %g,
 # find -printf %g) prints in the group column: the profile is the

@@ -141,8 +141,9 @@ export interface SessionView {
   // `preSession` rules. `followRef` is `set`'s: `declare -rn r` marks the
   // reference itself.
   mark(name: string, attr: VarAttr | null, on: boolean, followRef?: boolean): Promise<void>
-  // Whether `readonly` has marked the name.
-  isReadonly(name: string): boolean
+  // Whether `readonly` has marked the name; `followRef` false asks about
+  // a `declare -n` reference itself rather than its target.
+  isReadonly(name: string, followRef?: boolean): boolean
   // The name of the profile the session runs under, null for an
   // unrestricted session. What an owner-rendering command (ls -l, stat
   // %g, find -printf %g) prints in the group column: the profile is the

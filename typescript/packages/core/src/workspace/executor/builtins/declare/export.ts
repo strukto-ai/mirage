@@ -16,7 +16,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { VarAttr } from '../../../../shell/variable.ts'
 import { deref, outliveCall } from '../../../session/state.ts'
-import type { SessionState } from '../../../session/session.ts'
+import { sessionEntry, type SessionState } from '../../../session/session.ts'
 import { exportedNames } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -33,6 +33,7 @@ import {
   kindListed,
   markFunctions,
   markWritten,
+  operandParts,
   scalarValue,
   splitDeclFlags,
   storeStagedArrays,
@@ -120,7 +121,8 @@ export async function handleExport(
       stored,
       kind,
     )
-    if (refused !== null) return refused
+    // The literals that stored are marked even when a policy refused a
+    // later one.
     try {
       for (const name of stored) {
         await markWritten(session, view, name, deref(session, name) || name, VarAttr.Export, on)
@@ -129,6 +131,7 @@ export async function handleExport(
       if (err instanceof PolicyDenied) return refusal('export', err)
       throw err
     }
+    if (refused !== null) return refused
   }
   for (const assign of names) {
     const badName = identifierRefusal('export', assign)
@@ -136,20 +139,20 @@ export async function handleExport(
       errors.push(badName)
       continue
     }
-    const eq = assign.indexOf('=')
-    const key = eq >= 0 ? assign.slice(0, eq) : assign
-    if (eq >= 0 && view.isReadonly(key)) {
+    const [key, append, val] = operandParts(assign)
+    if (val !== null && view.isReadonly(key)) {
       errors.push(readonlyLine('export', key))
       continue
     }
     // A value of the other array kind is refused and the name is still
     // marked, as bash does.
-    const held = eq >= 0 ? heldValue(session, key) : null
-    const conflict = eq >= 0 ? kindConflict(held, kind) : null
+    const held = val !== null ? heldValue(session, key) : null
+    const conflict = val !== null ? kindConflict(held, kind) : null
     if (conflict !== null) errors.push(`bash: export: ${key}: ${conflict}`)
-    if (eq >= 0 && conflict === null) {
-      const [value, assigned] = scalarValue(held, assign.slice(eq + 1), kind)
+    if (val !== null && conflict === null) {
       const checked = deref(session, key) || key
+      const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
+      const [value, assigned] = scalarValue(held, val, kind, append, integer)
       try {
         if (kind !== null) await dropReference(session, view, key)
         await view.set(key, value, true, assigned)

@@ -1255,6 +1255,74 @@
         "stdout": "in=x\nout=new\nfrozen\ndeclare -- H=\"inner\"\ndeclare -x K=\"inner\"\ndeclare -xu H=\"NEW\"\ndeclare -i I=\"3\"\ndeclare -- K=\"new\"\nin=inner\ndeclare -r J=\"new\"\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "declare_g_arithmetic_reads_the_function_scope",
+      "seq": 930437,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( declare -i G=10 H=20; f(){ local G=1 H=2; declare -gi G=H H=3; echo \"in G=$G H=$H\"; }; f; echo \"out G=$G H=$H\"; K=1; g(){ local K=10; declare -gi K=K+1; echo \"in=$K\"; }; g; echo \"out=$K\"; x=0; h(){ local x=1; declare -gi J='x=5'; echo \"in x=$x\"; }; h; echo \"out x=$x J=$J\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "in G=1 H=2\nout G=2 H=3\nin=10\nout=11\nin x=5\nout x=0 J=5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "declaration_operands_append",
+      "seq": 930438,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( Y=a; declare Y+=b; declare Z+=c; echo \"Y=$Y Z=$Z\"; X=a; f(){ local X+=y; local W=a; local W+=b; echo \"in=$X W=$W\"; }; f; echo \"out=$X\"; A=(old keep); g(){ local -I A+=new; declare -p A; }; g; E=a; export E+=b; R=a; readonly R+=b; declare -p E R; declare R+=c; echo rc=$? ); ( declare -i N=2; declare N+=3; declare -i M+=4; echo \"N=$N M=$M\"; A=(x y); declare A+=z; S=x; declare -a S+=y; declare -A T=([k]=v); declare T+=w; declare -l L=ab; declare L+=CD; declare -p A S T L; G=a; f(){ local G=b; declare -g G+=c; }; f; echo G=$G; declare 1X+=a; echo rc=$? )",
+      "expect": {
+        "exit": 0,
+        "stdout": "Y=ab Z=c\nin=y W=ab\nout=a\ndeclare -a A=([0]=\"oldnew\" [1]=\"keep\")\ndeclare -x E=\"ab\"\ndeclare -r R=\"ab\"\nrc=1\nN=5 M=4\ndeclare -a A=([0]=\"xz\" [1]=\"y\")\ndeclare -a S=([0]=\"xy\")\ndeclare -A T=([0]=\"w\" [k]=\"v\" )\ndeclare -l L=\"abcd\"\nG=ac\nrc=1\n",
+        "stderr": "bash: declare: R: readonly variable\nbash: declare: `1X+=a': not a valid identifier\n"
+      }
     }
   ]
 }

@@ -161,6 +161,31 @@ it('does not expand length after a refused offset', async () => {
   }
 })
 
+// The literals store first and take their marks once they all have; a
+// policy refusing a later one must not leave an earlier one stored but
+// unfrozen.
+const LITERALS: [string, string][] = [
+  ['readonly SAFE=(one) AWS_BLOCKED=(two)', '-ar'],
+  ['export SAFE=(one) AWS_BLOCKED=(two)', '-ax'],
+  ['declare -rx SAFE=(one) AWS_BLOCKED=(two)', '-arx'],
+]
+
+describe('a refused literal leaves the stored ones marked', () => {
+  for (const [line, expected] of LITERALS) {
+    it(line, async () => {
+      const ws = await guarded()
+      try {
+        const result = await ws.shell(line)
+        expect(result.refusal?.reason).toContain('not yours to set')
+        const shown = await ws.shell('declare -p SAFE')
+        expect(DEC.decode(shown.stdout)).toBe(`declare ${expected} SAFE=([0]="one")\n`)
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+})
+
 it('asks for no unset when a fresh local is assigned', async () => {
   // The new local's reset is the scope's bookkeeping, not a deletion the
   // line asked for; only the assignment is the gated write.

@@ -479,6 +479,10 @@ export class SessionState {
   // refused (`0: Bad file descriptor`); null for the read end itself.
   execStdinIdentity: string | null = null
   localFrames: Map<string, ShellVar | null>[] = []
+  // The names a running `declare -g` has put at global scope
+  // (`reachGlobal`), each with its frame and the function's local it set
+  // aside: arithmetic in the declaration still reads that local.
+  reached: [string, Map<string, ShellVar | null>, ShellVar | null][] = []
   // The caller's `RANDOM` marker for every frame that shadows the name,
   // innermost last: a local `RANDOM` is an ordinary variable for the
   // function's extent, and the generator resumes when it returns.

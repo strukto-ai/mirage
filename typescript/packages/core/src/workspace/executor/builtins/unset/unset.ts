@@ -159,9 +159,19 @@ export async function handleUnset(
   for (const name of args.slice(i)) {
     if (mode === 'n') {
       // `unset -n` drops the reference itself rather than its target;
-      // on a plain variable bash unsets it. Ungated-by-target unset.
+      // on a plain variable bash unsets it. Ungated-by-target unset. A
+      // frozen reference refuses, writable target or not.
+      const view = requireView(state)
+      if (view.isReadonly(name, false)) {
+        const err = encodeText(`bash: unset: ${name}: cannot unset: readonly variable\n`)
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: err }),
+          new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
+        ]
+      }
       try {
-        await requireView(state).unset(name, false)
+        await view.unset(name, false)
       } catch (err) {
         if (err instanceof PolicyDenied) return refusal('unset', err)
         throw err

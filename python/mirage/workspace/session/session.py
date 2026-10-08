@@ -394,6 +394,12 @@ class SessionState:
     # name, innermost last: a local `RANDOM` is an ordinary variable for
     # the function's extent, and the generator resumes when it returns.
     _local_random: list[str | None] = field(default_factory=list, repr=False)
+    # The names a running `declare -g` has put at global scope
+    # (`reach_global`), each with its frame and the function's local it
+    # set aside: arithmetic in the declaration still reads that local.
+    _reached: list[tuple[str, dict[str, ShellVar | None], ShellVar | None]] = (
+        field(default_factory=list, repr=False)
+    )
     # Hidden `getopts` state: the 1-based char offset within the current
     # word being scanned, plus the OPTIND value that offset belongs to.
     # A caller resetting OPTIND (e.g. to 1) makes the seen value stale,

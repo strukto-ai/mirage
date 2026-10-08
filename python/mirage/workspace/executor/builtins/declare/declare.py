@@ -13,13 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from collections.abc import Callable
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
+    array_get,
     array_set,
     build_assoc_literal,
     build_indexed_literal,
@@ -163,8 +163,20 @@ def kind_conflict(held: ShellValue | None, kind: VarKind | None) -> str | None:
     return None
 
 
+def _joined(old: str, value: str, append: bool, integer: bool) -> str:
+    if not append:
+        return value
+    if integer:
+        return f"{old or 0} + ({value})"
+    return old + value
+
+
 def scalar_value(
-    held: ShellValue | None, value: str, kind: VarKind | None
+    held: ShellValue | None,
+    value: str,
+    kind: VarKind | None,
+    append: bool = False,
+    integer: bool = False,
 ) -> tuple[ShellValue, frozenset[int | str] | None]:
     """What a declaration's ``NAME=value`` stores, and the elements it
     assigns (``coerce_value``).
@@ -172,23 +184,33 @@ def scalar_value(
     An array keeps its kind and takes the value at element 0 (key
     ``"0"`` in a map), as a plain ``NAME=value`` does, leaving the other
     elements as stored; otherwise ``-A`` makes the map ``([0]=value)``
-    and ``-a`` the one-element array, and with neither the value stays
-    a scalar.
+    and ``-a`` the one-element array, a held scalar converting to that
+    element first, and with neither the value stays a scalar.
+    ``NAME+=value`` appends to what that slot holds (``S=x; declare -a
+    S+=y`` gives ``([0]="xy")``), and on an integer adds: the door
+    evaluates ``old + (value)``.
 
     Args:
         held (ShellValue | None): the value the declaration lands on.
         value (str): the assigned text.
         kind (VarKind | None): the kind ``-a`` / ``-A`` asked for.
+        append (bool): the operand was ``NAME+=value``.
+        integer (bool): the variable carries ``-i``.
     """
+    scalar = held if isinstance(held, str) else None
     if isinstance(held, dict) or kind is VarKind.ASSOC:
-        return {**(held if isinstance(held, dict) else {}), "0": value}, (
-            frozenset({"0"})
-        )
+        amap = dict(held) if isinstance(held, dict) else {}
+        if scalar is not None:
+            amap["0"] = scalar
+        amap["0"] = _joined(amap.get("0", ""), value, append, integer)
+        return amap, frozenset({"0"})
     if isinstance(held, list) or kind is VarKind.INDEXED:
         arr = list(held) if isinstance(held, list) else []
-        array_set(arr, 0, value)
+        if scalar is not None:
+            arr.append(scalar)
+        array_set(arr, 0, _joined(array_get(arr, 0), value, append, integer))
         return arr, frozenset({0})
-    return value, None
+    return _joined(scalar or "", value, append, integer), None
 
 
 def kind_listed(session: SessionState, name: str, flags: set[str]) -> bool:
@@ -300,7 +322,8 @@ def plus_refusal(
     """The line a ``+letter`` earns on one operand, if any.
 
     Two letters cannot be taken off. ``+r`` on a readonly name is
-    ``declare: R: readonly variable`` and the name stays frozen; ``+a``
+    ``declare: R: readonly variable`` and the name stays frozen, as is
+    ``+n`` on a frozen reference; ``+a``
     / ``+A`` on an array is ``cannot destroy array variables in this
     way``, since the kind is what the value is, not a mark. Either skips
     that operand's value and marks, and the others still declare
@@ -313,7 +336,11 @@ def plus_refusal(
         name (str): the operand's name.
         plus (str): the declaration's ``+`` letters.
     """
-    if "r" in plus and view.is_readonly(name):
+    var = session.vars.get(name)
+    reference = var is not None and VarAttr.NAMEREF in var.attrs
+    if ("r" in plus and view.is_readonly(name)) or (
+        "n" in plus and reference and view.is_readonly(name, False)
+    ):
         return readonly_line(cmd, name)
     if ("a" in plus and name in session.arrays) or (
         "A" in plus and name in session.assocs
@@ -322,52 +349,6 @@ def plus_refusal(
             f"bash: {cmd}: {name}: cannot destroy array variables in this way"
         )
     return None
-
-
-def _place(session: SessionState, name: str, var: ShellVar | None) -> None:
-    if var is None:
-        session.vars.pop(name, None)
-    else:
-        session.vars[name] = var
-
-
-def reach_global(
-    session: SessionState, names: list[str]
-) -> Callable[[], None]:
-    """Put each name's global record in place for a ``declare -g``, and
-    return the call that puts the running locals back.
-
-    Outside a function, or for a name no frame on the call path shadows,
-    the global record is already in place. Otherwise the running local
-    lives in ``session.vars`` and the global is what the *outermost*
-    shadowing frame saved, so the two swap for the declaration: its
-    reads, writes and marks reach the global, and the local comes back
-    untouched, which is what GNU shows (``local G=5; declare -gr G=1``
-    leaves ``$G`` at 5 and writable in the function, 1 and frozen
-    outside, and a nested ``declare -g`` reaches past the caller's local
-    too).
-
-    Args:
-        session (SessionState): shell session state.
-        names (list[str]): the declaration's operand names.
-    """
-    swapped: list[tuple[str, dict[str, ShellVar | None], ShellVar | None]]
-    swapped = []
-    for name in dict.fromkeys(names):
-        outer = next(
-            (frame for frame in session._local_frames if name in frame), None
-        )
-        if outer is None:
-            continue
-        swapped.append((name, outer, session.vars.get(name)))
-        _place(session, name, outer[name])
-
-    def restore() -> None:
-        for name, outer, running in swapped:
-            outer[name] = session.vars.get(name)
-            _place(session, name, running)
-
-    return restore
 
 
 async def store_staged_arrays(
@@ -576,6 +557,19 @@ def split_decl_flags(
     return flags, args[i:], None
 
 
+def operand_parts(word: str) -> tuple[str, bool, str | None]:
+    """A declaration operand as its name, whether it appends, and its
+    value, None for a bare name: ``X+=y`` appends ``y`` to ``X``.
+
+    Args:
+        word (str): the operand as typed.
+    """
+    name, eq, value = word.partition("=")
+    if not eq:
+        return word, False, None
+    return name.removesuffix("+"), name.endswith("+"), value
+
+
 def identifier_refusal(cmd: str, word: str) -> str | None:
     """GNU's ``not a valid identifier`` line for one declaration operand.
 
@@ -598,7 +592,7 @@ def identifier_refusal(cmd: str, word: str) -> str | None:
     Returns:
         str | None: the refusal line, or None when the name is legal.
     """
-    name = word.partition("=")[0]
+    name = operand_parts(word)[0]
     if is_valid_name(name):
         return None
     subscript = SUBSCRIPT_RE.fullmatch(name)

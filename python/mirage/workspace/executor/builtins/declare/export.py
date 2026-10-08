@@ -33,6 +33,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     kind_listed,
     mark_functions,
     mark_written,
+    operand_parts,
     scalar_value,
     split_decl_flags,
     store_staged_arrays,
@@ -148,8 +149,8 @@ async def handle_export(
             stored=stored,
             kind=kind,
         )
-        if refused is not None:
-            return refused
+        # The literals that stored are marked even when a policy refused
+        # a later one.
         try:
             for name in stored:
                 await mark_written(
@@ -162,24 +163,33 @@ async def handle_export(
                 )
         except PolicyDenied as exc:
             return refusal("export", exc)
+        if refused is not None:
+            return refused
     for assign in names:
         bad_name = identifier_refusal("export", assign)
         if bad_name is not None:
             errors.append(bad_name)
             continue
-        key, eq, val = assign.partition("=")
-        if eq and view.is_readonly(key):
+        key, append, val = operand_parts(assign)
+        if val is not None and view.is_readonly(key):
             errors.append(readonly_line("export", key))
             continue
         # A value of the other array kind is refused and the name is
         # still marked, as bash does.
-        held = held_value(session, key) if eq else None
-        conflict = kind_conflict(held, kind) if eq else None
+        held = held_value(session, key) if val is not None else None
+        conflict = kind_conflict(held, kind) if val is not None else None
         if conflict is not None:
             errors.append(f"bash: export: {key}: {conflict}")
-        if eq and conflict is None:
-            value, assigned = scalar_value(held, val, kind)
+        if val is not None and conflict is None:
             checked = deref(session, key)
+            target = session.vars.get(checked)
+            value, assigned = scalar_value(
+                held,
+                val,
+                kind,
+                append,
+                target is not None and VarAttr.INTEGER in target.attrs,
+            )
             try:
                 if kind is not None:
                     await drop_reference(session, view, key)

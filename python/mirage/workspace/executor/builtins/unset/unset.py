@@ -183,9 +183,20 @@ async def handle_unset(
         if mode == "n":
             # `unset -n` drops the reference itself rather than what it
             # points at; on a name that is not a reference bash unsets
-            # the variable, and both are one ungated-by-target unset.
+            # the variable, and both are one ungated-by-target unset. A
+            # frozen reference refuses, writable target or not.
+            view = require_view(state)
+            if view.is_readonly(name, False):
+                err = encode_text(
+                    f"bash: unset: {name}: cannot unset: readonly variable\n"
+                )
+                return (
+                    None,
+                    IOResult(exit_code=1, stderr=err),
+                    ExecutionNode(command="unset", exit_code=1, stderr=err),
+                )
             try:
-                await require_view(state).unset(name, follow_ref=False)
+                await view.unset(name, follow_ref=False)
             except PolicyDenied as exc:
                 return refusal("unset", exc)
             continue

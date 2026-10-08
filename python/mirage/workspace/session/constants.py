@@ -96,6 +96,7 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
     "_local_vars",
     "_local_frames",
     "_local_random",
+    "_reached",
     "_trap_status",
     "_pipe_status_pending",
     "_random_state",

@@ -26,6 +26,7 @@ import {
   deref,
   envGet,
   inCallEnv,
+  reachGlobal,
   shadowLocal,
   visibleArrays,
   visibleAssocs,
@@ -41,9 +42,9 @@ import {
   kindConflict,
   localAttrs,
   namerefRefusal,
+  operandParts,
   plusRefusal,
   premark,
-  reachGlobal,
   scalarValue,
   stampMarks,
   startLocal,
@@ -104,7 +105,7 @@ export async function handleLocal(
   const view = requireView(state)
   const restore = globalScope
     ? reachGlobal(session, [
-        ...assignments.map((a) => a.split('=')[0] ?? a),
+        ...assignments.map((a) => operandParts(a)[0]),
         ...(arrays ?? []).map(({ name }) => name),
       ])
     : null
@@ -161,7 +162,8 @@ async function declareOperands(
       locals === null,
       inherit,
     )
-    if (refused !== null) return refused
+    // The literals that stored take their marks even when a policy refused
+    // a later one.
     for (const name of stored) {
       const line = plusRefusal(cmd, session, view, name, plus)
       if (line !== null) {
@@ -170,6 +172,7 @@ async function declareOperands(
       }
       await stampMarks(session, view, name, deref(session, name) || name, marks)
     }
+    if (refused !== null) return refused
     for (const assign of assignments) {
       const line = await declareOperand(
         session,
@@ -195,9 +198,12 @@ async function declareOperands(
 }
 
 /**
- * Declare one `NAME` / `NAME=value` operand and mark it. Returns the
- * operand's refusal line, or null when it declared; a policy denial or an
- * `-i` value that does not evaluate throws.
+ * Declare one `NAME`, `NAME=value` or `NAME+=value` operand and mark it.
+ * Returns the operand's refusal line, or null when it declared; a policy
+ * denial or an `-i` value that does not evaluate throws. A `-n`
+ * declaration writes the reference itself, so a frozen reference refuses
+ * it (`declare -rn r=T; declare -n r=U`) even when what it points at is
+ * writable.
  */
 async function declareOperand(
   session: SessionState,
@@ -214,10 +220,10 @@ async function declareOperand(
 ): Promise<string | null> {
   const badName = identifierRefusal(cmd, assign)
   if (badName !== null) return badName
-  const eq = assign.indexOf('=')
-  const key = eq >= 0 ? assign.slice(0, eq) : assign
+  const [key, append, given] = operandParts(assign)
   const fresh = locals !== null && !locals.has(key)
-  if (eq < 0) {
+  if (given === null) {
+    if (nameref && view.isReadonly(key, false)) return readonlyLine(cmd, key)
     if (locals !== null) shadowLocal(session, locals, key)
     if (fresh) {
       const line = await freshLocal(session, view, cmd, key, inherit)
@@ -240,12 +246,14 @@ async function declareOperand(
     await stampMarks(session, view, key, null, marks, !nameref)
     return null
   }
-  const val = assign.slice(eq + 1)
+  let val = given
   if (nameref) {
+    const own = sessionEntry(session.vars, key)?.value
+    if (append && typeof own === 'string') val = own + val
     const badRef = namerefRefusal(cmd, key, val)
     if (badRef !== null) return badRef
   }
-  if (view.isReadonly(key)) return readonlyLine(cmd, key)
+  if (view.isReadonly(key, !nameref)) return readonlyLine(cmd, key)
   if (locals !== null) shadowLocal(session, locals, key)
   if (fresh && !inCallEnv(session, key)) startLocal(session, key, inherit)
   const line = plusRefusal(cmd, session, view, key, plus)
@@ -256,10 +264,13 @@ async function declareOperand(
   const held = nameref || (fresh && !inherit) ? null : heldValue(session, key)
   const conflict = kindConflict(held, kind)
   if (conflict !== null) return `bash: ${cmd}: ${key}: ${conflict}`
+  const checked = nameref ? key : deref(session, key) || key
+  const integer =
+    shaping.has(VarAttr.Integer) ||
+    sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
   const [value, assigned]: [ShellValue, ReadonlySet<number | string> | null] = nameref
     ? [val, null]
-    : scalarValue(held, val, kind)
-  const checked = nameref ? key : deref(session, key) || key
+    : scalarValue(held, val, kind, append, integer)
   await premark(view, key, shaping)
   if (kind !== null && !nameref) await dropReference(session, view, key)
   await view.set(key, value, !nameref, assigned)

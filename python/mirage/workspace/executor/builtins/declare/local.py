@@ -26,9 +26,9 @@ from mirage.workspace.executor.builtins.declare.declare import (
     kind_conflict,
     local_attrs,
     nameref_refusal,
+    operand_parts,
     plus_refusal,
     premark,
-    reach_global,
     scalar_value,
     stamp_marks,
     start_local,
@@ -46,6 +46,7 @@ from mirage.workspace.session.state import (
     deref,
     env_get,
     in_call_env,
+    reach_global,
     session_view,
     shadow_local,
     visible_arrays,
@@ -126,7 +127,7 @@ async def handle_local(
     restore = (
         reach_global(
             session,
-            [a.partition("=")[0] for a in assignments]
+            [operand_parts(a)[0] for a in assignments]
             + [name for name, _, _ in arrays or []],
         )
         if global_scope
@@ -201,14 +202,16 @@ async def _declare_operands(
             global_scope=local_vars is None,
             inherit=inherit,
         )
-        if refused is not None:
-            return refused
+        # The literals that stored take their marks even when a policy
+        # refused a later one.
         for name in stored:
             line = plus_refusal(cmd, session, view, name, plus)
             if line is not None:
                 errors.append(line)
                 continue
             await stamp_marks(session, view, name, deref(session, name), marks)
+        if refused is not None:
+            return refused
         for assign in assignments:
             line = await _declare_operand(
                 session,
@@ -245,7 +248,12 @@ async def _declare_operand(
     local_vars: dict[str, ShellVar | None] | None,
     inherit: bool,
 ) -> str | None:
-    """Declare one ``NAME`` / ``NAME=value`` operand and mark it.
+    """Declare one ``NAME``, ``NAME=value`` or ``NAME+=value`` operand
+    and mark it.
+
+    A ``-n`` declaration writes the reference itself, so a frozen
+    reference refuses it (``declare -rn r=T; declare -n r=U``) even when
+    what it points at is writable.
 
     Args:
         session (SessionState): shell session state.
@@ -271,9 +279,11 @@ async def _declare_operand(
     bad_name = identifier_refusal(cmd, assign)
     if bad_name is not None:
         return bad_name
-    key, eq, val = assign.partition("=")
+    key, append, val = operand_parts(assign)
     fresh = local_vars is not None and key not in local_vars
-    if not eq:
+    if val is None:
+        if nameref and view.is_readonly(key, False):
+            return readonly_line(cmd, key)
         if local_vars is not None:
             shadow_local(session, local_vars, key)
         if fresh:
@@ -298,10 +308,13 @@ async def _declare_operand(
         await stamp_marks(session, view, key, None, marks, not nameref)
         return None
     if nameref:
+        own = session.vars.get(key)
+        if append and own is not None and isinstance(own.value, str):
+            val = own.value + val
         bad_ref = nameref_refusal(cmd, key, val)
         if bad_ref is not None:
             return bad_ref
-    if view.is_readonly(key):
+    if view.is_readonly(key, not nameref):
         return readonly_line(cmd, key)
     if local_vars is not None:
         shadow_local(session, local_vars, key)
@@ -322,8 +335,16 @@ async def _declare_operand(
     conflict = kind_conflict(held, kind)
     if conflict is not None:
         return f"bash: {cmd}: {key}: {conflict}"
-    value, assigned = (val, None) if nameref else scalar_value(held, val, kind)
     checked = key if nameref else deref(session, key)
+    target = session.vars.get(checked)
+    integer = VarAttr.INTEGER in shaping or (
+        target is not None and VarAttr.INTEGER in target.attrs
+    )
+    value, assigned = (
+        (val, None)
+        if nameref
+        else scalar_value(held, val, kind, append, integer)
+    )
     await premark(view, key, shaping)
     if kind is not None and not nameref:
         await drop_reference(session, view, key)
