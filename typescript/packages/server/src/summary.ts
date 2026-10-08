@@ -50,7 +50,7 @@ function userMounts(ws: Workspace) {
  * measures and slices `Array.from` -- the same fix `sanitizeLabel` carries.
  */
 export function describeVfs(vfs: BaseVFS): string {
-  const raw = vfs.prompt ?? ''
+  const raw = vfs.prompt
   const points = Array.from(raw)
   if (points.length <= DESCRIPTION_MAX) return raw
   const cut = points.slice(0, DESCRIPTION_MAX - 1).join('')
