@@ -599,21 +599,9 @@ export class Dispatcher {
    */
   private async walkOperands(call: Call): Promise<void> {
     for (const [at, typed] of operands(call.name, call.args, call.kwargs)) {
-      if (!pathVisible(call.vis, typed.virtual)) throw hiddenRefusal(call.vis, typed.virtual, false)
-      if (typed.walkError !== null) throw walkRefusal(typed)
-      if (typed.dotted !== null) {
-        const refusal = await dotRefusal(dispatchStat(this.dispatch), typed, (virtual) =>
-          this.namespace.follow(virtual),
-        )
-        if (refusal !== null) throw refusal
-      }
-      const walked = this.walked(typed, false)
-      const followed = followOrLoop(this.namespace, walked, true)
-      const landed = followed === walked.virtual ? walked : PathSpec.fromStrPath(followed)
-      if (!pathVisible(call.vis, landed.virtual)) {
-        throw hiddenRefusal(call.vis, landed.virtual, false)
-      }
-      if (call.ruleGate !== null) judge(call.ruleGate, typed, walked, landed)
+      const other = await this.walk(call.name, typed, [], {}, call.ruleGate, undefined, call.issuer)
+      this.follow(other)
+      const landed = other.path
       if (typeof at === 'number') {
         call.args = (call.args ?? []).map((value, i) => (i === at ? landed : value))
       } else {
@@ -823,7 +811,6 @@ export class Dispatcher {
     const filetype = getExtension(p.virtual)
     const [readOffset, readSize] = readWindow(kwargs)
     const whole = readOffset === 0 && readSize === null
-    mount.requireWritable(name, p, [...(call.args ?? []), ...Object.values(kwargs ?? {})])
     // Ops registered under a rendered filetype (gdocs/gsheets/gslides/
     // gmail reads) resolve by the path's extension; Python reaches them
     // because its dispatcher routes through Mount.call, which

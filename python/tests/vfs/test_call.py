@@ -86,10 +86,6 @@ class Shelf(BaseVFS):
         key = path.vfs_path.strip("/")
         self.files[target.vfs_path.strip("/")] = self.files[key]
 
-    @vfs_call(effect=Effect.RENAME)
-    async def move(self, path: PathSpec, dst: PathSpec) -> None:
-        return None
-
     async def helper(self, path: PathSpec) -> None:
         raise AssertionError("an unmarked method is not reachable by name")
 
@@ -103,6 +99,14 @@ def test_a_mark_declares_and_an_override_keeps_it():
     )
     assert declared(Shelf, "read") == declared(BaseVFS, "read")
     assert declared(Shelf, "helper") is None
+
+
+def test_only_rename_declares_a_rename():
+    async def move(path: PathSpec, dst: PathSpec) -> None:
+        return None
+
+    with pytest.raises(TypeError, match="move: only rename"):
+        vfs_call(effect=Effect.RENAME)(move)
 
 
 # What each built-in function declares. The TypeScript twin
@@ -184,23 +188,22 @@ async def test_a_function_takes_its_own_keywords_only():
 @pytest.mark.asyncio
 async def test_a_writing_function_answers_to_the_read_only_paths():
     shelf = Shelf()
+    shelf.files["b.txt"] = b"older\n"
     ws = Workspace({"/shelf/": shelf}, mode=MountMode.WRITE)
-    show = {"/shelf/a.txt": "r", "/shelf/tree/locked": "r"}
+    show = {"/shelf/a.txt": "r", "/shelf/b.txt": "rw"}
     token = set_current_session(
         ws.create_session("rev", profile={"paths": {"show": show}})
     )
+    a = PathSpec.from_str_path("/shelf/a.txt")
+    b = PathSpec.from_str_path("/shelf/b.txt")
     try:
         with pytest.raises(OSError) as refused:
-            await ws.dispatch("shelve", PathSpec.from_str_path("/shelf/a.txt"))
+            await ws.dispatch("shelve", a)
+        assert refused.value.errno == errno.EROFS
+        with pytest.raises(OSError) as refused:
+            await ws.dispatch("copy_to", b, target=a)
         assert refused.value.errno == errno.EROFS
         assert shelf.files["a.txt"] == b"old\n"
-        with pytest.raises(OSError) as refused:
-            await ws.dispatch(
-                "move",
-                PathSpec.from_str_path("/shelf/tree"),
-                dst=PathSpec.from_str_path("/shelf/moved"),
-            )
-        assert refused.value.errno == errno.EROFS
     finally:
         reset_current_session(token)
         await ws.close()

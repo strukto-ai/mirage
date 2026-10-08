@@ -716,7 +716,7 @@ class Dispatcher:
             _judge(call.rule_gate, call.typed, walked, call.path)
 
     async def _walk_operands(self, call: _Call) -> None:
-        """Walk and follow each other path argument the way the path is.
+        """Walk and follow each other path argument as the path is.
 
         The same hides, spelling checks and rule gate apply, so a second
         path is no way around them; the followed spelling replaces it.
@@ -725,27 +725,11 @@ class Dispatcher:
             call (_Call): the followed op; its path arguments are walked.
         """
         for key, typed in _operands(call.name, call.kwargs):
-            if not path_visible(call.vis, typed.virtual):
-                raise hidden_refusal(call.vis, typed.virtual, False)
-            if typed.walk_error is not None:
-                raise walk_refusal(typed)
-            refusal = await dot_refusal(
-                self._walk_stat, typed, self._namespace.follow
+            other = await self._walk(
+                call.name, typed, {}, call.rule_gate, None
             )
-            if refusal is not None:
-                raise refusal
-            walked = self._walked(typed, False)
-            followed = _follow_or_loop(self._namespace, walked, True)
-            landed = (
-                walked
-                if followed == walked.virtual
-                else PathSpec.from_str_path(followed)
-            )
-            if not path_visible(call.vis, landed.virtual):
-                raise hidden_refusal(call.vis, landed.virtual, False)
-            if call.rule_gate is not None:
-                _judge(call.rule_gate, typed, walked, landed)
-            call.kwargs[key] = landed
+            self._follow(other)
+            call.kwargs[key] = other.path
 
     async def _answer_unmounted(self, call: _Call) -> Any:
         """Answer an op on a path no mount serves.

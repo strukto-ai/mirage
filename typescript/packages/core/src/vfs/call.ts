@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compareCodePoints } from '../utils/sort.ts'
-import { type Declaration, type Effect, Target } from './types.ts'
+import { type Declaration, Effect, Target } from './types.ts'
 
 const MARK = Symbol.for('mirage.vfsCall')
 
@@ -33,8 +33,10 @@ interface Marked {
  *
  * The built-in functions' marks are where the door's op classes come from:
  * which ops follow a link, create a name, run one at a time per path or stamp
- * an mtime is read off what they declare here. `target` is the kind of entry
- * the path names (any when omitted) and `creates` marks a WRITE that makes a
+ * an mtime is read off what they declare here. Only `rename` declares RENAME:
+ * the door moves the hides, links and cache below a source to a destination,
+ * and only `rename(path, dst)` names both. `target` is the kind of entry the
+ * path names (any when omitted) and `creates` marks a WRITE that makes a
  * missing file, as open(2) with O_CREAT. Mirrors Python's `vfs_call`.
  */
 export function vfsCall(options: { effect: Effect; target?: Target; creates?: boolean }) {
@@ -45,8 +47,12 @@ export function vfsCall(options: { effect: Effect; target?: Target; creates?: bo
   }
   return function apply(
     method: (...args: never[]) => unknown,
-    _context: ClassMethodDecoratorContext,
+    context: ClassMethodDecoratorContext,
   ): void {
+    const name = String(context.name)
+    if (mark.effect === Effect.RENAME && name !== 'rename') {
+      throw new TypeError(`${name}: only rename declares RENAME`)
+    }
     ;(method as Marked)[MARK] = mark
   }
 }

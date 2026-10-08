@@ -16,7 +16,6 @@ import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
   effectiveMountMode,
-  requirePathsWritable,
   runWithMountGate,
   runWithWalkProbe,
   strongestModeUnder,
@@ -48,7 +47,6 @@ import {
 } from '../../core/generic/rewrite.ts'
 import { declared } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
-import { Effect } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
 import { getExtension } from '../../commands/resolve.ts'
@@ -525,22 +523,6 @@ export class MountEntry {
   writes(name: string): boolean {
     const effect = declared(this.vfs.constructor, name)?.effect
     return effect !== undefined && WRITE_EFFECTS.includes(effect)
-  }
-
-  /**
-   * Refuse a write the mount's mode does not grant at any path. A rename moves
-   * everything below its endpoints, so a read-only region below either refuses
-   * it; a removal answers per path. Mirrors Python's `require_writable`.
-   */
-  requireWritable(name: string, path: PathSpec, values: readonly unknown[]): void {
-    const effect = declared(this.vfs.constructor, name)?.effect
-    if (effect === undefined || !WRITE_EFFECTS.includes(effect)) return
-    requirePathsWritable(
-      [path, ...values.filter((value): value is PathSpec => value instanceof PathSpec)],
-      this.prefix,
-      this.mode,
-      effect === Effect.RENAME,
-    )
   }
 
   /** Refuse a keyword `name` does not take, as a cold call would. Mirrors Python's `refuse_keywords`. */
@@ -1071,7 +1053,6 @@ export class MountEntry {
       if (levels.length === 0) {
         throw enotsup(this.vfs.name, name, path)
       }
-      this.requireWritable(name, PathSpec.fromStrPath(path), [...args, ...Object.values(kwargs)])
       taken(name, kwargs)
       const mountPrefix = rstripSlash(this.prefix)
       const lastSlash = path.lastIndexOf('/')

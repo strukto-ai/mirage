@@ -75,11 +75,6 @@ class Shelf extends BaseVFS {
     if (data !== undefined) this.files.set(target.vfsPath.replace(/^\/+/, ''), data)
     return Promise.resolve()
   }
-
-  @vfsCall({ effect: Effect.RENAME })
-  move(_path: PathSpec, _dst: PathSpec): Promise<void> {
-    return Promise.resolve()
-  }
 }
 
 // What each built-in function declares. The Python twin
@@ -116,6 +111,18 @@ describe('declarations', () => {
       target: Target.ANY,
       creates: false,
     })
+  })
+
+  it('lets only rename declare a rename', () => {
+    expect(() => {
+      class Mover extends BaseVFS {
+        @vfsCall({ effect: Effect.RENAME })
+        move(): Promise<void> {
+          return Promise.resolve()
+        }
+      }
+      return Mover
+    }).toThrow('move: only rename declares RENAME')
   })
 
   it('keeps the names that match every filter', () => {
@@ -164,22 +171,23 @@ describe('VFS functions', () => {
 
   it('has a writing function answer to the read-only paths', async () => {
     const shelf = new Shelf()
+    shelf.files.set('b.txt', ENC.encode('older\n'))
     const ws = new Workspace({ '/shelf': shelf }, { mode: MountMode.WRITE })
     const session = ws.createSession('rev', {
       profile: parseSessionProfile({
-        paths: { show: { '/shelf/a.txt': 'r', '/shelf/tree/locked': 'r' } },
+        paths: { show: { '/shelf/a.txt': 'r', '/shelf/b.txt': 'rw' } },
       }),
     })
     try {
       await expect(
         runWithSession(session, () => ws.dispatch('shelve', '/shelf/a.txt')),
       ).rejects.toMatchObject({ code: 'EROFS' })
-      expect(DEC.decode(shelf.files.get('a.txt'))).toBe('old\n')
       await expect(
         runWithSession(session, () =>
-          ws.dispatch('move', '/shelf/tree', [PathSpec.fromStrPath('/shelf/moved')]),
+          ws.dispatch('copyTo', '/shelf/b.txt', [PathSpec.fromStrPath('/shelf/a.txt')]),
         ),
       ).rejects.toMatchObject({ code: 'EROFS' })
+      expect(DEC.decode(shelf.files.get('a.txt'))).toBe('old\n')
     } finally {
       await ws.close()
     }

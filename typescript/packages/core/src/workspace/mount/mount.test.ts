@@ -433,16 +433,6 @@ describe('Mount.call', () => {
     const m = makeMount()
     await expect(m.call('nope', '/x')).rejects.toThrow(/no op/)
   })
-
-  it('rejects write ops on READ mount', async () => {
-    class Writing extends StubVFS {
-      override write(): Promise<void> {
-        return Promise.resolve()
-      }
-    }
-    const m = makeMount(MountMode.READ, new Writing())
-    await expect(m.call('write', '/x')).rejects.toThrow(/read-only/)
-  })
 })
 
 describe('Mount.revisions', () => {

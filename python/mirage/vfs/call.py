@@ -36,7 +36,10 @@ def vfs_call(
 
     The built-in functions' marks are where the door's op classes come
     from: which ops follow a link, create a name, run one at a time per
-    path or stamp an mtime is read off what they declare here.
+    path or stamp an mtime is read off what they declare here. Only
+    ``rename`` declares RENAME: the door moves the hides, links and
+    cache below a source to a destination, and only ``rename(path, dst)``
+    names both.
 
     Args:
         effect (Effect): what the call does to the mount.
@@ -46,6 +49,8 @@ def vfs_call(
     """
 
     def mark(fn: Fn) -> Fn:
+        if effect is Effect.RENAME and fn.__name__ != "rename":
+            raise TypeError(f"{fn.__name__}: only rename declares RENAME")
         setattr(fn, _MARK, Declaration(effect, target, creates))
         return fn
 
