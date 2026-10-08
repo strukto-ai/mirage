@@ -16,6 +16,7 @@ import asyncio
 import builtins
 import io
 import os
+import shutil
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from types import ModuleType
@@ -25,7 +26,7 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.concurrency.limiter import run_blocking
 from mirage.observe.store import ObserverStore
 from mirage.process.supervisor import ProcessSupervisor
-from mirage.runtime.python.host.fs import os_routing
+from mirage.runtime.python.host.fs import make_rmtree, os_routing
 from mirage.runtime.python.host.open import make_open
 from mirage.shell.job_table import JobTable, cancel_job
 from mirage.workspace.files import Files
@@ -100,7 +101,9 @@ def patch_process(
     all of them, and ``os.path`` comes along for free because
     ``posixpath`` reads ``os.stat`` off that same module at call time.
     ``open`` needs the same treatment twice: it is also ``io.open``,
-    which is the one ``pathlib`` calls.
+    which is the one ``pathlib`` calls. ``shutil.rmtree`` is the one name
+    past those: it walks a tree by descriptor, and a mount has none (see
+    ``make_rmtree``).
 
     The block gets ONE event loop, driven a call at a time, that every
     patched call and the closing ``close()`` share. Without it each call
@@ -121,10 +124,12 @@ def patch_process(
     patched: list[Patched] = [
         (builtins, "open", builtins.open),
         (io, "open", io.open),
+        (shutil, "rmtree", shutil.rmtree),
         *((os, name, getattr(os, name)) for name in routing),
     ]
     builtins.open = opener
     io.open = opener
+    shutil.rmtree = cast(Any, make_rmtree(files))
     for name, fn in routing.items():
         setattr(os, name, fn)
     return patched

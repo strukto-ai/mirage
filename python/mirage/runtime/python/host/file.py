@@ -22,10 +22,10 @@ from typing import TYPE_CHECKING, Self
 
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import FileHandle
 from mirage.runtime.handles.mode import parse_mode
 from mirage.runtime.open import apply_open
+from mirage.runtime.python.host.fs import door_files, syscall
 from mirage.workspace.files import Files
 
 if TYPE_CHECKING:
@@ -106,7 +106,7 @@ class MirageFile:
         newline: str | None = None,
     ) -> None:
         self._closed = True
-        self._door = RuntimeFiles(files.dispatch, loop)
+        self._door = door_files(files, loop)
         self._path = path
         self._mode = mode
         self._facts = parse_mode(mode)
@@ -168,7 +168,7 @@ class MirageFile:
     def _read_range(self, offset: int, size: int | None) -> bytes:
         # A handle that writes reads the stored bytes, since its writes
         # land on them; a read-only one sees the rendering.
-        return self._door.read(
+        return syscall(self._door.read)(
             self._path, offset=offset, size=size, raw=self._writable
         )
 
@@ -235,6 +235,14 @@ class MirageFile:
         self._check_closed()
         return self._buf.seek(offset, whence)
 
+    def truncate(self, size: int | None = None) -> int:
+        return self._write_buffer().truncate(size)
+
+    def fileno(self) -> int:
+        # No descriptor backs a mounted file, so this answers as an
+        # in-memory stream does.
+        raise io.UnsupportedOperation("fileno")
+
     def tell(self) -> int:
         self._check_closed()
         return self._buf.tell()
@@ -245,7 +253,7 @@ class MirageFile:
         steps = self._handle.flush_plan()
         if not steps:
             return
-        self._door.flush(self._path, steps)
+        syscall(self._door.flush)(self._path, steps)
         self._handle.settle(self._read_range)
 
     def close(self) -> None:

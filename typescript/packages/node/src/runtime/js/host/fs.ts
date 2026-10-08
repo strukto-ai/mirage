@@ -18,6 +18,7 @@ import { constants } from 'node:fs'
 import { createRequire } from 'node:module'
 import { posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { classify } from '@struktoai/mirage-core/errors/classify'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { posixErrno, posixPhrase } from '@struktoai/mirage-core/errors/posix'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
@@ -38,7 +39,7 @@ import {
 type FsObject = Record<string, unknown>
 type Fn = (...args: unknown[]) => unknown
 type Callback = (err: unknown, value?: unknown) => void
-type Options = Record<string, unknown> | string | number | undefined
+type Options = Record<string, unknown> | string | number | null | undefined
 
 const fs = createRequire(import.meta.url)('node:fs') as FsObject & { promises: FsObject }
 const { S_IFMT, S_IFREG, S_IFDIR, S_IFCHR, S_IFLNK, W_OK, X_OK, COPYFILE_EXCL } = constants
@@ -75,10 +76,15 @@ function syncRefusal(name: string, path: string): NodeJS.ErrnoException {
   return err
 }
 
+/** An options argument's fields; node takes null, a number (a mode)
+ * and a string (an encoding) there too, which name none of them. */
+function fieldsOf(options: Options): Record<string, unknown> {
+  return typeof options === 'object' && options !== null ? options : {}
+}
+
 function encodingOf(options: Options): BufferEncoding | undefined {
   if (typeof options === 'string') return options as BufferEncoding
-  if (typeof options === 'object') return options.encoding as BufferEncoding | undefined
-  return undefined
+  return (fieldsOf(options).encoding ?? undefined) as BufferEncoding | undefined
 }
 
 function bytesOf(data: unknown, options: Options): Uint8Array {
@@ -131,7 +137,18 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     private readonly native: FsObject,
   ) {
     this.files = new RuntimeFiles(
-      workspaceBridge((name, path, args, kwargs) => ws.vfs.dispatch(name, path, args, kwargs)),
+      workspaceBridge(async (name, path, args, kwargs) => {
+        try {
+          return await ws.vfs.dispatch(name, path, args, kwargs)
+        } catch (err) {
+          if (classify(err) !== null) throw err
+          // An op that fails with no condition (an upstream 502 a REST
+          // mount throws as it came) answers EIO, the kernel's word for a
+          // device that failed, as a guest's door does; the original
+          // rides along as the cause.
+          throw Object.assign(refusal('EIO', name, path), { cause: err })
+        }
+      }),
       new PrefixResolver(
         () => [],
         (directory) => ws.namespace.linkNamesUnder(directory),
@@ -180,8 +197,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
       ctimeMs: mtime.getTime(),
       birthtimeMs: mtime.getTime(),
     }
-    if (typeof options !== 'object' || options.bigint !== true)
-      return { ...kinds, ...fields, ...dates }
+    if (fieldsOf(options).bigint !== true) return { ...kinds, ...fields, ...dates }
     // node's BigIntStats: every number a bigint, plus the stamps in ns.
     const big = Object.fromEntries(
       Object.entries(fields).map(([k, v]) => [k, BigInt(Math.trunc(v))]),
@@ -293,7 +309,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   }
 
   async mkdir(path: string, options?: Options): Promise<string | undefined> {
-    if (typeof options !== 'object' || options.recursive !== true) {
+    if (fieldsOf(options).recursive !== true) {
       await this.files.mkdir(path)
       return undefined
     }
@@ -324,8 +340,8 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   }
 
   async readdir(path: string, options?: Options): Promise<unknown[]> {
-    const typed = typeof options === 'object' && options.withFileTypes === true
-    const recursive = typeof options === 'object' && options.recursive === true
+    const typed = fieldsOf(options).withFileTypes === true
+    const recursive = fieldsOf(options).recursive === true
     const out: unknown[] = []
     const walk = async (directory: string, prefix: string): Promise<void> => {
       for (const row of await this.files.readdir(directory, typed || recursive)) {
@@ -356,8 +372,8 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   }
 
   async rm(path: string, options?: Options): Promise<void> {
-    const force = typeof options === 'object' && options.force === true
-    const recursive = typeof options === 'object' && options.recursive === true
+    const force = fieldsOf(options).force === true
+    const recursive = fieldsOf(options).recursive === true
     let st: VFSStat
     try {
       st = await this.files.stat(path, true)
@@ -370,25 +386,45 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
       return
     }
     if (!recursive) throw refusal('EISDIR', 'rm', path)
-    for (const [doomed, isDir] of await this.doomed(path, true)) {
-      if (isDir) await this.files.rmdir(doomed)
-      else await this.files.unlink(doomed)
+    const doomed: [string, boolean][] = []
+    await this.plan(path, true, doomed)
+    // A name another writer removed since the plan is already gone, as
+    // node's own recursive rm counts it.
+    for (const [name, isDir] of doomed) {
+      try {
+        if (isDir) await this.files.rmdir(name)
+        else await this.files.unlink(name)
+      } catch (err) {
+        if (!isMissingPath(err) || name === path) throw err
+      }
     }
   }
 
-  /** Every name under `path`, children before their directory. The whole
-   * tree is planned before anything goes, as the agent adapters plan it,
-   * so a mount root anywhere in it refuses the call with nothing removed. */
-  private async doomed(path: string, isDir: boolean): Promise<[string, boolean][]> {
+  /** Every name under `path` onto `out`, children before their directory.
+   * The whole tree is planned before anything goes, as the agent adapters
+   * plan it, so a mount root anywhere in it refuses the call with nothing
+   * removed. */
+  private async plan(
+    path: string,
+    isDir: boolean,
+    out: [string, boolean][],
+    top = path,
+  ): Promise<void> {
     if (this.ws.registry.isMountRoot(path)) throw refusal('EBUSY', 'rm', path)
-    if (!isDir) return [[path, false]]
-    const out: [string, boolean][] = []
-    for (const row of await this.files.readdir(path)) {
-      const child = posix.join(path, leaf(row.path))
-      out.push(...(await this.doomed(child, row.isDir && row.isLink !== true)))
+    if (isDir) {
+      let rows: VFSEntry[]
+      try {
+        rows = await this.files.readdir(path)
+      } catch (err) {
+        if (!isMissingPath(err) || path === top) throw err
+        return
+      }
+      for (const row of rows) {
+        const child = posix.join(path, leaf(row.path))
+        await this.plan(child, row.isDir && row.isLink !== true, out, top)
+      }
     }
-    out.push([path, true])
-    return out
+    out.push([path, isDir])
   }
 
   async rmdir(path: string): Promise<void> {
@@ -407,6 +443,9 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   }
 
   async truncate(path: string, length = 0): Promise<void> {
+    // truncate(2) names a file that is there; the op creates a missing
+    // one, as GNU truncate does without -c.
+    await this.files.stat(path)
     await this.files.truncate(path, length)
   }
 
@@ -431,8 +470,8 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     options: Options,
     fallback: string,
   ): Promise<void> {
-    const flag =
-      typeof options === 'object' && typeof options.flag === 'string' ? options.flag : fallback
+    const given = fieldsOf(options).flag
+    const flag = typeof given === 'string' ? given : fallback
     const bytes = bytesOf(data, options)
     if (flag.includes('x') && (await this.files.statOrNull(path, true)) !== null) {
       throw refusal('EEXIST', 'open', path)

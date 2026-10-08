@@ -168,6 +168,28 @@ describe('patchNodeFs — routed calls', () => {
     await ws.close()
   })
 
+  it('takes null for options, as node does', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+
+    await fs.promises.writeFile('/data/f.txt', 'one', null)
+    await fs.promises.appendFile('/data/f.txt', new Uint8Array([33]), null)
+    expect(await fs.promises.readFile('/data/f.txt', { encoding: null })).toEqual(
+      Buffer.from('one!'),
+    )
+    await fs.promises.symlink('f.txt', '/data/l')
+    expect(await fs.promises.readlink('/data/l', null)).toBe('f.txt')
+    const size = await new Promise((resolve, reject) => {
+      fs.stat('/data/f.txt', null as never, (err, st) => {
+        if (err) reject(err)
+        else resolve(st.size)
+      })
+    })
+    expect(size).toBe(4)
+    await ws.close()
+  })
+
   it('answers in the shapes node does', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)
@@ -287,6 +309,7 @@ describe('patchNodeFs — what a mount cannot serve', () => {
       (fs: Fs) => Promise.resolve().then(() => fs.watch('/data/f.txt', () => undefined)),
     ],
     ['rm of a directory without recursive', 'EISDIR', (fs: Fs) => fs.promises.rm('/data/d')],
+    ['a truncate of a missing file', 'ENOENT', (fs: Fs) => fs.promises.truncate('/data/nope')],
     [
       'a sync spelling',
       'ENOTSUP',
@@ -324,6 +347,44 @@ describe('patchNodeFs — what a mount cannot serve', () => {
     await expect(fs.promises.rmdir('/data/d/m')).rejects.toMatchObject({ code: 'EBUSY' })
     expect(await fs.promises.readFile('/data/d/f.txt', 'utf-8')).toBe('f')
     expect(await fs.promises.readFile('/data/d/m/g.txt', 'utf-8')).toBe('g')
+    await ws.close()
+  })
+
+  it('counts a name another writer removed mid-rm as gone', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.mkdir('/data/d')
+    await ws.vfs.write('/data/d/a.txt', 'a')
+    await ws.vfs.write('/data/d/b.txt', 'b')
+    const facade = ws.vfs as unknown as {
+      dispatch: (name: string, path: string, ...rest: unknown[]) => Promise<unknown>
+    }
+    const dispatch = facade.dispatch.bind(ws.vfs)
+    facade.dispatch = async (name, path, ...rest) => {
+      if (name === 'unlink' && path === '/data/d/a.txt') await dispatch(name, path, ...rest)
+      return dispatch(name, path, ...rest)
+    }
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+
+    await fs.promises.rm('/data/d', { recursive: true })
+    expect(await ws.vfs.exists('/data/d')).toBe(false)
+    await ws.close()
+  })
+
+  it('answers EIO for a failure that names no condition', async () => {
+    class Upstream extends RAMVFS {
+      override read(): Promise<Uint8Array> {
+        return Promise.reject(new Error('upstream 502 Bad Gateway'))
+      }
+    }
+    const ws = new Workspace({ '/data': new Upstream() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/f.txt', 'f')
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+
+    const err: unknown = await fs.promises.readFile('/data/f.txt').catch((e: unknown) => e)
+    expect(err).toMatchObject({ code: 'EIO' })
+    expect(((err as Error).cause as Error).message).toBe('upstream 502 Bad Gateway')
     await ws.close()
   })
 

@@ -56,7 +56,7 @@ await readFile('/data/x.txt')  // hits the real filesystem, throws ENOENT
 
 A sync form (`fs.readFileSync`, `fs.statSync`) refuses a mounted path, since the workspace answers asynchronously. Paths outside every mount keep Node's own behavior in every form.
 
-**Why Python doesn't hit this.** Python has no equivalent concept of "ESM vs CJS". `with Workspace() as ws:` swaps `builtins.open` and the `os` module's functions in place: one set of mutable globals, one patch point, works for every caller.
+**Why Python doesn't hit this.** Python has no equivalent concept of "ESM vs CJS". `with Workspace() as ws:` swaps `builtins.open`, the `os` module's functions and `shutil.rmtree` in place: one set of mutable globals, one patch point, works for every caller.
 
 **Workarounds.**
 

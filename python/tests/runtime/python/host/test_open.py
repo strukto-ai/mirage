@@ -92,7 +92,8 @@ class TestPatchedOpen:
 )
 def test_open_refuses_what_ws_vfs_refuses(path, mode, code):
     # A hide, a read-only mount and a path rule: both doors ask the
-    # dispatcher, so the one refusal comes back through either.
+    # dispatcher, so the one refusal comes back through either, open()'s
+    # as the class CPython builds for its errno.
     ws = Workspace(
         {"/data/": RAMVFS(), "/ro/": (RAMVFS(), MountMode.READ)},
         mode=MountMode.WRITE,
@@ -119,5 +120,5 @@ def test_open_refuses_what_ws_vfs_refuses(path, mode, code):
             else:
                 f.write("x")
     assert direct.value.errno == code
-    assert type(opened.value) is type(direct.value)
+    assert type(opened.value) is type(OSError(code, "builtin"))
     assert opened.value.errno == code

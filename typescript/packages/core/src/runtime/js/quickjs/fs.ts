@@ -90,9 +90,13 @@ export function installQuickJsFs(
   // then fails: it answers nothing and sets the stream's error flag. A
   // read of zero bytes never reaches the stream, so it leaves the flag.
   const directories = new Set<number>()
+  // A stream whose bytes the mount refused or failed to send: libc's
+  // fread answers what it got and sets the error flag, so every read of
+  // it fails the way a directory's does instead of throwing at the guest.
+  const unreadable = new Set<number>()
   const failed = new Set<number>()
   const readFails = (fd: number, size = -1): boolean => {
-    if (!directories.has(fd)) return false
+    if (!directories.has(fd) && !unreadable.has(fd)) return false
     if (size === 0) return true
     failed.add(fd)
     return true
@@ -214,6 +218,7 @@ export function installQuickJsFs(
   defineAsync('__mirage_close', async (fdH) => {
     const fd = ctx.getNumber(fdH)
     directories.delete(fd)
+    unreadable.delete(fd)
     failed.delete(fd)
     const file = table.pop(fd)
     if (file === undefined) return ctx.undefined
@@ -227,18 +232,27 @@ export function installQuickJsFs(
   // asks whether a read lacks bytes and fills until it does not; every
   // read below then answers synchronously.
   defineSync('__mirage_lacks', (fdH, sizeH) => {
-    const file = table.get(ctx.getNumber(fdH))
-    return file?.lacks(ctx.getNumber(sizeH)) === true ? ctx.true : ctx.false
+    const fd = ctx.getNumber(fdH)
+    const file = table.get(fd)
+    const lacks = !unreadable.has(fd) && file?.lacks(ctx.getNumber(sizeH)) === true
+    return lacks ? ctx.true : ctx.false
   })
 
   defineSync('__mirage_lacks_line', (fdH) => {
-    const file = table.get(ctx.getNumber(fdH))
-    return file?.lacksLine() === true ? ctx.true : ctx.false
+    const fd = ctx.getNumber(fdH)
+    const lacks = !unreadable.has(fd) && table.get(fd)?.lacksLine() === true
+    return lacks ? ctx.true : ctx.false
   })
 
   defineAsync('__mirage_fill', async (fdH, sizeH) => {
-    const file = table.get(ctx.getNumber(fdH))
-    if (file !== undefined) await file.fill(ctx.getNumber(sizeH))
+    const fd = ctx.getNumber(fdH)
+    const file = table.get(fd)
+    try {
+      if (file !== undefined) await file.fill(ctx.getNumber(sizeH))
+    } catch (err) {
+      console.debug(`quickjs: read of fd ${String(fd)} failed: ${String(err)}`)
+      unreadable.add(fd)
+    }
     return ctx.undefined
   })
 

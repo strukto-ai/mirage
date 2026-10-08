@@ -14,17 +14,20 @@
 
 import asyncio
 import errno
+import functools
 import genericpath
 import os as _real_os
 import posixpath
+import shutil
 import time
 import types
 from collections.abc import Callable, Iterator
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
-from mirage.errors import FsCondition
+from mirage.errors import FsCondition, classify
 from mirage.errors.fs import ebusy, eexist, fs_error
 from mirage.errors.posix import posix_errno, posix_phrase
+from mirage.io import IOResult
 from mirage.runtime.files import RuntimeFiles, stat_row
 from mirage.runtime.python.host.constants import (
     REFUSED_CALLS,
@@ -42,10 +45,13 @@ from mirage.runtime.python.host.list import (
 )
 from mirage.runtime.python.host.stat import stat_result
 from mirage.runtime.types import VFSStat
+from mirage.types import PathSpec
 from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import owner_prefix
 from mirage.utils.stat_view import LINK_MODE
 from mirage.workspace.files import Files
+
+T = TypeVar("T")
 
 
 def _spelled(path: Any) -> str | None:
@@ -64,6 +70,123 @@ def _spelled(path: Any) -> str | None:
     except TypeError:
         return None
     return spelled if isinstance(spelled, str) else None
+
+
+def door_files(
+    files: Files, loop: asyncio.AbstractEventLoop | None
+) -> RuntimeFiles:
+    """The file door ``open`` and ``os`` call inside ``with ws:``.
+
+    A workspace op that fails with no errno (an upstream 502 a REST
+    mount raises as it came) answers what ``classify`` names for it, and
+    EIO when it names nothing, the kernel's word for a device that
+    failed: a guest's door answers the same, and a caller of ``os`` can
+    only ``except OSError``. The original rides along as the cause.
+
+    Args:
+        files (Files): the workspace's ``ws.vfs``.
+        loop (asyncio.AbstractEventLoop | None): the block's loop.
+    """
+
+    async def dispatch(
+        name: str, path: PathSpec, /, **kwargs: Any
+    ) -> tuple[Any, IOResult]:
+        try:
+            return await files.dispatch(name, path, **kwargs)
+        except OSError:
+            raise
+        except Exception as exc:
+            condition = classify(exc) or FsCondition.EIO
+            raise fs_error(path, condition) from exc
+
+    return RuntimeFiles(dispatch, loop)
+
+
+def as_raised(exc: OSError) -> OSError:
+    """`exc` as a syscall raises it: CPython's own class for its errno.
+
+    A refusal leaves the workspace as one of mirage's subclasses
+    (``ReadOnlyError`` is a ``PermissionError`` stamped EROFS), where a
+    real filesystem gives the class CPython builds from the errno: plain
+    ``OSError`` for EROFS, ``FileNotFoundError`` for ENOENT. The errno,
+    message and paths carry over; an error with no errno is left as it
+    is, since no class follows from it.
+
+    Args:
+        exc (OSError): what the door raised.
+    """
+    if exc.errno is None or type(exc).__module__ == "builtins":
+        return exc
+    return OSError(exc.errno, exc.strerror, exc.filename, None, exc.filename2)
+
+
+def syscall(fn: Callable[..., T]) -> Callable[..., T]:
+    """`fn` raising what ``as_raised`` makes of its errors.
+
+    Args:
+        fn (Callable[..., T]): one door function.
+    """
+
+    @functools.wraps(fn)
+    def call(*args: Any, **kwargs: Any) -> T:
+        try:
+            return fn(*args, **kwargs)
+        except OSError as exc:
+            raised = as_raised(exc)
+            if raised is exc:
+                raise
+            raise raised from exc
+
+    return call
+
+
+def make_rmtree(files: Files) -> Callable[..., None]:
+    """``shutil.rmtree``, walking a mounted tree by name.
+
+    shutil removes a tree through descriptors where the platform has
+    them, ``os.open`` on each directory and then ``os.scandir`` of the
+    descriptor, and a mount has none: the door refuses ``os.open``, so
+    every rmtree of a mounted path failed ENOTSUP. A mounted path takes
+    the walk shutil keeps for a platform without those calls, which
+    reaches the mount through ``os.scandir``, ``os.unlink`` and
+    ``os.rmdir`` like any other caller; a host path keeps the
+    descriptor walk. A tree holding a mount root is refused (EBUSY)
+    before anything goes, as node's door refuses it, so nothing under
+    it is half removed; ``ignore_errors`` drops that refusal as it drops
+    any other.
+
+    Args:
+        files (Files): the workspace's ``ws.vfs``.
+    """
+    original = shutil.rmtree
+    module = vars(shutil)
+
+    @functools.wraps(original)
+    def rmtree(path: Any, *args: Any, **kwargs: Any) -> None:
+        spelled = _spelled(path)
+        if (
+            spelled is None
+            or in_host_io()
+            or kwargs.get("dir_fd") is not None
+            or not files.is_mounted(spelled)
+        ):
+            original(path, *args, **kwargs)
+            return
+        root = spelled.rstrip("/")
+        for prefix in files.mount_prefixes():
+            mount = prefix.rstrip("/")
+            if mount and (mount == root or mount.startswith(root + "/")):
+                if kwargs.get("ignore_errors", args[0] if args else False):
+                    return
+                raise as_raised(ebusy(mount))
+        saved = module["_use_fd_functions"]
+        module["_use_fd_functions"] = False
+        try:
+            original(path, *args, **kwargs)
+        finally:
+            module["_use_fd_functions"] = saved
+
+    return rmtree
 
 
 class HostFs:
@@ -93,7 +216,7 @@ class HostFs:
         self, files: Files, loop: asyncio.AbstractEventLoop | None
     ) -> None:
         self._files = files
-        self._door = RuntimeFiles(files.dispatch, loop)
+        self._door = door_files(files, loop)
         # The host functions as they were when this router was built.
         # `patch_process` installs these wrappers onto the real os
         # module itself, so a wrapper that read `os.listdir` at call
@@ -855,6 +978,9 @@ class HostFs:
         if virtual is None:
             self._host.truncate(path, length)
             return
+        # truncate(2) names a file that is there; the op creates a
+        # missing one, as GNU truncate does without -c.
+        self._door.stat(virtual)
         self._door.truncate(virtual, length)
 
 
@@ -951,10 +1077,10 @@ def os_routing(
     table: dict[str, Callable[..., Any]] = {}
     for verb in ROUTED_CALLS:
         if hasattr(_real_os, verb):
-            table[verb] = getattr(router, verb)
+            table[verb] = syscall(getattr(router, verb))
     for verb, condition in REFUSED_CALLS.items():
         if hasattr(_real_os, verb):
-            table[verb] = _refusal(router, verb, condition)
+            table[verb] = syscall(_refusal(router, verb, condition))
     return table
 
 
