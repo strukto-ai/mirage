@@ -27,7 +27,6 @@ from mirage.policy.types import HandOff
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.errors import (
     ArithError,
     ExitSignal,
@@ -43,10 +42,19 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.read.read import read_reply
 from mirage.workspace.executor.jobs import run_statement
 from mirage.workspace.executor.statement import (
+    errexit_acts,
     fd0_binding,
     finish_statement,
+    ignoring_errexit,
+    land,
     record_status,
 )
+from mirage.workspace.executor.traps import (
+    err_trap_armed,
+    run_err_trap,
+    run_return_trap,
+)
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view, visible_env
 from mirage.workspace.types import ExecutionNode
 
@@ -57,7 +65,7 @@ from mirage.workspace.types import ExecutionNode
 _MAX_WHILE = 10000
 
 
-async def _execute_body(
+async def execute_body(
     execute_node: Callable[..., Any],
     body: list[TSNodeLike],
     context: EvaluationContext,
@@ -67,17 +75,20 @@ async def _execute_body(
     agent_id: str | None,
     handed: HandOff | None,
     decisions: Decisions | None,
-    test: bool = False,
+    execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
     bound: tuple[SharedInput | None, bool] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Execute a list of body commands sequentially.
+    """Execute a list of statements in order: a group, a loop or ``if``
+    body, a ``case`` arm, a function body.
 
     A statement ending in ``&`` is launched as a job through
     ``run_statement`` rather than run inline; ``job_table`` and
-    ``agent_id`` are the job plane it needs. ``test`` marks an
-    ``if``/``while``/``until`` test, whose failures ``set -e`` ignores;
-    ``bound`` is ``fd0_binding`` as the construct running the list
-    started, so an ``exec <&-`` in a loop body reaches the next test.
+    ``agent_id`` are the job plane it needs. The ERR action answers a
+    failing statement, its output landed through ``sink`` when the body
+    writes to one, and ``set -e`` stops the list. ``bound`` is
+    ``fd0_binding`` as the construct running the list started, so an
+    ``exec <&-`` in a loop body reaches the next test.
     """
     session = context.session
     all_stdout: list[ByteSource | None] = []
@@ -89,6 +100,7 @@ async def _execute_body(
         # A comment is no statement: it leaves `$?` as it was.
         if cmd.type == NT.COMMENT:
             continue
+        armed = err_trap_armed(session)
         try:
             stdout, io, last_exec = await run_statement(
                 execute_node,
@@ -102,6 +114,23 @@ async def _execute_body(
                 handed,
                 decisions,
             )
+            all_stdout.append(await finish_statement(stdout, io, session, cmd))
+            merged_io = await merged_io.merge(io)
+            merged_io = await land(
+                await run_err_trap(
+                    execute_fn,
+                    cmd,
+                    io.exit_code,
+                    session,
+                    armed,
+                    stdin,
+                    call_stack,
+                    last_exec,
+                ),
+                sink,
+                all_stdout,
+                merged_io,
+            )
         except UNWINDING as sig:
             # The control builtin is a statement the loop leaves through
             # rather than closes, so its own status is recorded here:
@@ -109,17 +138,7 @@ async def _execute_body(
             if isinstance(sig, (BreakSignal, ContinueSignal)):
                 record_status(session, sig.io.exit_code)
             raise await carried(sig, _chain_streams(all_stdout), merged_io)
-        stdout = await finish_statement(stdout, io, session, cmd)
-        all_stdout.append(stdout)
-        merged_io = await merged_io.merge(io)
-        if (
-            io.exit_code != 0
-            and not test
-            and session.shell_options.get("errexit")
-            and cmd.type not in ERREXIT_EXEMPT_TYPES
-            and not session.errexit_immune
-        ):
-            merged_io.exit_code = io.exit_code
+        if errexit_acts(cmd, io.exit_code, session):
             break
     return _chain_streams(all_stdout), merged_io, last_exec
 
@@ -173,6 +192,55 @@ async def carried(
     return sig
 
 
+async def returning(
+    execute_fn: Callable[..., Any] | None,
+    session: SessionState,
+    stdin: ByteSource | None,
+    call_stack: CallStack,
+    stdout: ByteSource | None,
+    io: IOResult,
+    sink: JobConsole | None = None,
+) -> tuple[ByteSource | None, IOResult]:
+    """What a function or a sourced file gives back as it returns: its
+    output and status, with what its RETURN action wrote after the
+    output. A ``return`` in a function's action returns from the
+    function with its status. A sourced file has returned by the time
+    its action runs, so a ``return`` there leaves the function around
+    it, or only complains at the top level. An ``exit``, or that
+    ``return``, leaves with the output in front of its own.
+
+    Args:
+        execute_fn (Callable[..., Any] | None): runs the action.
+        session (SessionState): the shell returning.
+        stdin (ByteSource | None): its standard input.
+        call_stack (CallStack): the returning frames.
+        stdout (ByteSource | None): what it wrote.
+        io (IOResult): its result.
+        sink (JobConsole | None): where it writes as it goes, if
+            anywhere.
+    """
+    frame = call_stack.current
+    frame.closed = frame.sourced
+    if session.function_names is not None:
+        session.function_names = call_stack.function_names()
+    outputs = [stdout]
+    try:
+        io = await land(
+            await run_return_trap(execute_fn, session, stdin, call_stack),
+            sink,
+            outputs,
+            io,
+        )
+    except UNWINDING as sig:
+        left = await carried(sig, stdout, io)
+        if not isinstance(left, ReturnSignal) or frame.sourced:
+            raise left
+        return left.stdout, IOResult(
+            stderr=left.stderr or None, exit_code=left.exit_code
+        )
+    return _chain_streams(outputs), io
+
+
 def ended(sig: Exception, simple: bool = False) -> IOResult:
     """What a child shell reports when one of ``UNWINDING`` ends it:
     what it wrote, its diagnostic, and its status, ``exit``'s contained
@@ -199,6 +267,26 @@ def ended(sig: Exception, simple: bool = False) -> IOResult:
             else sig.exit_code
         ),
     )
+
+
+async def take_stdout(sig: Exception) -> bytes:
+    """Take what a nested line wrote before it left (an ``exec``'d
+    command, an ERR or RETURN action), for the redirects it ran under to
+    route. An EXIT action's output, the ``cleanup`` at its end, goes
+    around them, and what the other unwinding signals carry went through
+    them already.
+
+    Args:
+        sig (Exception): one of ``UNWINDING``.
+    """
+    if not isinstance(sig, (ExitSignal, ReturnSignal)) or not sig.unrouted:
+        return b""
+    written = await materialize(sig.stdout) or b""
+    cut = len(written) - (
+        len(sig.cleanup) if isinstance(sig, ExitSignal) else 0
+    )
+    sig.stdout = written[cut:] or None
+    return written[:cut]
 
 
 async def take_stderr(sig: Exception) -> bytes:
@@ -261,9 +349,14 @@ async def handle_if(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    session = context.session
+    # Each test and the branch read the fd 0 the `if` started with, so an
+    # `exec < f` or `exec <&-` in one reaches the next.
     run = partial(
-        _execute_body,
+        execute_body,
         execute_node,
         context=context,
         stdin=stdin,
@@ -272,16 +365,17 @@ async def handle_if(
         agent_id=agent_id,
         handed=handed,
         decisions=decisions,
+        execute_fn=execute_fn,
+        sink=sink,
+        bound=fd0_binding(session),
     )
-    # What the tests wrote stays, ahead of what the branch writes; each
-    # test reads the fd 0 the `if` started with, so an `exec <&-` in one
-    # reaches the next.
+    # What the tests wrote stays, ahead of what the branch writes.
     lead_stdout: list[ByteSource | None] = []
     lead = IOResult()
-    bound = fd0_binding(context.session)
     try:
         for test, body in branches:
-            stdout, io, _ = await run(test, test=True, bound=bound)
+            with ignoring_errexit(session):
+                stdout, io, _ = await run(test)
             lead_stdout.append(stdout)
             lead = await lead.merge(io)
             if io.exit_code == 0:
@@ -316,6 +410,8 @@ async def handle_for(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     merged_io = IOResult()
@@ -331,7 +427,9 @@ async def handle_for(
         return _collect_loop_result(
             [], IOResult(exit_code=1, stderr=err), "for"
         )
-
+    # Each iteration reads the fd 0 the loop started with, so an
+    # `exec < f` in one reaches the next.
+    bound = fd0_binding(session)
     for val in values:
         if session.shell_options.get("noexec"):
             break
@@ -348,7 +446,7 @@ async def handle_for(
             )
             break
         try:
-            stdout, io, _ = await _execute_body(
+            stdout, io, _ = await execute_body(
                 execute_node,
                 body,
                 context,
@@ -358,6 +456,9 @@ async def handle_for(
                 agent_id,
                 handed,
                 decisions,
+                execute_fn=execute_fn,
+                sink=sink,
+                bound=bound,
             )
         except (BreakSignal, ContinueSignal) as sig:
             merged_io = await _absorbed(sig, all_stdout, merged_io)
@@ -385,14 +486,17 @@ async def _condition_loop(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
     hit_limit = True
-    bound = fd0_binding(session)
+    # Each test and body reads the fd 0 the loop started with, so an
+    # `exec < f` in one reaches the rest.
     run = partial(
-        _execute_body,
+        execute_body,
         execute_node,
         context=context,
         stdin=stdin,
@@ -401,13 +505,17 @@ async def _condition_loop(
         agent_id=agent_id,
         handed=handed,
         decisions=decisions,
+        execute_fn=execute_fn,
+        sink=sink,
+        bound=fd0_binding(session),
     )
     for _ in range(_MAX_WHILE):
         if session.shell_options.get("noexec"):
             hit_limit = False
             break
         try:
-            cond_stdout, cond_io, _ = await run(test, test=True, bound=bound)
+            with ignoring_errexit(session):
+                cond_stdout, cond_io, _ = await run(test)
             all_stdout.append(cond_stdout)
             merged_io = await merged_io.merge(
                 IOResult(stderr=cond_io.stderr, exit_code=merged_io.exit_code)
@@ -450,6 +558,8 @@ async def handle_cfor(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run bash's C-style for: ((init; cond; update)) around a body.
 
@@ -478,6 +588,7 @@ async def handle_cfor(
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
     hit_limit = True
+    bound = fd0_binding(session)
     try:
         await eval_expr(exprs[0], 0)
         for _ in range(_MAX_WHILE):
@@ -488,7 +599,7 @@ async def handle_cfor(
                 hit_limit = False
                 break
             try:
-                stdout, io, _ = await _execute_body(
+                stdout, io, _ = await execute_body(
                     execute_node,
                     body,
                     context,
@@ -498,6 +609,9 @@ async def handle_cfor(
                     agent_id,
                     handed,
                     decisions,
+                    execute_fn=execute_fn,
+                    sink=sink,
+                    bound=bound,
                 )
             except (BreakSignal, ContinueSignal) as sig:
                 merged_io = await _absorbed(sig, all_stdout, merged_io)
@@ -547,6 +661,8 @@ async def handle_while(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(
         execute_node,
@@ -561,6 +677,8 @@ async def handle_while(
         agent_id=agent_id,
         handed=handed,
         decisions=decisions,
+        execute_fn=execute_fn,
+        sink=sink,
     )
 
 
@@ -575,6 +693,8 @@ async def handle_until(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(
         execute_node,
@@ -589,6 +709,8 @@ async def handle_until(
         agent_id=agent_id,
         handed=handed,
         decisions=decisions,
+        execute_fn=execute_fn,
+        sink=sink,
     )
 
 
@@ -603,56 +725,46 @@ async def handle_case(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    session = context.session
-    all_stdout: list[ByteSource] = []
+    """Run the first arm whose pattern matches ``word``, and after it
+    the arms its terminator reaches: ``;&`` falls into the next arm's
+    body untested, ``;;&`` tests the rest, ``;;`` stops.
+    """
+    all_stdout: list[ByteSource | None] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="case", exit_code=0)
-    ran = False
     fallthrough = False
-    bound = fd0_binding(session)
+    # Each arm reads the fd 0 the `case` started with, so an `exec < f`
+    # in one reaches an arm it falls into.
+    bound = fd0_binding(context.session)
     for patterns, body, terminator in items:
         if not (fallthrough or any(fnmatch(word, p) for p in patterns)):
             continue
-        ran = True
-        for stmt in body:
-            if stmt.type == NT.COMMENT:
-                continue
-            try:
-                stdout, io, last_exec = await run_statement(
-                    execute_node,
-                    stmt,
-                    context,
-                    stdin,
-                    bound,
-                    call_stack,
-                    job_table,
-                    agent_id,
-                    handed,
-                    decisions,
-                )
-            except UNWINDING as sig:
-                raise await carried(
-                    sig, _chain_streams(list(all_stdout)), merged_io
-                )
-            stdout = await finish_statement(stdout, io, session, stmt)
-            if stdout is not None:
-                all_stdout.append(stdout)
-            merged_io = await merged_io.merge(io)
-        if terminator == ";&":
-            # Fall through: run the next arm's body without testing it.
-            fallthrough = True
-            continue
-        # ;;& keeps testing remaining patterns; ;; stops here.
-        fallthrough = False
-        if terminator != ";;&":
+        try:
+            stdout, io, last_exec = await execute_body(
+                execute_node,
+                body,
+                context,
+                stdin,
+                call_stack,
+                job_table,
+                agent_id,
+                handed,
+                decisions,
+                execute_fn,
+                sink,
+                bound,
+            )
+        except UNWINDING as sig:
+            raise await carried(sig, _chain_streams(all_stdout), merged_io)
+        all_stdout.append(stdout)
+        merged_io = await merged_io.merge(io)
+        fallthrough = terminator == ";&"
+        if context.session.errexit_exiting or terminator not in (";&", ";;&"):
             break
-    if not ran:
-        return None, IOResult(), ExecutionNode(command="case", exit_code=0)
-    if len(all_stdout) == 1:
-        return all_stdout[0], merged_io, last_exec
-    combined = async_chain(all_stdout) if all_stdout else None
-    return combined, merged_io, last_exec
+    return _chain_streams(all_stdout), merged_io, last_exec
 
 
 def _select_menu(words: list[str], columns: str) -> str:
@@ -703,6 +815,7 @@ async def handle_select(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run bash's select loop: menu to stderr, choice read from stdin.
@@ -737,6 +850,7 @@ async def handle_select(
         session, policies, diagnostics=context.frame.diagnostics
     )
     lines = line_buffer(stdin) if stdin is not None else None
+    bound = fd0_binding(session)
     words = [word_text(v) for v in values]
     show_menu = bool(words)
     for _ in range(_MAX_WHILE if words else 0):
@@ -782,7 +896,7 @@ async def handle_select(
             )
             break
         try:
-            stdout, io, _ = await _execute_body(
+            stdout, io, _ = await execute_body(
                 execute_node,
                 body,
                 context,
@@ -792,6 +906,9 @@ async def handle_select(
                 agent_id,
                 handed,
                 decisions,
+                execute_fn=execute_fn,
+                sink=sink,
+                bound=bound,
             )
         except (BreakSignal, ContinueSignal) as sig:
             merged_io = await _absorbed(sig, all_stdout, merged_io)

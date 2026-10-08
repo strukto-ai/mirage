@@ -16,10 +16,10 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.context import (
-    clear_program_invocation,
     reset_current_session,
     reset_program_invocation,
     set_current_evaluation,
+    set_program_invocation,
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
@@ -148,11 +148,13 @@ async def handle_exec_path(
     if isinstance(vfs, BinViewVFS):
         # The read above enforces visibility and path policy. Dispatch the
         # target through its own command gate, without requiring permission
-        # for the stub's implementation helper, `command`.
+        # for the stub's implementation helper, `command`. It runs as the
+        # program, as an `exec`'d or `env`'d head does: `/usr/bin/printf
+        # -v x` prints `-v`.
         context = child_context(context)
         session = context.session
         child_token = set_current_evaluation(context)
-        token = clear_program_invocation()
+        token = set_program_invocation(session)
         try:
             return await handle_command_builtin(
                 execute_fn,

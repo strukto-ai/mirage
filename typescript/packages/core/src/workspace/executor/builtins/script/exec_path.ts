@@ -14,7 +14,7 @@
 
 import { type EvaluationContext, childContext } from '../../../evaluation.ts'
 
-import { runAsShell } from '../../../../context/session_context.ts'
+import { runAsProgram } from '../../../../context/session_context.ts'
 import { resolvePath } from '../../../../utils/path.ts'
 import { BinViewVFS } from '../../../../vfs/bin/bin.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
@@ -127,11 +127,13 @@ export async function handleExecPath(
   const [vfs, spec] = registry.resolve(target)
   if (vfs instanceof BinViewVFS) {
     // The read enforces visibility and path policy; the target still passes
-    // its command gate, without needing permission for the stub's helper.
+    // its command gate, without needing permission for the stub's helper. It
+    // runs as the program, as an `exec`'d or `env`'d head does:
+    // `/usr/bin/printf -v x` prints `-v`.
     context = childContext(context)
     session = context.session
 
-    return await runAsShell(() =>
+    return await runAsProgram(session, () =>
       handleCommandBuiltin(
         (command, opts) => executeFn(command, { ...opts, context }),
         ['--', stripSlash(spec.mountPath), ...args],

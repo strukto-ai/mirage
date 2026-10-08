@@ -112,27 +112,6 @@ SCALAR_DEFAULTS = {
 
 COUNTERS = frozenset({"NR", "FNR", "NF"})
 
-ARITY = {
-    "close": 1,
-    "system": 1,
-    "atan2": 2,
-    "cos": 1,
-    "exp": 1,
-    "index": 2,
-    "int": 1,
-    "log": 1,
-    "match": 2,
-    "sin": 1,
-    "split": 2,
-    "sprintf": 1,
-    "sqrt": 1,
-    "sub": 2,
-    "gsub": 2,
-    "substr": 2,
-    "tolower": 1,
-    "toupper": 1,
-}
-
 STDOUT_NAMES = frozenset({"/dev/stdout", "-"})
 STDERR_NAME = "/dev/stderr"
 PROGRAM_NAME = "awk"
@@ -761,8 +740,6 @@ class Interpreter:
         args = node.args
         if name == "length":
             return await self.builtin_length(args)
-        if name in ARITY and len(args) < ARITY[name]:
-            raise AwkRuntimeError(f"awk: not enough arguments to {name}")
         if name in ("sin", "cos"):
             return num(safe_trig(to_num(await self.eval(args[0])), name))
         if name == "exp":

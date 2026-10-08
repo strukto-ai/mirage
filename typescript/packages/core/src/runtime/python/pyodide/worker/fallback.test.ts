@@ -66,7 +66,7 @@ it.each(['construction', 'startup'])(
         expect(new TextDecoder().decode(result.stdout)).toBe('hello\n')
       }
       expect(calls).toContain('readdir')
-      expect(state.terminated).toBe(mode === 'startup' ? 1 : 0)
+      expect(state.terminated).toBe(mode === 'startup' ? 2 : 0)
     } finally {
       await rt.close()
     }

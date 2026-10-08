@@ -16,6 +16,8 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any
 
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.standard import help_page, version_line
 from mirage.context import (
     clear_program_invocation,
     reset_current_session,
@@ -23,17 +25,19 @@ from mirage.context import (
     set_current_evaluation,
 )
 from mirage.io import IOResult
-from mirage.io.stream import materialize
+from mirage.io.stream import materialize, yield_bytes
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.console import JobConsole, JobOutput
+from mirage.shell.constants import SET_OPTION_NAMES
 from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.script.constants import (
     BASH_LONG_OPTIONS,
     BASH_START_FLAGS,
+    BASH_UNSUPPORTED_LONG_OPTIONS,
 )
 from mirage.workspace.executor.builtins.script.script import (
     read_script_file,
@@ -41,45 +45,69 @@ from mirage.workspace.executor.builtins.script.script import (
 )
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.executor.traps import clear_exit_trap, finish_shell
+from mirage.workspace.executor.traps import clear_traps, finish_shell
 from mirage.workspace.types import ExecutionNode
 
 
 def parse_bash_args(args: list[str]) -> BashArgs:
-    """Split a ``bash``/``sh`` argument list into flags, program and argv.
+    """Read Bash startup options, then select a program and its argv.
 
-    Option parsing stops at the first operand, so everything after a
-    script file (or after ``-c``'s program text) is positional, even when
-    it looks like a flag: ``bash run.sh -c foo`` passes ``-c foo`` to the
-    script. ``-`` and ``--`` both end it without being operands.
+    GNU Bash 5.2 reads long options (one or two dashes) before short ones.
+    Help/version return after that pass: unknown long options still fail,
+    while help outranks version and unsupported modes. A long option after
+    a short one is refused as ``--``. Unsupported short options name the
+    whole character here, rather than its first byte as GNU does.
 
-    ``-c`` takes the next *word*, never the rest of its cluster, which is
-    where bash's own parser departs from getopt: ``bash -cx 'echo hi'``
-    traces and runs ``echo hi`` rather than running ``x``.
+    Options after a script file or ``-c``'s program are positional; ``-``
+    and ``--`` end option parsing. ``-c`` takes the next word, never the
+    rest of its cluster: ``-cx 'echo hi'`` traces and runs ``echo hi``.
 
     Args:
         args (list[str]): words after the head word.
     """
     settings: list[tuple[str, bool]] = []
-    read_stdin = False
+    want_help = want_version = False
+    unsupported: str | None = None
     i = 0
+    while i < len(args) and args[i].startswith("-"):
+        spelling = args[i]
+        spelled_long = spelling.startswith("--") and len(spelling) > 2
+        name = spelling[2:] if spelled_long else spelling[1:]
+        takes_value = BASH_LONG_OPTIONS.get(name)
+        if takes_value is None:
+            if spelled_long:
+                return BashArgs(invalid=spelling)
+            break
+        if takes_value:
+            if i + 1 >= len(args):
+                return BashArgs(needs_value=name)
+            i += 1
+        elif name in SET_OPTION_NAMES:
+            settings.append((name, True))
+        elif name in BASH_UNSUPPORTED_LONG_OPTIONS:
+            unsupported = unsupported or spelling
+        want_help = want_help or name == "help"
+        want_version = want_version or name == "version"
+        i += 1
+    if want_help or want_version:
+        return BashArgs(help=want_help, version=want_version)
+    if unsupported is not None:
+        return BashArgs(invalid=unsupported)
+    read_stdin = False
     while i < len(args):
         tok = args[i]
         if tok in ("--", "-"):
             i += 1
             break
         if tok.startswith("--"):
-            takes_value = BASH_LONG_OPTIONS.get(tok)
-            if takes_value is None:
-                return BashArgs(invalid=tok)
-            i += 2 if takes_value else 1
-            continue
+            return BashArgs(invalid="--")
         nxt = args[i + 1] if i + 1 < len(args) else None
         word = parse_option_word(tok, nxt)
         if word is None:
             break
-        if any(ch not in BASH_START_FLAGS for ch in word.other):
-            return BashArgs(invalid=tok)
+        refused = [ch for ch in word.other if ch not in BASH_START_FLAGS]
+        if refused:
+            return BashArgs(invalid=tok[0] + refused[0])
         settings.extend(word.settings)
         read_stdin = read_stdin or "s" in word.other
         if "c" in word.other:
@@ -138,11 +166,27 @@ async def handle_bash(
     """
     session = context.session
     parsed = parse_bash_args(args)
+    if parsed.help or parsed.version:
+        # bash answers --help ahead of --version, whatever their order,
+        # and runs nothing else. The page and the version line are the
+        # ones every mirage command prints, under the name typed. `sh` is
+        # this same shell, so `sh --version` answers as bash invoked as
+        # sh does; Debian's dash refuses it ("Illegal option --", 2).
+        text = (
+            help_page(name, SPECS["bash"])
+            if parsed.help
+            else version_line(name)
+        )
+        return (
+            yield_bytes(text),
+            IOResult(),
+            ExecutionNode(command=name, exit_code=0),
+        )
     if parsed.invalid is not None:
         # GNU words this "invalid option" and follows it with a usage
         # block. One word covers both cases here on purpose: some of what
         # lands here is an option bash has and mirage does not implement
-        # (`-r`, `-a`, `--version`), and calling those invalid would be a
+        # (`-r`, `--restricted`), and calling those invalid would be a
         # lie. The exit status is GNU's 2 either way.
         return script_error(name, f"{parsed.invalid}: unsupported option", 2)
     if parsed.needs_value is not None:
@@ -172,7 +216,7 @@ async def handle_bash(
     )
     session = context.session
     child_token = set_current_evaluation(context)
-    clear_exit_trap(session)
+    clear_traps(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session.positional_args = positional
     session.script_name = script_name

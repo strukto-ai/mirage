@@ -973,6 +973,36 @@ async def test_an_expanded_name_is_explained_as_the_route_reads_it():
 
 
 @pytest.mark.asyncio
+async def test_a_line_the_gate_cannot_read_is_explained_as_refused():
+    # Under a rule, a whole-line runtime's gate refuses a command whose
+    # lines it cannot see into (a sourced file, a bash option mirage does
+    # not read), and explain says exactly what the run says.
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {"commands": {"allow": ["bash", "source", "rm"]}}},
+        runtimes=[_LineBox(), "workspace"],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        for line in (
+            "source /data/f.sh",
+            "bash --restricted -c 'rm /data/x'",
+            "bash --rcfile $SKIP --version -c 'rm /data/x'",
+            "bash --init-file $SKIP --help -c 'rm /data/x'",
+            "bash --rcfile missing-* --version -c 'rm /data/x'",
+        ):
+            said = await _judged(ws, line, "s")
+            ran = await ws.shell(line, session_id="s")
+            assert ran.exit_code == 126
+            assert [(e.exit_code, e.stderr) for e in said if e.exit_code] == [
+                (126, await ran.stderr_str())
+            ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_path_the_pass_cannot_read_is_left_to_the_gate():
     # Read as typed in the cwd the pass last knew, `$F` and a relative
     # word after `cd "$d"` matched the rule's glob, refusing whole lines

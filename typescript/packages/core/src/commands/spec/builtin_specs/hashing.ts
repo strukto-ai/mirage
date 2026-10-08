@@ -67,6 +67,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-t', type: 'str' }),
       new Option({ short: '-c' }),
       new Option({ short: '-o', type: 'path' }),
+      new Option({ short: '-l', long: '--list' }),
     ],
     rest: new Operand({ type: 'path' }),
   }),

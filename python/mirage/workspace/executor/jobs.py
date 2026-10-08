@@ -64,7 +64,7 @@ from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.statement import failed_read, statement_stdin
-from mirage.workspace.executor.traps import inherit_exit_trap
+from mirage.workspace.executor.traps import inherit_traps
 from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import (
     SessionState,
@@ -202,7 +202,7 @@ async def handle_background(
     def release_job(_: asyncio.Task[Any] | None = None) -> None:
         release_program()
 
-    inherit_exit_trap(bg_session)
+    inherit_traps(bg_session)
     output = session.job_output or session.tty.jobs
     # A job is a shell of its own: what jobs it starts write into the
     # statement it runs, then where it writes.

@@ -1,6 +1,11 @@
 {
- "baseline": 3989,
+ "baseline": 3982,
  "modules": {
+  "commands/builtin/generic/iconv_multibyte": {
+   "typescript_only": {
+    "logger": "An opt-in diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes."
+   }
+  },
   "policy/policies": {
    "typescript_only": {
     "captureOpPolicies": "A deferred TypeScript callback restores each async-local store it needs, as captureSessionContext and captureRecordingContext do; a Python contextvar travels with the copied context."
@@ -280,6 +285,11 @@
   "vfs/secrets": {
    "typescript_only": {
     "refuseRepeatedFields": "Python's models take one spelling of a field, so a second spelling is an extra field pydantic refuses; a TypeScript config takes either spelling, so the code door refuses one field named in both."
+   }
+  },
+  "utils/yaml": {
+   "python_only": {
+    "_YamlLoader": "PyYAML needs a SafeLoader subclass to recognize exponent-only floats without changing yaml.safe_load globally; TypeScript's yaml package already uses YAML 1.2 exponent resolution. Both loaders read the shared YAML scalar fixture."
    }
   },
   "config": {

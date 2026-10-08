@@ -64,7 +64,7 @@ export function handleReturn(
   } else if (first !== undefined) {
     status = statusOf(first)
   }
-  if (callStack === null || callStack.depth <= 1) {
+  if (!callStack?.returnable) {
     // bash prints the diagnostic, sets $? to 2, and carries on with the
     // rest of the line.
     err = concat([
@@ -112,11 +112,13 @@ export async function handleExit(
   }
   const cleanup = await runExitTrap(executeFn, session, code, stdin, callStack)
   if (cleanup === null) throw new ExitSignal(code, err)
-  throw new ExitSignal(
+  const leaving = new ExitSignal(
     cleanup.exitCode,
     concat([err, await cleanup.materializeStderr()]),
     await cleanup.materializeStdout(),
   )
+  leaving.cleanup = leaving.stdout ?? new Uint8Array()
+  throw leaving
 }
 
 /**

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize } from '../../../io/types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { SlackAccessor } from '../../../accessor/slack.ts'
 import { describe, expect, it } from 'vitest'
@@ -50,6 +51,7 @@ describe('slack grep on a time-scoped mount', () => {
       },
     )
     expect(transport.calls.map((c) => c.endpoint)).not.toContain('search.messages')
+    expect(await materialize(result?.[0] ?? null)).toEqual(new Uint8Array())
     expect(result?.[1].exitCode).toBe(2)
     expect(await result?.[1].stderrStr()).toContain('Is a directory')
   })

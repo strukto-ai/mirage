@@ -83,6 +83,14 @@ export abstract class LanguageRuntime extends Runtime {
     })
   }
 
-  /** Execute one program and return its captured outcome. */
+  /**
+   * Execute one program and return its captured outcome.
+   *
+   * Each call represents an independent language command, such as
+   * python3 or node. Guest globals, imports and builtin mutations
+   * do not carry over from earlier commands or evaluator sessions.
+   * The adapter owns engine reuse; this does not reset workspace
+   * state or undo external effects.
+   */
   abstract run(args: RunArgs): Promise<RunResult>
 }

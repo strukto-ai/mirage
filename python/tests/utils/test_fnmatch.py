@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.utils.fnmatch import _normalize_negation, fnmatch
+from mirage.utils.fnmatch import _normalize_negation, fnmatch, fnmatchcase
 
 
 @pytest.mark.parametrize(
@@ -32,10 +32,25 @@ from mirage.utils.fnmatch import _normalize_negation, fnmatch
         ("Hello", "hello", False),
         ("x", "[x^]", True),
         ("^", "[x^]", True),
+        ("😀.txt", "?.txt", True),
     ],
 )
 def test_fnmatch(name, pattern, expected):
     assert fnmatch(name, pattern) is expected
+
+
+@pytest.mark.parametrize(
+    "name,pattern,expected",
+    [
+        ("a.txt", "[^a]*", True),
+        ("^x", "[^a]*", True),
+        ("b.txt", "[^a]*", False),
+        ("b.txt", "[!a]*", True),
+        ("😀.txt", "?.txt", True),
+    ],
+)
+def test_fnmatchcase_keeps_a_leading_caret_literal(name, pattern, expected):
+    assert fnmatchcase(name, pattern) is expected
 
 
 def test_normalize_negation_rewrites_class_openers():

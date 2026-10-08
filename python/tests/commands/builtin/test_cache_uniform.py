@@ -110,7 +110,7 @@ async def test_a_warm_read_command_reads_nothing_from_the_backend(line):
 
 
 @pytest.mark.asyncio
-async def test_generic_grep_awaits_byte_reader_before_returning():
+async def test_generic_grep_reads_bytes_once_when_drained():
     reader = _CountingReader(_PAYLOAD)
     out, io = await grep_generic(
         [_spec()],
@@ -121,6 +121,7 @@ async def test_generic_grep_awaits_byte_reader_before_returning():
         read_bytes=reader,
         read_stream=None,
     )
-    assert reader.calls == 1
+    assert reader.calls == 0
     assert await materialize(out) == b"alpha\n"
+    assert reader.calls == 1
     assert io.exit_code == 0

@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { assert, describe, expect, it } from 'vitest'
 
-import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.ts'
+import { getParts } from '../../shell/helpers.ts'
+import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
 
 // Mirrors python/tests/workspace/node/test_inner_lines.py.
 
@@ -64,18 +66,20 @@ describe('innerLines', () => {
         ['argv', ['cat', '{}'], true],
       ],
     ],
-    // Lines the gate cannot read: a file, a program from stdin.
+    // Lines the gate cannot read: a file, a program from stdin, an option
+    // mirage refuses and a real bash takes.
     ['source', ['f.sh'], [['none', null, false]]],
     ['.', ['f.sh'], [['none', null, false]]],
     ['sh', ['f.sh'], [['none', null, false]]],
     ['bash', [], [['none', null, false]]],
+    ['bash', ['--restricted', '-c', 'rm /x'], [['none', null, false]]],
     ['./run.sh', ['a'], [['none', null, false]]],
-    // Nothing runs: a probe, a bare word, a usage error.
+    // Nothing runs: a probe, a bare word, a usage error, an answer.
     ['command', ['-v', 'rm'], []],
     ['eval', [], []],
     ['env', ['A=1'], []],
     ['timeout', ['5'], []],
-    ['bash', ['--bogus'], []],
+    ['bash', ['--version', '-c', 'rm /x'], []],
     ['cat', ['/x'], []],
   ])('reads the words that run other words: %s %j', (head, args, expected) => {
     expect(shapes(head, args)).toEqual(expected)
@@ -116,5 +120,43 @@ describe('innerLines', () => {
       { raw: '"$p"', text: null },
     ])
     expect(line?.line).toBe('rm "$p"')
+    const [unknown] = innerLines('bash', [...words('-c'), dynamic, ...words('rm /x')])
+    expect(unknown && innerReadable(unknown)).toBe(false)
+    expect(innerLines('bash', [...words('--version'), dynamic])).toEqual([])
+    const [stable] = innerLines('sh', [...words('-c', 'echo safe'), dynamic])
+    expect(stable?.line).toBe('echo safe')
+  })
+
+  it.each<[string, boolean]>([
+    ['$SKIP', false],
+    ['"$SKIP"', false],
+    ['missing-*', false],
+    ['missing-?', false],
+    ['missing-[ab]', false],
+    ["'missing-'*", false],
+    [String.raw`missing-\\*`, false],
+    ['@(x|y)', false],
+    ['!(x)', false],
+    ['{a,b}', false],
+    ["'missing-*'", true],
+    ['"missing-*"', true],
+    [String.raw`missing-\*`, true],
+    [String.raw`missing-\[ab]`, true],
+    ['missing-"*"', true],
+  ])('requires stable shell option words: %s', async (raw, stable) => {
+    const parser = await getTestParser()
+    const first = parser.parse(`bash --rcfile ${raw} --version -c 'rm /x'`).children[0]
+    assert(first)
+    const inner = innerLines(
+      'bash',
+      getParts(first)
+        .slice(1)
+        .map((part) => readWord(part)),
+    )
+    expect(inner.length === 0).toBe(stable)
+    if (!stable) {
+      expect(inner).toHaveLength(1)
+      expect(inner[0] && innerReadable(inner[0])).toBe(false)
+    }
   })
 })

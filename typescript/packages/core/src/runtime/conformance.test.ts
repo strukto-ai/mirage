@@ -20,6 +20,7 @@ import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import type { BridgeDispatchFn, RunArgs } from './types.ts'
 import { PrefixResolver } from './resolver.ts'
+import { EvalError } from './errors.ts'
 
 interface CountingBridge {
   dispatch: BridgeDispatchFn
@@ -141,4 +142,81 @@ describe('append ships only the deltas', () => {
     },
     120_000,
   )
+})
+
+const INVOCATION_STATE_PY =
+  "mirage_marker = 42\nimport os\nos.environ['MIRAGE_INVOCATION_MARKER'] = 'changed'"
+const INVOCATION_PROBE_PY =
+  "try:\n    print(mirage_marker)\nexcept NameError:\n    print('fresh')\n" +
+  "import os\nprint(os.environ.get('MIRAGE_INVOCATION_MARKER', 'fresh'))"
+const INVOCATION_STATE_JS = 'globalThis.mirage_marker = 42; Array.prototype.mirage_marker = 42'
+const INVOCATION_PROBE_JS =
+  "console.log(typeof mirage_marker === 'undefined' ? 'fresh' : 'leaked'); " +
+  "console.log([].mirage_marker === undefined ? 'fresh' : 'leaked')"
+
+describe('interpreter state belongs to an invocation', () => {
+  for (const Runtime of [MontyRuntime, PyodideRuntime, QuickJsRuntime]) {
+    const javascript = Runtime === QuickJsRuntime
+    const seed = javascript ? INVOCATION_STATE_JS : INVOCATION_STATE_PY
+    const probe = javascript ? INVOCATION_PROBE_JS : INVOCATION_PROBE_PY
+    for (const fails of [false, true]) {
+      it(`${Runtime.name} starts fresh after ${fails ? 'failure' : 'success'}`, async () => {
+        const engine = new Runtime()
+        const code =
+          seed +
+          (fails
+            ? javascript
+              ? "; throw new Error('failed')"
+              : "\nraise ValueError('failed')"
+            : '')
+        try {
+          const first = await engine.run(runArgs(code))
+          expect(first.exitCode, String(first.stderr)).toBe(Number(fails))
+          const second = await engine.run(runArgs(probe))
+          expect(second.exitCode, String(second.stderr)).toBe(0)
+          expect(new TextDecoder().decode(second.stdout)).toBe('fresh\nfresh\n')
+        } finally {
+          await engine.close()
+        }
+      }, 120_000)
+    }
+
+    it(`${Runtime.name} isolates one-shot evaluations and runs`, async () => {
+      const engine = new Runtime()
+      try {
+        await engine.eval(seed)
+        await expect(engine.eval('mirage_marker')).rejects.toBeInstanceOf(EvalError)
+        const result = await engine.run(runArgs(probe))
+        expect(result.exitCode, String(result.stderr)).toBe(0)
+        expect(new TextDecoder().decode(result.stdout)).toBe('fresh\nfresh\n')
+        const seeded = await engine.run(runArgs(seed))
+        expect(seeded.exitCode, String(seeded.stderr)).toBe(0)
+        await expect(engine.eval('mirage_marker')).rejects.toBeInstanceOf(EvalError)
+      } finally {
+        await engine.close()
+      }
+    }, 120_000)
+  }
+
+  for (const Runtime of [MontyRuntime, PyodideRuntime]) {
+    it(`${Runtime.name} keeps interpreter state only in its named evaluator session`, async () => {
+      const engine = new Runtime()
+      try {
+        await engine.eval('mirage_marker = 40', { session: 'first' })
+        await engine.eval('mirage_marker = 10', { session: 'second' })
+        const seeded = await engine.run(runArgs('mirage_marker = 99'))
+        expect(seeded.exitCode, String(seeded.stderr)).toBe(0)
+        await engine.eval('mirage_marker = 88')
+        const first = await engine.eval('print(mirage_marker + 2)', { session: 'first' })
+        const second = await engine.eval('print(mirage_marker + 2)', { session: 'second' })
+        expect(new TextDecoder().decode(first.stdout)).toBe('42\n')
+        expect(new TextDecoder().decode(second.stdout)).toBe('12\n')
+        const result = await engine.run(runArgs(INVOCATION_PROBE_PY))
+        expect(result.exitCode, String(result.stderr)).toBe(0)
+        expect(new TextDecoder().decode(result.stdout)).toBe('fresh\nfresh\n')
+      } finally {
+        await engine.close()
+      }
+    }, 120_000)
+  }
 })

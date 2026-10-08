@@ -485,9 +485,8 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "bash": CommandSpec(
         description=(
-            "Run a command string through Mirage's shell. "
-            "Only `-c` is meaningful; other flags are accepted "
-            "and ignored. `bash` and `sh` are aliases."
+            "Run a program in a nested Mirage shell: the text after `-c`, "
+            "a script file, or standard input. `bash` and `sh` are aliases."
         ),
         options=(
             Option(
@@ -517,22 +516,40 @@ SPECS: dict[str, CommandSpec] = {
                     "shells are non-interactive."
                 ),
             ),
-            Option(short="-e", description="(Ignored) Exit on first error."),
+            Option(short="-e", description="Exit on first error."),
             Option(
                 short="-u",
-                description="(Ignored) Treat unset variables as errors.",
+                description="Treat unset variables as errors.",
             ),
             Option(
                 short="-x",
-                description="(Ignored) Print commands as they execute.",
+                description="Print commands as they execute.",
+            ),
+            Option(long="--debug", description="(Ignored) Debugging mode."),
+            Option(
+                long="--init-file",
+                type="str",
+                description="(Ignored) Read this file instead of ~/.bashrc.",
             ),
             Option(long="--login", description="(Ignored) Login shell."),
-            Option(long="--norc", description="(Ignored) Skip rc files."),
+            Option(
+                long="--noediting", description="(Ignored) No line editing."
+            ),
             Option(
                 long="--noprofile", description="(Ignored) Skip profile files."
             ),
+            Option(long="--norc", description="(Ignored) Skip rc files."),
             Option(
                 long="--posix", description="(Ignored) POSIX-conformant mode."
+            ),
+            Option(
+                long="--rcfile",
+                type="str",
+                description="(Ignored) Read this file instead of ~/.bashrc.",
+            ),
+            Option(
+                long="--verbose",
+                description="Print input lines as they are read.",
             ),
         ),
         rest=Operand(type="str"),

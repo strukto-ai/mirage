@@ -64,21 +64,21 @@ If `pyodide` isn't installed, `python3` returns `exit=127` with a helpful stderr
 
 Pyodide runs CPython in WebAssembly, using a worker when workers and `SharedArrayBuffer` are available. That creates these divergences from Python Mirage's subprocess model:
 
-### 1. Shared module cache (`sys.modules`)
+### 1. Interpreter startup per command
 
-A single Pyodide interpreter serves all `python3` calls in one workspace, so imports persist across calls.
+Each `python3` command starts a fresh Pyodide interpreter. Imported modules,
+builtins, and other interpreter state belong to that invocation, so editing
+a module and running another command loads it again. Files written to
+workspace mounts remain available to later commands.
 
-```ts
-await ws.shell(`python3 -c "import json"`)
-const r = await ws.shell(`python3 -c "import sys; print('json' in sys.modules)"`)
-r.stdout // "True", Python Mirage would print "False"
-```
-
-This is a perf win (`import numpy` is paid once) with no correctness impact, since Python imports are idempotent. User-level globals (`foo = 1` at top level) **do not** leak; each call gets a fresh `globals()`.
+Initialization and package imports run for each command. Explicit console
+evaluation sessions retain their own interpreter until the runtime closes;
+one-shot evaluations and other sessions do not share that state.
 
 ### 2. No true CPU parallelism within a workspace
 
-Mirage keeps one Pyodide interpreter per workspace, so concurrent `python3` calls in one workspace serialize via a JS queue.
+Mirage serializes ordinary `python3` calls through the runtime's queue, even
+though each call receives a fresh interpreter.
 
 ```ts
 // Runs in ~2s total, not ~1s:
@@ -181,9 +181,9 @@ PYEOF`)
 | `sys.argv[1:]` reflects shell args | matches Python Mirage |
 | `sys.exit(n)` | matches Python Mirage |
 | `os.getcwd()` reflects `session.cwd` | matches Python Mirage |
-| Cross-workspace env isolation | own Pyodide per workspace |
-| Cross-call env isolation | snapshot/restore per call |
-| `sys.modules` fresh per call | shared within workspace |
+| Cross-workspace env isolation | fresh interpreter per command |
+| Cross-call env isolation | fresh interpreter per command |
+| `sys.modules` fresh per call | fresh interpreter with configured initialization |
 | True CPU parallelism within one workspace | serialized; use separate workspaces |
 | `select()` / `poll()` / `fcntl()` on stdin | no real fds in WASM |
 | `open('/<mount>/...')` inside Python | via Mirage's own filesystem, collected before the run + replayed after |

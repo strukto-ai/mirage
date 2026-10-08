@@ -509,6 +509,74 @@
         "stdout": "differ\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ctl_bash_answers_version_and_help",
+      "seq": 502844,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash --version | head -1 | cut -d' ' -f1,2; bash -version --login nosuch.sh | head -1 | cut -d' ' -f1,2; sh --version | cut -d' ' -f1,2; bash --help | grep -c -- --norc; bash -c 'echo hi' --version; bash --version -c 'echo hi' | cut -d' ' -f1,2; bash --help --restricted | grep -c -- --norc; bash --restricted --help | grep -c -- --norc; bash --help --debugger | grep -c -- --norc; bash --help --pretty-print | grep -c -- --norc; bash --version --restricted | cut -d' ' -f1,2; bash --version --dump-strings | cut -d' ' -f1,2",
+      "expect": {
+        "exit": 0,
+        "stdout": "bash (Mirage)\nbash (Mirage)\nsh (Mirage)\n1\nhi\nbash (Mirage)\n1\n1\n1\n1\nbash (Mirage)\nbash (Mirage)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_bash_reads_long_options_before_short_ones",
+      "seq": 502845,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash --version --bogus; echo rc=$?; bash -x --norc -c :; echo rc=$?; bash --rcfile; echo rc=$?; bash -xz; echo rc=$?; bash -norc -c 'echo hi'; bash -- --version; echo rc=$?; bash --restricted -c :; echo rc=$?; bash --restricted --bogus; echo rc=$?; bash +z; echo rc=$?; bash -😀; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\nrc=2\nhi\nrc=127\nrc=2\nrc=2\nrc=2\nrc=2\n",
+        "stderr": "bash: --bogus: unsupported option\nbash: --: unsupported option\nbash: rcfile: option requires an argument\nbash: -z: unsupported option\nbash: --version: No such file or directory\nbash: --restricted: unsupported option\nbash: --bogus: unsupported option\nbash: +z: unsupported option\nbash: -😀: unsupported option\n"
+      }
     }
   ]
 }

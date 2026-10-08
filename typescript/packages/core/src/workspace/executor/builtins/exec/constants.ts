@@ -51,3 +51,15 @@ export const EXEC_STREAM_FIELDS = [
   'execStdinUnreadable',
   'execStdinIdentity',
 ] as const
+
+// The `exec` binding of each standard output stream with no `exec`
+// redirect in force: what a statement's own redirect of the stream holds it
+// at while the statement runs.
+export const EXEC_STREAM_UNBOUND = {
+  1: { execStdout: null, execStdoutAppend: false, execStdoutInput: null },
+  2: { execStderr: null, execStderrAppend: false, execStderrInput: null },
+} as const
+
+// bash's usage line for `exec`, printed after an invalid option.
+export const EXEC_USAGE =
+  'exec: usage: exec [-cl] [-a name] [command [argument ...]] [redirection ...]\n'

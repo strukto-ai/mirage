@@ -31,21 +31,19 @@ async function main(): Promise<void> {
     `stdout: ${r2.stdoutText.trim()}  (expected: bar — previous mutation died with the call)\n`,
   )
 
-  console.log('=== isolation across workspaces — each has its own Pyodide ===')
+  console.log('=== isolation across workspaces — each command has its own Pyodide ===')
   const wsA = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC })
   const wsB = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC })
   await wsA.shell('export NAME=alice')
   await wsB.shell('export NAME=bob')
 
-  // Fire python3 in both workspaces concurrently — each has its own Pyodide,
-  // so envs are strictly isolated even while they run in parallel.
   const [aliceOut, bobOut] = await Promise.all([
     wsA.shell('python3 -c "import os; print(os.environ.get(\'NAME\'))"'),
     wsB.shell('python3 -c "import os; print(os.environ.get(\'NAME\'))"'),
   ])
   console.log(`wsA:  ${aliceOut.stdoutText.trim()}  (expected: alice)`)
   console.log(`wsB:  ${bobOut.stdoutText.trim()}  (expected: bob)`)
-  console.log('(each workspace has its own Pyodide → own os.environ → no mixing)\n')
+  console.log('(each command has its own Pyodide → own os.environ → no mixing)\n')
   await wsA.close()
   await wsB.close()
 

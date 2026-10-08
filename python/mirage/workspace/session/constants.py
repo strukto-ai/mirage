@@ -60,6 +60,10 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "script_name",
     "exit_trap",
     "exit_trap_inherited",
+    "err_trap",
+    "return_trap",
+    "err_trap_hidden",
+    "return_trap_hidden",
     "tty",
     "job_output",
     "job_waits",
@@ -75,6 +79,7 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "exec_stdin_identity",
     "_getopts_pos",
     "_getopts_optind",
+    "errexit_ignored",
     "_parse_seq",
     "_alias_marks",
     "_function_sites",
@@ -93,6 +98,9 @@ STARTUP_VALUES: dict[str, ShellVar] = {
 # locals.
 TRANSIENT_FIELDS: tuple[str, ...] = (
     "errexit_immune",
+    "errexit_exiting",
+    "err_trap_running",
+    "return_trap_running",
     "_local_vars",
     "_local_frames",
     "_local_random",
@@ -106,6 +114,6 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
     "_parse_row",
     "_line_open",
     "terminal",
-    "_alias_stack",
+    "_alias_expansion",
     "status_writer",
 )

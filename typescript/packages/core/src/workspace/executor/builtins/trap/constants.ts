@@ -12,12 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { TrapEvent } from './types.ts'
+
 export const USAGE = 'trap: usage: trap [-lp] [[arg] signal_spec ...]\n'
 
 export const EXIT_EVENT = 'EXIT'
 
-// bash's pseudo-signals besides EXIT: names it accepts, mirage runs none.
-export const PSEUDO_SIGNALS: ReadonlySet<string> = new Set(['DEBUG', 'ERR', 'RETURN'])
+// bash's pseudo-signals besides EXIT, ERR and RETURN: names it accepts,
+// mirage runs none.
+export const PSEUDO_SIGNALS: ReadonlySet<string> = new Set(['DEBUG'])
+
+// The events mirage runs, in the order `trap -p` lists them: bash's
+// signal numbers put EXIT (0) first and its pseudo-signals last.
+export const RUN_EVENTS: readonly TrapEvent[] = [TrapEvent.Exit, TrapEvent.Err, TrapEvent.Return]
 
 // The highest signal number bash lists.
 export const SIGNAL_MAX = 64

@@ -22,8 +22,13 @@ export interface BashArgs {
   argv: string[]
   // Shell options the startup flags turn on or off, in the order written.
   settings: [string, boolean][]
-  // The option word the shell does not have.
+  // The option the shell refuses, as bash names it.
   invalid: string | null
   // The option given no argument.
   needsValue: string | null
+  // `--help` was given; bash answers it before `--version` and before
+  // reading anything else.
+  help: boolean
+  // `--version` was given.
+  version: boolean
 }

@@ -36,6 +36,7 @@ from mirage.core.hf_hub.client import (
     rev_segment,
 )
 from mirage.core.hf_hub.constants import (
+    GITATTRIBUTES,
     MAX_TREE_PAGES,
     TREE_PAGE_SIZE,
     TREE_PAGE_SIZE_EXPANDED,
@@ -43,6 +44,7 @@ from mirage.core.hf_hub.constants import (
 from mirage.core.hf_hub.repo import head_commit, mount_version
 from mirage.core.hf_hub.tree_entry import TreeEntry
 from mirage.utils import key_prefix as kp
+from mirage.utils.fnmatch import fnmatchcase
 
 log = logging.getLogger(__name__)
 
@@ -677,3 +679,88 @@ async def local_rows(
     entries, children = index_rows(accessor.tree, prefix)
     accessor.rows_cache = (prefix, entries, children)
     return entries, children
+
+
+def repo_files(tree: dict[str, TreeEntry]) -> list[str]:
+    """The file paths of a tree, sorted, its directories left out.
+
+    Args:
+        tree (dict[str, TreeEntry]): the repository listing.
+
+    Returns:
+        list[str]: repo-relative file paths.
+    """
+    return sorted(path for path, entry in tree.items() if not entry.is_dir)
+
+
+def _folder_wildcard(pattern: str) -> str:
+    return pattern + "*" if pattern.endswith("/") else pattern
+
+
+def filter_repo_paths(
+    paths: list[str],
+    include: list[str],
+    exclude: list[str] | None = None,
+) -> list[str]:
+    """Keep the repo paths an allowlist and a denylist of patterns admit.
+
+    huggingface_hub's ``filter_repo_objects``, the one rule its
+    ``--include``, ``--exclude`` and ``--delete`` share: a pattern is a
+    CPython fnmatch glob over the whole path, so ``*`` crosses a ``/``
+    (``data/*.json`` holds ``data/sub/x.json``), ``[^a]`` is ``^`` or
+    ``a`` rather than bash's negation, and a pattern ending in ``/``
+    names a folder and matches everything under it. An empty list puts
+    no constraint on the paths.
+
+    Args:
+        paths (list[str]): repo-relative paths.
+        include (list[str]): patterns a path must match one of.
+        exclude (list[str] | None): patterns a path must match none of.
+
+    Returns:
+        list[str]: the admitted paths, in their given order.
+    """
+    allow = [_folder_wildcard(p) for p in include]
+    deny = [_folder_wildcard(p) for p in exclude or []]
+    return [
+        path
+        for path in paths
+        if (not allow or any(fnmatchcase(path, p) for p in allow))
+        and not any(fnmatchcase(path, p) for p in deny)
+    ]
+
+
+def deletions_for(
+    files: list[str],
+    patterns: list[str],
+    path_in_repo: str = "",
+) -> list[str]:
+    """The repo files a set of deletion patterns names, as upstream does.
+
+    huggingface_hub's ``_prepare_folder_deletions``: the patterns match
+    the repository's listing, not paths of their own, so ``**`` or
+    ``*.txt`` deletes the files it matches and a pattern matching nothing
+    deletes nothing. They match relative to ``path_in_repo``, the folder
+    an upload lands in, and ``.gitattributes`` always survives, because
+    the Hub needs it to serve the repo.
+
+    Args:
+        files (list[str]): the repository's file paths.
+        patterns (list[str]): the deletion globs; none deletes nothing.
+        path_in_repo (str): the folder the patterns are relative to,
+            normalized: no leading or trailing slash, "" for the root.
+
+    Returns:
+        list[str]: repo-relative paths to delete.
+    """
+    if not patterns:
+        return []
+    folder = f"{path_in_repo}/" if path_in_repo else ""
+    relative = {
+        file[len(folder) :]: file for file in files if file.startswith(folder)
+    }
+    return [
+        relative[rel]
+        for rel in filter_repo_paths(list(relative), patterns)
+        if relative[rel] != GITATTRIBUTES
+    ]

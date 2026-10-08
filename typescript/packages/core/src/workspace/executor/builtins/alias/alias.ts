@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { getText } from '../../../../shell/helpers.ts'
+import type { TSNodeLike } from '../../../../shell/types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { SHOPT_DEFAULTS } from '../../../../shell/constants.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -130,52 +132,75 @@ function aliasesOn(session: SessionState): boolean {
  */
 export function expandingAliases(session: SessionState): ReadonlySet<string> {
   if (!aliasesOn(session)) return new Set()
-  return new Set(Object.keys(session.aliases).filter((name) => !session.aliasStack.includes(name)))
+  return new Set(
+    Object.keys(session.aliases).filter((name) => !session.aliasExpansion?.names.has(name)),
+  )
 }
 
 /** The alias text a command word expands to, or null. */
-export function aliasValue(session: SessionState, name: string, mark: AliasMark): string | null {
+export function aliasValue(
+  session: SessionState,
+  name: string,
+  mark: AliasMark,
+  blocked: ReadonlySet<string>,
+): string | null {
   if (!aliasesOn(session)) return null
   const value = sessionEntry(session.aliases, name)
-  if (value === undefined || session.aliasStack.includes(name)) return null
+  if (value === undefined || blocked.has(name)) return null
   const seen = session.aliasMarks.get(name)
   if (seen?.[0] === mark[0] && seen[1] === mark[1]) return null
   return value
 }
 
 /**
- * The command line an aliased head word rewrites to, or null. The value
- * replaces the word; a value ending in a blank asks for the next word
- * to be checked too (bash's `alias sudo='sudo '` rule); the result is a
- * fresh line the parser reads again. Returned with each alias and the text
- * it put at the line's head, in order; the rest of the line is the
- * command's own.
+ * Replace alias words, preserving the rest of the command and its guards.
+ * Each insertion inherits the replaced word's guards and adds its name.
+ * A trailing blank checks the next caller word through the same loop.
  */
 export function aliasCommandText(
   session: SessionState,
-  name: string,
-  rest: string,
+  node: TSNodeLike,
+  head: TSNodeLike,
   mark: AliasMark,
-): [string, [string, string][]] | null {
-  const value = aliasValue(session, name, mark)
-  if (value === null) return null
-  const seen = new Set([name])
-  const texts: [string, string][] = [[name, value]]
-  let out = value
-  let tailSource = rest
-  while (out.endsWith(' ') || out.endsWith('\t')) {
-    const stripped = tailSource.replace(/^\s+/, '')
-    const match = FIRST_WORD.exec(stripped)
-    if (match === null || seen.has(match[0])) break
-    const nxt = aliasValue(session, match[0], mark)
-    if (nxt === null) break
-    seen.add(match[0])
-    texts.push([match[0], nxt])
-    out += nxt
-    tailSource = stripped.slice(match[0].length)
+): [string, readonly ReadonlySet<string>[]] | null {
+  const source = getText(node)
+  const scope = session.aliasExpansion
+  let root = node
+  while (root.parent != null) root = root.parent
+  const base = node.startIndex ?? 0
+  const inherited =
+    scope !== null && root.id === scope.root
+      ? scope.owners.slice(base, node.endIndex)
+      : Array<ReadonlySet<string>>(source.length).fill(scope?.names ?? new Set())
+  let at = (head.startIndex ?? 0) - base
+  let end = (head.endIndex ?? 0) - base
+  let name = getText(head)
+  const seen = new Set<string>()
+  const parts: string[] = []
+  const owners: ReadonlySet<string>[] = []
+  let cursor = 0
+  while (!seen.has(name)) {
+    const blocked = inherited[at]
+    if (blocked === undefined) throw new Error('alias word has no source')
+    const value = aliasValue(session, name, mark, blocked)
+    if (value === null) break
+    seen.add(name)
+    parts.push(source.slice(cursor, at), value)
+    for (const owner of inherited.slice(cursor, at)) owners.push(owner)
+    const guard = new Set([...blocked, name])
+    for (const owner of Array<ReadonlySet<string>>(value.length).fill(guard)) owners.push(owner)
+    cursor = end
+    if (!value.endsWith(' ') && !value.endsWith('\t')) break
+    const match = FIRST_WORD.exec(source.slice(cursor))
+    if (match === null) break
+    name = match[0]
+    at = cursor + match.index
+    end = at + name.length
   }
-  const tail = tailSource.trim()
-  return [tail !== '' ? `${out} ${tail}` : out, texts]
+  if (seen.size === 0) return null
+  parts.push(source.slice(cursor))
+  for (const owner of inherited.slice(cursor)) owners.push(owner)
+  return [parts.join(''), owners]
 }
 
 /** The `alias` arm; the row marks where the definition was made. */

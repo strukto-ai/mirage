@@ -85,7 +85,7 @@ import { ExecutionNode } from '../types.ts'
 import { abortable, joinOrAbort } from '../abort.ts'
 import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
-import { finishShell, inheritExitTrap } from '../executor/traps.ts'
+import { finishShell, inheritTraps } from '../executor/traps.ts'
 import { expandingAliases } from '../executor/builtins/alias/index.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
@@ -418,6 +418,8 @@ async function runPreparedLine(
       frame.writer,
       async () => {
         const parser = new ParseScope(await abortable(env.parser(), options.signal))
+        const previousAliasExpansion = effectiveSession.aliasExpansion
+        effectiveSession.aliasExpansion = null
         try {
           const root = argv === undefined ? parser.parse(command) : literalTree(argv)
           // Syntax gates before policy, mirroring bash: an unparsable line exits 2
@@ -614,7 +616,11 @@ async function runPreparedLine(
             const rest = session.jobOutput ?? session.tty.jobs
             if (substitution) {
               session.terminalOutput = false
-              inheritExitTrap(session)
+              inheritTraps(session)
+              // bash runs a substitution without `set -e` unless
+              // `shopt -s inherit_errexit` (or POSIX mode) passes it on.
+              if (session.shopts.inherit_errexit !== true && session.shellOptions.posix !== true)
+                session.shellOptions.errexit = false
               // A substitution reads its pipe until every writer has closed
               // it, so what a job it started writes is part of its value,
               // and it ends when its jobs do. They are its own jobs.
@@ -715,6 +721,7 @@ async function runPreparedLine(
             env.sessions,
           )
         } finally {
+          effectiveSession.aliasExpansion = previousAliasExpansion
           parser.release()
         }
       },

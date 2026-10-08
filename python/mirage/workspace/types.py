@@ -63,6 +63,10 @@ class ExecutionNode:
             ran. Transient: the redirect layer reads it to leave output
             targets untouched, where an ordinary failure still creates
             and truncates them as bash's open-before-exec would.
+        unopened (bool): A redirect target could not be opened, so the
+            command never ran. Transient: the ERR action answers a group
+            or loop that fails this way, which its own commands would
+            have answered otherwise.
     """
 
     command: str | None = None
@@ -73,6 +77,7 @@ class ExecutionNode:
     records: list[OpRecord] = field(default_factory=list)
     paths: list[PathSpec] = field(default_factory=list)
     refused: bool = False
+    unopened: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {}

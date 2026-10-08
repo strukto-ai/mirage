@@ -195,6 +195,11 @@ backend, CLI or package belongs in the filter that tests it, a module joins
 the drop list only when nothing kept imports it, and a runtime case that
 starts mounting a dropped backend takes that name off the list.
 
+The shared YAML config readers (`python/mirage/utils/yaml.py` and
+`typescript/packages/node/src/utils/yaml.ts`) use the broad language filters
+above, including `runtime`. The CLI exit-code workflow also covers both
+through its `python/**` and `typescript/**` patterns.
+
 The CLI snapshot smoke also runs the shared
 `function_sources_survive_snapshot_restore` lifecycle case in fresh Python
 and TypeScript processes, in both directions. It checks function calls,

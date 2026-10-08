@@ -20,15 +20,19 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
+import { SET_OPTION_NAMES } from '../../../../shell/constants.ts'
 
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { BASH_LONG_OPTIONS, BASH_START_FLAGS } from './constants.ts'
+import { BASH_LONG_OPTIONS, BASH_START_FLAGS, BASH_UNSUPPORTED_LONG_OPTIONS } from './constants.ts'
 import { readScriptFile, scriptError } from './script.ts'
 import type { BashArgs } from './types.ts'
+import { helpPage, versionLine } from '../../../../commands/spec/standard.ts'
+import { specOf } from '../../../../commands/spec/index.ts'
+import { yieldBytes } from '../../../../io/stream.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { clearExitTrap, finishShell } from '../../traps.ts'
-import { decodeText } from '../../../../shell/bytes.ts'
+import { clearTraps, finishShell } from '../../traps.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
 function bashArgs(partial: Partial<BashArgs>): BashArgs {
   return {
@@ -38,53 +42,67 @@ function bashArgs(partial: Partial<BashArgs>): BashArgs {
     settings: [],
     invalid: null,
     needsValue: null,
+    help: false,
+    version: false,
     ...partial,
   }
 }
 
 /**
- * Split a `bash`/`sh` argument list into flags, program and argv.
+ * Read Bash startup options, then select a program and its argv.
  *
- * Option parsing stops at the first operand, so everything after a script
- * file (or after `-c`'s program text) is positional, even when it looks
- * like a flag: `bash run.sh -c foo` passes `-c foo` to the script. `-` and
- * `--` both end it without being operands.
+ * GNU Bash 5.2 reads long options (one or two dashes) before short ones.
+ * Help/version return after that pass: unknown long options still fail,
+ * while help outranks version and unsupported modes. A long option after
+ * a short one is refused as `--`. Unsupported short options name the
+ * whole character here, rather than its first byte as GNU does.
  *
- * `-c` takes the next *word*, never the rest of its cluster, which is where
- * bash's own parser departs from getopt: `bash -cx 'echo hi'` traces and
- * runs `echo hi` rather than running `x`.
- *
- * The two failure fields report what went wrong rather than a rendered
- * message, the way `ShellParse` does: the wording and the exit code belong
- * to the caller, which is the only thing that knows the head word the shell
- * was spelled as.
+ * Options after a script file or `-c`'s program are positional; `-` and
+ * `--` end option parsing. `-c` takes the next word, never the rest of its
+ * cluster: `-cx 'echo hi'` traces and runs `echo hi`.
  */
 export function parseBashArgs(args: string[]): BashArgs {
   const settings: [string, boolean][] = []
-  let readStdin = false
+  let wantHelp = false
+  let wantVersion = false
+  let unsupported: string | null = null
   let i = 0
+  while (i < args.length && (args[i] ?? '').startsWith('-')) {
+    const spelling = args[i] ?? ''
+    const spelledLong = spelling.startsWith('--') && spelling.length > 2
+    const name = spelledLong ? spelling.slice(2) : spelling.slice(1)
+    const takesValue = BASH_LONG_OPTIONS.get(name)
+    if (takesValue === undefined) {
+      if (spelledLong) return bashArgs({ invalid: spelling })
+      break
+    }
+    if (takesValue) {
+      if (i + 1 >= args.length) return bashArgs({ needsValue: name })
+      i += 1
+    } else if (SET_OPTION_NAMES.has(name)) {
+      settings.push([name, true])
+    } else if (BASH_UNSUPPORTED_LONG_OPTIONS.has(name)) {
+      unsupported ??= spelling
+    }
+    wantHelp = wantHelp || name === 'help'
+    wantVersion = wantVersion || name === 'version'
+    i += 1
+  }
+  if (wantHelp || wantVersion) return bashArgs({ help: wantHelp, version: wantVersion })
+  if (unsupported !== null) return bashArgs({ invalid: unsupported })
+  let readStdin = false
   while (i < args.length) {
     const tok = args[i] ?? ''
     if (tok === '--' || tok === '-') {
       i += 1
       break
     }
-    if (tok.startsWith('--')) {
-      const takesValue = BASH_LONG_OPTIONS[tok]
-      if (takesValue === undefined) return bashArgs({ invalid: tok })
-      i += takesValue ? 2 : 1
-      continue
-    }
+    if (tok.startsWith('--')) return bashArgs({ invalid: '--' })
     const word = parseOptionWord(tok, args[i + 1] ?? null)
     if (word === null) break
-    let known = true
-    for (let j = 0; j < word.other.length; j++) {
-      if (!BASH_START_FLAGS.has(word.other.charAt(j))) {
-        known = false
-        break
-      }
+    for (const ch of word.other) {
+      if (!BASH_START_FLAGS.has(ch)) return bashArgs({ invalid: tok.charAt(0) + ch })
     }
-    if (!known) return bashArgs({ invalid: tok })
     settings.push(...word.settings)
     readStdin = readStdin || word.other.includes('s')
     if (word.other.includes('c')) {
@@ -129,11 +147,24 @@ export async function handleBash(
 ): Promise<Result> {
   let session = context.session
   const parsed = parseBashArgs(args)
+  if (parsed.help || parsed.version) {
+    // bash answers --help ahead of --version, whatever their order, and
+    // runs nothing else. The page and the version line are the ones every
+    // mirage command prints, under the name typed. `sh` is this same shell,
+    // so `sh --version` answers as bash invoked as sh does; Debian's dash
+    // refuses it ("Illegal option --", 2).
+    const text = parsed.help ? helpPage(name, specOf('bash')) : versionLine(name)
+    return [
+      yieldBytes(encodeText(text)),
+      new IOResult(),
+      new ExecutionNode({ command: name, exitCode: 0 }),
+    ]
+  }
   if (parsed.invalid !== null) {
     // GNU words this "invalid option" and follows it with a usage block.
     // One word covers both cases here on purpose: some of what lands here
-    // is an option bash has and mirage does not implement (`-r`, `-a`,
-    // `--version`), and calling those invalid would be a lie. The exit
+    // is an option bash has and mirage does not implement (`-r`,
+    // `--restricted`), and calling those invalid would be a lie. The exit
     // status is GNU's 2 either way.
     return scriptError(name, `${parsed.invalid}: unsupported option`, 2)
   }
@@ -161,7 +192,7 @@ export async function handleBash(
   }
   context = new EvaluationContext(session.newShell(), context.frame.fork(), context)
   session = context.session
-  clearExitTrap(session)
+  clearTraps(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.positionalArgs = positional
   session.scriptName = scriptName

@@ -24,6 +24,7 @@ class CallFrame:
     function_name: str = ""
     loop_level: int = 0
     sourced: bool = False
+    closed: bool = False
 
 
 class CallStack:
@@ -101,6 +102,12 @@ class CallStack:
     def depth(self) -> int:
         return len(self._frames)
 
+    @property
+    def returnable(self) -> bool:
+        """Whether a function or sourced file is running for ``return``
+        to leave."""
+        return any(not frame.closed for frame in self._frames[1:])
+
     @contextmanager
     def loop(self) -> Iterator[None]:
         """Count a loop the current frame runs, for ``break`` and
@@ -115,8 +122,9 @@ class CallStack:
     def function_names(self) -> tuple[str, ...]:
         """``${FUNCNAME[@]}``: the frames innermost first, a sourced
         file as ``source``. Empty while no function runs, as bash hides
-        a sourced file's entry outside one."""
-        frames = self._frames[1:]
+        a sourced file's entry outside one, and one whose RETURN action
+        runs: it has returned."""
+        frames = [frame for frame in self._frames[1:] if not frame.closed]
         if all(frame.sourced for frame in frames):
             return ()
         return tuple(frame.function_name for frame in reversed(frames))
