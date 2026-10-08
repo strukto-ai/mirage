@@ -84,11 +84,13 @@ export abstract class LanguageRuntime extends Runtime {
   }
 
   /**
-   * Execute one program with fresh guest interpreter state, including
-   * globals, imported modules and builtins, even after a failed invocation.
-   * Workspace file writes persist through the dispatcher; interpreter
-   * state does not cross into other runs or evaluator sessions. Immutable
-   * engine assets may be reused.
+   * Execute one program and return its captured outcome.
+   *
+   * Each call represents an independent language command, such as
+   * python3 or node. Guest globals, imports and builtin mutations
+   * do not carry over from earlier commands or evaluator sessions.
+   * The adapter owns engine reuse; this does not reset workspace
+   * state or undo external effects.
    */
   abstract run(args: RunArgs): Promise<RunResult>
 }

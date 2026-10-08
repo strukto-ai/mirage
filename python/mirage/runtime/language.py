@@ -90,11 +90,11 @@ class LanguageRuntime(Runtime):
     async def run(self, args: RunArgs) -> RunResult:
         """Execute one program and return its captured outcome.
 
-        Every invocation starts with fresh guest interpreter state,
-        including globals, imported modules and builtins, even after a
-        failed invocation. Workspace file writes persist through the
-        dispatcher; interpreter state does not cross into other runs
-        or evaluator sessions. Immutable engine assets may be reused.
+        Each call represents an independent language command, such as
+        python3 or node. Guest globals, imports and builtin mutations
+        do not carry over from earlier commands or evaluator sessions.
+        The adapter owns engine reuse; this does not reset workspace
+        state or undo external effects.
 
         Args:
             args (RunArgs): the execution request.

@@ -44,9 +44,8 @@ class Runtime(ABC):
     machinery inside a handler, invisible to the dispatcher. Each
     runtime declares the command names it captures; a command binds to
     the first runtime in the workspace's ordered list that captures
-    it. Implementations own their engine lifecycle (lazy boot, reusable
-    assets, teardown in close); guest interpreter state belongs to one
-    invocation or an explicitly named evaluator session.
+    it. Implementations own their engine lifecycle (lazy boot, reuse
+    across runs, teardown in close).
 
     The base holds only what every tier shares: the registry name, the
     captured command names, the coerced config, and the per-line
