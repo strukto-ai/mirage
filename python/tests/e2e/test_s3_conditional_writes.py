@@ -80,6 +80,19 @@ def _mutations(
     return [e for e in client.ledger if e[0] in MUTATIONS]
 
 
+def _deny_access() -> None:
+    exc = Exception("AccessDenied")
+    exc.response = {
+        "Error": {"Code": "AccessDenied"},
+        "ResponseMetadata": {"HTTPStatusCode": 403},
+    }
+    raise exc
+
+
+def _network_down() -> None:
+    raise ConnectionError("network down")
+
+
 async def _run(ws: Workspace, line: str) -> tuple[int, str, str]:
     r = await ws.shell(line)
     return r.exit_code, await r.stdout_str(), await r.stderr_str()
@@ -778,16 +791,7 @@ async def test_an_auth_failure_keeps_its_own_words(fake):
     ws = _workspace()
     try:
         await _run(ws, "cat /s3/f")
-
-        def deny() -> None:
-            exc = Exception("AccessDenied")
-            exc.response = {
-                "Error": {"Code": "AccessDenied"},
-                "ResponseMetadata": {"HTTPStatusCode": 403},
-            }
-            raise exc
-
-        fake.before("put_object", deny)
+        fake.before("put_object", _deny_access)
         code, _, err = await _run(ws, "echo x > /s3/f")
         assert code == 1 and STALE not in err, err
     finally:
@@ -963,11 +967,7 @@ async def test_a_conditional_dir_mv_copies_everything_before_deleting(fake):
         fake.buckets["b"][f"d/{name}"] = name.encode()
     before = {k: v for k, v in fake.buckets["b"].items() if k.startswith("d/")}
     fake.page_size = 2
-
-    def fail() -> None:
-        raise ConnectionError("network down")
-
-    for hook in (lambda: None, lambda: None, lambda: None, fail):
+    for hook in (lambda: None, lambda: None, lambda: None, _network_down):
         fake.before("copy_object", hook)
     ws = _workspace()
     try:

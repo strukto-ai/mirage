@@ -50,6 +50,10 @@ const VERDICTS = (
   }
 ).cases
 
+function sortedRows(r: Record<string, readonly string[]>): Record<string, string[]> {
+  return Object.fromEntries(Object.entries(r).map(([k, v]) => [k, [...v].sort()]))
+}
+
 function stub(name: string, config?: Record<string, unknown>): BaseVFS {
   return {
     name,
@@ -85,9 +89,7 @@ describe('the condition table', () => {
   it('is the shared fixture, both ways', () => {
     const rows = Object.entries(CONDITIONS.vfs).filter(([, ops]) => ops.length > 0)
     expect(rows.length).toBeGreaterThan(0)
-    const sorted = (r: Record<string, readonly string[]>) =>
-      Object.fromEntries(Object.entries(r).map(([k, v]) => [k, [...v].sort()]))
-    expect(sorted(WRITE_CONDITIONS)).toEqual(sorted(Object.fromEntries(rows)))
+    expect(sortedRows(WRITE_CONDITIONS)).toEqual(sortedRows(Object.fromEntries(rows)))
   })
 
   it('gives an s3 mount on a custom endpoint the minio row', () => {

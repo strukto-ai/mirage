@@ -1162,9 +1162,7 @@ async def test_a_cold_read_bigger_than_the_cache_is_not_kept():
     await cache.set("/data/warm", b"abc")
     manager = CacheManager(cache, index, "/data/", True)
 
-    async def fetch() -> bytes:
-        return b"x" * 11
-
+    fetch = AsyncMock(return_value=b"x" * 11)
     assert await manager.fill(_spec("/data/big"), fetch) == b"x" * 11
     assert not await cache.exists("/data/big")
     assert await cache.get("/data/warm") == b"abc"
@@ -1178,7 +1176,5 @@ async def test_a_cold_read_the_store_refuses_still_returns_its_bytes(
         refusing_store(), RAMIndexCacheStore(ttl=600), "/data/", True
     )
 
-    async def fetch() -> bytes:
-        return b"hello"
-
+    fetch = AsyncMock(return_value=b"hello")
     assert await manager.fill(_spec("/data/a"), fetch) == b"hello"

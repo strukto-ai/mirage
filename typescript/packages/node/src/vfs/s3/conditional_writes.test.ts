@@ -88,6 +88,8 @@ describe('conditional writes on an S3 mount', () => {
   const theirs = (key = 'f'): void => {
     mock.store.set('b', key, ENC.encode('theirs\n'))
   }
+  const keysUnder = (prefix: string): string[] =>
+    [...mock.store.objects('b').keys()].filter((k) => k.startsWith(prefix)).sort()
   const object = (key: string): string | undefined => {
     const data = mock.store.get('b', key)
     return data === undefined ? undefined : DEC.decode(data)
@@ -801,9 +803,7 @@ describe('conditional writes on an S3 mount', () => {
     // As GNU mv across devices: a copy failing on a later page leaves the
     // source whole.
     for (const name of ['c', 'd', 'e']) mock.store.set('b', `d/${name}`, ENC.encode(name))
-    const under = (): string[] =>
-      [...mock.store.objects('b').keys()].filter((k) => k.startsWith('d/')).sort()
-    const before = under()
+    const before = keysUnder('d/')
     mock.pageSize = 2
     for (let i = 0; i < 3; i++) mock.before('CopyObject', () => undefined)
     mock.before('CopyObject', () => {
@@ -812,7 +812,7 @@ describe('conditional writes on an S3 mount', () => {
     const ws = workspace()
     try {
       expect((await run(ws, 'mv /s3/d /s3/e'))[0]).toBe(1)
-      expect(under()).toEqual(before)
+      expect(keysUnder('d/')).toEqual(before)
       expect(mutations().filter(([op]) => op === 'DeleteObjects')).toEqual([])
     } finally {
       mock.pageSize = null
