@@ -1,0 +1,471 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { Buffer } from 'node:buffer'
+import { createHash } from 'node:crypto'
+import { constants } from 'node:fs'
+import { createRequire } from 'node:module'
+import { posix } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
+import { posixErrno, posixPhrase } from '@struktoai/mirage-core/errors/posix'
+import type { FsCondition } from '@struktoai/mirage-core/errors/types'
+import { workspaceBridge } from '@struktoai/mirage-core/runtime/binding'
+import { RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
+import { PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
+import type { VFSEntry, VFSStat } from '@struktoai/mirage-core/runtime/types'
+import { MountMode, type SetAttrFields } from '@struktoai/mirage-core/types'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { PATH_ARGS, REFUSED_CALLS, ROUTED_CALLS, type RoutedCall } from './constants.ts'
+
+type FsObject = Record<string, unknown>
+type Fn = (...args: unknown[]) => unknown
+type Callback = (err: unknown, value?: unknown) => void
+type Options = Record<string, unknown> | string | number | undefined
+
+const fs = createRequire(import.meta.url)('node:fs') as FsObject & { promises: FsObject }
+const { S_IFMT, S_IFREG, S_IFDIR, S_IFCHR, S_IFLNK, W_OK, X_OK, COPYFILE_EXCL } = constants
+
+/** `path` as a string a mount could serve, or null: a descriptor and a
+ * Buffer are host spellings no mount uses. */
+function spelled(path: unknown): string | null {
+  if (typeof path === 'string') return path
+  if (path instanceof URL && path.protocol === 'file:') return fileURLToPath(path)
+  return null
+}
+
+/** A stable id for one name, so two mounted files never compare as one
+ * inode (`dev`/`ino`), mirroring python's `host/stat.ident`. */
+function ident(text: string): number {
+  return createHash('sha256').update(text).digest().readUIntBE(0, 6)
+}
+
+/** A refusal spelled the way node's own fs spells an error. */
+function refusal(condition: FsCondition, syscall: string, path: string): NodeJS.ErrnoException {
+  const err: NodeJS.ErrnoException = new Error(
+    `${condition}: ${posixPhrase(condition)}, ${syscall} '${path}'`,
+  )
+  err.code = condition
+  err.errno = -posixErrno(condition)
+  err.syscall = syscall
+  err.path = path
+  return err
+}
+
+function syncRefusal(name: string, path: string): NodeJS.ErrnoException {
+  const err = refusal('ENOTSUP', name, path)
+  err.message = `mirage.patchNodeFs: sync fs methods not supported on a mounted path; use fs.promises.${name.replace(/Sync$/, '')} ('${path}')`
+  return err
+}
+
+function encodingOf(options: Options): BufferEncoding | undefined {
+  if (typeof options === 'string') return options as BufferEncoding
+  if (typeof options === 'object') return options.encoding as BufferEncoding | undefined
+  return undefined
+}
+
+function bytesOf(data: unknown, options: Options): Uint8Array {
+  if (typeof data === 'string') return Buffer.from(data, encodingOf(options) ?? 'utf8')
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  throw new TypeError('mirage.patchNodeFs: data must be a string or an ArrayBufferView')
+}
+
+function leaf(entry: string): string {
+  const trimmed = entry.endsWith('/') ? entry.slice(0, -1) : entry
+  return trimmed.slice(trimmed.lastIndexOf('/') + 1)
+}
+
+/** A time argument (seconds, a numeric string, a Date) as the ISO stamp
+ * setattr stores. */
+function stampOf(time: unknown): string {
+  const ms = time instanceof Date ? time.getTime() : Number(time) * 1000
+  return new Date(ms).toISOString()
+}
+
+/**
+ * Every routed fs call, answered on a mount: python's `HostFs` for
+ * node. One method per name in `ROUTED_CALLS`, each taking the call's
+ * own arguments with its path arguments already spelled as strings. The
+ * calls ride `RuntimeFiles` over `ws.vfs.dispatch`, so they run as the
+ * facade's session and land on `ws.vfs.records`. A call with one end on
+ * a mount and the other on the host reaches the host through `native`,
+ * node's own functions as they were before the patch.
+ */
+class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown>> {
+  private readonly files: RuntimeFiles
+  // One stamp for the patch's life, the choice python's HostFs makes: a
+  // backend that reports no mtime would otherwise answer a new time on
+  // every stat, and "did it change?" heuristics fire on that.
+  private readonly born = Date.now()
+
+  constructor(
+    private readonly ws: Workspace,
+    private readonly native: FsObject,
+  ) {
+    this.files = new RuntimeFiles(
+      workspaceBridge((name, path, args, kwargs) => ws.vfs.dispatch(name, path, args, kwargs)),
+      new PrefixResolver(
+        () => [],
+        (directory) => ws.namespace.linkNamesUnder(directory),
+      ),
+    )
+  }
+
+  /** Whether `path` is under a mount the patch answers for. The synthetic
+   * root anchor matches every path but backs no files, so a path only it
+   * catches stays on the host; a mount the caller put at `/` is honored. */
+  mounted(path: string | null): path is string {
+    if (path === null) return false
+    const mount = this.ws.registry.tryMountFor(path)
+    if (mount === null) return false
+    return !(this.ws.syntheticRoot && mount === this.ws.registry.rootMount)
+  }
+
+  private statsOf(path: string, st: VFSStat): unknown {
+    const kind = st.mode & S_IFMT
+    const mtime = new Date(st.mtimeMs ?? this.born)
+    const atime = st.atimeMs === undefined ? mtime : new Date(st.atimeMs)
+    const prefix = this.ws.registry.tryMountFor(path)?.prefix ?? '/'
+    return {
+      isFile: () => kind === S_IFREG,
+      isDirectory: () => kind === S_IFDIR,
+      isBlockDevice: () => false,
+      isCharacterDevice: () => kind === S_IFCHR,
+      isSymbolicLink: () => kind === S_IFLNK,
+      isFIFO: () => false,
+      isSocket: () => false,
+      dev: ident(prefix),
+      ino: ident(path),
+      mode: st.mode,
+      nlink: st.isDir ? 2 : 1,
+      uid: st.uid ?? process.getuid?.() ?? 0,
+      gid: st.gid ?? process.getgid?.() ?? 0,
+      rdev: st.rdev ?? 0,
+      size: st.size,
+      blksize: 4096,
+      blocks: Math.ceil(st.size / 512),
+      atime,
+      atimeMs: atime.getTime(),
+      mtime,
+      mtimeMs: mtime.getTime(),
+      ctime: mtime,
+      ctimeMs: mtime.getTime(),
+      birthtime: mtime,
+      birthtimeMs: mtime.getTime(),
+    }
+  }
+
+  private direntOf(directory: string, row: VFSEntry): unknown {
+    const kind = row.isLink === true ? S_IFLNK : row.isDir ? S_IFDIR : (row.mode ?? 0) & S_IFMT
+    return {
+      name: leaf(row.path),
+      parentPath: directory,
+      path: directory,
+      isFile: () => kind === S_IFREG,
+      isDirectory: () => kind === S_IFDIR,
+      isBlockDevice: () => false,
+      isCharacterDevice: () => kind === S_IFCHR,
+      isSymbolicLink: () => kind === S_IFLNK,
+      isFIFO: () => false,
+      isSocket: () => false,
+    }
+  }
+
+  private nativeCall(name: string, ...args: unknown[]): Promise<unknown> {
+    return ((this.native.promises as FsObject)[name] as Fn)(...args) as Promise<unknown>
+  }
+
+  async access(path: string, mode = 0): Promise<void> {
+    const st = await this.files.stat(path)
+    // Write is the mount's mode, mirage's access control; a session's own
+    // narrower grant answers when the write happens, as POSIX leaves
+    // access(2) advisory. Execute is the one question the bits answer.
+    if (mode & W_OK && this.ws.registry.tryMountFor(path)?.mode === MountMode.READ) {
+      throw refusal('EACCES', 'access', path)
+    }
+    if (mode & X_OK && (st.mode & 0o111) === 0) throw refusal('EACCES', 'access', path)
+  }
+
+  async appendFile(path: string, data: unknown, options?: Options): Promise<void> {
+    await this.files.append(path, bytesOf(data, options))
+  }
+
+  async chmod(path: string, mode: number | string): Promise<void> {
+    await this.files.setattr(path, { mode: typeof mode === 'string' ? parseInt(mode, 8) : mode })
+  }
+
+  async lchmod(path: string, mode: number | string): Promise<void> {
+    const bits = typeof mode === 'string' ? parseInt(mode, 8) : mode
+    await this.files.setattr(path, { mode: bits, nofollow: true })
+  }
+
+  async chown(path: string, uid: number, gid: number, nofollow = false): Promise<void> {
+    // -1 is POSIX's "leave this one alone"; passing it on would store it.
+    const attrs: SetAttrFields = nofollow ? { nofollow: true } : {}
+    if (uid !== -1) attrs.uid = uid
+    if (gid !== -1) attrs.gid = gid
+    await this.files.setattr(path, attrs)
+  }
+
+  async lchown(path: string, uid: number, gid: number): Promise<void> {
+    await this.chown(path, uid, gid, true)
+  }
+
+  async copyFile(src: string, dst: string, mode = 0): Promise<void> {
+    const data = this.mounted(src)
+      ? await this.files.read(src)
+      : await this.nativeCall('readFile', src)
+    if (mode & COPYFILE_EXCL && (await this.exists(dst))) throw refusal('EEXIST', 'copyfile', dst)
+    if (this.mounted(dst)) await this.files.write(dst, data as Uint8Array)
+    else await this.nativeCall('writeFile', dst, data)
+  }
+
+  async exists(path: string): Promise<boolean> {
+    if (!this.mounted(path)) {
+      return this.nativeCall('access', path).then(
+        () => true,
+        () => false,
+      )
+    }
+    try {
+      return (await this.files.statOrNull(path)) !== null
+    } catch {
+      return false
+    }
+  }
+
+  async lstat(path: string): Promise<unknown> {
+    return this.statsOf(path, await this.files.stat(path, true))
+  }
+
+  async lutimes(path: string, atime: unknown, mtime: unknown): Promise<void> {
+    await this.files.setattr(path, { atime: stampOf(atime), mtime: stampOf(mtime), nofollow: true })
+  }
+
+  async mkdir(path: string, options?: Options): Promise<undefined> {
+    if (typeof options !== 'object' || options.recursive !== true) {
+      await this.files.mkdir(path)
+      return undefined
+    }
+    // Each missing ancestor in turn, stopping at the mount root, as
+    // python's makedirs does: a backend's mkdir is one level, and the
+    // mount root is the deployment's own and refused (EBUSY).
+    const root = (this.ws.registry.tryMountFor(path)?.prefix ?? '/').replace(/\/$/, '')
+    const missing: string[] = []
+    for (let probe = path.replace(/\/$/, ''); probe !== '' && probe !== '/' && probe !== root;) {
+      const st = await this.files.statOrNull(probe)
+      if (st !== null) {
+        if (!st.isDir) throw refusal('ENOTDIR', 'mkdir', probe)
+        break
+      }
+      missing.push(probe)
+      probe = posix.dirname(probe)
+    }
+    for (const dir of missing.reverse()) await this.files.mkdir(dir)
+    return undefined
+  }
+
+  async readFile(path: string, options?: Options): Promise<Buffer | string> {
+    const bytes = Buffer.from(await this.files.read(path))
+    const encoding = encodingOf(options)
+    return encoding === undefined ? bytes : bytes.toString(encoding)
+  }
+
+  async readdir(path: string, options?: Options): Promise<unknown[]> {
+    const typed = typeof options === 'object' && options.withFileTypes === true
+    const recursive = typeof options === 'object' && options.recursive === true
+    const out: unknown[] = []
+    const walk = async (directory: string, prefix: string): Promise<void> => {
+      for (const row of await this.files.readdir(directory, typed || recursive)) {
+        const name = leaf(row.path)
+        out.push(typed ? this.direntOf(directory, row) : prefix + name)
+        if (recursive && row.isDir && row.isLink !== true) {
+          await walk(posix.join(directory, name), `${prefix}${name}/`)
+        }
+      }
+    }
+    await walk(path, '')
+    return out
+  }
+
+  async readlink(path: string): Promise<string> {
+    return this.files.readlink(path)
+  }
+
+  async rename(src: string, dst: string): Promise<void> {
+    // A move between a mount and the host is EXDEV, the kernel's answer
+    // for two filesystems and the errno a mover retries as copy + delete.
+    if (!this.mounted(src) || !this.mounted(dst)) throw refusal('EXDEV', 'rename', src)
+    await this.files.rename(src, dst)
+  }
+
+  async rm(path: string, options?: Options): Promise<void> {
+    const force = typeof options === 'object' && options.force === true
+    const recursive = typeof options === 'object' && options.recursive === true
+    let st: VFSStat
+    try {
+      st = await this.files.stat(path, true)
+    } catch (err) {
+      if (force && isMissingPath(err)) return
+      throw err
+    }
+    if (!st.isDir) {
+      await this.files.unlink(path)
+      return
+    }
+    if (!recursive) throw refusal('EISDIR', 'rm', path)
+    for (const row of await this.files.readdir(path, false)) {
+      await this.rm(posix.join(path, leaf(row.path)), options)
+    }
+    await this.files.rmdir(path)
+  }
+
+  async rmdir(path: string): Promise<void> {
+    await this.files.rmdir(path)
+  }
+
+  async stat(path: string): Promise<unknown> {
+    return this.statsOf(path, await this.files.stat(path))
+  }
+
+  async symlink(target: unknown, path: string): Promise<void> {
+    await this.files.symlink(path, String(target))
+  }
+
+  async truncate(path: string, length = 0): Promise<void> {
+    await this.files.truncate(path, length)
+  }
+
+  async unlink(path: string): Promise<void> {
+    await this.files.unlink(path)
+  }
+
+  async utimes(path: string, atime: unknown, mtime: unknown): Promise<void> {
+    await this.files.setattr(path, { atime: stampOf(atime), mtime: stampOf(mtime) })
+  }
+
+  async writeFile(path: string, data: unknown, options?: Options): Promise<void> {
+    const flag =
+      typeof options === 'object' && typeof options.flag === 'string' ? options.flag : 'w'
+    const bytes = bytesOf(data, options)
+    if (flag.startsWith('a')) {
+      await this.files.append(path, bytes)
+      return
+    }
+    if (flag.includes('x') && (await this.files.statOrNull(path, true)) !== null) {
+      throw refusal('EEXIST', 'open', path)
+    }
+    await this.files.write(path, bytes)
+  }
+}
+
+/**
+ * Point node's own `fs` at the workspace for every mounted path.
+ *
+ * Each name in `constants.ts` is swapped on the CommonJS `fs` object
+ * and on `fs.promises`, in all the spellings node has: a routed call
+ * goes through the workspace, a refused one answers its condition, and
+ * a sync spelling refuses a mounted path, since the workspace answers
+ * asynchronously. A path no mount owns reaches node's own function in
+ * every spelling, so the rest of the process keeps its filesystem. ESM
+ * named imports of `node:fs/promises` keep node's functions: an ES
+ * module binds them at link time, which is also why a node backend's
+ * own host I/O never routes back into the workspace.
+ *
+ * Returns a `restore()` that puts every swapped function back.
+ */
+export function patchNodeFs(ws: Workspace): () => void {
+  const native: FsObject = { ...fs, promises: { ...fs.promises } }
+  const host = new HostFs(ws, native)
+  const swapped: [FsObject, string, unknown][] = []
+  const swap = (target: FsObject, name: string, make: (original: Fn) => Fn): void => {
+    const original = target[name]
+    if (typeof original !== 'function') return
+    swapped.push([target, name, original])
+    target[name] = make(original as Fn)
+  }
+  // The mounted path a call names, or null when every path it takes is
+  // the host's, which leaves the call to node.
+  const mountedIn = (name: string, args: unknown[]): string | null => {
+    for (const index of PATH_ARGS[name] ?? [0]) {
+      const path = spelled(args[index])
+      if (host.mounted(path)) return path
+    }
+    return null
+  }
+  const spellPaths = (name: string, args: unknown[]): unknown[] => {
+    const positions = PATH_ARGS[name] ?? [0]
+    return args.map((arg, index) => (positions.includes(index) ? (spelled(arg) ?? arg) : arg))
+  }
+
+  for (const name of ROUTED_CALLS) {
+    const route = (args: unknown[]): Promise<unknown> =>
+      (host[name] as (...a: unknown[]) => Promise<unknown>).call(host, ...spellPaths(name, args))
+    swap(
+      fs.promises,
+      name,
+      (original) =>
+        (...args) =>
+          mountedIn(name, args) === null ? original(...args) : route(args),
+    )
+    swap(fs, name, (original) => (...args) => {
+      const done = args.at(-1)
+      const rest = args.slice(0, -1)
+      if (typeof done !== 'function' || mountedIn(name, rest) === null) return original(...args)
+      const callback = done as Callback
+      // `exists` is the one callback without an error slot.
+      route(rest).then(
+        (value) => {
+          if (name === 'exists') callback(value)
+          else callback(null, value)
+        },
+        (err: unknown) => {
+          if (name === 'exists') callback(false)
+          else callback(err)
+        },
+      )
+      return undefined
+    })
+    swap(fs, `${name}Sync`, (original) => (...args) => {
+      const path = mountedIn(name, args)
+      if (path !== null) throw syncRefusal(`${name}Sync`, path)
+      return original(...args)
+    })
+  }
+
+  for (const [name, condition] of Object.entries(REFUSED_CALLS)) {
+    swap(fs.promises, name, (original) => (...args) => {
+      const path = mountedIn(name, args)
+      return path === null ? original(...args) : Promise.reject(refusal(condition, name, path))
+    })
+    swap(fs, name, (original) => (...args) => {
+      const path = mountedIn(name, args)
+      if (path === null) return original(...args)
+      const err = refusal(condition, name, path)
+      const done = args.at(-1)
+      if (typeof done !== 'function') throw err
+      process.nextTick(done as Callback, err)
+      return undefined
+    })
+    swap(fs, `${name}Sync`, (original) => (...args) => {
+      const path = mountedIn(name, args)
+      if (path !== null) throw refusal(condition, `${name}Sync`, path)
+      return original(...args)
+    })
+  }
+
+  return function restore(): void {
+    for (const [target, name, original] of swapped.reverse()) target[name] = original
+  }
+}

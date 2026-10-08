@@ -21,7 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { DiskVFS } from '../../../vfs/disk/disk.ts'
-import { patchNodeFs } from './os_patch.ts'
+import { patchNodeFs } from './fs.ts'
 import { Workspace } from '../../../workspace.ts'
 
 type Fs = typeof fs
@@ -91,6 +91,80 @@ describe('patchNodeFs — mounted paths', () => {
   })
 })
 
+describe('patchNodeFs — routed calls', () => {
+  it('serves every routed spelling on a mount', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+
+    await fs.promises.mkdir('/data/a/b', { recursive: true })
+    await fs.promises.writeFile('/data/a/b/f.txt', 'hi')
+    await fs.promises.appendFile('/data/a/b/f.txt', '!')
+    await fs.promises.access('/data/a/b/f.txt')
+    await fs.promises.copyFile('/data/a/b/f.txt', '/data/a/g.txt')
+    await fs.promises.chmod('/data/a/g.txt', 0o600)
+    await fs.promises.truncate('/data/a/g.txt', 2)
+    await fs.promises.utimes('/data/a/g.txt', 1_700_000_000, 1_700_000_123)
+    await fs.promises.symlink('g.txt', '/data/a/l')
+    const st = await fs.promises.stat('/data/a/g.txt')
+    expect([st.size, st.mode & 0o777, st.mtimeMs]).toEqual([2, 0o600, 1_700_000_123_000])
+    expect((await fs.promises.lstat('/data/a/l')).isSymbolicLink()).toBe(true)
+    expect(await fs.promises.readlink('/data/a/l')).toBe('g.txt')
+    const typed = await fs.promises.readdir('/data/a', { withFileTypes: true })
+    expect(typed.map((d) => [d.name, d.isDirectory(), d.isSymbolicLink()]).sort()).toEqual([
+      ['b', true, false],
+      ['g.txt', false, false],
+      ['l', false, true],
+    ])
+    expect((await fs.promises.readdir('/data/a', { recursive: true })).sort()).toEqual([
+      'b',
+      'b/f.txt',
+      'g.txt',
+      'l',
+    ])
+    await fs.promises.rename('/data/a/g.txt', '/data/a/h.txt')
+    const exists = (p: string): Promise<boolean> =>
+      new Promise((resolve) => {
+        // eslint-disable-next-line @typescript-eslint/no-deprecated
+        fs.exists(p, resolve)
+      })
+    expect(await exists('/data/a/h.txt')).toBe(true)
+    await fs.promises.rm('/data/a', { recursive: true })
+    expect(await exists('/data/a')).toBe(false)
+    await ws.close()
+  })
+
+  it('copies between a mount and the host', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const real = join(scratch, 'in.txt')
+    writeFileSync(real, 'from the host')
+
+    await fs.promises.copyFile(real, '/data/in.txt')
+    await fs.promises.copyFile('/data/in.txt', join(scratch, 'out.txt'))
+    expect(await fs.promises.readFile('/data/in.txt', 'utf-8')).toBe('from the host')
+    expect(await fs.promises.readFile(join(scratch, 'out.txt'), 'utf-8')).toBe('from the host')
+    await ws.close()
+  })
+
+  it('leaves every spelling to node on a path no mount owns', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const real = join(scratch, 'r.txt')
+    writeFileSync(real, 'R')
+
+    await fs.promises.access(real)
+    await fs.promises.appendFile(real, 'S')
+    expect((await fs.promises.lstat(real)).size).toBe(2)
+    await fs.promises.rename(real, `${real}2`)
+    expect(fs.readFileSync(`${real}2`, 'utf-8')).toBe('RS')
+    expect(fs.existsSync(`${real}2`)).toBe(true)
+    await ws.close()
+  })
+})
+
 describe('patchNodeFs — ledger', () => {
   it('records each call on ws.vfs.records', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
@@ -132,6 +206,48 @@ describe('patchNodeFs — refusals', () => {
     const patched = op === 'read' ? fs.promises.readFile(path) : fs.promises.writeFile(path, 'x')
     await expect(direct).rejects.toMatchObject({ code })
     await expect(patched).rejects.toMatchObject({ code })
+    await ws.close()
+  })
+})
+
+describe('patchNodeFs — what a mount cannot serve', () => {
+  it.each([
+    [
+      'rename across the mount edge',
+      'EXDEV',
+      (fs: Fs) => fs.promises.rename('/data/f.txt', join(scratch, 'x')),
+    ],
+    ['a hard link', 'EPERM', (fs: Fs) => fs.promises.link('/data/f.txt', '/data/g.txt')],
+    ['a descriptor', 'ENOTSUP', (fs: Fs) => fs.promises.open('/data/f.txt')],
+    [
+      'an exclusive create of a name that is there',
+      'EEXIST',
+      (fs: Fs) => fs.promises.writeFile('/data/f.txt', 'x', { flag: 'wx' }),
+    ],
+    ['rm of a directory without recursive', 'EISDIR', (fs: Fs) => fs.promises.rm('/data/d')],
+    [
+      'a sync spelling',
+      'ENOTSUP',
+      (fs: Fs) => Promise.resolve().then(() => fs.statSync('/data/f.txt')),
+    ],
+  ] as const)('refuses %s with %s', async (_label, code, call) => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/f.txt', 'f')
+    await ws.vfs.mkdir('/data/d')
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await expect(call(fs)).rejects.toMatchObject({ code })
+    await ws.close()
+  })
+
+  it('answers a refused callback spelling through its callback', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const err = await new Promise((resolve) => {
+      fs.link('/data/a', '/data/b', resolve)
+    })
+    expect(err).toMatchObject({ code: 'EPERM', syscall: 'link', path: '/data/a' })
     await ws.close()
   })
 })

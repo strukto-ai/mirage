@@ -132,7 +132,7 @@ runs the full PKCE dance end-to-end and persists the refresh token to `localStor
 
 ## VFS mode (`patchNodeFs`)
 
-Mirage exposes a `patchNodeFs(workspace)` shim that routes `fs.promises.*` calls under a mount
+Mirage exposes a `patchNodeFs(workspace)` shim that routes `fs` calls under a mount
 through the workspace, so any library that uses Node's `fs` API can read directly from Dropbox
 without code changes.
 
@@ -153,8 +153,8 @@ const bytes = await fs.promises.readFile('/dropbox/data/example.parquet')
 restore()
 ```
 
-Only `fs.promises.*` (the async API) is patched. Sync forms like `fs.statSync` and
-`fs.readFileSync` aren't supported because remote reads can't block the event loop.
+The async forms (`fs.promises.*` and the callbacks) are routed. Sync forms like `fs.statSync` and
+`fs.readFileSync` refuse a mounted path because remote reads can't block the event loop.
 
 ## FUSE mode
 
