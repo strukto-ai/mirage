@@ -49,7 +49,7 @@ Pyodide is an optional peer dependency of `@struktoai/mirage-core`. Workspaces t
 
 <CodeGroup>
 ```bash Node
-pnpm add @struktoai/mirage-node pyodide
+pnpm add @struktoai/mirage-node @struktoai/mirage-core pyodide
 ```
 ```bash Browser
 pnpm add @struktoai/mirage-browser pyodide
@@ -75,20 +75,61 @@ Initialization and package imports run for each command. Explicit console
 evaluation sessions retain their own interpreter until the runtime closes;
 one-shot evaluations and other sessions do not share that state.
 
-### 2. No true CPU parallelism within a workspace
+### 2. Concurrency is bounded and defaults to one
 
-Mirage serializes ordinary `python3` calls through the runtime's queue, even
-though each call receives a fresh interpreter.
+Set `maxConcurrency` in the Pyodide runtime's config to allow independent
+top-level commands, one-shot evaluations, and different named console
+sessions to run concurrently. It must be a positive safe integer and
+defaults to `1`. Additional calls wait for a slot; feeds to the same named
+console always run one at a time. Each command still receives a fresh
+interpreter. Nested subprocess calls bypass this limit so a parent waiting
+for its child cannot deadlock.
+
+Shell calls in the same session stay ordered, including calls using the
+default session. Create distinct sessions and pass their `sessionId` to
+run independent shell calls concurrently:
 
 ```ts
-// Runs in ~2s total, not ~1s:
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide'
+
+const ws = new Workspace(
+  { '/data': new RAMVFS() },
+  {
+    mode: MountMode.EXEC,
+    runtimes: [new PyodideRuntime({ config: { maxConcurrency: 2 } }), 'workspace'],
+  },
+)
+
+for (const sessionId of ['python-one', 'python-two', 'python-three']) {
+  ws.createSession(sessionId)
+}
+
 await Promise.all([
-  ws.shell(`python3 -c "import time; time.sleep(1)"`),
-  ws.shell(`python3 -c "import time; time.sleep(1)"`),
+  ws.shell(`python3 -c "print(sum(range(1_000_000)))"`, { sessionId: 'python-one' }),
+  ws.shell(`python3 -c "print(sum(range(2_000_000)))"`, { sessionId: 'python-two' }),
+  ws.shell(`python3 -c "print(sum(range(3_000_000)))"`, { sessionId: 'python-three' }),
 ])
 ```
 
-For parallelism, use separate workspaces. Envs and `sys.modules` are fully isolated across workspaces.
+The YAML key is `max_concurrency`, inside the runtime's `config` block:
+
+```yaml
+runtimes:
+  - name: pyodide
+    config:
+      max_concurrency: 2
+  - workspace
+mounts:
+  /data:
+    vfs: ram
+```
+
+Hosts that cannot isolate asynchronous task context use an effective limit
+of `1`. CPU parallelism also requires workers and `SharedArrayBuffer`;
+without them, Python executes on the host thread. Each active call has its
+own interpreter, so raising the limit increases memory use and does not
+remove interpreter startup cost.
 
 ### 3. No real OS file descriptors
 
@@ -184,7 +225,7 @@ PYEOF`)
 | Cross-workspace env isolation | fresh interpreter per command |
 | Cross-call env isolation | fresh interpreter per command |
 | `sys.modules` fresh per call | fresh interpreter with configured initialization |
-| True CPU parallelism within one workspace | serialized; use separate workspaces |
+| True CPU parallelism within one workspace | opt in with `maxConcurrency`; requires workers, shared memory, and isolated task context |
 | `select()` / `poll()` / `fcntl()` on stdin | no real fds in WASM |
 | `open('/<mount>/...')` inside Python | via Mirage's own filesystem, collected before the run + replayed after |
 | `pip install` at runtime | pre-bundle instead |
