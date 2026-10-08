@@ -408,6 +408,40 @@
         "stderr": ""
       },
       "note": "bash draws RANDOM more than once inside some operators (`${#RANDOM}` consumes two draws, `${RANDOM/1/X}` three, pinned on 5.2); that re-evaluation is bash's own and is not modelled, so only the single-draw forms are pinned."
+    },
+    {
+      "id": "integer_array_element_writes_leave_the_rest",
+      "seq": 746,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( x=4; A=(0 'x++'); declare -i A; let 'A[0]=1'; (( A[0]+=1 )); : $(( A[0]*=3 )); read 'A[2]' <<< 5; printf -v 'A[3]' 7; declare -i n; n='A[4]=9'; echo \"x=$x n=$n\"; declare -p A )",
+      "expect": {
+        "exit": 0,
+        "stdout": "x=4 n=9\ndeclare -ai A=([0]=\"6\" [1]=\"x++\" [2]=\"5\" [3]=\"7\" [4]=\"9\")\n",
+        "stderr": ""
+      }
     }
   ]
 }

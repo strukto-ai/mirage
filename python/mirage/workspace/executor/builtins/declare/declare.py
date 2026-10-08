@@ -18,7 +18,6 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
-from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (
     array_get,
     array_set,
@@ -56,18 +55,14 @@ from mirage.workspace.executor.builtins.shared import (
     require_view,
 )
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import (
     conversion_scalar,
     deref,
     in_call_env,
     outlive_call,
-    random_reader,
-    session_elements,
     set_attr,
     shadow_local,
     subscript_index,
-    visible_env,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -326,52 +321,6 @@ async def drop_reference(
     var = session.vars.get(target)
     if var is not None and VarAttr.NAMEREF in var.attrs:
         await view.mark(target, VarAttr.NAMEREF, False)
-
-
-async def evaluate_value(
-    session: SessionState, view: SessionView, cmd: str, text: str
-) -> str | None:
-    """Evaluate a value as arithmetic the way an ``-i`` write coerces it,
-    landing the assignments it makes, without storing a result: what
-    bash does with a ``-n`` value under ``-i`` before refusing it
-    (``M='X=5'; declare -ni r=M`` sets ``X``).
-
-    Args:
-        session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
-        cmd (str): the builtin's spelling, for a readonly refusal.
-        text (str): the value.
-
-    Returns:
-        The readonly refusal line when an assignment meets a frozen
-        name, else None.
-
-    Raises:
-        PolicyDenied: the gate refused an assignment.
-        ArithError: the value is malformed; the assignments it made
-            before the error have landed.
-    """
-    reader = random_reader(session)
-    error: ArithError | None = None
-    try:
-        result = evaluate_arith(
-            text,
-            visible_env(session),
-            elements=session_elements(session, reader),
-            read_var=reader.read,
-            wrote_var=reader.wrote,
-        )
-        writes = result.writes
-    except ArithError as exc:
-        error, writes = exc, exc.writes
-    for write in writes:
-        if view.is_readonly(write.name):
-            return readonly_line(cmd, write.name)
-        await assign_element(session, view, write.name, write.key, write.value)
-    reader.settle()
-    if error is not None:
-        raise ArithError(f"{text}: {error}") from error
-    return None
 
 
 def visible_record(session: SessionState, name: str) -> ShellVar | None:
@@ -1240,29 +1189,28 @@ def nameref_refusal(cmd: str, name: str, target: str) -> str | None:
 
 
 def reference_refusal(
-    cmd: str, name: str, own: ShellVar | None, target: str | None
+    cmd: str, name: str, own: ShellVar | None, bare: bool
 ) -> str | None:
-    """The line a ``declare -n`` operand earns before anything else,
-    readonly included (pinned on 5.2.37).
+    """The line the name a ``declare -n`` operand lands on earns, ahead
+    of its readonly mark (pinned on 5.2.37).
 
     An array cannot become a reference (``reference variable cannot be
-    an array``). A value names the target (``nameref_refusal``); a bare
-    ``declare -n NAME`` aims the name at the value it already holds, so
-    that value has to name a variable, though here it may name NAME
-    itself.
+    an array``). A given value was judged on its own
+    (``nameref_refusal``); a bare ``declare -n NAME`` aims the name at
+    the value it already holds, so that value has to name a variable,
+    though here it may name NAME itself.
 
     Args:
         cmd (str): the builtin's spelling, for the diagnostic.
         name (str): the reference being declared.
         own (ShellVar | None): the record the operand lands on.
-        target (str | None): the value given, None for a bare name.
+        bare (bool): the operand gave no value.
     """
     if own is not None and isinstance(own.value, (list, dict)):
         return f"bash: {cmd}: {name}: reference variable cannot be an array"
-    if target is not None:
-        return nameref_refusal(cmd, name, target)
     if (
-        own is None
+        not bare
+        or own is None
         or not isinstance(own.value, str)
         or VarAttr.NAMEREF in own.attrs
         or own.value == name

@@ -14,10 +14,10 @@
 
 import errno
 import functools
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import replace
 
-from mirage.ops.types import SessionView
+from mirage.ops.types import EnvSet, SessionView
 from mirage.policy import Policies, PolicyDenied, pre_session_gate
 from mirage.policy.types import SessionContext
 from mirage.shell.arith import evaluate_arith
@@ -39,7 +39,7 @@ from mirage.shell.constants import (
     RANDOM_MODULUS,
     RANDOM_UNSET,
 )
-from mirage.shell.errors import ArithError
+from mirage.shell.errors import ArithError, DiscardSignal
 from mirage.shell.types import ArithWrite, ElementOps
 from mirage.shell.variable import (
     ShellValue,
@@ -396,26 +396,50 @@ def element_index(
         return 0
 
 
-def _written_value(session: SessionState, write: ArithWrite) -> ShellValue:
-    """The whole variable one arithmetic write produces.
+async def _land_writes(
+    session: SessionState, store: EnvSet, writes: Sequence[ArithWrite]
+) -> None:
+    """Land arithmetic assignments in order, each as the whole variable
+    it produces, so a refusal never leaves one half-applied.
 
     A scalar is itself; an element is the array it lands in, the way
-    ``assign_element`` lands one, so a refusal never leaves a write
-    half-applied.
+    ``assign_element`` lands one, naming the element it assigns so an
+    ``-i`` array never runs its other elements again
+    (``A=(0 'x++'); declare -i A; (( A[0]=9 ))`` leaves ``x++``). A
+    readonly name is an error in the expression, which discards the
+    line as bash's does (``declare -i n; ( n='R=3'; echo no )`` ends
+    only the subshell).
 
     Args:
-        session (SessionState): the session the write reads.
-        write (ArithWrite): the assignment.
+        session (SessionState): the session the writes read.
+        store (EnvSet): the door each write goes through.
+        writes (Sequence[ArithWrite]): the assignments, in order.
+
+    Raises:
+        DiscardSignal: an assignment named a readonly variable.
+        PolicyDenied: the door refused an assignment.
     """
-    if write.key is None:
-        return write.value
-    assoc = visible_assocs(session).get(write.name)
-    if assoc is not None:
-        return {**assoc, write.key: write.value}
-    arr = visible_arrays(session).get(write.name)
-    return array_with(
-        arr if arr is not None else make_array([]), int(write.key), write.value
-    )
+    for write in writes:
+        value: ShellValue = write.value
+        assigned: frozenset[int | str] | None = None
+        if write.key is not None:
+            assoc = visible_assocs(session).get(write.name)
+            if assoc is not None:
+                value = {**assoc, write.key: write.value}
+                assigned = frozenset({write.key})
+            else:
+                arr = visible_arrays(session).get(write.name)
+                index = int(write.key)
+                value = array_with(
+                    arr if arr is not None else make_array([]),
+                    index,
+                    write.value,
+                )
+                assigned = frozenset({index})
+        try:
+            await store(write.name, value, assigned=assigned)
+        except ReadonlyVariableError as exc:
+            raise DiscardSignal(encode_text(f"{exc}\n")) from exc
 
 
 async def subscript_index(
@@ -464,12 +488,13 @@ async def subscript_index(
         idx, writes = result.value, result.writes
     except ArithError as exc:
         error, writes = exc, exc.writes
-    for write in writes:
-        value = _written_value(session, write)
-        if view is not None:
-            await view.set(write.name, value)
-        else:
-            await set_var(session, None, write.name, value)
+    await _land_writes(
+        session,
+        view.set
+        if view is not None
+        else functools.partial(set_var, session, None),
+        writes,
+    )
     reader.settle()
     if error is not None:
         raise ArithError(f"{subscript.strip()}: {error}") from error
@@ -840,15 +865,42 @@ async def _land_coercion(
         policies (Policies | None): the session plane's gate.
         coercion (_IntegerCoercion): the evaluation that made the writes.
     """
-    for write in coercion.writes:
-        await set_var(
-            session,
-            policies,
-            write.name,
-            _written_value(session, write),
-            diagnostics=diagnostics,
-        )
+    await _land_writes(
+        session,
+        functools.partial(set_var, session, policies, diagnostics=diagnostics),
+        coercion.writes,
+    )
     coercion.reader.settle()
+
+
+async def evaluate_integer(
+    session: SessionState, view: SessionView, text: str
+) -> None:
+    """Evaluate ``text`` as an ``-i`` write coerces it and land what it
+    assigns through ``view``, storing no result: a ``declare -ni r=M``
+    value, which bash evaluates before refusing the reference
+    (``M='X=5'`` sets X). Inside a ``declare -g`` it reads the
+    function's scope, as the coercion does.
+
+    Args:
+        session (SessionState): shell session state.
+        view (SessionView): the session plane's gated door.
+        text (str): the value.
+
+    Raises:
+        PolicyDenied: an assignment named a hidden variable or the gate
+            refused it; the ones before it have landed.
+        ReadonlyVariableError: an assignment named a readonly variable,
+            which ends the line, as bash's does.
+        ArithError: the text does not evaluate; the assignments made
+            before the error have landed.
+    """
+    coercion = _IntegerCoercion(session)
+    try:
+        coercion(text)
+    finally:
+        await _land_writes(session, view.set, coercion.writes)
+        coercion.reader.settle()
 
 
 def ensure_var_visible(session: SessionState, name: str) -> None:

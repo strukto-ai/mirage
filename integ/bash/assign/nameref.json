@@ -441,6 +441,142 @@
         "stdout": "rc=1 X=5\nunset\nrc=1\ndeclare -inrx r=\"T\"\nrc=1\ndeclare -inrx r=\"T\"\n",
         "stderr": "bash: declare: r: readonly variable\n"
       }
+    },
+    {
+      "id": "nameref_array_reports_before_readonly",
+      "seq": 940126,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( readonly -a A=(one); declare -n A=T; echo rc=$?; declare -n A=''; echo rc=$?; declare -n A+=1bad; echo rc=$?; declare -p A; f(){ local -n A=T; echo rc=$?; }; f; readonly R=1; declare -n R=''; echo rc=$? )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\ndeclare -ar A=([0]=\"one\")\nrc=1\nrc=1\n",
+        "stderr": "bash: declare: A: reference variable cannot be an array\nbash: declare: A: reference variable cannot be an array\nbash: declare: A: reference variable cannot be an array\nbash: local: A: readonly variable\nbash: declare: R: readonly variable\n"
+      }
+    },
+    {
+      "id": "nameref_empty_value_keeps_marks",
+      "seq": 940127,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( unset y; x=1; declare -nrx x=''; echo rc=$?; declare -p x; declare -n y=''; echo rc=$?; declare -p y 2>/dev/null || echo unset; declare -i n=1; declare -n n+=''; echo rc=$?; declare -p n; f(){ local -ni z=''; echo rc=$?; declare -p z; }; f )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ndeclare -rx x=\"1\"\nrc=1\nunset\nrc=1\ndeclare -- n=\"1\"\nrc=1\ndeclare -i z\n",
+        "stderr": "bash: declare: `': not a valid identifier\nbash: declare: `': not a valid identifier\nbash: declare: `': not a valid identifier\nbash: local: `': not a valid identifier\n"
+      }
+    },
+    {
+      "id": "nameref_append_and_shaping_marks",
+      "seq": 940128,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( x=1; declare -nx x+=T; echo rc=$?; declare -p x; v=a; declare -n v+=1; declare -p v; declare -l w=T; declare -n w=U; declare -p w; declare -i k=1; declare -n k=T; declare -p k; declare -n r=T; X=old; M='X=5'; declare -ni r+=M; echo \"rc=$? X=$X\"; declare -p r )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ndeclare -x x=\"1\"\ndeclare -n v=\"a1\"\ndeclare -n w=\"U\"\ndeclare -n k=\"T\"\nrc=1 X=5\ndeclare -in r=\"T\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nameref_integer_value_reads_scope_ends_on_readonly",
+      "seq": 940129,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( X=0; r=1; M='X=r'; f(){ local r=2; declare -gni r=M; }; f; echo \"X=$X\"; x=4; A=(0 'x++'); declare -i A; M='A[0]=9'; declare -ni q=M; echo \"x=$x\"; declare -p A; ( readonly R=1; M='R=3'; declare -ni q=M; echo unreached ); echo \"rc=$?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "X=2\nx=4\ndeclare -ai A=([0]=\"9\" [1]=\"x++\")\nrc=1\n",
+        "stderr": "bash: R: readonly variable\n"
+      }
     }
   ]
 }

@@ -13,9 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { storedFunctionText } from '../../../../shell/printer.ts'
-import { evaluateArith } from '../../../../shell/arith.ts'
-import type { ArithWrite } from '../../../../shell/types.ts'
-import { assignElement } from '../../../session/elements.ts'
 import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { ArithError, DiscardSignal } from '../../../../shell/errors.ts'
@@ -36,12 +33,9 @@ import {
   deref,
   inCallEnv,
   outliveCall,
-  randomReader,
-  sessionElements,
   setAttr,
   shadowLocal,
   subscriptIndex,
-  visibleEnv,
 } from '../../../session/state.ts'
 import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
@@ -244,46 +238,6 @@ export async function dropReference(
   if (sessionEntry(session.vars, target)?.attrs.has(VarAttr.Nameref) === true) {
     await view.mark(target, VarAttr.Nameref, false)
   }
-}
-
-/**
- * Evaluate a value as arithmetic the way an `-i` write coerces it, landing
- * the assignments it makes, without storing a result: what bash does with a
- * `-n` value under `-i` before refusing it (`M='X=5'; declare -ni r=M` sets
- * `X`). Returns the readonly refusal line when an assignment meets a frozen
- * name, else null; a policy denial throws, and a malformed value throws its
- * ArithError once the assignments before the error have landed.
- */
-export async function evaluateValue(
-  session: SessionState,
-  view: SessionView,
-  cmd: string,
-  text: string,
-): Promise<string | null> {
-  const reader = randomReader(session)
-  let error: ArithError | null = null
-  let writes: readonly ArithWrite[]
-  try {
-    writes = evaluateArith(
-      text,
-      visibleEnv(session),
-      0,
-      sessionElements(session, reader),
-      reader.read,
-      reader.wrote,
-    ).writes
-  } catch (err) {
-    if (!(err instanceof ArithError)) throw err
-    error = err
-    writes = err.writes
-  }
-  for (const write of writes) {
-    if (view.isReadonly(write.name)) return readonlyLine(cmd, write.name)
-    await assignElement(session, view, write.name, write.key, write.value)
-  }
-  reader.settle()
-  if (error !== null) throw new ArithError(`${text}: ${error.message}`)
-  return null
 }
 
 /**
@@ -986,24 +940,24 @@ export function namerefRefusal(cmd: string, name: string, target: string): strin
 }
 
 /**
- * The line a `declare -n` operand earns before anything else, readonly
- * included (pinned on 5.2.37). An array cannot become a reference
- * (`reference variable cannot be an array`). A value names the target
- * (`namerefRefusal`); a bare `declare -n NAME` (`target` null) aims the name
- * at the value it already holds, so that value has to name a variable,
- * though here it may name NAME itself.
+ * The line the name a `declare -n` operand lands on earns, ahead of its
+ * readonly mark (pinned on 5.2.37). An array cannot become a reference
+ * (`reference variable cannot be an array`). A given value was judged on
+ * its own (`namerefRefusal`); a bare `declare -n NAME` aims the name at the
+ * value it already holds, so that value has to name a variable, though here
+ * it may name NAME itself.
  */
 export function referenceRefusal(
   cmd: string,
   name: string,
   own: ShellVar | undefined,
-  target: string | null,
+  bare: boolean,
 ): string | null {
   if (own !== undefined && own.value !== null && typeof own.value === 'object') {
     return `bash: ${cmd}: ${name}: reference variable cannot be an array`
   }
-  if (target !== null) return namerefRefusal(cmd, name, target)
   if (
+    !bare ||
     own === undefined ||
     typeof own.value !== 'string' ||
     own.attrs.has(VarAttr.Nameref) ||

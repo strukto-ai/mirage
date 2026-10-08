@@ -144,13 +144,14 @@ async def assign_element(
         return "readonly"
     amap = session.assocs.get(name)
     stored: ShellValue
+    assigned: frozenset[int | str] | None = None
     if amap is not None:
         key = "0" if subscript is None else subscript
         if key == "":
             return "subscript"
         updated = dict(amap)
         updated[key] = (amap.get(key, "") + value) if append else value
-        stored = updated
+        stored, assigned = updated, frozenset({key})
     else:
         arr = session.arrays.get(name)
         if subscript is None and arr is None:
@@ -173,8 +174,9 @@ async def assign_element(
                 return "subscript"
             base = array_get(arr, idx) if append else ""
             stored = array_with(arr, idx, base + value)
+            assigned = frozenset({idx})
     if view is not None:
-        await view.set(name, stored)
+        await view.set(name, stored, assigned=assigned)
         return "ok"
     seed_var(session, name, stored)
     return "ok"

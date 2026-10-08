@@ -33,7 +33,7 @@ import {
   RANDOM_UNSET,
 } from '../../shell/constants.ts'
 import { encodeText } from '../../shell/bytes.ts'
-import { ArithError } from '../../shell/errors.ts'
+import { ArithError, DiscardSignal } from '../../shell/errors.ts'
 import type { ArithWrite, ElementOps } from '../../shell/types.ts'
 import { varHidden } from '../../utils/hidden.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -387,16 +387,43 @@ export function sessionElements(
 }
 
 /**
- * The whole variable one arithmetic write produces. A scalar is itself;
- * an element is the array it lands in, the way `assignElement` lands
- * one, so a refusal never leaves a write half-applied.
+ * Land arithmetic assignments in order, each as the whole variable it
+ * produces, so a refusal never leaves one half-applied. A scalar is itself;
+ * an element is the array it lands in, the way `assignElement` lands one,
+ * naming the element it assigns so an `-i` array never runs its other
+ * elements again (`A=(0 'x++'); declare -i A; (( A[0]=9 ))` leaves `x++`).
+ * A readonly name is an error in the expression, which discards the line as
+ * bash's does (`declare -i n; ( n='R=3'; echo no )` ends only the
+ * subshell): DiscardSignal.
  */
-function writtenValue(session: SessionState, write: ArithWrite): ShellValue {
-  if (write.key === null) return write.value
-  const assoc = visibleAssocs(session)[write.name]
-  if (assoc !== undefined) return { ...assoc, [write.key]: write.value }
-  const arr = visibleArrays(session)[write.name]
-  return arrayWith(arr ?? makeArray([]), Number(write.key), write.value)
+async function landWrites(
+  session: SessionState,
+  store: SessionView['set'],
+  writes: readonly ArithWrite[],
+): Promise<void> {
+  for (const write of writes) {
+    let value: ShellValue = write.value
+    let assigned: ReadonlySet<number | string> | null = null
+    if (write.key !== null) {
+      const assoc = visibleAssocs(session)[write.name]
+      if (assoc !== undefined) {
+        value = { ...assoc, [write.key]: write.value }
+        assigned = new Set([write.key])
+      } else {
+        const index = Number(write.key)
+        value = arrayWith(visibleArrays(session)[write.name] ?? makeArray([]), index, write.value)
+        assigned = new Set([index])
+      }
+    }
+    try {
+      await store(write.name, value, true, assigned)
+    } catch (err) {
+      if (err instanceof ReadonlyVariableError) {
+        throw new DiscardSignal(encodeText(`${err.message}\n`))
+      }
+      throw err
+    }
+  }
 }
 
 /**
@@ -443,11 +470,14 @@ export async function subscriptIndex(
     error = err
     writes = err.writes
   }
-  for (const write of writes) {
-    const value = writtenValue(session, write)
-    if (view !== null) await view.set(write.name, value)
-    else await setVar(session, null, write.name, value)
-  }
+  await landWrites(
+    session,
+    (name, value, followRef, assigned) =>
+      view !== null
+        ? view.set(name, value, followRef, assigned)
+        : setVar(session, null, name, value, followRef, undefined, assigned),
+    writes,
+  )
   reader.settle()
   if (error !== null) throw new ArithError(`${subscript.trim()}: ${error.message}`)
   return idx
@@ -680,10 +710,40 @@ async function landCoercion(
   coercion: IntegerCoercion,
   diagnostics?: (string | Uint8Array)[],
 ): Promise<void> {
-  for (const write of coercion.writes) {
-    await setVar(session, policies, write.name, writtenValue(session, write), true, diagnostics)
-  }
+  await landWrites(
+    session,
+    (name, value, followRef, assigned) =>
+      setVar(session, policies, name, value, followRef, diagnostics, assigned),
+    coercion.writes,
+  )
   coercion.reader.settle()
+}
+
+/**
+ * Evaluate `text` as an `-i` write coerces it and land what it assigns
+ * through `view`, storing no result: a `declare -ni r=M` value, which bash
+ * evaluates before refusing the reference (`M='X=5'` sets X). Inside a
+ * `declare -g` it reads the function's scope, as the coercion does. A hidden
+ * name throws PolicyDenied and a readonly one ReadonlyVariableError, which
+ * ends the line as bash's does, the assignments before it landed; a
+ * malformed text throws ArithError once the ones before the error land.
+ */
+export async function evaluateInteger(
+  session: SessionState,
+  view: SessionView,
+  text: string,
+): Promise<void> {
+  const coercion = new IntegerCoercion(session)
+  try {
+    coercion.run(text)
+  } finally {
+    await landWrites(
+      session,
+      (name, value, followRef, assigned) => view.set(name, value, followRef, assigned),
+      coercion.writes,
+    )
+    coercion.reader.settle()
+  }
 }
 
 export function ensureVarVisible(session: SessionState, name: string): void {

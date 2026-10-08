@@ -17,11 +17,11 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.errors import ArithError
-from mirage.shell.variable import ShellVar, VarAttr, VarKind
+from mirage.shell.variable import ShellVar, VarAttr, VarKind, appended
+from mirage.workspace.executor.builtins.declare.constants import SUBSCRIPT_RE
 from mirage.workspace.executor.builtins.declare.declare import (
     declaration_result,
     drop_reference,
-    evaluate_value,
     held_value,
     identifier_refusal,
     kind_conflict,
@@ -43,6 +43,7 @@ from mirage.workspace.executor.builtins.declare.types import (
 )
 from mirage.workspace.executor.builtins.shared import (
     arith_refusal,
+    is_valid_name,
     readonly_line,
     refusal,
     require_view,
@@ -52,6 +53,7 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     deref,
     env_get,
+    evaluate_integer,
     in_call_env,
     reach_global,
     session_view,
@@ -236,7 +238,7 @@ async def _declare_operands(
                 name = operand[0]
                 line = (
                     reference_refusal(
-                        cmd, name, visible_record(session, name), None
+                        cmd, name, visible_record(session, name), False
                     )
                     if nameref
                     else None
@@ -318,7 +320,7 @@ async def _declare_operand(
                 return line
         if nameref:
             line = reference_refusal(
-                cmd, key, visible_record(session, key), None
+                cmd, key, visible_record(session, key), True
             )
             if line is None and view.is_readonly(key, False):
                 line = readonly_line(cmd, key)
@@ -341,92 +343,130 @@ async def _declare_operand(
             await view.mark(key, None, True, not nameref)
         await stamp_marks(session, view, key, None, marks, not nameref)
         return None
-    if nameref:
-        # A new local holds nothing to append to, unless `-I` inherits
-        # the caller's value or the call assigned one in front.
-        own = (
-            None
-            if fresh and not inherit and not in_call_env(session, key)
-            else visible_record(session, key)
-        )
-        if append and own is not None and isinstance(own.value, str):
-            val = own.value + val
+    if nameref and not append and val:
+        # A value that names no variable refuses first, before a local
+        # is made; an empty one, and what `+=` builds, are judged once
+        # the name may take a reference (`_aim_reference`).
         bad_ref = nameref_refusal(cmd, key, val)
         if bad_ref is not None:
             return bad_ref
-    if view.is_readonly(key, not nameref):
+    creates = fresh and not in_call_env(session, key)
+    if (creates or not nameref) and view.is_readonly(key, not nameref):
         return readonly_line(cmd, key)
     if local_vars is not None:
         shadow_local(session, local_vars, key)
-    if fresh and not in_call_env(session, key):
+    if creates:
         start_local(session, key, inherit)
     if nameref:
         # Checked on the local, which exists from here on even when the
         # array it inherited cannot become a reference, as bash's does,
-        # so the function's later writes stay its own.
+        # so the function's later writes stay its own. A name no local
+        # replaces reports its array before its readonly mark.
         bad_ref = reference_refusal(
-            cmd, key, visible_record(session, key), val
+            cmd, key, visible_record(session, key), False
         )
+        if bad_ref is None and view.is_readonly(key, False):
+            bad_ref = readonly_line(cmd, key)
         if bad_ref is not None:
             return bad_ref
     line = plus_refusal(cmd, session, view, key, plus)
     if line is not None:
         return line
+    if nameref:
+        return await _aim_reference(
+            session, view, cmd, key, append, val, shaping, marks, creates
+        )
     # A new local holds nothing of the caller's but what `start_local`
     # kept; otherwise the value lands as any declaration's does
     # (`scalar_value`), and an array kind the variable cannot take is
     # refused.
-    held = (
-        None
-        if nameref or (fresh and not inherit)
-        else held_value(session, key)
-    )
+    held = None if fresh and not inherit else held_value(session, key)
     conflict = kind_conflict(held, kind)
     if conflict is not None:
         return f"bash: {cmd}: {key}: {conflict}"
-    checked = key if nameref else deref(session, key)
-    if nameref and _integer_reference(session, key, shaping):
-        # bash evaluates the value as arithmetic, landing what it
-        # assigns, and a number never names a variable: the operand
-        # fails without a word, and a reference that already exists
-        # keeps the declaration's marks, readonly included.
-        line = await evaluate_value(session, view, cmd, val)
-        if line is not None:
-            return line
-        if key in session.vars:
-            await premark(view, key, shaping, False)
-            await stamp_marks(session, view, key, None, marks, False)
-        return ""
-    await premark(view, key, shaping, not nameref)
+    checked = deref(session, key)
+    await premark(view, key, shaping)
     target = session.vars.get(checked)
     integer = target is not None and VarAttr.INTEGER in target.attrs
-    value, assigned = (
-        (val, None)
-        if nameref
-        else scalar_value(held, val, kind, append, integer)
-    )
-    if kind is not None and not nameref:
+    value, assigned = scalar_value(held, val, kind, append, integer)
+    if kind is not None:
         await drop_reference(session, view, key)
-    await view.set(key, value, follow_ref=not nameref, assigned=assigned)
-    await stamp_marks(session, view, key, checked, marks, not nameref)
+    await view.set(key, value, assigned=assigned)
+    await stamp_marks(session, view, key, checked, marks)
     return None
 
 
-def _integer_reference(
-    session: SessionState, name: str, shaping: AttrMarks
-) -> bool:
-    """Whether a ``-n`` declaration leaves its reference under ``-i``.
+async def _aim_reference(
+    session: SessionState,
+    view: SessionView,
+    cmd: str,
+    key: str,
+    append: bool,
+    given: str,
+    shaping: AttrMarks,
+    marks: AttrMarks,
+    creates: bool,
+) -> str | None:
+    """Aim a ``declare -n NAME=VALUE`` (or ``NAME+=VALUE``) reference
+    once the name may take one.
+
+    The reference is what ``+=`` builds onto its own value, and under a
+    declared ``-i`` what the arithmetic makes of it, landing the writes
+    it does (``M='X=5'; declare -ni r=M`` sets X) and never a name. A
+    result that names no variable fails, in bash's words when the given
+    text names none either (``declare -n r=''`` is `` `': not a valid
+    identifier``) and silently otherwise (``x=1; declare -n x+=T``).
+    The name still takes the declaration's marks but ``-n``, ``-i -l
+    -u`` it did not ask for coming off, and a local it made stays
+    declared; a name that never existed stays unset.
 
     Args:
         session (SessionState): shell session state.
-        name (str): the reference.
-        shaping (AttrMarks): the declaration's ``-i -l -u`` marks.
+        view (SessionView): the session plane's gated door.
+        cmd (str): the builtin's spelling, for diagnostics.
+        key (str): the reference being declared.
+        append (bool): the operand was ``NAME+=VALUE``.
+        given (str): the value as written.
+        shaping (AttrMarks): the ``-i -l -u`` / ``+i +l +u`` marks.
+        marks (AttrMarks): the attribute marks.
+        creates (bool): the declaration made ``key`` a new local.
+
+    Returns:
+        The refusal line ("" for a silent one), or None once aimed.
+
+    Raises:
+        PolicyDenied: the gate refused a write or a mark.
+        ReadonlyVariableError: an ``-i`` value assigned a readonly
+            variable, which ends the line.
+        ArithError: an ``-i`` value did not evaluate.
     """
-    for attr, on in shaping:
-        if attr is VarAttr.INTEGER:
-            return on
-    var = visible_record(session, name)
-    return var is not None and VarAttr.INTEGER in var.attrs
+    own = visible_record(session, key)
+    held = own.value if append and own is not None else None
+    old = held if isinstance(held, str) else ""
+    value = old + given
+    if (VarAttr.INTEGER, True) in shaping:
+        await evaluate_integer(
+            session, view, appended(old, given, True) if append else given
+        )
+        value = ""
+    if is_valid_name(value) or SUBSCRIPT_RE.fullmatch(value) is not None:
+        line = nameref_refusal(cmd, key, value)
+        if line is not None:
+            return line
+        await premark(view, key, shaping, False)
+        await view.set(key, value, follow_ref=False)
+        await stamp_marks(session, view, key, key, marks, False)
+        return None
+    if creates and key not in session.vars:
+        await view.mark(key, None, True, False)
+    if key in session.vars:
+        kept = tuple(mark for mark in marks if mark[0] is not VarAttr.NAMEREF)
+        await stamp_marks(session, view, key, None, kept, False)
+    return (
+        ""
+        if is_valid_name(given)
+        else f"bash: {cmd}: `{given}': not a valid identifier"
+    )
 
 
 async def _fresh_local(
