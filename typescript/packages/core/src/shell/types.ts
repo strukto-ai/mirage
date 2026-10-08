@@ -493,3 +493,10 @@ export interface ShellNode extends TSNodeLike {
   child(index: number): ShellNode | null
   childForFieldName(name: string): ShellNode | null
 }
+
+/** Alias ownership of a rewritten tree's parsed source, in UTF-16 units. */
+export interface AliasExpansion {
+  readonly root: number
+  readonly owners: readonly ReadonlySet<string>[]
+  readonly names: ReadonlySet<string>
+}

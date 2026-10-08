@@ -116,7 +116,11 @@ def test_an_alias_name_is_reserved_inside_its_own_text(line, own, word):
     # Pinned against bash 5.2.37: a name stays reserved only inside the
     # text its alias put there, a trailing blank's chained one included.
     # Spans are in the line as typed, which a continuation shifts.
-    found = check_syntax(line, frozenset(own), own)
+    found = check_syntax(
+        line,
+        frozenset(own),
+        lambda name, at: name in own and own[name][0] <= at < own[name][1],
+    )
     assert (found and found.offending) == word
 
 

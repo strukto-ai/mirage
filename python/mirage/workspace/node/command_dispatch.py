@@ -46,9 +46,10 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.scope import ParseScope
+from mirage.shell.parse.source import source_offsets
 from mirage.shell.parse.syntax import find_syntax_issue
+from mirage.shell.types import AliasExpansion, ProcessSubDirection
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import ProcessSubDirection
 from mirage.shell.variable import TempEnv, VarAttr
 from mirage.shell.xtrace import trace_command
 from mirage.types import LsLinkMode, PathSpec, Producer, word_text
@@ -77,6 +78,7 @@ from mirage.workspace.executor.builtins import (
 )
 from mirage.workspace.executor.builtins.alias import (
     alias_command_text,
+    alias_owners,
     expanding_aliases,
 )
 from mirage.workspace.executor.builtins.table import BUILTINS
@@ -158,7 +160,7 @@ async def execute_command(
     # alias holding a pipe is a pipe. Only an unquoted plain word
     # qualifies (`\x` and `'x'` are never aliases), and `alias_value`
     # applies the rest of bash's rules (expand_aliases, the same-line
-    # mark, the no-second-expansion stack). The rewritten line runs
+    # mark, the guards on inserted text). The rewritten line runs
     # through the same executor with the same call stack, so `$1`
     # inside a function still means the function's argument.
     if (
@@ -177,21 +179,26 @@ async def execute_command(
         source = node.text or b""
         base = node.start_byte
         rest = decode_text(source[head_node.end_byte - base :])
-        rewrite = alias_command_text(session, head, rest, mark)
+        rewrite = alias_command_text(session, head_node, rest, mark)
         if rewrite is not None:
-            rewritten, texts = rewrite
+            rewritten, owners = rewrite
             lead = decode_text(source[: head_node.start_byte - base])
             line = lead + rewritten
+            owners = (
+                alias_owners(session, head_node, base, head_node.start_byte)
+                + owners
+            )
+            names = frozenset(name for names in owners for name in names)
+            previous = session._alias_expansion
             scope = ParseScope()
             try:
                 ast = scope.parse(line)
-                own: dict[str, tuple[int, int]] = {}
-                at = len(lead)
-                for alias, text in texts:
-                    own[alias] = (at, at + len(text))
-                    at = own[alias][1]
                 found = check_syntax(
-                    line, expanding_aliases(session), own
+                    line,
+                    expanding_aliases(session) | names,
+                    lambda name, at: (
+                        name in owners[len(encode_text(line[:at]))]
+                    ),
                 ) or find_syntax_issue(ast)
                 if found is not None:
                     io = syntax_error_result(found)
@@ -203,7 +210,12 @@ async def execute_command(
                             command=head, exit_code=io.exit_code, stderr=bad
                         ),
                     )
-                session._alias_stack.append(head)
+                mapped = owners + (frozenset(),)
+                session._alias_expansion = AliasExpansion(
+                    ast.id,
+                    tuple(mapped[i] for i in source_offsets(line, ast)),
+                    names,
+                )
                 # The rewritten line is read from this node, so it runs as
                 # a line of its own under the word that named it: each
                 # invocation of one alias is a place of its own on the line
@@ -224,7 +236,7 @@ async def execute_command(
                         ast, context, stdin, call_stack, handed=expansion
                     )
                 finally:
-                    session._alias_stack.pop()
+                    session._alias_expansion = previous
                     if expansion is not None:
                         registry.decisions.hand_up(
                             session.session_id, expansion

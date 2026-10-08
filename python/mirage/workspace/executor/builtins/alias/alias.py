@@ -16,6 +16,8 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
+from mirage.shell.helpers import get_text
+from mirage.shell.types import TSNodeLike
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.alias.constants import (
     ALIAS_USAGE,
@@ -142,7 +144,10 @@ async def handle_unalias(
 
 
 def alias_value(
-    session: SessionState, name: str, mark: AliasMark
+    session: SessionState,
+    name: str,
+    mark: AliasMark,
+    blocked: frozenset[str] | None = None,
 ) -> str | None:
     """The alias text a command word expands to, or None.
 
@@ -156,13 +161,18 @@ def alias_value(
         session (SessionState): shell session state.
         name (str): the command word.
         mark (AliasMark): the parse and row of the use.
+        blocked (frozenset[str] | None): guards at this word; absent,
+            guards inherited by a separately parsed line.
     """
     if not session.shopts.get(
         "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
     ):
         return None
+    if blocked is None:
+        scope = session._alias_expansion
+        blocked = scope.names if scope is not None else frozenset()
     value = session.aliases.get(name)
-    if value is None or name in session._alias_stack:
+    if value is None or name in blocked:
         return None
     if session._alias_marks.get(name) == mark:
         return None
@@ -183,51 +193,88 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
         "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
     ):
         return frozenset()
-    return frozenset(session.aliases) - frozenset(session._alias_stack)
+    scope = session._alias_expansion
+    blocked = scope.names if scope is not None else frozenset()
+    return frozenset(session.aliases) - blocked
+
+
+def alias_owners(
+    session: SessionState,
+    node: TSNodeLike,
+    start: int,
+    end: int,
+) -> tuple[frozenset[str], ...]:
+    """Aliases in progress at the node's source bytes.
+
+    Args:
+        session (SessionState): active expansion, if any.
+        node (TSNodeLike): identifies the tree the offsets belong to.
+        start (int): first parsed byte.
+        end (int): exclusive last parsed byte.
+    """
+    scope = session._alias_expansion
+    if scope is None:
+        return (frozenset(),) * (end - start)
+    root = node
+    while root.parent is not None:
+        root = root.parent
+    if root.id != scope.root:
+        return (scope.names,) * (end - start)
+    return scope.owners[start:end]
 
 
 def alias_command_text(
-    session: SessionState, name: str, rest: str, mark: AliasMark
-) -> tuple[str, list[tuple[str, str]]] | None:
-    """The command line an aliased head word rewrites to, or None.
+    session: SessionState,
+    node: TSNodeLike,
+    rest: str,
+    mark: AliasMark,
+) -> tuple[str, tuple[frozenset[str], ...]] | None:
+    """Rewrite an alias and retain who owns each byte of the result.
 
-    The alias text replaces the word; a value ending in a blank asks for
-    the next word to be checked as an alias too, which is bash's rule
-    for `alias sudo='sudo '`. Whatever comes back is a fresh line the
-    parser reads again, so a value holding a pipe or a redirection is a
-    pipe or a redirection.
+    Inserted text inherits the replaced word's guards and adds its own.
+    Retained text keeps its guards, so neither a nested rewrite nor a
+    trailing-blank chain extends an alias into the caller's words.
 
     Args:
         session (SessionState): shell session state.
-        name (str): the head word.
-        rest (str): the source text after the head word, as typed.
+        node (TSNodeLike): the command's head word.
+        rest (str): parsed source after the head word.
         mark (AliasMark): the parse and row of the use.
-
-    Returns:
-        tuple[str, list[tuple[str, str]]] | None: the line, and each
-        alias with the text it put at the line's head, in order; the
-        rest of the line is the command's own.
     """
-    value = alias_value(session, name, mark)
+    name = get_text(node)
+    blocked = alias_owners(
+        session, node, node.start_byte, node.start_byte + 1
+    )[0]
+    value = alias_value(session, name, mark, blocked)
     if value is None:
         return None
     seen = {name}
-    texts = [(name, value)]
     out = value
+    owners = (blocked | {name},) * len(encode_text(value))
+    at = node.end_byte
     while out.endswith((" ", "\t")):
         stripped = rest.lstrip()
         match = FIRST_WORD.match(stripped)
         if match is None or match.group(0) in seen:
             break
-        nxt = alias_value(session, match.group(0), mark)
+        word_at = at + len(encode_text(rest[: len(rest) - len(stripped)]))
+        blocked = alias_owners(session, node, word_at, word_at + 1)[0]
+        name = match.group(0)
+        nxt = alias_value(session, name, mark, blocked)
         if nxt is None:
             break
-        seen.add(match.group(0))
-        texts.append((match.group(0), nxt))
+        seen.add(name)
         out += nxt
+        owners += (blocked | {name},) * len(encode_text(nxt))
         rest = stripped[match.end() :]
+        at = word_at + len(encode_text(name))
     tail = rest.strip()
-    return (f"{out} {tail}" if tail else out), texts
+    if not tail:
+        return out, owners
+    at += len(encode_text(rest[: len(rest) - len(rest.lstrip())]))
+    return out + " " + tail, owners + (frozenset(),) + alias_owners(
+        session, node, at, at + len(encode_text(tail))
+    )
 
 
 async def alias_builtin(call: BuiltinCall) -> Result:

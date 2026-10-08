@@ -106,6 +106,6 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
     "_parse_row",
     "_line_open",
     "terminal",
-    "_alias_stack",
+    "_alias_expansion",
     "status_writer",
 )

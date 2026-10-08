@@ -132,7 +132,12 @@ describe('checkSyntax', () => {
   ]
   it.each(OWN)('reads %j with alias text %j as %j', (line, spans, word) => {
     const own = new Map(spans.map(([name, start, end]) => [name, [start, end] as const]))
-    expect(checkSyntax(line, new Set(own.keys()), own)?.offending ?? null).toBe(word)
+    expect(
+      checkSyntax(line, new Set(own.keys()), (name, at) => {
+        const span = own.get(name)
+        return span !== undefined && span[0] <= at && at < span[1]
+      })?.offending ?? null,
+    ).toBe(word)
   })
 })
 

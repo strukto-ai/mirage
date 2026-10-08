@@ -70,6 +70,22 @@ class TSNodeLike(Protocol):
     def child_by_field_name(self, name: str) -> "TSNodeLike | None": ...
 
 
+@dataclass(frozen=True, slots=True)
+class AliasExpansion:
+    """Alias ownership of a rewritten tree's source bytes.
+
+    Args:
+        root (int): identity of the rewritten tree.
+        owners (tuple[frozenset[str], ...]): aliases in progress at each
+            parsed byte, composed through the parser's source map.
+        names (frozenset[str]): guards inherited by a different tree.
+    """
+
+    root: int
+    owners: tuple[frozenset[str], ...]
+    names: frozenset[str]
+
+
 FunctionBody: TypeAlias = list[TSNodeLike]
 
 

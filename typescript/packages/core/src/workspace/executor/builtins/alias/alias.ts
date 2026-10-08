@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { getText } from '../../../../shell/helpers.ts'
+import type { TSNodeLike } from '../../../../shell/types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { SHOPT_DEFAULTS } from '../../../../shell/constants.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -130,52 +132,85 @@ function aliasesOn(session: SessionState): boolean {
  */
 export function expandingAliases(session: SessionState): ReadonlySet<string> {
   if (!aliasesOn(session)) return new Set()
-  return new Set(Object.keys(session.aliases).filter((name) => !session.aliasStack.includes(name)))
+  return new Set(
+    Object.keys(session.aliases).filter((name) => !session.aliasExpansion?.names.has(name)),
+  )
 }
 
 /** The alias text a command word expands to, or null. */
-export function aliasValue(session: SessionState, name: string, mark: AliasMark): string | null {
+export function aliasValue(
+  session: SessionState,
+  name: string,
+  mark: AliasMark,
+  blocked: ReadonlySet<string> = session.aliasExpansion?.names ?? new Set(),
+): string | null {
   if (!aliasesOn(session)) return null
   const value = sessionEntry(session.aliases, name)
-  if (value === undefined || session.aliasStack.includes(name)) return null
+  if (value === undefined || blocked.has(name)) return null
   const seen = session.aliasMarks.get(name)
   if (seen?.[0] === mark[0] && seen[1] === mark[1]) return null
   return value
 }
 
+/** Aliases in progress at the node's parsed source positions. */
+export function aliasOwners(
+  session: SessionState,
+  node: TSNodeLike,
+  start: number,
+  end: number,
+): readonly ReadonlySet<string>[] {
+  const scope = session.aliasExpansion
+  if (scope === null) return Array<ReadonlySet<string>>(end - start).fill(new Set())
+  let root = node
+  while (root.parent != null) root = root.parent
+  if (root.id !== scope.root) return Array<ReadonlySet<string>>(end - start).fill(scope.names)
+  return scope.owners.slice(start, end)
+}
+
 /**
- * The command line an aliased head word rewrites to, or null. The value
- * replaces the word; a value ending in a blank asks for the next word
- * to be checked too (bash's `alias sudo='sudo '` rule); the result is a
- * fresh line the parser reads again. Returned with each alias and the text
- * it put at the line's head, in order; the rest of the line is the
- * command's own.
+ * Rewrite an alias and retain who owns each character. Inserted text
+ * inherits the replaced word's guards and adds its own; retained text
+ * keeps its guards across nested rewrites and trailing-blank chains.
  */
 export function aliasCommandText(
   session: SessionState,
-  name: string,
+  node: TSNodeLike,
   rest: string,
   mark: AliasMark,
-): [string, [string, string][]] | null {
-  const value = aliasValue(session, name, mark)
+): [string, readonly ReadonlySet<string>[]] | null {
+  let name = getText(node)
+  let blocked = aliasOwners(session, node, node.startIndex ?? 0, (node.startIndex ?? 0) + 1)[0]
+  if (blocked === undefined) throw new Error('alias head has no source')
+  const value = aliasValue(session, name, mark, blocked)
   if (value === null) return null
   const seen = new Set([name])
-  const texts: [string, string][] = [[name, value]]
   let out = value
+  let owners = Array<ReadonlySet<string>>(value.length).fill(new Set([...blocked, name]))
+  let at = node.endIndex ?? 0
   let tailSource = rest
   while (out.endsWith(' ') || out.endsWith('\t')) {
-    const stripped = tailSource.replace(/^\s+/, '')
+    const stripped = tailSource.trimStart()
     const match = FIRST_WORD.exec(stripped)
     if (match === null || seen.has(match[0])) break
-    const nxt = aliasValue(session, match[0], mark)
+    const wordAt = at + tailSource.length - stripped.length
+    blocked = aliasOwners(session, node, wordAt, wordAt + 1)[0]
+    if (blocked === undefined) throw new Error('alias word has no source')
+    name = match[0]
+    const nxt = aliasValue(session, name, mark, blocked)
     if (nxt === null) break
-    seen.add(match[0])
-    texts.push([match[0], nxt])
+    seen.add(name)
     out += nxt
-    tailSource = stripped.slice(match[0].length)
+    owners = owners.concat(Array<ReadonlySet<string>>(nxt.length).fill(new Set([...blocked, name])))
+    tailSource = stripped.slice(name.length)
+    at = wordAt + name.length
   }
   const tail = tailSource.trim()
-  return [tail !== '' ? `${out} ${tail}` : out, texts]
+  if (tail === '') return [out, owners]
+  at += tailSource.length - tailSource.trimStart().length
+  return [
+    out + ' ' + tail,
+    [...owners, new Set(), ...aliasOwners(session, node, at, at + tail.length)],
+  ]
 }
 
 /** The `alias` arm; the row marks where the definition was made. */
