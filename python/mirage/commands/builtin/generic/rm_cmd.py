@@ -49,7 +49,6 @@ def rm_without_operands(force: bool) -> tuple[ByteSource | None, IOResult]:
 def make_rm(
     *,
     vfs: str,
-    glob_fn: Callable[..., Awaitable[list[PathSpec]]],
     unlink: Callable[..., Awaitable[None]],
 ) -> Callable[..., Any]:
     """Build a file-only ``rm`` over an index-threaded unlink.
@@ -63,8 +62,6 @@ def make_rm(
 
     Args:
         vfs (str): VFS name the command registers under.
-        glob_fn (Callable): backend resolve_glob ``(accessor, paths,
-            index)``.
         unlink (Callable): backend unlink ``(accessor, path, index)``.
     """
     unlink = with_write_guards(unlink)
@@ -81,7 +78,9 @@ def make_rm(
         v = fl.as_bool("v")
         if not paths:
             return rm_without_operands(f)
-        paths = await glob_fn(accessor, paths, opts.index)
+        if opts.io is None:
+            raise TypeError("rm: ran without its mount's table")
+        paths = await opts.io.resolve_glob(accessor, paths, opts.index)
         verbose_parts: list[str] = []
         errors: list[str] = []
         removed: dict[str, ByteSource] = {}

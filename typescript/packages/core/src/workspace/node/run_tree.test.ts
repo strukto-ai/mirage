@@ -17,7 +17,6 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
 import { createShellParser, type ShellParser } from '../../shell/parse/index.ts'
@@ -58,8 +57,6 @@ function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
 
 function registry(): MountRegistry {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  ops.registerVfs(ram)
   return new MountRegistry({ '/': ram }, MountMode.WRITE)
 }
 

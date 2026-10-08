@@ -16,7 +16,6 @@ import { type IOResult, OpReport } from '../io/types.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { finishRecord, type OpTimer, startOp } from '../observe/context.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
-import type { OpKwargs } from './registry.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
@@ -24,7 +23,7 @@ import { dottedSpelling } from '../utils/path.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { getCurrentSession, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from '../utils/hidden.ts'
-import type { SessionBind } from './types.ts'
+import type { OpKwargs, SessionBind } from './types.ts'
 
 /** Receives each record with the id of the session the op ran as. */
 export type OpSink = (rec: OpRecord, sessionId: string) => Promise<void>

@@ -15,7 +15,6 @@
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
 import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/gmail/scope.ts'
 import { formatGrepResults, searchMessages } from '../../../core/gmail/search.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
@@ -27,6 +26,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { parseFlags, refuseMissingPattern, rgGeneric } from '../generic/rg.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { mountIo } from '../generic_bind/adapter.ts'
 
 const ENC = new TextEncoder()
 
@@ -42,7 +42,7 @@ async function rg(
   if (refused !== null) return refused
   // Same gate as gmail grep, from the same table: only a lone concrete
   // operand with no reshaping flag may be answered by the search API.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const [scan, scoped] = scanIo(mountIo(opts), opts.ns, opts.mountPrefix)
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   if (operand !== null && pattern !== null && fl.asBool('word_regexp')) {
     const match = detectScope(operand)

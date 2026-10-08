@@ -15,7 +15,7 @@
 import { config as loadEnv } from 'dotenv'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { Agent, run } from '@openai/agents'
 import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
 import { configureOpenAIExample } from './config.ts'
@@ -25,9 +25,7 @@ loadEnv({
 })
 
 const ram = new RAMVFS()
-const ops = new OpsRegistry()
-for (const op of ram.ops()) ops.register(op)
-const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 const openAI = configureOpenAIExample(ws, 'gpt-5.5-mini')
 
 const instructions = await buildSystemPrompt({

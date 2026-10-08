@@ -12,13 +12,12 @@
 # limitations under the License.
 
 from collections.abc import Awaitable
-from typing import TYPE_CHECKING, TypeVar
+from typing import TypeVar
 
+from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
+from mirage.shell.types import ArithWrite
 
-if TYPE_CHECKING:
-    from mirage.io.types import ByteSource
-    from mirage.shell.types import ArithWrite
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
@@ -33,7 +32,7 @@ class ArithError(ValueError):
     error.
     """
 
-    writes: "tuple[ArithWrite, ...]" = ()
+    writes: tuple[ArithWrite, ...] = ()
 
 
 class ReadonlyError(ValueError):
@@ -189,7 +188,7 @@ class ReturnSignal(Exception):
         self,
         exit_code: int = 0,
         stderr: bytes = b"",
-        stdout: "ByteSource | None" = None,
+        stdout: ByteSource | None = None,
     ) -> None:
         self.exit_code = exit_code
         self.stderr = stderr

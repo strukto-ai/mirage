@@ -14,11 +14,11 @@
 
 import { SLACK_COMMANDS } from '@struktoai/mirage-core/commands/builtin/slack/index'
 import { normalizeSlackConfig, redactSlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
-import { SLACK_OPS } from '@struktoai/mirage-core/ops/slack/index'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { buildVfs } from '../registry.ts'
 import { SlackVFS } from './slack.ts'
 
@@ -51,14 +51,9 @@ describe('SlackVFS (node)', () => {
     expect(typeof r.writePrompt).toBe('string')
   })
 
-  it('commands() returns SLACK_COMMANDS', () => {
+  it('serves SLACK_COMMANDS', () => {
     const r = new SlackVFS({ token: 'xoxb-test' })
-    expect(r.commands()).toBe(SLACK_COMMANDS)
-  })
-
-  it('ops() returns SLACK_OPS', () => {
-    const r = new SlackVFS({ token: 'xoxb-test' })
-    expect(r.ops()).toBe(SLACK_OPS)
+    expect(commandsFor(r)).toEqual(SLACK_COMMANDS)
   })
 
   it('getState() redacts both token and searchToken when both present', async () => {

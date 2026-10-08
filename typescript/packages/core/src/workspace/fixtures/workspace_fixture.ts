@@ -16,7 +16,6 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../shell/parse/index.ts'
 import { type CacheFacts, MountMode, type Refusal } from '../../types.ts'
@@ -110,14 +109,9 @@ export async function makeWorkspace(extra: { agentId?: string } = {}): Promise<T
   putFile(ram, '/nums.txt', '5\n3\n1\n4\n2\n')
   putFile(ram, '/words.txt', 'banana\napple\ncherry\napple\n')
 
-  const registry = new OpsRegistry()
-  registry.registerVfs(s3)
-  registry.registerVfs(disk)
-  registry.registerVfs(ram)
-
   const ws = new Workspace(
     { '/s3': s3, '/disk': disk, '/ram': ram },
-    { mode: MountMode.EXEC, ops: registry, shellParser: parser, ...extra },
+    { mode: MountMode.EXEC, shellParser: parser, ...extra },
   )
   ws.getSession(ws.defaultSessionId).cwd = '/s3'
   return { ws, s3, disk, ram }

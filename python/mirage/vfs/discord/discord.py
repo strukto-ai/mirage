@@ -15,12 +15,13 @@
 from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.commands.builtin.discord import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.discord.read import read as _read
+from mirage.core.discord.read import read_range as _read_range
+from mirage.core.discord.readdir import readdir as _readdir
+from mirage.core.discord.stat import stat as _stat
 from mirage.core.time_range import TimeRange
-from mirage.ops.discord import OPS as DISCORD_VFS_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import VFSName
+from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.discord.config import DiscordConfig
 from mirage.vfs.discord.prompt import PROMPT, WRITE_PROMPT
@@ -37,6 +38,8 @@ class DiscordVFS(BaseVFS):
     prompt: str = PROMPT
     write_prompt: str = WRITE_PROMPT
 
+    reads_ranges: bool = True
+
     def __init__(self, config: DiscordConfig) -> None:
         super().__init__()
         self.config = config
@@ -46,11 +49,26 @@ class DiscordVFS(BaseVFS):
         )
         self.prompt = PROMPT + self.accessor.time_range.prompt()
 
-    def ops(self) -> list[RegisteredOp]:
-        return DISCORD_VFS_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        if not offset and size is None:
+            return await _read(self.accessor, path, index)
+        return await _read_range(self.accessor, path, index, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

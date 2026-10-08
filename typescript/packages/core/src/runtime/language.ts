@@ -20,8 +20,8 @@ import type {
   RunResult,
   RuntimeLanguage,
   RuntimeCapabilities,
-  RuntimeContext,
 } from './types.ts'
+import type { RuntimeContext } from './binding.ts'
 
 /**
  * A runtime that interprets one language's code inside a command.

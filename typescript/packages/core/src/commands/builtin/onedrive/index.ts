@@ -1,9 +1,5 @@
-import type { OneDriveAccessor } from '../../../accessor/onedrive.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 
-export const ONEDRIVE_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<OneDriveAccessor>(VFSName.ONEDRIVE, IO, {}),
-]
+export const ONEDRIVE_COMMANDS: readonly Command[] = [...genericCommands(VFSName.ONEDRIVE)]

@@ -17,12 +17,11 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.sort import sort_generic as generic_sort
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -46,4 +45,4 @@ async def sort(
     )
 
 
-BUILDER = Builder("sort", sort, read=True)
+BUILDER = GenericCommand("sort", sort, read=True)

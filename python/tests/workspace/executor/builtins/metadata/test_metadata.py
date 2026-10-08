@@ -3,6 +3,7 @@ import os
 import pytest
 
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -14,11 +15,10 @@ from mirage.workspace.executor.builtins.metadata import (
 
 
 class _OverlayRAMVFS(RAMVFS):
-    """RAM VFS with the native setattr op stripped, standing in for
+    """RAM VFS with no native setattr, standing in for
     an API backend that has no attribute slot."""
 
-    def ops(self):
-        return [ro for ro in super().ops() if ro.name != "setattr"]
+    setattr = BaseVFS.setattr
 
 
 def _make_overlay_ws(

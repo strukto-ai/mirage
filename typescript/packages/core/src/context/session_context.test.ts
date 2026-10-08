@@ -20,19 +20,16 @@ import {
   getCurrentSession,
   getCurrentSessionFor,
   getCurrentSessionUnlessForeign,
-  getOpPolicies,
   hiddenRefusal,
   sessionVisibility,
   readonlyBelow,
   requireMountWritable,
   runWithAdmission,
   runWithMountGate,
-  runWithOpPolicies,
   runWithSession,
   strongestModeUnder,
 } from './session_context.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
-import { Policies } from '../policy/policies.ts'
 import { MountMode, weakerMode } from '../types.ts'
 import { SessionManager } from '../workspace/session/manager.ts'
 import { SessionState } from '../workspace/session/session.ts'
@@ -444,17 +441,5 @@ describe('the admission binding', () => {
       expect(getAdmission()).toBe(outer)
     })
     expect(getAdmission()).toBeNull()
-  })
-})
-
-describe('the op-policies binding', () => {
-  it('is scoped to one command', async () => {
-    expect(getOpPolicies()).toBeNull()
-    const policies = new Policies([])
-    await runWithOpPolicies(policies, () => {
-      expect(getOpPolicies()).toBe(policies)
-      return Promise.resolve()
-    })
-    expect(getOpPolicies()).toBeNull()
   })
 })

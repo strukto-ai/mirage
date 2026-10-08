@@ -15,7 +15,7 @@
 import { config as loadEnv } from 'dotenv'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { createDeepAgent } from 'deepagents'
 import {
@@ -29,9 +29,7 @@ loadEnv({
 })
 
 const ram = new RAMVFS()
-const ops = new OpsRegistry()
-for (const op of ram.ops()) ops.register(op)
-const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 
 const agent = createDeepAgent({
   model: new ChatAnthropic({ model: 'claude-sonnet-4-6' }),

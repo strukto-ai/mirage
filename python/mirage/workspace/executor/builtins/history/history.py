@@ -125,7 +125,7 @@ async def handle_history(
             IOResult(exit_code=1, stderr=err),
             ExecutionNode(command="history", exit_code=1, stderr=err),
         )
-    stream, io = await mount.execute_cmd(
+    stream, io = await mount.run_command(
         "history",
         [],
         texts,

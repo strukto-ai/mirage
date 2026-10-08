@@ -92,7 +92,7 @@ describe('core/disk/stat folder probe', () => {
           ],
         ])
         expect((await mount.indexStore.listDir('/m/d')).entries ?? null).not.toBeNull()
-        await new Reconciler(ws.cache, ws.namespace, ws.opsRegistry).reconcileRead(mount, '/m/d')
+        await new Reconciler(ws.cache, ws.namespace).reconcileRead(mount, '/m/d')
         expect((await mount.indexStore.listDir('/m/d')).entries ?? null).toBeNull()
       } finally {
         await ws.close()

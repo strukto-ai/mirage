@@ -1,18 +1,17 @@
 import pytest
 
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 class _StatOnlyRAMVFS(RAMVFS):
-    """RAM VFS stripped of write-shaped ops, standing in for an API
+    """RAM VFS with no write or setattr, standing in for an API
     backend that can stat but never create files."""
 
-    def ops(self):
-        return [
-            ro for ro in super().ops() if ro.name not in {"setattr", "write"}
-        ]
+    setattr = BaseVFS.setattr
+    write = BaseVFS.write
 
 
 def _make_ws(mode: MountMode = MountMode.WRITE) -> Workspace:

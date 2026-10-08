@@ -324,7 +324,7 @@ async def test_cancel_during_cache_fill_aborts():
     ws = Workspace({"/data": RAMVFS()})
     cancel = asyncio.Event()
 
-    real_apply_io = ws.apply_io
+    real_apply_io = ws._dispatcher.apply_io
 
     async def slow_apply_io(io, records=None, cache_facts=None):
         if io.exit_code != 0:
@@ -333,7 +333,7 @@ async def test_cancel_during_cache_fill_aborts():
         cancel.set()
         await asyncio.Event().wait()
 
-    ws.apply_io = slow_apply_io
+    ws._dispatcher.apply_io = slow_apply_io
     try:
         await ws.shell("false")
         session = ws.get_session(ws.default_session_id)

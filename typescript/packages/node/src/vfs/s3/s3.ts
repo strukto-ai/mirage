@@ -12,14 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { S3VFSBase } from '@struktoai/mirage-core/vfs/s3/s3'
 import { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
-
-import { S3_COMMANDS } from '@struktoai/mirage-core/commands/builtin/s3/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-import { S3_OPS } from '@struktoai/mirage-core/ops/s3/index'
 
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import type { S3HttpAgents } from '@struktoai/mirage-core/vfs/s3/config'
@@ -42,7 +36,7 @@ export interface S3VFSState {
   config: S3ConfigRedacted
 }
 
-export class S3VFS extends BaseVFS {
+export class S3VFS extends S3VFSBase {
   override readonly name: string = VFSName.S3
   override readonly cachesReads: boolean = true
   override readonly supportsSnapshot: boolean = true
@@ -76,14 +70,6 @@ export class S3VFS extends BaseVFS {
 
   override storageLocation(): string {
     return s3StorageLocation(this.config)
-  }
-
-  override commands(): readonly RegisteredCommand[] {
-    return S3_COMMANDS.toArray()
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return S3_OPS
   }
 
   override deltaHook(): DeltaHook {

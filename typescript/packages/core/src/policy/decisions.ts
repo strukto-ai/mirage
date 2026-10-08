@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { getOpCall, runWithOpCall } from '../context/session_context.ts'
+import { createAsyncContext } from '../utils/async_context.ts'
 import { sha256Hex } from '../utils/hash.ts'
 import { Outcome } from './types.ts'
 import type {
@@ -848,4 +848,31 @@ export class Decisions {
   private async flush(): Promise<void> {
     if (this.sessions !== null) await this.sessions.flush()
   }
+}
+
+const opCallStorage = createAsyncContext<readonly [Decisions, HandOff]>()
+
+/**
+ * Run one call made outside a line (a file tool's), the unit an op-level
+ * answer covers: a grant one of its ops is answered by is claimed on
+ * `handed` for the call's other ops on that path. `owner` is the ledger
+ * the call runs under, the only one that claims on `handed` and spends
+ * it. Mirrors Python's `set_op_call`.
+ */
+export function runWithOpCall<T>(
+  owner: Decisions,
+  handed: HandOff,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return Promise.resolve(opCallStorage.run([owner, handed], fn))
+}
+
+/**
+ * The call made outside a line running in this context under `owner`'s
+ * ledger, null for a bare op or for a call another ledger runs (a host
+ * callback reaching a second workspace mid-call).
+ */
+export function getOpCall(owner: Decisions): HandOff | null {
+  const call = opCallStorage.getStore()
+  return call?.[0] === owner ? call[1] : null
 }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry, type RegisteredOp } from '../../../../ops/registry.ts'
+import { BaseVFS } from '../../../../vfs/base.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import type { FileStat } from '../../../../types.ts'
 import { MountMode } from '../../../../types.ts'
@@ -73,35 +73,39 @@ async function makeWs(mode: MountMode = MountMode.WRITE): Promise<[Workspace, RA
   return [ws, vfs]
 }
 
-// Ops resolve by VFS kind in the workspace registry, so overlay- and
-// stat-only-backend simulations block registration itself.
-class NoSetattrRegistry extends OpsRegistry {
-  override register(ro: RegisteredOp): void {
-    if (ro.name === 'setattr') return
-    super.register(ro)
+// No setattr of its own, as an API backend with no attribute slot: attrs
+// land in the namespace overlay.
+class OverlayRAMVFS extends RAMVFS {
+  static {
+    Object.defineProperty(
+      this.prototype,
+      'setattr',
+      Object.getOwnPropertyDescriptor(BaseVFS.prototype, 'setattr') ?? {},
+    )
   }
 }
 
-class StatOnlyRegistry extends OpsRegistry {
-  override register(ro: RegisteredOp): void {
-    if (ro.name === 'setattr' || ro.name === 'write') return
-    super.register(ro)
+// Neither setattr nor write, as an API backend that can stat but never
+// create files.
+class StatOnlyRAMVFS extends OverlayRAMVFS {
+  static {
+    Object.defineProperty(
+      this.prototype,
+      'write',
+      Object.getOwnPropertyDescriptor(BaseVFS.prototype, 'write') ?? {},
+    )
   }
 }
 
 async function makeOverlayWs(
   files: Record<string, string>,
-  registry: OpsRegistry = new NoSetattrRegistry(),
+  vfs: RAMVFS = new OverlayRAMVFS(),
 ): Promise<[Workspace, RAMVFS]> {
   const parser = await getTestParser()
-  const vfs = new RAMVFS()
   for (const [p, data] of Object.entries(files)) {
     vfs.store.files.set(p, new TextEncoder().encode(data))
   }
-  const ws = new Workspace(
-    { '/data': vfs },
-    { mode: MountMode.WRITE, shellParser: parser, ops: registry },
-  )
+  const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, shellParser: parser })
   return [ws, vfs]
 }
 
@@ -239,7 +243,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('touch cannot create on a stat-only mount', async () => {
-    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' }, new StatOnlyRegistry())
+    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' }, new StatOnlyRAMVFS())
     const [code, , err] = await run(ws, 'touch /data/new.txt')
     expect(code).toBe(1)
     expect(err).toContain("cannot touch '/data/new.txt': Read-only file system")
@@ -249,7 +253,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('touch on a stat-only mount still stamps existing files via the overlay', async () => {
-    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' }, new StatOnlyRegistry())
+    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' }, new StatOnlyRAMVFS())
     const [code] = await run(ws, 'touch -t 202603041200 /data/f.txt')
     expect(code).toBe(0)
     expect((await statOf(ws, '/data/f.txt')).modified).toBe('2026-03-04T12:00:00Z')

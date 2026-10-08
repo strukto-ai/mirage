@@ -30,9 +30,9 @@ import {
   isFsError,
 } from '../../../../errors/fs.ts'
 import { operandSpelling } from '../../../../errors/render.ts'
-import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const rm: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const fl = new FlagView(opts.flags, specOf('rm'))
   const recursive = fl.asBool('r') || fl.asBool('R')
   const dirFlag = fl.asBool('d')
@@ -130,7 +130,7 @@ const rm: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   ]
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'rm',
   write: true,
   fn: rm,

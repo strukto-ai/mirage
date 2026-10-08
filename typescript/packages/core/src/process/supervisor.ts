@@ -1,7 +1,8 @@
 import { DEFAULT_PROCESS_PERMISSIONS, type ProcessPermissions } from './config.ts'
 import type { PathSpec, ProcessScope } from '../types.ts'
 import { ProcessHandle } from './handle.ts'
-import type { ProcessRunner, ProcessView } from './types.ts'
+import type { ProcessRunner } from './types.ts'
+import type { ProcessView } from './view.ts'
 
 /** Workspace-owned live runners; exited handles retain their own results. */
 export class ProcessSupervisor {

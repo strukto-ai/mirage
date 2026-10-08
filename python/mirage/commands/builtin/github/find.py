@@ -20,10 +20,11 @@ from mirage.commands.builtin.generic.find import (
     find_walk_generic,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
+    mount_io,
     with_command_guards,
     with_policy_guard,
 )
-from mirage.commands.builtin.github.io import IO, resolve_glob
+from mirage.commands.builtin.github.pushdown import resolve_glob
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.github.find import find as find_core
@@ -32,8 +33,6 @@ from mirage.core.github.tree import ensure_tree
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
-
-_WALK_IO = with_command_guards(with_policy_guard(IO))
 
 
 @command("find", vfs="github", spec=SPECS["find"])
@@ -54,12 +53,13 @@ async def find(
     # A truncated tree names only some paths and is never refetched, so it
     # takes the same folder-by-folder walk, which readdir answers per folder.
     if accessor.truncated or paths_scoped(opts.ns, paths):
+        walk = with_command_guards(with_policy_guard(mount_io(opts)))
         return await find_walk_generic(
             paths,
             list(texts),
             opts,
-            readdir=partial(_WALK_IO.readdir, accessor),
-            stat=partial(_WALK_IO.stat, accessor),
+            readdir=partial(walk.readdir, accessor),
+            stat=partial(walk.stat, accessor),
         )
     return await find_generic(
         paths,

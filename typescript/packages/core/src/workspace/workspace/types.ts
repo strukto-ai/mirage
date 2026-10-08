@@ -21,7 +21,6 @@ import type { CLISpec } from '../../commands/cli/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import type { ObserverStore } from '../../observe/store.ts'
-import type { OpsRegistry } from '../../ops/registry.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import type { Mount } from '../mount/spec.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -74,7 +73,6 @@ export interface WorkspaceOptions {
    *   for fingerprinted paths.
    */
   driftPolicy?: DriftPolicy
-  ops?: OpsRegistry
   shellParser?: ShellParser
   shellParserFactory?: () => Promise<ShellParser>
   agentId?: string
@@ -304,3 +302,6 @@ export interface ExecuteOptions {
    */
   jobTable?: JobTable
 }
+
+/** `ExecuteOptions` with the session already fixed. */
+export type SessionExecuteOptions = Omit<ExecuteOptions, 'sessionId'>

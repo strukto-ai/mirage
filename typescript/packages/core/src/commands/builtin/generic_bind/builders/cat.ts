@@ -14,9 +14,14 @@
 
 import { concatAggregate } from '../../aggregators.ts'
 import { catGeneric } from '../../generic/cat.ts'
-import { type Builder, dirAwareStat, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import {
+  type GenericCommand,
+  dirAwareStat,
+  resolveGlobOf,
+  type GenericCommandFn,
+} from '../adapter.ts'
 
-const cat: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+const cat: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return catGeneric(resolved, texts, opts, dirAwareStat(ops, accessor, opts), (p) =>
@@ -24,7 +29,7 @@ const cat: BuilderFn = async (ops, accessor, paths, texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'cat',
   read: true,
   aggregate: concatAggregate,

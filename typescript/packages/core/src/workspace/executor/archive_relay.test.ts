@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { writeTar } from '../../commands/builtin/tar_helper.ts'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { gzip } from '../../utils/compress.ts'
@@ -53,12 +52,9 @@ async function makeWs(): Promise<Workspace> {
   const root = new RAMVFS()
   const work = new RAMVFS()
   work.store.files.set('/files.tar.gz', await tgzBytes())
-  const registry = new OpsRegistry()
-  registry.registerVfs(root)
-  registry.registerVfs(work)
   return new Workspace(
     { '/': root, '/work/': work },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
 }
 
@@ -165,13 +161,9 @@ async function makeNested(): Promise<Workspace> {
   const data = new RAMVFS()
   const inner = new RAMVFS()
   const out = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(data)
-  registry.registerVfs(inner)
-  registry.registerVfs(out)
   const ws = new Workspace(
     { '/data/': data, '/data/d/inner/': inner, '/out/': out },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
   await ws.shell(
     'mkdir -p /data/d/real && echo r > /data/d/real/r.txt' +

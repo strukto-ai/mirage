@@ -15,17 +15,17 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import type { RegisteredCommand } from '../../config.ts'
+import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
+import type { Command, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { requireOp } from '../generic_bind/adapter.ts'
-import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
+import { requireOp, overMountIo } from '../generic_bind/adapter.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
 import { UsageError } from '../../errors.ts'
 import { usageHint } from '../../spec/usage.ts'
 
 /** Build the create-if-missing touch override for one keyed store. */
-export function makeTouch<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
+function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
   const exists = requireOp(io.exists, 'exists')
   const writeBytes = requireOp(io.write, 'write')
   const resolveGlob = resolveGlobOf(io)
@@ -53,11 +53,16 @@ export function makeTouch<A extends Accessor>(vfs: string, io: CommandIO<A>): Re
     return [null, new IOResult({ writes })]
   }
 
-  return command<A>({
+  return touchCommand
+}
+
+/** The keyed-store `touch` over the running mount's table, guarded by `wrap`. */
+export function makeTouch(vfs: string, wrap: (io: CommandIO) => CommandIO): Command[] {
+  return command({
     name: 'touch',
     vfs,
     spec: specOf('touch'),
-    fn: touchCommand,
+    fn: overMountIo(build, wrap),
     write: true,
     pathGuarded: true,
   })

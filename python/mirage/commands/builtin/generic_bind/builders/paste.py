@@ -17,12 +17,11 @@ from mirage.commands.builtin.generic.paste import (
     paste_generic as generic_paste,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -48,4 +47,4 @@ async def paste(
     )
 
 
-BUILDER = Builder("paste", paste, read=True)
+BUILDER = GenericCommand("paste", paste, read=True)

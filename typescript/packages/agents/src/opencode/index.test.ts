@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import type { ToolResult } from '@opencode-ai/plugin'
-import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
@@ -23,9 +22,7 @@ import { mirageTools, miragePlugin } from './index.ts'
 
 function mkWs(): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  for (const op of ram.ops()) ops.register(op)
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 }
 
 async function callTool(t: unknown, input: unknown): Promise<ToolResult> {

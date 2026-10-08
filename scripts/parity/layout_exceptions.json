@@ -17,7 +17,6 @@
    "vfs/opfs": "OPFS is the one typescript-only backend, declared in scripts/parity/parity_exceptions.json. There is no browser filesystem API for python to mirror.",
    "core/opfs": "OPFS backend core, browser-only.",
    "core/opfs/du": "OPFS backend core, browser-only.",
-   "commands/builtin/opfs": "OPFS command wrappers, browser-only.",
    "generated": "browser/src/generated/wasm.ts is a build artifact embedded for the browser bundle, not a source module.",
    "cli/bin": "An npm package declares its executable as a real file under bin/; python declares console_scripts in pyproject.toml instead.",
    "server/bin": "Same npm bin convention as cli/bin.",

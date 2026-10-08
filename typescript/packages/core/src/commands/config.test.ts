@@ -13,16 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { command, RegisteredCommand } from './config.ts'
+import { command, Command } from './config.ts'
 import { specOf } from './spec/builtins.ts'
 import { CommandSpec, Operand, Option } from './spec/types.ts'
 
 const STUB_SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
 const STUB_FN = () => Promise.resolve([null, { exitCode: 0 } as never] as [null, never])
 
-describe('RegisteredCommand', () => {
+describe('Command', () => {
   it('fills defaults: filetype=null, write=false', () => {
-    const rc = new RegisteredCommand({
+    const rc = new Command({
       name: 'cat',
       spec: STUB_SPEC,
       vfs: 'ram',
@@ -71,14 +71,14 @@ describe('command()', () => {
     expect(fn).toHaveBeenCalledTimes(calls)
   })
 
-  it('returns one RegisteredCommand per VFS when given a single string', () => {
+  it('returns one Command per VFS when given a single string', () => {
     const out = command({ name: 'cat', vfs: 'ram', spec: STUB_SPEC, fn: STUB_FN })
     expect(out).toHaveLength(1)
     expect(out[0]?.name).toBe('cat')
     expect(out[0]?.vfs).toBe('ram')
   })
 
-  it('returns one RegisteredCommand per VFS when given an array', () => {
+  it('returns one Command per VFS when given an array', () => {
     const out = command({ name: 'cat', vfs: ['ram', 'disk'], spec: STUB_SPEC, fn: STUB_FN })
     expect(out).toHaveLength(2)
     expect(out.map((r) => r.vfs)).toEqual(['ram', 'disk'])

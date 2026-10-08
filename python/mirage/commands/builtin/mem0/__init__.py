@@ -13,10 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic.search import make_search
-from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.mem0.io import IO as _IO
+from mirage.commands.builtin.generic_bind import generic_commands
 
 COMMANDS = [
-    *make_generic_commands("mem0", _IO),
-    make_search("mem0", _IO.search),
+    *generic_commands("mem0"),
+    make_search("mem0"),
 ]

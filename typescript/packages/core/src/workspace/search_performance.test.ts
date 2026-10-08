@@ -1,6 +1,5 @@
 import { expect, it, vi } from 'vitest'
 import { AsyncLineIterator } from '../io/async_line_iterator.ts'
-import { OpsRegistry } from '../ops/registry.ts'
 import { MountMode } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
@@ -31,9 +30,7 @@ it.each(COMMANDS)('skips nonmatching blocks through the shell: %s', async (comma
   const data = new TextEncoder().encode('abcdefg\n'.repeat(40000))
   ram.store.files.set('/tree/a.txt', data)
   ram.store.files.set('/tree/b.txt', data)
-  const ops = new OpsRegistry()
-  ops.registerVfs(ram)
-  const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
   const lines = vi.spyOn(AsyncLineIterator.prototype, 'readline')
   const records = vi.spyOn(AsyncLineIterator.prototype, 'readUntil')
   try {

@@ -136,11 +136,3 @@ export async function read(
   })
   return sliced
 }
-
-export async function* readStream(
-  accessor: GDriveAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await read(accessor, path, index)
-}

@@ -12,15 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 
 from mirage.accessor.gslides import GSlidesAccessor
-from mirage.commands.builtin.gslides import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.google.client import TokenManager
-from mirage.ops.gslides import OPS as GSLIDES_VFS_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import VFSName
+from mirage.core.gslides.read import read as _read
+from mirage.core.gslides.readdir import readdir as _readdir
+from mirage.core.gslides.stat import stat as _stat
+from mirage.types import FileStat, PathSpec, VFSName
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gslides.config import GSlidesConfig
 from mirage.vfs.gslides.prompt import PROMPT, WRITE_PROMPT
@@ -39,17 +42,44 @@ class GSlidesVFS(BaseVFS):
     prompt: str = PROMPT
     write_prompt: str = WRITE_PROMPT
 
+    # Every file here is a rendering; there are no stored bytes to read.
+    renderers: Mapping[str, str] = MappingProxyType(
+        {".gslide.json": "read_deck"}
+    )
+
     def __init__(self, config: GSlidesConfig) -> None:
         super().__init__()
         self.config = config
         self._token_manager = TokenManager(config)
         self.accessor = GSlidesAccessor(self.config, self._token_manager)
 
-    def ops(self) -> list[RegisteredOp]:
-        return GSLIDES_VFS_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read_deck(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        """Render a presentation as the JSON its ``.gslide.json`` file holds.
+
+        Args:
+            path (PathSpec): the file.
+            index (IndexCacheStore): the mount's index.
+            offset (int): the window's first byte.
+            size (int | None): the window's length, None through the end.
+        """
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

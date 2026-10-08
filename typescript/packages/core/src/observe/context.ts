@@ -37,7 +37,7 @@ const revisionsStorage = createAsyncContext<RevisionsState>()
 /**
  * The running command's own records. A storage of its own, not a field on
  * `RecordingState`: {@link runWithMountContext} rebuilds that state inside
- * every `executeCmd` and dispatcher op, and binding one would flip
+ * every `runCommand` and dispatcher op, and binding one would flip
  * {@link recordingActive} for an unrecorded command.
  */
 const commandSink = createAsyncContext<OpRecord[]>()

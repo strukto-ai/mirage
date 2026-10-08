@@ -32,23 +32,12 @@ import { applyIo } from '@struktoai/mirage-core/cache/file/io'
 import { CachableAsyncIterator } from '@struktoai/mirage-core/io/cachable_iterator'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
-import * as s3Io from '@struktoai/mirage-core/commands/builtin/s3/io'
-import * as onedriveIo from '@struktoai/mirage-core/commands/builtin/onedrive/io'
-import * as sharepointIo from '@struktoai/mirage-core/commands/builtin/sharepoint/io'
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import type { SharePointAccessor } from '@struktoai/mirage-core/accessor/sharepoint'
-import * as dropboxIo from '@struktoai/mirage-core/commands/builtin/dropbox/io'
 import type { DropboxAccessor } from '@struktoai/mirage-core/accessor/dropbox'
-import * as boxIo from '@struktoai/mirage-core/commands/builtin/box/io'
 import type { BoxAccessor } from '@struktoai/mirage-core/accessor/box'
-import * as gdocsIo from '@struktoai/mirage-core/commands/builtin/gdocs/io'
-import * as gdriveIo from '@struktoai/mirage-core/commands/builtin/gdrive/io'
-import * as gsheetsIo from '@struktoai/mirage-core/commands/builtin/gsheets/io'
-import * as gslidesIo from '@struktoai/mirage-core/commands/builtin/gslides/io'
-import type { CommandIO } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { commandIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { GDriveAccessor } from '@struktoai/mirage-core/accessor/gdrive'
-import * as githubIo from '@struktoai/mirage-core/commands/builtin/github/io'
-import { readStream as githubStream } from '@struktoai/mirage-core/core/github/read'
 import type { GitHubAccessor } from '@struktoai/mirage-core/accessor/github'
 import { DRIVER as S3_DRIVER } from '@struktoai/mirage-core/core/s3/driver'
 import { recordingActive, runWithRecording } from '@struktoai/mirage-core/observe/context'
@@ -58,9 +47,7 @@ import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { GridFSAccessor } from '../accessor/gridfs.ts'
 import type { HfBucketsAccessor } from '../accessor/hf_buckets.ts'
 import type { HfHubAccessor } from '../accessor/hf_hub.ts'
-import * as hfBucketsIo from '../commands/builtin/hf_buckets/io.ts'
 import { fakeHfOperator } from '../core/hf_buckets/mock.ts'
-import * as hfHubIo from '../commands/builtin/hf_hub/io.ts'
 import { FakeHub, blobOid, serveHub, xetHash } from '../core/hf_hub/_test_util.ts'
 import {
   DRIVE_ID,
@@ -70,7 +57,6 @@ import {
   SITE_NAME,
   serveGraph,
 } from '../core/msgraph/_test_util.ts'
-import * as gridfsIo from '../commands/builtin/gridfs/io.ts'
 import { Workspace } from '../workspace.ts'
 import { buildVfs, knownVfsNames } from './registry.ts'
 import { installS3Mock, type S3Mock } from './s3/mock.ts'
@@ -553,14 +539,11 @@ const HARNESSES: Record<string, Family> = {
 }
 
 // The mounts that render a Drive file through its editor API: the mime type
-// they list, the door, and the name their listing gives the file.
-const GAPPS: Record<
-  string,
-  [string, CommandIO, (title: string, id: string, modified: string) => string]
-> = {
-  gdocs: ['application/vnd.google-apps.document', gdocsIo.IO as CommandIO, docFilename],
-  gsheets: ['application/vnd.google-apps.spreadsheet', gsheetsIo.IO as CommandIO, sheetFilename],
-  gslides: ['application/vnd.google-apps.presentation', gslidesIo.IO as CommandIO, slideFilename],
+// they list and the name their listing gives the file.
+const GAPPS: Record<string, [string, (title: string, id: string, modified: string) => string]> = {
+  gdocs: ['application/vnd.google-apps.document', docFilename],
+  gsheets: ['application/vnd.google-apps.spreadsheet', sheetFilename],
+  gslides: ['application/vnd.google-apps.presentation', slideFilename],
 }
 
 // The drive each Graph backend addresses in the fake: OneDrive the signed-in
@@ -637,22 +620,13 @@ const FAMILY_ROWS: Partial<Record<Family, Row[]>> = {
 // live from source the same way. Imported by URL: the scripts package sits
 // outside this package's rootDir.
 const FACTS = resolve(fileURLToPath(import.meta.url), '../../../../../scripts/vfs_facts.ts')
-const { registryCapabilities, commandIoFacts } = (await import(pathToFileURL(FACTS).href)) as {
+const { registryCapabilities } = (await import(pathToFileURL(FACTS).href)) as {
   registryCapabilities: (
     root: string,
     pkgs: readonly string[],
-  ) => Record<string, { read_revalidatable?: unknown } | null>
-  commandIoFacts: (
-    root: string,
-    pkgs: readonly string[],
-    defaults: { maxGlobMatches: number; maxDuEntries: number },
-  ) => Record<string, { slots: string[] } | undefined>
+  ) => Record<string, { read_revalidatable?: unknown; functions: string[] } | null>
 }
 const CAPABILITIES = registryCapabilities(resolve(FACTS, '../../packages'), ['core', 'node'])
-const COMMAND_IO = commandIoFacts(resolve(FACTS, '../../packages'), ['core', 'node'], {
-  maxGlobMatches: 0,
-  maxDuEntries: 0,
-})
 
 interface Fake {
   vfs: BaseVFS
@@ -780,9 +754,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         dropbox.write(stored, next)
       },
-      readBytes: (p) => dropboxIo.IO.readBytes(accessor, p, index),
-      readStream: (p) => dropboxIo.IO.readStream(accessor, p, index),
-      stat: (p) => dropboxIo.IO.stat(accessor, p, index),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, index),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p, index),
+      stat: (p) => commandIo(vfs).stat(accessor, p, index),
       streamSlot: 'stream',
     }
   }
@@ -810,9 +784,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         box.write(stored, next)
       },
-      readBytes: (p) => boxIo.IO.readBytes(accessor, p, index),
-      readStream: (p) => boxIo.IO.readStream(accessor, p, index),
-      stat: (p) => boxIo.IO.stat(accessor, p, index),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, index),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p, index),
+      stat: (p) => commandIo(vfs).stat(accessor, p, index),
       streamSlot: 'stream',
     }
   }
@@ -857,9 +831,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         gh.files.set(key, next)
       },
-      readBytes: (p) => githubIo.IO.readBytes(accessor, p, ownIndex(vfs)),
-      readStream: (p) => githubIo.IO.readStream(accessor, p, ownIndex(vfs)),
-      stat: (p) => githubIo.IO.stat(accessor, p, ownIndex(vfs)),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, ownIndex(vfs)),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p, ownIndex(vfs)),
+      stat: (p) => commandIo(vfs).stat(accessor, p, ownIndex(vfs)),
       streamSlot: 'bytes',
     }
   }
@@ -895,9 +869,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
         key,
         fetches: () => graph.fetches() - before,
         rewrite,
-        readBytes: (p) => onedriveIo.IO.readBytes(accessor, p),
-        readStream: (p) => onedriveIo.IO.readStream(accessor, p),
-        stat: (p) => onedriveIo.IO.stat(accessor, p),
+        readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+        readStream: (p) => commandIo(vfs).readStream(accessor, p),
+        stat: (p) => commandIo(vfs).stat(accessor, p),
         streamSlot: 'stream',
       }
     }
@@ -909,9 +883,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       key,
       fetches: () => graph.fetches() - before,
       rewrite,
-      readBytes: (p) => sharepointIo.IO.readBytes(accessor, p),
-      readStream: (p) => sharepointIo.IO.readStream(accessor, p),
-      stat: (p) => sharepointIo.IO.stat(accessor, p),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p),
+      stat: (p) => commandIo(vfs).stat(accessor, p),
       streamSlot: 'stream',
     }
   }
@@ -932,18 +906,19 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         item.content = next
       },
-      readBytes: (p) => gdriveIo.IO.readBytes(accessor, p, index),
-      readStream: (p) => gdriveIo.IO.readStream(accessor, p, index),
-      stat: (p) => gdriveIo.IO.stat(accessor, p),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, index),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p, index),
+      stat: (p) => commandIo(vfs).stat(accessor, p),
       streamSlot: 'bytes',
     }
   }
   const gapp = GAPPS[name]
   if (gapp !== undefined) {
-    const [mime, io, filename] = gapp
+    const [mime, filename] = gapp
     const item = gdriveAdd('a', data, mime)
     const vfs = await buildVfs(name, GDRIVE_CONFIG)
     const accessor = vfs.accessor
+    const io = commandIo(vfs)
     expect(vfs.readRevalidatable).toBe(true)
     // The fake names no owner, so the file lists under shared/. A rewrite
     // moves modifiedTime within the same day, which keeps the name.
@@ -997,9 +972,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         op.files.set(stored, Buffer.from(next))
       },
-      readBytes: (p) => hfBucketsIo.IO.readBytes(accessor, p),
-      readStream: (p) => hfBucketsIo.IO.readStream(accessor, p),
-      stat: (p) => hfBucketsIo.IO.stat(accessor, p),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p),
+      stat: (p) => commandIo(vfs).stat(accessor, p),
       streamSlot: 'stream',
     }
   }
@@ -1046,9 +1021,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         files.set(stored, next)
       },
-      readBytes: (p) => hfHubIo.IO.readBytes(accessor, p),
-      readStream: (p) => hfHubIo.IO.readStream(accessor, p),
-      stat: (p) => hfHubIo.IO.stat(accessor, p),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p),
+      stat: (p) => commandIo(vfs).stat(accessor, p),
       streamSlot: 'stream',
     }
   }
@@ -1073,9 +1048,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         H.gridfs.set(stored, gridfsDoc(stored, next, 'aaaaaaaaaaaaaaaaaaaaaaaa', 2022))
       },
-      readBytes: (p) => gridfsIo.IO.readBytes(accessor, p),
-      readStream: (p) => gridfsIo.IO.readStream(accessor, p),
-      stat: (p) => gridfsIo.IO.stat(accessor, p),
+      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+      readStream: (p) => commandIo(vfs).readStream(accessor, p),
+      stat: (p) => commandIo(vfs).stat(accessor, p),
       streamSlot: 'stream',
     }
   }
@@ -1098,9 +1073,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     rewrite: (next) => {
       s3.store.set('b', stored, next)
     },
-    readBytes: (p) => s3Io.IO.readBytes(accessor, p),
-    readStream: (p) => s3Io.IO.readStream(accessor, p),
-    stat: (p) => s3Io.IO.stat(accessor, p),
+    readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
+    readStream: (p) => commandIo(vfs).readStream(accessor, p),
+    stat: (p) => commandIo(vfs).stat(accessor, p),
     streamSlot: 'stream',
   }
 }
@@ -1146,24 +1121,15 @@ const CHANGED_CASES: { name: string; shape: Shape }[] = [
 ]
 const B_CASES = cases(['bytes', 'stream'])
 
-// The command packages the aliases share: every s3 alias is wired through
-// s3's, every hf repo type through hf_hub's. Any other name keys itself, so a
-// new declarer with no package of its own reads as having no slots.
-const IO_KEYS: Record<string, string> = {
-  ...Object.fromEntries(S3_FAMILY.map((name) => [name, 's3'])),
-  ...Object.fromEntries(Object.keys(HF_FAMILY).map((name) => [name, 'hf_hub'])),
-}
-
-// Derived from the live roster and each backend's wired write slot (the
+// Derived from the live roster and each backend's own write function (the
 // facts the spec generator reads), not listed: a declarer that gains a write
-// op joins the write rows.
+// joins the write rows.
 function writableNames(): Set<string> {
   const known = new Set(knownVfsNames())
   const out = new Set<string>()
   for (const [name, caps] of Object.entries(CAPABILITIES)) {
     if (caps?.read_revalidatable !== true || !known.has(name)) continue
-    const slots = COMMAND_IO[IO_KEYS[name] ?? name]?.slots ?? []
-    if (slots.includes('write')) out.add(name)
+    if (caps.functions.includes('write')) out.add(name)
   }
   return out
 }
@@ -1239,14 +1205,9 @@ async function partialRead(ws: Workspace, fake: Fake, virtual: string): Promise<
 // Reconcile stats through a fresh index (workspace/reconcile.ts), so a
 // listing's index row, which carries no token, cannot answer for it.
 async function reconcileStat(ws: Workspace, fake: Fake, virtual: string): Promise<FileStat> {
-  const stat = await ws.opsRegistry.call(
-    'stat',
-    fake.vfs,
-    fake.accessor,
-    specFor(virtual, fake.key),
-    [],
-    { index: new RAMIndexCacheStore() },
-  )
+  const stat = await ws.namespace
+    .mountFor(virtual)
+    .callOp('stat', specFor(virtual, fake.key), [], { index: new RAMIndexCacheStore() })
   return stat as FileStat
 }
 
@@ -1736,10 +1697,13 @@ describe('the read-token contract', () => {
     }
   })
 
-  it("github's stream is its read, so it records through record", () => {
+  it("github's stream is its read, so it records through record", async () => {
     // Its expected stream slot is "bytes" for that reason. A native stream
     // that forgot to record would otherwise hide behind that slot.
-    expect(githubIo.IO.readStream).toBe(githubStream)
+    const fake = await makeFake('github', 'root', SEED)
+    const chunks: Uint8Array[] = []
+    for await (const chunk of fake.readStream(specFor('/m/a.txt', fake.key))) chunks.push(chunk)
+    expect(chunks).toEqual([SEED])
   })
 
   it('the contract goes red on github stamping another kind', async () => {

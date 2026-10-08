@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
@@ -78,12 +77,7 @@ const BARE_HERE: ReadonlyMap<string, string> = new Map([
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  const ws = new Workspace(
-    { '/ram': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, shellParser: parser })
   await ws.shell('mkdir -p /ram/dir')
   await ws.shell('echo inner > /ram/dir/inner.txt')
   return ws

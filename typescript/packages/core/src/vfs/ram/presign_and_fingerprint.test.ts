@@ -28,18 +28,9 @@ describe('RAM VFS: presign + fingerprint', () => {
     expect(typeof r.fingerprint).toBe('undefined')
   })
 
-  it('RAM VFS exposes read/write/stat ops', () => {
-    const r = new RAMVFS()
-    const ops = r.ops()
-    const names = new Set(ops.map((o) => o.name))
-    expect(names.has('read_bytes') || names.has('read')).toBe(true)
-    expect(names.has('write')).toBe(true)
-    expect(names.has('stat')).toBe(true)
-  })
-
-  it('RAM VFS ops list is non-empty', () => {
-    const r = new RAMVFS()
-    expect(r.ops().length).toBeGreaterThan(0)
+  it('RAM VFS serves read/write/stat at the door', () => {
+    const door = ops(new RAMVFS())
+    for (const name of ['read', 'write', 'stat']) expect(door.has(name)).toBe(true)
   })
 
   it('glob is callable on RAM store when files exist', async () => {

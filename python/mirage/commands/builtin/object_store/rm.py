@@ -20,14 +20,18 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic.rm_cmd import rm_without_operands
-from mirage.commands.builtin.generic_bind.adapter import CommandIO, Operation
+from mirage.commands.builtin.generic_bind.adapter import (
+    Operation,
+    over_mount_io,
+    require_op,
+)
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.builtin.utils.slash_links import (
     is_slashed_link,
     rm_link_refusal,
 )
 from mirage.commands.builtin.utils.verbose import removal_lines
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
@@ -36,18 +40,17 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
 
-def make_rm(vfs: str, io: CommandIO) -> Callable[..., Any]:
-    """Build the no-real-directories rm override for one keyed store.
+def _build(io: CommandIO) -> Callable[..., Any]:
+    """The rm handler over one mount's table.
 
     Args:
-        vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table; must wire rm_r.
+        io (CommandIO): the guarded table of the running mount.
     """
     stat = io.stat
     readdir = io.readdir
     resolve_glob = io.resolve_glob
-    unlink = io.require(Operation.UNLINK)
-    rmdir = io.require(Operation.RMDIR)
+    unlink = require_op(io, Operation.UNLINK)
+    rmdir = require_op(io, Operation.RMDIR)
     rm_r = io.rm_r
     if rm_r is None:
         raise NotImplementedError(
@@ -183,7 +186,19 @@ def make_rm(vfs: str, io: CommandIO) -> Callable[..., Any]:
             writes=removed, stderr=stderr, exit_code=1 if errors else 0
         )
 
+    return rm
+
+
+def make_rm(
+    vfs: str, wrap: Callable[[CommandIO], CommandIO]
+) -> Callable[..., Any]:
+    """Build the no-real-directories rm override for one keyed store.
+
+    Args:
+        vfs (str): VFS name the command registers under.
+        wrap (Callable): the guards over the mount's table.
+    """
     wrapped: Callable[..., Any] = command(
         "rm", vfs=vfs, spec=SPECS["rm"], write=True, path_guarded=True
-    )(rm)
+    )(over_mount_io(_build, wrap))
     return wrapped

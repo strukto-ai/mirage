@@ -14,9 +14,8 @@
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.commands.builtin.generic.grep import grep_generic
-from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.adapter import bound_op, mount_io
 from mirage.commands.builtin.generic_bind.factory import scan_io
-from mirage.commands.builtin.gmail.io import IO
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import (
     pushdown_operand,
@@ -54,7 +53,7 @@ async def grep(
     pattern = pattern_arg(texts, fl)
     # Output-shaping flags, a glob operand and a multi-operand line all need
     # the generic grep over rendered files; see SEARCH_HONORED above.
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, scoped = scan_io(mount_io(opts), opts.ns, opts.mount_prefix)
     operand = (
         None
         if scoped

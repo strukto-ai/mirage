@@ -20,13 +20,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.cache.index import NULL_INDEX
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.search import (
     narrow_scope,
     run_search,
 )
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.search import make_search_op
 from mirage.errors.fs import efbig, enoent

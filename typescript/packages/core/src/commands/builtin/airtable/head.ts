@@ -21,10 +21,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { headGeneric } from '../generic/head.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
-
-const resolveGlob = resolveGlobOf(IO)
+import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
 
 // A record renders as exactly one line, so the first N lines of a records
 // file are its first N records: the count rides maxRecords instead of paging
@@ -46,7 +43,9 @@ async function head(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+    paths.length > 0
+      ? await resolveGlobOf(mountIo(opts))(accessor, paths, opts.index ?? undefined)
+      : []
   const fl = new FlagView(opts.flags, specOf('head'))
   const nRaw = fl.asStr('lines') ?? null
   const lines = nRaw !== null ? Number.parseInt(nRaw, 10) : 10

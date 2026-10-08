@@ -15,17 +15,20 @@
 import { ListingVersion } from '@struktoai/mirage-core/types'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-
 import type { VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 
 import type { DeltaHook } from '@struktoai/mirage-core/watch/index'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
-import { HF_HUB_COMMANDS } from '../../commands/builtin/hf_hub/index.ts'
 
 import { buildDeltaHook } from '../../core/hf_hub/watch.ts'
-import { HF_HUB_OPS } from '../../ops/hf_hub/index.ts'
+import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import { readdir as hubReaddir } from '../../core/hf_hub/readdir.ts'
+import { read as hubRead } from '../../core/hf_hub/read.ts'
+import { stat as hubStat } from '../../core/hf_hub/stat.ts'
+import { readStream as hubStream } from '../../core/hf_hub/stream.ts'
+import { exists as hubExists } from '../../core/hf_hub/exists.ts'
+import { SCOPE_ERROR } from '../../core/hf_hub/constants.ts'
 
 /**
  * The shared body of the three Hub *repository* VFS.
@@ -63,12 +66,34 @@ export abstract class HfHubVFS extends BaseVFS {
   // full re-walk rather than risking a stale row.
   override readonly indexTtl: number = 86_400
 
-  override commands(): readonly RegisteredCommand[] {
-    return HF_HUB_COMMANDS
+  override readonly readsRanges: boolean = true
+
+  override readonly maxGlobMatches: number = SCOPE_ERROR
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return hubReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return HF_HUB_OPS
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    if (offset === 0 && size === null) return hubRead(this.accessor, path, index)
+    return hubRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return hubStat(this.accessor, path, index)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return hubStream(this.accessor, path, index)
+  }
+
+  override exists(path: PathSpec): Promise<boolean> {
+    return hubExists(this.accessor, path)
   }
 
   override deltaHook(): DeltaHook {

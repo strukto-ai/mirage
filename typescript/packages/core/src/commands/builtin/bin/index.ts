@@ -12,13 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { BinAccessor } from '../../../accessor/bin.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 
-export const BIN_COMMANDS: readonly RegisteredCommand[] = makeGenericCommands<BinAccessor>(
-  VFSName.BIN,
-  IO,
-)
+export const BIN_COMMANDS: readonly Command[] = genericCommands(VFSName.BIN)

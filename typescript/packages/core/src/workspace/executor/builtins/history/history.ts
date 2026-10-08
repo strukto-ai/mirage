@@ -115,7 +115,7 @@ export async function handleHistory(
       new ExecutionNode({ command: 'history', exitCode: 1, stderr: err }),
     ]
   }
-  const [stream, io] = await mount.executeCmd('history', [], texts, flags, {
+  const [stream, io] = await mount.runCommand('history', [], texts, flags, {
     cwd: session.cwd,
     sessionId: session.sessionId,
   })

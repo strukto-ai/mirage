@@ -15,10 +15,9 @@
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.commands.config import RegisteredCommand, command
+from mirage.commands.config import Command, command
 from mirage.commands.spec import SPECS
 from mirage.io.types import IOResult
-from mirage.ops.registry import op
 from mirage.vfs.ram import RAMVFS
 
 
@@ -57,44 +56,31 @@ def test_commands_introspection(ws):
     assert None in cmds["cat"]
 
 
-def test_registered_ops_introspection(ws):
+def test_the_mount_answers_its_vfs_functions(ws):
     m = ws.mount("/data/")
-    ops = m.registered_ops()
-    assert isinstance(ops, dict)
-    assert "read" in ops
-    assert "stat" in ops
+    assert m.answers("read")
+    assert m.answers("stat")
 
 
-def test_register_fns_adds_command(ws):
+def test_register_commands_adds_command(ws):
     @command("test_custom", vfs="ram", spec=SPECS["cat"])
     async def custom(accessor, paths, *texts, **kw):
         return b"custom", IOResult()
 
     m = ws.mount("/data/")
     assert "test_custom" not in m.commands()
-    m.register_fns([custom])
+    m.register_commands([custom])
     assert "test_custom" in m.commands()
 
 
-def test_register_fns_adds_registered_command(ws):
+def test_register_commands_adds_registered_command(ws):
     @command("test_custom", vfs="ram", spec=SPECS["cat"])
     async def custom(accessor, paths, *texts, **kw):
         return b"custom", IOResult()
 
     m = ws.mount("/data/")
-    m.register_fns(custom._registered_commands)
+    m.register_commands(custom._registered_commands)
     assert "test_custom" in m.commands()
-
-
-def test_register_fns_adds_op(ws):
-    @op("test_custom_op", vfs="ram")
-    async def custom_op(accessor, scope, **kwargs):
-        return b"hello"
-
-    m = ws.mount("/data/")
-    assert "test_custom_op" not in m.registered_ops()
-    m.register_fns([custom_op])
-    assert "test_custom_op" in m.registered_ops()
 
 
 def test_unregister_removes_command(ws):
@@ -113,7 +99,7 @@ def test_unregister_removes_all_filetypes(ws):
         return b"demo", IOResult()
 
     m.register(
-        RegisteredCommand(
+        Command(
             "cat", spec=SPECS["cat"], vfs="ram", filetype=".demo", fn=demo_cat
         )
     )
@@ -132,7 +118,7 @@ async def test_unregister_then_register_works(ws):
     async def custom_cat(accessor, paths, *texts, **kw):
         return b"custom cat output", IOResult()
 
-    m.register_fns([custom_cat])
+    m.register_commands([custom_cat])
     assert "cat" in m.commands()
     await ws.shell("echo hello | tee /data/hello.txt")
     result = await ws.shell("cat /data/hello.txt")
@@ -148,41 +134,31 @@ def test_register_isolated_per_mount(ws_two_mounts):
     assert "rm" in mb.commands()
 
 
-def test_register_fns_isolated_per_mount(ws_two_mounts):
+def test_register_commands_isolated_per_mount(ws_two_mounts):
     @command("only_on_a", vfs="ram", spec=SPECS["cat"])
     async def only_a(accessor, paths, *texts, **kw):
         return b"a", IOResult()
 
-    ws_two_mounts.mount("/a/").register_fns([only_a])
+    ws_two_mounts.mount("/a/").register_commands([only_a])
     assert "only_on_a" in ws_two_mounts.mount("/a/").commands()
     assert "only_on_a" not in ws_two_mounts.mount("/b/").commands()
 
 
-def test_register_fns_wrong_vfs_raises(ws):
+def test_register_commands_wrong_vfs_raises(ws):
     @command("s3_only", vfs="s3", spec=SPECS["cat"])
     async def s3_cmd(accessor, paths, *texts, **kw):
         return b"s3", IOResult()
 
     m = ws.mount("/data/")
     with pytest.raises(ValueError, match=r"'s3'"):
-        m.register_fns([s3_cmd])
+        m.register_commands([s3_cmd])
 
 
-def test_register_fns_wrong_vfs_op_raises(ws):
-    @op("s3_read", vfs="s3")
-    async def s3_op(accessor, scope, **kwargs):
-        return b"s3"
-
-    m = ws.mount("/data/")
-    with pytest.raises(ValueError, match=r"'s3'"):
-        m.register_fns([s3_op])
-
-
-def test_register_fns_multi_vfs_filters_to_matching(ws):
+def test_register_commands_multi_vfs_filters_to_matching(ws):
     @command("multi", vfs=["ram", "s3"], spec=SPECS["cat"])
     async def multi(accessor, paths, *texts, **kw):
         return b"multi", IOResult()
 
     m = ws.mount("/data/")
-    m.register_fns([multi])
+    m.register_commands([multi])
     assert "multi" in m.commands()

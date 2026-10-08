@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { sortGeneric } from '../../generic/sort.ts'
-import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const sort: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const sort: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const write = ops.write
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
@@ -27,7 +27,7 @@ const sort: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'sort',
   read: true,
   fn: sort,

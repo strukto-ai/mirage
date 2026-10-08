@@ -15,7 +15,6 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
@@ -42,12 +41,7 @@ async function* slowStdin(): AsyncGenerator<Uint8Array> {
 
 function buildWs(): Workspace {
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  return new Workspace(
-    { '/data': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 describe('pipeline timeout', () => {

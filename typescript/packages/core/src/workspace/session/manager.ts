@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SessionOwner } from '../../context/session_context.ts'
 import { ownRecord, SessionState, varsFromEntries, varsFromEnv } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
@@ -58,7 +59,7 @@ function mergeSeedVars(session: SessionState, seedVars: Record<string, ShellVar>
  * deletes from the store — closing a session revokes it everywhere —
  * while process shutdown leaves stored sessions in place.
  */
-export class SessionManager {
+export class SessionManager extends SessionOwner {
   private readonly sessions = new Map<string, SessionState>()
   private readonly persistLock = new KeyLock()
   private readonly sessionStore: SessionStore
@@ -81,6 +82,7 @@ export class SessionManager {
   private hasManaged: boolean
 
   constructor(defaultSessionId: string, store?: SessionStore, seedVars?: Record<string, ShellVar>) {
+    super()
     this.defaultIdInternal = defaultSessionId
     this.sessionStore = store ?? new RAMSessionStore()
     this.seedVarsInternal = ownRecord(seedVars)

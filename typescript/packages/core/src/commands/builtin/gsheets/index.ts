@@ -12,18 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { GSheetsAccessor } from '../../../accessor/gsheets.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 import { GSHEETS_RM } from './rm.ts'
 
 // Sheets verbs and API passthroughs live in the gws CLI
 // (commands/cli/builtin/gws), installed by name; the mount only serves
 // the filesystem surface.
-export const GSHEETS_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<GSheetsAccessor>(VFSName.GSHEETS, IO, {
+export const GSHEETS_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.GSHEETS, {
     overrides: new Set(['rm']),
   }),
   ...GSHEETS_RM,

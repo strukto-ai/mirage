@@ -21,6 +21,7 @@ from unittest.mock import patch
 import pytest
 
 from mirage.cache.index import NULL_INDEX
+from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.s3 import COMMANDS as _S3_COMMANDS
 from mirage.commands.config import CommandOpts
 from mirage.io.cachable_iterator import CachableAsyncIterator
@@ -332,7 +333,10 @@ async def test_cat_multifile_caches_materialized_bytes_per_file():
         a = _resolved("/s3/reports/summary.txt")
         b = _resolved("/s3/archive/2026/q1/deep.txt")
         source, io = await s3_cat(
-            backend.accessor, [a, b], [], CommandOpts(index=NULL_INDEX)
+            backend.accessor,
+            [a, b],
+            [],
+            CommandOpts(io=command_io(backend), index=NULL_INDEX),
         )
 
         assert (
@@ -354,7 +358,10 @@ async def test_cat_single_file_keeps_streaming_cachable():
     with _patch_async_session(objects):
         a = _resolved("/s3/reports/summary.txt")
         source, io = await s3_cat(
-            backend.accessor, [a], [], CommandOpts(index=NULL_INDEX)
+            backend.accessor,
+            [a],
+            [],
+            CommandOpts(io=command_io(backend), index=NULL_INDEX),
         )
         assert isinstance(source, CachableAsyncIterator)
         assert io.reads["/reports/summary.txt"] is source

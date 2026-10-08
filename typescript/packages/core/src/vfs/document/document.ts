@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DocumentAccessor } from '../../accessor/document.ts'
-import { IO } from '../../commands/builtin/document/io.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { read } from '../../core/document/read.ts'
+import { readdir } from '../../core/document/readdir.ts'
+import { stat } from '../../core/document/stat.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 
 export class DocumentVFS extends BaseVFS<DocumentAccessor> {
@@ -27,8 +32,25 @@ export class DocumentVFS extends BaseVFS<DocumentAccessor> {
     super({
       name: 'document',
       accessor: new DocumentAccessor(name, render),
-      io: IO,
       sizesAlwaysKnown: true,
     })
+  }
+
+  override readdir(path: PathSpec, _index?: IndexCacheStore): Promise<string[]> {
+    return readdir(this.accessor, path)
+  }
+
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await read(this.accessor, path)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
+    return stat(this.accessor, path)
   }
 }

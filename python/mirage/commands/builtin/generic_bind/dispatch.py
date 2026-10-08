@@ -18,8 +18,8 @@ from typing import cast
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
-from mirage.commands.config import CommandOpts
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
@@ -160,7 +160,7 @@ def dispatch_io(
 
 
 async def run_dispatch(
-    builder: Builder,
+    builder: GenericCommand,
     paths: list[PathSpec],
     texts: list[str],
     flag_kwargs: dict[str, FlagValue],
@@ -177,7 +177,7 @@ async def run_dispatch(
     stream read after it ends would be served the previous command's.
 
     Args:
-        builder (Builder): the command's existing generic binding.
+        builder (GenericCommand): the command's existing generic binding.
         paths (list[PathSpec]): operands in command-line order.
         texts (list[str]): text operands.
         flag_kwargs (dict[str, FlagValue]): the parsed flags.

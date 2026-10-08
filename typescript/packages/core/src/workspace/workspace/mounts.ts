@@ -14,7 +14,6 @@
 
 import { BIN_PREFIX } from '../../shell/constants.ts'
 import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
-import type { OpsRegistry } from '../../ops/registry.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { Limit, MountMode, ReadSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -122,14 +121,12 @@ export function prepareAddedMount(
 
 export interface UnmountDeps {
   registry: MountRegistry
-  opsRegistry: OpsRegistry
   sharedMounts: Set<BaseVFS>
   isShuttingDown: () => boolean
 }
 
 /**
- * Remove one mount, closing its owned VFS when its last alias leaves. Operations are shared by kind,
- * so they remain registered while any mount uses that kind. The virtual
+ * Remove one mount, closing its owned VFS when its last alias leaves. The virtual
  * root, the device mount, and the history view are permanent. Mirrors the
  * Python `unmount` in `workspace/mounts.py`.
  */
@@ -166,13 +163,6 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   const vfs = entry.vfs
   const remaining = deps.registry.allMounts()
   const stillMounted = remaining.some((m) => m.vfs === vfs)
-  const kindStillMounted = remaining.some((m) => m.vfs.name === vfs.name)
-  deps.opsRegistry.unregisterVfs(kindStillMounted ? vfs : vfs.name)
-  for (const survivor of remaining) {
-    if (survivor.vfs.name === vfs.name) {
-      deps.opsRegistry.registerVfs(survivor.vfs, false)
-    }
-  }
   if (!stillMounted) {
     const closing = closeVfs(deps, entry)
     deps.registry.retiringMounts.set(vfs, closing)

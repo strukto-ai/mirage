@@ -17,13 +17,12 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.uniq import uniq_generic as generic_uniq
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     bound_op,
     dir_aware_stat,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -48,4 +47,4 @@ async def uniq(
     )
 
 
-BUILDER = Builder("uniq", uniq, read=True)
+BUILDER = GenericCommand("uniq", uniq, read=True)

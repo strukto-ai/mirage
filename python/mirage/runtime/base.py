@@ -16,7 +16,7 @@ from abc import ABC
 from collections.abc import Sequence
 from typing import Any, Callable, ClassVar
 
-from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.binding import RuntimeContext, WorkspaceBinding
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.mixin import (
@@ -30,7 +30,6 @@ from mirage.runtime.types import (
     ProcessExecution,
     RunResult,
     RuntimeCapabilities,
-    RuntimeContext,
     RuntimeReach,
     ScriptSource,
     ShellExecution,

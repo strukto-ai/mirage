@@ -121,9 +121,7 @@ async def _stored(ws: Workspace, key: str = "/m") -> str | None:
 
 
 async def _checked(ws: Workspace, key: str = "/m") -> str | None:
-    remote = await ws.mount(key).execute_op(
-        "stat", key, index=RAMIndexCacheStore()
-    )
+    remote = await ws.mount(key).call("stat", key, index=RAMIndexCacheStore())
     return remote.fingerprint
 
 

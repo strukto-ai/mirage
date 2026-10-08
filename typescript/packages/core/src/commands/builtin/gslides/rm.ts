@@ -15,6 +15,5 @@
 import { unlink } from '../../../core/gslides/unlink.ts'
 import { VFSName } from '../../../types.ts'
 import { makeRm } from '../generic/rm_cmd.ts'
-import { IO } from './io.ts'
 
-export const GSLIDES_RM = makeRm(VFSName.GSLIDES, IO, unlink)
+export const GSLIDES_RM = makeRm(VFSName.GSLIDES, unlink)

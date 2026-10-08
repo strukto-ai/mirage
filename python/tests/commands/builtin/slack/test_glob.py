@@ -16,10 +16,11 @@ import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
-from mirage.commands.builtin.slack.io import resolve_glob
 from mirage.core.slack.config import SlackConfig
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.slack import SlackVFS
+from tests.fixtures.vfs_io import io_for
 
 
 @pytest.fixture
@@ -78,6 +79,8 @@ async def test_resolve_glob_files_pdf(accessor, index):
         pattern="*.pdf",
         resolved=False,
     )
-    matched = await resolve_glob(accessor, [spec], index=index)
+    matched = await io_for(SlackVFS, accessor).resolve_glob(
+        accessor, [spec], index=index
+    )
     assert len(matched) == 1
     assert matched[0].virtual.endswith("a__F1.pdf")

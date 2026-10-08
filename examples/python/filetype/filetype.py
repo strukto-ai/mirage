@@ -17,7 +17,7 @@ import json
 import struct
 
 from mirage import MountMode, Workspace
-from mirage.commands.config import RegisteredCommand
+from mirage.commands.config import Command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.read import read
 from mirage.io.types import IOResult
@@ -57,7 +57,7 @@ async def main() -> None:
 
     mount = ws.mount("/data/")
     mount.register(
-        RegisteredCommand(
+        Command(
             "cat",
             spec=SPECS["cat"],
             vfs="ram",

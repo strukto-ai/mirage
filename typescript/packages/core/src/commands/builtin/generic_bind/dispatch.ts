@@ -25,7 +25,8 @@ import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import type { Builder, CommandIO } from './adapter.ts'
+import type { GenericCommand } from './adapter.ts'
+import type { CommandIO } from '../../config.ts'
 
 /** Use the workspace's policy-checked operations as a generic IO adapter.
  * A listing answers the way a backend's does, which is what every generic is
@@ -107,7 +108,7 @@ function noneBelow(): string[] {
  * command made, so a lazy stream read after it ends would be served the
  * previous command's. */
 export async function runDispatch(
-  builder: Builder,
+  builder: GenericCommand,
   paths: readonly PathSpec[],
   texts: readonly string[],
   bag: Record<string, FlagValue>,

@@ -14,11 +14,13 @@
 
 import { indexConfigDump, restoreIndexConfig } from './config.ts'
 import { tokenOrNull } from '../../cache/file/utils.ts'
+import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheEntry } from '../../cache/file/entry.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE } from '../../observe/log_entry.ts'
-import type { EventDict } from '../../observe/observer.ts'
+import type { EventDict, Observer } from '../../observe/observer.ts'
+import type { OpRecord } from '../../observe/record.ts'
 import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
 import type { VFSStateBase } from '../../vfs/base.ts'
 import { z } from 'zod'
@@ -47,7 +49,7 @@ import {
   redactConfigWithSchema,
   vfsStateRequiresOverride,
 } from '../../vfs/secrets.ts'
-import { Job, JobStatus } from '../../shell/job_table/index.ts'
+import { Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
 import type { ShellVar } from '../../shell/variable.ts'
 import {
   Channel,
@@ -62,9 +64,16 @@ import { readRegular } from './fs.ts'
 import { resolveReadSpec } from '../mount/read_policy.ts'
 import { Mount } from '../mount/spec.ts'
 import { VERSION } from '../../version.ts'
-import { metaFromFields, metaToFields, type NodeMeta } from '../mount/namespace/namespace.ts'
+import type { Documents } from '../documentation/documents.ts'
+import {
+  metaFromFields,
+  metaToFields,
+  type Namespace,
+  type NodeMeta,
+} from '../mount/namespace/namespace.ts'
+import type { MountRegistry } from '../mount/registry.ts'
+import type { SessionManager } from '../session/manager.ts'
 import { SessionState, varsFromFields, varsToFields } from '../session/session.ts'
-import type { Workspace } from '../workspace/workspace.ts'
 import type { MountArgs } from './config.ts'
 import { captureFingerprints, liveOnlyMountPrefixes } from './drift.ts'
 import type {
@@ -80,9 +89,26 @@ import type {
 } from './types.ts'
 import { FORMAT_VERSION, normMountPrefix } from './utils.ts'
 
+/** What a snapshot reads from a workspace and restores into it (`Workspace`). */
+export interface WorkspaceLike {
+  readonly registry: MountRegistry
+  readonly sessionManager: SessionManager
+  readonly jobTable: JobTable
+  readonly agentId: string | null
+  readonly cache: FileCache & BaseVFS
+  readonly namespace: Namespace
+  readonly observer: Observer
+  readonly documents: Documents
+  readonly records: OpRecord[]
+  readonly defaultSessionId: string
+  adoptDefaultSession(sessionId: string): Promise<void>
+  forgetReads(): void
+  quiesced<T>(capture: () => Promise<T>): Promise<T>
+}
+
 const VALID_MODES: readonly string[] = [MountMode.READ, MountMode.WRITE, MountMode.EXEC]
 
-export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
+export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict> {
   const skip = new Set(['/dev/', normMountPrefix(HISTORY_PREFIX), normMountPrefix(BIN_PREFIX)])
   const mounted = [...ws.registry.allMounts()]
   for (const mount of mounted) await mount.ensureReady()
@@ -484,7 +510,7 @@ export async function withRebuiltMounts(
  * snapshot never carries them. Mirrors Python `apply_state_dict`.
  */
 export async function applyStateDict(
-  ws: Workspace,
+  ws: WorkspaceLike,
   state: WorkspaceStateDict,
   options: { replaceCache?: boolean } = {},
 ): Promise<void> {
@@ -542,7 +568,7 @@ export async function applyStateDict(
   await restoreNodes(ws, state)
 }
 
-async function restoreNodes(ws: Workspace, state: WorkspaceStateDict): Promise<void> {
+async function restoreNodes(ws: WorkspaceLike, state: WorkspaceStateDict): Promise<void> {
   const entries = new Map<string, NodeMeta>()
   for (const [path, e] of Object.entries(state.nodes ?? {})) {
     entries.set(path, metaFromFields(e))
@@ -570,7 +596,7 @@ async function restoreNodes(ws: Workspace, state: WorkspaceStateDict): Promise<v
  * snapshot carries none. Mirrors Python `_gate_restored_state`.
  */
 async function gateRestoredState(
-  ws: Workspace,
+  ws: WorkspaceLike,
   state: WorkspaceStateDict,
 ): Promise<[SessionState[], Record<string, ShellVar> | null]> {
   const sessions = state.sessions.map((s) => SessionState.fromJSON(s))
@@ -588,7 +614,7 @@ async function gateRestoredState(
 }
 
 async function restoreSessions(
-  ws: Workspace,
+  ws: WorkspaceLike,
   state: WorkspaceStateDict,
   tables: readonly SessionState[],
 ): Promise<void> {
@@ -628,7 +654,7 @@ async function restoreSessions(
   await ws.sessionManager.replaceFromSnapshot(restored)
 }
 
-function restoreCache(ws: Workspace, state: WorkspaceStateDict): void {
+function restoreCache(ws: WorkspaceLike, state: WorkspaceStateDict): void {
   if (!(ws.cache instanceof RAMFileCacheStore)) return
   // A snapshot is a third door into the entry table, and a document is not
   // obliged to spell "no token" the way this version does, so each token is
@@ -647,7 +673,7 @@ function restoreCache(ws: Workspace, state: WorkspaceStateDict): void {
   }
 }
 
-async function restoreHistory(ws: Workspace, state: WorkspaceStateDict): Promise<void> {
+async function restoreHistory(ws: WorkspaceLike, state: WorkspaceStateDict): Promise<void> {
   // Always load (loadEvents clears first): a snapshot with empty history
   // still rewinds the recorder, same as the cache clear. Foreign-format
   // entries (e.g. a Python snapshot's different history shape) are skipped
@@ -677,7 +703,7 @@ function restoredConsole(j: JobSnapshot): JobConsole {
   return new JobConsole(new RAMConsoleStore(null, chunks), true)
 }
 
-function restoreJobs(ws: Workspace, state: WorkspaceStateDict): void {
+function restoreJobs(ws: WorkspaceLike, state: WorkspaceStateDict): void {
   for (const j of state.jobs) {
     ws.jobTable.loadJob(
       new Job({

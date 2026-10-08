@@ -15,9 +15,9 @@
 import type { PathSpec } from '../../../../types.ts'
 import { readBytesOp, statOp } from '../../generic/crossmount/utils.ts'
 import { unzipGeneric } from '../../generic/unzip.ts'
-import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const unzip: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+const unzip: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   const idx = opts.index ?? undefined
   const write = requireOp(ops.write, 'write')
   const mkdir = requireOp(ops.mkdir, 'mkdir')
@@ -57,7 +57,7 @@ const unzip: BuilderFn = async (ops, accessor, paths, texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'unzip',
   write: true,
   fn: unzip,

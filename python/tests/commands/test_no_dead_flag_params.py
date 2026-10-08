@@ -23,7 +23,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import CommandSpec
 
 # The dispatcher calls every handler with exactly four positional
-# arguments (`Mount.execute_cmd`); everything else -- flags, stdin, cwd,
+# arguments (`Mount.run_command`); everything else -- flags, stdin, cwd,
 # the namespace facts -- rides the CommandOpts bag. A handler that names
 # anything else in its signature can never receive it.
 HANDLER_PARAMS = ("accessor", "paths", "texts", "opts")

@@ -4,6 +4,8 @@ from mirage.commands.builtin.dify import COMMANDS
 from mirage.commands.config import CommandOpts
 from mirage.core.dify import stat, tree
 from mirage.io.types import materialize
+from mirage.vfs.dify import DifyVFS
+from tests.fixtures.vfs_io import io_for
 
 from .conftest import document
 
@@ -33,7 +35,9 @@ async def test_ls_lists_virtual_tree_without_detail_calls(
         dify_accessor,
         [knowledge_root],
         [],
-        CommandOpts(index=dify_index, flags=flags),
+        CommandOpts(
+            io=io_for(DifyVFS, dify_accessor), index=dify_index, flags=flags
+        ),
     )
 
     output = (await materialize(stdout)).decode()

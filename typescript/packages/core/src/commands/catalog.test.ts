@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { CommandCatalog, RegisteredCommand } from './config.ts'
+import { CommandCatalog, Command } from './config.ts'
 import { CommandSpec } from './spec/types.ts'
 import { S3_COMMANDS } from './builtin/s3/index.ts'
 
@@ -21,8 +21,8 @@ const SPEC = new CommandSpec()
 const FN = () => Promise.resolve([null, { exitCode: 0 } as never] as [null, never])
 const REPLACEMENT_FN = () => Promise.resolve([null, { exitCode: 1 } as never] as [null, never])
 
-function registered(name: string, filetype: string | null = null): RegisteredCommand {
-  return new RegisteredCommand({ name, spec: SPEC, vfs: 's3', filetype, fn: FN })
+function registered(name: string, filetype: string | null = null): Command {
+  return new Command({ name, spec: SPEC, vfs: 's3', filetype, fn: FN })
 }
 
 describe('CommandCatalog', () => {
@@ -41,7 +41,7 @@ describe('CommandCatalog', () => {
   })
 
   it('remains assignable to readonly command-array consumers', () => {
-    const names = (commands: readonly RegisteredCommand[]) => commands.map(({ name }) => name)
+    const names = (commands: readonly Command[]) => commands.map(({ name }) => name)
 
     expect(names(new CommandCatalog([registered('cat')]))).toEqual(['cat'])
   })
@@ -58,11 +58,11 @@ describe('CommandCatalog', () => {
 
     expect(catalog.size).toBe(1)
     expect(Object.isFrozen(catalog.toArray())).toBe(true)
-    expect(() => (catalog.toArray() as RegisteredCommand[]).push(registered('tail'))).toThrow()
+    expect(() => (catalog.toArray() as Command[]).push(registered('tail'))).toThrow()
   })
 })
 
-describe('RegisteredCommand.withOverrides', () => {
+describe('Command.withOverrides', () => {
   it('keeps command definitions immutable', () => {
     const original = registered('cat')
 

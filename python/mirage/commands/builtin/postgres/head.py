@@ -19,9 +19,9 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.head import head_generic, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
+    mount_io,
     resolve_or_empty,
 )
-from mirage.commands.builtin.postgres.io import IO
 from mirage.commands.builtin.utils.limit import note_after, row_cap_notice
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
@@ -86,12 +86,14 @@ async def head(
     notices: list[bytes] = []
     if parsed.bytes_ is None and n_eff > 0 and not parsed.zero_terminated:
         read_fn = partial(_head_rows, n=n_eff, notices=notices)
-    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    resolved = await resolve_or_empty(
+        mount_io(opts), accessor, paths, opts.index
+    )
     out, io = await head_generic(
         resolved,
         list(texts),
         opts,
-        bound_op(IO.stat, accessor, opts.index),
+        bound_op(mount_io(opts).stat, accessor, opts.index),
         bound_op(read_fn, accessor, opts.index),
     )
     if out is None:

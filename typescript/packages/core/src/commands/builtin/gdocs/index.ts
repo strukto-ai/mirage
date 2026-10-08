@@ -12,18 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { GDocsAccessor } from '../../../accessor/gdocs.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 import { GDOCS_RM } from './rm.ts'
 
 // Docs verbs and API passthroughs live in the gws CLI
 // (commands/cli/builtin/gws), installed by name; the mount only serves
 // the filesystem surface.
-export const GDOCS_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<GDocsAccessor>(VFSName.GDOCS, IO, {
+export const GDOCS_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.GDOCS, {
     overrides: new Set(['rm']),
   }),
   ...GDOCS_RM,

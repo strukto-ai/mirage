@@ -12,16 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { NotionVFSBase } from '@struktoai/mirage-core/vfs/notion/notion'
 import { NotionAccessor } from '@struktoai/mirage-core/accessor/notion'
 
-import { NOTION_COMMANDS } from '@struktoai/mirage-core/commands/builtin/notion/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { MCPNotionTransport } from '@struktoai/mirage-core/core/notion/client'
 import type { MCPNotionTransportOptions } from '@struktoai/mirage-core/core/notion/client'
-
-import { NOTION_OPS } from '@struktoai/mirage-core/ops/notion/index'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 
 import { PROMPT, WRITE_PROMPT } from '@struktoai/mirage-core/vfs/notion/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -33,7 +28,7 @@ export interface NotionVFSState {
   config: NotionConfigRedacted
 }
 
-export class NotionVFS extends BaseVFS {
+export class NotionVFS extends NotionVFSBase {
   override readonly name: string = VFSName.NOTION
   override readonly cachesReads: boolean = true
   override readonly prompt: string = PROMPT
@@ -47,14 +42,6 @@ export class NotionVFS extends BaseVFS {
     const opts: MCPNotionTransportOptions = { authProvider: config.authProvider }
     if (config.serverUrl !== undefined) opts.serverUrl = config.serverUrl
     this.accessor = new NotionAccessor(new MCPNotionTransport(opts))
-  }
-
-  override commands(): readonly RegisteredCommand[] {
-    return NOTION_COMMANDS
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return NOTION_OPS
   }
 
   override getState(): Promise<NotionVFSState> {

@@ -20,10 +20,11 @@ from bson import ObjectId
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.mongodb.io import IO
 from mirage.core.mongodb.read import read
 from mirage.types import PathSpec
 from mirage.vfs.mongodb.config import MongoDBConfig
+from mirage.vfs.mongodb.mongodb import MongoDBVFS
+from tests.fixtures.vfs_io import io_for
 
 DOCS_PATH = "/sample_mflix/collections/movies/documents.jsonl"
 SCHEMA_PATH = "/sample_mflix/collections/movies/schema.json"
@@ -200,11 +201,13 @@ async def test_registered_stream_matches_read_for_metadata(
         "mirage.core.mongodb.read." + builder,
         new=AsyncMock(return_value={"name": "café", "fields": []}),
     ):
-        expected = await IO.read_bytes(accessor, _path(path), index=index)
+        expected = await io_for(MongoDBVFS, accessor).read_bytes(
+            accessor, _path(path), index=index
+        )
         actual = b"".join(
             [
                 chunk
-                async for chunk in IO.read_stream(
+                async for chunk in io_for(MongoDBVFS, accessor).read_stream(
                     accessor, _path(path), index=index
                 )
             ]
@@ -224,7 +227,9 @@ async def test_registered_document_stream_is_lazy(accessor, index):
             yield {"_id": i, "value": "x" * 1024}
 
     with patch("mirage.core.mongodb.stream.iter_documents", new=documents):
-        stream = IO.read_stream(accessor, _path(DOCS_PATH), index=index)
+        stream = io_for(MongoDBVFS, accessor).read_stream(
+            accessor, _path(DOCS_PATH), index=index
+        )
         first = await anext(stream)
         assert consumed == 1
         assert json.loads(first)["_id"] == 0

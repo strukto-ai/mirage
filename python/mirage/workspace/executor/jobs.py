@@ -31,7 +31,8 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
-from mirage.process.types import ProcessInfo, ProcessState, ProcessView
+from mirage.process.types import ProcessInfo, ProcessState
+from mirage.process.view import ProcessView
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import (

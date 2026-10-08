@@ -37,7 +37,6 @@ import { posixPhrase } from '../../../errors/posix.ts'
 export type ComputeSize = (p: PathSpec) => Promise<number>
 export type ComputeEntries = (p: PathSpec) => Promise<DuEntries>
 
-export const DEFAULT_MAX_DU_ENTRIES = 10000
 const USAGE_HINT = "Try 'du --help' for more information."
 const DEPTH_HEX = /^[+-]?0[xX][0-9a-fA-F]+$/
 const DEPTH_OCT = /^[+-]?0[0-7]*$/

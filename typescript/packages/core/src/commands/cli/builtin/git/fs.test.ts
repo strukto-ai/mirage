@@ -22,7 +22,6 @@ import git from 'isomorphic-git'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../../../io/types.ts'
-import { OpsRegistry } from '../../../../ops/registry.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 
@@ -59,9 +58,7 @@ beforeAll(async () => {
   execFileSync('bash', [BUILDER, repo], { stdio: 'ignore' })
 
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, ops: registry })
+  ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE })
   // Copied into RAM rather than mounted from disk on purpose: a repository that
   // reads correctly out of a keyed store is proof the bridge goes through the
   // dispatcher and not through the filesystem underneath it.

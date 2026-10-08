@@ -222,7 +222,7 @@ async def handle_command(
     """Execute a simple command.
 
     Parts are already classified: strings for text,
-    PathSpec for paths. Dispatches to mount.execute_cmd. ``execute_fn``
+    PathSpec for paths. Dispatches to mount.run_command. ``execute_fn``
     runs a line in the session, which is how find's ``-exec`` runs its
     command. ``sink`` is where a function body writes its statements.
     """

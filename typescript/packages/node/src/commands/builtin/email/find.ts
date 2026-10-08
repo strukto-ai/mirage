@@ -22,7 +22,7 @@ import { walkFind } from '@struktoai/mirage-core/core/generic/find'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { EmailAccessor } from '../../../accessor/email.ts'
-import { IO } from './io.ts'
+import { mountIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/adapter'
 
 // Routed through the shared generic walk instead of a bespoke tree walk:
 // the generic owns every flag (-type, -size, -mtime, -empty, -path) and
@@ -36,7 +36,7 @@ async function find(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const idx = opts.index ?? undefined
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const [scan, scoped] = scanIo(mountIo(opts), opts.ns, opts.mountPrefix)
   const resolved = await resolveGlobOf(scan)(accessor, paths, idx)
   // Under a hide or a rule the walk is the generic builder's, which names
   // an entry it cannot open where GNU find does.

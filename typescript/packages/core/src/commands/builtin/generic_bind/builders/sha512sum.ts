@@ -13,15 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { sha512sumGeneric } from '../../generic/sha512sum.ts'
-import { type Builder, dirAwareStream, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import {
+  type GenericCommand,
+  dirAwareStream,
+  resolveGlobOf,
+  type GenericCommandFn,
+} from '../adapter.ts'
 
-const sha512sum: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const sha512sum: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return sha512sumGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'sha512sum',
   read: true,
   fn: sha512sum,

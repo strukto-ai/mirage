@@ -14,11 +14,9 @@
 
 import { VFSName } from '../../../types.ts'
 import { makeSearch } from '../generic/search.ts'
-import { IO } from './io.ts'
 
 export const CHROMA_SEARCH = makeSearch(
   VFSName.CHROMA,
-  IO.search,
   (fl) => ({ top_k: fl.asInt('top_k') ?? 10 }),
   { name: 'chroma-query' },
 )

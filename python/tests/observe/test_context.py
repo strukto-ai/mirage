@@ -13,9 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.observe import context as observe_context
 from mirage.observe.context import (
     RecordingScope,
@@ -31,7 +34,6 @@ from mirage.observe.context import (
     with_mount_context,
     with_revisions,
 )
-from mirage.ops.registry import RegisteredOp, op
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -344,11 +346,10 @@ def test_inactive_scope_joins_enclosing():
 async def _dispatch_recording_read(
     recorded: list[str], stream: bool
 ) -> list[str]:
-    # A custom read on a RAM mount at /m records exactly the paths it is
-    # given, inside a real mount frame, so the recorder's own treatment of
-    # the path is what the ledger shows.
-    @op("read", vfs="ram")
-    async def recording_read(accessor, scope, **kwargs):
+    # A RAM mount at /m whose read records exactly the paths it is given,
+    # inside a real mount frame, so the recorder's own treatment of the
+    # path is what the ledger shows.
+    async def recording_read() -> AsyncIterator[bytes]:
         for path in recorded:
             if stream:
                 record_stream("read", path, "ram")
@@ -357,8 +358,14 @@ async def _dispatch_recording_read(
         yield b""
 
     class RecordingRAMVFS(RAMVFS):
-        def ops(self) -> list[RegisteredOp]:
-            return [*super().ops(), *recording_read._registered_ops]
+        async def read(
+            self,
+            path: PathSpec,
+            index: IndexCacheStore = NULL_INDEX,
+            offset: int = 0,
+            size: int | None = None,
+        ) -> Any:
+            return recording_read()
 
     ws = Workspace({"/m": RecordingRAMVFS()})
     scope = RecordingScope()

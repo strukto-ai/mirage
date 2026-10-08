@@ -20,6 +20,7 @@ from typing import Any
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
 from mirage.cache.file.utils import glob_escape, parse_limit
 from mirage.cache.invalidation import Invalidation
+from mirage.types import PathSpec
 from mirage.utils.key_prefix import under_path
 from mirage.vfs.redis.redis import RedisVFS
 
@@ -148,8 +149,16 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         pipe.delete(self._meta_key(key))
         await pipe.execute()
 
-    async def exists(self, key: str) -> bool:
-        return bool(await self._cache_client.exists(self._data_key(key)))
+    async def exists(self, key: str | PathSpec) -> bool:
+        """Whether the cache holds an entry for ``key``.
+
+        The cache's own key test, which a path answers by its mount path.
+
+        Args:
+            key (str | PathSpec): the entry's key.
+        """
+        name = key if isinstance(key, str) else key.mount_path
+        return bool(await self._cache_client.exists(self._data_key(name)))
 
     async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:
         fp = await self._cache_client.get(self._meta_key(key))

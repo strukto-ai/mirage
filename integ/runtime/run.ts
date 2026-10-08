@@ -47,11 +47,10 @@ import {
   type VfsResultContext,
   type Policy,
   type RouteContext,
-  type BaseVFS,
+  BaseVFS,
   type RunResult,
   type RuntimeEntry,
   type FilesystemOperation,
-  type RegisteredOp,
 } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
@@ -62,10 +61,8 @@ import {
   type ProcessExecutor,
 } from '@struktoai/mirage-core'
 import type { RuntimeLanguage } from '@struktoai/mirage-core/runtime/types'
-import type { RAMAccessor } from '@struktoai/mirage-core/accessor/ram'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import { IO as RAM_IO } from '@struktoai/mirage-core/commands/builtin/ram/io'
+import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 
 const HOST = 'typescript'
 const SUITE_DIR = dirname(fileURLToPath(import.meta.url))
@@ -476,12 +473,20 @@ async function ensureMongo(): Promise<void> {
  *
  * The shape of one broken record behind a REST collection: the listing
  * names it, and every question about it errors with whatever the
- * upstream said, which is no filesystem code at all. The stat its
- * commands ask fails too, so ls and find meet the record where a remote
- * mount's commands do, and with no native find op, as such a mount has
- * none, find walks.
+ * upstream said, which is no filesystem code at all. Its commands ask the
+ * same functions, so ls and find meet the record where a remote mount's
+ * commands do, and with no find of its own, as such a mount has none,
+ * find walks.
  */
 class FailingRAMVFS extends RAMVFS {
+  static {
+    Object.defineProperty(
+      this.prototype,
+      'find',
+      Object.getOwnPropertyDescriptor(BaseVFS.prototype, 'find') ?? {},
+    )
+  }
+
   private readonly failing: ReadonlySet<string>
 
   constructor(failing: readonly string[]) {
@@ -489,33 +494,23 @@ class FailingRAMVFS extends RAMVFS {
     this.failing = new Set(failing)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return super
-      .ops()
-      .map((op) =>
-        op.name === 'stat' || op.name === 'read' ? { ...op, fn: this.guard(op.fn) } : op,
-      )
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    if (this.fails(path)) return Promise.reject(new Error('upstream 502 Bad Gateway'))
+    return super.stat(path, index)
   }
 
-  commands(): readonly RegisteredCommand[] {
-    const { find: _find, ...io } = RAM_IO
-    return makeGenericCommands<RAMAccessor>('ram', {
-      ...io,
-      stat: (accessor, path, index) => {
-        if (this.failing.has(path.vfsPath.split('/').filter(Boolean).join('/'))) {
-          return Promise.reject(new Error('upstream 502 Bad Gateway'))
-        }
-        return RAM_IO.stat(accessor, path, index)
-      },
-    })
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    if (this.fails(path)) return Promise.reject(new Error('upstream 502 Bad Gateway'))
+    return super.read(path, index, offset, size)
   }
 
-  private guard(fn: RegisteredOp['fn']): RegisteredOp['fn'] {
-    return (accessor, path, args, kwargs) => {
-      const name = path.vfsPath.split('/').filter(Boolean).join('/')
-      if (this.failing.has(name)) return Promise.reject(new Error('upstream 502 Bad Gateway'))
-      return fn(accessor, path, args, kwargs)
-    }
+  private fails(path: PathSpec): boolean {
+    return this.failing.has(path.vfsPath.split('/').filter(Boolean).join('/'))
   }
 }
 

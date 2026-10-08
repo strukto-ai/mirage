@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
+import type { Command } from '../../config.ts'
 import { GENERAL_BC } from './bc.ts'
 import { GENERAL_CURL } from './curl.ts'
 import { GENERAL_DATE } from './date.ts'
@@ -26,7 +26,7 @@ import { GENERAL_SEQ } from './seq.ts'
 import { GENERAL_UNAME } from './uname.ts'
 import { GENERAL_WGET } from './wget.ts'
 
-export const GENERAL_COMMANDS: readonly RegisteredCommand[] = [
+export const GENERAL_COMMANDS: readonly Command[] = [
   ...GENERAL_BC,
   ...GENERAL_CURL,
   ...GENERAL_DATE,

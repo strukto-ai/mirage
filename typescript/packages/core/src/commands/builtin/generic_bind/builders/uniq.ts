@@ -13,9 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { uniqGeneric } from '../../generic/uniq.ts'
-import { type Builder, dirAwareStat, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import {
+  type GenericCommand,
+  dirAwareStat,
+  resolveGlobOf,
+  type GenericCommandFn,
+} from '../adapter.ts'
 
-const uniq: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const uniq: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const write = ops.write
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
@@ -28,7 +33,7 @@ const uniq: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'uniq',
   read: true,
   fn: uniq,

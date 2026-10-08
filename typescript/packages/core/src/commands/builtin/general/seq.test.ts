@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../../../ops/registry.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
@@ -22,12 +21,7 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 async function run(line: string): Promise<[string, string, number]> {
   const parser = await getTestParser()
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  const ws = new Workspace(
-    { '/ram': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, shellParser: parser })
   try {
     const io = await ws.shell(line)
     return [io.stdoutText, io.stderrText, io.exitCode]

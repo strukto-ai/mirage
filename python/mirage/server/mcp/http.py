@@ -139,7 +139,9 @@ class DaemonToolOperations(MirageToolOperations):
             return await super().call(name, arguments)
 
         async def on_loop() -> ToolResult:
-            return await self._session.tools.call(name, arguments)
+            return await Session(
+                self._entry.runner.ws, self._session_id
+            ).tools.call(name, arguments)
 
         return await self._entry.runner.call(on_loop())
 
@@ -152,7 +154,9 @@ class DaemonToolOperations(MirageToolOperations):
         """
 
         async def on_loop() -> tuple[str, ...]:
-            return await self._session.tools.offered()
+            return await Session(
+                self._entry.runner.ws, self._session_id
+            ).tools.offered()
 
         return await self._entry.runner.call(on_loop())
 

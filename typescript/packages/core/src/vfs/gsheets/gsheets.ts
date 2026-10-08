@@ -15,17 +15,18 @@
 import { BaseVFS } from '../base.ts'
 import { GSheetsAccessor } from '../../accessor/gsheets.ts'
 
-import { GSHEETS_COMMANDS } from '../../commands/builtin/gsheets/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 import { TokenManager } from '../../core/google/client.ts'
-
-import { GSHEETS_OPS } from '../../ops/gsheets/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 
 import { redactGSheetsConfig, type GSheetsConfig, type GSheetsConfigRedacted } from './config.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { readdir as gsheetsReaddir } from '../../core/gsheets/readdir.ts'
+import { read as gsheetsRead } from '../../core/gsheets/read.ts'
+import { stat as gsheetsStat } from '../../core/gsheets/stat.ts'
 
 export interface GSheetsVFSState {
   type: string
@@ -50,12 +51,25 @@ export class GSheetsVFS extends BaseVFS {
     this.accessor = new GSheetsAccessor({ tokenManager: tm })
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return GSHEETS_COMMANDS
+  override readonly renderers: Readonly<Record<string, string>> = { '.gsheet.json': 'readSheet' }
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return gsheetsReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return GSHEETS_OPS
+  /** Render the file as the JSON its `.gsheet.json` name holds. */
+  async readSheet(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await gsheetsRead(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return gsheetsStat(this.accessor, path, index)
   }
 
   override getState(): Promise<GSheetsVFSState> {

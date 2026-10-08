@@ -14,14 +14,15 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import type { PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import type { RegisteredCommand } from '../../config.ts'
+import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
+import type { Command, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { statGeneric } from '../generic/stat.ts'
-import { overlaidStat, resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
+import { overMountIo } from '../generic_bind/adapter.ts'
+import { overlaidStat, resolveGlobOf } from '../generic_bind/index.ts'
 
 /** Build the index-threaded stat override for one keyed store. */
-export function makeStat<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
+function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
   const statCore = io.stat
   const resolveGlob = resolveGlobOf(io)
 
@@ -40,10 +41,15 @@ export function makeStat<A extends Accessor>(vfs: string, io: CommandIO<A>): Reg
     )
   }
 
-  return command<A>({
+  return statCommand
+}
+
+/** The keyed-store `stat` over the running mount's table, guarded by `wrap`. */
+export function makeStat(vfs: string, wrap: (io: CommandIO) => CommandIO): Command[] {
+  return command({
     name: 'stat',
     vfs,
     spec: specOf('stat'),
-    fn: statCommand,
+    fn: overMountIo(build, wrap),
   })
 }

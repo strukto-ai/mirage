@@ -17,12 +17,11 @@ from mirage.commands.builtin.generic.tsort import (
     tsort_generic as generic_tsort,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -42,4 +41,4 @@ async def tsort(
     )
 
 
-BUILDER = Builder("tsort", tsort, read=True)
+BUILDER = GenericCommand("tsort", tsort, read=True)

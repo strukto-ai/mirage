@@ -14,11 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { Runtime } from './base.ts'
-import type { WorkspaceBinding } from './binding.ts'
+import type { WorkspaceBinding, RuntimeContext } from './binding.ts'
 import { LanguageRuntime } from './language.ts'
 import { LINE_EXECUTOR } from './mixin.ts'
 import { UnsupportedExecutionError } from './errors.ts'
-import type { RunArgs, RunResult, RuntimeContext } from './types.ts'
+import type { RunArgs, RunResult } from './types.ts'
 import { RuntimeVFS } from './vfs.ts'
 import { MontyRuntime } from './python/monty/runtime.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'

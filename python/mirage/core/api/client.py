@@ -19,7 +19,7 @@ import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 import aiohttp
 from aiohttp.payload import JsonPayload
@@ -32,10 +32,14 @@ from tenacity import (
     stop_after_attempt,
 )
 
-from mirage.types import ErrorOf, JsonValue
+from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow, range_header, window_of
 
 logger = logging.getLogger(__name__)
+
+# How a >= 400 API response and its body text become the backend's own
+# exception; the engine here calls it, each backend supplies one.
+ErrorOf: TypeAlias = Callable[[aiohttp.ClientResponse, str], Exception]
 
 ReadMode = Literal[
     "json", "none", "bytes", "bytes_response", "text", "location", "response"

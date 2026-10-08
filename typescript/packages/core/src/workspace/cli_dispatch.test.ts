@@ -22,7 +22,6 @@ import { Operand, Option } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import type { Policy } from '../policy/base.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
@@ -79,12 +78,7 @@ function makeTree(): CLISpec {
 
 function buildWorkspace(): Workspace {
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  return new Workspace(
-    { '/data': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 describe('CLI dispatch e2e', () => {
@@ -116,13 +110,10 @@ describe('CLI dispatch e2e', () => {
     // and leave its twin alone, and a grant runs the line under the
     // granted install's own config.
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     const ws = new Workspace(
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        ops: registry,
         shellParser: parser,
         profiles: {
           crew: {
@@ -191,13 +182,10 @@ describe('CLI dispatch e2e', () => {
 
   it('the clis constructor option installs through the same path', async () => {
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     const ws = new Workspace(
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        ops: registry,
         shellParser: parser,
         clis: { sl: [makeTree(), { token: 'opt' }] },
       },
@@ -209,13 +197,10 @@ describe('CLI dispatch e2e', () => {
 
 function buildScriptWorkspace(): Workspace {
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
   return new Workspace(
     { '/data': ram },
     {
       mode: MountMode.WRITE,
-      ops: registry,
       shellParser: parser,
       runtimes: ['monty', 'quickjs', 'workspace'],
     },
@@ -367,13 +352,10 @@ describe('policy cli fact', () => {
   it('the policy sees the installed head on ctx.commands', async () => {
     const seen: (string | null)[] = []
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
     const ws = new Workspace(
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        ops,
         shellParser: parser,
         routePolicy: (ctx) => {
           seen.push(ctx.commands[0]?.cli ?? null)
@@ -432,13 +414,10 @@ describe('the session plane reaches a CLI leaf', () => {
     // every preSession rule, which is the whole reason writes go through one
     // door rather than to the session.
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     const ws = new Workspace(
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        ops: registry,
         shellParser: parser,
         policies: [new DenyAwsWrites()],
       },

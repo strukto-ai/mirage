@@ -35,8 +35,8 @@ import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/email/scope.ts'
 import { searchAndFormat } from '../../../core/email/search.ts'
-import { IO } from './io.ts'
 import { RG_SEARCH_HONORED, messageLines } from './grep.ts'
+import { mountIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/adapter'
 
 const ENC = new TextEncoder()
 
@@ -62,7 +62,7 @@ async function rg(
 
   // Same gate as email grep, from the same table, and it reads the scope the
   // same way: a line the push-down cannot answer takes the generic scan.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const [scan, scoped] = scanIo(mountIo(opts), opts.ns, opts.mountPrefix)
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   // The server is asked for the literal every match must contain, never
   // the regex's own spelling: IMAP TEXT is a substring search.

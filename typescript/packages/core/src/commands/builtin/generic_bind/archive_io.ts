@@ -22,7 +22,7 @@ import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readdirOp, statOp } from '../generic/crossmount/utils.ts'
 import type { DirProbe, StatFn, WalkFn } from '../generic/archive/walk.ts'
-import type { CommandIO } from './adapter.ts'
+import type { CommandIO } from '../../config.ts'
 
 function walkWith(
   readdir: WalkFindDeps['readdir'],

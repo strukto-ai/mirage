@@ -14,9 +14,8 @@
 
 from mirage.commands.builtin.email.find import find
 from mirage.commands.builtin.email.grep import grep
-from mirage.commands.builtin.email.io import IO as _IO
 from mirage.commands.builtin.email.rg import rg
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import generic_commands
 
 _EMAIL_OVERRIDES = {"find", "grep", "rg"}
 
@@ -24,9 +23,8 @@ _EMAIL_OVERRIDES = {"find", "grep", "rg"}
 # (mirage.commands.cli.builtin.himalaya), installed by name; the mount
 # only serves the filesystem surface.
 COMMANDS = [
-    *make_generic_commands(
+    *generic_commands(
         "email",
-        _IO,
         overrides=_EMAIL_OVERRIDES,
     ),
     find,

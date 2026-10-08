@@ -201,7 +201,7 @@ async def test_a_gdrive_read_reaches_snapshot_capture():
     ws = _fresh_ws()
     with patch_gdrive(fake):
         await ws.shell("cat /gd/file.txt")
-        entries = capture_fingerprints(ws)
+        entries = capture_fingerprints(ws._ops.records, ws._registry)
     paths = [e[FingerprintKey.PATH] for e in entries]
     assert "/gd/file.txt" in paths
 
@@ -216,7 +216,7 @@ async def test_a_captured_gdrive_read_carries_a_revision():
     ws = _fresh_ws()
     with patch_gdrive(fake):
         await ws.shell("cat /gd/file.txt")
-        entries = capture_fingerprints(ws)
+        entries = capture_fingerprints(ws._ops.records, ws._registry)
     entry = next(
         e for e in entries if e[FingerprintKey.PATH] == "/gd/file.txt"
     )
@@ -234,7 +234,10 @@ async def test_a_written_gdrive_path_pins_the_write_token_and_replays():
     with patch_gdrive(fake):
         await ws.shell("cat /gd/file.txt; echo x | tee /gd/file.txt")
         assert fake.calls["update_file_content"] == 1
-        pins = {e[FingerprintKey.PATH]: e for e in capture_fingerprints(ws)}
+        pins = {
+            e[FingerprintKey.PATH]: e
+            for e in capture_fingerprints(ws._ops.records, ws._registry)
+        }
         assert pins.get("/gd/file.txt") == {
             FingerprintKey.PATH: "/gd/file.txt",
             FingerprintKey.MOUNT_PREFIX: "/gd/",

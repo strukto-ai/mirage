@@ -19,15 +19,17 @@ import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.ram.readdir import readdir as ram_readdir
-from mirage.ops.registry import RegisteredOp, op
+from mirage.core.ram.stat import stat as ram_stat
 from mirage.types import MountMode, PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.expand.globs import resolve_globs
 from mirage.workspace.mount.mount import MountEntry
+from tests.fixtures.vfs_io import override, override_glob
 
 
 def _mock_registry(resolve_result=None):
@@ -41,9 +43,8 @@ def _mock_registry(resolve_result=None):
         # dir-shaped ask with the directory itself.
         return [] if path.pattern else [path]
 
-    mount = MountEntry("/data/", RAMVFS(), MountMode.READ)
-    mount.register_fns(
-        [RegisteredOp(name="glob", vfs="ram", filetype=None, fn=_glob)]
+    mount = override_glob(
+        MountEntry("/data/", RAMVFS(), MountMode.READ), _glob
     )
 
     reg = MagicMock()
@@ -701,26 +702,21 @@ def test_trailing_slash_glob_drives_the_issue_loop():
     assert _out(ws, line) == "sample\nsample\n"
 
 
-class KeyRecordingRAM(RAMVFS):
-    """A RAM mount whose ``glob`` op records the keys it was handed."""
+def _recording_keys(mount: MountEntry) -> list[tuple[str, str]]:
+    """Record the keys ``mount``'s glob is handed, then expand as before.
 
-    def __init__(self) -> None:
-        super().__init__()
-        self.seen: list[tuple[str, str]] = []
+    Args:
+        mount (MountEntry): the mount to watch.
+    """
+    seen: list[tuple[str, str]] = []
+    derived = mount._glob
 
-    def ops(self) -> list[RegisteredOp]:
-        table = super().ops()
-        derived = next(
-            ro for ro in table if ro.name == "glob" and ro.filetype is None
-        )
-        seen = self.seen
+    async def glob(accessor, path: PathSpec, **kwargs) -> list[PathSpec]:
+        seen.append((path.virtual, path.vfs_path))
+        return await derived(path, **kwargs)
 
-        @op("glob", vfs=self.name)
-        async def glob(accessor, path: PathSpec, **kwargs) -> list[PathSpec]:
-            seen.append((path.virtual, path.vfs_path))
-            return await derived.fn(accessor, path, **kwargs)
-
-        return [ro for ro in table if ro is not derived] + glob._registered_ops
+    override_glob(mount, glob)
+    return seen
 
 
 def test_glob_op_is_handed_keys_below_a_non_root_prefix():
@@ -729,8 +725,8 @@ def test_glob_op_is_handed_keys_below_a_non_root_prefix():
     # op runs, on every door that expands a word (the workspace expander,
     # its mid-path and globstar walks, and the builtins' operands). Pinned
     # the same way in typescript's globs.test.ts.
-    vfs = KeyRecordingRAM()
-    ws = Workspace({"/mnt/x/": vfs}, mode=MountMode.WRITE)
+    ws = Workspace({"/mnt/x/": RAMVFS()}, mode=MountMode.WRITE)
+    seen = _recording_keys(ws.mount("/mnt/x/"))
     ws.create_session("s")
     for line in (
         "mkdir -p /mnt/x/team/sub",
@@ -748,17 +744,14 @@ def test_glob_op_is_handed_keys_below_a_non_root_prefix():
     ]
     for line, want in cases:
         assert _out(ws, line).strip() == want, line
-    assert vfs.seen
-    assert [
-        (v, key) for v, key in vfs.seen if key != mount_key(v, "/mnt/x")
-    ] == []
+    assert seen
+    assert [(v, key) for v, key in seen if key != mount_key(v, "/mnt/x")] == []
 
 
 class NoStatRAM(RAMVFS):
-    """A RAM mount that answers listings but registers no ``stat`` op."""
+    """A RAM mount that answers listings but defines no ``stat``."""
 
-    def ops(self) -> list[RegisteredOp]:
-        return [op for op in super().ops() if op.name != "stat"]
+    stat = BaseVFS.stat
 
 
 async def _answers_nothing(_accessor, _path, *args, **kwargs):
@@ -798,16 +791,12 @@ async def test_trailing_slash_glob_keeps_nothing_a_mount_cannot_stat(
     vfs = NoStatRAM() if stat == "missing" else RAMVFS()
     ws = _flat_ws(vfs)
     if stat != "missing":
-        ram_stat = next(op.fn for op in vfs.ops() if op.name == "stat")
-        ws.mount("/m").register_op(
-            RegisteredOp(
-                name="stat",
-                vfs="ram",
-                filetype=None,
-                fn=_answers_nothing
-                if stat == "none"
-                else _unstatable("/m/f", ram_stat),
-            )
+        override(
+            vfs,
+            "stat",
+            _answers_nothing
+            if stat == "none"
+            else _unstatable("/m/f", ram_stat),
         )
     try:
         listed = await ws.shell("echo /m/*", session_id="s")
