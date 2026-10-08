@@ -290,6 +290,40 @@ def _judge(gate: EntryGate, *paths: PathSpec | None) -> None:
         gate.check(virtual)
 
 
+def _operands(name: str, kwargs: dict[str, Any]) -> list[tuple[str, PathSpec]]:
+    """A function's path arguments beside its path, by keyword.
+
+    A custom function can name more than one path; each is a path the
+    call reaches, so each passes the door the way ``path`` does. A
+    rename's destination has stages of its own and is not one.
+
+    Args:
+        name (str): the dispatched function name.
+        kwargs (dict[str, Any]): its arguments.
+    """
+    if name == "rename":
+        return []
+    return [
+        (key, value)
+        for key, value in kwargs.items()
+        if isinstance(value, PathSpec)
+    ]
+
+
+def _rekeyed(spec: PathSpec, mount_prefix: str) -> PathSpec:
+    """``spec`` addressed against a mount: its key below the prefix.
+
+    Args:
+        spec (PathSpec): a path the call is handed.
+        mount_prefix (str): the prefix of the mount serving the call.
+    """
+    return PathSpec(
+        virtual=spec.virtual,
+        directory=spec.virtual.rsplit("/", 1)[0] or "/",
+        vfs_path=mount_key(spec.virtual, mount_prefix.rstrip("/")),
+    )
+
+
 @dataclass(slots=True)
 class _Call:
     """One op on its way through the door, as the stages hand it on.
@@ -488,6 +522,7 @@ class Dispatcher:
                 IOResult(),
             )
         self._follow(call)
+        self._walk_operands(call)
         if name in XATTR_OPS:
             return (
                 await self._answer_xattr(name, call.path, kwargs, report),
@@ -676,6 +711,38 @@ class Dispatcher:
         if call.rule_gate is not None and not call.no_follow:
             _judge(call.rule_gate, call.typed, walked, call.path)
 
+    def _walk_operands(self, call: _Call) -> None:
+        """Walk and follow a function's other path arguments as its path.
+
+        Each answers to the session's hides as typed, walked and
+        followed, and the command's gate judges every spelling, so a
+        second path is no way around a hide or a rule. The followed
+        spelling replaces the argument.
+
+        Args:
+            call (_Call): the followed op; its path arguments are walked.
+        """
+        for key, typed in _operands(call.name, call.kwargs):
+            if not path_visible(call.vis, typed.virtual):
+                raise hidden_refusal(call.vis, typed.virtual, False)
+            if typed.walk_error is not None:
+                raise walk_refusal(typed)
+            walked = self._walked(typed, False)
+            try:
+                followed = self._namespace.follow(walked.virtual)
+            except CycleError:
+                raise eloop(walked) from None
+            landed = (
+                walked
+                if followed == walked.virtual
+                else PathSpec.from_str_path(followed)
+            )
+            if not path_visible(call.vis, landed.virtual):
+                raise hidden_refusal(call.vis, landed.virtual, False)
+            if call.rule_gate is not None:
+                _judge(call.rule_gate, typed, walked, landed)
+            call.kwargs[key] = landed
+
     async def _answer_unmounted(self, call: _Call) -> Any:
         """Answer an op on a path no mount serves.
 
@@ -727,6 +794,11 @@ class Dispatcher:
             refusal = await self._parent_refusal(call.path)
             refusal = refusal or await self._parent_refusal(dst)
             raise refusal or exdev(call.path)
+        # A function runs on one backend, so every path it is handed
+        # must be on the mount that serves it.
+        for _, other in _operands(call.name, call.kwargs):
+            if self._namespace.try_mount_for(other.virtual) is not mount:
+                raise exdev(other)
 
     async def _admit(self, call: _Call, mount: MountEntry) -> Boundary:
         """Run admission for an op on a mounted path.
@@ -763,6 +835,8 @@ class Dispatcher:
             await self._boundary(
                 self._namespace.try_mount_for(call.dst.virtual)
             ).admit(call.name, call.dst, True, create=True, subtree=True)
+        for _, other in _operands(call.name, call.kwargs):
+            await boundary.admit(call.name, other, call.write)
         if call.name == "rmdir" and any(
             path_visible(call.vis, link)
             for link, _ in self._namespace.link_stats_below(call.path.virtual)
@@ -867,16 +941,12 @@ class Dispatcher:
             Any: the op's answer (each op has its own shape).
         """
         kwargs = call.kwargs
-        if call.name == "rename" and isinstance(kwargs.get("dst"), PathSpec):
-            # Files.rename addresses both endpoints against the source's
-            # mount; mirror that here so the backend sees a
-            # mount-relative destination.
-            dst = kwargs["dst"]
-            kwargs["dst"] = PathSpec(
-                virtual=dst.virtual,
-                directory=dst.virtual.rsplit("/", 1)[0] or "/",
-                vfs_path=mount_key(dst.virtual, mount.prefix.rstrip("/")),
-            )
+        # Every path argument beside the path (a rename's destination, a
+        # custom function's other paths) is addressed against the same
+        # mount, so the backend sees a mount-relative path.
+        for key, value in list(kwargs.items()):
+            if isinstance(value, PathSpec):
+                kwargs[key] = _rekeyed(value, mount.prefix)
         result: Any
         try:
             if call.name == "setattr":
@@ -1013,6 +1083,8 @@ class Dispatcher:
         await self.invalidate_after_write(
             mount, path, observed=observed, times=not opened
         )
+        for _, other in _operands(name, kwargs):
+            await self.invalidate_after_write(mount, other)
         if name in ("unlink", "rmdir"):
             # The name no longer holds that file, so what was set on
             # it (overlay mode and owner, extended attributes) goes

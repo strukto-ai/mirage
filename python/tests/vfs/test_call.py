@@ -18,14 +18,22 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.context import reset_current_session, set_current_session
 from mirage.policy import Action, Policy
 from mirage.policy.types import VfsContext
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import (
+    FileStat,
+    FileType,
+    HiddenPaths,
+    PathSpec,
+    Visibility,
+)
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import call_effect, call_names, declared_calls, vfs_call
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import Declaration, Effect, Target
 from mirage.workspace.mount import MountEntry
+from mirage.workspace.session import SessionState
 from tests.fixtures.vfs_io import served
 
 
@@ -71,6 +79,10 @@ class Notes(BaseVFS):
     @vfs_call(effect=Effect.WRITE)
     async def stamp(self, path: PathSpec) -> None:
         self.stamped.append(path.virtual)
+
+    @vfs_call(effect=Effect.READ)
+    async def compare(self, path: PathSpec, other: PathSpec) -> str:
+        return other.vfs_path
 
     async def helper(self, path: PathSpec) -> None:
         raise AssertionError("an unmarked method is not reachable by name")
@@ -272,6 +284,11 @@ class Shelf(BaseVFS):
     async def shelve(self, path: PathSpec) -> None:
         self.files[path.vfs_path.strip("/")] = b"new\n"
 
+    @vfs_call(effect=Effect.WRITE)
+    async def copy_to(self, path: PathSpec, target: PathSpec) -> None:
+        key = path.vfs_path.strip("/")
+        self.files[target.vfs_path.strip("/")] = self.files[key]
+
 
 @pytest.mark.asyncio
 async def test_a_custom_write_drops_the_bytes_it_changed():
@@ -283,5 +300,89 @@ async def test_a_custom_write_drops_the_bytes_it_changed():
         await ws.dispatch("shelve", page)
         read, _ = await ws.dispatch("read", page)
         assert read == b"new\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_second_path_answers_to_the_hides():
+    ws = Workspace({"/notes/": Notes()}, mode=MountMode.WRITE)
+    hidden = Visibility(paths=HiddenPaths(paths=("/notes/b.txt",)))
+    token = set_current_session(
+        SessionState(session_id="agent", visibility=hidden)
+    )
+    try:
+        with pytest.raises(FileNotFoundError):
+            await ws.dispatch(
+                "compare",
+                PathSpec.from_str_path("/notes/a.txt"),
+                other=PathSpec.from_str_path("/notes/b.txt"),
+            )
+    finally:
+        reset_current_session(token)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_second_path_is_on_the_functions_mount():
+    ws = Workspace(
+        {"/notes/": Notes(), "/ram/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    try:
+        here = PathSpec.from_str_path("/notes/a.txt")
+        answer, _ = await ws.dispatch(
+            "compare", here, other=PathSpec.from_str_path("/notes/b.txt")
+        )
+        assert answer == "b.txt"
+        for elsewhere in ("/ram/b.txt", "/nowhere/b.txt"):
+            with pytest.raises(OSError) as refused:
+                await ws.dispatch(
+                    "compare", here, other=PathSpec.from_str_path(elsewhere)
+                )
+            assert refused.value.errno == errno.EXDEV
+    finally:
+        await ws.close()
+
+
+class PathRecorder(Policy):
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        self.seen.append(ctx.path.virtual)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_policies_judge_every_path_a_function_is_handed():
+    recorder = PathRecorder()
+    ws = Workspace(
+        {"/notes/": Notes()}, mode=MountMode.WRITE, policies=[recorder]
+    )
+    try:
+        await ws.dispatch(
+            "compare",
+            PathSpec.from_str_path("/notes/a.txt"),
+            other=PathSpec.from_str_path("/notes/b.txt"),
+        )
+        assert recorder.seen == ["/notes/a.txt", "/notes/b.txt"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_custom_write_drops_the_bytes_of_every_path_it_changed():
+    shelf = Shelf()
+    shelf.files["b.txt"] = b"older\n"
+    ws = Workspace({"/shelf/": shelf}, mode=MountMode.WRITE)
+    try:
+        target = PathSpec.from_str_path("/shelf/b.txt")
+        read, _ = await ws.dispatch("read", target)
+        assert read == b"older\n"
+        await ws.dispatch(
+            "copy_to", PathSpec.from_str_path("/shelf/a.txt"), target=target
+        )
+        read, _ = await ws.dispatch("read", target)
+        assert read == b"old\n"
     finally:
         await ws.close()

@@ -1024,9 +1024,14 @@ export class MountEntry {
         throw enotsup(this.vfs.name, name, path)
       }
       if (this.writes(name)) {
-        const dst = kwargs.dst
-        const endpoints = [PathSpec.fromStrPath(path)]
-        if (dst instanceof PathSpec) endpoints.push(dst)
+        // Every path the call is handed is one it may change: a rename's
+        // destination, a custom function's other paths.
+        const endpoints = [
+          PathSpec.fromStrPath(path),
+          ...[...args, ...Object.values(kwargs)].filter(
+            (value): value is PathSpec => value instanceof PathSpec,
+          ),
+        ]
         // A rename mutates everything under its endpoints in one backend
         // call, so a read-only region below either one refuses it too.
         // Removals stay per-path: the runtimes compose rmtree from unlink

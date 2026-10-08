@@ -1219,10 +1219,13 @@ class MountEntry:
 
             effect = call_effect(type(self.vfs), name)
             if effect in WRITE_EFFECTS:
-                dst = kwargs.get("dst")
-                endpoints = [PathSpec.from_str_path(path)]
-                if isinstance(dst, PathSpec):
-                    endpoints.append(dst)
+                # Every path the call is handed is one it may change: a
+                # rename's destination, a custom function's other paths.
+                endpoints = [PathSpec.from_str_path(path)] + [
+                    value
+                    for value in kwargs.values()
+                    if isinstance(value, PathSpec)
+                ]
                 require_paths_writable(
                     endpoints,
                     self.prefix,

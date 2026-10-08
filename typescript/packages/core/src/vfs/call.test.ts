@@ -16,9 +16,12 @@ import { describe, expect, it } from 'vitest'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import { enoent } from '../errors/fs.ts'
 import type { Action, VfsContext } from '../policy/types.ts'
-import { FileStat, FileType, MountMode, type PathSpec } from '../types.ts'
+import { runWithSession } from '../context/session_context.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../types.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
+import { SessionState } from '../workspace/session/session.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
+import { RAMVFS } from './ram/ram.ts'
 import { BaseVFS } from './base.ts'
 import { callNames, declaredCalls, vfsCall } from './call.ts'
 import { Effect, Target } from './types.ts'
@@ -60,6 +63,18 @@ class Shelf extends BaseVFS {
   @vfsCall({ effect: Effect.READ })
   peek(path: PathSpec): Promise<string> {
     return Promise.resolve(path.virtual)
+  }
+
+  @vfsCall({ effect: Effect.READ })
+  compare(_path: PathSpec, other: PathSpec): Promise<string> {
+    return Promise.resolve(other.vfsPath)
+  }
+
+  @vfsCall({ effect: Effect.WRITE })
+  copyTo(path: PathSpec, target: PathSpec): Promise<void> {
+    const data = this.files.get(path.vfsPath.replace(/^\/+/, ''))
+    if (data !== undefined) this.files.set(target.vfsPath.replace(/^\/+/, ''), data)
+    return Promise.resolve()
   }
 }
 
@@ -146,6 +161,72 @@ describe('VFS functions', () => {
       expect(DEC.decode((await ws.dispatch('read', '/shelf/a.txt')) as Uint8Array)).toBe('old\n')
       await ws.dispatch('shelve', '/shelf/a.txt')
       expect(DEC.decode((await ws.dispatch('read', '/shelf/a.txt')) as Uint8Array)).toBe('new\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('has a second path answer to the hides', async () => {
+    const ws = new Workspace({ '/shelf': new Shelf() }, { mode: MountMode.WRITE })
+    const session = new SessionState({
+      sessionId: 'agent',
+      visibility: { paths: { paths: ['/shelf/b.txt'] } },
+    })
+    try {
+      await expect(
+        runWithSession(session, () =>
+          ws.dispatch('compare', '/shelf/a.txt', [PathSpec.fromStrPath('/shelf/b.txt')]),
+        ),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("keeps a second path on the function's mount", async () => {
+    const ws = new Workspace(
+      { '/shelf': new Shelf(), '/ram': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    try {
+      expect(
+        await ws.dispatch('compare', '/shelf/a.txt', [PathSpec.fromStrPath('/shelf/b.txt')]),
+      ).toBe('b.txt')
+      for (const elsewhere of ['/ram/b.txt', '/nowhere/b.txt']) {
+        await expect(
+          ws.dispatch('compare', '/shelf/a.txt', [PathSpec.fromStrPath(elsewhere)]),
+        ).rejects.toMatchObject({ code: 'EXDEV' })
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('has policies judge every path a function is handed', async () => {
+    const seen: string[] = []
+    const ws = new Workspace({ '/shelf': new Shelf() }, { mode: MountMode.WRITE })
+    ws.policies.add({
+      preVfs(ctx: VfsContext): Action | null {
+        seen.push(ctx.path.virtual)
+        return null
+      },
+    })
+    try {
+      await ws.dispatch('compare', '/shelf/a.txt', [PathSpec.fromStrPath('/shelf/b.txt')])
+      expect(seen).toEqual(['/shelf/a.txt', '/shelf/b.txt'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('drops the cached bytes of every path a custom write changed', async () => {
+    const shelf = new Shelf()
+    shelf.files.set('b.txt', ENC.encode('older\n'))
+    const ws = new Workspace({ '/shelf': shelf }, { mode: MountMode.WRITE })
+    try {
+      expect(DEC.decode((await ws.dispatch('read', '/shelf/b.txt')) as Uint8Array)).toBe('older\n')
+      await ws.dispatch('copyTo', '/shelf/a.txt', [PathSpec.fromStrPath('/shelf/b.txt')])
+      expect(DEC.decode((await ws.dispatch('read', '/shelf/b.txt')) as Uint8Array)).toBe('old\n')
     } finally {
       await ws.close()
     }

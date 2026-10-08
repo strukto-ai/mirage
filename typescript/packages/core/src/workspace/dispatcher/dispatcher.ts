@@ -173,6 +173,38 @@ function judge(gate: EntryGate, ...paths: readonly unknown[]): void {
   for (const virtual of new Set(specs.map((p) => p.virtual))) gate.check(virtual)
 }
 
+/**
+ * A function's path arguments beside its path, by position or keyword. A
+ * custom function can name more than one path; each is a path the call
+ * reaches, so each passes the door the way `path` does. A rename's
+ * destination has stages of its own and is not one. Mirrors Python's
+ * `_operands`.
+ */
+function operands(
+  name: string,
+  args: readonly unknown[] | undefined,
+  kwargs: Record<string, unknown> | undefined,
+): [number | string, PathSpec][] {
+  if (name === 'rename') return []
+  const found: [number | string, PathSpec][] = []
+  ;(args ?? []).forEach((value, at) => {
+    if (value instanceof PathSpec) found.push([at, value])
+  })
+  for (const [key, value] of Object.entries(kwargs ?? {})) {
+    if (value instanceof PathSpec) found.push([key, value])
+  }
+  return found
+}
+
+/** `spec` addressed against a mount: its key below the mount's prefix. */
+function rekeyed(spec: PathSpec, mountPrefix: string): PathSpec {
+  return new PathSpec({
+    virtual: spec.virtual,
+    directory: spec.virtual.slice(0, spec.virtual.lastIndexOf('/')) || '/',
+    vfsPath: mountKey(spec.virtual, rstripSlash(mountPrefix)),
+  })
+}
+
 /** The byte window a read asked for, whole file when it asked none. */
 function readWindow(kwargs: OpKwargs | undefined): [number, number | null] {
   return [
@@ -243,7 +275,8 @@ interface Call {
   readonly typed: PathSpec
   /** A rename's walked destination. */
   readonly dst: PathSpec | null
-  readonly args: readonly unknown[] | undefined
+  /** The op's positional arguments; the operand walk replaces path ones. */
+  args: readonly unknown[] | undefined
   /** The op's arguments; `follow` consumes `nofollow`. */
   kwargs: Record<string, unknown> | undefined
   /** The session's view, read once at the door. */
@@ -355,6 +388,7 @@ export class Dispatcher {
       ]
     }
     this.follow(call)
+    this.walkOperands(call)
     if (XATTR_OPS.has(name)) {
       return [
         await this.answerXattr(name, call.path, call.kwargs ?? {}, report, issuer),
@@ -396,7 +430,13 @@ export class Dispatcher {
       (DISPATCH_WRITE_OPS.has(name) || (call.write && !POLICY_WRITE_OPS.has(name))) &&
       !SERIAL_WRITE_OPS.has(name)
     ) {
-      await this.settleWrite(name, call.path, renameDst, fullArgs)
+      await this.settleWrite(
+        name,
+        call.path,
+        renameDst,
+        fullArgs,
+        operands(name, call.args, call.kwargs),
+      )
     }
     // The transfer already happened, so a limit changes what the caller
     // receives, not what the backend moved; the report above already
@@ -567,6 +607,32 @@ export class Dispatcher {
   }
 
   /**
+   * Walk and follow a function's other path arguments as its path. Each
+   * answers to the session's hides as typed, walked and followed, and the
+   * command's gate judges every spelling, so a second path is no way
+   * around a hide or a rule. The followed spelling replaces the argument.
+   * Mirrors Python's Dispatcher._walk_operands.
+   */
+  private walkOperands(call: Call): void {
+    for (const [at, typed] of operands(call.name, call.args, call.kwargs)) {
+      if (!pathVisible(call.vis, typed.virtual)) throw hiddenRefusal(call.vis, typed.virtual, false)
+      if (typed.walkError !== null) throw walkRefusal(typed)
+      const walked = this.walked(typed, false)
+      const followed = followOrLoop(this.namespace, walked, true)
+      const landed = followed === walked.virtual ? walked : PathSpec.fromStrPath(followed)
+      if (!pathVisible(call.vis, landed.virtual)) {
+        throw hiddenRefusal(call.vis, landed.virtual, false)
+      }
+      if (call.ruleGate !== null) judge(call.ruleGate, typed, walked, landed)
+      if (typeof at === 'number') {
+        call.args = (call.args ?? []).map((value, i) => (i === at ? landed : value))
+      } else {
+        call.kwargs = { ...call.kwargs, [at]: landed }
+      }
+    }
+  }
+
+  /**
    * Answer EXDEV for a rename between two mounts.
    *
    * A mount is a filesystem boundary: rename(2) moves a name within one and
@@ -577,6 +643,11 @@ export class Dispatcher {
    * ahead of EXDEV. Mirrors Python's Dispatcher._refuse_cross_mount.
    */
   private async refuseCrossMount(call: Call, owner: MountEntry): Promise<void> {
+    // A function runs on one backend, so every path it is handed must be
+    // on the mount that serves it.
+    for (const [, other] of operands(call.name, call.args, call.kwargs)) {
+      if (this.namespace.tryMountFor(other.virtual) !== owner) throw exdev(other)
+    }
     const dst = call.dst
     if (dst === null || this.namespace.tryMountFor(dst.virtual) === owner) return
     throw (
@@ -623,6 +694,9 @@ export class Dispatcher {
         { create: true, subtree: true },
         call.issuer,
       )
+    }
+    for (const [, other] of operands(call.name, call.args, call.kwargs)) {
+      await boundary.admit(call.name, other, call.write, {}, call.issuer)
     }
   }
 
@@ -767,32 +841,29 @@ export class Dispatcher {
       if (wDst !== null && effectivePathMode(wDst.virtual, mountPrefix, mode) === MountMode.READ) {
         throw erofs(wDst, `mount at '${wDst.virtual}' is read-only`)
       }
+      for (const [, other] of operands(name, call.args, kwargs)) {
+        if (effectivePathMode(other.virtual, mountPrefix, mode) === MountMode.READ) {
+          throw erofs(other, `mount at '${other.virtual}' is read-only`)
+        }
+      }
     }
     // Ops registered under a rendered filetype (gdocs/gsheets/gslides/
     // gmail reads) resolve by the path's extension; Python reaches them
     // because its dispatcher routes through Mount.call, which
     // stamps the filetype. Stamp it here the same way.
+    // Every path argument beside the path (a rename's destination, a
+    // custom function's other paths) is addressed against the same mount,
+    // mirroring the Python dispatcher: a caller-supplied path built from
+    // the virtual path alone would otherwise reach the backend untranslated.
+    const keyed = (value: unknown): unknown =>
+      value instanceof PathSpec ? rekeyed(value, mountPrefix) : value
     const fullKwargs: OpKwargs = {
-      ...(kwargs ?? {}),
+      ...Object.fromEntries(Object.entries(kwargs ?? {}).map(([key, v]) => [key, keyed(v)])),
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
     }
-    let fullArgs = call.args ?? []
-    const renameDst = name === 'rename' && fullArgs[0] instanceof PathSpec ? fullArgs[0] : null
-    if (renameDst !== null) {
-      // Files.rename addresses both endpoints against the source's mount,
-      // mirroring the Python dispatcher: a caller-supplied dst built
-      // from the virtual path alone would otherwise reach the backend
-      // untranslated.
-      fullArgs = [
-        new PathSpec({
-          virtual: renameDst.virtual,
-          directory: renameDst.virtual.slice(0, renameDst.virtual.lastIndexOf('/')) || '/',
-          vfsPath: mountKey(renameDst.virtual, rstripSlash(mountPrefix)),
-        }),
-        ...fullArgs.slice(1),
-      ]
-    }
+    const renameDst = name === 'rename' && call.args?.[0] instanceof PathSpec ? call.args[0] : null
+    const fullArgs = (call.args ?? []).map(keyed)
     // Per-op command limits bind to the executing (post-follow)
     // mount, and the timeout window covers only the backend op — cache
     // probes and post-write invalidation stay outside the budget —
@@ -846,7 +917,7 @@ export class Dispatcher {
           (onCall) => run(fullKwargs, onCall),
           async (value) => {
             served(report, value)
-            await this.settleWrite(name, p, renameDst, fullArgs)
+            await this.settleWrite(name, p, renameDst, fullArgs, operands(name, call.args, kwargs))
           },
         )
       } else {
@@ -1004,10 +1075,12 @@ export class Dispatcher {
     p: PathSpec,
     renameDst: PathSpec | null,
     args: readonly unknown[],
+    others: readonly [number | string, PathSpec][],
   ): Promise<void> {
     const opened = appendsNothing(name, args)
     const observed = STAMP_WRITE_OPS.has(name) && !opened ? Date.now() / 1000 : null
     await this.invalidateAfterWriteByPath(p.virtual, observed, !opened)
+    for (const [, other] of others) await this.invalidateAfterWriteByPath(other.virtual)
     if (name === 'unlink' || name === 'rmdir') {
       // The name no longer holds that file, so what was set on it
       // (overlay mode and owner, extended attributes) goes with it, as

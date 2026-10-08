@@ -126,7 +126,10 @@ class JiraVFS extends BaseVFS<JiraAccessor> {
 
 `await ws.dispatch('searchIssues', '/jira/', ['project = OPS'])` then runs
 through every check the door runs: hidden paths, path rules, the mount's mode
-and admission policies. A subclass overriding a marked function keeps the mark.
+and admission policies. A subclass overriding a marked function keeps the
+mark. Every other `PathSpec` argument passes the same checks and must be on
+the function's own mount (EXDEV otherwise); the backend receives it
+mount-relative.
 
 The effect is one of `READ`, `METADATA`, `WRITE`, `CREATE`, `REMOVE`,
 `RENAME` and `ATTR`; every one but `READ` and `METADATA` is a write. `target`
