@@ -419,10 +419,7 @@ function stringCapability(
 // hop. `maxGlobMatches: SCOPE_ERROR` is the whole reason this exists:
 // reporting the name instead of 5000 would make the two languages differ
 // on a value they agree about.
-function resolveIdentifier(
-  source: ts.SourceFile,
-  name: string,
-): CapabilityValue | undefined {
+function resolveIdentifier(source: ts.SourceFile, name: string): CapabilityValue | undefined {
   for (const statement of source.statements) {
     if (ts.isVariableStatement(statement)) {
       for (const decl of statement.declarationList.declarations) {
