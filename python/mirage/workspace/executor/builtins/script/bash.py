@@ -16,7 +16,12 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any
 
-from mirage.context import clear_program_invocation, reset_program_invocation
+from mirage.context import (
+    clear_program_invocation,
+    reset_current_session,
+    reset_program_invocation,
+    set_current_evaluation,
+)
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -25,11 +30,7 @@ from mirage.shell.bytes import decode_text
 from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.script.constants import (
     BASH_LONG_OPTIONS,
     BASH_START_FLAGS,
@@ -195,7 +196,7 @@ async def handle_bash(
         io = await finish_shell(execute_fn, session, io, stdin)
     finally:
         reset_program_invocation(token)
-        reset_current_evaluation(child_token)
+        reset_current_session(child_token)
     label = f"{name} {parsed.path}" if parsed.path else f"{name} -c {script}"
     return io.stdout, io, ExecutionNode(command=label, exit_code=io.exit_code)
 

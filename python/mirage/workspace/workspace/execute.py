@@ -20,7 +20,12 @@ from functools import partial
 from typing import Any
 
 from mirage.commands.errors import CommandTimeoutError
-from mirage.context import reset_refusal_sink, set_refusal_sink
+from mirage.context import (
+    get_current_evaluation,
+    reset_refusal_sink,
+    set_current_evaluation,
+    set_refusal_sink,
+)
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope, active_records
@@ -50,13 +55,7 @@ from mirage.workspace.abort import (
     set_line_writer,
 )
 from mirage.workspace.dispatcher import Dispatcher
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    child_context,
-    get_current_evaluation,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.alias import expanding_aliases
 from mirage.workspace.executor.control import UNWINDING, ended
@@ -368,7 +367,7 @@ async def recurse(
     finally:
         if substitution:
             if child_token is not None:
-                reset_current_evaluation(child_token)
+                reset_current_session(child_token)
     if io.refusal is not None:
         nested.latest = io.refusal
     return io
@@ -1037,7 +1036,7 @@ async def run_prepared_line(
         # succeeded.
         parse_scope.release()
         scope.close()
-        reset_current_evaluation(session_token)
+        reset_current_session(session_token)
         # The marks were only for this line's apply_io, so they go however
         # the save ends, with any a background job added during it; the
         # seal stops a background command that returns later from marking

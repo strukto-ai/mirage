@@ -12,12 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  getCurrentEvaluation,
-  runWithEvaluation,
-  EvaluationContext,
-  childContext,
-} from '../evaluation.ts'
+import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
 
 import { ExecutionScope } from '../execution.ts'
@@ -39,6 +34,8 @@ import {
   getCurrentSessionFor,
   runWithRefusalSink,
   runWithSession,
+  getCurrentEvaluation,
+  runWithEvaluation,
 } from '../../context/session_context.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import { checkSyntax, syntaxErrorResult, type ShellParser } from '../../shell/parse/index.ts'
@@ -340,7 +337,7 @@ async function runLine(
                 frame,
                 argv,
               ),
-            env.sessions,
+            { owner: env.sessions },
           )
           return result.exitCode
         },
