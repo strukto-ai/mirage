@@ -367,10 +367,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( NBX=1; export NBY=2; NBA=(1 2); export NBA; declare -rx NBR=1; declare -ix NBI=5; nbf() { local -x NBV=1; local NBW=2; NBP=3 bash -c 'NBR=2; NBI=2+3; echo \"x=[$NBX] y=[$NBY] a=[$NBA] r=$NBR i=$NBI v=$NBV w=[$NBW] p=$NBP\"'; }; nbf )",
+      "command": "( NBX=1; export NBY=2 constructor=ok toString=ts; NBA=(1 2); export NBA; declare -rx NBR=1; declare -ix NBI=5; nbf() { local -x NBV=1; local NBW=2; NBP=3 bash -c 'NBR=2; NBI=2+3; echo \"x=[$NBX] y=[$NBY] a=[$NBA] r=$NBR i=$NBI v=$NBV w=[$NBW] p=$NBP $constructor $toString\"'; }; nbf )",
       "expect": {
         "exit": 0,
-        "stdout": "x=[] y=[2] a=[] r=2 i=2+3 v=1 w=[] p=3\n",
+        "stdout": "x=[] y=[2] a=[] r=2 i=2+3 v=1 w=[] p=3 ok ts\n",
         "stderr": ""
       }
     },
