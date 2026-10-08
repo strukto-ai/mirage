@@ -101,9 +101,6 @@ logger = logging.getLogger(__name__)
 # each of those answers for its own path above.
 _SUBTREE_OPS = frozenset({"rename"})
 
-# What the mount itself hands every function, taken or not.
-_MOUNT_KEYWORDS = frozenset({"index"})
-
 
 async def _command_output(
     source: AsyncIterator[bytes],
@@ -248,7 +245,7 @@ def _taken(fn: Callable[..., Any], kwargs: dict[str, Any]) -> dict[str, Any]:
     names = _parameters(getattr(target, "__func__", target))
     if names is None:
         return kwargs
-    unknown = sorted(set(kwargs) - names - _MOUNT_KEYWORDS)
+    unknown = sorted(set(kwargs) - names - {"index"})
     if unknown:
         raise TypeError(
             f"{getattr(target, '__name__', target)}() got an unexpected "
