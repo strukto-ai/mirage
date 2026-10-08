@@ -376,11 +376,33 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
 
   private async withFreshRuntime<T>(execute: (runtime: PyodideRuntime) => Promise<T>): Promise<T> {
     const runtime = this.createRuntime()
+    let result: T
     try {
-      return await execute(runtime)
-    } finally {
-      await runtime.close()
+      result = await execute(runtime)
+    } catch (error) {
+      try {
+        await runtime.close()
+      } catch (cleanupError) {
+        console.warn('pyodide runtime cleanup failed', cleanupError)
+        if (!(error instanceof Error))
+          throw new AggregateError([error, cleanupError], 'pyodide execution and cleanup failed')
+        Reflect.defineProperty(error, 'cause', {
+          configurable: true,
+          enumerable: false,
+          writable: true,
+          value:
+            error.cause === undefined
+              ? cleanupError
+              : new AggregateError(
+                  [error.cause, cleanupError],
+                  'pyodide execution and cleanup failed',
+                ),
+        })
+      }
+      throw error
     }
+    await runtime.close()
+    return result
   }
 
   private async evalOne(

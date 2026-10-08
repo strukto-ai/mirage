@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { CommandTimeoutError } from '../../../errors/types.ts'
+import { WorkspaceBinding } from '../../binding.ts'
+import { EvalError } from '../../errors.ts'
+import { PrefixResolver } from '../../resolver.ts'
+import { PyodideExecution } from './execution.ts'
 import { PyodideRuntime } from './runtime.ts'
 import * as interrupt from './interrupt.ts'
 import type * as PendingCleanup from './fixtures/pending_cleanup.ts'
@@ -166,6 +171,112 @@ describe('PyodideRuntime host initializer', () => {
       await rt.close()
     }
   }, 60_000)
+
+  it.each(['inline', 'worker'] as const)(
+    'preserves evaluation and timeout errors when cleanup also fails (%s)',
+    async (mode) => {
+      const ref = new URL('./fixtures/failing_cleanup.ts', import.meta.url)
+      ref.searchParams.set('case', `primary-${mode}`)
+      const module = (await import(ref.href)) as typeof FailingCleanup
+      module.configure('async')
+      const rt = new PyodideRuntime({ config: { initModule: ref.href } })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      if (mode === 'worker') {
+        rt.bind(
+          new WorkspaceBinding(
+            () => Promise.reject(new Error('unexpected filesystem operation')),
+            new PrefixResolver(() => []),
+          ),
+        )
+      }
+      try {
+        const evaluated = rt.eval("raise ValueError('primary failure')")
+        await expect(evaluated).rejects.toBeInstanceOf(EvalError)
+        await expect(evaluated).rejects.toThrow('ValueError: primary failure')
+        await expect(evaluated).rejects.toMatchObject({ syntax: false })
+        if (mode === 'inline')
+          await expect(evaluated).rejects.toHaveProperty('cause', module.failure)
+        const timedOut = rt.run({
+          code: 'while True: pass',
+          args: [],
+          env: {},
+          stdin: null,
+          timeoutSeconds: 0.05,
+        })
+        await expect(timedOut).rejects.toBeInstanceOf(CommandTimeoutError)
+        await expect(timedOut).rejects.toMatchObject({ command: 'pyodide', seconds: 0.05 })
+        if (mode === 'inline')
+          await expect(timedOut).rejects.toHaveProperty('cause', module.failure)
+        expect(warn).toHaveBeenCalledTimes(2)
+        for (const diagnostic of warn.mock.calls) {
+          expect(diagnostic.map(String).join(' ')).toContain('pyodide runtime cleanup failed')
+          expect(diagnostic.map(String).join(' ')).toContain('Error: cleanup failed')
+        }
+      } finally {
+        await rt.close()
+        warn.mockRestore()
+      }
+    },
+    60_000,
+  )
+
+  it.each(['mutable', 'frozen', 'readonly'] as const)(
+    'keeps the original error, stack, and prior cause (%s)',
+    async (mode) => {
+      const ref = new URL('./fixtures/failing_cleanup.ts', import.meta.url)
+      ref.searchParams.set('case', `prior-cause-${mode}`)
+      const module = (await import(ref.href)) as typeof FailingCleanup
+      const prior = new Error('original cause')
+      const primary = new EvalError('original traceback', { cause: prior })
+      const stack = primary.stack
+      if (mode === 'frozen') Object.freeze(primary)
+      if (mode === 'readonly')
+        Object.defineProperty(primary, 'cause', { writable: false, configurable: false })
+      const evaluate = vi.spyOn(PyodideExecution.prototype, 'evaluate').mockImplementation(() => {
+        throw primary
+      })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      const rt = new PyodideRuntime({ config: { initModule: ref.href } })
+      try {
+        await expect(rt.eval('42')).rejects.toBe(primary)
+        expect(primary.stack).toBe(stack)
+        if (mode !== 'mutable') expect(primary.cause).toBe(prior)
+        else {
+          expect(primary.cause).toBeInstanceOf(AggregateError)
+          expect(primary.cause).toHaveProperty('errors', [prior, module.failure])
+        }
+        expect(warn).toHaveBeenCalledWith('pyodide runtime cleanup failed', module.failure)
+        expect(module.disposals).toBe(1)
+      } finally {
+        await rt.close()
+        evaluate.mockRestore()
+        warn.mockRestore()
+      }
+    },
+    60_000,
+  )
+
+  it.each(['run', 'eval'] as const)(
+    'rejects cleanup-only failure after successful %s',
+    async (method) => {
+      const ref = new URL('./fixtures/failing_cleanup.ts', import.meta.url)
+      ref.searchParams.set('case', `cleanup-only-${method}`)
+      const module = (await import(ref.href)) as typeof FailingCleanup
+      module.configure('async')
+      const rt = new PyodideRuntime({ config: { initModule: ref.href } })
+      try {
+        const result =
+          method === 'run'
+            ? rt.run({ code: 'print(42)', args: [], env: {}, stdin: null })
+            : rt.eval('42')
+        await expect(result).rejects.toBe(module.failure)
+        expect(module.disposals).toBe(1)
+      } finally {
+        await rt.close()
+      }
+    },
+    60_000,
+  )
 })
 
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========

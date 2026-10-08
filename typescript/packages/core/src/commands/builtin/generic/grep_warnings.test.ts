@@ -19,6 +19,8 @@ import { materialize, type IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { grepGeneric, labelled } from './grep.ts'
+import { prependStderr } from '../utils/output.ts'
+import { yieldBytes } from '../../../io/stream.ts'
 
 type GrepOut = Uint8Array | AsyncIterable<Uint8Array> | null
 
@@ -305,3 +307,130 @@ it.each(['stat', 'readdir', 'read'] as const)(
     }
   },
 )
+
+describe('grepGeneric streaming results', () => {
+  it.each<[string[], Record<string, boolean>]>([
+    [['/data/a.txt'], {}],
+    [['/data/a.txt', '/data/b.txt'], {}],
+    [['/data'], { r: true }],
+  ])('publishes status before yielding and on early close for %j', async (paths, flags) => {
+    for (const missing of [false, true]) {
+      const closed: string[] = []
+      async function* read(p: PathSpec): AsyncIterable<Uint8Array> {
+        try {
+          yield* yieldBytes(ENC.encode('alice\nalice\n'))
+        } finally {
+          closed.push(p.virtual)
+        }
+      }
+      const probe = (p: PathSpec): Promise<FileStat> =>
+        p.virtual === '/missing'
+          ? Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+          : stat(p)
+      const [out, io] = (await grepGeneric(
+        'grep',
+        [...(missing ? ['/missing'] : []), ...paths].map(spec),
+        ['alice'],
+        opts(flags),
+        probe,
+        readdir,
+        read,
+      )) as [AsyncIterable<Uint8Array>, IOResult]
+      const iterator = out[Symbol.asyncIterator]()
+      const expected = missing ? 2 : 0
+      expect((await iterator.next()).done).toBe(false)
+      expect(io.exitCode).toBe(expected)
+      await iterator.return?.()
+      expect(io.exitCode).toBe(expected)
+      expect(closed).toEqual(['/data/a.txt'])
+      expect(await io.stderrStr()).toBe(
+        missing ? 'grep: /missing: No such file or directory\n' : '',
+      )
+    }
+  })
+
+  it.each([false, true])(
+    'retains a binary notice before a read failure (suppressed=%s)',
+    async (noMessages) => {
+      async function* read(): AsyncIterable<Uint8Array> {
+        yield* yieldBytes(new Uint8Array([...ENC.encode('alice'), 255, 10]))
+        throw Object.assign(new Error('denied'), { code: 'EACCES' })
+      }
+      const [out, io] = (await grepGeneric(
+        'grep',
+        [spec('/data/a.txt')],
+        ['alice'],
+        { ...opts({ no_messages: noMessages }), env: { LC_ALL: 'C.UTF-8' } },
+        stat,
+        readdir,
+        read,
+      )) as [GrepOut, IOResult]
+      expect(await decode(out)).toBe('')
+      expect(io.exitCode).toBe(2)
+      expect(await io.stderrStr()).toBe(
+        'grep: /data/a.txt: binary file matches\n' +
+          (noMessages ? '' : 'grep: /data/a.txt: Permission denied\n'),
+      )
+    },
+  )
+
+  it('preserves diagnostics added by a wrapper before drain', async () => {
+    const [out, io] = (await grepGeneric(
+      'grep',
+      [spec('/data/bad.txt'), spec('/data/a.txt')],
+      ['*alice'],
+      opts({ E: true }),
+      stat,
+      readdir,
+      stream,
+    )) as [GrepOut, IOResult]
+    await prependStderr(io, ['backend: scan fallback'])
+    expect(await decode(out)).toBe('/data/a.txt:alice\n')
+    expect(io.exitCode).toBe(2)
+    expect(await io.stderrStr()).toBe(
+      'backend: scan fallback\ngrep: warning: * at start of expression\ngrep: /data/bad.txt: Permission denied\n',
+    )
+  })
+})
+
+it('settles late binary detection after a match', async () => {
+  async function* read(): AsyncIterable<Uint8Array> {
+    yield* yieldBytes(ENC.encode('alice\n'))
+    yield* yieldBytes(new Uint8Array([0]))
+  }
+  const [out, io] = (await grepGeneric(
+    'grep',
+    [spec('/data/a.txt')],
+    ['alice'],
+    opts({ args_I: true }),
+    stat,
+    readdir,
+    read,
+  )) as [AsyncIterable<Uint8Array>, IOResult]
+  const iterator = out[Symbol.asyncIterator]()
+  expect(await iterator.next()).toEqual({ done: false, value: ENC.encode('alice\n') })
+  expect(io.exitCode).toBe(0)
+  expect(await iterator.next()).toEqual({ done: true, value: undefined })
+  expect(io.exitCode).toBe(1)
+})
+
+it('flushes a binary notice on early close', async () => {
+  async function* read(): AsyncIterable<Uint8Array> {
+    yield* yieldBytes(new Uint8Array([...ENC.encode('alice'), 255, 10]))
+    yield* yieldBytes(ENC.encode('alice\n'))
+  }
+  const [out, io] = (await grepGeneric(
+    'grep',
+    [spec('/data/a.txt')],
+    ['alice'],
+    { ...opts({}), env: { LC_ALL: 'C.UTF-8' } },
+    stat,
+    readdir,
+    read,
+  )) as [AsyncIterable<Uint8Array>, IOResult]
+  const iterator = out[Symbol.asyncIterator]()
+  expect(await iterator.next()).toEqual({ done: false, value: ENC.encode('alice\n') })
+  await iterator.return?.()
+  expect(io.exitCode).toBe(0)
+  expect(await io.stderrStr()).toBe('grep: /data/a.txt: binary file matches\n')
+})

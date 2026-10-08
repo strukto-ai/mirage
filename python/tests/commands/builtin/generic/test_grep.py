@@ -537,3 +537,144 @@ async def test_grep_propagates_non_filesystem_read_failures(
     with pytest.raises(type(error)) as raised:
         await _drain_async(output)
     assert raised.value is error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "paths,flags",
+    [
+        (["/data/a.txt"], {}),
+        (["/data/a.txt", "/data/b.txt"], {}),
+        (["/data"], {"r": True}),
+    ],
+)
+@pytest.mark.parametrize("missing", [False, True])
+async def test_grep_publishes_status_before_output_and_on_close(
+    paths, flags, missing
+):
+    readdir, stat, rb, _ = _make_backend(
+        {"/data/a.txt": b"alice\nalice\n", "/data/b.txt": b"alice\n"}
+    )
+    closed = []
+
+    async def read_stream(path):
+        try:
+            yield await rb(path)
+        finally:
+            closed.append(path.virtual)
+
+    output, io = await grep_generic(
+        [_spec(path) for path in (["/missing"] if missing else []) + paths],
+        ["alice"],
+        CommandOpts(flags=flags),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=read_stream,
+    )
+    expected = 2 if missing else 0
+    assert b"alice" in await anext(output)
+    assert io.exit_code == expected
+    await output.aclose()
+    assert io.exit_code == expected
+    assert closed == ["/data/a.txt"]
+    expected_stderr = (
+        b"grep: /missing: No such file or directory\n" if missing else b""
+    )
+    assert (io.stderr or b"") == expected_stderr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("no_messages", [False, True])
+async def test_grep_preserves_binary_notice_before_read_failure(no_messages):
+    readdir, stat, rb, _ = _make_backend({"/data/a.txt": b"alice\xff\n"})
+
+    async def read_stream(path):
+        yield await rb(path)
+        raise PermissionError(path.virtual)
+
+    output, io = await grep_generic(
+        [_spec("/data/a.txt")],
+        ["alice"],
+        CommandOpts(
+            flags={"no_messages": no_messages}, env={"LC_ALL": "C.UTF-8"}
+        ),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=read_stream,
+    )
+    assert await _drain_async(output) == b""
+    assert io.exit_code == 2
+    expected = b"grep: /data/a.txt: binary file matches\n"
+    if not no_messages:
+        expected += b"grep: /data/a.txt: Permission denied\n"
+    assert io.stderr == expected
+
+
+@pytest.mark.asyncio
+async def test_grep_preserves_stderr_added_before_drain():
+    readdir, stat, rb, rs = _make_backend({"/data/a.txt": b"alice\n"})
+    output, io = await grep_generic(
+        [_spec("/missing"), _spec("/data/a.txt")],
+        ["*alice"],
+        CommandOpts(flags={"E": True}),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    io.stderr = b"backend: scan fallback\n" + (io.stderr or b"")
+    assert await _drain_async(output) == b"/data/a.txt:alice\n"
+    assert io.exit_code == 2
+    assert io.stderr == (
+        b"backend: scan fallback\n"
+        b"grep: warning: * at start of expression\n"
+        b"grep: /missing: No such file or directory\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_grep_settles_late_binary_detection_after_a_match():
+    readdir, stat, rb, _ = _make_backend({"/data/a.txt": b"alice\n"})
+
+    async def read_stream(path):
+        yield await rb(path)
+        yield b"\0"
+
+    output, io = await grep_generic(
+        [_spec("/data/a.txt")],
+        ["alice"],
+        CommandOpts(flags={"args_I": True}),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=read_stream,
+    )
+    assert await anext(output) == b"alice\n"
+    assert io.exit_code == 0
+    assert await _drain_async(output) == b""
+    assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_flushes_binary_notice_on_early_close():
+    readdir, stat, rb, _ = _make_backend({"/data/a.txt": b"alice\xff\n"})
+
+    async def read_stream(path):
+        yield await rb(path)
+        yield b"alice\n"
+
+    output, io = await grep_generic(
+        [_spec("/data/a.txt")],
+        ["alice"],
+        CommandOpts(env={"LC_ALL": "C.UTF-8"}),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=read_stream,
+    )
+    assert await anext(output) == b"alice\n"
+    await output.aclose()
+    assert io.exit_code == 0
+    assert io.stderr == b"grep: /data/a.txt: binary file matches\n"

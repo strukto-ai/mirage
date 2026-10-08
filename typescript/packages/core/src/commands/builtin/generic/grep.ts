@@ -23,7 +23,8 @@ import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellOne } from '../../../utils/path.ts'
 import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
+import { concat } from '../../../io/cachable_iterator.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
@@ -263,13 +264,18 @@ export async function grepGeneric(
   const rd = mountParentReaddir((p: string) => readdir(makeSpec(p, first)), mounts, prefix)
   const st = mountParentStat((p: string) => stat(makeSpec(p, first)), mounts)
   let failed = false
-  const notices: Uint8Array[] = warning ? [ENC.encode(warning)] : []
+  const notices: Uint8Array[] = []
   let matched = false
   let printed = false
 
   function warn(message: string): void {
     failed = true
+    io.exitCode = exitCodeFor(matched, failed, f.quiet)
     if (!f.noMessages) notices.push(ENC.encode(message + '\n'))
+  }
+
+  function updateStatus(fileIO: IOResult): void {
+    io.exitCode = exitCodeFor(matched || fileIO.exitCode === 0, failed, f.quiet)
   }
 
   async function* scan(p: PathSpec, walked = false): AsyncIterable<Uint8Array> {
@@ -321,46 +327,46 @@ export async function grepGeneric(
     if (walked && info.type !== FileType.FILE) return
     if (walked && !f.filters.text && BINARY_EXTENSIONS.has(getExtension(p.virtual) ?? '')) return
     if (!fileAdmitted(p.virtual, f.filters)) return
+    const fileIO = new IOResult({ exitCode: 1 })
     try {
-      const fileIO = new IOResult({ exitCode: 1 })
-      const show = !f.noFilename && (f.withFilename || walked || paths.length > 1)
-      for await (const chunk of grepInput(
-        stream(p),
-        pat,
-        f,
-        operandLabel(p, '(standard input)'),
-        show,
-        fileIO,
-        printed,
-        opts.signal,
-        utf8,
-      )) {
-        printed = true
-        yield chunk
+      try {
+        const show = !f.noFilename && (f.withFilename || walked || paths.length > 1)
+        for await (const chunk of grepInput(
+          stream(p),
+          pat,
+          f,
+          operandLabel(p, '(standard input)'),
+          show,
+          fileIO,
+          printed,
+          opts.signal,
+          utf8,
+        )) {
+          updateStatus(fileIO)
+          printed = true
+          yield chunk
+        }
+      } finally {
+        matched ||= fileIO.exitCode === 0
+        updateStatus(fileIO)
+        if (fileIO.stderr !== null) notices.push(await materialize(fileIO.stderr))
       }
-      matched ||= fileIO.exitCode === 0
-      if (fileIO.stderr instanceof Uint8Array) notices.push(fileIO.stderr)
     } catch (error) {
       if (!isFsError(error)) throw error
       warn(`${name}: ${p.rawPath}: ${reason(error)}`)
     }
   }
+
   async function* run(): AsyncIterable<Uint8Array> {
-    for (const path of paths) {
-      yield* scan(path)
-      if (f.quiet && matched) break
-    }
-    const length = notices.reduce((n, part) => n + part.length, 0)
-    if (length) {
-      const stderr = new Uint8Array(length)
-      let offset = 0
-      for (const notice of notices) {
-        stderr.set(notice, offset)
-        offset += notice.length
+    try {
+      for (const path of paths) {
+        yield* scan(path)
+        if (f.quiet && matched) break
       }
-      io.stderr = stderr
+    } finally {
+      if (notices.length > 0) io.stderr = concat([await materialize(io.stderr), ...notices])
     }
-    io.exitCode = exitCodeFor(matched, failed, f.quiet)
   }
+
   return [run(), io]
 }

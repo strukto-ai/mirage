@@ -270,15 +270,21 @@ async def grep_generic(
     st = mount_parent_stat(partial(call_stat, stat, prefix=prefix), mounts)
     rb = partial(call_read_bytes, read_bytes, prefix=prefix)
     failed = False
-    diagnostics: list[bytes] = [warning] if warning else []
+    diagnostics: list[bytes] = []
     matched = False
     printed = False
 
     def warn(message: str) -> None:
         nonlocal failed
         failed = True
+        io.exit_code = exit_code_for(matched, failed, f.quiet)
         if not f.no_messages:
             diagnostics.append((message + "\n").encode())
+
+    def update_status(file_io: IOResult) -> None:
+        io.exit_code = exit_code_for(
+            matched or file_io.exit_code == 0, failed, f.quiet
+        )
 
     async def scan(
         p: PathSpec, walked: bool = False
@@ -344,47 +350,54 @@ async def grep_generic(
             return
         if not file_admitted(p.virtual, f.filters):
             return
+        file_io = IOResult(exit_code=1)
         try:
-            source = (
-                operand_stream(p)
-                if is_stdin(p) or read_stream is not None
-                else wrap_bytes(await rb(p.virtual))
-            )
-            file_io = IOResult(exit_code=1)
-            show = not f.no_filename and (
-                f.with_filename or walked or len(paths) > 1
-            )
-            async with aclosing(
-                grep_input(
-                    source,
-                    pat,
-                    f,
-                    operand_label(p, "(standard input)"),
-                    show,
-                    file_io,
-                    printed,
-                    utf8,
+            try:
+                source = (
+                    operand_stream(p)
+                    if is_stdin(p) or read_stream is not None
+                    else wrap_bytes(await rb(p.virtual))
                 )
-            ) as output:
-                async for chunk in output:
-                    printed = True
-                    yield chunk
-            matched = matched or file_io.exit_code == 0
-            if file_io.stderr:
-                diagnostics.append(await materialize(file_io.stderr))
+                show = not f.no_filename and (
+                    f.with_filename or walked or len(paths) > 1
+                )
+                async with aclosing(
+                    grep_input(
+                        source,
+                        pat,
+                        f,
+                        operand_label(p, "(standard input)"),
+                        show,
+                        file_io,
+                        printed,
+                        utf8,
+                    )
+                ) as output:
+                    async for chunk in output:
+                        update_status(file_io)
+                        printed = True
+                        yield chunk
+            finally:
+                matched = matched or file_io.exit_code == 0
+                update_status(file_io)
+                if file_io.stderr:
+                    diagnostics.append(await materialize(file_io.stderr))
         except FS_ERRORS as exc:
             warn(f"grep: {p.raw_path}: {fs_strerror(exc) or exc}")
 
     async def run() -> AsyncIterator[bytes]:
-        for path in paths:
-            async with aclosing(scan(path)) as output:
-                async for chunk in output:
-                    yield chunk
-            if f.quiet and matched:
-                break
-        if diagnostics:
-            io.stderr = b"".join(diagnostics)
-        io.exit_code = exit_code_for(matched, failed, f.quiet)
+        try:
+            for path in paths:
+                async with aclosing(scan(path)) as output:
+                    async for chunk in output:
+                        yield chunk
+                if f.quiet and matched:
+                    break
+        finally:
+            if diagnostics:
+                io.stderr = (await materialize(io.stderr)) + b"".join(
+                    diagnostics
+                )
 
     return run(), io
 
