@@ -534,6 +534,11 @@
    "typescript_only": {
     "atimeMs": "Nanoseconds in python and milliseconds in TypeScript, as mtime_ns and mtimeMs: epoch nanoseconds are past 2**53, so a JS number cannot hold them exactly, while a python int can and preview1 asks in them."
    }
+  },
+  "core/email/client": {
+   "python_only": {
+    "_text_lines": "Reads the text lines of an IMAPResponse from mirage's own Python IMAP client (accessor/imap); node's imapflow hands back parsed messages, so its client has no lines to read."
+   }
   }
  }
 }

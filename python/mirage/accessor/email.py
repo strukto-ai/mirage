@@ -43,7 +43,7 @@ class EmailAccessor(Accessor):
                     bytes(line).decode(errors="replace")
                     for line in response.lines
                 )
-                await client.logout()
+                await client.close()
                 raise ConnectionError(
                     f"IMAP login failed for {self.config.username} on "
                     f"{self.config.imap_host}: {detail or response.result}"

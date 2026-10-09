@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 import pytest
 import pytest_asyncio
@@ -55,6 +55,13 @@ def _answers(tag: str, rest: str, reader: asyncio.StreamReader) -> list[bytes]:
         ]
     if verb == "SEARCH" and rest.endswith("NONE"):
         return [b"* SEARCH\r\n", done]
+    if verb == "SEARCH" and rest.endswith("UPDATED"):
+        return [
+            b"* 23 EXISTS\r\n",
+            b"* 1 RECENT\r\n",
+            b"* SEARCH 1 2\r\n",
+            done,
+        ]
     if verb == "SEARCH":
         return [b"* SEARCH 1 2\r\n", done]
     if verb == "UID":
@@ -72,7 +79,7 @@ def _answers(tag: str, rest: str, reader: asyncio.StreamReader) -> list[bytes]:
 
 @pytest_asyncio.fixture
 async def imap_server() -> AsyncIterator[
-    Callable[[Script], asyncio.Future[tuple[IMAPClient, list[str]]]]
+    Callable[[Script], Awaitable[tuple[IMAPClient, list[str]]]]
 ]:
     servers: list[asyncio.Server] = []
     clients: list[IMAPClient] = []
@@ -208,3 +215,62 @@ async def test_a_closed_connection_is_not_alive(imap_server):
     assert not client.alive
     with pytest.raises(ConnectionError):
         await client.select('"INBOX"')
+
+
+@pytest.mark.asyncio
+async def test_an_update_the_server_volunteers_stays_out_of_the_answer(
+    imap_server,
+):
+    client, _ = await imap_server(_answers)
+    response = await client.search("UPDATED")
+    assert response.lines == [b"1 2", b"SEARCH completed"]
+
+
+async def _quiet_server(
+    after_login: bytes,
+) -> tuple[asyncio.Server, int]:
+    async def serve(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        writer.write(b"* OK IMAP4rev1 ready\r\n")
+        line = await reader.readline()
+        tag = line.split(b" ")[0]
+        writer.write(tag + b" OK LOGIN completed\r\n" + after_login)
+        await writer.drain()
+        if after_login:
+            writer.close()
+            return
+        await reader.read()
+        writer.close()
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    return server, server.sockets[0].getsockname()[1]
+
+
+@pytest.mark.asyncio
+async def test_a_server_that_says_bye_while_idle_is_not_alive():
+    server, port = await _quiet_server(b"* BYE idle too long\r\n")
+    try:
+        client = await IMAPClient.connect("127.0.0.1", port, False)
+        assert (await client.login("u", "p")).result == "OK"
+        await asyncio.sleep(0.1)
+        assert not client.alive
+        await client.close()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_an_abandoned_command_closes_the_connection():
+    server, port = await _quiet_server(b"")
+    try:
+        client = await IMAPClient.connect("127.0.0.1", port, False)
+        assert (await client.login("u", "p")).result == "OK"
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(client.select('"INBOX"'), 0.2)
+        assert not client.alive
+        await client.close()
+    finally:
+        server.close()
+        await server.wait_closed()

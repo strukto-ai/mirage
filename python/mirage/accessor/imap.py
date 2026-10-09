@@ -27,6 +27,14 @@ _LITERAL = re.compile(rb"\{(\d+)\}\r?\n\Z")
 # literal, read by its count, so only text lines are held to this.
 _LINE_LIMIT = 1 << 20
 
+# How long the server may go quiet inside a command: past it the command is
+# abandoned and the connection closed, so a hung server ends a request
+# instead of holding it.
+_REPLY_TIMEOUT = 120.0
+
+# How much of a literal is read at a time, each piece under the deadline.
+_LITERAL_CHUNK = 1 << 16
+
 # An answer's lines, named once: the client's own `list` method shadows the
 # builtin inside the class body.
 _Lines = list[bytes | bytearray]
@@ -64,6 +72,23 @@ def _quoted(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+class _Protocol(asyncio.StreamReaderProtocol):
+    """asyncio's stream protocol, noting when the server ends the
+    connection: the stream reader reports its end only once every byte
+    before it is read, so a ``* BYE`` the server sent while the client
+    was idle would hide it."""
+
+    ended = False
+
+    def eof_received(self) -> bool | None:
+        self.ended = True
+        return super().eof_received()
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        self.ended = True
+        super().connection_lost(exc)
+
+
 class IMAPClient:
     """An IMAP4rev1 client over asyncio streams: one command at a time,
     synchronising literals, and the commands the email backend sends.
@@ -73,16 +98,26 @@ class IMAPClient:
     while node's imapflow is MIT. The answer keeps the shape the email
     parsers read (``IMAPResponse``).
 
+    A command the caller abandons (a timeout, a cancellation), or one the
+    server stops answering for ``_REPLY_TIMEOUT``, closes the connection:
+    the server may still be mid-answer or waiting for a literal, so
+    nothing more can be sent on it.
+
     Args:
         reader (asyncio.StreamReader): the connection's read side.
         writer (asyncio.StreamWriter): its write side.
+        protocol (_Protocol): the protocol that notes the server's end.
     """
 
     def __init__(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        protocol: _Protocol,
     ) -> None:
         self._reader = reader
         self._writer = writer
+        self._protocol = protocol
         self._tag = 0
         self._lock = asyncio.Lock()
 
@@ -100,14 +135,22 @@ class IMAPClient:
         Raises:
             ConnectionError: the server greeted with anything but OK.
         """
-        reader, writer = await asyncio.open_connection(
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader(limit=_LINE_LIMIT, loop=loop)
+        protocol = _Protocol(reader, loop=loop)
+        transport, _ = await loop.create_connection(
+            lambda: protocol,
             host,
             port,
             ssl=ssl.create_default_context() if use_ssl else None,
-            limit=_LINE_LIMIT,
         )
-        client = cls(reader, writer)
-        greeting = await client._readline()
+        writer = asyncio.StreamWriter(transport, protocol, reader, loop)
+        client = cls(reader, writer, protocol)
+        try:
+            greeting = await client._readline()
+        except BaseException:
+            writer.close()
+            raise
         if not greeting.startswith(b"* OK"):
             writer.close()
             raise ConnectionError(
@@ -120,11 +163,7 @@ class IMAPClient:
     def alive(self) -> bool:
         """Whether the connection can still carry a command: the server
         has not closed or reset it and the client has not closed it."""
-        return (
-            self._reader.exception() is None
-            and not self._reader.at_eof()
-            and not self._writer.is_closing()
-        )
+        return not self._protocol.ended and not self._writer.is_closing()
 
     async def login(self, user: str, password: str) -> IMAPResponse:
         """Authenticate with LOGIN.
@@ -238,17 +277,21 @@ class IMAPClient:
             name = args[0] if verb == "UID" and args else verb
             line = " ".join((tag, verb, *args)).encode()
             lines: _Lines = []
-            if literal is not None:
-                self._writer.write(line + b" {%d}\r\n" % len(literal))
+            try:
+                if literal is not None:
+                    self._writer.write(line + b" {%d}\r\n" % len(literal))
+                    await self._writer.drain()
+                    refused = await self._await_continuation(tag, name, lines)
+                    if refused is not None:
+                        return refused
+                    self._writer.write(literal + b"\r\n")
+                else:
+                    self._writer.write(line + b"\r\n")
                 await self._writer.drain()
-                refused = await self._await_continuation(tag, name, lines)
-                if refused is not None:
-                    return refused
-                self._writer.write(literal + b"\r\n")
-            else:
-                self._writer.write(line + b"\r\n")
-            await self._writer.drain()
-            return await self._read_answer(tag, name, lines)
+                return await self._read_answer(tag, name, lines)
+            except BaseException:
+                self._writer.close()
+                raise
 
     async def _await_continuation(
         self, tag: str, name: str, lines: _Lines
@@ -297,6 +340,11 @@ class IMAPClient:
     ) -> IMAPResponse | None:
         """File one response line, and its literals, into the answer.
 
+        An untagged line belongs to the command when it carries the
+        command's name, first (``* SEARCH 1 2``, which loses the name) or
+        after a number (``* 1 FETCH ...``). Anything else is an update the
+        server volunteered (``* 23 EXISTS``), read and set aside.
+
         Args:
             raw (bytes): the line as read.
             tag (str): the command's tag.
@@ -317,25 +365,49 @@ class IMAPClient:
         if not raw.startswith(b"* "):
             return None
         text = raw[2:]
-        word, space, _ = text.rstrip(b"\r\n").partition(b" ")
-        if word.upper() == name.encode().upper():
-            text = text[len(word) + len(space) :]
+        first, space, rest = text.rstrip(b"\r\n").partition(b" ")
+        named = name.encode().upper()
+        ours = named in (first.upper(), rest.partition(b" ")[0].upper())
+        if first.upper() == named:
+            text = text[len(first) + len(space) :]
+        pieces: _Lines = []
         while (found := _LITERAL.search(text)) is not None:
-            lines.append(text[: found.start()] + b"{" + found[1] + b"}")
-            lines.append(
-                bytearray(await self._reader.readexactly(int(found[1])))
-            )
+            pieces.append(text[: found.start()] + b"{" + found[1] + b"}")
+            pieces.append(await self._read_octets(int(found[1])))
             text = await self._readline()
-        lines.append(text.rstrip(b"\r\n"))
+        pieces.append(text.rstrip(b"\r\n"))
+        if ours:
+            lines.extend(pieces)
         return None
+
+    async def _read_octets(self, count: int) -> bytearray:
+        """A literal's octets, each piece under the reply deadline.
+
+        Args:
+            count (int): how many.
+
+        Raises:
+            ConnectionError: the server closed the connection first.
+        """
+        data = bytearray()
+        while len(data) < count:
+            piece = await asyncio.wait_for(
+                self._reader.read(min(count - len(data), _LITERAL_CHUNK)),
+                _REPLY_TIMEOUT,
+            )
+            if not piece:
+                raise ConnectionError("the IMAP server closed the connection")
+            data += piece
+        return data
 
     async def _readline(self) -> bytes:
         """One response line, CRLF included.
 
         Raises:
             ConnectionError: the server closed the connection.
+            TimeoutError: the server sent nothing for ``_REPLY_TIMEOUT``.
         """
-        raw = await self._reader.readline()
+        raw = await asyncio.wait_for(self._reader.readline(), _REPLY_TIMEOUT)
         if not raw:
             raise ConnectionError("the IMAP server closed the connection")
         return raw
