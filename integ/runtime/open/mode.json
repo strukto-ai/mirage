@@ -7,7 +7,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "world": {
         "mounts": {

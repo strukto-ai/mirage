@@ -23,8 +23,8 @@ import {
   knownRuntimes,
   registerRuntime,
   runtimeBindingsFor,
-  WorkspaceRuntime,
 } from './table.ts'
+import { WorkspaceRuntime } from './workspace.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PythonRuntime } from './python/base.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'

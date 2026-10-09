@@ -6,7 +6,8 @@
       "runtimes": [
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",
@@ -56,7 +57,8 @@
       "note": "monty has no lstat and quickjs no os.lstat, so only wasi and pyodide can read a link's own time.",
       "runtimes": [
         "wasi",
-        "pyodide"
+        "pyodide",
+        "host"
       ],
       "world": {
         "mounts": {
@@ -98,7 +100,8 @@
       "note": "monty has no os.chmod and quickjs no os.chmod; WASI preview1 has no call that sets a mode, so CPython on wasi accepts os.chmod and nothing reaches the mount.",
       "runtimes": [
         "wasi",
-        "pyodide"
+        "pyodide",
+        "host"
       ],
       "world": {
         "mounts": {

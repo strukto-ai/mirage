@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from mirage.commands.cli.walk import invoked_env_names, supplied_env_names
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
-from mirage.runtime.table import WorkspaceRuntime
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import fetch_secret
 from mirage.secrets.summary import field_summary

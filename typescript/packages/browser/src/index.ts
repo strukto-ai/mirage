@@ -322,7 +322,7 @@ export type { E2BConfig } from '@struktoai/mirage-core/runtime/sandbox/e2b/confi
 export type { HomeConfig, RuntimeConfig } from '@struktoai/mirage-core/runtime/config'
 export { knownRuntimes, registerRuntime } from '@struktoai/mirage-core/runtime/table'
 export { type MountResolver, PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
-export { RuntimeVFS } from '@struktoai/mirage-core/runtime/vfs'
+export { RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
 export { CrossMountError } from '@struktoai/mirage-core/runtime/errors'
 export type { RunArgs, RuntimeReach } from '@struktoai/mirage-core/runtime/types'
 export {

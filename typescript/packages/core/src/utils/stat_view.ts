@@ -51,6 +51,12 @@ export function mtimeMs(st: FileStat): number | null {
   return seconds === null ? null : seconds * 1000
 }
 
+/** A FileStat's atime as epoch milliseconds, null when unknown. */
+export function atimeMs(st: FileStat): number | null {
+  const seconds = isoTimestamp(st.atime)
+  return seconds === null ? null : seconds * 1000
+}
+
 /** Whether a FileStat describes a directory. */
 export function isDir(st: FileStat): boolean {
   return st.type === FileType.DIRECTORY

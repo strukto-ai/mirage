@@ -19,10 +19,9 @@ from mirage.runtime.types import VFSStat
 
 
 def stat_result(st: VFSStat) -> Any:
-    # 0 is the door's spelling of "no stamp", and monty reads a 0.0
-    # as epoch zero rather than substituting the host clock, so an
-    # unknown mtime stays unknown instead of becoming now.
-    mtime = st.mtime_ns / 1_000_000_000
+    # Monty reads a 0.0 as epoch zero rather than substituting the host
+    # clock, so an unknown mtime stays unknown instead of becoming now.
+    mtime = (st.mtime_ns or 0) / 1_000_000_000
     if st.is_dir:
         return StatResult.dir_stat(mode=st.mode, mtime=mtime)
     return StatResult.file_stat(size=st.size, mode=st.mode, mtime=mtime)

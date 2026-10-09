@@ -134,7 +134,7 @@ const bytes = await fs.promises.readFile('/box/Documents/example.json')
 restore()
 ```
 
-Only `fs.promises.*` is patched, sync forms aren't supported.
+The async forms (`fs.promises.*` and the callbacks) are routed; a sync form like `fs.statSync` refuses a mounted path.
 
 ## FUSE mode
 

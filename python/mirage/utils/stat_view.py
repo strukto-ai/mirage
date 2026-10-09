@@ -53,6 +53,20 @@ def mtime_ns(st: FileStat) -> int | None:
     return int(seconds * 1_000_000_000)
 
 
+def atime_ns(st: FileStat) -> int | None:
+    """A FileStat's atime as epoch nanoseconds, None when unknown.
+
+    Read the way ``mtime_ns`` reads the mtime.
+
+    Args:
+        st (FileStat): the stat whose ``atime`` field to read.
+    """
+    seconds = iso_timestamp(st.atime)
+    if seconds is None:
+        return None
+    return int(seconds * 1_000_000_000)
+
+
 def posix_mode(st: FileStat) -> int:
     """The st_mode a stat consumer should report for one FileStat.
 

@@ -362,7 +362,9 @@ export interface VFSStat {
   isDir: boolean
   // Milliseconds here and nanoseconds in python, on purpose: epoch
   // nanoseconds are past 2**53, so a number cannot hold them exactly.
-  mtimeMs: number
+  // Absent when the source reports none; a guest wire with no validity
+  // channel spells that 0 at its own boundary.
+  mtimeMs?: number
   // The full st_mode, type bits included, so a chmod the shell made is
   // what a guest's stat reports. A guest that has no mode field on its
   // own wire (preview1's filestat carries only a filetype) reads the
@@ -374,4 +376,9 @@ export interface VFSStat {
   isLink?: boolean
   // Encoded logical major:minor; present only for a character device.
   rdev?: number
+  // Access time, absent when the source reports none.
+  atimeMs?: number
+  // Numeric owner and group, absent when unknown or stored as a name.
+  uid?: number
+  gid?: number
 }

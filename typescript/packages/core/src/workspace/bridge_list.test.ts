@@ -17,7 +17,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MontyRuntime } from '../runtime/python/monty/index.ts'
 import { PrefixResolver } from '../runtime/resolver.ts'
 import type { BridgeDispatchFn } from '../runtime/types.ts'
-import { RuntimeVFS } from '../runtime/vfs.ts'
+import { RuntimeFiles } from '../runtime/files.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -32,11 +32,11 @@ function mkWorld(): { ws: Workspace; vfs: RAMVFS } {
 // The door a sandboxed runtime holds, over this workspace's own bridge
 // and the same two sources the workspace hands its runtimes: the mount
 // prefixes and the node table's link names.
-function doorOn(ws: Workspace): RuntimeVFS {
+function doorOn(ws: Workspace): RuntimeFiles {
   const bridge = (
     ws as unknown as { buildWorkspaceBridge(): BridgeDispatchFn }
   ).buildWorkspaceBridge()
-  return new RuntimeVFS(
+  return new RuntimeFiles(
     bridge,
     new PrefixResolver(
       () => ['/data/'],

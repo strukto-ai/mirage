@@ -126,24 +126,34 @@ class VFSStat:
             the shell made is what a guest's stat reports. ``is_dir``
             and ``is_link`` are this field's type bits spelled out;
             mode is the authority and they are the convenience.
-        mtime_ns (int): modification time in epoch nanoseconds, 0 when
-            the source reports none. Nanoseconds here and milliseconds
-            in TypeScript, on purpose: epoch nanoseconds are past
-            2**53, so a JS number cannot hold them exactly, while a
-            python int can and preview1 asks in them.
+        mtime_ns (int | None): modification time in epoch nanoseconds,
+            None when the source reports none. A guest wire with no
+            validity channel spells None as 0 at its own boundary.
+            Nanoseconds here and milliseconds in TypeScript, on purpose:
+            epoch nanoseconds are past 2**53, so a JS number cannot hold
+            them exactly, while a python int can and preview1 asks in
+            them.
         is_link (bool): the path is a symlink. Only ever true for a
             stat the caller asked not to follow, since every other
             answer is the target's.
         rdev (int): encoded logical major:minor for a character device,
             otherwise 0.
+        atime_ns (int | None): access time in epoch nanoseconds, None
+            when the source reports none.
+        uid (int | None): the owner's numeric id, None when unknown or
+            stored as a name.
+        gid (int | None): the group's numeric id, read the same way.
     """
 
     size: int
     is_dir: bool
     mode: int
-    mtime_ns: int
+    mtime_ns: int | None = None
     is_link: bool = False
     rdev: int = 0
+    atime_ns: int | None = None
+    uid: int | None = None
+    gid: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

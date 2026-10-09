@@ -42,6 +42,7 @@ export const MountKey = Object.freeze({
   VFS_REF: 'vfs_ref',
   INDEX_CONFIG: 'index_config',
   VFS_STATE: 'vfs_state',
+  ANCHOR: 'anchor',
 } as const)
 
 export const CacheKey = Object.freeze({

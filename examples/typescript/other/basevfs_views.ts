@@ -13,7 +13,7 @@ import {
   MountMode,
   Operand,
   type PathSpec,
-  RuntimeVFS,
+  RuntimeFiles,
   type SearchQuery,
   Workspace,
 } from "@struktoai/mirage-node";
@@ -211,7 +211,7 @@ async function main(): Promise<void> {
     });
     assert.deepEqual(await reader.vfs.read("/latest"), expected);
 
-    const runtime = new RuntimeVFS((op, path) => ws.dispatch(op, path));
+    const runtime = new RuntimeFiles((op, path) => ws.dispatch(op, path));
     assert.deepEqual(await runtime.read("/latest"), expected);
     assert.equal((await runtime.stat("/latest")).isDir, false);
     const refused = await ws.shell("echo changed > /notes/welcome.txt");

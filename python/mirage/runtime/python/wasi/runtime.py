@@ -19,6 +19,7 @@ from typing import Any, Callable, ClassVar
 
 from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.config import HomeConfig, RuntimeConfig
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
 from mirage.runtime.python.flags import init_argv
@@ -29,7 +30,6 @@ from mirage.runtime.types import (
     RuntimeReach,
     ScriptSource,
 )
-from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm import WasmExecution, WasmFsConfig, WasmView
 from mirage.runtime.wasm.loader import wasmtime
 
@@ -129,7 +129,7 @@ class WasiRuntime(PythonRuntime):
         # collides with the interpreter's own files.
         fs = WasmView(
             WasmFsConfig(host_root=str(self._root)),
-            RuntimeVFS.of(context) if context is not None else None,
+            RuntimeFiles.of(context) if context is not None else None,
         )
         # The guest sees the mounts, so the script's own directory heads
         # sys.path, as it does on CPython.

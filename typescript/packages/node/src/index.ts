@@ -39,7 +39,7 @@ export {
   RedisWorkspaceStateStore,
   type RedisWorkspaceStateStoreOptions,
 } from './workspace/store/redis.ts'
-export { patchNodeFs } from './ops/os_patch.ts'
+export { patchNodeFs } from './runtime/js/host/fs.ts'
 export { RedisVFS, type RedisVFSOptions, type RedisVFSState } from './vfs/redis/redis.ts'
 export { PROMPT as REDIS_PROMPT } from '@struktoai/mirage-core/vfs/redis/prompt'
 export { RedisStore, type RedisStoreOptions } from './vfs/redis/store.ts'
@@ -460,7 +460,7 @@ export { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 export type { HomeConfig, RuntimeConfig } from '@struktoai/mirage-core/runtime/config'
 export { knownRuntimes, registerRuntime } from '@struktoai/mirage-core/runtime/table'
 export { type MountResolver, PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
-export { RuntimeVFS } from '@struktoai/mirage-core/runtime/vfs'
+export { RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
 export { CrossMountError } from '@struktoai/mirage-core/runtime/errors'
 export type { RunArgs, RuntimeReach } from '@struktoai/mirage-core/runtime/types'
 export {

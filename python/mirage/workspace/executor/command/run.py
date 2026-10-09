@@ -29,8 +29,8 @@ from mirage.observe.context import command_records
 from mirage.observe.record import WRITE_FINGERPRINT_OPS, OpRecord
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
-from mirage.runtime.table import WorkspaceRuntime
 from mirage.runtime.types import DispatchFn
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext

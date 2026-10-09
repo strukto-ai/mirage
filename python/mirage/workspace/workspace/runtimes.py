@@ -22,11 +22,11 @@ from mirage.runtime.routing import RouteDecision
 from mirage.runtime.table import (
     DEFAULT_ENTRIES,
     NAMED,
-    WorkspaceRuntime,
     bind_commands,
     build_runtime,
     whole_line_runtime,
 )
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.workspace.guard import reject_config_script
 

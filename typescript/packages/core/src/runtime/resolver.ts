@@ -24,7 +24,7 @@ import type { LinkChildrenSource, PrefixSource } from './types.ts'
  * owns the tables so a consumer never re-implements the longest-prefix
  * rule or reaches for a link table it cannot import. Answers use the
  * table's own prefix spelling; a surface with a spelling convention of
- * its own (`RuntimeVFS`) re-spells on its side of the seam.
+ * its own (`RuntimeFiles`) re-spells on its side of the seam.
  */
 export interface MountResolver {
   /** The live mount prefixes, in the table's own spelling. */

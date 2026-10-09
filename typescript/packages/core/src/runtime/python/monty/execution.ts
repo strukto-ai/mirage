@@ -26,7 +26,7 @@ import {
 import { DEFAULT_PROG, EVAL_INTERRUPT_SECONDS, INCOMPLETE_MARKERS } from './constants.ts'
 import { displayError } from './errors.ts'
 import { MontyFs } from './fs.ts'
-import type { RuntimeVFS } from '../../vfs.ts'
+import type { RuntimeFiles } from '../../files.ts'
 
 const INTERRUPTED = Symbol('interrupted')
 
@@ -81,7 +81,7 @@ export class MontyExecution {
   private poolPromise: Promise<MontyPoolLike> | null = null
   private readonly evalSessions = new Map<string, MontySessionLike>()
 
-  async run(args: RunArgs, vfs: RuntimeVFS | null): Promise<RunResult> {
+  async run(args: RunArgs, files: RuntimeFiles | null): Promise<RunResult> {
     const pool = await this.ensurePool()
     // A script is Monty's own scriptName, which it keeps the last part of
     // for `__file__`, under the directory a feed starts in.
@@ -95,7 +95,7 @@ export class MontyExecution {
     const workerPid = session.workerPid
     const interruption = this.installInterruption(args.signal, args.timeoutSeconds)
     try {
-      const run = this.feedOne(session, args.code, args, vfs)
+      const run = this.feedOne(session, args.code, args, files)
       const winner = await Promise.race([run, interruption.promise])
       if (winner !== INTERRUPTED) return winner
       run.catch(() => undefined)
@@ -160,7 +160,7 @@ export class MontyExecution {
    */
   async eval(
     code: string,
-    vfs: RuntimeVFS | null,
+    files: RuntimeFiles | null,
     opts: { inputs?: Record<string, EvalValue>; session?: string; cwd?: PathSpec } = {},
   ): Promise<EvalResult> {
     const pool = await this.ensurePool()
@@ -186,7 +186,7 @@ export class MontyExecution {
         if (stream === 'stderr') err.push(text)
         else out.push(text)
       },
-      os: new MontyFs(module, {}, vfs).handle,
+      os: new MontyFs(module, {}, files).handle,
     }
     const enc = new TextEncoder()
     // One-shot evals get the quickjs-style 10s bound (the policy layer
@@ -294,7 +294,7 @@ export class MontyExecution {
     session: MontySessionLike,
     code: string,
     args: RunArgs,
-    vfs: RuntimeVFS | null,
+    files: RuntimeFiles | null,
   ): Promise<RunResult> {
     const module = await this.loadModule()
     const out: string[] = []
@@ -308,7 +308,7 @@ export class MontyExecution {
         if (stream === 'stderr') err.push(text)
         else out.push(text)
       },
-      os: new MontyFs(module, args.env, vfs).handle,
+      os: new MontyFs(module, args.env, files).handle,
     }
     try {
       await session.feedRun(code, options)

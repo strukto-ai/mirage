@@ -125,3 +125,43 @@ describe('quickjs gives the event loop a turn', () => {
     }
   }, 120_000)
 })
+
+describe('quickjs reads after a failed fetch', () => {
+  it('fails the read, and reads again once the stream is cleared', async () => {
+    // A fetch that fails sets the stream's error flag, as fread does,
+    // and clearerr lets the next read ask the mount again.
+    class Flaky extends RAMVFS {
+      failures = 0
+      override read(...args: Parameters<RAMVFS['read']>): ReturnType<RAMVFS['read']> {
+        if (this.failures > 0) {
+          this.failures -= 1
+          return Promise.reject(new Error('upstream 502 Bad Gateway'))
+        }
+        return super.read(...args)
+      }
+    }
+    const flaky = new Flaky()
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data': flaky },
+      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.shell('echo content > /data/f.txt')
+      flaky.failures = 1
+      const program = [
+        "const f = std.open('/data/f.txt', 'r')",
+        'const first = f.readAsString()',
+        'const failed = f.error()',
+        'f.clearerr()',
+        'console.log(JSON.stringify(first), failed, JSON.stringify(f.readAsString()))',
+        'f.close()',
+      ].join('; ')
+      const result = await ws.shell(`node -e "${program}"`)
+      expect(DEC.decode(result.stdout)).toBe('"" true "content\\n"\n')
+      expect(result.exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  }, 120_000)
+})

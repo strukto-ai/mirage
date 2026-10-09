@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { Runtime } from '../runtime/base.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
-import { WorkspaceRuntime } from '../runtime/table.ts'
+import { WorkspaceRuntime } from '../runtime/workspace.ts'
 import {
   EVALUATOR,
   isLineExecutor,

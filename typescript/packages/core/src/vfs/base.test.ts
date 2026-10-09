@@ -20,7 +20,7 @@ import { commandsFor } from '../commands/builtin/backends.ts'
 import { command, type Command } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
-import { RuntimeVFS } from '../runtime/vfs.ts'
+import { RuntimeFiles } from '../runtime/files.ts'
 import { IOResult } from '../io/types.ts'
 import { ops } from '../test-utils.ts'
 import { CapacityState, ContentType, FileStat, FileType, MountMode, PathSpec } from '../types.ts'
@@ -517,7 +517,7 @@ it('serves a custom driver through CLI, namespace and runtime doors', async () =
       expect(result.exitCode).toBe(0)
       expect(new TextDecoder().decode(result.stdout)).toBe('agents speak bash\n')
     }
-    const runtime = new RuntimeVFS((op, path) => ws.dispatch(op, path))
+    const runtime = new RuntimeFiles((op, path) => ws.dispatch(op, path))
     expect(new TextDecoder().decode(await runtime.read('/page'))).toBe('agents speak bash\n')
     expect(await runtime.stat('/page')).toMatchObject({ size: 18, isDir: false })
   } finally {

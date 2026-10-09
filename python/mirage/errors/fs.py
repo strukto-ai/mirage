@@ -71,6 +71,27 @@ def fs_error(path: str | PathSpec, condition: FsCondition) -> OSError:
     return _stamped(CONDITION_CLASS.get(condition, OSError), condition, path)
 
 
+def numbered(exc: OSError) -> OSError:
+    """`exc` as a real syscall raises it: errno, strerror and path set.
+
+    Every mirage constructor stamps the errno already, but a third-party
+    mount may raise ``FileNotFoundError(path)`` with none, and pathlib
+    reads the errno to tell a missing path from a broken one:
+    ``Path.exists``, ``is_file`` and ``is_dir`` re-raise any OSError
+    whose errno they do not recognize, so a plain ``if p.exists()`` would
+    crash on a missing mounted path. An error the vocabulary cannot name
+    is returned as it came.
+
+    Args:
+        exc (OSError): what the door raised, errno set or not.
+    """
+    condition = classify(exc)
+    if exc.errno is not None or condition is None:
+        return exc
+    path = exc.filename if exc.filename is not None else exc.args[0]
+    return fs_error(path, condition)
+
+
 def enoent(path: str | PathSpec) -> FileNotFoundError:
     return _stamped(FileNotFoundError, FsCondition.ENOENT, path)
 

@@ -19,7 +19,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from mirage.runtime.vfs import RuntimeVFS
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.wasm.execution import WasmExecution
 from mirage.runtime.wasm.view import WasmView
 
@@ -40,8 +40,8 @@ async def test_cancel_joins_worker_and_host_operation(monkeypatch):
             await release.wait()
         return None, None
 
-    bridge = RuntimeVFS(dispatch, asyncio.get_running_loop())
-    fs = WasmView(core=bridge)
+    bridge = RuntimeFiles(dispatch, asyncio.get_running_loop())
+    fs = WasmView(files=bridge)
     execution = WasmExecution(Path("unused.wasm"), "probe")
     engine = Mock()
 

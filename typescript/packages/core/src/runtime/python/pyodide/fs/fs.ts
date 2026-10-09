@@ -18,7 +18,7 @@ import { BLKSIZE, GROW_FLOOR, LINK_MODE, O_APPEND, SEEK_CUR, SEEK_END } from './
 import { errnoError } from './errors.ts'
 import { classify } from '../../../../errors/index.ts'
 import { isMissingPath } from '../../../../errors/fs.ts'
-import { isUnclassified } from '../../../vfs.ts'
+import { isUnclassified } from '../../../files.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
 import type { MutationJournal } from './journal.ts'
 import type { PyodideFsSeed } from './seed.ts'
@@ -168,7 +168,7 @@ export class PyodideFs {
    *   errno: Emscripten's errno table (`pyodide.ERRNO_CODES`).
    *   journal: the write-ahead log guest mutations are recorded on.
    *   prefix: the mount prefix this filesystem serves.
-   *   mountOf: the mirage mount owning a path (`RuntimeVFS.mountOf`).
+   *   mountOf: the mirage mount owning a path (`RuntimeFiles.mountOf`).
    *     One mountpoint serves every mirage mount nested under its
    *     prefix, so this is the only boundary fact left to check ops
    *     against; Emscripten's own cross-mount checks cannot see it.
@@ -460,7 +460,7 @@ export class PyodideFs {
     node.unclassified = false
     this.nodes.retype(node, stat.mode)
     node.rdev = stat.rdev ?? 0
-    node.atime = node.mtime = node.ctime = stat.mtimeMs
+    node.atime = node.mtime = node.ctime = stat.mtimeMs ?? 0
     if (this.host.isFile(stat.mode) && node.loaded === false) node.usedBytes = stat.size
   }
 

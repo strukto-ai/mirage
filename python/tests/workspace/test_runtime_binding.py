@@ -36,8 +36,8 @@ from mirage.runtime.routing import (
     RouteContext,
     RouteResult,
 )
-from mirage.runtime.table import WorkspaceRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
+from mirage.runtime.workspace import WorkspaceRuntime
 
 
 @pytest_asyncio.fixture

@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from mirage.cache.index.config import IndexConfig, IndexType, RedisIndexConfig
 from mirage.commands.cli.types import CLISpec
-from mirage.types import WritePolicy
+from mirage.types import MountMode, WritePolicy
 from mirage.vfs.secrets import REDACTED_SECRET, has_redacted_secret
 
 
@@ -35,6 +35,8 @@ class MountArgs:
     default_agent_id: str | None
     clis: dict[str, tuple[str | CLISpec, dict[str, Any] | None]] | None = None
     write_default: WritePolicy = WritePolicy.UNCONDITIONAL
+    # The saved scratch root's mode, for the one the new workspace adds.
+    anchor_mode: MountMode | None = None
 
 
 def index_config_dump(

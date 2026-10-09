@@ -100,6 +100,7 @@ import { FORMAT_VERSION, normMountPrefix } from './utils.ts'
 /** What a snapshot reads from a workspace and restores into it (`Workspace`). */
 export interface WorkspaceLike {
   readonly registry: MountRegistry
+  readonly syntheticRoot: boolean
   readonly sessionManager: SessionManager
   readonly jobTable: JobTable
   readonly agentId: string | null
@@ -142,6 +143,10 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
       vfs_ref: m.vfsRef,
       index_config: indexConfigDump(m.indexConfig),
       vfs_state: state,
+      // The scratch root nobody mounted keeps its files across the round
+      // trip, and stays the anchor: a load leaves it out of the mounts and
+      // lets the new workspace add its own. Mirrors python.
+      ...(ws.syntheticRoot && m.prefix === '/' ? { anchor: true as const } : {}),
     })
   }
   const ramCache = ws.cache instanceof RAMFileCacheStore ? ws.cache : null
@@ -344,6 +349,7 @@ export function buildMountArgs(
     )
   }
   const mountArgs: Record<string, Mount> = {}
+  let anchorMode: MountMode | undefined
   for (const m of state.mounts) {
     if (!VALID_MODES.includes(m.mode)) {
       throw new Error(`Workspace.fromState: mount '${m.prefix}' has invalid mode '${m.mode}'`)
@@ -352,6 +358,10 @@ export function buildMountArgs(
     // came through; a bare VFS, or a rebuilt one, keeps the saved
     // reference so a second round trip rebuilds through the same door.
     const override = normalized[normMountPrefix(m.prefix)]
+    if (m.anchor === true && override === undefined) {
+      anchorMode = m.mode as MountMode
+      continue
+    }
     const placed = override instanceof Mount ? override : null
     // Required, never defaulted: a dict labelled v4 with the key missing
     // would install a default on a mount saved carrying something else,
@@ -451,6 +461,7 @@ export function buildMountArgs(
     defaultAgentId: state.default_agent_id,
     writeDefault: coerceWritePolicy(savedName(savedDefault)),
     ...(cliEntries.length > 0 ? { clis: cliArgs } : {}),
+    ...(anchorMode !== undefined ? { anchorMode } : {}),
   }
 }
 

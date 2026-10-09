@@ -19,6 +19,7 @@ from stat import S_ISREG
 from typing import Any
 
 from mirage.errors import FsCondition, classify
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import parse_mode
 from mirage.runtime.open import apply_open
 from mirage.runtime.python.monty.constants import (
@@ -34,7 +35,6 @@ from mirage.runtime.python.monty.loader import (
 )
 from mirage.runtime.python.monty.stat import stat_result
 from mirage.runtime.types import VFSStat
-from mirage.runtime.vfs import RuntimeVFS
 
 
 @contextmanager
@@ -68,7 +68,7 @@ class MontyFs(AbstractOS):
     implements that object rather than hooking a syscall layer. Every
     path goes to the file door, and nothing is kept aside: structure is
     open (a listing, whether a name is a directory or a link) and
-    content goes only through the runtime's view (``RuntimeVFS.serves``:
+    content goes only through the runtime's view (``RuntimeFiles.serves``:
     the announced mounts and what a link reaches), so a guest lists what
     a shell lists and reads and writes nothing the view withholds. The
     environment, the clocks and ``urandom`` are the engine's own.
@@ -78,7 +78,7 @@ class MontyFs(AbstractOS):
     mode's effect on the mount (``apply_open``) and nothing else, and
     each write after it ships only its own bytes.
 
-    The door uses synchronous callbacks, so the core's hop parks the
+    The door uses synchronous callbacks, so the file API's hop parks the
     tokio worker for the whole I/O wait. That caps concurrent
     I/O-waiting runs at Monty's worker pool size, which is the core
     count by default; TOKIO_WORKER_THREADS raises it, and parked
@@ -86,18 +86,18 @@ class MontyFs(AbstractOS):
     runs finish in ~2s at 64 workers versus ~8s at 14).
 
     Args:
-        core (RuntimeVFS | None): the execution's file door, built with
-            ``RuntimeVFS.of(context)``; None outside a workspace, where
+        files (RuntimeFiles | None): the execution's file API, built with
+            ``RuntimeFiles.of(context)``; None outside a workspace, where
             every path is out of view.
         environ (dict[str, str]): the guest's environment.
     """
 
     def __init__(
-        self, core: RuntimeVFS | None, environ: dict[str, str]
+        self, files: RuntimeFiles | None, environ: dict[str, str]
     ) -> None:
         self.max_urandom_bytes = MAX_URANDOM_BYTES
         self._environ = dict(environ)
-        self._core = core
+        self._files = files
 
     def getenv(self, key: str, default: str | None = None) -> str | None:
         return self._environ.get(key, default)
@@ -112,32 +112,32 @@ class MontyFs(AbstractOS):
     def path_resolve(self, path: PurePosixPath) -> str:
         return self.path_absolute(path)
 
-    def _door(self, path: PurePosixPath) -> RuntimeVFS:
+    def _door(self, path: PurePosixPath) -> RuntimeFiles:
         """The file door for a content call on `path`, in the view only.
 
         Args:
             path (PurePosixPath): the guest path.
         """
-        core = self._core
-        if core is None or not core.serves(str(path)):
+        files = self._files
+        if files is None or not files.serves(str(path)):
             raise guest_error(FsCondition.ENOENT, str(path))
-        return core
+        return files
 
-    def _structure(self, path: PurePosixPath) -> RuntimeVFS:
+    def _structure(self, path: PurePosixPath) -> RuntimeFiles:
         """The file door for a structural question, asked of any path.
 
         Args:
             path (PurePosixPath): the guest path.
         """
-        if self._core is None:
+        if self._files is None:
             raise guest_error(FsCondition.ENOENT, str(path))
-        return self._core
+        return self._files
 
     def _row(self, path: PurePosixPath) -> VFSStat | None:
-        if self._core is None:
+        if self._files is None:
             return None
         with _as_guest(str(path)):
-            return self._core.view_stat(str(path))
+            return self._files.view_stat(str(path))
 
     def path_exists(self, path: PurePosixPath) -> bool:
         return self._row(path) is not None
@@ -159,11 +159,11 @@ class MontyFs(AbstractOS):
         Args:
             path (PurePosixPath): the guest path to test.
         """
-        if self._core is None:
+        if self._files is None:
             return False
         with _as_guest(str(path)):
             try:
-                self._core.readlink(str(path))
+                self._files.readlink(str(path))
             except Exception as caught:
                 if classify(caught) not in NOT_A_LINK:
                     raise

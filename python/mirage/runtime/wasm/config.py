@@ -21,7 +21,7 @@ from mirage.runtime.config import RuntimeConfig
 class WasmFsConfig(RuntimeConfig):
     """What the filesystem a wasm guest sees is made of.
 
-    Knobs only. The live wiring a guest also needs, its `RuntimeVFS`,
+    Knobs only. The live wiring a guest also needs, its `RuntimeFiles`,
     is a constructor argument rather than a field here, because a
     dispatch coroutine and an event loop are not settings and do not
     belong in something a yaml block can name.

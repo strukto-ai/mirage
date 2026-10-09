@@ -23,9 +23,9 @@ import { SlackVFS } from './slack/slack.ts'
 type Ctor = new (...args: never[]) => unknown
 
 // Two `*VFS` names are not backends: the contract itself, exported for
-// authors extending it, and `RuntimeVFS`, the bridge a guest runtime's file
+// authors extending it, and `RuntimeFiles`, the bridge a guest runtime's file
 // ops cross to reach the workspace.
-const NOT_BACKENDS = new Set(['BaseVFS', 'RuntimeVFS'])
+const NOT_BACKENDS = new Set(['BaseVFS', 'RuntimeFiles'])
 const VFS_CLASSES = Object.entries(browserPkg as Record<string, unknown>).filter(
   (entry): entry is [string, Ctor] =>
     /^[A-Z]\w*VFS$/.test(entry[0]) && typeof entry[1] === 'function' && !NOT_BACKENDS.has(entry[0]),
