@@ -28,7 +28,7 @@ import {
 import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
 import type { DuEntries } from '@struktoai/mirage-core/vfs/types'
 import { readdir as hfReaddir } from '../../core/hf_buckets/readdir.ts'
 import { read as hfRead } from '../../core/hf_buckets/read.ts'

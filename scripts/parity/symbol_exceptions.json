@@ -1,5 +1,5 @@
 {
- "baseline": 3975,
+ "baseline": 3964,
  "modules": {
   "workspace/executor/redirect": {
    "typescript_only": {

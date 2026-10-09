@@ -127,7 +127,7 @@ def _select_runtime(
     prog: str,
     leaf: CLISpec,
     entries: list[Runtime],
-    routing: RouteDecision | None = None,
+    routing: RouteDecision[Runtime] | None = None,
 ) -> tuple[LanguageRuntime | None, IOResult | None]:
     """Pick the workspace entry that runs a script leaf.
 
@@ -149,7 +149,7 @@ def _select_runtime(
         prog (str): display path for message attribution.
         leaf (CLISpec): the script-bearing node.
         entries (list[Runtime]): the workspace's ordered world.
-        routing (RouteDecision | None): the line's placement, None
+        routing (RouteDecision[Runtime] | None): the line's placement, None
             outside a routed line.
     """
     script = leaf.script
@@ -277,7 +277,7 @@ class CLIContext:
             (``ns.mounts.root_of``), so it needs no entry point of its own.
         session_view (SessionView | None): the session plane's live,
             gated handle; ``inv.env`` stays the frozen process view.
-        routing (RouteDecision | None): the line's placement, which a
+        routing (RouteDecision[Runtime] | None): the line's placement, which a
             script leaf runs its program under.
     """
 
@@ -289,7 +289,7 @@ class CLIContext:
     ns: NamespaceView | None = None
     session_view: SessionView | None = None
     processes: ProcessView | None = None
-    routing: RouteDecision | None = None
+    routing: RouteDecision[Runtime] | None = None
 
 
 def drops_mount_caches(spec: CLISpec) -> bool:

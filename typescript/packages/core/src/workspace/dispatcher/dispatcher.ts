@@ -227,8 +227,6 @@ function wholeRead(kwargs: OpKwargs): OpKwargs {
   ) as OpKwargs
 }
 
-export type ResolveFn = (path: string) => Promise<[BaseVFS, PathSpec, MountMode]>
-
 /**
  * Stamp the caller's report: memory answered, no backend ran.
  *

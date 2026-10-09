@@ -71,3 +71,10 @@ export class ExecutionNode {
     return d
   }
 }
+
+/**
+ * Opaque per-line identity for status writes, minted once per
+ * `execute()` and carried on the line's abort frame so every statement
+ * it runs stamps the same one.
+ */
+export type StatusWriter = symbol

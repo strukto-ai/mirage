@@ -18,6 +18,7 @@ import type { PathSpec } from '../../types.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
+import type { S3Module, S3SendClient } from './types.ts'
 import { CONDITION_LOST_CODES } from './constants.ts'
 
 export function s3Key(path: string, config: S3Config): string {
@@ -35,11 +36,6 @@ export function rawPathOf(path: PathSpec): string {
     : path.virtual
 }
 
-export interface S3SendClient {
-  send: (cmd: unknown) => Promise<Record<string, unknown>>
-  destroy?: () => void
-}
-
 export async function withClient<T>(
   config: S3Config,
   fn: (client: S3SendClient) => Promise<T>,
@@ -50,17 +46,6 @@ export async function withClient<T>(
   } finally {
     client.destroy?.()
   }
-}
-
-export interface S3Module {
-  S3Client: new (options: Record<string, unknown>) => S3Client
-  GetObjectCommand: new (input: Record<string, unknown>) => unknown
-  HeadObjectCommand: new (input: Record<string, unknown>) => unknown
-  ListObjectsV2Command: new (input: Record<string, unknown>) => unknown
-  PutObjectCommand: new (input: Record<string, unknown>) => unknown
-  DeleteObjectCommand: new (input: Record<string, unknown>) => unknown
-  DeleteObjectsCommand: new (input: Record<string, unknown>) => unknown
-  CopyObjectCommand: new (input: Record<string, unknown>) => unknown
 }
 
 let cachedModule: Promise<S3Module> | null = null

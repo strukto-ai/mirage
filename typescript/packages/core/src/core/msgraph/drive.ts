@@ -23,7 +23,7 @@ import {
   revisionFor,
   startOp,
 } from '../../observe/context.ts'
-import type { FindOptions } from '../../vfs/base.ts'
+import type { FindOptions } from '../../vfs/types.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, listingError } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'

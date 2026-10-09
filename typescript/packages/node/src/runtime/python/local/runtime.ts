@@ -15,11 +15,12 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { accessSync, constants, statSync } from 'node:fs'
 import { delimiter, resolve } from 'node:path'
+import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
 import { initArgv, type InitFlags } from '@struktoai/mirage-core/runtime/python/flags'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RunArgs, RunResult, RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
+import type { RunArgs, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'

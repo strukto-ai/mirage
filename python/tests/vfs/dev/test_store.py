@@ -90,6 +90,10 @@ def test_pop_mirrors_delete_semantics():
     files["/null"] = b"real"
     assert files.pop("/null") == b"real"
     assert "/null" not in files
+    assert files.pop("/missing", None) is None
+    assert files.pop("/missing", 42) == 42
+    with pytest.raises(KeyError):
+        files.pop("/missing")
 
 
 def test_iterates_synthetic_then_real():

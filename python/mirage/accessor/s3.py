@@ -31,13 +31,13 @@ class S3Accessor(Accessor):
         # building a client needs the kwargs helpers in mirage.core.s3.client,
         # a layer above the accessor, so constructing one here would import
         # against the dependency direction.
-        self._clients = LoopClientCache("s3")
+        self._clients = LoopClientCache[Any]("s3")
 
-    async def cached_client(self, factory: ClientFactory) -> Any:
+    async def cached_client(self, factory: ClientFactory[Any]) -> Any:
         """Return this loop's open client, opening one when there is none.
 
         Args:
-            factory (ClientFactory): builds the client manager, called
+            factory (ClientFactory[Any]): builds the client manager, called
                 only when this loop has no client yet.
 
         Returns:

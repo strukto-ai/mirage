@@ -23,7 +23,7 @@ import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime, type RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { buildRuntime, checkRuntimeOptions } from '@struktoai/mirage-core/runtime/table'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
+import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import {
   EnvVarSchema,
   SecretSourceSchema,

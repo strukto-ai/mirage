@@ -14,7 +14,7 @@
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { buildTree, emitStartPath, keep, startBasename } from '../generic/find_eval.ts'
-import type { FindOptions } from '../../vfs/base.ts'
+import type { FindOptions } from '../../vfs/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { isFolder, resolveKey } from './resolve.ts'
 import { iterTree } from './tree.ts'

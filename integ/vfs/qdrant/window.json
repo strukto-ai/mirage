@@ -64,6 +64,32 @@
         "stdout": "",
         "stderr": "ls: cannot access '/db/all/*99.json': No such file or directory\n"
       }
+    },
+    {
+      "id": "qdrant_uuid_point_id_is_json_text",
+      "seq": 640405,
+      "targets": [
+        "qdrant-window"
+      ],
+      "command": "cat /db/uuid/11111111-1111-1111-1111-111111111111.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"label\":\"uuid\",\"name\":\"uuid point\",\"id\":\"11111111-1111-1111-1111-111111111111\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_payload_preserves_prototype_named_keys",
+      "seq": 640406,
+      "targets": [
+        "qdrant-window"
+      ],
+      "command": "cat /db/keys/601.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"label\":\"keys\",\"__proto__\":{\"keep\":\"value\"},\"constructor\":\"constructor value\",\"toString\":\"toString value\",\"id\":601}\n",
+        "stderr": ""
+      }
     }
   ]
 }

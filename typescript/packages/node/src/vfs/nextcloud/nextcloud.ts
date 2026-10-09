@@ -14,7 +14,7 @@ import {
 import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
 import type { DuEntries } from '@struktoai/mirage-core/vfs/types'
 import { appendByRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import { readdir } from '../../core/nextcloud/readdir.ts'

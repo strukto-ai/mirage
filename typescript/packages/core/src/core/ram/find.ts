@@ -21,26 +21,12 @@ import {
   computeNonemptyDirs,
   emitStartPath,
   keep,
-  type PredNode,
   startBasename,
 } from '../generic/find_eval.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'
 
-export interface FindOptions {
-  name?: string | null
-  type?: string | null
-  minSize?: number | null
-  maxSize?: number | null
-  maxDepth?: number | null
-  minDepth?: number | null
-  nameExclude?: string | null
-  orNames?: string[] | null
-  iname?: string | null
-  pathPattern?: string | null
-  empty?: boolean | null
-  tree?: PredNode | null
-}
+import type { FindOptions } from '../../vfs/types.ts'
 
 export function find(
   accessor: RAMAccessor,

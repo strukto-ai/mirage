@@ -14,7 +14,6 @@
 
 import { toIsoZ } from '../../utils/dates.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
-import type { S3Config } from '../../vfs/s3/config.ts'
 import { VFSName } from '../../types.ts'
 import { eacces, enoent, unnamedFsError } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -38,20 +37,11 @@ import {
   isNotFoundError,
   loadS3Module,
   streamToBuffer,
-  type S3Module,
 } from './client.ts'
+import type { S3Conn, S3SendClient } from './types.ts'
 import { CONDITION_LOST_CODES, SCOPE_ERROR } from './constants.ts'
 
 const DELETE_BATCH = 1000
-
-type Send = (cmd: unknown) => Promise<Record<string, unknown>>
-
-/** One open S3 client plus the module and config that shaped it. */
-export interface S3Conn {
-  send: Send
-  mod: S3Module
-  config: S3Config
-}
 
 interface Listing {
   CommonPrefixes?: { Prefix?: string }[]
@@ -84,7 +74,7 @@ async function connect(accessor: S3Accessor): Promise<ObjectStoreConnection<S3Co
   const { config } = accessor
   const mod = await loadS3Module(config)
   const client = await createS3Client(config)
-  const send = (client as unknown as { send: Send }).send.bind(client)
+  const send = (client as unknown as S3SendClient).send.bind(client)
   return {
     conn: { send, mod, config },
     close: () => {

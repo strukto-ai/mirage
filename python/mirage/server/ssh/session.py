@@ -36,7 +36,7 @@ from mirage.server.ssh.stream import (
     loop_sender,
 )
 from mirage.server.stdin import LoopStdin
-from mirage.workspace.abort import MirageAbortError
+from mirage.utils.abort import MirageAbortError
 from mirage.workspace.executor.statement import record_status
 
 logger = logging.getLogger(__name__)

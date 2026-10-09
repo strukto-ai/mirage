@@ -50,8 +50,8 @@ from mirage.shell.helpers import (
 from mirage.shell.parse import opaque_reads, referenced_names
 from mirage.shell.types import NodeType
 from mirage.types import PathSpec, Refusal
+from mirage.utils.abort import MirageAbortError
 from mirage.utils.path import resolve_path
-from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LanceRow } from './query.ts'
+import type { LanceRow } from './types.ts'
 import type { LanceDBConfigResolved } from '../../vfs/lancedb/config.ts'
 import { valueText } from '../render/json.ts'
 

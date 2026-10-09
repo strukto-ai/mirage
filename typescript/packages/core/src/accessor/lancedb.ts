@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
-import type { LanceDriver, LanceRow } from '../core/lancedb/query.ts'
+import type { LanceDriver, LanceRow } from '../core/lancedb/types.ts'
 import type { LanceDBConfigResolved } from '../vfs/lancedb/config.ts'
 
 export class LanceDBAccessor extends Accessor {

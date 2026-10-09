@@ -12,6 +12,31 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RouteScript } from './routing/types.ts'
+
+/** Constructor options every runtime accepts (a yaml entry's keys). */
+export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown>> {
+  /**
+   * Commands this runtime claims; EXTERNAL_COMMANDS captures unresolved
+   * program names. ["*"]
+   * claims every line for a line-executing runtime.
+   */
+  captures?: readonly string[]
+  /**
+   * The runtime's implementation knobs (a yaml entry's `config`
+   * block), coerced against the runtime's own key list so a field the
+   * runtime does not have fails loud.
+   */
+  config?: C
+  /**
+   * Per-line admission script for the routing ladder, answering "do I
+   * want this line": a function taking a RouteContext, or a
+   * config-borne ScriptSource. Absent = always willing. Policy, not
+   * capability: it can only refuse lines the captures already allow.
+   */
+  script?: RouteScript
+}
+
 /**
  * How a runtime's engine is set up: its implementation knobs.
  *

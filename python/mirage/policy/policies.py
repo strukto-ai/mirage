@@ -853,7 +853,7 @@ _op_policies: ContextVar[Policies | None] = ContextVar(
 )
 
 
-def set_op_policies(policies: Policies) -> Token[Any]:
+def set_op_policies(policies: Policies) -> Token[Policies | None]:
     """Bind the workspace's admission policies to the current async
     context, for the run of one command.
 
@@ -870,7 +870,7 @@ def set_op_policies(policies: Policies) -> Token[Any]:
     return _op_policies.set(policies)
 
 
-def reset_op_policies(token: Token[Any]) -> None:
+def reset_op_policies(token: Token[Policies | None]) -> None:
     """Restore the previous policies binding."""
     _op_policies.reset(token)
 

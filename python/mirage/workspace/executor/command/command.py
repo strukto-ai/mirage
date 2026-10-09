@@ -46,6 +46,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.policy import resolve_limit, resolve_producer
 from mirage.policy.types import HandOff
+from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -213,7 +214,7 @@ async def handle_command(
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     agent_id: str | None = None,
     execute_fn: ExecuteLine | None = None,
     handed: HandOff | None = None,

@@ -24,6 +24,7 @@ from mirage.runtime.mixin import (
     LineExecutorMixin,
     ProcessExecutorMixin,
 )
+from mirage.runtime.routing.types import RouteScript
 from mirage.runtime.types import (
     ExecutionRequest,
     FilesystemOperation,
@@ -31,7 +32,6 @@ from mirage.runtime.types import (
     RunResult,
     RuntimeCapabilities,
     RuntimeReach,
-    ScriptSource,
     ShellExecution,
 )
 from mirage.utils.activity import Activity
@@ -73,7 +73,7 @@ class Runtime(ABC):
     # I want this line": a callable taking a RouteContext, or a
     # config-borne ScriptSource. None = always willing. Policy, not
     # capability: it can only refuse lines the captures already allow.
-    script: Callable[..., Any] | ScriptSource | None = None
+    script: RouteScript | None = None
     # Each runtime's config class; coerce() makes unknown fields fail
     # loud, so runtimes need no per-field rejection code.
     config_cls: ClassVar[type[RuntimeConfig]] = RuntimeConfig
@@ -86,7 +86,7 @@ class Runtime(ABC):
         self,
         captures: Sequence[str] | None = None,
         config: RuntimeConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
+        script: RouteScript | None = None,
     ) -> None:
         """Every runtime is constructed the same way.
 
@@ -101,7 +101,7 @@ class Runtime(ABC):
                 own config class (config_cls), so a field the runtime
                 does not have fails loud; the dict form is a yaml
                 entry's ``config`` block.
-            script (Callable | ScriptSource | None): per-line
+            script (RouteScript | None): per-line
                 admission script for the routing ladder.
         """
         if captures is not None:

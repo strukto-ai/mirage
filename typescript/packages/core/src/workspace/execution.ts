@@ -1,5 +1,5 @@
 import { YieldBudget } from '../io/yield_budget.ts'
-import { makeAbortError } from './abort.ts'
+import { makeAbortError } from '../utils/abort.ts'
 
 /** One scheduling budget shared by a foreground call and its evaluations. */
 export class ExecutionScope {

@@ -14,7 +14,8 @@
 
 import { PythonRuntime } from '../base.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
-import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../../types.ts'
+import type { EvalResult, EvalValue, RunArgs, RunResult } from '../../types.ts'
+import type { RuntimeOptions } from '../../config.ts'
 import type { RuntimeContext } from '../../binding.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { unhonoredNotice, type InitFlags } from '../flags.ts'

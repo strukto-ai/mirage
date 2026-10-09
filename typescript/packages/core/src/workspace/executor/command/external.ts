@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Runtime } from '../../../runtime/base.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { mergeSignals } from '../../abort.ts'
+import { mergeSignals } from '../../../utils/abort.ts'
 import { runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -35,7 +36,7 @@ export async function runExternal(
   stdin: ByteSource | null,
   session: SessionState,
   registry: MountRegistry,
-  routing?: RouteDecision,
+  routing?: RouteDecision<Runtime>,
   signal?: AbortSignal,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   const key =

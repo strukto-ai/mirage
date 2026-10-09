@@ -57,9 +57,9 @@ from mirage.shell.helpers import (
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec, Refusal
+from mirage.utils.abort import MirageAbortError
 from mirage.utils.hidden import is_glob, path_visible
 from mirage.utils.path import resolve_path
-from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.builtins.links.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.command.routing import (

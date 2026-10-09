@@ -12,28 +12,60 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.routing.decide import (
-    decide_line,
-    evaluate_policy,
-    evaluate_script,
-    evaluator_of,
-    parse_verdict,
-    runtime_for_language,
-)
-from mirage.runtime.routing.errors import RouteDeny, RouteError
-from mirage.runtime.routing.facts import command_nodes, parsed_commands
-from mirage.runtime.routing.types import (
-    DenyResult,
-    ParsedCommand,
-    RouteContext,
-    RouteDecision,
-    RouteOutcome,
-    RoutePolicy,
-    RouteResult,
-    RouteScript,
-    RouteVerdict,
-    ScriptSource,
-)
+import importlib
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mirage.runtime.routing.decide import (
+        decide_line,
+        evaluate_policy,
+        evaluate_script,
+        evaluator_of,
+        parse_verdict,
+        runtime_for_language,
+    )
+    from mirage.runtime.routing.errors import RouteDeny, RouteError
+    from mirage.runtime.routing.facts import command_nodes, parsed_commands
+    from mirage.runtime.routing.types import (
+        DenyResult,
+        ParsedCommand,
+        RouteContext,
+        RouteDecision,
+        RouteOutcome,
+        RoutePolicy,
+        RouteResult,
+        RouteScript,
+        RouteVerdict,
+    )
+    from mirage.runtime.types import ScriptSource
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.runtime.routing.decide": (
+        "decide_line",
+        "evaluate_policy",
+        "evaluate_script",
+        "evaluator_of",
+        "parse_verdict",
+        "runtime_for_language",
+    ),
+    "mirage.runtime.routing.errors": ("RouteDeny", "RouteError"),
+    "mirage.runtime.routing.facts": ("command_nodes", "parsed_commands"),
+    "mirage.runtime.routing.types": (
+        "DenyResult",
+        "ParsedCommand",
+        "RouteContext",
+        "RouteDecision",
+        "RouteOutcome",
+        "RoutePolicy",
+        "RouteResult",
+        "RouteScript",
+        "RouteVerdict",
+    ),
+    "mirage.runtime.types": ("ScriptSource",),
+}
+_MODULE_OF = {
+    name: module for module, names in _EXPORTS.items() for name in names
+}
 
 __all__ = [
     "ParsedCommand",
@@ -57,3 +89,12 @@ __all__ = [
     "evaluator_of",
     "runtime_for_language",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    module = _MODULE_OF.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value

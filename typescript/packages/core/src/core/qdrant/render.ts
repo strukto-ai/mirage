@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { QdrantRow } from './query.ts'
+import type { QdrantRow } from './types.ts'
 import type { QdrantConfigResolved } from '../../vfs/qdrant/config.ts'
 import { compactJsonText, valueText } from '../render/json.ts'
 import { fieldValue, withoutField } from './payload.ts'
@@ -21,11 +21,7 @@ const ENC = new TextEncoder()
 const SKIP_KEYS = new Set(['_score', '_rowid', '_distance'])
 
 export function renderJson(row: QdrantRow, config: QdrantConfigResolved): Uint8Array {
-  let data: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(row)) {
-    if (SKIP_KEYS.has(key)) continue
-    data[key] = value
-  }
+  let data = Object.fromEntries(Object.entries(row).filter(([key]) => !SKIP_KEYS.has(key)))
   data = withoutField(data, config.vectorField)
   data = withoutField(data, config.blobField)
   return ENC.encode(compactJsonText(data) + '\n')

@@ -18,6 +18,7 @@ from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.policy import resolve_limit
+from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.routing.types import RouteDecision
@@ -35,7 +36,7 @@ async def run_external(
     stdin: ByteSource | None,
     session: SessionState,
     registry: MountRegistry,
-    routing: RouteDecision | None = None,
+    routing: RouteDecision[Runtime] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute one admitted program; its surrounding shell stays in Mirage."""
     bindings = (

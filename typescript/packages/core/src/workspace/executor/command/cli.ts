@@ -100,7 +100,7 @@ function selectRuntime(
   prog: string,
   leaf: CLISpec,
   entries: readonly Runtime[],
-  routing?: RouteDecision,
+  routing?: RouteDecision<Runtime>,
 ): [LanguageRuntime, null] | [null, IOResult] {
   const script = leaf.script
   if (script === null) {
@@ -224,7 +224,7 @@ export interface CLIContext {
   sessionView?: SessionView
   processes?: ProcessView
   /** The line's placement, which a script leaf runs its program under. */
-  routing?: RouteDecision
+  routing?: RouteDecision<Runtime>
 }
 
 /**

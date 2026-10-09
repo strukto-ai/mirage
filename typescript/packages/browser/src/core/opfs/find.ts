@@ -25,22 +25,7 @@ import { DIR_SIZE } from '@struktoai/mirage-core/utils/stat_view'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { isNotFound, iterEntries, norm, resolveDirHandle } from './utils.ts'
 
-export interface FindOptions {
-  name?: string | null
-  type?: string | null
-  minSize?: number | null
-  maxSize?: number | null
-  maxDepth?: number | null
-  minDepth?: number | null
-  nameExclude?: string | null
-  orNames?: string[] | null
-  iname?: string | null
-  pathPattern?: string | null
-  empty?: boolean | null
-  tree?: PredNode | null
-  mtimeMin?: number | null
-  mtimeMax?: number | null
-}
+import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
 
 interface WalkCtx {
   options: FindOptions

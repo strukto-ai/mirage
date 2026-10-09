@@ -73,7 +73,7 @@ async def test_empty_chunks_allow_timer_progress():
 
 @pytest.mark.asyncio
 async def test_caller_cancel_joins_producer():
-    from mirage.workspace.abort import MirageAbortError, run_cancellable
+    from mirage.utils.abort import MirageAbortError, run_cancellable
 
     closed = False
     cancel = asyncio.Event()
@@ -152,8 +152,8 @@ async def test_cancelled_read_chars_closes_source():
 @pytest.mark.asyncio
 async def test_aborted_execution_records_failure():
     from mirage import Workspace
+    from mirage.utils.abort import MirageAbortError
     from mirage.vfs.ram import RAMVFS
-    from mirage.workspace.abort import MirageAbortError
 
     ws = Workspace({"/data": RAMVFS()})
     cancel = asyncio.Event()
@@ -319,8 +319,8 @@ async def test_line_reader_discards_cache_on_cancel(method, monkeypatch):
 @pytest.mark.asyncio
 async def test_cancel_during_cache_fill_aborts():
     from mirage import Workspace
+    from mirage.utils.abort import MirageAbortError
     from mirage.vfs.ram import RAMVFS
-    from mirage.workspace.abort import MirageAbortError
 
     ws = Workspace({"/data": RAMVFS()})
     cancel = asyncio.Event()
@@ -351,8 +351,8 @@ async def test_cancel_during_cache_fill_aborts():
 async def test_cancel_reaches_a_whole_line_runtime():
     from mirage import LineExecutorMixin, Runtime, Workspace
     from mirage.types import MountMode
+    from mirage.utils.abort import MirageAbortError
     from mirage.vfs.ram import RAMVFS
-    from mirage.workspace.abort import MirageAbortError
 
     class Hanging(Runtime, LineExecutorMixin):
         name = "hanging"

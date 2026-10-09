@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { LanguageRuntime } from '../language.ts'
-import type { RunResult, RuntimeLanguage, RuntimeOptions } from '../types.ts'
+import type { RunResult, RuntimeLanguage } from '../types.ts'
+import type { RuntimeOptions } from '../config.ts'
 
 /**
  * The python tier: every runtime that interprets Python source.

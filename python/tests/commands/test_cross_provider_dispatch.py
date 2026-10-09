@@ -113,25 +113,5 @@ def test_aggregate_partial_failure_propagates_exit_code():
     _seed(ws)
     io = asyncio.run(ws.shell("cat /m1/a.txt /m2/missing.txt"))
     assert io.exit_code != 0
-
-
-def test_aggregate_partial_failure_still_returns_output():
-    ws = _make_ws()
-    _seed(ws)
-    io = asyncio.run(ws.shell("cat /m1/a.txt /m2/missing.txt"))
-    assert io.exit_code != 0
-
-
-def test_aggregate_partial_failure_has_stderr():
-    ws = _make_ws()
-    _seed(ws)
-    io = asyncio.run(ws.shell("cat /m1/a.txt /m2/missing.txt"))
-    stderr = io.stderr if io.stderr else b""
-    assert len(stderr) > 0
-
-
-def test_aggregate_all_succeed_exit_zero():
-    ws = _make_ws()
-    _seed(ws)
-    io = asyncio.run(ws.shell("cat /m1/a.txt /m2/b.txt"))
-    assert io.exit_code == 0
+    assert asyncio.run(io.stdout_str()) == "aaa\n"
+    assert b"missing.txt" in io.stderr

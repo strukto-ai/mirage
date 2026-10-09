@@ -74,9 +74,9 @@ class Router:
         session: SessionState,
         session_id: str,
         agent_id: str,
-        inherited: RouteDecision | None,
+        inherited: RouteDecision[Runtime] | None,
         held: Callable[[], Awaitable[bool]] | None = None,
-    ) -> RouteDecision | Deny | None:
+    ) -> RouteDecision[Runtime] | Deny | None:
         """Resolve the routing decision for one typed line.
 
         Returns None when nothing decides (no runtime argument, nothing
@@ -143,7 +143,7 @@ class Router:
         session: SessionState,
         session_id: str,
         agent_id: str,
-    ) -> tuple[tuple[Deny | Route, ...], RouteDecision | Deny | None]:
+    ) -> tuple[tuple[Deny | Route, ...], RouteDecision[Runtime] | Deny | None]:
         """Every placement answer for a line and what they decide,
         without running it: what ``explain`` shows.
 
@@ -180,7 +180,7 @@ class Router:
 
     async def _scripted(
         self, entries: list[Runtime], ctx: RouteContext, session: SessionState
-    ) -> RouteDecision:
+    ) -> RouteDecision[Runtime]:
         """The entry scripts' decision, for a line no policy placed: each
         runtime's ``script:`` says whether it takes the line.
 
@@ -211,7 +211,7 @@ class Router:
         name: str,
         ctx: RouteContext,
         session: SessionState,
-    ) -> RouteDecision | Deny:
+    ) -> RouteDecision[Runtime] | Deny:
         """The decision placing a line on the runtime ``name``, once the
         runtime agrees: its own ``script:``, when it has one, must take
         the line, or the placement and the runtime conflict and the line
@@ -249,7 +249,9 @@ class Router:
             f"runtime {name} declines this line", policy=f"runtimes.{name}"
         )
 
-    def runtime_for(self, command: str, decision: RouteDecision | None) -> str:
+    def runtime_for(
+        self, command: str, decision: RouteDecision[Runtime] | None
+    ) -> str:
         """The runtime entry that serves a command under a decision (the
         static bindings when there is none), empty when the workspace
         runs it itself.
@@ -272,7 +274,9 @@ class Router:
             return ""
         return serving.name
 
-    def _placed(self, entries: list[Runtime], name: str) -> RouteDecision:
+    def _placed(
+        self, entries: list[Runtime], name: str
+    ) -> RouteDecision[Runtime]:
         """The decision that serves a line on one named runtime: its
         captures over the static bindings.
 
