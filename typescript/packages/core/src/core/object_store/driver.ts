@@ -360,8 +360,9 @@ export async function keepLost(
 }
 
 /**
- * The `*If` hook a conditional op calls. Every `write: conditional` mount is
- * on the S3 driver, which carries them all.
+ * The `*If` hook a conditional op calls. Every `write: conditional` object
+ * store is on the S3 driver, which carries them all; Box and Dropbox condition
+ * their own ops and never reach here.
  */
 export function requireHook<F>(hook: F | undefined): F {
   if (hook === undefined) throw new Error('conditional op on a driver without its hook')

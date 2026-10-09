@@ -66,9 +66,7 @@ export function makeCopy<A extends Accessor, C>(
       if (copied === false) return
       // The destination, not the source: a copy replaces dst's bytes and
       // leaves src untouched, so only dst's token stops describing its
-      // object. (dropbox records a copy against src; that is inert there
-      // only because dropbox emits no read record at all, so no dropbox
-      // path is ever pinned.)
+      // object.
       record('copy', dst.virtual, driver.vfs, 0, timer)
       // The eviction rides with the record, as in unlink.
       await invalidateAfterWrite(dst)

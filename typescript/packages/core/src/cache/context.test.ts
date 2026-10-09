@@ -31,8 +31,12 @@ import {
   invalidateAncestors,
   invalidateSubtree,
   listingRefreshed,
+  nativeCondition,
   runWithCacheManager,
+  runWithWriteContext,
 } from './context.ts'
+import type { LiveVersion, WriteContext } from './types.ts'
+import { isStaleWrite } from '../errors/fs.ts'
 
 class FakeManager {
   listingTrusted(_folder: string): boolean {
@@ -225,4 +229,50 @@ it.each([['verified'], [null], ['first', 'second']])(
 
 it('capture preserves non-byte results', async () => {
   expect(await captureRead('/m/x', () => Promise.resolve(42))).toEqual([42, []])
+})
+
+describe('nativeCondition', () => {
+  const path = new PathSpec({ virtual: '/box/f', directory: '/box/', vfsPath: '/f' })
+
+  function context(kept: string[]): WriteContext {
+    return {
+      vfs: 'box',
+      conditions: ['put', 'copy', 'delete'],
+      readVersion: () => Promise.resolve('v1'),
+      readVersions: (paths) => Promise.resolve(paths.map(() => 'v1')),
+      drop: () => Promise.resolve(),
+      keep: (_path, version) => {
+        kept.push(version)
+        return Promise.resolve()
+      },
+    }
+  }
+
+  it.each<[string, string | undefined, LiveVersion | null, string | null, string[]]>([
+    ['plain', undefined, { content: 's1', native: 'e1' }, null, []],
+    ['current', 's1', { content: 's1', native: 'e1' }, 'e1', []],
+    ['changed', 's1', { content: 's2', native: 'e2' }, 'stale', ['s1']],
+    ['gone', 's1', null, 'stale', []],
+    ['no-native', 's1', { content: 's1', native: null }, 'enotsup', []],
+  ])('translates the held content token: %s', async (_name, held, live, want, kept) => {
+    const seen: string[] = []
+    const cond = held === undefined ? {} : { ifMatch: held }
+    const call = runWithWriteContext('/box/', context(seen), () =>
+      nativeCondition(path, cond, live, 'delete'),
+    )
+    if (want === 'stale') expect(isStaleWrite(await call.catch((e: unknown) => e))).toBe(true)
+    else if (want === 'enotsup') await expect(call).rejects.toMatchObject({ code: 'ENOTSUP' })
+    else expect(await call).toBe(want)
+    expect(seen).toEqual(kept)
+  })
+
+  it.each(['put', 'copy', 'delete'] as const)(
+    'names the op it cannot condition: %s',
+    async (kind) => {
+      const call = runWithWriteContext('/box/', context([]), () =>
+        nativeCondition(path, { ifMatch: 's1' }, { content: 's1', native: null }, kind),
+      )
+      await expect(call).rejects.toThrow(`conditional ${kind}`)
+    },
+  )
 })

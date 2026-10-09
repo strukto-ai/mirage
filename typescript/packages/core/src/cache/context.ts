@@ -21,6 +21,7 @@ import { keyPath, underPath } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import {
   type KnownVersions,
+  type LiveVersion,
   OwnRead,
   type WriteCondition,
   type WriteContext,
@@ -263,16 +264,22 @@ export function runWithWriteContext<T>(
 function activeWriteContext(path: PathSpec): WriteContext | null {
   const states = writeStorage.liveStores()
   if (agree(states, (state) => state.context)) return states[0]?.context ?? null
+  const owners = ownersOf(path, states)
+  if (owners.length === 0 || !agree(owners, (state) => state.context)) throw overlapping(path)
+  return owners[0]?.context ?? null
+}
+
+/** The live frames of the longest prefix covering `path`, as the mount table routes. */
+function ownersOf<S extends { prefix: string }>(path: PathSpec, states: readonly S[]): S[] {
   let best = -1
-  let owners: (typeof states)[number][] = []
+  let owners: S[] = []
   for (const state of states) {
     if (!underPath(path.virtual, state.prefix)) continue
     const length = rstripSlash(state.prefix).length
     if (length > best) [best, owners] = [length, [state]]
     else if (length === best) owners.push(state)
   }
-  if (owners.length === 0 || !agree(owners, (state) => state.context)) throw overlapping(path)
-  return owners[0]?.context ?? null
+  return owners
 }
 
 /** Whether every state picks the same value. */
@@ -413,6 +420,75 @@ function condition(
 
 function require(context: WriteContext, path: PathSpec, kind: WriteKind): void {
   if (!context.conditions.includes(kind)) throw enotsup(context.vfs, `conditional ${kind}`, path)
+}
+
+/**
+ * The backend's own token a conditioned write sends, null to go plain. The
+ * held version is a content token, so it is compared with the live one here
+ * and the live native token goes out in its place: the backend refuses
+ * whatever lands between this lookup and the write. Mirrors Python's
+ * `native_condition`.
+ *
+ * @throws a stale-write error when the file changed or went since it was read
+ * @throws an ENOTSUP error when the backend gave no token to send
+ */
+export async function nativeCondition(
+  path: PathSpec,
+  cond: WriteCondition | null,
+  live: LiveVersion | null,
+  kind: WriteKind,
+): Promise<string | null> {
+  const held = cond?.ifMatch
+  if (held === undefined || held === '') return null
+  if (live === null) throw await stale(path, { gone: true })
+  if (live.content !== held) throw await stale(path, { version: held })
+  if (live.native === null || live.native === '') {
+    const context = activeWriteContext(path)
+    if (context === null) throw new Error('nativeCondition: a held version outside a write context')
+    throw enotsup(context.vfs, `conditional ${kind}`, path)
+  }
+  return live.native
+}
+
+/**
+ * Keep the version of every file a walk left behind, and return the refusal
+ * naming the first, or null. Each one keeps the version it lost on, so a retry
+ * without a read is refused on any of them, not only the one named; this holds
+ * when the walk stopped on a later error too. Mirrors Python's `keep_refused`.
+ */
+export async function keepRefused(
+  lost: readonly (readonly [PathSpec, string | null])[],
+): Promise<StaleWriteError | null> {
+  const refusals: StaleWriteError[] = []
+  for (const [spec, version] of lost) refusals.push(await stale(spec, { version }))
+  return refusals[0] ?? null
+}
+
+/**
+ * The version the mount holds for each path, in one store round trip, for a
+ * walk that measures its files against what the agent read; every null on an
+ * unconditional mount. Mirrors Python's `held_versions`.
+ */
+export async function heldVersions(paths: readonly PathSpec[]): Promise<(string | null)[]> {
+  const first = paths[0]
+  const context = first === undefined ? null : activeWriteContext(first)
+  if (context === null) return paths.map(() => null)
+  return context.readVersions(paths)
+}
+
+/**
+ * Whether the mount that owns `path` is a `write: conditional` one, for a
+ * backend that hands a read's token on only where a write will send it, so
+ * an unconditional mount's reads cache exactly what they did. Never throws:
+ * while overlapping lines leave the owner unclear it answers true, so a read
+ * still hands on the token a conditional mount's write needs. Mirrors
+ * Python's `writes_conditioned`.
+ */
+export function writesConditioned(path: PathSpec): boolean {
+  const states = writeStorage.liveStores()
+  if (agree(states, (state) => state.context)) return (states[0]?.context ?? null) !== null
+  const owners = ownersOf(path, states)
+  return owners.length === 0 || owners.some((state) => state.context !== null)
 }
 
 /**

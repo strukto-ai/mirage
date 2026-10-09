@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readVersioned, runWithOwnVersion } from '../../cache/context.ts'
+import { readVersioned, runWithOwnVersion, writesConditioned } from '../../cache/context.ts'
 import { OwnRead } from '../../cache/types.ts'
 import { eexist, einval, eisdir, enotsup, isEnotdir, isMissingPath } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../types.ts'
@@ -133,16 +133,23 @@ export async function truncateByRewrite(
   noCreate: boolean,
 ): Promise<void> {
   if (noCreate) throw enotsup('emulated', 'truncate --no-create', path)
+  if (length === 0 && writesConditioned(path)) {
+    // Emptying carries the agent's version; no read needed.
+    await write(path, new Uint8Array(0))
+    return
+  }
   let data: Uint8Array
+  let own: string | OwnRead | null
   try {
-    data = await read(path)
+    ;[data, own] = await readVersioned(path, () => read(path))
   } catch (error) {
     if (!isMissingPath(error)) throw error
     data = new Uint8Array(0)
+    own = OwnRead.ABSENT
   }
   const out = new Uint8Array(length)
   out.set(data.subarray(0, length))
-  await write(path, out)
+  await runWithOwnVersion(path, own, () => write(path, out))
 }
 
 /** A pwrite offset, refused with EINVAL when negative. Mirrors Python's `expect_offset`. */

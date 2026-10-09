@@ -18,6 +18,7 @@ from typing import Protocol
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import child_spec
 
 Allowed = Callable[[str], bool]
 
@@ -93,22 +94,6 @@ def visible_below(base: str, names: Iterable[str], allowed: Allowed) -> bool:
     """
     root = base.rstrip("/")
     return any(allowed(f"{root}/{entry_name(n)}") for n in names)
-
-
-def child_spec(spec: PathSpec, name: str) -> PathSpec:
-    """The child PathSpec one cascade step descends to.
-
-    Args:
-        spec (PathSpec): the directory being walked.
-        name (str): the child's bare name.
-    """
-    base = spec.virtual.rstrip("/")
-    key = spec.vfs_path.rstrip("/")
-    return PathSpec(
-        virtual=f"{base}/{name}",
-        directory=spec.virtual,
-        vfs_path=f"{key}/{name}" if key else name,
-    )
 
 
 async def remove_remnants(

@@ -37,6 +37,23 @@ class WriteCondition:
 
 
 @dataclass(frozen=True, slots=True)
+class LiveVersion:
+    """A file's current tokens, as the backend's own lookup reports them.
+
+    For a backend whose cache token is not the one its write condition
+    takes: the content token is what mirage holds and compares, the native
+    token is what the backend's condition is sent with.
+
+    Args:
+        content (str | None): the token mirage keeps for these bytes.
+        native (str | None): the token the backend's condition takes.
+    """
+
+    content: str | None
+    native: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class WriteContext:
     """What a write on a ``write: conditional`` mount needs to know.
 

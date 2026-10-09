@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from mirage.cache.context import (
     own_write_version,
     read_versioned,
+    writes_conditioned,
 )
 from mirage.cache.types import OwnRead
 from mirage.errors.fs import eexist, einval, eisdir, enotsup
@@ -139,11 +140,17 @@ async def truncate_by_rewrite(
     """
     if no_create:
         raise enotsup("emulated", "truncate --no-create", path)
+    if length == 0 and writes_conditioned():
+        # Emptying carries the agent's version; no read needed.
+        await write(path, b"")
+        return
+    own: str | OwnRead | None
     try:
-        data = await read(path)
+        data, own = await read_versioned(path, lambda: read(path))
     except FileNotFoundError:
-        data = b""
-    await write(path, data[:length].ljust(length, b"\0"))
+        data, own = b"", OwnRead.ABSENT
+    with own_write_version(path, own):
+        await write(path, data[:length].ljust(length, b"\0"))
 
 
 def expect_offset(offset: int, path: PathSpec) -> int:

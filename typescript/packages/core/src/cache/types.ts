@@ -25,6 +25,17 @@ export interface WriteCondition {
 }
 
 /**
+ * A file's current tokens, as the backend's own lookup reports them, for a
+ * backend whose cache token is not the one its write condition takes: the
+ * content token is what mirage holds and compares, the native token is what
+ * the backend's condition is sent with. Mirrors Python's `LiveVersion`.
+ */
+export interface LiveVersion {
+  readonly content: string | null
+  readonly native: string | null
+}
+
+/**
  * What a write on a `write: conditional` mount needs to know. Bound by the
  * mount's own entry points (`runWithCaches`, `runWithWriteRevisions`), so a write always sees
  * the context of the mount it lands on; an unconditional mount binds null,
