@@ -98,12 +98,12 @@ def strtold_erange(found: re.Match[str]) -> bool:
     if hexa is not None:
         mantissa, _, power = hexa[2:].lower().partition("p")
         whole, _, fraction = mantissa.partition(".")
-        digits = int(whole + fraction or "0", 16)
-        if digits == 0:
+        significand = int(whole + fraction or "0", 16)
+        if significand == 0:
             return False
         exponent = int(power or "0") - 4 * len(fraction)
-        top = digits.bit_length() - 1 + exponent
-        low = (digits & -digits).bit_length() - 1 + exponent
+        top = significand.bit_length() - 1 + exponent
+        low = (significand & -significand).bit_length() - 1 + exponent
         return top >= 16384 or (top < -16382 and low < -16494)
     if decimal is None:
         return False

@@ -91,10 +91,10 @@ export function strtoldErange(found: RegExpExecArray): boolean {
   if (hexa !== undefined) {
     const [mantissa = '', power = '0'] = hexa.slice(2).toLowerCase().split('p')
     const [whole = '', fraction = ''] = mantissa.split('.')
-    const digits = BigInt('0x' + (whole + fraction || '0'))
-    if (digits === 0n) return false
+    const significand = BigInt('0x' + (whole + fraction || '0'))
+    if (significand === 0n) return false
     const exponent = Number(power) - 4 * fraction.length
-    const bits = digits.toString(2)
+    const bits = significand.toString(2)
     const top = bits.length - 1 + exponent
     const low = bits.length - 1 - bits.lastIndexOf('1') + exponent
     return top >= 16384 || (top < -16382 && low < -16494)
