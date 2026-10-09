@@ -45,7 +45,12 @@ export class ShellOutput extends JobConsole {
   }
 }
 
-/** Stream one job and retain its existing owner through disconnect cleanup. */
+/**
+ * Stream one job and retain its existing owner through disconnect cleanup.
+ * The final record waits for the rest of the upload, discarded, as the
+ * foreground reply does, so the caller finishes sending before the
+ * connection closes.
+ */
 export function shellResponse(
   output: ShellOutput,
   jobs: JobTable,
@@ -81,6 +86,8 @@ export function shellResponse(
     try {
       yield* output.pipe.stream()
       const result = await completed
+      if (stdin instanceof UploadStdin) stdin.discard()
+      await failed
       yield Buffer.from(
         JSON.stringify({
           status: result.status,

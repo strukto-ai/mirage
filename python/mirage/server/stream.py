@@ -68,6 +68,9 @@ class ShellResponse(Response):
 
     The upload owns ASGI receive until it ends; only then does the
     disconnect watcher read it. Output and input may progress concurrently.
+    The final record waits for the rest of the upload, discarded, as the
+    foreground reply does, so the caller finishes sending before the
+    connection closes.
     """
 
     def __init__(
@@ -127,6 +130,10 @@ class ShellResponse(Response):
                 }
             )
         job = await asyncio.shield(completed)
+        if self._upload is not None:
+            if self._part is not None:
+                self._part.discard()
+            await asyncio.wait({self._upload})
         terminal = (
             json.dumps(
                 {

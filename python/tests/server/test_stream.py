@@ -8,6 +8,7 @@ from starlette.requests import Request
 from mirage.execution.ram import RAMExecutionStore
 from mirage.io.pipe import CAPACITY
 from mirage.server.jobs import JobTable
+from mirage.server.stdin import UploadStdin
 from mirage.server.stream import ShellOutput, ShellResponse
 from mirage.shell.console.types import Channel
 
@@ -102,3 +103,39 @@ async def test_disconnect_joins_cleanup_when_the_record_store_is_unavailable():
     store.offline = False
     await table.close()
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_the_final_record_waits_for_the_upload_to_end():
+    uploaded = asyncio.Event()
+    incoming = asyncio.Queue()
+    sent = []
+
+    async def receive():
+        return await incoming.get()
+
+    async def send(message):
+        sent.append(message)
+
+    async def run(scope):
+        await scope.start()
+        return {"exit_code": 0}
+
+    table = JobTable(RAMExecutionStore())
+    job = await table.submit("workspace", "true", run, session_id="session")
+    await table.wait(job.id)
+    upload = asyncio.create_task(uploaded.wait())
+    scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
+    request = Request(scope, receive)
+    response = ShellResponse(
+        ShellOutput(), table, job, request, upload, UploadStdin()
+    )
+    sending = asyncio.create_task(response(scope, receive, send))
+    for _ in range(50):
+        await asyncio.sleep(0)
+    assert all(message.get("more_body", True) for message in sent)
+    uploaded.set()
+    await asyncio.wait_for(sending, 1)
+    assert sent[-1]["more_body"] is False
+    assert json.loads(sent[-1]["body"])["status"] == "done"
+    await table.close()

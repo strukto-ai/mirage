@@ -7,6 +7,7 @@ import type { ExecutionRecord } from '@struktoai/mirage-core/execution/types'
 import { CAPACITY } from '@struktoai/mirage-core/io/pipe'
 import { Channel } from '@struktoai/mirage-core/shell/console/types'
 import { JobTable } from './jobs.ts'
+import { UploadStdin } from './stdin.ts'
 import { ShellOutput, shellResponse } from './stream.ts'
 
 function gate() {
@@ -138,4 +139,46 @@ it('disconnect joins cleanup and closes transport even when the record store fai
   store.offline = false
   await table.close()
   await store.close()
+})
+
+it('the final record waits for the upload to end', async () => {
+  const uploaded = gate()
+  const table = new JobTable(new RAMExecutionStore())
+  const job = await table.submit(
+    'workspace',
+    'true',
+    async (_signal, scope) => {
+      await scope.start()
+      return { exit_code: 0 }
+    },
+    'session',
+  )
+  await table.wait(job.id)
+  let source: Readable | undefined
+  const reply = {
+    raw: new EventEmitter(),
+    log: { error: vi.fn(), debug: vi.fn() },
+    header: vi.fn().mockReturnThis(),
+    type: vi.fn().mockReturnThis(),
+    send: (body: Readable) => {
+      source = body
+      return reply
+    },
+  } as unknown as FastifyReply
+  const failed = uploaded.wait.then(() => undefined)
+  shellResponse(new ShellOutput(), table, job, reply, failed, new UploadStdin())
+  if (source === undefined) throw new Error('response did not send a stream')
+  const body = source
+  const records: string[] = []
+  const reading = (async () => {
+    for await (const chunk of body) records.push(Buffer.from(chunk as Uint8Array).toString())
+  })()
+  for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve))
+  expect(records.join('')).not.toContain('"status"')
+  uploaded.release()
+  await reading
+  expect(JSON.parse(records.join('').trim().split('\n').at(-1) ?? '')).toMatchObject({
+    status: 'done',
+  })
+  await table.close()
 })
