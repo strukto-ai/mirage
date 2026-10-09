@@ -18,7 +18,6 @@ import pytest
 from pydantic import BaseModel
 
 from mirage.commands.cli.types import CLIInvocation, CLISpec
-from mirage.commands.config import command
 from mirage.commands.errors import PartialOutputError
 from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import CommandSpec, Operand, Option, UsageStyle
@@ -1180,50 +1179,18 @@ async def test_invocation_shell_is_revoked_after_cancellation():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["cli", "mount"])
-async def test_native_writer_routes_interleaved_channels_and_late_status(kind):
-    async def write(stdio):
-        await stdio.stdout.write(b"a" * 100000)
-        await stdio.stderr.write(b"e" * 100000)
-        await stdio.stdout.write(b"z")
-        return IOResult(exit_code=7)
-
-    async def leaf(inv):
-        return await write(inv.stdio)
-
-    @command("writer", vfs="ram", spec=CommandSpec())
-    async def builtin(accessor, paths, texts, opts):
-        return await write(opts.stdio)
-
-    with Workspace({"/ram": RAMVFS()}, mode="write") as ws:
-        if kind == "cli":
-            ws.register_cli("writer", CLISpec(name="writer", fn=leaf))
-        else:
-            ws.mount("/ram").register_commands([builtin])
-        await ws.shell("cd /ram")
-        result = await ws.shell("writer")
-        assert result.stdout == b"a" * 100000 + b"z"
-        assert result.stderr == b"e" * 100000
-        assert result.exit_code == 7
-        result = await ws.shell("writer 2>&1")
-        assert result.stdout == b"a" * 100000 + b"e" * 100000 + b"z"
-        assert not result.stderr
-        assert result.exit_code == 7
-        await ws.shell("writer > /ram/log 2>&1")
-        result = await ws.shell("cat /ram/log")
-        assert result.stdout == b"a" * 100000 + b"e" * 100000 + b"z"
-
-
-@pytest.mark.asyncio
-async def test_native_writer_closes_on_early_pipeline_consumer_exit():
+async def test_native_output_closes_on_early_pipeline_consumer_exit():
     closed = asyncio.Event()
 
-    async def writer(inv):
+    async def source():
         try:
             while True:
-                await inv.stdio.stdout.write(b"x" * 16384)
+                yield b"x" * 16384
         finally:
             closed.set()
+
+    async def writer(inv):
+        return source(), IOResult()
 
     with Workspace({"/ram": RAMVFS()}, mode="write") as ws:
         ws.register_cli("writer", CLISpec(name="writer", fn=writer))
@@ -1239,12 +1206,7 @@ async def test_native_cli_unstarted_output_close_joins_producer(timeout):
     closed = asyncio.Event()
 
     async def writer(inv):
-        try:
-            await inv.stdio.stdout.write(b"prefix")
-            await inv.stdio.wait_cancelled()
-            return IOResult()
-        finally:
-            closed.set()
+        return _HeldSource(b"prefix", closed.set), IOResult()
 
     spec = CLISpec(
         name="writer",
@@ -1256,3 +1218,25 @@ async def test_native_cli_unstarted_output_close_joins_producer(timeout):
     )
     await asyncio.wait_for(output.aclose(), 1)
     assert closed.is_set()
+
+
+class _HeldSource:
+    """Yields its bytes once, then waits until it is closed, once."""
+
+    def __init__(self, data, on_close):
+        self._data = data
+        self._on_close = on_close
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._data:
+            data, self._data = self._data, b""
+            return data
+        await asyncio.Event().wait()
+
+    async def aclose(self):
+        if self._on_close is not None:
+            self._on_close()
+            self._on_close = None

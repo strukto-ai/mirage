@@ -379,7 +379,6 @@ async def run_on_mount(
                         or registry.command_limits.get(cmd_name)
                     ),
                     stdin=stdin,
-                    buffer_bytes=registry.io.buffer_bytes,
                     cwd=session.cwd,
                     dispatch=dispatch,
                     session_id=session.session_id,

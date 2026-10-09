@@ -288,7 +288,6 @@ export async function handleCommand(
             : {}),
           ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
           commandLimits: registry.commandLimits,
-          bufferBytes: registry.io.bufferBytes,
           entries: registry.runtimeEntries,
           dispatch,
           statPath: (path) => pathStat(dispatch, path, null),

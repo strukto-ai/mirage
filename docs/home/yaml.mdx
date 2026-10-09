@@ -75,10 +75,10 @@ through 9007199254740991. Unknown keys are rejected. Chunks remain at most
 A larger value, such as 256 KiB or 1 MiB, absorbs longer bursts at the cost
 of more memory per active queue. It does not guarantee faster execution.
 
-The immutable workspace setting applies to shell pipes, command output,
-process stdin/stdout/stderr, SDK events and HTTP upload/output queues.
+The immutable workspace setting applies to shell pipes, process
+stdin/stdout/stderr, SDK events and HTTP upload/output queues.
 HTTP output counts encoded NDJSON bytes, including base64 overhead; its
-raw payload records remain at most 8 KiB. SDK and handler queues count raw bytes.
+raw payload records remain at most 8 KiB. SDK queues count raw bytes.
 CLI and MCP calls use their workspace's setting, including MCP over SSE
 and stdio. Configure it when creating the workspace; shell calls and MCP
 tool arguments do not override it. Snapshots and copies preserve it.

@@ -19,7 +19,6 @@ import { describe, expect, it } from 'vitest'
 import { ioFor } from '../../../test-utils.ts'
 import { DiscordVFSBase } from '../../../vfs/discord/discord.ts'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
-import { invoke } from '../../../io/stdio.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
@@ -37,15 +36,13 @@ async function runGrep(
   if (cmd === undefined) throw new Error('grep not registered')
   const transport = options.transport ?? new FakeDiscordTransport()
   const vfs = makeFakeVfs(transport)
-  const result = await invoke(() =>
-    cmd.fn(vfs.accessor, paths, texts, {
-      stdin: null,
-      flags,
-      io: commandIo(vfs),
-      cwd: '/',
-      ...(options.index !== undefined ? { index: options.index } : {}),
-    }),
-  )
+  const result = await cmd.fn(vfs.accessor, paths, texts, {
+    stdin: null,
+    flags,
+    io: commandIo(vfs),
+    cwd: '/',
+    ...(options.index !== undefined ? { index: options.index } : {}),
+  })
   if (result === null) return { stdout: '', exitCode: 0 }
   const [out, io] = result
   const buf =

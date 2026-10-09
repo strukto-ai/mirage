@@ -1,10 +1,3 @@
-import { ContextScope } from '../../../utils/context_scope.ts'
-import { captureSessionContext } from '../../../context/session_context.ts'
-import { captureOpPolicies } from '../../../policy/policies.ts'
-import { captureRecordingContext } from '../../../observe/context.ts'
-import { OutputStream, invoke } from '../../../io/stdio.ts'
-import { chunks } from '../../../io/cooperative.ts'
-import { closeQuietly } from '../../../io/stream.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,8 +32,9 @@ import { UsageStyle, Operand, type FlagValue } from '../../../commands/spec/type
 import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { chunks } from '../../../io/cooperative.ts'
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
-import { joinOrAbort } from '../../../utils/abort.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
@@ -220,7 +214,6 @@ export interface CLIContext {
   shell?: (command: string) => Promise<IOResult>
   signal?: AbortSignal
   commandLimits?: Readonly<Record<string, Limit>>
-  bufferBytes?: number
   /**
    * The workspace's ordered runtime world, which a script leaf selects
    * its interpreter from; absent (outside a workspace) refuses script
@@ -460,39 +453,7 @@ export async function handleCli(
     // Defer the call into the promise: a synchronously-thrown leaf
     // error must land in the catch arms below, exactly as when the
     // call sat inside the try.
-    const scope = new ContextScope([
-      ...captureSessionContext(),
-      ...captureOpPolicies(),
-      ...captureRecordingContext(),
-    ])
-    body = invoke(
-      (stdio) =>
-        scope.run(async () => {
-          const running = Promise.resolve().then(() => fn({ ...inv, stdio }))
-          try {
-            return await runWithTimeout(running, timeout, prog)
-          } catch (error) {
-            if (error instanceof CommandTimeoutError) {
-              stdio.cancel()
-              if (stdio.writing) await joinOrAbort(running, stdio.signal).catch(() => undefined)
-              if (leaf.write && dropCaches !== null) {
-                const settle = (): Promise<void> => dropCaches()
-                void running.then(settle, settle).catch((dropError: unknown) => {
-                  const reason = dropError instanceof Error ? dropError.message : String(dropError)
-                  console.warn(`${prog}: cache drop after timeout failed: ${reason}`)
-                })
-              }
-            }
-            throw error
-          } finally {
-            active = false
-            if (leaf.write && dropCaches !== null) await dropCaches()
-          }
-        }),
-      stdin,
-      context.signal,
-      context.bufferBytes,
-    )
+    body = Promise.resolve().then(() => fn(inv))
   }
   // The leaf's declared limit bounds the handler body and its
   // streams, exactly like mount dispatch: without the wrap a blocking
@@ -501,7 +462,7 @@ export async function handleCli(
   let stdout: ByteSource | null = null
   let io = new IOResult()
   try {
-    const out = await (native ? body : runWithTimeout(body, timeout, prog))
+    const out = await runWithTimeout(body, timeout, prog)
     if (out !== null) {
       ;[stdout, io] = out
     }
@@ -524,7 +485,7 @@ export async function handleCli(
       // the abort signal keeps running, and its request may land after
       // exit 124. Drop now, for a write the service already accepted, and
       // again when the body settles, for one still in flight.
-      if (!native && leaf.write && dropCaches !== null) {
+      if (leaf.write && dropCaches !== null) {
         await dropCaches()
         const settle = (): Promise<void> => dropCaches()
         void body.then(settle, settle).catch((dropErr: unknown) => {
@@ -545,7 +506,7 @@ export async function handleCli(
     // request (a PUT whose --jq program fails filters a response the
     // service already applied); without the drop a github mount keeps
     // serving its pre-write bytes.
-    if (!native && leaf.write && dropCaches !== null) await dropCaches()
+    if (leaf.write && dropCaches !== null) await dropCaches()
     const message = err instanceof Error ? err.message : String(err)
     const stderr = encodeText(`${prog}: ${message}\n`)
     return [
@@ -554,12 +515,12 @@ export async function handleCli(
       new ExecutionNode({ command: cmdStr, exitCode: 1, stderr }),
     ]
   } finally {
-    if (!native) active = false
+    active = false
   }
   // The spec's `write` is the one answer: what policy calls a write, the
   // cache does too, so a verb that can mutate (`gh api` under any method)
   // costs the mounts a reload rather than a stale read.
-  if (!native && leaf.write && dropCaches !== null) await dropCaches()
+  if (leaf.write && dropCaches !== null) await dropCaches()
 
   io.producer = { command: prog, prefixes: [], declared: leaf.limit ?? null }
 
@@ -569,7 +530,7 @@ export async function handleCli(
     io.stderr = concat([warn, existing])
   }
 
-  const owned = io.output !== null ? stdout : null
+  const owned = native ? stdout : null
   if (owned !== null) stdout = cliOutput(owned, io, prog)
   stdout = maybeWithTimeout(stdout, limit, prog)
   if (owned !== null && stdout !== null && !(stdout instanceof Uint8Array)) {

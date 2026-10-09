@@ -14,8 +14,7 @@
 
 import { concat } from '../../../io/cachable_iterator.ts'
 import { chunks } from '../../../io/cooperative.ts'
-import { OutputStream } from '../../../io/stdio.ts'
-import { closeQuietly, ensureStream } from '../../../io/stream.ts'
+import { OutputStream, closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type Limit, OnExceed } from '../../../types.ts'
 import { LimitExceededError } from '../../errors.ts'

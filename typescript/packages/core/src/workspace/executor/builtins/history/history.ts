@@ -118,7 +118,6 @@ export async function handleHistory(
   const [stream, io] = await mount.runCommand('history', [], texts, flags, {
     cwd: session.cwd,
     sessionId: session.sessionId,
-    bufferBytes: registry.io.bufferBytes,
   })
   // The view command always returns byte stderr, but io.stderr is typed
   // as a ByteSource (a possible lazy stream); resolve it to bytes so the

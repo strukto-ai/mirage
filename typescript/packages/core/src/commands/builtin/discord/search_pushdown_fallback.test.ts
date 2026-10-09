@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { materialize } from '../../../io/types.ts'
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
@@ -52,26 +51,24 @@ describe('discord grep push-down fallback', () => {
     const vfs = makeFakeVfs(transport)
     const grep = DISCORD_GREP[0]
     if (grep === undefined) throw new Error('grep not registered')
-    const result = await invoke(() =>
-      grep.fn(
-        vfs.accessor,
-        [
-          new PathSpec({
-            virtual: '/mnt/discord/My Server__G1/channels/general__C1',
-            directory: '/mnt/discord/My Server__G1/channels/general__C1',
-            resolved: false,
-            vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
-          }),
-        ],
-        ['hi'],
-        {
-          stdin: null,
-          flags: { w: true },
-          io: commandIo(vfs),
-          cwd: '/',
-          index: idx,
-        },
-      ),
+    const result = await grep.fn(
+      vfs.accessor,
+      [
+        new PathSpec({
+          virtual: '/mnt/discord/My Server__G1/channels/general__C1',
+          directory: '/mnt/discord/My Server__G1/channels/general__C1',
+          resolved: false,
+          vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
+        }),
+      ],
+      ['hi'],
+      {
+        stdin: null,
+        flags: { w: true },
+        io: commandIo(vfs),
+        cwd: '/',
+        index: idx,
+      },
     )
     if (result === null) throw new Error('expected a result tuple')
     await materialize(result[0])
@@ -90,26 +87,24 @@ describe('discord rg push-down fallback', () => {
     const vfs = makeFakeVfs(transport)
     const rg = DISCORD_RG[0]
     if (rg === undefined) throw new Error('rg not registered')
-    const result = await invoke(() =>
-      rg.fn(
-        vfs.accessor,
-        [
-          new PathSpec({
-            virtual: '/mnt/discord/My Server__G1/channels/general__C1',
-            directory: '/mnt/discord/My Server__G1/channels/general__C1',
-            resolved: false,
-            vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
-          }),
-        ],
-        ['hi'],
-        {
-          stdin: null,
-          flags: { word_regexp: true },
-          io: commandIo(vfs),
-          cwd: '/',
-          index: idx,
-        },
-      ),
+    const result = await rg.fn(
+      vfs.accessor,
+      [
+        new PathSpec({
+          virtual: '/mnt/discord/My Server__G1/channels/general__C1',
+          directory: '/mnt/discord/My Server__G1/channels/general__C1',
+          resolved: false,
+          vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
+        }),
+      ],
+      ['hi'],
+      {
+        stdin: null,
+        flags: { word_regexp: true },
+        io: commandIo(vfs),
+        cwd: '/',
+        index: idx,
+      },
     )
     if (result === null) throw new Error('expected a result tuple')
     await materialize(result[0])

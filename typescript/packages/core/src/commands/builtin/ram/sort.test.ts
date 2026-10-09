@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
@@ -32,14 +31,12 @@ async function runSort(
 ): Promise<{ lines: string[]; exitCode: number }> {
   const cmd = RAM_SORT[0]
   if (cmd === undefined) throw new Error('sort not registered')
-  const result = await invoke(() =>
-    cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
-      stdin,
-      flags,
-      io: commandIo(vfs),
-      cwd: '/',
-    }),
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
+    stdin,
+    flags,
+    io: commandIo(vfs),
+    cwd: '/',
+  })
   if (result === null) return { lines: [], exitCode: -1 }
   const [out, ioResult] = result
   const buf =

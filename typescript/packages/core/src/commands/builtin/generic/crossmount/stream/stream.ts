@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { concat } from '../../../../../io/cachable_iterator.ts'
-import { OutputStream } from '../../../../../io/stdio.ts'
-import { asyncChain, closeQuietly, drain } from '../../../../../io/stream.ts'
+import { OutputStream, asyncChain, closeQuietly, drain } from '../../../../../io/stream.ts'
 import { readFailExitCodeFromLine } from '../../../../spec/usage.ts'
 import { IOResult, OutputState, materialize, type ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'

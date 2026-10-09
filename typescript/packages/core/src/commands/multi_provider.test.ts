@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../io/stdio.ts'
 import { describe, expect, it } from 'vitest'
 import { command, Command } from './config.ts'
 import { CommandSpec } from './spec/types.ts'
@@ -93,7 +92,7 @@ describe('command() registers multiple mounts', () => {
     }
     const cmd = cmds[0]
     if (cmd === undefined) throw new Error('expected a registered command')
-    const result = await invoke(() => cmd.fn({} as never, [], [], opts))
+    const result = await cmd.fn({} as never, [], [], opts)
     expect(handlerCalled).toBe(false)
     const stdout = result?.[0]
     expect(stdout).toBeDefined()
@@ -132,7 +131,7 @@ describe('command() registers multiple mounts', () => {
     }
     const cmd = cmds[0]
     if (cmd === undefined) throw new Error('expected a registered command')
-    const result = await invoke(() => cmd.fn({} as never, [], [], opts))
+    const result = await cmd.fn({} as never, [], [], opts)
     expect(handlerCalled).toBe(false)
     const stdout = result?.[0]
     expect(stdout).toBeDefined()

@@ -25,11 +25,9 @@ export interface OutputEvent {
 }
 
 export type CommandOutput = [ByteSource | null, IOResult]
-export type HandlerResult = CommandOutput | IOResult | null
 
-/** Routing and settlement shared by a live handler's result and drain. */
+/** Settlement of a result whose fields fill in as its output drains. */
 export class OutputState {
-  stderr: ((data: Uint8Array) => Promise<void>) | null = null
   settled = false
   readonly callbacks: (() => void)[] = []
 

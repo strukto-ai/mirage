@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import type { FlagValue } from '../../../spec/types.ts'
 import { GitHubApiError } from '../../../../core/github/client.ts'
 import { search } from '../../../../core/github/search.ts'
-import { invoke } from '../../../../io/stdio.ts'
 import { materialize } from '../../../../io/types.ts'
 import { searchSpec } from './search.ts'
 import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
@@ -88,16 +87,14 @@ describe('a failed search reads as gh words it', () => {
     const leaf = searchSpec().subcommands.find((item) => item.name === 'issues')
     if (!leaf?.fn) throw new Error('missing search handler')
     const handler = leaf.fn
-    const result = await invoke(() =>
-      handler(
-        cliInvocation({
-          config: { token: 't' },
-          argv: ['search', 'issues', 'needle'],
-          texts: ['needle'],
-          flags: { limit: '30' },
-          spec: leaf,
-        }),
-      ),
+    const result = await handler(
+      cliInvocation({
+        config: { token: 't' },
+        argv: ['search', 'issues', 'needle'],
+        texts: ['needle'],
+        flags: { limit: '30' },
+        spec: leaf,
+      }),
     )
     if (result === null) throw new Error('missing search result')
     const io = result[1]
