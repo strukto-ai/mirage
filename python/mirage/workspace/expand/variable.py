@@ -131,7 +131,7 @@ def guard_expansion_write(session: SessionState, *names: str) -> None:
     """Refuse expansion-time writes that name hidden variables.
 
     ``${X:=d}`` and ``$((X=5))`` land on the raw session env rather
-    than the async session door, so the hidden half of that door
+    than the async session view, so the hidden half of the session view
     (``ensure_var_visible``) is applied here, and the refusal takes the
     fatal expansion-error shape ``${var:?}`` uses.
 
@@ -176,7 +176,7 @@ async def _expansion_index(
 
     Args:
         session (SessionState): the session the subscript reads.
-        view (SessionView | None): the gated door; None outside a
+        view (SessionView | None): the gated session view; None outside a
             workspace.
         subscript (str): the raw subscript text.
     """
@@ -196,13 +196,13 @@ async def land_arith_writes(
 
     Each write goes through ``expansion_write`` in evaluation order; then
     the ``RANDOM`` reader replays the draws the expression made after it
-    seeded the generator, now that the door holds the seed. One door for
-    a completed expression and for one that failed partway, since bash
-    binds each assignment as it is made.
+    seeded the generator, now that the session view holds the seed. One entry
+    point for a completed expression and for one that failed partway, since
+    bash binds each assignment as it is made.
 
     Args:
         session (SessionState): the shell session.
-        view (SessionView | None): the gated door; None outside a
+        view (SessionView | None): the gated session view; None outside a
             workspace.
         writes (tuple[ArithWrite, ...]): the assignments, in order.
         reader (RandomReader): the expression's ``RANDOM`` reader.
@@ -224,17 +224,17 @@ async def expansion_write(
     value: str,
     contained: int = 1,
 ) -> None:
-    """One expansion-time write, through the session plane's door.
+    """One expansion-time write, through the session view.
 
     ``${X:=d}``, ``${a[i]:=d}`` and ``$((X=5))`` are assignments the
     shell performs while expanding a word rather than while running a
     command, and they used to land on the raw session env. That made
     a ``pre_session`` rule one ``${X:=d}`` away from irrelevant: a
     deployment refusing ``AWS_*`` still had ``${AWS_PROFILE:=prod}``
-    write it. They go through the door now, so one rule covers every
+    write it. They go through the session view now, so one rule covers every
     spelling.
 
-    Without a door (a unit test outside a workspace) the write lands
+    Without a session view (a unit test outside a workspace) the write lands
     directly, with the hidden half still applied: skipping that would
     let the write-back clobber a value the host's wiring reads.
 
@@ -246,7 +246,7 @@ async def expansion_write(
 
     Args:
         session (SessionState): shell session the write lands on.
-        view (SessionView | None): the session plane's gated door,
+        view (SessionView | None): the gated session view,
             None outside a workspace.
         name (str): the variable being written.
         key (str | None): the canonical subscript, None for a bare
@@ -962,7 +962,8 @@ class _ArithOperand:
 
     Args:
         session (SessionState): the session the bound reads and writes.
-        view (SessionView | None): the gated door for arithmetic writes.
+        view (SessionView | None): the gated session view for arithmetic
+            writes.
     """
 
     def __init__(
@@ -1012,7 +1013,8 @@ async def _slice_bounds(
     Args:
         node (TSNodeLike): substring expansion.
         expand_child (ExpandChild): nested word evaluator.
-        operand (_ArithOperand): arithmetic evaluator and session write door.
+        operand (_ArithOperand): arithmetic evaluator and session write entry
+            point.
         extent (int): scalar length or array index extent.
         allow_end (bool): scalar slices may start exactly at the end.
     """
@@ -1186,7 +1188,7 @@ async def expand_braces(
 
     An offset, length or slice bound is arithmetic and may assign
     (``${v:x=1:y=2}``) or seed (``${v:RANDOM%10:1}``); each bound lands
-    through the door before the next bound expands.
+    through the session view before the next bound expands.
 
     Args:
         node (TSNodeLike): the ``expansion`` tree-sitter node.
@@ -1194,7 +1196,7 @@ async def expand_braces(
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): callback that expands a nested node
             (dependency-injected to avoid a cycle with ``expand_node``).
-        view (SessionView | None): the gated door the expansion's
+        view (SessionView | None): the gated session view the expansion's
             writes land through; None outside a workspace.
         quoted (bool): whether the expansion sits inside double quotes,
             which decides the rules an operator's word follows and the

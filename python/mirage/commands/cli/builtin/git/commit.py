@@ -54,7 +54,7 @@ from mirage.commands.cli.builtin.git.util import (
     links_of,
     start_point,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -89,13 +89,13 @@ def identity(fl: FlagView, session: SessionView | None = None) -> bytes:
     operator's name. The committer is the author here, where git tracks
     ``GIT_COMMITTER_*`` separately.
 
-    Read through the session plane's door rather than the frozen
+    Read through the session view rather than the frozen
     ``inv.env`` snapshot, so a hidden name reads as unset exactly as it
     does in the shell.
 
     Args:
         fl (FlagView): the leaf's flag bag.
-        session (SessionView | None): the session plane's door, None
+        session (SessionView | None): the session view, None
             outside a workspace.
     """
     author = fl.as_str("author")
@@ -176,11 +176,11 @@ async def commit(
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
-    stat_path = doors.stat_path
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
+    stat_path = view.stat_path
     flags = inv.flags
     fl = FlagView(flags)
     try:
@@ -195,7 +195,7 @@ async def commit(
         message = fl.as_str("message")
         if not message:
             raise MissingMessageError()
-        repo, location = await opened(fl, doors, work_tree=True)
+        repo, location = await opened(fl, view, work_tree=True)
         # git takes the index's lock before it looks for anything to
         # commit, so a read-only repository refuses an empty commit too.
         try:
@@ -207,7 +207,7 @@ async def commit(
             raise UnmergedIndexError()
         if staging:
             await stage_tracked(
-                dispatch, stat_path, location, state, links_of(doors)
+                dispatch, stat_path, location, state, links_of(view)
             )
         head = await read_head(dispatch, location.gitdir)
         before = await asyncio.to_thread(head_entries, repo)
@@ -228,11 +228,11 @@ async def commit(
                     location,
                     head,
                     start_point(fl).virtual,
-                    links_of(doors),
+                    links_of(view),
                 )
             )
         parents = [] if before is None else [repo.refs[HEAD_REF]]
-        who = identity(fl, doors.session_view)
+        who = identity(fl, view.session_view)
         when = int(time.time())
         written, tree = await asyncio.to_thread(
             build_commit, repo, state, message, who, parents, when

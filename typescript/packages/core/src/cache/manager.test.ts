@@ -636,7 +636,7 @@ describe('what a probe saw this command', () => {
     })
   })
 
-  // Every door that drops cached state: a write the command makes, a clear
+  // Every entry point that drops cached state: a write the command makes, a clear
   // after native code ran (an external program, a remote runtime line), a
   // path-less CLI mutation, and a re-list that found the file gone. Each one
   // means the backend may no longer match what the probe saw.

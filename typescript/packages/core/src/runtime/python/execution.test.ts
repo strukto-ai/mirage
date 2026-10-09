@@ -63,7 +63,7 @@ describe('prepareSource', () => {
     expect(out).toContain(`, "/w/s.py", 'exec')`)
   })
 
-  it.each(['', '-'])('compiles both stdin doors as <stdin> (prog %j)', (prog) => {
+  it.each(['', '-'])('compiles both stdin entry points as <stdin> (prog %j)', (prog) => {
     const out = prepareSource(run({ prog }))
     expect(out).toContain(`, "<stdin>", 'exec')`)
     expect(out).toContain(`__file__ = "<stdin>"`)

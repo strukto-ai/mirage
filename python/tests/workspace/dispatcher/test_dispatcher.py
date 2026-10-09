@@ -157,7 +157,7 @@ async def test_setattr_classifies_as_a_write():
 
 @pytest.mark.asyncio
 async def test_symlink_classifies_as_a_write():
-    # A symlink create is a name-plane write the door itself answers;
+    # A symlink create is a name-plane write the dispatcher itself answers;
     # the policy write classification must cover it like any mutation.
     policies = Policies()
     policies.add(DenyWrites())
@@ -188,7 +188,7 @@ async def test_readlink_answers_from_the_namespace():
 
 
 @pytest.mark.asyncio
-async def test_spec_op_twin_holds_on_the_dispatch_door():
+async def test_spec_op_twin_holds_on_the_dispatcher():
     policies = Policies()
     policies.add(
         RulePolicy(CommandRule(reason="frozen", paths=("/data/locked/*",)))
@@ -275,7 +275,7 @@ async def test_a_structure_answer_still_clears_the_sessions_hides(
 async def test_a_hidden_path_denies_a_read_and_refuses_a_create(
     scoped_session,
 ):
-    # The hide's two verdicts, at the door every surface comes through:
+    # The hide's two verdicts, at the dispatcher every surface comes through:
     # absent on a read, EACCES on a create, and a write is never served
     # from structure.
     dispatcher, _ = _dispatcher(Policies())
@@ -333,7 +333,7 @@ async def test_a_create_under_a_hidden_directory_is_absent_like_its_reads(
 
 @pytest.mark.asyncio
 async def test_unlink_removes_a_namespace_link():
-    # The door creates links (`symlink`), so it has to remove them too:
+    # The dispatcher creates links (`symlink`), so it has to remove them too:
     # a link has no backend entry, so forwarding the unlink reaches a
     # backend that has never heard of the name and answers ENOENT,
     # leaving the link in place. That is what left `git checkout` unable
@@ -587,7 +587,7 @@ async def test_a_rename_destination_is_judged_on_its_own_turf():
     "occupied", ["/ram/a.txt", "/ram/d", "/ram/link", "/ram"]
 )
 async def test_symlink_refuses_an_occupied_name(occupied):
-    # symlink(2) is EEXIST on a name that is taken, and only the door can
+    # symlink(2) is EEXIST on a name that is taken, and only the dispatcher can
     # tell: a file and a directory are the backend's, a link is the node
     # table's, and a mount root is the registry's. Unchecked, the node
     # went on top and buried whatever was there.
@@ -1027,7 +1027,7 @@ async def test_an_xattr_op_on_a_missing_path_is_enoent():
 
 @pytest.mark.asyncio
 async def test_a_removed_file_takes_its_xattrs_with_it():
-    # Removed through the door rather than the shell's rm, the node
+    # Removed through the dispatcher rather than the shell's rm, the node
     # stayed, and a file created at the name next read back the old
     # file's attributes.
     with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
@@ -1385,9 +1385,9 @@ async def _text(ws: Workspace, virtual: str) -> bytes:
 
 @pytest.mark.asyncio
 async def test_a_marked_op_is_judged_on_every_path_it_reaches():
-    # Each spelling once, in the order the door meets it: as handed in,
+    # Each spelling once, in the order the dispatcher meets it: as handed in,
     # walked, then followed. A refused op leaves the bytes alone; an
-    # unmarked one is the door's alone.
+    # unmarked one is the dispatcher's alone.
     ws = await _linked_ws()
     await ws.shell(
         "echo new > /data/real/other && echo o > /data/other && "
@@ -1492,7 +1492,7 @@ async def test_hidden_space_answers_a_marked_op_before_any_rule():
 
 @pytest.mark.asyncio
 async def test_the_mark_never_reaches_the_op(monkeypatch):
-    # The door lifts the mark at entry: the mount's op sees only its own
+    # The dispatcher lifts the mark at entry: the mount's op sees only its own
     # arguments, whatever the command's dispatcher carried.
     ws = await _linked_ws()
     seen: list[dict] = []
@@ -1805,7 +1805,7 @@ class SeenReads(Policy):
         "md5sum /d/a.txt",
     ],
 )
-async def test_a_command_reads_at_the_door(line):
+async def test_a_command_reads_at_the_dispatcher(line):
     seen = SeenReads()
     with Workspace(
         {"/d/": RAMVFS()}, mode=MountMode.WRITE, policies=[seen]

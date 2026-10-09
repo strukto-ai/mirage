@@ -43,7 +43,7 @@ class LocalRuntime(PythonRuntime):
 
     name = "local"
     # Spawns the host interpreter: a real process with the user's own
-    # filesystem and network, doors the workspace gate never sees.
+    # filesystem and network, entry points the workspace gate never sees.
     # This is the base default; declared here so the claim is explicit
     # at the one builtin runtime that voids a world's sandbox claim.
     reach: RuntimeReach = "process"

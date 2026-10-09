@@ -29,10 +29,10 @@ function mkWorld(): { ws: Workspace; vfs: RAMVFS } {
   return { ws, vfs }
 }
 
-// The door a sandboxed runtime holds, over this workspace's own bridge
+// The file adapter a sandboxed runtime holds, over this workspace's own bridge
 // and the same two sources the workspace hands its runtimes: the mount
 // prefixes and the node table's link names.
-function doorOn(ws: Workspace): RuntimeFiles {
+function filesOn(ws: Workspace): RuntimeFiles {
   const bridge = (
     ws as unknown as { buildWorkspaceBridge(): BridgeDispatchFn }
   ).buildWorkspaceBridge()
@@ -45,17 +45,17 @@ function doorOn(ws: Workspace): RuntimeFiles {
   )
 }
 
-// The runtime door's readdir is the sandboxed runtimes' directory read:
+// The file adapter's readdir is the sandboxed runtimes' directory read:
 // what it fails, a guest sees as the whole directory failing, so one
 // entry's stat never fails it; that entry's own stat still reports why.
-describe('runtime door readdir', () => {
+describe('file adapter readdir', () => {
   // A link row is stat'd without following, so a dangling target never
   // reaches the backend: the node table answers with the link's own row.
   it('lists a dangling link as its own row instead of failing the listing', async () => {
     const { ws } = mkWorld()
     await ws.vfs.write('/data/a.txt', 'hi')
     await ws.namespace.symlink('/data/lnk', '/data/gone', 1)
-    const entries = await doorOn(ws).readdir('/data')
+    const entries = await filesOn(ws).readdir('/data')
     const row = entries.find((e) => e.path.endsWith('/lnk'))
     expect(row).toMatchObject({
       size: '/data/gone'.length,
@@ -73,9 +73,9 @@ describe('runtime door readdir', () => {
     const { ws, vfs } = mkWorld()
     await ws.vfs.write('/data/a.txt', 'hi')
     vfs.stat = () => Promise.reject(new Error('401 Unauthorized'))
-    const door = doorOn(ws)
-    expect(await door.readdir('/data')).toEqual([{ path: '/data/a.txt', size: 0, isDir: false }])
-    await expect(door.stat('/data/a.txt')).rejects.toThrow('401 Unauthorized')
+    const files = filesOn(ws)
+    expect(await files.readdir('/data')).toEqual([{ path: '/data/a.txt', size: 0, isDir: false }])
+    await expect(files.stat('/data/a.txt')).rejects.toThrow('401 Unauthorized')
   })
 
   // A live link lists as itself, the row lstat gives, not its target's:
@@ -84,7 +84,7 @@ describe('runtime door readdir', () => {
     const { ws } = mkWorld()
     await ws.vfs.write('/data/a.txt', 'hello')
     await ws.namespace.symlink('/data/lnk', '/data/a.txt', 1)
-    const entries = await doorOn(ws).readdir('/data')
+    const entries = await filesOn(ws).readdir('/data')
     expect(entries.find((e) => e.path.endsWith('/lnk'))).toMatchObject({
       size: '/data/a.txt'.length,
       isDir: false,
@@ -106,7 +106,7 @@ describe('runtime door readdir', () => {
     await ws.vfs.write('/data/real/t.txt', 'hi')
     await ws.namespace.symlink('/data/real/lk', '/data/real/t.txt', 1)
     await ws.namespace.symlink('/data/alias', '/data/real', 1)
-    const entries = await doorOn(ws).readdir('/data/alias')
+    const entries = await filesOn(ws).readdir('/data/alias')
     expect(entries.find((e) => e.path.endsWith('/lk'))).toMatchObject({ isLink: true })
   })
 })

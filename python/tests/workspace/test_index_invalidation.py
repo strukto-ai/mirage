@@ -24,9 +24,9 @@ from mirage.vfs.disk import DiskVFS
 # every backend. Disk carries a 60s index TTL, so a cached listing would hide
 # a mutation for a full minute unless something evicts it. Both surfaces do,
 # and for one reason: ``dispatch`` and the VFS/FUSE ``Files`` facade are the
-# same door, so every write goes through Dispatcher.invalidate_after_write.
-# TS mirrors this file, and now the whole of it, in
-# packages/node/src/ops/index_invalidation.test.ts.
+# same entry point, so every write goes through
+# Dispatcher.invalidate_after_write. TS mirrors this file, and now the whole of
+# it, in packages/node/src/ops/index_invalidation.test.ts.
 
 
 def _spec(virtual: str, rel: str) -> PathSpec:

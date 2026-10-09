@@ -333,7 +333,7 @@ describe('readByteRange', () => {
     const { fs } = await makeFs({ 'blob.bin': blob })
     const target = await fs.resolve('/data/blob.bin')
     expect(await fs.readByteRange(target, { offset: 1, length: 3 })).toEqual(blob.slice(1, 4))
-    // The same bytes through the text door are refused, which is the
+    // The same bytes through the text read are refused, which is the
     // difference this method exists for.
     expect(await errorCode(fs.readText(target))).toBe('FS_NOT_TEXT')
   })
@@ -673,7 +673,7 @@ describe('the session the adapter reads as', () => {
     const err = await fs.writeText(target, 'x').catch((caught: unknown) => caught)
     expect((err as FsError).code).toBe('FS_NOT_FOUND')
     // A link inside hidden space is not followed out of it: the typed
-    // path reaches the door and reads as absent, and the listing never
+    // path reaches the dispatcher and reads as absent, and the listing never
     // names a hidden link either.
     const link = await fs.resolve('/data/vault/lk')
     expect(String(link.targetKey)).toBe('/data/vault/lk')
@@ -688,10 +688,10 @@ describe('the session the adapter reads as', () => {
     expect(await ws.vfs.cat('/data/vault/secret')).toBe('top')
   })
 
-  it('reads links as the ambient session the door will keep', async () => {
+  it('reads links as the ambient session the dispatcher will keep', async () => {
     // A callback reaching ctx.fs from inside `ws.shell` dispatches as
     // that line's session, so the link table is judged as it too: a
-    // link the ambient session hides stays typed for the door to refuse,
+    // link the ambient session hides stays typed for the dispatcher to refuse,
     // even though the adapter's own configured session could see it.
     const ws = new Workspace(
       { '/data': [new RAMVFS(), MountMode.WRITE] },
@@ -750,7 +750,7 @@ describe('the session the adapter reads as', () => {
   it('hydrates a fresh attach before reading as its session', async () => {
     // `ready` resolves an attached workspace as built, with a minted
     // default and an empty link table; the adapter reads both outside
-    // the door, so it must hydrate first or a persisted hide is judged
+    // the dispatcher, so it must hydrate first or a persisted hide is judged
     // by the wrong session and a persisted link is not seen at all.
     const store = new RAMWorkspaceStateStore()
     const ram = new RAMVFS()
@@ -782,7 +782,7 @@ describe('the session the adapter reads as', () => {
   })
 })
 
-describe('a policy refusal at the op door', () => {
+describe('a policy refusal at the dispatcher', () => {
   it('reads as a sandbox denial, so the tool layer offers the escalation', async () => {
     const ram = new RAMVFS()
     const seeder = new Workspace({ '/data': [ram, MountMode.WRITE] })

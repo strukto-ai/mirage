@@ -256,7 +256,7 @@ def refusal(cmd: str, exc: PolicyDenied) -> Result:
 
 
 def readonly_line(cmd: str, name: str) -> str:
-    """The shell's own readonly refusal line, checked before the door.
+    """The shell's own readonly refusal line, checked before the session view.
 
     ``declare``, ``local`` and ``typeset`` name themselves in it
     (``bash: declare: R: readonly variable``); every other writer

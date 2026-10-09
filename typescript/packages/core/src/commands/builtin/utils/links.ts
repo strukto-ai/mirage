@@ -54,14 +54,14 @@ export function typedLink(links: LinkView, path: PathSpec, cwd: string): FileSta
 }
 
 /**
- * The namespace's links as a command meets a name, and the door past them.
+ * The namespace's links as a command meets a name, and the dispatcher past them.
  *
  * A link is invisible to every backend, so a command bound to one mount needs
- * the links to tell a name that stands on one, and the op door to act where
+ * the links to tell a name that stands on one, and the dispatcher to act where
  * the link leads or where it stands: the target may live on any mount, and so
- * may the link. Mirrors Python's LinkDoor.
+ * may the link. Mirrors Python's LinkResolver.
  */
-export class LinkDoor {
+export class LinkResolver {
   constructor(
     readonly links: LinkView,
     readonly dispatch: DispatchFn,
@@ -113,25 +113,25 @@ export class LinkDoor {
     }
   }
 
-  /** What a name leads to, its stat through the door, on any mount. */
+  /** What a name leads to, its stat through the dispatcher, on any mount. */
   async stat(virtual: string): Promise<FileStat> {
     const [stat] = await this.dispatch('stat', PathSpec.fromStrPath(virtual))
     return stat as FileStat
   }
 
-  /** A directory's entries through the door, links among them. */
+  /** A directory's entries through the dispatcher, links among them. */
   async readdir(virtual: string): Promise<string[]> {
     const [entries] = await this.dispatch('readdir', PathSpec.fromStrPath(virtual))
     return [...(entries as string[])]
   }
 
-  /** A name's own stat through the door: a link's, not its target's. */
+  /** A name's own stat through the dispatcher: a link's, not its target's. */
   async lstat(path: PathSpec): Promise<FileStat> {
     const [stat] = await this.dispatch('stat', path, [], { nofollow: true })
     return stat as FileStat
   }
 
-  /** What a name leads to, read through the door, which follows it. */
+  /** What a name leads to, read through the dispatcher, which follows it. */
   async *read(virtual: string): AsyncIterable<Uint8Array> {
     const [data] = await this.dispatch('read', PathSpec.fromStrPath(virtual))
     yield data as Uint8Array
@@ -148,10 +148,10 @@ export class LinkDoor {
   }
 }
 
-/** The link door an invocation carries: null when the namespace holds no
- * link, the fast path, or outside a workspace. Mirrors Python's link_door. */
-export function linkDoor(opts: CommandOpts): LinkDoor | null {
+/** The link resolver an invocation carries: null when the namespace holds no
+ * link, the fast path, or outside a workspace. Mirrors Python's link_resolver. */
+export function linkResolver(opts: CommandOpts): LinkResolver | null {
   const links = opts.ns?.links
   if (links === undefined || opts.dispatch === undefined) return null
-  return new LinkDoor(links, opts.dispatch, opts.cwd)
+  return new LinkResolver(links, opts.dispatch, opts.cwd)
 }

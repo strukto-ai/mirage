@@ -109,7 +109,7 @@ export function sourceOf(rule: CommandRule): string {
  * Ranking across subjects is the whole answer for a deny, which refuses
  * the line, and only half of it for an ask, which is a question the host
  * still has to answer. So every ask that won a subject of its own is
- * reported (`Ruling.asks`) and the door requires all of them: with
+ * reported (`Ruling.asks`) and the entry point requires all of them: with
  * `ask cp /a/*` and a deeper `ask cp /deep/b/*`, `cp /a/x /deep/b/y` used
  * to present the deeper one alone, and a nod for the destination ran the
  * line without the source ever being asked about.

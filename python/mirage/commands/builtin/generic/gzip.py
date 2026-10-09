@@ -13,7 +13,7 @@ from mirage.commands.builtin.generic.decompress import (
     replace_output,
     suffix_refusal,
 )
-from mirage.commands.builtin.utils.links import LinkDoor, link_door
+from mirage.commands.builtin.utils.links import LinkResolver, link_resolver
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import (
     resolve_source,
@@ -65,7 +65,7 @@ async def gzip(
     quiet: bool = False,
     suffix: str = GZIP_SUFFIX,
     level: int = zlib.Z_DEFAULT_COMPRESSION,
-    door: LinkDoor | None = None,
+    resolver: LinkResolver | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     refused = suffix_refusal(suffix)
     if refused is not None:
@@ -83,7 +83,7 @@ async def gzip(
             quiet=quiet,
             suffix=suffix,
             to_stdout=to_stdout,
-            door=door,
+            resolver=resolver,
         )
     if not paths:
         return gzip_compress_stream(
@@ -130,7 +130,7 @@ async def gzip(
                 suffix=suffix,
                 decompress=False,
                 follow=to_stdout or force,
-                door=door,
+                resolver=resolver,
             )
             if opened is None:
                 continue
@@ -162,7 +162,7 @@ async def gzip(
             if link is None
             else beside_link(link, p.raw_path + suffix)
         )
-        existed = await output_taken(out, stat, door)
+        existed = await output_taken(out, stat, resolver)
         if existed and not force:
             lines.append(
                 f"gzip: {p.raw_path}{suffix} already exists;\tnot overwritten"
@@ -171,7 +171,7 @@ async def gzip(
             continue
         try:
             await replace_output(
-                out, data, write_bytes, door, link is not None
+                out, data, write_bytes, resolver, link is not None
             )
         except FS_ERRORS as exc:
             lines.append(
@@ -187,8 +187,8 @@ async def gzip(
         if not keep:
             await (
                 unlink(p)
-                if link is None or door is None
-                else door.unlink(link)
+                if link is None or resolver is None
+                else resolver.unlink(link)
             )
     stderr = ("\n".join(lines) + "\n").encode() if lines else None
     return b"".join(stdout) or None, IOResult(
@@ -252,5 +252,5 @@ async def gzip_generic(
             if parsed.level is not None
             else zlib.Z_DEFAULT_COMPRESSION
         ),
-        door=link_door(opts),
+        resolver=link_resolver(opts),
     )

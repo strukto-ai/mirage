@@ -3,7 +3,7 @@
 These suites run what mirage hands to a runtime against mirage mounts: a
 guest program (Python on monty, wasi, pyodide and local, JavaScript on
 quickjs), a whole line (the sandboxes), or a program the runner runs in its
-own process through the SDK's door (`host`). Every case runs through `run.py`
+own process through the SDK's entry point (`host`). Every case runs through `run.py`
 (the python host), `run.ts` (the typescript host) and `cli.sh` (both CLIs
 and their daemons).
 
@@ -27,7 +27,7 @@ differs.
 | [`dir/`](dir/)                         | topic   | listing, `mkdir`, `rmdir`, glob and walk                                                          |
 | [`path/`](path/)                       | topic   | stat, rename, unlink, symlinks, hard links, times and modes, xattrs, the working directory        |
 | [`program/`](program/)                 | topic   | what one program gets: argv, output streams, eval                                                 |
-| [`sandbox/`](sandbox/)                 | topic   | the whole-line door every sandbox shares                                                          |
+| [`sandbox/`](sandbox/)                 | topic   | the whole-line entry point every sandbox shares                                                   |
 | [`routing/`](routing/)                 | topic   | how a line reaches a runtime                                                                      |
 | [`policy/`](policy/)                   | topic   | route policy, hooks and output limits                                                             |
 | [`config/`](config/)                   | topic   | runtime names and config fields that are refused                                                  |
@@ -40,7 +40,7 @@ differs.
 | [`quickjs/`](quickjs/)                 | runtime | QuickJS invocation, printing, argv and policy scripts                                             |
 | [`local/`](local/)                     | runtime | the host's own interpreter                                                                        |
 | [`workspace/`](workspace/)             | runtime | the in-mirage runtime: captures, lockdown, listings                                               |
-| [`host/`](host/)                       | runtime | the SDK's in-process door: `with ws:` and `patchNodeFs`                                           |
+| [`host/`](host/)                       | runtime | the SDK's in-process entry point: `with ws:` and `patchNodeFs`                                    |
 | [`sandlock/`](sandlock/)               | runtime | Landlock limits on a host process                                                                 |
 | [`apple_container/`](apple_container/) | runtime | Apple's container: stderr, sessions, an unserved cwd                                              |
 | [`e2b/`](e2b/)                         | scripts | manual checks against a live E2B sandbox, not run by the runners                                  |
@@ -77,7 +77,7 @@ because the runners run one case at a time. No CLI reaches a process's own
   `python3 -c` or `node -e`), `script` (a file under
   `integ/fixtures/runtime/`, in the folder of the same topic) or `command`
   (a whole line). A step without the runtime's language is left out of that
-  variant. A sandbox runs the plain lines. The host door's language is
+  variant. A sandbox runs the plain lines. The host entry point's language is
   `python` on the python host and `node` on the typescript host: node's own
   `fs`, where `js` is QuickJS's `std` and `os`.
 - `entry` narrows a runtime's captures or adds to its config for one case;

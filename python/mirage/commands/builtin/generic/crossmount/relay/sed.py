@@ -32,7 +32,7 @@ async def run_sed(
     GNU sed 4.9 keeps filenames and file boundaries for F and -s, and
     shares its output files and quit state even under -i. The executor
     already expanded the operands; every read and write uses their
-    owning mount's dispatcher door.
+    owning mount's dispatcher.
 
     Args:
         scopes (list[PathSpec]): Expanded operands, in order.

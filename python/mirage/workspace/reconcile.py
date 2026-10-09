@@ -70,7 +70,7 @@ class Reconciler:
     command's own stat of the operand, reuse it instead of asking again. A
     write in the command, the clear after an external program, or a re-list
     that finds the path gone retires it, and a read outside any command (FUSE,
-    the op door) never sees it.
+    the dispatcher) never sees it.
     """
 
     def __init__(self, cache: FileCacheMixin, namespace: Namespace) -> None:

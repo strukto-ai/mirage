@@ -64,7 +64,7 @@ def parent_hierarchy(monkeypatch):
     ],
 )
 @pytest.mark.parametrize("change", ["title", "parent", "trash", "archived"])
-async def test_row_validation_applies_to_every_door(
+async def test_row_validation_applies_to_every_entry_point(
     monkeypatch, operation, suffix, change
 ):
     page = {

@@ -87,7 +87,7 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
  * because the workspace owns the tasks: teardown must stop every job in
  * every session (`killAll`), snapshot capture reads every finished one
  * (`allJobs`), and a disowned job keeps running after its shell forgot
- * it. Those are the only cross-session doors; every other method takes
+ * it. Those are the only cross-session views; every other method takes
  * the session whose list it reads, and the empty session id is the list
  * a caller with no session (a bare table in a test) shares.
  */
@@ -248,7 +248,7 @@ export class JobTable {
   }
 
   /**
-   * Every session's jobs, for the workspace-wide doors only. Snapshot
+   * Every session's jobs, for the workspace-wide entry points only. Snapshot
    * capture and the server summary read this; a shell builtin never
    * does, since bash lists only its own jobs.
    */
@@ -310,7 +310,7 @@ export class JobTable {
    * up, and a later shell that reuses the same id starts from an empty
    * list numbered from 1 rather than inheriting jobs it never launched,
    * under a profile it may not share. Session closure revokes process
-   * doors and stops disowned runners too.
+   * entry points and stops disowned runners too.
    */
   async closeSession(sessionId: string): Promise<Job[]> {
     const running = this.runningJobs(sessionId)

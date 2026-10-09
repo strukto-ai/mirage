@@ -26,9 +26,9 @@ import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { ChromaVFS } from './chroma.ts'
 
-describe('chroma op door under read: fresh', () => {
+describe('chroma dispatcher under read: fresh', () => {
   // chroma lists from one tree document, so a refused listing refetches the
-  // whole tree. A burst through the op door belongs to no shell command;
+  // whole tree. A burst through the dispatcher belongs to no shell command;
   // fresh trusts its own refill for the window instead of refetching per call.
   it('fetches the tree once for a burst', async () => {
     const fetch = vi.mocked(clientMod.fetchPathTree)

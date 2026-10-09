@@ -24,11 +24,11 @@ import { compileSpec } from '../spec/compile.ts'
 import { CommandSpec, type CommandSpecInit, type FlagValue, UsageStyle } from '../spec/types.ts'
 
 /**
- * One door per state plane, for the CLI verb that needs one.
+ * One entry point per state plane, for the CLI verb that needs one.
  *
  * Most CLIs want none of this: an account CLI reaches a service and has
  * no filesystem, while `git`'s whole subject is a repository that lives
- * on a mount. So this rides `CLIInvocation.doors` and is absent outside a
+ * on a mount. So this rides `CLIInvocation.view` and is absent outside a
  * workspace (a spec exercised directly in a test), and a verb that never
  * reads it cannot touch a mount. That is the same opt-in a declared
  * parameter gave, moved onto the one record every leaf already takes.
@@ -38,7 +38,7 @@ import { CommandSpec, type CommandSpecInit, type FlagValue, UsageStyle } from '.
  * from a command handler must be spelled the same way, or the two tiers
  * grow separate vocabularies for one plane.
  */
-export interface CLIDoors {
+export interface CLIView {
   /**
    * The workspace op dispatcher. A CLI routes by name rather than by operand,
    * so nothing hands it an accessor; a verb that works over a mount (git over a
@@ -54,7 +54,7 @@ export interface CLIDoors {
    */
   statPath?: StatPath
   /**
-   * The name plane's door, holding the facts no backend can see: symlinks,
+   * The namespace view, holding the facts no backend can see: symlinks,
    * mount boundaries, the attr overlay, the child names the namespace owes a
    * directory. A verb that walks a tree itself needs this or it silently
    * cannot see a link, the way `git status` could not. `ns.mounts.rootOf` is
@@ -64,7 +64,7 @@ export interface CLIDoors {
    */
   ns?: NamespaceView
   /**
-   * The session plane's door, live and gated for both reads and writes.
+   * The session view, live and gated for both reads and writes.
    * `inv.env` stays the frozen process view, which is what a script or native
    * handler maps onto a real process environment; a verb that wants liveness,
    * or wants to write, reads this instead. Env is not a mount, so an account
@@ -82,7 +82,7 @@ export interface CLIDoors {
  * substrate can express. Narrower than CommandOpts on purpose: a CLI
  * consults no mount, so there is no VFS, no mount prefix, and no
  * filetype cascade; the config carries whatever the handler needs, and a
- * verb whose subject is files reads `doors`.
+ * verb whose subject is files reads `view`.
  */
 export interface CLIInvocation<ConfigT = unknown> {
   /** The installation's validated config, null without a configModel. */
@@ -102,15 +102,15 @@ export interface CLIInvocation<ConfigT = unknown> {
   /**
    * The session's environment variables, as one frozen process-view
    * snapshot. A leaf that wants the live, gated handle reads
-   * `doors.sessionView`.
+   * `view.sessionView`.
    */
   env: Readonly<Record<string, string>>
   /**
-   * The workspace doors a mount-reading verb needs (`git`), absent
+   * The workspace entry points a mount-reading verb needs (`git`), absent
    * outside a workspace and for every CLI that reaches a service instead
    * of a filesystem.
    */
-  doors?: CLIDoors
+  view?: CLIView
   /**
    * The leaf the line resolved to, the grammar its argv was parsed
    * against. A verb reads it to answer in its original's terms (git names
@@ -188,7 +188,7 @@ export class CLISpec extends CommandSpec {
   /**
    * Root only, and the root stands alone (no fn, no subcommands). The
    * program that serves the whole install, embedded from a YAML
-   * `script:` path at load; config is the only door for script source,
+   * `script:` path at load; config is the only entry point for script source,
    * in code a leaf carries `fn`.
    */
   readonly script: ScriptSource | null

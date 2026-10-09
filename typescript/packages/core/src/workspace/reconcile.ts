@@ -75,7 +75,7 @@ enum Verdict {
  * rest of the command, so the gate, and the command's own stat of the
  * operand, reuse it instead of asking again. A write in the command, the
  * clear after an external program, or a re-list that finds the path gone
- * retires it, and a read outside any command (FUSE, the op door) never sees
+ * retires it, and a read outside any command (FUSE, the dispatcher) never sees
  * it.
  */
 export class Reconciler {
@@ -115,8 +115,8 @@ export class Reconciler {
         // probeOrUnknown would reach the same verdict, but it would also log
         // every read: this is a permanent capability of the mount, not an
         // anomaly worth a log line each time. isMissingOp, not a bare ENOTSUP
-        // check: python catches OperationNotSupportedError, which only the op
-        // door raises, and `stat` is the only op probed here -- so a backend
+        // check: python catches OperationNotSupportedError, which only the
+        // dispatcher raises, and `stat` is the only op probed here -- so a backend
         // that stamps ENOTSUP itself takes the logged path on both sides.
         if (isMissingOp(err, 'stat')) {
           await this.cache.remove(path)

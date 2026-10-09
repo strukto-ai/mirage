@@ -41,8 +41,8 @@ async def _ws_mount():
 
 
 async def _dispatch_read(ws):
-    # Op caps are policy and fire at the op doors, not inside
-    # Mount.call; route through the dispatcher door.
+    # Op caps are policy and fire at the dispatcher, not inside
+    # Mount.call; route through the dispatcher.
     result, _ = await ws._dispatcher.dispatch(
         "read", PathSpec.from_str_path("/data/f.txt")
     )

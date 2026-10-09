@@ -338,7 +338,7 @@ async def test_structure_only_chain_descends_under_recursive():
 
 @pytest.mark.asyncio
 async def test_a_child_mount_row_falls_back_to_directory_with_no_dispatcher():
-    """Absence of the door can only mean "nobody can answer", so the row
+    """Absence of the dispatcher can only mean "nobody can answer", so the row
     keeps the shape every caller outside a workspace already saw."""
     tree = {"/base": _dir("base")}
     readdir, stat = _make_fs_backend(tree)

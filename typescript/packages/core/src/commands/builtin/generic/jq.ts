@@ -595,8 +595,8 @@ export async function jqGeneric(
   const toSpec = pathSpecFactory(paths, opts)
   const programFile = programFileOf(fl, toSpec)
   // -f, --rawfile and --slurpfile route nothing (the executor's FILE_KEYS and
-  // DOOR_FLAG_KEYS), so a file may sit on another mount than the operands: it
-  // is read through the door. jq opens it by name, so /dev/stdin is the
+  // DISPATCH_FLAG_KEYS), so a file may sit on another mount than the operands: it
+  // is read through the dispatcher. jq opens it by name, so /dev/stdin is the
   // invocation's own stdin and `-` is a file named `-`.
   const readFlagFile = (path: PathSpec): Promise<Uint8Array> => {
     if (isStdin(path, false)) return materialize(readInput(path))

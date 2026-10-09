@@ -154,7 +154,7 @@ describe('dispatch resolves a rendered filetype by path extension', () => {
 
 describe('unlink of a namespace link', () => {
   it('removes the link, which no backend can see', async () => {
-    // The door creates links (`symlink`), so it has to remove them too: a
+    // The dispatcher creates links (`symlink`), so it has to remove them too: a
     // link has no backend entry, so forwarding the unlink reaches a backend
     // that has never heard of the name and answers ENOENT, leaving the link
     // in place. That is what left `git checkout` unable to drop a link the
@@ -315,7 +315,7 @@ describe('the node table answers every verb that names a link', () => {
   })
 
   it('refuses a symlink onto a name that is taken', async () => {
-    // symlink(2) is EEXIST on an occupied name, and only the door can
+    // symlink(2) is EEXIST on an occupied name, and only the dispatcher can
     // tell: a file and a directory are the backend's, a link is the node
     // table's, and a mount root is the registry's. Unchecked, the node
     // went on top and buried whatever was there.
@@ -629,7 +629,7 @@ describe('a failed backend probe is not evidence of absence', () => {
       { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      // The door probes the name before linking over it. A backend that
+      // The dispatcher probes the name before linking over it. A backend that
       // cannot answer has not reported the name free, so the link must not
       // be created on the strength of that failure.
       await expect(
@@ -679,7 +679,7 @@ describe('a failed backend probe is not evidence of absence', () => {
   }, 30_000)
 })
 
-describe('the door answers extended attributes from the node table', () => {
+describe('the dispatcher answers extended attributes from the node table', () => {
   const open = async (): Promise<Workspace> => {
     const parser = await getTestParser()
     const ws = new Workspace(
@@ -736,7 +736,7 @@ describe('the door answers extended attributes from the node table', () => {
   })
 
   it('drops them with the file and carries them through a rename', async () => {
-    // Removed through the door rather than the shell's rm, the node
+    // Removed through the dispatcher rather than the shell's rm, the node
     // stayed, and a file created at the name next read back the old
     // file's attributes.
     const ws = await open()
@@ -1094,10 +1094,10 @@ const text = async (ws: Workspace, virtual: string): Promise<string> =>
 
 const spec = (virtual: string): PathSpec => PathSpec.fromStrPath(virtual)
 
-describe('a marked op is judged on the paths the door reaches', () => {
-  // Each spelling once, in the order the door meets it: as handed in,
+describe('a marked op is judged on the paths the dispatcher reaches', () => {
+  // Each spelling once, in the order the dispatcher meets it: as handed in,
   // walked, then followed. A refused op leaves the bytes alone; an unmarked
-  // one is the door's alone.
+  // one is the dispatcher's alone.
   it('judges every spelling once', async () => {
     const ws = await linkedWs()
     try {
@@ -1191,7 +1191,7 @@ describe('a marked op is judged on the paths the door reaches', () => {
     }
   })
 
-  // The door lifts the mark at entry: the mount's op sees only its own
+  // The dispatcher lifts the mark at entry: the mount's op sees only its own
   // arguments. A null mark is no mark, as Python's rule_gate=None.
   it('never forwards the mark to the op', async () => {
     const ws = await linkedWs()
@@ -1697,7 +1697,7 @@ describe('a streamed read', () => {
   })
 })
 
-describe('a command reads at the door', () => {
+describe('a command reads at the dispatcher', () => {
   it.each([
     'cat /d/a.txt',
     'head -n 1 /d/a.txt',

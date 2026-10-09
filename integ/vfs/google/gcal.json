@@ -157,7 +157,7 @@
       }
     },
     {
-      "id": "gc_cp_reads_an_event_through_the_op_door",
+      "id": "gc_cp_reads_an_event_through_the_dispatcher",
       "seq": 570012,
       "targets": [
         "gcal"
@@ -170,7 +170,7 @@
       }
     },
     {
-      "id": "gc_cp_reads_calendar_json_through_the_op_door",
+      "id": "gc_cp_reads_calendar_json_through_the_dispatcher",
       "seq": 570013,
       "targets": [
         "gcal"

@@ -59,7 +59,7 @@ async def _fatal_index(
     Args:
         context (EvaluationContext): the session the subscript reads.
         subscript (str): the raw subscript text.
-        view (SessionView | None): the gated door.
+        view (SessionView | None): the gated session view.
     """
     session = context.session
     try:
@@ -81,7 +81,7 @@ async def _fatal_index_literal(
         items (list[str]): the expanded element words.
         append (bool): extend rather than replace.
         index_of (Callable[[str], Awaitable[int]]): the subscript
-            resolver, bound to the session and door.
+            resolver, bound to the session and its view.
     """
     try:
         return await build_indexed_literal(held, items, append, index_of)
@@ -95,16 +95,16 @@ async def _assign_var(
     value: ShellValue,
     assigned: frozenset[int | str] | None = None,
 ) -> None:
-    """One assignment through the session door; denial is fatal.
+    """One assignment through the session view; denial is fatal.
 
     Every assignment spelling (scalar, array literal, subscript,
     append) computes its resulting value and stores through
     ``view.set``, so the gate and the storage invariant live in the
-    door, not here. Denial mirrors the readonly case: a fatal
+    session view, not here. Denial mirrors the readonly case: a fatal
     variable-assignment error that abandons the rest of the line.
 
     Args:
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         key (str): the variable being written.
         value (ShellValue): the resulting value to store.
         assigned (frozenset[int | str] | None): the elements written,
@@ -141,7 +141,7 @@ async def expand_array_items(
         cs (CallStack | None): function-call scope, if any.
     """
     session = context.session
-    # The session plane's door, bound once for the line: every
+    # The session view, bound once for the line: every
     # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
     # so a pre_session rule governs those exactly as it governs `X=d`.
     view = session_view(
@@ -190,7 +190,7 @@ async def _subscript_key_text(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         cs (CallStack | None): shell call stack.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
     """
     inner = [
         sc
@@ -218,7 +218,7 @@ async def execute_assignment(
 
     Every spelling -- scalar, array literal, subscript, append -- is
     computed with bash's own mechanics on a copy of the held value and
-    then stored through the session door, which owns the admission gate
+    then stored through the session view, which owns the admission gate
     and the scalar/array invariant.
 
     Args:
@@ -268,7 +268,7 @@ async def execute_assignment(
     ]
     # Every branch below computes its resulting value with bash's
     # own mechanics on a copy, then stores through the one session
-    # door, which owns the gate and the scalar/array invariant.
+    # view, which owns the gate and the scalar/array invariant.
     view = session_view(
         session,
         namespace.registry.policies,

@@ -154,7 +154,7 @@ class ArithResult:
         value (int): the expression's value.
         writes (tuple[ArithWrite, ...]): the assignments made, one per
             target, in the order of each target's last write, for the
-            caller to land through the session door. Bare and
+            caller to land through the session view. Bare and
             subscripted targets share the one sequence, because a bare
             name aliases element 0 and ``((a[0]=1, a=2))`` has to
             leave 2.

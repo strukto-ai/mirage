@@ -91,7 +91,7 @@ class TestPatchedOpen:
     ],
 )
 def test_open_refuses_what_ws_vfs_refuses(path, mode, code):
-    # A hide, a read-only mount and a path rule: both doors ask the
+    # A hide, a read-only mount and a path rule: both entry points ask the
     # dispatcher, so the one refusal comes back through either, open()'s
     # as the class CPython builds for its errno.
     ws = Workspace(

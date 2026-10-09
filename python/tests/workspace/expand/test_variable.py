@@ -144,7 +144,8 @@ async def test_arith_operand_resolves_expressions_and_applies_writes():
     with pytest.raises(ExitSignal) as caught:
         await operand.value("notanum;")
     assert caught.value.stderr.startswith(b"bash: v: notanum;: ")
-    # The next bound and its expansions see the assignment through the door.
+    # The next bound and its expansions see the assignment through the entry
+    # point.
     assert await operand.value("x=1") == 1
     assert await operand.value("x+1") == 2
     assert session.env["x"] == "1"

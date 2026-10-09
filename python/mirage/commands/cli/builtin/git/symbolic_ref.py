@@ -57,7 +57,7 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
@@ -202,13 +202,13 @@ async def symbolic_ref(
         inv (CLIInvocation[None]): the line's invocation record.
     """
     fl = FlagView(inv.flags)
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
     try:
         if dispatch is None:
             raise NoWorkspaceError()
         check_switches(inv, inv.texts)
-        _, location = await opened(fl, doors)
+        _, location = await opened(fl, view)
         message = fl.as_str("m")
         if message == "":
             raise EmptyUpdateMessageError()
@@ -239,7 +239,7 @@ async def symbolic_ref(
                 raise HeadOutsideRefsError()
             if not whole_ref_name(target):
                 raise InvalidSymbolicTargetError(name, target)
-            who = identity(fl, doors.session_view)
+            who = identity(fl, view.session_view)
             await set_symbolic(
                 dispatch, location, table, name, target, who, message or ""
             )

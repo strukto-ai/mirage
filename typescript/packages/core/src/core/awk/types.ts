@@ -20,7 +20,7 @@ export interface CommandRun {
 }
 
 /**
- * The doors an awk program reaches the world through: the main input
+ * The entry points an awk program reaches the world through: the main input
  * operands, `getline < file`, output redirection and the command pipes.
  * A failure to open, read or write raises `AwkIOError`.
  */

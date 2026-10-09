@@ -348,7 +348,7 @@ async def test_workspace_execution_end_to_end():
     assert (await ws.stat("/wiki/notes.md")).size == 18
 
 
-def test_a_plugin_serves_its_reads_at_the_door():
+def test_a_plugin_serves_its_reads_at_the_dispatcher():
     assert served(make_vfs()) == {"glob", "read", "readdir", "stat"}
 
 
@@ -471,8 +471,8 @@ async def test_builtin_and_custom_writes_obey_mount_mode(custom):
 
 
 async def _read_cli(inv):
-    assert inv.doors is not None and inv.doors.dispatch is not None
-    return await inv.doors.dispatch("read", inv.paths[0])
+    assert inv.view is not None and inv.view.dispatch is not None
+    return await inv.view.dispatch("read", inv.paths[0])
 
 
 @pytest.mark.asyncio

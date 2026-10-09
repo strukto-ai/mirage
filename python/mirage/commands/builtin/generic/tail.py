@@ -376,7 +376,7 @@ async def _polled_window(
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
-    """A follow poll's read: what the backend holds now, at the door.
+    """A follow poll's read: what the backend holds now, at the dispatcher.
 
     A direct read, never served from the file cache nor kept in it: the
     poll looks for exactly the bytes a cached copy does not have yet.
@@ -769,7 +769,7 @@ async def tail_generic(
                 io.exit_code = 1
                 return None, io
             # The first print reads like any other tail; the polls ask
-            # the door for what the backend holds now, past the file
+            # the dispatcher for what the backend holds now, past the file
             # cache and past the stat the command's freshness probe kept:
             # they look for exactly the change neither has yet.
             poll_stat, poll_read, poll_range = stat, stream, read_range

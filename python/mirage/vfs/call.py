@@ -21,7 +21,7 @@ Fn = TypeVar("Fn", bound=Callable[..., Any])
 
 _MARK = "__vfs_call__"
 
-# Removing or moving a name is what these calls do, and the door's link,
+# Removing or moving a name is what these calls do, and the dispatcher's link,
 # overlay and cache bookkeeping for it is keyed on their names.
 _NAMED = {Effect.REMOVE: ("unlink", "rmdir"), Effect.RENAME: ("rename",)}
 
@@ -32,17 +32,17 @@ def vfs_call(
     """Make a VFS method callable by name through the dispatcher.
 
     ``ws.dispatch("search_abc", path, ...)`` reaches a method marked here
-    through every check the door runs: hidden paths, path rules, the
-    mount's mode and admission policies. The effect tells the door what
+    through every check the dispatcher runs: hidden paths, path rules, the
+    mount's mode and admission policies. The effect tells the dispatcher what
     the call does to the mount, so a read-only mount refuses a write and
     a policy judges it as one. A subclass overriding a marked method
     keeps the mark, so a backend writes its ``read`` without repeating it.
 
-    The built-in functions' marks are where the door's op classes come
+    The built-in functions' marks are where the dispatcher's op classes come
     from: which ops follow a link, create a name, run one at a time per
     path or stamp an mtime is read off what they declare here. REMOVE
     belongs to ``unlink`` and ``rmdir`` and RENAME to ``rename``: what
-    the door does around them (a link removed rather than followed, a
+    the dispatcher does around them (a link removed rather than followed, a
     rename refused when it would bring hidden entries into view, the
     links and cache below a moved directory) is keyed on those names, so
     another function declaring either is refused. A VFS that deletes or

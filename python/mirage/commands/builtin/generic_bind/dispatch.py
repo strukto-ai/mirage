@@ -49,7 +49,7 @@ def dispatch_io(
 
     A listing here answers the way a backend's does, which is what every
     generic is written against: no backend stores a link, and the
-    generics merge the namespace's own from ``ns.links``, so the door's
+    generics merge the namespace's own from ``ns.links``, so the dispatcher's
     copy would be a second row (find) or a followed stat (ls).
 
     Args:

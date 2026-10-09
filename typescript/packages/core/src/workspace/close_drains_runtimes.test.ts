@@ -73,12 +73,12 @@ describe('Workspace.close', () => {
   // `closed` is only set once teardown finishes, so that a runtime can still
   // replay its journal. That would otherwise leave a window where a caller
   // could start a job after killAll, or add a mount after the close list was
-  // taken, so the public doors check that a close is under way.
+  // taken, so the public entry points check that a close is under way.
   it('refuses new work as soon as close starts', async () => {
     const ws = build()
     const closing = ws.close()
     expect(() => ws.addMount('/late', new RAMVFS())).toThrow('Workspace is closed')
-    // The top-level door too: a line that got in here could submit a
+    // The top-level entry point too: a line that got in here could submit a
     // background job after killAll had already run, and teardown would close
     // resources out from under it.
     await expect(ws.shell('echo hi')).rejects.toThrow('Workspace is closed')

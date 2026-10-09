@@ -49,13 +49,13 @@ type Write = (p: PathSpec, data: Uint8Array) => Promise<void>
  * on another mount works as it does for awk's redirections, and through
  * this mount's own read and write otherwise.
  */
-interface SedDoors {
+interface ScriptFiles {
   virtual(name: string): string
   read(name: string): Promise<Uint8Array>
   write(name: string, data: Uint8Array): Promise<void>
 }
 
-function sedDoors(opts: CommandOpts, stream: Stream, write: Write): SedDoors {
+function scriptFiles(opts: CommandOpts, stream: Stream, write: Write): ScriptFiles {
   const prefix = opts.mountPrefix !== undefined ? rstripSlash(opts.mountPrefix) : ''
   const spec = (name: string): PathSpec => {
     const resolved = resolvePath(name, opts.cwd)
@@ -110,11 +110,14 @@ function editFailure(name: string, err: unknown): string {
 
 // Truncate the `w` files as GNU opens them when it compiles the script,
 // in order; the first that cannot be opened is GNU's panic.
-async function openWriteFiles(names: readonly string[], doors: SedDoors): Promise<string | null> {
+async function openWriteFiles(
+  names: readonly string[],
+  access: ScriptFiles,
+): Promise<string | null> {
   for (const name of names) {
     if (name === SED_STDOUT || name === SED_STDERR) continue
     try {
-      await doors.write(name, new Uint8Array())
+      await access.write(name, new Uint8Array())
     } catch (err) {
       if (!isFsError(err)) throw err
       return openFailure(name, err)
@@ -129,13 +132,13 @@ async function openWriteFiles(names: readonly string[], doors: SedDoors): Promis
 // text, under a UTF-8 locale.
 async function readScriptFiles(
   names: readonly string[],
-  doors: SedDoors,
+  access: ScriptFiles,
   utf8: boolean,
 ): Promise<Map<string, SedFileContent>> {
   const files = new Map<string, SedFileContent>()
   for (const name of names) {
     try {
-      files.set(name, { text: byteView(await doors.read(name), utf8) })
+      files.set(name, { text: byteView(await access.read(name), utf8) })
     } catch (err) {
       if (!isFsError(err)) throw err
       const code = (err as { code?: string }).code
@@ -152,15 +155,15 @@ async function readScriptFiles(
 // keeps the edit: GNU's stream still points at the file -i renamed over.
 async function flushWriteFiles(
   machine: SedMachine,
-  doors: SedDoors,
+  access: ScriptFiles,
   utf8: boolean,
   edited: ReadonlySet<string> = new Set(),
 ): Promise<string> {
   let err = ''
   for (const [name, out] of machine.wfiles) {
-    if (out.chunks.length === 0 || edited.has(doors.virtual(name))) continue
+    if (out.chunks.length === 0 || edited.has(access.virtual(name))) continue
     try {
-      await doors.write(name, fromByteView(out.chunks.join(''), utf8))
+      await access.write(name, fromByteView(out.chunks.join(''), utf8))
     } catch (e) {
       if (!isFsError(e)) throw e
       err += openFailure(name, e)
@@ -269,7 +272,7 @@ export async function sedGeneric(
   if (pieces.length === 0 && texts[0] !== undefined) pieces.push({ kind: 'expr', text: texts[0] })
   if (pieces.length === 0) return failed(`${SED_MISSING_SCRIPT}\n`, 1)
 
-  const doors = sedDoors(opts, stream, write)
+  const access = scriptFiles(opts, stream, write)
   const utf8 = utf8Locale(opts.env)
   let program: SedProgram
   try {
@@ -277,21 +280,21 @@ export async function sedGeneric(
     program = compileScript(pieces, parsed.extended, utf8)
   } catch (err) {
     if (!(err instanceof SedError)) throw err
-    const refused = await openWriteFiles(err.wfiles, doors)
+    const refused = await openWriteFiles(err.wfiles, access)
     return failed(refused ?? `${err.message}\n`, refused === null ? err.exitCode : 4)
   }
-  const refused = await openWriteFiles(program.wfiles, doors)
+  const refused = await openWriteFiles(program.wfiles, access)
   if (refused !== null) return failed(refused, 4)
   const machine = new SedMachine(program, {
     suppress: parsed.suppress,
     separate: inPlace || parsed.separate,
     lineLength: parsed.lineLength,
-    files: await readScriptFiles(program.rfiles, doors, utf8),
-    readerFiles: await readScriptFiles(program.readerFiles, doors, utf8),
+    files: await readScriptFiles(program.rfiles, access, utf8),
+    readerFiles: await readScriptFiles(program.readerFiles, access, utf8),
     utf8,
   })
 
-  if (inPlace) return runInPlace(paths, program, machine, doors, stream, write, utf8)
+  if (inPlace) return runInPlace(paths, program, machine, access, stream, write, utf8)
 
   const inputs: SedInput[] = []
   if (paths.length === 0) {
@@ -329,7 +332,7 @@ export async function sedGeneric(
     }
   }
   machine.process(inputs, true)
-  const writeErr = await flushWriteFiles(machine, doors, utf8)
+  const writeErr = await flushWriteFiles(machine, access, utf8)
   const stderr = machine.stderr() + writeErr
   return [
     fromByteView(machine.stdout.chunks.join(''), utf8),
@@ -349,7 +352,7 @@ async function runInPlace(
   paths: PathSpec[],
   program: SedProgram,
   machine: SedMachine,
-  doors: SedDoors,
+  access: ScriptFiles,
   stream: Stream,
   write: Write,
   utf8: boolean,
@@ -373,7 +376,7 @@ async function runInPlace(
       continue
     }
     // An `r` file edited by an earlier file of this command reads new.
-    if (edited.length > 0) machine.setFiles(await readScriptFiles(program.rfiles, doors, utf8))
+    if (edited.length > 0) machine.setFiles(await readScriptFiles(program.rfiles, access, utf8))
     const out = machine.process([{ name: p.rawPath, text: byteView(data, utf8) }], false)
     if (machine.panicCode !== null) break
     const newData = fromByteView(out, utf8)
@@ -389,7 +392,7 @@ async function runInPlace(
     edited.push(p.mountPath)
     editedVirtual.add(p.virtual)
   }
-  const writeErr = await flushWriteFiles(machine, doors, utf8, editedVirtual)
+  const writeErr = await flushWriteFiles(machine, access, utf8, editedVirtual)
   const stderr = err + machine.stderr() + writeErr
   const exitCode =
     machine.panicCode ?? (writeErr !== '' ? 4 : code === 4 ? 4 : code || machine.exitCode())

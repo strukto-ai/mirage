@@ -91,9 +91,11 @@ def test_assignment_later_unbraced_var_stays_one_assignment():
 @pytest.mark.parametrize(
     ("command", "words"),
     [
-        # A `$` bash keeps literal is left alone: no name character follows.
+        # A `$` bash keeps literal is left alone: no expansion opens after it.
         ("echo a$ b", ["echo", "a$", "b"]),
         ("echo $", ["echo", "$"]),
+        ("echo x $\\a $,y", ["echo", "x", "$\\a", "$,y"]),
+        ("echo x $\\ a a$\\b", ["echo", "x", "$\\ a", "a$\\b"]),
     ],
 )
 def test_literal_dollar_words_stay_untouched(command, words):

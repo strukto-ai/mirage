@@ -72,12 +72,12 @@ export async function iconvMultibyteDigests(
 }
 
 /**
- * A VFS called the way a mount calls it: through the op door, one index
+ * A VFS called the way a mount calls it: through the dispatcher, one index
  * store per instance, so a driver can be exercised without a Workspace. A
  * verb the VFS does not answer is a `no op registered` error, the same
  * answer a mount gives.
  */
-class DoorOps {
+class MountedVFS {
   readonly index: IndexCacheStore
   private readonly mount: MountEntry
 
@@ -86,7 +86,7 @@ class DoorOps {
     this.mount = new MountEntry({ prefix: '/', vfs, mode: MountMode.WRITE })
   }
 
-  /** Whether the door answers `name` on this VFS. */
+  /** Whether the dispatcher answers `name` on this VFS. */
   has(name: string): boolean {
     return this.mount.answers(name)
   }
@@ -150,13 +150,13 @@ class DoorOps {
   }
 }
 
-const TABLES = new WeakMap<BaseVFS, DoorOps>()
+const TABLES = new WeakMap<BaseVFS, MountedVFS>()
 
-/** The op door of `vfs`, bound once per instance so its index store persists across calls. */
-export function ops(vfs: BaseVFS): DoorOps {
+/** The dispatcher of `vfs`, bound once per instance so its index store persists across calls. */
+export function ops(vfs: BaseVFS): MountedVFS {
   let table = TABLES.get(vfs)
   if (table === undefined) {
-    table = new DoorOps(vfs)
+    table = new MountedVFS(vfs)
     TABLES.set(vfs, table)
   }
   return table

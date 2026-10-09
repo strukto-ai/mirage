@@ -849,7 +849,7 @@
         "stdout": "",
         "stderr": "sed: -e expression #1, char 1: `e' command not supported\n"
       },
-      "note": "GNU sed runs `e` through popen (debian:stable-slim prints hi before each line); mirage has no door to run a shell command from inside sed and refuses it where GNU compiles it, in the words of GNU's no-popen build."
+      "note": "GNU sed runs `e` through popen (debian:stable-slim prints hi before each line); mirage has no entry point to run a shell command from inside sed and refuses it where GNU compiles it, in the words of GNU's no-popen build."
     }
   ]
 }

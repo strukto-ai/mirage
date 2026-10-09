@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// The package's front door, and only that: the names a program reaches
+// The package's entry point, and only that: the names a program reaches
 // for first. Everything else in core is reached by module path, the way
 // `mirage.vfs.s3` is in Python -- the `./*` subpath map means no
 // symbol needs a line here to be importable.

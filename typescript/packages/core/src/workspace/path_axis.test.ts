@@ -21,7 +21,7 @@ import { runWithSession } from '../context/session_context.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
 import { Session, Workspace } from './workspace/workspace.ts'
 
-/** Refuse the unlink of one exact path, whatever door asked. */
+/** Refuse the unlink of one exact path, whatever entry point asked. */
 class DenyRemnantUnlink implements Policy {
   preVfs(ctx: VfsContext): Action | null {
     if (ctx.op === 'unlink' && ctx.path.virtual === '/a/d/sec/k') {
@@ -154,14 +154,14 @@ describe('the path axis end to end', () => {
     expect(stdoutStr(await ws.shell('cat /repo/secrets/key.pem'))).toBe('PRIVATE needle\n')
   })
 
-  it('the op door runs as the default session', async () => {
+  it('the dispatcher runs as the default session', async () => {
     // `ws.vfs`, `ws.dispatch`, `ws.stat` and `ws.readdir` are judged
     // under the default session's profile, the way a bare `shell`
     // is, so an agent whose file tool reads through the facade is
     // confined like its shell. A session already bound is kept, and
-    // A handle runs the same door as another session over the
+    // A handle runs the same entry point as another session over the
     // same ledger; a session with an explicit empty profile is the
-    // host's door to what the default profile hides.
+    // host's entry point to what the default profile hides.
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/data': [new RAMVFS(), MountMode.WRITE] as const },
@@ -174,11 +174,11 @@ describe('the path axis end to end', () => {
     )
     open.push(ws)
     const host = ws.createSession('host', { profile: parseSessionProfile({}) })
-    const door = new Session(ws, host.sessionId).vfs
-    expect(door.records).toBe(ws.vfs.records)
-    await door.mkdir('/data/vault')
-    await door.write('/data/vault/secret', 'top\n')
-    expect(await door.cat('/data/vault/secret')).toBe('top\n')
+    const files = new Session(ws, host.sessionId).vfs
+    expect(files.records).toBe(ws.vfs.records)
+    await files.mkdir('/data/vault')
+    await files.write('/data/vault/secret', 'top\n')
+    expect(await files.cat('/data/vault/secret')).toBe('top\n')
     await expect(ws.vfs.read('/data/vault/secret')).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(ws.stat('/data/vault')).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(ws.dispatch('read', '/data/vault/secret')).rejects.toMatchObject({
@@ -191,9 +191,9 @@ describe('the path axis end to end', () => {
     })
   })
 
-  it("the op door does not adopt another workspace's session", async () => {
+  it("the dispatcher does not adopt another workspace's session", async () => {
     // A session bound by another workspace describes that workspace:
-    // an embedder callback reaching this door from inside the other's
+    // an embedder callback reaching this entry point from inside the other's
     // line runs as this workspace's default session, not as the wider
     // session it arrived under. A binding that names no owner is a
     // deliberate placement (a kernel mount binds one that way) and is
@@ -207,16 +207,16 @@ describe('the path axis end to end', () => {
     const wide = other.createSession('wide', { profile: parseSessionProfile({}) })
     const ws = await hiding()
     const host = ws.createSession('host', { profile: parseSessionProfile({}) })
-    const door = new Session(ws, host.sessionId).vfs
-    await door.mkdir('/data/vault')
-    await door.write('/data/vault/secret', 'top\n')
+    const files = new Session(ws, host.sessionId).vfs
+    await files.mkdir('/data/vault')
+    await files.write('/data/vault/secret', 'top\n')
     await runWithSession(
       wide,
       async () => {
         await expect(ws.vfs.read('/data/vault/secret')).rejects.toMatchObject({
           code: 'ENOENT',
         })
-        expect(await door.cat('/data/vault/secret')).toBe('top\n')
+        expect(await files.cat('/data/vault/secret')).toBe('top\n')
       },
       { owner: other.sessionManager },
     )
@@ -225,25 +225,25 @@ describe('the path axis end to end', () => {
     })
   })
 
-  it('the op door does not follow a link the session cannot see', async () => {
-    // The facade follows links before the door so the record carries
+  it('the dispatcher does not follow a link the session cannot see', async () => {
+    // The facade follows links before the dispatcher so the record carries
     // the resolved path, and that follow used to run unbound: a link
-    // inside hidden space reached the door already resolved to its
-    // visible target, so the door's check of the typed path never saw
+    // inside hidden space reached the dispatcher already resolved to its
+    // visible target, so the dispatcher's check of the typed path never saw
     // the hide. The follow now runs as the session and only from a
     // path it can see, so the link reads as absent.
     const ws = await hiding()
     const host = ws.createSession('host', { profile: parseSessionProfile({}) })
-    const door = new Session(ws, host.sessionId).vfs
-    await door.write('/data/pub.txt', 'pub\n')
-    await door.mkdir('/data/vault')
-    await door.symlink('/data/vault/lk', '/data/pub.txt')
-    expect(await door.cat('/data/vault/lk')).toBe('pub\n')
+    const files = new Session(ws, host.sessionId).vfs
+    await files.write('/data/pub.txt', 'pub\n')
+    await files.mkdir('/data/vault')
+    await files.symlink('/data/vault/lk', '/data/pub.txt')
+    expect(await files.cat('/data/vault/lk')).toBe('pub\n')
     await expect(ws.vfs.read('/data/vault/lk')).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(ws.vfs.write('/data/vault/lk', 'x\n')).rejects.toMatchObject({
       code: 'ENOENT',
     })
-    expect(await door.cat('/data/pub.txt')).toBe('pub\n')
+    expect(await files.cat('/data/pub.txt')).toBe('pub\n')
   })
 
   it('a write below the mode reads Read-only file system', async () => {
@@ -256,8 +256,8 @@ describe('the path axis end to end', () => {
   it('a deeper show mode refines the mount cap', async () => {
     // mounts: {/repo: r} + show {"/repo/build": rw}: the deeper entry
     // wins below its anchor, the mount cap holds everywhere else, and
-    // the whole-mount write command gate lets the line reach the op
-    // door instead of refusing the command outright.
+    // the whole-mount write command gate lets the line reach the
+    // dispatcher instead of refusing the command outright.
     const ws = await seeded()
     ws.createSession('rev', {
       profile: parseSessionProfile({
@@ -342,7 +342,7 @@ describe('the path axis end to end', () => {
   it('the write gate holds per path inside an admitted command', async () => {
     // The command gate admits mkdir because one region grants writes;
     // each write the handler then makes still answers for its own
-    // region, so the whole-mount admission opens no side door.
+    // region, so the whole-mount admission opens no side entry point.
     const ws = await seeded()
     ws.createSession('rev', {
       profile: parseSessionProfile({
@@ -626,7 +626,7 @@ describe('ws.vfs against hides', () => {
 
   it('keeps the refusal when a visible mounted child remains', async () => {
     // The backend cannot see a mount nested below the directory, so
-    // the remnant arm judges emptiness on the door's merged listing:
+    // the remnant arm judges emptiness on the dispatcher's merged listing:
     // the visible mounted child keeps the not-empty refusal instead of
     // the arm destroying the hidden backend remnants and reporting a
     // successful rmdir while the mount remains.

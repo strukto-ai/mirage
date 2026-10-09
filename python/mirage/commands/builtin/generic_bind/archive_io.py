@@ -144,7 +144,7 @@ async def _own_listing(
 ) -> list[str]:
     """One directory as its own backend lists it, through the dispatcher.
 
-    The door adds the names the namespace owes a directory (nested
+    The dispatcher adds the names the namespace owes a directory (nested
     mount roots and symlinks) to every listing. The archive scan adds
     those itself, from the same tables, and a walk that followed one
     would descend into a link's target under the link's name or into a
@@ -153,7 +153,7 @@ async def _own_listing(
     Args:
         dispatch (DispatchFn): the workspace op dispatcher.
         owed (ChildMounts | None): the names the namespace owes a
-            directory; None lists everything the door does.
+            directory; None lists everything the dispatcher does.
         path (PathSpec): the directory to list.
         index (IndexCacheStore | None): unused; the owning mount keeps
             its own.

@@ -271,7 +271,7 @@ function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
     return redactConfigWithSchema(model, install.config)
   }
   // A script's config is opaque, so it is captured verbatim rather than
-  // guessed at; the config door refuses a secrets pointer in one for
+  // guessed at; the config loader refuses a secrets pointer in one for
   // exactly this reason (`validateConfigKeys`), since resolved, the
   // value would sit in this capture.
   if (install.config !== null && typeof install.config === 'object') {
@@ -288,11 +288,11 @@ function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
  * read policy required, so an unversioned dict would land on a bad
  * ReadSpec instead of this message.
  *
- * Both doors run it, mirroring Python's `check_format_version`.
+ * Both entry points run it, mirroring Python's `check_format_version`.
  * `buildMountArgs` builds a workspace from the state; `applyStateDict`
  * restores into one that already exists, and is what `version checkout`,
  * `version restore` and the agent sandbox's hydrate call. Checking in one
- * door only meant the same bytes were refused through `Workspace.load`
+ * entry point only meant the same bytes were refused through `Workspace.load`
  * and half-restored through a checkout.
  */
 export function checkFormatVersion(state: WorkspaceStateDict): void {
@@ -354,9 +354,9 @@ export function buildMountArgs(
     if (!VALID_MODES.includes(m.mode)) {
       throw new Error(`Workspace.fromState: mount '${m.prefix}' has invalid mode '${m.mode}'`)
     }
-    // A live override placed as a `Mount` names the door it
+    // A live override placed as a `Mount` names the entry point it
     // came through; a bare VFS, or a rebuilt one, keeps the saved
-    // reference so a second round trip rebuilds through the same door.
+    // reference so a second round trip rebuilds through the same entry point.
     const override = normalized[normMountPrefix(m.prefix)]
     if (m.anchor === true && override === undefined) {
       anchorMode = m.mode as MountMode
@@ -716,9 +716,9 @@ async function restoreSessions(
 
 function restoreCache(ws: WorkspaceLike, state: WorkspaceStateDict): void {
   if (!(ws.cache instanceof RAMFileCacheStore)) return
-  // A snapshot is a third door into the entry table, and a document is not
+  // A snapshot is a third entry point into the entry table, and a document is not
   // obliged to spell "no token" the way this version does, so each token is
-  // folded the way the live write doors fold it.
+  // folded the way the live write entry points fold it.
   for (const e of state.cache.entries) {
     ws.cache.loadEntry(
       e.key,

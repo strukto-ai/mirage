@@ -97,14 +97,13 @@ const ESCAPED_BLANK = /\\[ \t]/g
 
 const LAST_ARM = /^\s*esac(?![^\s;&|()<>])/
 
-// Tokens the grammar lexes apart from a word in an argument list, where
-// bash reads a word, by the node they stand under. A bare `$` in a command
-// is already kept as a word, and only an error region loses it; the `$`
-// opening `$"..."` is the translation marker, never a word.
-const BARE_WORDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['command', new Set(['==', '=~'])],
-  ['ERROR', new Set(['==', '=~', '$'])],
-])
+// Test operators the grammar lexes apart from a word in an argument list or
+// an error region, where bash reads a word.
+const BARE_WORDS: ReadonlySet<string> = new Set(['==', '=~'])
+
+// A `$` that no name, digit, special parameter, brace, paren, bracket or
+// quote follows, which bash reads as a literal `$`.
+const LITERAL_DOLLAR = /\$(?![\w@*#?$!{(['"[-])/y
 
 const WORD_BREAK = ' \t\n;&|()<>'
 
@@ -160,9 +159,10 @@ function bracketIsACommand(text: string, node: ShellNode): boolean {
  * arm's `;&` or `;;&`, which the grammar refuses, ends it as `;;` does, there
  * being no arm after it, so it is spelled so. An argument of `==` or `=~`,
  * which the grammar reads as a test operator wanting an operand (so `echo ==`
- * is an error and `echo == x` drops it), and a bare `$` before a terminator
- * are words to bash; spelled as `_` filler they parse as the words they are,
- * and `SourceNode` gives back their text. So is the `[` of a test bash reads
+ * is an error and `echo == x` drops it), and a `$` that opens no expansion
+ * (`$\a`, `$,`, `$` before a blank) are words to bash, where the grammar errs
+ * or reads an expansion missing its name; spelled as `_` filler they parse as
+ * the words they are, and `SourceNode` gives back their text. So is the `[` of a test bash reads
  * as a `[` command (`bracketIsACommand`, or one an error region opens), which
  * then runs as the builtin, and so is a backslash-blank pair the grammar
  * skips as whitespace (`skippedEscapes`), spelled `..` so it opens its word
@@ -222,11 +222,13 @@ function respelled(text: string, root: ShellNode): string {
     if (node.type === 'test_command' && bracketIsACommand(text, node)) out[node.startIndex] = '_'
     if (UNLEXED.has(node.type)) continue
     stack.push(...node.children)
-    const bare = BARE_WORDS.get(node.type)
     for (const child of node.children) {
       if (child.isNamed) continue
-      if (bare?.has(child.type) === true) {
-        if (child.type === '$' && text[child.endIndex] === '"') continue
+      LITERAL_DOLLAR.lastIndex = child.startIndex
+      if (
+        (BARE_WORDS.has(child.type) && (node.type === 'command' || node.type === 'ERROR')) ||
+        (child.type === '$' && LITERAL_DOLLAR.test(text))
+      ) {
         for (let i = child.startIndex; i < child.endIndex; i++) out[i] = '_'
       } else if (
         node.type === 'ERROR' &&

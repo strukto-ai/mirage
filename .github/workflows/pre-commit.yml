@@ -156,7 +156,7 @@ jobs:
             exit "$rc"
           }
 
-      # Writes the manifests to `.cache/spec/`, where the config door
+      # Writes the manifests to `.cache/spec/`, where the config loader
       # parity step below reads the rename map.
       - name: Live spec parity
         run: |
@@ -171,13 +171,13 @@ jobs:
       - name: VFS prompt parity
         run: ./python/.venv/bin/python scripts/check_prompt_parity.py --selftest
 
-      # One snake_case config block through both registries' doors. The
+      # One snake_case config block through both registries' entry points. The
       # shell-line battery never crosses them: its runners construct every
       # mount by hand in each language's own idiom.
-      - name: Config door parity (python)
+      - name: Config entry point parity (python)
         run: ./python/.venv/bin/python integ/config/run.py
 
-      - name: Config door parity (typescript)
+      - name: Config entry point parity (typescript)
         working-directory: integ
         run: pnpm exec tsx config/run.ts
 

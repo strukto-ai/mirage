@@ -135,7 +135,7 @@ function declareOptionRefusal(
  * order, readonly last.
  *
  * The letters that shape a value (`-i -l -u`) are stored as attributes and
- * applied by the door on every *later* write, which is GNU's rule:
+ * applied by the session view on every *later* write, which is GNU's rule:
  * `v=MiXeD; declare -l v` keeps `MiXeD`, and the next `v=ABC` stores `abc`.
  * So this marks and never rewrites. `-l` and `-u` are exclusive: setting
  * one clears the other, and a cluster naming both (`-lu`, `-ul`) sets
@@ -363,7 +363,7 @@ export async function executeDeclaration(
     }
   }
   // Array literals travel as data: the handler stores them through
-  // the session door and owns both refusal voices, so the executor
+  // the session view and owns both refusal voices, so the executor
   // only expands and stages.
   if (keyword === 'readonly') {
     const result = await handleReadonly(

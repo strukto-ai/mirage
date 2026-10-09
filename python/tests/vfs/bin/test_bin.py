@@ -21,7 +21,7 @@ from mirage.commands.builtin.backends import commands_for
 from mirage.types import PathSpec
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.ram import RAMVFS
-from tests.fixtures.vfs_io import DOOR_OPS, served
+from tests.fixtures.vfs_io import DISPATCH_OPS, served
 
 
 def test_view_registers_reads_and_refuses_every_write_op():
@@ -31,7 +31,7 @@ def test_view_registers_reads_and_refuses_every_write_op():
     # reads the view like any reader, and a line that writes is refused
     # at the op the view does not have.
     assert {"cat", "ls", "stat", "gzip", "rm", "cp"} <= names
-    assert served(vfs) == set(DOOR_OPS)
+    assert served(vfs) == set(DISPATCH_OPS)
 
 
 @pytest.mark.asyncio

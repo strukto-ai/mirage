@@ -107,7 +107,7 @@ export const SPECS: Record<string, CommandSpec> = {
     options: [new Option({ short: '-z', long: '--zero' })],
     rest: new Operand({ type: 'str' }),
   }),
-  // getfattr and setfattr run in the executor over the op door's attribute
+  // getfattr and setfattr run in the executor over the dispatcher's attribute
   // ops, like readlink and ln, so these specs are their grammar and no
   // builder binds them. Pinned against Debian's attr 2.5.2;
   // --one-file-system, --restore and --raw are not offered.
@@ -157,7 +157,7 @@ export const SPECS: Record<string, CommandSpec> = {
     rest: new Operand({ type: 'path' }),
   }),
   // ln runs in the executor for both link kinds (a symlink is namespace
-  // state, a "hard link" is a byte copy through the op door), so this spec
+  // state, a "hard link" is a byte copy through the dispatcher), so this spec
   // is its grammar authority and no builder binds it.
   ln: new CommandSpec({
     options: [

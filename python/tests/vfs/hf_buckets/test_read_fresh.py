@@ -120,7 +120,7 @@ async def test_a_refused_probe_keeps_the_overlay(route, status, code):
             await _out(ws, "cat /m/a.txt")
             await ws.namespace.set_attrs("/m/a.txt", mode=0o600)
             hub.fail[route] = (status, code)
-            # Cross-mount cp reads through the dispatcher, the door whose
+            # Cross-mount cp reads through the dispatcher, the dispatcher whose
             # "no such file" drops the overlay; a plain cat never reaches it.
             cp = await ws.shell("cp /m/a.txt /r/x")
             assert cp.exit_code == 1
@@ -183,7 +183,7 @@ async def test_a_gated_bucket_does_not_hide_the_other_mounts():
 async def test_listing_a_refused_bucket_is_never_absent():
     # `ls` of a file reaches paths-info through the listing's file probe
     # (object_store readdir `_probe_file`); find and du answer from the
-    # opendal listing alone, so only this door can mistake a refusal for
+    # opendal listing alone, so only the dispatcher can mistake a refusal for
     # an absence.
     with serve(_hub({"a.txt": OLD})) as hub:
         hub.fail["bucket_paths_info"] = (401, "")
@@ -224,9 +224,10 @@ async def test_a_probe_leaves_find_its_whole_prefixed_listing():
 
 
 # Measured on the first green run, then pinned (test plan T23): the
-# routing probe; the handler's own stat and the cache door reuse its
-# answer. Cross-mount cp skips routing's probe, so the cache door asks, and
-# its stat goes through its own door against a mount index nothing filled.
+# routing probe; the handler's own stat and the cache stage reuse its
+# answer. Cross-mount cp skips routing's probe, so the cache stage asks,
+# and its stat goes its own way against a mount index nothing
+# filled.
 WARM = [
     ("", "cat /m/a.txt", 1),
     ("ls /m", "cat /m/a.txt", 1),
@@ -338,13 +339,13 @@ def _spec(path: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_a_window_past_eof_is_empty_on_every_door():
+async def test_a_window_past_eof_is_empty_on_every_entry_point():
     with serve(_hub({"a.txt": b"abc"})) as hub:
         vfs = _vfs(hub)
         ws = _ws(vfs, ReadPolicy.BOUNDED)
         try:
-            # The door folds a 416 for every backend; the VFS's own ranged
-            # read has no fold, so the read must answer it itself.
+            # The dispatcher folds a 416 for every backend; the VFS's own
+            # ranged read has no fold, so the read must answer it itself.
             via_op = await ws.mount("/m/a.txt").call(
                 "read",
                 "/m/a.txt",

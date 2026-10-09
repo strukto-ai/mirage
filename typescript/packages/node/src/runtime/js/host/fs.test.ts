@@ -306,7 +306,7 @@ describe('patchNodeFs — ledger', () => {
 })
 
 describe('patchNodeFs — refusals', () => {
-  // A hide, a read-only mount and a path rule: both doors ask the
+  // A hide, a read-only mount and a path rule: both entry points ask the
   // dispatcher, so the one refusal comes back through either.
   it.each([
     ['/data/secret.txt', 'read', 'ENOENT'],

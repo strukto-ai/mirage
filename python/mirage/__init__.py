@@ -19,7 +19,7 @@ from mirage.version import __version__ as __version__
 
 # The authoring surface: what a host reaches for to bring its own
 # VFS, CLI, policy, runtime or secrets source, and the types the
-# Workspace's own signatures hand back. One front door, the way
+# Workspace's own signatures hand back. One entry point, the way
 # @struktoai/mirage-core's index.ts is. Each name resolves on first use,
 # so a leaf such as the `mirage` CLI imports without loading the package.
 if TYPE_CHECKING:
@@ -27,9 +27,9 @@ if TYPE_CHECKING:
     from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
     from mirage.commands.builtin.generic_bind import generic_commands
     from mirage.commands.cli import (
-        CLIDoors,
         CLIInvocation,
         CLISpec,
+        CLIView,
         register_cli_spec,
     )
     from mirage.commands.config import command
@@ -145,7 +145,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "CLIInvocation",
         "CLISpec",
         "register_cli_spec",
-        "CLIDoors",
+        "CLIView",
     ),
     "mirage.commands.spec": (
         "Operand",
@@ -290,7 +290,7 @@ __all__ = [
     "Accessor",
     "Ask",
     "BaseVFS",
-    "CLIDoors",
+    "CLIView",
     "CommandSpec",
     "ContentType",
     "DEFAULT_MAX_GLOB_MATCHES",

@@ -109,7 +109,7 @@ async def resolve_sources(
 
     Takes the block parsed or raw, because the three callers hold
     different things: the constructor validates eagerly so a bad
-    declaration fails there, the yaml door and a clone override hand
+    declaration fails there, the YAML loader and a clone override hand
     over what they were given.
 
     Args:
@@ -217,8 +217,8 @@ async def resolve_sources_for(
 ) -> dict[str, ResolvedSource] | None:
     """The declared instances, built only when one of `configs` names one.
 
-    Every door that builds a mount or a CLI from data comes through
-    here -- the yaml door, a clone override, a load override -- because
+    Every loader that builds a mount or a CLI from data comes through
+    here -- the YAML loader, a clone override, a load override -- because
     building a source reads its own bootstrap pointers, and a dotenv
     file is I/O. A config holding no pointer must leave that I/O where
     `Workspace._secret_sources` put it, deferred to the first line that
@@ -232,7 +232,7 @@ async def resolve_sources_for(
             or raw; anything that is not a mapping is left for the
             constructor to refuse.
         configs (Iterable[Mapping[str, Any]]): every raw mount or CLI
-            config the door is about to resolve.
+            config the loader is about to resolve.
 
     Returns:
         dict[str, ResolvedSource] | None: the built instances, or None
@@ -272,7 +272,7 @@ async def _resolve_value(
             for i, item in enumerate(value)
         ]
         # A tuple stays a tuple: this walk runs over every config the
-        # yaml door loads, pointer or not, so it must hand a VFS
+        # YAML loader loads, pointer or not, so it must hand a VFS
         # back what it was given.
         return tuple(items) if isinstance(value, tuple) else items
     return value

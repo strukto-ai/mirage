@@ -123,7 +123,7 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
   )
 
   /**
-   * Cancel the session's running and queued lines, from every door. The
+   * Cancel the session's running and queued lines, from every entry point. The
    * session stays open; answers once those lines have ended.
    */
   app.post<{ Params: WsSessionParams }>(

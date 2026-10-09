@@ -180,7 +180,7 @@ class Interpreter:
 
     Args:
         program (Program): the parsed program.
-        host (AwkHost): the doors to files and commands.
+        host (AwkHost): the entry points to files and commands.
         argv (Sequence[str]): the operands as typed, ARGV[1] onward.
         assignments (dict[str, str] | None): the ``-v`` assignments.
         environ (Mapping[str, str] | None): the exported environment,

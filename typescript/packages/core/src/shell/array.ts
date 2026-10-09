@@ -81,7 +81,7 @@ export function arraySet(arr: ShellArray, idx: number, value: string): void {
 /**
  * A copy of `arr` with `value` assigned at `idx`.
  *
- * What a writer hands the session plane's door: the door speaks in whole
+ * What a writer hands the session view: the session view speaks in whole
  * variables, so an element write states itself as the array the write
  * produces. Building it on a copy is what keeps a refusal from leaving
  * the element applied.
@@ -150,7 +150,7 @@ export function keyedWord(word: string): [string, string] | null {
  * value, which is GNU's `([3]=x y [1]=z)` giving
  * `([1]="z" [3]="x" [4]="y")`. `+=` starts the cursor at the extent
  * instead of replacing. `indexOf` is async because a subscript may
- * assign, and the assignment lands through the session door.
+ * assign, and the assignment lands through the session view.
  */
 export async function buildIndexedLiteral(
   base: ShellArray | null,

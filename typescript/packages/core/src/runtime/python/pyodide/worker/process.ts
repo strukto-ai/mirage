@@ -204,7 +204,7 @@ export class GuestProcessTable {
       request.argv = [found, ...(request.argv ?? []).slice(1)]
 
       if (this.context.processes?.spawn === undefined)
-        throw new Error('runtime has no process spawn door')
+        throw new Error('runtime has no process spawn entry point')
       if (
         !Array.isArray(request.argv) ||
         request.argv.length === 0 ||

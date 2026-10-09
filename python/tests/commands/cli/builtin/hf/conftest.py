@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.core.hf_hub.config import HfConfig
 from mirage.io.stream import yield_bytes
 from mirage.types import PathSpec
@@ -27,7 +27,7 @@ def inv(
     texts=(),
     flags=None,
     config=CONFIG,
-    doors=None,
+    view=None,
     stdin=None,
     paths=(),
 ):
@@ -39,16 +39,16 @@ def inv(
         texts=tuple(texts),
         flags=flags or {},
         stdin=None if stdin is None else yield_bytes(stdin),
-        doors=doors,
+        view=view,
     )
 
 
-class FakeDoors(CLIDoors):
-    """Workspace doors recording every dispatched op."""
+class FakeView(CLIView):
+    """Workspace entry points recording every dispatched op."""
 
 
 @pytest.fixture
-def doors():
+def view():
     calls: list[tuple] = []
     tree = {
         "/work/a.txt": b"alpha",
@@ -92,5 +92,5 @@ def doors():
             return None, None
         raise AssertionError(f"unexpected op {op}")
 
-    record = CLIDoors(dispatch=dispatch)
+    record = CLIView(dispatch=dispatch)
     return record, calls, tree, dirs

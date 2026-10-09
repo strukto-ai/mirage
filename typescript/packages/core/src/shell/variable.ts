@@ -90,11 +90,11 @@ export interface ManagedRef {
  * One shell variable: a value plus the attributes set on it.
  *
  * Readonly on purpose. Every writer already computes its result on a
- * copy and hands the finished value to the session door (`[...arr]`
+ * copy and hands the finished value to the session view (`[...arr]`
  * before an element write, and so on), precisely so a refused write
  * leaves nothing half-applied. Making the record immutable turns that
  * convention into something the type enforces: the only way to change a
- * variable is to hand the door a new record, so a policy gate cannot be
+ * variable is to hand the session view a new record, so a policy gate cannot be
  * walked around by reaching into storage.
  *
  * `value` is null in bash's third state: declared with attributes but
@@ -205,8 +205,8 @@ export function withAttr(v: ShellVar, attr: VarAttr, on = true): ShellVar {
  */
 /**
  * The text a `+=` stores: the old text then the added one, or on an integer
- * the two joined by `INTEGER_APPEND` for the door's coercion to evaluate
- * apart and add. Each side is evaluated on its own and an empty side counts
+ * the two joined by `INTEGER_APPEND` for the session view's coercion to
+ * evaluate apart and add. Each side is evaluated on its own and an empty side counts
  * as 0, as bash does: with `N='1?2:3'` under `-i`, `N+=4` stores 6,
  * `N+=''` keeps the old value, and `N+=1+` names `1+`.
  */

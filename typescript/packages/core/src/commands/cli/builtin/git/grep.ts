@@ -169,8 +169,8 @@ export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
       words = words.slice(0, cut)
     }
     const flags = parseFlags(fl, patterns, origin, utf8Locale(inv.env))
-    const doors = inv.doors ?? {}
-    const repo = await opened(fl, doors)
+    const view = inv.view ?? {}
+    const repo = await opened(fl, view)
     const start = startPoint(fl).virtual
     const prefix = repoRelative(repo.location, start, '.')
     const cached = fl.asBool('cached')
@@ -197,10 +197,10 @@ export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
     }
     if (sources.length && cached) throw new GitError('both --cached and trees are given')
     if (!sources.length && !cached) {
-      if (doors.statPath === undefined) throw new NoWorkspaceError()
+      if (view.statPath === undefined) throw new NoWorkspaceError()
       await requireWorkTree(
         repo.dispatch,
-        doors.statPath,
+        view.statPath,
         repo.location,
         fl.asPath('work_tree') !== undefined,
       )

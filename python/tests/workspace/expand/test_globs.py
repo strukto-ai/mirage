@@ -722,9 +722,9 @@ def _recording_keys(mount: MountEntry) -> list[tuple[str, str]]:
 def test_glob_op_is_handed_keys_below_a_non_root_prefix():
     # The ``glob`` op never sees the mount prefix: the mount stamps each
     # spec's ``vfs_path`` with ``mount_key(virtual, prefix)`` before the
-    # op runs, on every door that expands a word (the workspace expander,
-    # its mid-path and globstar walks, and the builtins' operands). Pinned
-    # the same way in typescript's globs.test.ts.
+    # op runs, on every entry point that expands a word (the workspace
+    # expander, its mid-path and globstar walks, and the builtins' operands).
+    # Pinned the same way in typescript's globs.test.ts.
     ws = Workspace({"/mnt/x/": RAMVFS()}, mode=MountMode.WRITE)
     seen = _recording_keys(ws.mount("/mnt/x/"))
     ws.create_session("s")

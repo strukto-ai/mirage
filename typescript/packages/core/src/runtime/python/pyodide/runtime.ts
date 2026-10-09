@@ -132,7 +132,7 @@ function servable(prefix: string): boolean {
 /**
  * Drop every prefix nested inside another: only the shallowest of a
  * nested pair earns an Emscripten mountpoint, and its preload descends
- * into the child through the door's merged readdir.
+ * into the child through the dispatcher's merged readdir.
  *
  * Args:
  *   prefixes: slash-terminated mount prefixes.
@@ -644,7 +644,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       )
     }
     // Only maximal prefixes become Emscripten mounts: the bridge routes
-    // every op by full path and the door's readdir lists a nested
+    // every op by full path and the dispatcher's readdir lists a nested
     // mount's name under its parent, so a child mount is served through
     // the parent's mountpoint. A second Emscripten mount inside the
     // first would be orphaned when the parent remounts.
@@ -751,8 +751,8 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   /**
    * The guest's extended-attribute calls (its os.getxattr family, which
    * the harness installs over this module), answered by the workspace
-   * door and handed back as JSON: `{value}`, or `{code}` naming the
-   * condition the door reported. Only the worker can wait on the door
+   * dispatcher and handed back as JSON: `{value}`, or `{code}` naming the
+   * condition the dispatcher reported. Only the worker can wait on the dispatcher
    * from inside a WASM frame, so without one, and for a path no mount
    * serves, the answer is ENOTSUP: what a filesystem without extended
    * attributes says.

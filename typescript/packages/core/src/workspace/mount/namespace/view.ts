@@ -131,7 +131,7 @@ export function namespaceViewOf(
     namespace !== null
       ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
       : null
-  // A session running a line sees what the op door folds for it: on the
+  // A session running a line sees what the dispatcher folds for it: on the
   // fallback storage every live session's hides hold, so a command never
   // lists a name its own reads would answer as absent.
   const vis =

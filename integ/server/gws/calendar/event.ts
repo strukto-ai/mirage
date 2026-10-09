@@ -86,7 +86,7 @@ export function listCalendarEvents(
 ): Reply {
   const asked = query.get('timeZone')
   // Rendering in this zone means handing it to Intl, which throws a
-  // RangeError for anything it cannot resolve. A request door refuses
+  // RangeError for anything it cannot resolve. The request is refused
   // instead of crashing the read. (The generic refusal, not a probed
   // per-field wording.)
   if (asked !== null && !isIanaZone(asked)) return invalidFormat()

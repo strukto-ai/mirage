@@ -484,7 +484,7 @@ describe('resolveGlobWith trailing slash', () => {
     expect(out.map((m) => m.rawPath)).toEqual(['alpha/', 'broken/', 'flink/', 'inner/', 'lnk/'])
   })
 
-  it('keeps every match without a stat door', async () => {
+  it('keeps every match without a stat function', async () => {
     const out = await resolveGlobWith(fakeReaddir, null, [typedSpec('/*', '*/')], undefined)
     expect(out.map((m) => m.rawPath)).toEqual(['alpha/', 'beta.txt/'])
   })

@@ -243,7 +243,7 @@ def test_resolved_config_includes_port(monkeypatch, tmp_path):
     assert resolved_config()["port"] == ("9100", "env MIRAGE_DAEMON_PORT")
 
 
-def test_resolved_config_includes_the_ssh_door(monkeypatch, tmp_path):
+def test_resolved_config_includes_the_ssh_endpoint(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
     for name in (
         "MIRAGE_SSH_PORT",

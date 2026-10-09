@@ -36,7 +36,7 @@ from mirage.commands.cli.builtin.git.util import (
     mounts_of,
     start_point,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult, materialize
 
@@ -83,7 +83,7 @@ def git_would_refuse(
     """
     if location is None or not path:
         return True
-    mounts = mounts_of(inv.doors or CLIDoors())
+    mounts = mounts_of(inv.view or CLIView())
     root = (
         "/" if mounts is None else mounts.root_of(location.commondir.virtual)
     )
@@ -146,7 +146,7 @@ def verb(
 
 
 async def opened(
-    fl: FlagView, doors: CLIDoors, work_tree: bool = False
+    fl: FlagView, view: CLIView, work_tree: bool = False
 ) -> tuple[BaseRepo, RepoLocation]:
     """Discover and open the repository a verb was invoked against.
 
@@ -156,7 +156,7 @@ async def opened(
     discovery rules rather than restating them, and so the refusal a
     verb owes outside a workspace is written once.
 
-    The mount root comes from the name plane rather than a door of its
+    The mount root comes from the name plane rather than a field of its
     own: ``ns.mounts.root_of`` is the same fact the command tier reads,
     and a second field holding the same callable is a second thing to
     keep in step.
@@ -164,7 +164,7 @@ async def opened(
     Args:
         fl (FlagView): the leaf's flag bag, read for ``-C``,
             ``--git-dir`` and ``--work-tree``.
-        doors (CLIDoors): the invocation's doors, one per state plane.
+        view (CLIView): the invocation's view, one per state plane.
         work_tree (bool): the verb reads or writes working files, so
             there must be a work tree to enter, as git's
             ``NEED_WORK_TREE`` asks.
@@ -173,8 +173,8 @@ async def opened(
         NoWorkspaceError: a plane this verb needs is not wired.
         NotAWorkTreeError: ``work_tree`` and there is none to enter.
     """
-    location = await located(fl, doors)
-    dispatch, stat_path = doors.dispatch, doors.stat_path
+    location = await located(fl, view)
+    dispatch, stat_path = view.dispatch, view.stat_path
     assert dispatch is not None and stat_path is not None
     LOCATIONS.set(location)
     if work_tree:
@@ -191,16 +191,16 @@ async def opened(
     return repo, location
 
 
-async def located(fl: FlagView, doors: CLIDoors) -> RepoLocation:
+async def located(fl: FlagView, view: CLIView) -> RepoLocation:
     """Locate a repository without opening potentially damaged objects.
 
     Args:
         fl (FlagView): repository-selection flags.
-        doors (CLIDoors): namespace and dispatcher doors.
+        view (CLIView): the namespace and the dispatcher.
     """
-    dispatch = doors.dispatch
-    stat_path = doors.stat_path
-    mounts = doors.ns.mounts if doors.ns is not None else None
+    dispatch = view.dispatch
+    stat_path = view.stat_path
+    mounts = view.ns.mounts if view.ns is not None else None
     if stat_path is None or mounts is None or dispatch is None:
         raise NoWorkspaceError()
     chosen = fl.as_path("work_tree")
@@ -208,4 +208,4 @@ async def located(fl: FlagView, doors: CLIDoors) -> RepoLocation:
     location = await discover(
         dispatch, stat_path, mounts.root_of, start_point(fl), gitdir, chosen
     )
-    return replace(location, ns=doors.ns)
+    return replace(location, ns=view.ns)

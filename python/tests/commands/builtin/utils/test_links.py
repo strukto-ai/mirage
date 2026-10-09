@@ -17,8 +17,8 @@ from typing import Any
 import pytest
 
 from mirage.commands.builtin.utils.links import (
-    LinkDoor,
-    link_door,
+    LinkResolver,
+    link_resolver,
     name_location,
     typed_link,
 )
@@ -106,8 +106,8 @@ def test_a_plain_name_is_no_link():
     assert typed_link(LINKS, _spec("/data/a.txt", "a.txt"), "/data") is None
 
 
-class _Door:
-    """A door that records the ops it is asked for."""
+class _Dispatch:
+    """A dispatcher that records the ops it is asked for."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
@@ -117,22 +117,22 @@ class _Door:
     ) -> tuple[Any, IOResult]:
         self.calls.append((op, path.virtual, kwargs))
         if op == "read":
-            return b"through the door", IOResult()
+            return b"through the dispatcher", IOResult()
         if op == "readdir":
             return (f"{path.virtual}/a", f"{path.virtual}/b"), IOResult()
         return FileStat(name="n", type=FileType.SYMLINK), IOResult()
 
 
 @pytest.mark.asyncio
-async def test_the_door_reads_writes_and_unlinks_by_the_name_it_is_handed():
-    calls = _Door()
-    door = LinkDoor(links=LINKS, dispatch=calls, cwd="/data")
-    assert [c async for c in door.read("/data/dir/tl.gz")] == [
-        b"through the door"
+async def test_the_dispatcher_reads_writes_and_unlinks_by_the_name_it_is_handed():
+    calls = _Dispatch()
+    resolver = LinkResolver(links=LINKS, dispatch=calls, cwd="/data")
+    assert [c async for c in resolver.read("/data/dir/tl.gz")] == [
+        b"through the dispatcher"
     ]
-    await door.write("/data/dir/tl", b"x")
-    await door.unlink("/data/dir/tl.gz")
-    await door.lstat(PathSpec.from_str_path("/data/dir/tl.gz"))
+    await resolver.write("/data/dir/tl", b"x")
+    await resolver.unlink("/data/dir/tl.gz")
+    await resolver.lstat(PathSpec.from_str_path("/data/dir/tl.gz"))
     assert calls.calls == [
         ("read", "/data/dir/tl.gz", {}),
         ("write", "/data/dir/tl", {"data": b"x"}),
@@ -142,28 +142,33 @@ async def test_the_door_reads_writes_and_unlinks_by_the_name_it_is_handed():
 
 
 def test_a_link_the_router_followed_can_vanish_before_its_turn():
-    door = LinkDoor(links=_links({}), dispatch=_Door(), cwd="/data")
-    followed = _spec("/data/t.gz", "tl.gz")
-    assert door.vanished(followed)
-    assert door.link_at(followed) is None
-    assert not door.vanished(_spec("/data/t.gz", "t.gz"))
-
-
-def test_an_invocation_without_links_or_a_door_has_no_link_door():
-    assert link_door(CommandOpts()) is None
-    assert link_door(CommandOpts(ns=NamespaceView(links=LINKS))) is None
-    door = link_door(
-        CommandOpts(ns=NamespaceView(links=LINKS), dispatch=_Door())
+    resolver = LinkResolver(
+        links=_links({}), dispatch=_Dispatch(), cwd="/data"
     )
-    assert door is not None and door.cwd == "/"
+    followed = _spec("/data/t.gz", "tl.gz")
+    assert resolver.vanished(followed)
+    assert resolver.link_at(followed) is None
+    assert not resolver.vanished(_spec("/data/t.gz", "t.gz"))
+
+
+def test_an_invocation_without_links_or_an_entry_point_has_no_link_resolver():
+    assert link_resolver(CommandOpts()) is None
+    assert link_resolver(CommandOpts(ns=NamespaceView(links=LINKS))) is None
+    resolver = link_resolver(
+        CommandOpts(ns=NamespaceView(links=LINKS), dispatch=_Dispatch())
+    )
+    assert resolver is not None and resolver.cwd == "/"
 
 
 @pytest.mark.asyncio
-async def test_the_door_lists_and_stats_by_the_name_it_is_handed():
-    calls = _Door()
-    door = LinkDoor(links=LINKS, dispatch=calls, cwd="/data")
-    assert await door.readdir("/data/dir") == ["/data/dir/a", "/data/dir/b"]
-    assert (await door.stat("/data/t.gz")).name == "n"
+async def test_the_dispatcher_lists_and_stats_by_the_name_it_is_handed():
+    calls = _Dispatch()
+    resolver = LinkResolver(links=LINKS, dispatch=calls, cwd="/data")
+    assert await resolver.readdir("/data/dir") == [
+        "/data/dir/a",
+        "/data/dir/b",
+    ]
+    assert (await resolver.stat("/data/t.gz")).name == "n"
     assert calls.calls == [
         ("readdir", "/data/dir", {}),
         ("stat", "/data/t.gz", {}),
@@ -171,19 +176,19 @@ async def test_the_door_lists_and_stats_by_the_name_it_is_handed():
 
 
 def test_a_walker_merges_the_links_standing_in_a_directory():
-    door = LinkDoor(links=LINKS, dispatch=_Door(), cwd="/data")
-    assert door.children("/data/dir/") == ["/data/dir/tl.gz"]
-    assert door.children("/data/w") == []
+    resolver = LinkResolver(links=LINKS, dispatch=_Dispatch(), cwd="/data")
+    assert resolver.children("/data/dir/") == ["/data/dir/tl.gz"]
+    assert resolver.children("/data/w") == []
 
 
 def test_a_link_leads_where_the_table_resolves_it():
-    door = LinkDoor(links=LINKS, dispatch=_Door(), cwd="/data")
-    assert door.target("/data/dir/tl.gz") == "/data/t.gz"
+    resolver = LinkResolver(links=LINKS, dispatch=_Dispatch(), cwd="/data")
+    assert resolver.target("/data/dir/tl.gz") == "/data/t.gz"
 
 
 def test_a_looping_link_is_the_eloop_a_walker_reports():
-    door = LinkDoor(
-        links=_links({"/data/l": "/data/l"}), dispatch=_Door(), cwd="/data"
+    resolver = LinkResolver(
+        links=_links({"/data/l": "/data/l"}), dispatch=_Dispatch(), cwd="/data"
     )
     with pytest.raises(DotWalkLoop):
-        door.target("/data/l")
+        resolver.target("/data/l")

@@ -90,14 +90,14 @@ export async function elementIsSet(
  * Assign one element (or a bare name resolved as element 0).
  *
  * The element mechanics are computed on a copy and the landing write
- * goes through the door as the whole variable the write produces, so a
+ * goes through the session view as the whole variable the write produces, so a
  * refused write leaves nothing half-applied and a `preSession` rule
  * sees `m[k]=v` as a write to `m`. The subscript arrives already
  * expanded: an associative name takes it as the key verbatim, an
  * indexed one evaluates it as arithmetic. A null subscript is a bare
  * target, which bash resolves as element 0 of an array and a plain
  * scalar otherwise. Answers `"ok"`, `"denied"`, `"readonly"`, or
- * `"subscript"`; a preSession refusal from the door propagates so the
+ * `"subscript"`; a preSession refusal from the session view propagates so the
  * rule's own message reaches the caller.
  */
 export async function assignElement(
@@ -156,7 +156,7 @@ export async function assignElement(
 
 /**
  * Land an arithmetic command's assignments in the order the expression made
- * them, each through the door: a hidden name throws PolicyDenied and the
+ * them, each through the session view: a hidden name throws PolicyDenied and the
  * ones after it never land, as a readonly name stopped the evaluation itself
  * (`let 'X=5, R=3'` leaves X at 5). The draws made after a seed that landed
  * settle either way. Mirrors Python's land_arith.

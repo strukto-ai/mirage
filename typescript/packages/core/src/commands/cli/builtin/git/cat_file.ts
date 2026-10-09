@@ -177,10 +177,10 @@ async function* batchLines(
  */
 export async function catFile(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const texts = [...inv.texts]
   try {
-    if (doors.dispatch === undefined) throw new NoWorkspaceError()
+    if (view.dispatch === undefined) throw new NoWorkspaceError()
     checkSwitches(inv, texts)
     const modes = fl.typedOrder(...QUERIES)
     const [first, second] = modes
@@ -199,7 +199,7 @@ export async function catFile(inv: CLIInvocation): Promise<CommandFnResult> {
           throw new GitError(`bad cat-file format: ${found[0]}`)
         }
       }
-      const repo = await opened(fl, doors)
+      const repo = await opened(fl, view)
       const text = DEC.decode((await readStdinAsync(inv.stdin ?? null)) ?? new Uint8Array())
       const lines = text.split('\n')
       if (lines.at(-1) === '') lines.pop()
@@ -216,7 +216,7 @@ export async function catFile(inv: CLIInvocation): Promise<CommandFnResult> {
       if (texts.length > 1) {
         throw new UsageError('', 'fatal: too many arguments\n\n' + verbUsage(inv))
       }
-      const repo = await opened(fl, doors)
+      const repo = await opened(fl, view)
       const [out, code] = await query(repo, first, name)
       return [out.length > 0 ? out : null, new IOResult({ exitCode: code })]
     }
@@ -232,7 +232,7 @@ export async function catFile(inv: CLIInvocation): Promise<CommandFnResult> {
     if (!OBJECT_TYPES.some((type) => type === kind)) {
       throw new GitError(`invalid object type "${kind}"`)
     }
-    const repo = await opened(fl, doors)
+    const repo = await opened(fl, view)
     const obj = await peeled(repo, await namedObject(repo, name), kind)
     if (obj === null) throw new GitError(`git cat-file ${name}: bad file`)
     return [await raw(repo, obj.oid), new IOResult()]

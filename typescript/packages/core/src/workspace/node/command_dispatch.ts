@@ -281,7 +281,7 @@ export async function executeCommand(
       // exports it for the command. Only the hidden half was checked
       // here, so a deployment refusing `SECRET_*` still saw
       // `SECRET_K=leak printenv SECRET_K` print the secret: the seeding
-      // below goes through `seedVar`, which is the ungated door, so this
+      // below goes through `seedVar`, which is the ungated entry point, so this
       // loop is the only place the rule can be asked.
       await preSessionGate(registry.policies, {
         plane: 'env',
@@ -411,7 +411,7 @@ async function runCommandBody(
   // builtins (sleep) and the mount layer observe the kill.
   const signal = mergeSignals(signalIn, context.frame.abortSignal)
   // The command's place on the line, as the pass computed it, and the
-  // door its nested evaluations re-enter through: a word that runs a
+  // entry point its nested evaluations re-enter through: a word that runs a
   // line (eval, source, xargs) is bound to this node, and a substitution
   // names its own node when it calls, so every nested line stands under
   // the node its text came from.
@@ -756,7 +756,7 @@ async function routeArgv(
   const session = context.session
   // The half of `runArgv` past the gate, split out so the gate's verdict
   // can be bound around it.
-  // Every handler below reaches the op door through this one function,
+  // Every handler below reaches the dispatcher through this one function,
   // so a line whose caller was already released starts no further op
   // between its operands (`rm l1 l2` with the first unlink held past
   // the grace). Python needs nothing here: its cancelled task never
@@ -866,7 +866,7 @@ async function routeArgv(
     return await handleReadlink(namespace, dispatch, session, operands)
   }
 
-  // Extended attributes: the door's node table and the backend's own
+  // Extended attributes: the dispatcher's node table and the backend's own
   // facts; they read -h themselves.
   if (name === 'getfattr') {
     return await handleGetfattr(dispatch, session, operands)

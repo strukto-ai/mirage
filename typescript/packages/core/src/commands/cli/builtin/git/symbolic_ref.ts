@@ -142,7 +142,7 @@ export async function symbolicRef(inv: CLIInvocation): Promise<CommandFnResult> 
   const fl = new FlagView(inv.flags)
   try {
     checkSwitches(inv, inv.texts)
-    const repo = await opened(fl, inv.doors ?? {})
+    const repo = await opened(fl, inv.view ?? {})
     const message = fl.asStr('m')
     if (message === '') throw new EmptyUpdateMessageError()
     const quiet = switched(fl, 'quiet', false)
@@ -162,7 +162,7 @@ export async function symbolicRef(inv: CLIInvocation): Promise<CommandFnResult> 
     if (inv.texts.length === 2 && target !== undefined) {
       if (name === HEAD && !target.startsWith(REFS_PREFIX)) throw new HeadOutsideRefsError()
       if (!wholeRefName(target)) throw new InvalidSymbolicTargetError(name, target)
-      const who = identity(fl, inv.doors?.sessionView).line
+      const who = identity(fl, inv.view?.sessionView).line
       await setSymbolic(repo, table, name, target, who, message ?? '')
       return [null, new IOResult()]
     }

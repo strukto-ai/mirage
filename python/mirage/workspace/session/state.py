@@ -414,12 +414,12 @@ async def _land_writes(
 
     Args:
         session (SessionState): the session the writes read.
-        store (EnvSet): the door each write goes through.
+        store (EnvSet): the session view each write goes through.
         writes (Sequence[ArithWrite]): the assignments, in order.
 
     Raises:
         ExitSignal: an assignment named a readonly variable.
-        PolicyDenied: the door refused an assignment.
+        PolicyDenied: the session view refused an assignment.
     """
     for write in writes:
         name = deref(session, write.name) or write.name
@@ -454,7 +454,7 @@ async def subscript_index(
 
     The subscript is arithmetic, so it may assign (``a[x=3]``) and seed
     (``a[RANDOM=42]``), and bash binds those as it evaluates them. Each
-    lands through the door once the index is known, then the ``RANDOM``
+    lands through the session view once the index is known, then the ``RANDOM``
     reader replays the draws made after the seed. A subscript that
     fails to evaluate lands what it assigned before failing and then
     raises, the subscript text leading the message, since bash aborts
@@ -464,11 +464,11 @@ async def subscript_index(
     Args:
         session (SessionState): the session the subscript reads.
         subscript (str): the raw subscript text.
-        view (SessionView | None): the gated door the assignments land
+        view (SessionView | None): the gated session view the assignments land
             through; None lands them ungated, outside a workspace.
 
     Raises:
-        PolicyDenied: the door refused an assignment.
+        PolicyDenied: the session view refused an assignment.
         ExitSignal: an assignment named a readonly variable, which ends
             the shell wherever a subscript is (``${a[R=3]}``).
         ArithError: the subscript does not evaluate, or an assigned name
@@ -513,9 +513,9 @@ class _SessionElements:
     indexed subscript is arithmetic and may itself hold an element
     reference, so ``resolve`` hands the evaluator the same pair of
     callbacks it is one of. It lives beside the other reader
-    projections because the session door needs it too: the ``-i``
+    projections because the session view needs it too: the ``-i``
     coercion evaluates ``n=a[1]+1`` at the write, and a resolver that
-    imported the door would close a cycle.
+    imported the session view would close a cycle.
     """
 
     __slots__ = ("_session", "_reader")
@@ -635,7 +635,7 @@ def seed_from(word: str, session: SessionState) -> int:
 def next_random(session: SessionState, stored: str | None) -> int | None:
     """Draw from the session generator, or None after RANDOM is unset.
 
-    Shell assignments validate and seed at the session door. A host-seeded
+    Shell assignments validate and seed at the session view. A host-seeded
     variable is consumed here on its first read. The last draw is separate
     from the stored word because a reseed resets repeat suppression to zero.
 
@@ -684,7 +684,7 @@ def note_random_kind(
     so ``RANDOM=(1 2)``, ``declare -a RANDOM``,
     ``RANDOM[1]=5`` and ``RANDOM+=(3)`` all leave an ordinary array that
     ``$RANDOM`` reads element 0 of, for good, as ``unset RANDOM`` does.
-    Every store door calls this, gated or not, since a host seeding an
+    Every store entry point calls this, gated or not, since a host seeding an
     array onto the name means the same thing.
 
     Args:
@@ -722,20 +722,20 @@ class RandomReader:
     session generator. bash seeds at the instant of an assignment and
     every later read draws from the new seed (``$((RANDOM=42, RANDOM))``
     is the first draw after seeding with 42). Here the assignment is
-    still pending at the session door, which lands it gated after
+    still pending at the session view, which lands it gated after
     evaluation, so the evaluator tells the reader of each assignment as
     it is made (``wrote``), the reader seeds a scratch generator the way
-    the door will and draws from that, and ``settle`` replays the draws
-    on the session once the door has seeded it: the session ends where
+    the session view will and draws from that, and ``settle`` replays the draws
+    on the session once the session view has seeded it: the session ends where
     bash's does, seeded and advanced by every read since the last
     assignment, and the write still reaches the gate as the assignment
     it is. Each assignment restarts the scratch generator and the count,
-    since the door lands only the last value written, and the draws are
-    replayed only if the door did land it: an assignment the caller
+    since the session view lands only the last value written, and the draws are
+    replayed only if the session view did land it: an assignment the caller
     never applied leaves the session as it was.
 
-    Lives beside the door rather than with the generator because the
-    door needs it too: ``RANDOM=RANDOM`` draws once while the seed is
+    Lives beside the session view rather than with the generator because the
+    session view needs it too: ``RANDOM=RANDOM`` draws once while the seed is
     evaluated, then seeds with the draw, as bash does: it reads an
     assigned seed as an arithmetic expression.
 
@@ -792,7 +792,7 @@ class RandomReader:
 
     def settle(self) -> None:
         """Replay the scratch draws on the session generator, once the
-        door has seeded it with the value the expression assigned."""
+        session view has seeded it with the value the expression assigned."""
         if self.seeded is None or self.session._random_seed != self.seeded:
             return
         for _ in range(self.draws):
@@ -864,7 +864,7 @@ class _IntegerCoercion:
     is 0 (`n=abc` stores `0`), the arithmetic rule, not a refusal.
     ``RANDOM`` draws, as in every other arithmetic context, so `n=RANDOM`
     and a `RANDOM=RANDOM` seed both advance the generator. The
-    assignments the expression makes are kept for the door to land
+    assignments the expression makes are kept for the session view to land
     (``_land_coercion``): bash binds `x` in `n='x=5'` and in
     `RANDOM='x=5'`, before the error too if the expression then fails.
     A malformed expression raises ArithError with the offending text
@@ -921,7 +921,7 @@ class _IntegerCoercion:
 async def _land_coercion(
     session: SessionState, store: EnvSet, coercion: _IntegerCoercion
 ) -> None:
-    """Land the assignments a coercion made, each through the door, in
+    """Land the assignments a coercion made, each through the session view, in
     the scope it read, then settle its ``RANDOM`` draws.
 
     Inside a ``declare -g`` that is the function's: ``local G=3; declare
@@ -930,7 +930,7 @@ async def _land_coercion(
 
     Args:
         session (SessionState): the shell session.
-        store (EnvSet): the door each write goes through.
+        store (EnvSet): the session view each write goes through.
         coercion (_IntegerCoercion): the evaluation that made the writes.
     """
     reach_again = _step_back(session)
@@ -952,7 +952,7 @@ async def evaluate_integer(
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         text (str): the value.
 
     Raises:
@@ -1502,7 +1502,7 @@ def seed_var(session: SessionState, name: str, value: ShellValue) -> None:
     which is the whole point of the store being read-only from outside.
     One caller is neither, and is called out here rather than left to
     be discovered: `execute_command` lands a prefix assignment
-    (``FOO=bar cmd``) through this door. That is not a way around the
+    (``FOO=bar cmd``) through this entry point. That is not a way around the
     gate. The same site asks ``ensure_var_visible`` and then
     ``pre_session``, with the value, before it seeds anything, because
     a prefix assignment is a session write like any other and the form
@@ -1627,7 +1627,7 @@ def session_view(
 
     The one constructor every tier uses — builtins, the command
     dispatcher, a bare unit test — so the gate cannot be skipped by
-    picking a different door. The view is the whole capability: it
+    picking a different entry point. The view is the whole capability: it
     carries no handle back to the raw session.
 
     Args:

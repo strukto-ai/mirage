@@ -136,10 +136,10 @@ function reachable(
 export async function fsck(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const fl = new FlagView(inv.flags)
-    const doors = inv.doors ?? {}
-    const statPath = doors.statPath
+    const view = inv.view ?? {}
+    const statPath = view.statPath
     if (statPath === undefined) throw new NoWorkspaceError()
-    const repo = await opened(fl, doors)
+    const repo = await opened(fl, view)
     const args = repoArgs(repo)
     const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
     const roots = new Set([...refs.values()].filter((oid) => !oid.startsWith('ref: ')))

@@ -791,7 +791,7 @@ async def expr(
         # GNU writes the refusal to stderr, nothing to stdout, and exits
         # 2; exit 1 is reserved for a zero-valued success. The
         # diagnostic quotes a byte view of the offending word, so it
-        # leaves through the same door the value does.
+        # leaves through the same entry point the value does.
         return None, IOResult(
             exit_code=2, stderr=from_byte_view(f"{exc}\n", utf8)
         )

@@ -36,7 +36,7 @@ function codeOf(err: unknown): string | null {
 // that would couple this adapter to mirage internals.
 function codeFor(err: unknown): FsErrorCode {
   if (isMissingPath(err)) return 'FS_NOT_FOUND'
-  // An admission policy refused the op at the door: the session's
+  // An admission policy refused the op at the dispatcher: the session's
   // permission document, or a code policy registered beside it. EACCES is
   // too coarse to say so alone, since a plain mount-mode refusal carries
   // it too, and the two want different answers — a mode refusal is the

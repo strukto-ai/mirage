@@ -106,7 +106,7 @@ async def handle_readlink(
     for op in operands:
         abs_op = operand_abs(namespace, op, session.cwd)
         spec = PathSpec.from_str_path(op, cwd=session.cwd)
-        # The link entry is namespace state behind the op door: session
+        # The link entry is namespace state behind the dispatcher: session
         # grants and admission policies decide whether this session may
         # read the target at all, so a link operand clears it even under
         # -f, -e and -m. EINVAL (not a link), a refusal and a failed walk

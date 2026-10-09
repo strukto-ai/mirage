@@ -42,7 +42,7 @@ const CALLS: Readonly<Record<string, boolean>> = { tools: false, all: true }
  * can be cancelled there, and is recorded like any other. The caller's
  * `signal` (an MCP client's cancel) cancels the job too. The other tools
  * run through the session's own table (`session.tools`), so a read
- * through any door guards a write through another.
+ * through any entry point guards a write through another.
  */
 export class DaemonToolOperations extends MirageToolOperations {
   constructor(
@@ -107,7 +107,7 @@ export class DaemonToolOperations extends MirageToolOperations {
  * so the read one request stamps guards the edit the next one makes; the
  * SDK builds a server per request around it.
  */
-export class McpDoor {
+export class McpEndpoint {
   private readonly served = new Map<
     string,
     {
@@ -221,9 +221,9 @@ export class McpDoor {
   /**
    * The tool table a workspace session is served by, or why there is
    * none: the workspace or the session does not exist. One table per
-   * workspace and live session, shared by every door that serves the
+   * workspace and live session, shared by every entry point that serves the
    * tools (this endpoint, the HTTP tool routes, the RPC endpoint and the
-   * CLI through them), so a read through one door stamps the file for an
+   * CLI through them), so a read through one entry point stamps the file for an
    * edit through another. No session is the workspace's default; another
    * account's workspace is not found.
    */
@@ -326,13 +326,13 @@ export function registerMcpRoutes(
   app: FastifyInstance,
   registry: WorkspaceRegistry,
   jobs: JobTable,
-): McpDoor {
-  const door = new McpDoor(registry, jobs)
+): McpEndpoint {
+  const endpoint = new McpEndpoint(registry, jobs)
   app.route({
     method: ['GET', 'POST', 'DELETE'],
     url: MCP_PATH,
     bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE,
-    handler: (req, reply) => door.handle(req, reply),
+    handler: (req, reply) => endpoint.handle(req, reply),
   })
-  return door
+  return endpoint
 }

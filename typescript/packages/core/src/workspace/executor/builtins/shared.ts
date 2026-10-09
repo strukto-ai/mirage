@@ -261,7 +261,7 @@ export function refusal(cmd: string, err: PolicyDenied): Result {
 }
 
 /**
- * The shell's own readonly refusal line, checked before the door.
+ * The shell's own readonly refusal line, checked before the session view.
  * `declare`, `local` and `typeset` name themselves in it (`bash: declare: R:
  * readonly variable`); every other writer refuses in the assignment's voice
  * (`bash: R: readonly variable`).

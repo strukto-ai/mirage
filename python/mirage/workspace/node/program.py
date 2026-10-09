@@ -74,7 +74,7 @@ async def execute_program(
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Execute program node (root / semicolon-separated).
 
-    ``dispatch`` is the op door, threaded so an active ``exec`` redirect
+    ``dispatch`` is the dispatcher, threaded so an active ``exec`` redirect
     can send each statement's output to its file; None (a nested loop
     that is not the program root) leaves output undiverted. ``handed``
     and ``decisions`` are the line's hand-off and its ledger, for a

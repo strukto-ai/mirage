@@ -113,9 +113,9 @@ export interface ProfileMount {
  * no mount-owned block above it, so reading this object is reading
  * everything the profile may do; what a profile does not say, it does not
  * restrict. Configuration, not enforcement: the resolver compiles it
- * onto the session's narrowing fields and the doors keep enforcing.
+ * onto the session's narrowing fields and the entry points keep enforcing.
  * Deliberately not named a View, which per the view convention is a
- * door-scoped handle an agent holds, while a profile is what the
+ * handle an agent holds on one entry point, while a profile is what the
  * embedder uses to *define* one. Immutable by type, so two agents with
  * the same profile share one object and neither can bend the other's view.
  *
@@ -140,7 +140,7 @@ export interface SessionProfile {
    * answers at, the way a coded Policy defines only the hooks it cares
    * about: `preCommand(ctx)` per command, `preVfs(ctx)` per VFS op,
    * `preSession(ctx)` per env write (`pre_command`, `pre_vfs`,
-   * `pre_session` in python). Each is handed the door's facts as `ctx`
+   * `pre_session` in python). Each is handed the entry point's facts as `ctx`
    * and answers with `return`: null or 'allow' for no opinion, 'deny' /
    * {deny: reason}, and at the command gate 'ask' / {ask: reason}. A block
    * naming the program and the engine it runs on, the shape a `clis`
@@ -158,7 +158,7 @@ export interface SessionProfile {
  * A profile's policy as the document states it: the program, and the
  * engine that runs it.
  *
- * `script` is the path form the config door accepts and loads; code
+ * `script` is the path form the config loader accepts and loads; code
  * passes the loaded ScriptSource, so a path still spelled as a string
  * when the workspace reads it means the config layer never saw it.
  * `runtime` is required: there is no default engine, because an engine

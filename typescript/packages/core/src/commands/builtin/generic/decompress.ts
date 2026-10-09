@@ -6,7 +6,7 @@ import { enoent, eloop, isDotWalkError, isEisdir, isEnoent, isFsError } from '..
 import { fsErrorLine } from '../../../errors/render.ts'
 import { GzipDataError } from '../../../utils/compress.ts'
 import { mountedPath, respelled } from '../../../utils/key_prefix.ts'
-import type { LinkDoor } from '../utils/links.ts'
+import type { LinkResolver } from '../utils/links.ts'
 import {
   GZIP_KNOWN_SUFFIXES,
   GZIP_MAX_SUFFIX,
@@ -128,7 +128,7 @@ interface GzipOpenOptions {
   suffix?: string
   decompress?: boolean
   follow?: boolean
-  door?: LinkDoor | null
+  resolver?: LinkResolver | null
 }
 
 /**
@@ -137,7 +137,7 @@ interface GzipOpenOptions {
  * A name typed with a trailing slash has to be a directory. Without -c, -t
  * or -f gzip opens with O_NOFOLLOW, so a link standing at the name, dangling
  * or not, is ELOOP, which -q never quiets; with them it is followed, a
- * retried name through the door, since what it leads to may live on any
+ * retried name through the dispatcher, since what it leads to may live on any
  * mount. A directory is a warning. A missing name with no suffix gzip knows
  * is retried, when decompressing, with each suffix in turn and reported with
  * the -S one; any other failure ends the operand. Every failure is reported
@@ -150,20 +150,21 @@ export async function openGzipInput(
   options: GzipOpenOptions = {},
 ): Promise<GzipInput | null> {
   const suffix = options.suffix ?? GZIP_SUFFIX
-  const door = options.door ?? null
+  const resolver = options.resolver ?? null
   const retry = options.decompress !== false && gzipSuffix(path.rawPath, suffix) === null
   const names = [path]
   for (const name of names) {
-    const link = door !== null ? door.linkAt(name) : null
+    const link = resolver !== null ? resolver.linkAt(name) : null
     if (link !== null && options.follow !== true) {
       report(fsErrorLine('gzip', name, eloop(name)), 1, false)
       return null
     }
     try {
-      if (door !== null && name === path && door.vanished(name)) throw enoent(name.virtual)
+      if (resolver !== null && name === path && resolver.vanished(name)) throw enoent(name.virtual)
       // The router followed the operand itself; a retried name it never saw
-      // is followed through the door.
-      const reads = door !== null && link !== null && name !== path ? door.read(link) : source(name)
+      // is followed through the dispatcher.
+      const reads =
+        resolver !== null && link !== null && name !== path ? resolver.read(link) : source(name)
       return { name, stream: await opened(reads), link }
     } catch (err) {
       if (isEisdir(err)) {
@@ -187,15 +188,16 @@ export async function openGzipInput(
 /**
  * Whether anything stands where gzip creates an output. gzip creates with
  * O_EXCL, which a link standing there refuses, dangling or not, so the probe
- * is an lstat: through the door while the namespace holds links, the mount's
+ * is an lstat: through the dispatcher while the namespace holds links, the mount's
  * own stat otherwise. Mirrors Python's output_taken.
  */
 export async function outputTaken(
   where: PathSpec,
   stat: StatFn | undefined,
-  door: LinkDoor | null,
+  resolver: LinkResolver | null,
 ): Promise<boolean> {
-  if (door !== null) return pathExists((p) => door.lstat(p), PathSpec.fromStrPath(where.virtual))
+  if (resolver !== null)
+    return pathExists((p) => resolver.lstat(p), PathSpec.fromStrPath(where.virtual))
   return stat !== undefined && (await pathExists(stat, where))
 }
 
@@ -210,18 +212,19 @@ export function besideLink(link: string, typed: string): PathSpec {
  * Write an in-place output, replacing a link standing at its name. gzip -f
  * unlinks whatever holds the name before it creates the file, so a link there
  * is removed, never written through; an output beside a link goes through the
- * door, since the link may sit on any mount. Mirrors Python's replace_output.
+ * dispatcher, since the link may sit on any mount. Mirrors Python's replace_output.
  */
 export async function replaceOutput(
   out: PathSpec,
   data: Uint8Array,
   write: (path: PathSpec, data: Uint8Array) => Promise<void>,
-  door: LinkDoor | null,
+  resolver: LinkResolver | null,
   beside: boolean,
 ): Promise<void> {
-  if (door !== null && door.links.statAt(out.virtual) !== null) await door.unlink(out.virtual)
-  if (beside && door !== null) {
-    await door.write(out.virtual, data)
+  if (resolver !== null && resolver.links.statAt(out.virtual) !== null)
+    await resolver.unlink(out.virtual)
+  if (beside && resolver !== null) {
+    await resolver.write(out.virtual, data)
     return
   }
   await write(out, data)
@@ -238,7 +241,7 @@ interface DecompressOptions {
   write?: (path: PathSpec, data: Uint8Array) => Promise<void>
   unlink?: (path: PathSpec) => Promise<void>
   stat?: StatFn
-  door?: LinkDoor | null
+  resolver?: LinkResolver | null
 }
 
 /**
@@ -268,7 +271,7 @@ export async function decompressInputs(
   const force = options.force === true
   const quiet = options.quiet === true
   const testOnly = options.testOnly === true
-  const door = options.door ?? null
+  const resolver = options.resolver ?? null
   const follow = options.toStdout === true || testOnly || force
   const operands = paths.length > 0 ? paths : [STDIN_OPERAND]
   const stream = stdinStream(read, options.stdin)
@@ -293,7 +296,7 @@ export async function decompressInputs(
         : await openGzipInput(operand, inPlace ? read : stream, report, {
             suffix,
             follow,
-            door,
+            resolver,
           })
       if (found === null && !onStdin) continue
       const path = found === null ? operand : found.name
@@ -336,7 +339,7 @@ export async function decompressInputs(
         throw new Error('in-place decompression requires write and unlink')
       const outName = output[0]
       const out = link === null ? output[1] : besideLink(link, outName)
-      const existed = await outputTaken(out, options.stat, door)
+      const existed = await outputTaken(out, options.stat, resolver)
       if (existed && !force) {
         report(`gzip: ${outName} already exists;\tnot overwritten\n`, 2)
         continue
@@ -348,7 +351,7 @@ export async function decompressInputs(
       }
       const data = concat(chunks)
       try {
-        await replaceOutput(out, data, options.write, door, link !== null)
+        await replaceOutput(out, data, options.write, resolver, link !== null)
       } catch (err) {
         if (!isFsError(err)) throw err
         const line = fsErrorLine('gzip', outName, err)
@@ -358,8 +361,8 @@ export async function decompressInputs(
       }
       if (link === null) io.writes[out.mountPath] = data
       if (options.keep !== true) {
-        if (link === null || door === null) await options.unlink(path)
-        else await door.unlink(link)
+        if (link === null || resolver === null) await options.unlink(path)
+        else await resolver.unlink(link)
       }
     }
   }

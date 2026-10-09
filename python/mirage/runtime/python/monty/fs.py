@@ -61,24 +61,24 @@ def _as_guest(path: str, target: str | None = None) -> Iterator[None]:
 
 
 class MontyFs(AbstractOS):
-    """Monty's OS door: every path a guest names is the workspace's.
+    """Monty's OS callbacks: every path a guest names is the workspace's.
 
     This is monty's tier of the interception taxonomy: the engine hands
     the interpreter a host OS object and calls its methods, so mirage
     implements that object rather than hooking a syscall layer. Every
-    path goes to the file door, and nothing is kept aside: structure is
+    path goes to the file adapter, and nothing is kept aside: structure is
     open (a listing, whether a name is a directory or a link) and
     content goes only through the runtime's view (``RuntimeFiles.serves``:
     the announced mounts and what a link reaches), so a guest lists what
     a shell lists and reads and writes nothing the view withholds. The
     environment, the clocks and ``urandom`` are the engine's own.
 
-    Monty hands the door whole-file calls: an open, then reads of the
+    Monty hands the callbacks whole-file calls: an open, then reads of the
     whole file and appends of each new write. So an open applies its
     mode's effect on the mount (``apply_open``) and nothing else, and
     each write after it ships only its own bytes.
 
-    The door uses synchronous callbacks, so the file API's hop parks the
+    The callbacks are synchronous, so the file API's hop parks the
     tokio worker for the whole I/O wait. That caps concurrent
     I/O-waiting runs at Monty's worker pool size, which is the core
     count by default; TOKIO_WORKER_THREADS raises it, and parked
@@ -112,8 +112,8 @@ class MontyFs(AbstractOS):
     def path_resolve(self, path: PurePosixPath) -> str:
         return self.path_absolute(path)
 
-    def _door(self, path: PurePosixPath) -> RuntimeFiles:
-        """The file door for a content call on `path`, in the view only.
+    def _files_for(self, path: PurePosixPath) -> RuntimeFiles:
+        """The file adapter for a content call on `path`, in the view only.
 
         Args:
             path (PurePosixPath): the guest path.
@@ -124,7 +124,7 @@ class MontyFs(AbstractOS):
         return files
 
     def _structure(self, path: PurePosixPath) -> RuntimeFiles:
-        """The file door for a structural question, asked of any path.
+        """The file adapter for a structural question, asked of any path.
 
         Args:
             path (PurePosixPath): the guest path.
@@ -182,18 +182,18 @@ class MontyFs(AbstractOS):
         return stat_result(row)
 
     def path_iterdir(self, path: PurePosixPath) -> list[PurePosixPath]:
-        door = self._structure(path)
+        files = self._structure(path)
         with _as_guest(str(path)):
-            entries = door.readdir(str(path), classify=False)
+            entries = files.readdir(str(path), classify=False)
         return child_paths(path, [entry.path for entry in entries])
 
     def path_open(self, path: PurePosixPath, mode: str) -> MontyFileHandle:
         # Built first: a malformed mode must raise before any effect
         # lands on the mount.
         handle = MontyFileHandle(str(path), mode)
-        door = self._door(path)
+        files = self._files_for(path)
         with _as_guest(str(path)):
-            apply_open(door, str(path), parse_mode(mode))
+            apply_open(files, str(path), parse_mode(mode))
         return handle
 
     def path_read_text(self, path: PurePosixPath | MontyFileHandle) -> str:
@@ -201,9 +201,9 @@ class MontyFs(AbstractOS):
 
     def path_read_bytes(self, path: PurePosixPath | MontyFileHandle) -> bytes:
         target = path_from_arg(path)
-        door = self._door(target)
+        files = self._files_for(target)
         with _as_guest(str(target)):
-            return door.read(str(target))
+            return files.read(str(target))
 
     def path_write_text(
         self, path: PurePosixPath | MontyFileHandle, data: str
@@ -215,9 +215,9 @@ class MontyFs(AbstractOS):
         self, path: PurePosixPath | MontyFileHandle, data: bytes
     ) -> int:
         target = path_from_arg(path)
-        door = self._door(target)
+        files = self._files_for(target)
         with _as_guest(str(target)):
-            door.write(str(target), bytes(data))
+            files.write(str(target), bytes(data))
         return len(data)
 
     def path_append_text(
@@ -233,7 +233,7 @@ class MontyFs(AbstractOS):
 
         Re-sending everything written so far turns a write loop
         quadratic, so a mount with its own append op carries just these
-        bytes, and the door falls back to a whole-file write only for
+        bytes, and the adapter falls back to a whole-file write only for
         the mount without one.
 
         Args:
@@ -241,9 +241,9 @@ class MontyFs(AbstractOS):
             data (bytes): only the newly appended bytes.
         """
         target = path_from_arg(path)
-        door = self._door(target)
+        files = self._files_for(target)
         with _as_guest(str(target)):
-            door.append(str(target), bytes(data))
+            files.append(str(target), bytes(data))
         return len(data)
 
     def path_mkdir(
@@ -269,25 +269,25 @@ class MontyFs(AbstractOS):
             if exist_ok:
                 return
             raise guest_error(FsCondition.EEXIST, str(path))
-        door = self._door(path)
+        files = self._files_for(path)
         with _as_guest(str(path)):
-            door.mkdir(str(path), parents=parents)
+            files.mkdir(str(path), parents=parents)
 
     def path_rmdir(self, path: PurePosixPath) -> None:
-        door = self._door(path)
+        files = self._files_for(path)
         with _as_guest(str(path)):
-            door.rmdir(str(path))
+            files.rmdir(str(path))
 
     def path_unlink(self, path: PurePosixPath) -> None:
-        door = self._door(path)
+        files = self._files_for(path)
         with _as_guest(str(path)):
-            door.unlink(str(path))
+            files.unlink(str(path))
 
     def path_rename(self, path: PurePosixPath, target: PurePosixPath) -> None:
         """Rename within one mount; across mounts it is EXDEV.
 
         The dispatcher picks the mount from the source alone, so the
-        door refuses a pair on different mounts, and EXDEV is POSIX's
+        adapter refuses a pair on different mounts, and EXDEV is POSIX's
         answer for a rename across filesystems. Monty ships no `shutil`,
         so guest code writes the copy-and-delete fallback by hand, and
         the errno is what tells it to.
@@ -296,6 +296,6 @@ class MontyFs(AbstractOS):
             path (PurePosixPath): the source path.
             target (PurePosixPath): the destination path.
         """
-        door = self._door(path)
+        files = self._files_for(path)
         with _as_guest(str(path), str(target)):
-            door.rename(str(path), str(target))
+            files.rename(str(path), str(target))

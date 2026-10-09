@@ -52,7 +52,7 @@ function mountOf(ws: Workspace, path: string): MountEntry {
 // MountEntry.read is constructor-set. These are unit tests of the
 // Reconciler itself -- they build it directly rather than going through a
 // workspace -- so they pin the policy under test on the mount. The verdict
-// that would refuse a RAM mount `fresh` runs at the workspace door, which
+// that would refuse a RAM mount `fresh` runs at the workspace entry point, which
 // this path bypasses.
 function withFresh(mount: MountEntry): MountEntry {
   ;(mount as { read: ReadSpec }).read = { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL }
@@ -747,7 +747,7 @@ describe('the gate reuses what routing got from the backend', () => {
     }
   })
 
-  // FUSE and the op door belong to no command, so nothing a command's probe
+  // FUSE and the dispatcher belong to no command, so nothing a command's probe
   // saw is reused for them.
   it('asks the backend outside a command', async () => {
     const { ws, mount, rec, calls } = await gated()

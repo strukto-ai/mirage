@@ -63,7 +63,7 @@ export function programFileRefusal(name: string, path: PathSpec, err: unknown): 
 }
 
 /**
- * One program file's bytes, read through the door. A directory opens and
+ * One program file's bytes, read through the dispatcher. A directory opens and
  * fails at its read, which a keyed store's own read cannot tell from nothing
  * being there, so a stat goes first; sed alone reads a directory as an empty
  * script (sed 4.9). Mirrors Python's read_program_file.

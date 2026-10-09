@@ -470,7 +470,7 @@ async function listBranches(
  * git answers with its usage.
  */
 export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const words = filterWords(inv)
   const texts = withoutFilterValues(inv.texts, words)
   const fl = new FlagView(inv.flags)
@@ -478,10 +478,10 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
   const includeRemotes = remotesOnly || fl.asBool('a')
   const listing = words.length > 0 || fl.asBool('list')
   try {
-    const dispatch = doors.dispatch
+    const dispatch = view.dispatch
     if (dispatch === undefined) throw new NoWorkspaceError()
     checkSwitches(inv, texts)
-    const repo = await opened(fl, doors)
+    const repo = await opened(fl, view)
     const mode = await trackMode(repo)
     const filter = await refFilter(repo, words)
     const refs = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)

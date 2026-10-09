@@ -51,7 +51,7 @@ from mirage.commands.builtin.grep_binary import GrepFlags
 from mirage.commands.builtin.grep_pattern import compile_pattern, pattern_arg
 from mirage.commands.builtin.grep_select import dir_admitted, file_admitted
 from mirage.commands.builtin.rg_scan import walk_error_line
-from mirage.commands.builtin.utils.links import LinkDoor
+from mirage.commands.builtin.utils.links import LinkResolver
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
@@ -199,8 +199,10 @@ async def run_search(
         if planned:
             assert rg is not None and walk is not None
             warnings: list[str] = []
-            door = (
-                LinkDoor(ns.links, dispatch, cwd) if ns and ns.links else None
+            resolver = (
+                LinkResolver(ns.links, dispatch, cwd)
+                if ns and ns.links
+                else None
             )
             found = haystacks(
                 paths,
@@ -211,7 +213,7 @@ async def run_search(
                 rg,
                 warnings,
                 ns.mounts if ns and rg.one_file_system else None,
-                door,
+                resolver,
             )
             if rg.sort not in (None, "none") and not (
                 rg.sort == "path" and not rg.sort_reverse

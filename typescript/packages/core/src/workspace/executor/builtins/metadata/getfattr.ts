@@ -161,7 +161,7 @@ async function fileBlock(
  * Debian's attr 2.5.2, pinned in docker: a `# file:` block per path that
  * has a matching attribute, names sorted, a blank line after each block,
  * `-d`/`-n` adding `="value"`, and the default match `^user\.` (`-m -`
- * matches every name). The attributes are the op door's: what was set on
+ * matches every name). The attributes are the dispatcher's: what was set on
  * the path. `-h` reads a link's own attributes. Mirrors Python's
  * `handle_getfattr`.
  */

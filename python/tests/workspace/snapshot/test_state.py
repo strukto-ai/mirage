@@ -441,7 +441,7 @@ async def test_an_alias_over_a_builtin_rebuilds_through_its_ref_not_its_type():
         await ws.close()
     mount = state[StateKey.MOUNTS][0]
     # The type alone names RAMVFS, which is what the mount used to
-    # come back as; the ref is the door it was declared through.
+    # come back as; the ref is the entry point it was declared through.
     assert mount[MountKey.VFS_STATE]["type"] == "ram"
     assert mount[MountKey.VFS_REF] == "seeded"
     restored = await Workspace.from_state(state)
@@ -504,7 +504,7 @@ class DenyGate(Policy):
 
 # The restore used to seed `session.vars` directly, past the gate a live
 # `export GATE_X=1` clears (#1017); a snapshot is the one env input the
-# deployment did not author, so this is the door where the rule matters.
+# deployment did not author, so this is the entry point where the rule matters.
 @pytest.mark.asyncio
 async def test_a_restored_variable_clears_the_session_gate():
     source = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
@@ -772,7 +772,7 @@ async def test_the_read_policy_survives_a_snapshot_round_trip():
 
 @pytest.mark.asyncio
 async def test_snapshot_rejects_fresh_on_a_mount_without_caching():
-    # A hand-edited snapshot is input like any other: the load door runs
+    # A hand-edited snapshot is input like any other: the load entry point runs
     # the same verdict as the constructor, listing arm included.
     ws = Workspace({"/d/": RAMVFS()}, mode=MountMode.WRITE)
     try:
@@ -852,12 +852,12 @@ async def test_a_v4_entry_missing_the_read_key_raises_rather_than_defaulting(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("version", [3, 4])
 async def test_apply_state_dict_runs_the_version_check_too(version):
-    """Both doors, or the same bytes get two answers.
+    """Both entry points, or the same bytes get two answers.
 
     ``build_mount_args`` builds a workspace from the state;
     ``apply_state_dict`` restores into one that already exists and is
     what ``version checkout`` and the agent sandbox's hydrate call.
-    Checking one door only meant a v3 commit was refused through
+    Checking one entry point only meant a v3 commit was refused through
     ``Workspace.load`` and half-restored through a checkout.
     """
     ws = Workspace({"/d/": RAMVFS()}, mode=MountMode.WRITE)
@@ -975,19 +975,19 @@ async def test_a_restore_into_a_live_workspace_keeps_the_live_read_policy():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("door", ["copy", "load"])
+@pytest.mark.parametrize("route", ["copy", "load"])
 @pytest.mark.parametrize(
     "folder_versions, listing_version",
     [(True, ListingVersion.FOLDER), (False, ListingVersion.NONE)],
 )
 async def test_a_rebuilt_disk_mount_keeps_its_folder_versions(
-    tmp_path, door, folder_versions, listing_version
+    tmp_path, route, folder_versions, listing_version
 ):
     root = tmp_path / "root"
     root.mkdir()
     ws = Workspace({"/d": DiskVFS(str(root), folder_versions=folder_versions)})
     try:
-        if door == "copy":
+        if route == "copy":
             rebuilt = await ws.copy()
         else:
             snap = tmp_path / "ws.tar"
@@ -1168,8 +1168,8 @@ async def _saved_state(mounts: dict[str, VFSMount]) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("door", ["state", "copy"])
-async def test_the_write_policies_survive_each_door(track, door):
+@pytest.mark.parametrize("route", ["state", "copy"])
+async def test_the_write_policies_survive_each_entry_point(track, route):
     # Two mounts with two values and a workspace default for later mounts.
     ws = track(
         Workspace(
@@ -1183,7 +1183,7 @@ async def test_the_write_policies_survive_each_door(track, door):
             write="conditional",
         )
     )
-    if door == "copy":
+    if route == "copy":
         back = track(await ws.copy())
     else:
         state = await to_state_dict(ws)

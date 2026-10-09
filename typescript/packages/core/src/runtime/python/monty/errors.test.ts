@@ -112,7 +112,7 @@ describe('asGuestError', () => {
     expect(guest.message).toBe(message)
   })
 
-  it('keeps a guest error this door already built', () => {
+  it('keeps a guest error this adapter already built', () => {
     const built = guestError('ENOENT', '/x')
     expect(asGuestError(built, '/y')).toBe(built)
   })

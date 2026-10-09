@@ -280,7 +280,7 @@ def _reader(vfs: BaseVFS) -> Callable[..., Awaitable[bytes]]:
     read agrees with a stream. Only a VFS with no ``read`` of its own
     (gdocs, gsheets, gslides, whose stored form is the rendering) is read
     through the renderer of the path's filetype. Both are looked up per
-    call, as the op door looks them up; the op door renders for the
+    call, as the dispatcher looks them up; the dispatcher renders for the
     surfaces that show files.
 
     Args:
@@ -384,7 +384,7 @@ def command_io(vfs: BaseVFS) -> CommandIO:
     )
 
 
-async def _door_bytes(
+async def _dispatched_bytes(
     dispatch: DispatchFn,
     accessor: Accessor | None,
     path: PathSpec,
@@ -392,11 +392,11 @@ async def _door_bytes(
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
-    """A command's whole or ranged read of the stored bytes, at the door.
+    """A command's whole or ranged read of the stored bytes, at the dispatcher.
 
     Args:
         dispatch (DispatchFn): the command's dispatcher.
-        accessor (Accessor | None): unused; the door finds the mount.
+        accessor (Accessor | None): unused; the dispatcher finds the mount.
         path (PathSpec): the file.
         index (IndexCacheStore): unused; the mount brings its own.
         offset (int): first byte of the window.
@@ -408,19 +408,19 @@ async def _door_bytes(
     return await materialize(data) or b""
 
 
-async def _door_stream(
+async def _dispatched_stream(
     dispatch: DispatchFn,
     accessor: Accessor | None,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes]:
-    """A command's streamed read of the stored bytes, at the door.
+    """A command's streamed read of the stored bytes, at the dispatcher.
 
     Opened at the first pull, as a backend stream is.
 
     Args:
         dispatch (DispatchFn): the command's dispatcher.
-        accessor (Accessor | None): unused; the door finds the mount.
+        accessor (Accessor | None): unused; the dispatcher finds the mount.
         path (PathSpec): the file.
         index (IndexCacheStore): unused; the mount brings its own.
     """
@@ -433,10 +433,10 @@ async def _door_stream(
         await close_quietly(source)
 
 
-def with_door_reads(ops: CommandIO, dispatch: DispatchFn) -> CommandIO:
+def dispatched_io(ops: CommandIO, dispatch: DispatchFn) -> CommandIO:
     """Return ``ops`` whose content reads go through the dispatcher.
 
-    The door checks hides, the command's path rule, the mount's mode and
+    The dispatcher checks hides, the command's path rule, the mount's mode and
     policy, serves a warm copy and fills a cold one, so a command's read
     answers what the same read through ``ws.vfs`` or FUSE answers.
 
@@ -444,11 +444,11 @@ def with_door_reads(ops: CommandIO, dispatch: DispatchFn) -> CommandIO:
         ops (CommandIO): the mount's table.
         dispatch (DispatchFn): the command's dispatcher.
     """
-    reader = functools.partial(_door_bytes, dispatch)
+    reader = functools.partial(_dispatched_bytes, dispatch)
     return replace(
         ops,
         read_bytes=reader,
-        read_stream=functools.partial(_door_stream, dispatch),
+        read_stream=functools.partial(_dispatched_stream, dispatch),
         read_range=reader if ops.read_range is not None else None,
     )
 
@@ -1477,7 +1477,7 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
         # a reader that turns a failed open into its own words (awk's
         # `cannot open`) relays the stream through its own handler, so a
         # walk that already failed (a link loop) must surface where it
-        # drains. Hides and the path rule are the door's.
+        # drains. Hides and the path rule are the dispatcher's.
 
         async def admit() -> None:
             if path.walk_error is not None:
@@ -1524,9 +1524,9 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
 
 def with_dispatch_rule_guard(dispatch: DispatchFn) -> DispatchFn:
     """Return ``dispatch`` marking each op with the admitted command's
-    gate as ``rule_gate``, which the door judges on the paths the op
+    gate as ``rule_gate``, which the dispatcher judges on the paths the op
     reaches: the command's dispatcher skips its guarded slots, and the
-    door cannot tell which command issued an op. A metadata op passes
+    dispatcher cannot tell which command issued an op. A metadata op passes
     unmarked, as ``with_command_guards`` lets ``stat`` pass.
 
     Args:
@@ -1699,7 +1699,7 @@ def with_policy_guard(ops: CommandIO) -> CommandIO:
     The coded-policy arm of the guard chain. The surface is every
     mutation slot and the directory a readdir lists; content reads go
     through the dispatcher, which admits them itself
-    (``with_door_reads``). stat/exists stay unguarded as
+    (``dispatched_io``). stat/exists stay unguarded as
     presence facts, the mode-000 shape the path rules already take, so
     a denied entry still lists and stats while the read of it is what
     fails; ``scoped_io`` drops the native find/du slots, so the walk

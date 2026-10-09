@@ -440,7 +440,7 @@ export class Decisions {
   }
 
   /**
-   * An Ask from the op door where no line is running: a standing answer
+   * An Ask from the dispatcher where no line is running: a standing answer
    * settles it, else the question is raised now. The op has no command
    * behind it, so its record names none: the rule and the path are the
    * key, the path standing as the one word asked about. A ONCE answer

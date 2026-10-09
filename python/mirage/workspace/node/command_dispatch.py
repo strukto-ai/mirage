@@ -291,7 +291,8 @@ async def execute_command(
             # checked here, so a deployment refusing `SECRET_*` still saw
             # `SECRET_K=leak printenv SECRET_K` print the secret: the
             # seeding below goes through `seed_var`, which is the ungated
-            # door, so this loop is the only place the rule can be asked.
+            # entry point, so this loop is the only place the rule can be
+            # asked.
             await pre_session_gate(
                 registry.policies,
                 SessionContext(
@@ -407,7 +408,7 @@ async def _dispatch_command_body(
     sink: JobConsole | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     # The command's place on the line, as the pass computed it, and
-    # the door its nested evaluations re-enter through: a word that
+    # the entry point its nested evaluations re-enter through: a word that
     # runs a line (eval, source, xargs) is bound to this node, and a
     # substitution names its own node when it calls, so every nested
     # line stands under the node its text came from.
@@ -888,7 +889,7 @@ async def _route_argv(
     if name == "readlink":
         return await handle_readlink(namespace, dispatch, session, operands)
 
-    # ── extended attributes (the door's node table and the backend's
+    # ── extended attributes (the namespace's node table and the backend's
     #    own facts; they read -h themselves) ──
     if name == "getfattr":
         return await handle_getfattr(dispatch, session, operands)

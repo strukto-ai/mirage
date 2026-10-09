@@ -40,7 +40,7 @@ import { recordStatus } from '../executor/statement.ts'
 import { decodeText } from '../../shell/bytes.ts'
 
 /**
- * The executor's door for a nested line. `node` is the node whose text
+ * The executor's entry point for a nested line. `node` is the node whose text
  * the line is: the command running it (bound by the dispatcher for
  * every word that runs a line) or the substitution being expanded,
  * which names itself. The inner line's commands stand under it, where
@@ -504,7 +504,7 @@ async function stringChunks(
 /**
  * An arithmetic expansion's value. Reads resolve against the visible env,
  * so a hidden name counts as unset; the write-back goes through the session
- * plane's door, so a preSession rule governs `$((X=5))` exactly as it
+ * view, so a preSession rule governs `$((X=5))` exactly as it
  * governs `X=5`. bash bound the assignments made before an error, RANDOM's
  * seed included; they land before the line dies.
  */

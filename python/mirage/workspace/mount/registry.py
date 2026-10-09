@@ -151,7 +151,7 @@ class MountRegistry:
         # runtime fields above.
         self.clis = CLIRegistry()
         # The workspace-level default a mount overrides, kept so the
-        # runtime door (`Workspace.add_mount`) has something to resolve
+        # runtime entry point (`Workspace.add_mount`) has something to resolve
         # an unset policy against.
         self._default_read: ReadSpec = ReadSpec()
         self._default_write: WritePolicy = WritePolicy.UNCONDITIONAL

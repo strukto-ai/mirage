@@ -168,7 +168,7 @@ describe('snapshot rebuild through the registry', () => {
     const [mount] = state.mounts
     if (mount === undefined) throw new Error('snapshot recorded no mounts')
     // The type alone names RAMVFS, which is what the mount used to
-    // come back as; the ref is the door it was declared through.
+    // come back as; the ref is the entry point it was declared through.
     expect(mount.vfs_state.type).toBe('ram')
     expect(mount[MountKey.VFS_REF]).toBe('seeded-test')
     const restored = await Workspace.fromState(state)
@@ -219,7 +219,7 @@ describe('the write policy in a snapshot', () => {
     }
   }
 
-  it.each(['state', 'copy'])('survives the %s door', async (door) => {
+  it.each(['state', 'copy'])('survives the %s entry point', async (route) => {
     // Two mounts with two values and a workspace default for later mounts.
     const ws = track(
       new Workspace(
@@ -231,7 +231,7 @@ describe('the write policy in a snapshot', () => {
       ),
     )
     const back = track(
-      door === 'copy'
+      route === 'copy'
         ? await ws.copy()
         : await Workspace.fromState(
             await toStateDict(ws),

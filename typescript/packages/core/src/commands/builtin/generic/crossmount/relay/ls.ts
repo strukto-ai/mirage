@@ -74,7 +74,7 @@ export async function runLs(
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   ns?: NamespaceView,
-  // The session plane's door, for the profile the group column renders.
+  // The session view, for the profile the group column renders.
   sessionView?: SessionView,
 ): Promise<CrossResult> {
   const opts: CommandOpts = {

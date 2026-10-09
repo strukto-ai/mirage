@@ -295,7 +295,7 @@ describe('matchRaw via resolveGlobs', () => {
 
 // The `glob` op never sees the mount prefix: the mount stamps each spec's
 // `vfsPath` with `mountKey(virtual, prefix)` before the op runs, on every
-// door that expands a word (the workspace expander, its mid-path and
+// entry point that expands a word (the workspace expander, its mid-path and
 // globstar walks, and the builtins' operands). Pinned the same way in
 // python's test_globs.py.
 describe('the glob op under a non-root mount prefix', () => {

@@ -141,7 +141,7 @@ async def test_stdin_bytes_reach_exec_line():
 
 def test_sandboxes_take_lines_not_stages():
     # A sandbox is a line executor, never the engine inside one
-    # command: it carries the line door and no interpreter door.
+    # command: it carries the line entry point and no interpreter entry point.
     box = RecordingSandbox()
     assert isinstance(box, LineExecutorMixin)
     assert not hasattr(box, "run")

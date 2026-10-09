@@ -32,18 +32,18 @@ function workspace(): Workspace {
 }
 
 describe('gcal VFS', () => {
-  // gcal's read is the by-VFS op: an event resolves as ".json" at the door,
+  // gcal's read is the by-VFS op: an event resolves as ".json" at the dispatcher,
   // so a read keyed to ".gcal.json" was never picked and a cold read failed
   // until a cat warmed the file cache.
   it.each([
     ['whole', {}, WHOLE],
     ['raw', { raw: true }, WHOLE],
     ['range', { offset: 2, size: 10 }, WHOLE.slice(2, 12)],
-  ])('reads an event cold at the op door (%s)', async (_label, options, data) => {
+  ])('reads an event cold at the dispatcher (%s)', async (_label, options, data) => {
     expect(await workspace().vfs.read(EVENT, options)).toEqual(data)
   })
 
-  it('reads calendar.json cold at the op door', async () => {
+  it('reads calendar.json cold at the dispatcher', async () => {
     const text = await workspace().vfs.cat('/cal/primary/calendar.json')
     expect(JSON.parse(text)).toMatchObject({ bucketTimeZone: HK })
   })

@@ -15,10 +15,10 @@
 from mirage.accessor.base import Accessor
 from mirage.vfs.discord import DiscordVFS
 from mirage.workspace.mount import MountEntry
-from tests.fixtures.vfs_io import DOOR_OPS, vfs_over
+from tests.fixtures.vfs_io import DISPATCH_OPS, vfs_over
 
 
-def test_the_door_serves_reads_only():
+def test_the_dispatcher_serves_reads_only():
     mount = MountEntry("/", vfs_over(DiscordVFS, Accessor()))
-    served = {op for op in DOOR_OPS if mount.answers(op)}
+    served = {op for op in DISPATCH_OPS if mount.answers(op)}
     assert served == {"glob", "read", "readdir", "stat"}

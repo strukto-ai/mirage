@@ -1858,7 +1858,7 @@ describe('declared source instances', () => {
   })
 })
 
-// A profile policy at the session door and one away from it: only the
+// A profile policy at the session view and one away from it: only the
 // first is a session-write gate, and only for the sessions under its
 // profile.
 const SESSION_GATE = `\
@@ -1890,7 +1890,7 @@ async function scriptedWs(env: EnvEntries, source: string): Promise<Workspace> {
 }
 
 describe('fillEnv under a profile policy', () => {
-  it('a policy at the session door drops the masks', async () => {
+  it('a policy at the session view drops the masks', async () => {
     // Its preSession may refuse the assignment mid-line, so the standing
     // value is fetched, as under a coded preSession policy.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
@@ -1905,9 +1905,9 @@ describe('fillEnv under a profile policy', () => {
     }
   }, 120000)
 
-  it('a policy away from the session door keeps the masks', async () => {
-    // The script policy stands at every door of every workspace, but
-    // this program says nothing at the session door, so the fill's masks
+  it('a policy away from the session view keeps the masks', async () => {
+    // The script policy stands at every entry point of every workspace, but
+    // this program says nothing at the session view, so the fill's masks
     // hold and no source is contacted.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-scripted-judge', FakeConfig, fetch)

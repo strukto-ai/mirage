@@ -95,15 +95,15 @@ export function expectedKind(known: ReadonlyMap<string, string>, name: string): 
  * detached HEAD is the state an agent loses commits in.
  */
 export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   let carried: string
   let note: string
   let warnings = ''
   try {
-    const dispatch = doors.dispatch
-    const statPath = doors.statPath
+    const dispatch = view.dispatch
+    const statPath = view.statPath
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
@@ -118,7 +118,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
     if (!creating && first === undefined && !flags.detach) {
       throw new MissingBranchArgumentError()
     }
-    const repo = await opened(fl, doors, true)
+    const repo = await opened(fl, view, true)
     const mode = await trackMode(repo)
     const head = await readHead(dispatch, repo.location.gitdir)
     const known = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
@@ -216,8 +216,8 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
     const moved = await moveHead(
       dispatch,
       statPath,
-      doors.ns?.links ?? null,
-      doors.ns?.mounts ?? null,
+      view.ns?.links ?? null,
+      view.ns?.mounts ?? null,
       repo,
       known,
       head,

@@ -200,7 +200,7 @@ class ReadOnlyProd(Policy):
 
 
 @pytest.mark.asyncio
-async def test_path_guards_hold_at_the_programmatic_door():
+async def test_path_guards_hold_at_the_programmatic_entry_point():
     # ws.vfs is the same seam FUSE comes through; a path-only guard
     # must refuse it, not just shell commands (#675).
     ws = Workspace(
@@ -238,7 +238,7 @@ class SuppressProdWrites(Policy):
 
 
 @pytest.mark.asyncio
-async def test_touch_on_an_existing_file_is_a_write_at_the_op_door():
+async def test_touch_on_an_existing_file_is_a_write_at_the_dispatcher():
     # touch on an existing file mutates via setattr, not create; the
     # write classification must cover that op too.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
@@ -453,7 +453,7 @@ async def test_a_committed_write_is_recorded_when_bookkeeping_fails():
     # The backend applied the write, then a step after it (here an
     # invalid post_vfs return, but any foreign bookkeeping error looks
     # the same) blew up. The error must propagate AND the transfer must
-    # stay on the books: the door stamped the report at completion, so
+    # stay on the books: the dispatcher stamped the report at completion, so
     # the record does not depend on what kind of exception followed.
     ws = Workspace({"/data/": ColdRemote()}, mode=MountMode.WRITE)
     try:
@@ -471,7 +471,7 @@ async def test_a_committed_write_is_recorded_when_bookkeeping_fails():
 
 
 @pytest.mark.asyncio
-async def test_pre_vfs_policy_holds_on_the_dispatcher_door():
+async def test_pre_vfs_policy_holds_on_the_dispatcher():
     # touch routes through the shell's internal dispatcher, not
     # handle_command; a pre_vfs-only policy must still refuse it.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
@@ -503,9 +503,9 @@ class SealedPaths(Policy):
 
 
 @pytest.mark.asyncio
-async def test_pre_vfs_binds_op_doors_and_command_tier_io():
+async def test_pre_vfs_binds_dispatcher_and_command_tier_io():
     # The documented boundary (Policy.pre_vfs): coded op hooks fire at
-    # the op doors AND for the backend I/O inside a mount command's
+    # the dispatcher AND for the backend I/O inside a mount command's
     # handler (with_policy_guard). Both tiers are pinned so a move of
     # the boundary is loud.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
@@ -515,7 +515,7 @@ async def test_pre_vfs_binds_op_doors_and_command_tier_io():
         await ws.vfs.write("/data/prod/keep.txt", b"keep\n")
         ws.policies.add(SealedPaths())
 
-        # The doors hold: the ops facade, and a dispatcher-routed
+        # The entry points hold: ``ws.vfs``, and a dispatcher-routed
         # redirect write.
         with pytest.raises(PermissionError):
             await ws.vfs.read("/data/secret.txt")
@@ -630,7 +630,7 @@ class OpRecorder(Policy):
 
 @pytest.mark.asyncio
 async def test_shell_rm_r_admits_through_pre_vfs():
-    # The cascade asymmetry closed: an ops-door rmdir cascade always
+    # The cascade asymmetry closed: a `ws.vfs` rmdir cascade always
     # admitted per deletion while a shell rm -r admitted nothing. The
     # shell tree removal now admits the op the backend performs (the
     # native rm_r here), and a write-deny refuses it outright.
@@ -685,7 +685,7 @@ async def test_find_delete_admits_each_deletion_exactly_once():
 @pytest.mark.asyncio
 async def test_pre_vfs_sees_the_session_on_the_command_tier():
     # VfsContext.session_id names the session on the command tier
-    # exactly as at the op doors, including for a reader the pipeline
+    # exactly as at the dispatcher, including for a reader the pipeline
     # drains after dispatch (head), so a session-scoped policy holds on
     # both.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
@@ -742,7 +742,7 @@ async def test_user_limit_policy_caps_line_output():
 
 @pytest.mark.asyncio
 async def test_user_limit_policy_caps_op_reads():
-    # A post_vfs Limit bounds the programmatic door too: ws.vfs (and
+    # A post_vfs Limit bounds the programmatic entry point too: ws.vfs (and
     # FUSE behind it) serve capped bytes.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
@@ -879,7 +879,7 @@ async def test_profile_hides_bind_every_session_including_the_default():
         profiles=_profile(paths=PathsBlock(hide=("/data/finance", "*.key"))),
     )
     # The facade runs as the default session too, so the seed goes
-    # through a session with an explicit empty profile, the host's door.
+    # through a session with an explicit empty profile, the host's entry point.
     host = Session(ws, ws.create_session("host", profile={}).session_id).vfs
     try:
         await ws.shell("mkdir -p /data/finance /data/pub")
@@ -964,7 +964,7 @@ async def test_a_bare_name_under_deny_refuses_with_the_default_reason():
 
 
 # A per-command judge: deny cat under /data/sealed/ with a computed
-# reason, take shred to the approval door, stay silent otherwise. A
+# reason, take shred to the approval ledger, stay silent otherwise. A
 # policy defines the hook it answers at, and answers with return.
 JUDGE = """\
 def pre_command(ctx):
@@ -1080,7 +1080,7 @@ async def test_a_document_may_ride_beside_the_script():
 
 
 @pytest.mark.asyncio
-async def test_an_ask_it_computed_takes_the_approval_door():
+async def test_an_ask_it_computed_takes_the_approval_entry_point():
     ws = Workspace(
         {"/data/": RAMVFS()}, mode=MountMode.WRITE, profiles=_scripted()
     )
@@ -1103,7 +1103,7 @@ async def test_an_ask_it_computed_takes_the_approval_door():
 @pytest.mark.asyncio
 async def test_a_profile_script_reads_what_the_line_names():
     # Content, not names: the script opens each operand through the
-    # same door an agent's program would, so it can ask about what a
+    # same entry point an agent's program would, so it can ask about what a
     # file holds. A directory operand is not its business, and a file
     # without the marker runs.
     ws = Workspace(
@@ -1258,7 +1258,7 @@ def test_the_old_script_and_runtime_keys_are_told_the_new_block():
 async def test_a_policy_defining_no_hook_fails_closed():
     # A verdict as a bare last expression was the old contract; a policy
     # defines the hooks it answers at, and a program defining none is
-    # refused at every door rather than read for a value it never meant.
+    # refused at every entry point rather than read for a value it never meant.
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
@@ -1294,7 +1294,7 @@ async def test_an_inline_document_may_not_add_a_policy():
         await ws.close()
 
 
-# A program at the op and session doors and nowhere else: writes under
+# A program at the op and session views and nowhere else: writes under
 # /data/frozen are refused, so is an AWS_* variable, and a command is
 # never judged.
 GATES = """\
@@ -1311,7 +1311,7 @@ def pre_session(ctx):
 """
 
 # The content judge with an op hook beside it: its own reads have to
-# pass the door its pre_vfs guards.
+# pass the dispatcher its pre_vfs guards.
 READER_AND_GATE = (
     READER
     + """
@@ -1325,7 +1325,7 @@ def pre_vfs(ctx):
 
 
 @pytest.mark.asyncio
-async def test_a_profile_policy_judges_the_op_door():
+async def test_a_profile_policy_judges_the_dispatcher():
     ws = Workspace(
         {"/data/": RAMVFS()}, mode=MountMode.WRITE, profiles=_scripted(GATES)
     )
@@ -1351,7 +1351,7 @@ async def test_a_profile_policy_judges_the_op_door():
 
 
 @pytest.mark.asyncio
-async def test_a_profile_policy_judges_the_session_door():
+async def test_a_profile_policy_judges_the_session_view():
     ws = Workspace(
         {"/data/": RAMVFS()}, mode=MountMode.WRITE, profiles=_scripted(GATES)
     )
@@ -1370,8 +1370,8 @@ async def test_a_profile_policy_judges_the_session_door():
 
 
 @pytest.mark.asyncio
-async def test_a_policys_own_read_passes_the_door_its_op_hook_guards():
-    # pre_command opens the operand through the workspace's door while
+async def test_a_policys_own_read_passes_the_dispatcher_its_op_hook_guards():
+    # pre_command opens the operand through the workspace's dispatcher while
     # pre_vfs stands at it: the read is the policy's own and is let
     # through rather than re-entering the evaluation waiting on it, so
     # the content verdict lands and the op hook still refuses a write.

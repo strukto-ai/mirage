@@ -93,6 +93,6 @@ class CondContext:
     namespace: Namespace
     session: SessionState
     name: str
-    # The session plane's gated door, which an assignment inside a
+    # The gated session view, which an assignment inside a
     # numeric operand lands through; None outside a workspace.
     view: SessionView | None = None

@@ -25,7 +25,7 @@ from mirage.errors.types import FsCondition
 from mirage.runtime.handles import FileHandle
 from mirage.runtime.handles.mode import parse_mode
 from mirage.runtime.open import apply_open
-from mirage.runtime.python.host.fs import door_files, syscall
+from mirage.runtime.python.host.fs import host_files, syscall
 from mirage.workspace.files import Files
 
 if TYPE_CHECKING:
@@ -106,7 +106,7 @@ class MirageFile:
         newline: str | None = None,
     ) -> None:
         self._closed = True
-        self._door = door_files(files, loop)
+        self._adapter = host_files(files, loop)
         self._path = path
         self._mode = mode
         self._facts = parse_mode(mode)
@@ -131,9 +131,9 @@ class MirageFile:
         if encoding is None or encoding == LOCALE_ENCODING:
             encoding = "utf-8"
         codecs.lookup(encoding)
-        # The open's effect lands now, by the rule every door shares; a
+        # The open's effect lands now, by the rule every entry point shares; a
         # refusal leaves the file closed, so nothing flushes behind it.
-        row = apply_open(self._door, path, self._facts)
+        row = apply_open(self._adapter, path, self._facts)
         # Nothing is read at open: the handle fetches what a read lands
         # in, and keeps what was written until a flush.
         self._handle = FileHandle.opened(
@@ -168,7 +168,7 @@ class MirageFile:
     def _read_range(self, offset: int, size: int | None) -> bytes:
         # A handle that writes reads the stored bytes, since its writes
         # land on them; a read-only one sees the rendering.
-        return syscall(self._door.read)(
+        return syscall(self._adapter.read)(
             self._path, offset=offset, size=size, raw=self._writable
         )
 
@@ -253,7 +253,7 @@ class MirageFile:
         steps = self._handle.flush_plan()
         if not steps:
             return
-        syscall(self._door.flush)(self._path, steps)
+        syscall(self._adapter.flush)(self._path, steps)
         self._handle.settle(self._read_range)
 
     def close(self) -> None:

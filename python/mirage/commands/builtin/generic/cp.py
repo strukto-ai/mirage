@@ -91,11 +91,11 @@ class TransferLinks:
 
     Attributes:
         links (LinkView): the namespace's symlink facts.
-        dispatch (DispatchFn): the op door, through which a link is made.
+        dispatch (DispatchFn): the dispatcher, through which a link is made.
         cwd (str): the directory a typed operand resolves against.
-        relay (PrimitiveCopy): the door's own transfer primitives, which
+        relay (PrimitiveCopy): the dispatcher's own transfer primitives, which
             copy what a followed link leads to on whatever mount it lives.
-        relay_stat (StatFn): the door's stat, for the same walk.
+        relay_stat (StatFn): the dispatcher's stat, for the same walk.
         visibility (Visibility | None): the session's visibility; a link
             it hides is not copied.
     """
@@ -333,11 +333,11 @@ def parse_flags(fl: FlagView) -> CpFlags:
 
 
 async def _entry_at(dispatch: DispatchFn, spec: PathSpec) -> FileStat | None:
-    """What stands at a path, asked through the door; None where nothing
+    """What stands at a path, asked through the dispatcher; None where nothing
     does, which is where a new link goes.
 
     Args:
-        dispatch (DispatchFn): the op door.
+        dispatch (DispatchFn): the dispatcher.
         spec (PathSpec): the path.
     """
     try:
@@ -351,7 +351,7 @@ async def link_stat(copies: TransferLinks, path: PathSpec) -> FileStat:
     """Stat an entry itself for overwrite and backup decisions.
 
     Args:
-        copies (TransferLinks): Namespace facts and transfer doors.
+        copies (TransferLinks): Namespace facts and transfer calls.
         path (PathSpec): Entry being transferred or replaced.
     """
     return copies.links.stat_at(path.virtual) or await copies.relay_stat(path)
@@ -360,10 +360,10 @@ async def link_stat(copies: TransferLinks, path: PathSpec) -> FileStat:
 async def rename_link(
     copies: TransferLinks, src: PathSpec, target: PathSpec
 ) -> None:
-    """Rename through the namespace door, including its admission checks.
+    """Rename through the namespace, including its admission checks.
 
     Args:
-        copies (TransferLinks): Namespace facts and transfer doors.
+        copies (TransferLinks): Namespace facts and transfer calls.
         src (PathSpec): Entry being renamed.
         target (PathSpec): Destination entry.
     """
@@ -383,7 +383,7 @@ async def make_link(
     """Copy a symlink through the shared overwrite and backup policy.
 
     Args:
-        copies (TransferLinks): Namespace facts and transfer doors.
+        copies (TransferLinks): Namespace facts and transfer calls.
         src (PathSpec): The link being copied.
         target (PathSpec): Its destination entry, without dereferencing.
         text (str): Link target verbatim.
@@ -463,7 +463,7 @@ async def copy_tree_links(
     copied until the name is too long, which is where GNU stops.
 
     Args:
-        copies (TransferLinks): the namespace's links and door.
+        copies (TransferLinks): the namespace's links and the dispatcher.
         deref (CopyDeref): the line's link policy.
         src (PathSpec): the copied directory.
         target (PathSpec): where it was copied to.
@@ -908,7 +908,7 @@ async def _restore_backup_link(
     """Restore a displaced backup link, removing any partial copy first.
 
     Args:
-        copies (TransferLinks): Namespace facts and transfer doors.
+        copies (TransferLinks): Namespace facts and transfer calls.
         backup (PathSpec): Backup entry to restore.
         link (FileStat): The original link's row.
         cmd_name (str): Command name for error prefixes.
@@ -949,7 +949,7 @@ async def make_backup(
         target (PathSpec): The destination being replaced.
         writes (dict[str, ByteSource]): Recorded writes, updated in place.
         errors (list[str]): Collected stderr lines, appended in place.
-        copies (TransferLinks | None): Namespace facts and transfer doors.
+        copies (TransferLinks | None): Namespace facts and transfer calls.
 
     Returns:
         tuple[PathSpec | None, bool]: The backup path (None when no
@@ -1411,7 +1411,7 @@ async def cp_generic(
             destination was typed as, its own row, None where none stands
             (the router has followed the operand by the time cp runs);
             None outside a workspace.
-        copies (TransferLinks | None): The namespace's links and the door
+        copies (TransferLinks | None): The namespace's links and the dispatcher
             that makes them, so a link is copied as a link where the
             policy says to; None outside a workspace, where no link can
             stand.
