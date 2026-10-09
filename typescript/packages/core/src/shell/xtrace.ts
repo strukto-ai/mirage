@@ -14,20 +14,24 @@
 
 import { encodeText } from './bytes.ts'
 
-// Characters that force quoting, mirroring Python's shlex.quote.
+// Characters that force quoting.
 const UNSAFE = /[^\w@%+=:,./-]/
 
-function traceQuote(word: string): string {
-  if (word === '') return "''"
-  if (!UNSAFE.test(word)) return word
+function quoted(word: string): string {
   return "'" + word.replaceAll("'", "'\\''") + "'"
 }
 
 /**
+ * One word as bash's trace writes it: bare when every character is safe,
+ * else single-quoted with each `'` spelled `'\''`.
+ */
+function traceQuote(word: string): string {
+  if (word === '') return "''"
+  return UNSAFE.test(word) ? quoted(word) : word
+}
+
+/**
  * Render one `set -x` trace line for an expanded simple command.
- *
- * Words are shown post-expansion with bash's `+ ` prefix; words that
- * need it are single-quoted like bash's trace output.
  */
 export function traceCommand(words: readonly string[]): Uint8Array {
   return encodeText('+ ' + words.map(traceQuote).join(' ') + '\n')
@@ -38,4 +42,18 @@ export function traceAssignment(key: string, val: string, append: boolean): Uint
   const op = append ? '+=' : '='
   const rendered = val === '' ? '' : traceQuote(val)
   return encodeText(`+ ${key}${op}${rendered}\n`)
+}
+
+/**
+ * Render the trace line a declaration writes for an array operand: every
+ * element single-quoted, a keyed one as `['k']='v'`.
+ */
+export function traceArray(key: string, items: readonly string[], append: boolean): Uint8Array {
+  const shown = items.map((item) => {
+    const eq = item.indexOf(']=')
+    return item.startsWith('[') && eq > 0
+      ? `[${quoted(item.slice(1, eq))}]=${quoted(item.slice(eq + 2))}`
+      : quoted(item)
+  })
+  return encodeText(`+ ${key}${append ? '+=' : '='}(${shown.join(' ')})\n`)
 }

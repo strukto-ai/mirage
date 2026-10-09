@@ -29,6 +29,7 @@ import { getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { type ShellValue, VarAttr } from '../../shell/variable.ts'
 import { sessionEntry } from '../session/session.ts'
+import { ReadonlyVariableError } from '../session/errors.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../view/types.ts'
@@ -81,9 +82,10 @@ async function fatalIndexLiteral(
  *
  * Every assignment spelling (scalar, array literal, subscript, append)
  * computes its resulting value and stores through `view.set`, so the
- * gate and the storage invariant live in the session view, not here. Denial
- * mirrors the readonly case: a fatal variable-assignment error that
- * abandons the rest of the line.
+ * gate and the storage invariant live in the session view, not here. A
+ * readonly name or a denial is a fatal variable-assignment error that
+ * abandons the rest of the line (builtins like `export` merely fail with 1
+ * and continue).
  */
 async function assignVar(
   view: SessionView,
@@ -95,7 +97,7 @@ async function assignVar(
   try {
     await view.set(key, value, true, assigned, added)
   } catch (err) {
-    if (err instanceof PolicyDenied) {
+    if (err instanceof PolicyDenied || err instanceof ReadonlyVariableError) {
       throw new DiscardSignal(encodeText(`${err.message}\n`))
     }
     if (err instanceof ArithError) throw err.signal('', true)
@@ -204,12 +206,6 @@ export async function executeAssignment(
   const append = node.children.some((c) => c.type === '+=')
   // `+=` on an integer adds, element by element too (`appended`).
   const integer = sessionEntry(session.vars, key)?.attrs.has(VarAttr.Integer) === true
-  if (session.readonlyVars.has(key)) {
-    // A bare assignment to a readonly variable is a variable-assignment
-    // error: the rest of the line is discarded (builtins like `export`
-    // merely fail with 1 and continue).
-    throw new DiscardSignal(encodeText(`bash: ${key}: readonly variable\n`))
-  }
   const valNodes = node.namedChildren.filter(
     (c) => c.type !== NT.VARIABLE_NAME && c.type !== 'subscript',
   )
@@ -218,7 +214,23 @@ export async function executeAssignment(
   // which owns the gate and the scalar/array invariant.
   const view = sessionView(session, registry.policies, context.frame.diagnostics)
   const firstVal = valNodes[0]
+  // `set -x` traces the name as typed, before the store refuses it.
+  const xtrace = session.shellOptions.xtrace === true
   if (firstVal?.type === NT.ARRAY) {
+    if (xtrace) {
+      // A literal traces as typed, its words one space apart.
+      const words = firstVal.namedChildren
+        .filter((c) => c.type !== NT.COMMENT)
+        .map(getText)
+        .join(' ')
+      context.frame.diagnostics.push(encodeText(`+ ${spelled}${append ? '+=' : '='}(${words})\n`))
+    }
+    // bash refuses an array literal before expanding it; every other
+    // spelling expands its value and subscript first and meets the
+    // refusal at the store (`assignVar`).
+    if (session.readonlyVars.has(key)) {
+      throw new DiscardSignal(encodeText(`bash: ${key}: readonly variable\n`))
+    }
     const items = await expandArrayItems(
       firstVal,
       context,
@@ -271,13 +283,11 @@ export async function executeAssignment(
   }
   let val = text.slice(eq + 1)
   if (firstVal !== undefined) {
-    val = await expandNode(
-      firstVal,
-      context,
-      executeFn,
-      callStack,
-      sessionView(session, registry.policies, context.frame.diagnostics),
-    )
+    val = await expandNode(firstVal, context, executeFn, callStack, view)
+  }
+  if (xtrace) {
+    const target = subscriptNode === null ? spelled : getText(subscriptNode)
+    context.frame.diagnostics.push(traceAssignment(target, val, append))
   }
   if (subscriptNode !== null) {
     const subText = await subscriptKeyText(
@@ -368,9 +378,9 @@ export async function executeAssignment(
   // scan, matching bash's internal char pointer.
   if (key === 'OPTIND') session.getoptsOptind = null
   const code = assignmentStatus(context.frame, subSeq)
-  const assignIo = new IOResult({ exitCode: code })
-  if (session.shellOptions.xtrace === true) {
-    assignIo.stderr = traceAssignment(key, val, append)
-  }
-  return [null, assignIo, new ExecutionNode({ command: text, exitCode: code })]
+  return [
+    null,
+    new IOResult({ exitCode: code }),
+    new ExecutionNode({ command: text, exitCode: code }),
+  ]
 }

@@ -61,11 +61,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "declare -i xvi=1; set -x; xvt=5; xvt+=1; xvi+=2; echo $xvt $xvi; set +x",
+      "command": "set -x; declare -i xvi=1; xvt=5; xvt+=1; xvi+=2; ( export xve=\"a b\" xvf 2>/dev/null; readonly xvg=1 ); declare -a xva=( p \"it's\" ); xva[1]=q; xvb=( 1  2 ); echo $xvt $xvi; set +x",
       "expect": {
         "exit": 0,
         "stdout": "51 3\n",
-        "stderr": "+ xvt=5\n+ xvt+=1\n+ xvi+=2\n+ echo 51 3\n+ set +x\n"
+        "stderr": "+ declare -i xvi=1\n+ xvt=5\n+ xvt+=1\n+ xvi+=2\n+ export 'xve=a b' xvf\n+ readonly xvg=1\n+ xvg=1\n+ xva=('p' 'it'\\''s')\n+ declare -a xva\n+ xva[1]=q\n+ xvb=(1 2)\n+ echo 51 3\n+ set +x\n"
       }
     }
   ]

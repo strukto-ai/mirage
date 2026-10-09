@@ -42,6 +42,7 @@ from mirage.workspace.expand import expand_and_classify, expand_node
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.state import (
     appended,
     conversion_scalar,
@@ -102,8 +103,9 @@ async def _assign_var(
     Every assignment spelling (scalar, array literal, subscript,
     append) computes its resulting value and stores through
     ``view.set``, so the gate and the storage invariant live in the
-    session view, not here. Denial mirrors the readonly case: a fatal
-    variable-assignment error that abandons the rest of the line.
+    session view, not here. A readonly name or a denial is a fatal
+    variable-assignment error that abandons the rest of the line
+    (builtins like ``export`` merely fail with 1 and continue).
 
     Args:
         view (SessionView): the gated session view.
@@ -117,6 +119,8 @@ async def _assign_var(
         await view.set(key, value, assigned=assigned, added=added)
     except PolicyDenied as exc:
         raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
+    except ReadonlyVariableError as exc:
+        raise DiscardSignal(encode_text(f"{exc}\n")) from exc
     except ArithError as exc:
         raise exc.signal(fatal=True) from exc
 
@@ -259,11 +263,6 @@ async def execute_assignment(
     # `+=` on an integer adds, element by element too (`appended`).
     held_var = session.vars.get(key)
     integer = held_var is not None and VarAttr.INTEGER in held_var.attrs
-    if key in session.readonly_vars:
-        # A bare assignment to a readonly variable is a
-        # variable-assignment error: the rest of the line is discarded
-        # (builtins like `export` merely fail with 1 and continue).
-        raise DiscardSignal(encode_text(f"bash: {key}: readonly variable\n"))
     val_nodes = [
         c
         for c in node.named_children
@@ -277,7 +276,27 @@ async def execute_assignment(
         namespace.registry.policies,
         diagnostics=context.frame.diagnostics,
     )
+    # `set -x` traces the name as typed, before the store refuses it.
+    xtrace = session.shell_options.get("xtrace")
     if val_nodes and val_nodes[0].type == NT.ARRAY:
+        if xtrace:
+            # A literal traces as typed, its words one space apart.
+            words = " ".join(
+                get_text(c)
+                for c in val_nodes[0].named_children
+                if c.type != NT.COMMENT
+            )
+            op = "+=" if append else "="
+            context.frame.diagnostics.append(
+                encode_text(f"+ {spelled}{op}({words})\n")
+            )
+        if key in session.readonly_vars:
+            # bash refuses an array literal before expanding it; every
+            # other spelling expands its value and subscript first and
+            # meets the refusal at the store (`_assign_var`).
+            raise DiscardSignal(
+                encode_text(f"bash: {key}: readonly variable\n")
+            )
         items = await expand_array_items(
             val_nodes[0], context, execute_fn, registry, namespace, cs
         )
@@ -328,6 +347,11 @@ async def execute_assignment(
         )
     else:
         val = text.partition("=")[2]
+    if xtrace:
+        target = (
+            spelled if subscript_node is None else get_text(subscript_node)
+        )
+        context.frame.diagnostics.append(trace_assignment(target, val, append))
     if subscript_node is not None:
         sub_text = await _subscript_key_text(
             subscript_node, spelled, context, execute_fn, cs, view
@@ -420,7 +444,8 @@ async def execute_assignment(
     if key == "OPTIND":
         session._getopts_optind = None
     code = assignment_status(context.frame, sub_seq)
-    io = IOResult(exit_code=code)
-    if session.shell_options.get("xtrace"):
-        io.stderr = trace_assignment(key, val, append)
-    return None, io, ExecutionNode(command=text, exit_code=code)
+    return (
+        None,
+        IOResult(exit_code=code),
+        ExecutionNode(command=text, exit_code=code),
+    )

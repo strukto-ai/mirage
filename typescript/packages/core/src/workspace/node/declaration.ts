@@ -14,7 +14,7 @@
 
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import { type ByteSource, IOResult } from '../../io/types.ts'
+import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { DiscardSignal } from '../../shell/errors.ts'
 import { getDeclarationKeyword, getText } from '../../shell/helpers.ts'
@@ -38,9 +38,13 @@ import {
 import {
   declaredKind,
   heldValue,
+  identifierRefusal,
   kindConflict,
+  operandParts,
   startLocal,
 } from '../executor/builtins/declare/declare.ts'
+import { traceArray, traceAssignment, traceCommand } from '../../shell/xtrace.ts'
+import { concat } from '../../io/cachable_iterator.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -201,6 +205,8 @@ export async function executeDeclaration(
   const flagChars = new Set<string>()
   const plusChars = new Set<string>()
   let optsDone = false
+  const traced: string[] = []
+  const view = sessionView(session, registry.policies, context.frame.diagnostics)
   for (const child of node.namedChildren) {
     if (child.type === NT.VARIABLE_ASSIGNMENT) {
       const valNodes = child.namedChildren.filter((c) => c.type !== NT.VARIABLE_NAME)
@@ -210,8 +216,10 @@ export async function executeDeclaration(
         const eq = text.indexOf('=')
         const key = eq >= 0 ? text.slice(0, eq) : text
         const append = key.endsWith('+')
+        const name = append ? key.slice(0, -1) : key
+        traced.push(name)
         operands.push({
-          name: append ? key.slice(0, -1) : key,
+          name,
           append,
           items: await expandArrayItems(
             firstVal,
@@ -224,15 +232,9 @@ export async function executeDeclaration(
         })
         continue
       }
-      operands.push(
-        await expandNode(
-          child,
-          context,
-          executeFn,
-          callStack,
-          sessionView(session, registry.policies, context.frame.diagnostics),
-        ),
-      )
+      const expanded = await expandNode(child, context, executeFn, callStack, view)
+      operands.push(expanded)
+      traced.push(expanded)
     } else if (
       child.type === NT.SIMPLE_EXPANSION ||
       child.type === NT.EXPANSION ||
@@ -247,13 +249,7 @@ export async function executeDeclaration(
       child.type === NT.ANSI_C_STRING ||
       child.type === NT.TRANSLATED_STRING
     ) {
-      const expanded = await expandNode(
-        child,
-        context,
-        executeFn,
-        callStack,
-        sessionView(session, registry.policies, context.frame.diagnostics),
-      )
+      const expanded = await expandNode(child, context, executeFn, callStack, view)
       // An *unquoted* expansion that came back empty is removed by
       // word splitting, so `export $UNSET` is a bare `export` and
       // prints the listing. A quoted one is a real, empty operand:
@@ -262,6 +258,7 @@ export async function executeDeclaration(
       // the builtin rather than vanish here.
       if (expanded === '' && (child.type === NT.SIMPLE_EXPANSION || child.type === NT.EXPANSION))
         continue
+      traced.push(expanded)
       if (!optsDone && expanded.startsWith('-') && expanded.length > 1) {
         flagWords.push(expanded)
         if (expanded === '--') optsDone = true
@@ -284,6 +281,18 @@ export async function executeDeclaration(
   }
   const cmdWord = keyword === NT.LOCAL ? 'local' : keyword
   const words = operands.filter((operand) => typeof operand === 'string')
+  const xtrace = session.shellOptions.xtrace === true
+  if (xtrace) {
+    // Traced once expanded, before the builtin runs and outside its
+    // redirects: each array operand, then the command naming them.
+    const staged = operands.filter((op) => typeof op !== 'string')
+    context.frame.diagnostics.push(
+      concat([
+        ...staged.map((op) => traceArray(op.name, op.items, op.append)),
+        traceCommand([cmdWord, ...traced]),
+      ]),
+    )
+  }
   if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
     const refused = declareOptionRefusal(cmdWord, flagChars, plusChars)
     if (refused !== null) return refused
@@ -362,19 +371,6 @@ export async function executeDeclaration(
       else seedVar(session, bare, scalar === undefined ? [] : [scalar])
     }
   }
-  // Array literals travel as data: the handler stores them through
-  // the session view and owns both refusal voices, so the executor
-  // only expands and stages.
-  if (keyword === 'readonly') {
-    const result = await handleReadonly(
-      [...flagWords, ...operands],
-      session,
-      sessionView(session, registry.policies, context.frame.diagnostics),
-      kind,
-      parser,
-    )
-    return mergeConversionErrors(result, conversionErrors)
-  }
   // declare/typeset scope like `local` inside a function (bash
   // semantics) and assign globally at top level, which is exactly
   // handleLocal's fallback when no function scope is active. `-r` rides
@@ -384,7 +380,7 @@ export async function executeDeclaration(
     const result = await handleLocal(
       operands,
       session,
-      sessionView(session, registry.policies, context.frame.diagnostics),
+      view,
       // `declare`/`typeset` share this handler but have to name
       // themselves in a diagnostic rather than say `local`.
       cmdWord,
@@ -398,12 +394,23 @@ export async function executeDeclaration(
     )
     return mergeConversionErrors(result, conversionErrors)
   }
-  // Pass export flags through so -p / bare print and illegal options work.
-  const exportResult = await handleExport(
-    [...flagWords, ...operands],
-    session,
-    sessionView(session, registry.policies, context.frame.diagnostics),
-    parser,
-  )
-  return mergeConversionErrors(exportResult, conversionErrors)
+  // Array literals travel as data: the handler stores them through
+  // the session view and owns both refusal voices, so the executor
+  // only expands and stages. The flags pass through so -p, the bare
+  // listing and bad options work.
+  const result =
+    keyword === 'readonly'
+      ? await handleReadonly([...flagWords, ...operands], session, view, kind, parser)
+      : await handleExport([...flagWords, ...operands], session, view, parser)
+  if (xtrace) {
+    // Each assignment these two make is traced as it is made, under the
+    // command's own redirects.
+    const lines = words
+      .filter((word) => identifierRefusal(cmdWord, word) === null)
+      .map(operandParts)
+      .filter(([, , val]) => val !== null)
+      .map(([key, add, val]) => traceAssignment(key, val ?? '', add))
+    result[1].stderr = concat([...lines, await materialize(result[1].stderr)])
+  }
+  return mergeConversionErrors(result, conversionErrors)
 }
