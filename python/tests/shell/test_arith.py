@@ -29,6 +29,10 @@ def _writes(result: ArithResult) -> list[tuple[str, str | None, str]]:
     return [(w.name, w.key, w.value) for w in result.writes]
 
 
+def _writes_of(exc: ArithError) -> list[tuple[str, str | None, str]]:
+    return [(w.name, w.key, w.value) for w in exc.writes]
+
+
 def test_assignment_and_updates():
     result = evaluate_arith("y = 3, y + 2", {})
     assert result.value == 5
@@ -85,17 +89,135 @@ def test_sixty_four_bit_wrap():
     assert evaluate_arith("(1 << 63) - 1 + 1", {}).value == -(1 << 63)
 
 
-def test_errors():
-    with pytest.raises(ArithError):
-        evaluate_arith("1 / 0", {})
-    with pytest.raises(ArithError):
-        evaluate_arith("2 ** -1", {})
-    with pytest.raises(ArithError):
-        evaluate_arith("1 +", {})
-    with pytest.raises(ArithError):
-        evaluate_arith("@", {})
-    with pytest.raises(ArithError):
-        evaluate_arith("r + 1", {"r": "r + 1"})
+@pytest.mark.parametrize(
+    ("expr", "env", "line"),
+    [
+        # Pinned against bash 5.2.37 (`let "$e"` and `$(( e ))`).
+        ("1+", {}, 'syntax error: operand expected (error token is "+")'),
+        ("1 2 3", {}, 'syntax error in expression (error token is "2 3")'),
+        ("(1+2", {}, 'missing `)\' (error token is "2")'),
+        ("1)", {}, 'syntax error in expression (error token is ")")'),
+        ("1/0 + 2", {}, 'division by 0 (error token is "0 + 2")'),
+        ("-(1/0)", {}, 'division by 0 (error token is "0)")'),
+        ("2**-1 + 3", {}, 'exponent less than 0 (error token is "+ 3")'),
+        (
+            "3=4",
+            {},
+            'attempted assignment to non-variable (error token is "=4")',
+        ),
+        (
+            "0 && x=08",
+            {},
+            'attempted assignment to non-variable (error token is "=08")',
+        ),
+        (
+            "1?2",
+            {},
+            '`:\' expected for conditional expression (error token is "2")',
+        ),
+        ("1 ? : 3", {}, 'expression expected (error token is ": 3")'),
+        (
+            "1.5",
+            {},
+            'syntax error: invalid arithmetic operator (error token is ".5")',
+        ),
+        ("'a'", {}, "syntax error: operand expected (error token is \"'a'\")"),
+        ("x[1", {}, 'bad array subscript (error token is "x[1")'),
+        ("--x--", {}, '--: assignment requires lvalue (error token is "--")'),
+        ("5++", {}, 'syntax error: operand expected (error token is "+")'),
+        ("1+ ", {}, 'syntax error: operand expected (error token is "+ ")'),
+    ],
+)
+def test_an_error_is_worded_as_bash_names_it(expr, env, line):
+    with pytest.raises(ArithError) as caught:
+        evaluate_arith(expr, env)
+    assert str(caught.value) == f"{expr.lstrip()}: {line}"
+
+
+@pytest.mark.parametrize(
+    ("expr", "env", "line"),
+    [
+        # A bad constant names the expression up to its end, an error in
+        # a variable's value names that value, and a reference cycle the
+        # name at the depth limit, as bash's does.
+        (
+            "x=08 + 1",
+            {},
+            'x=08: value too great for base (error token is "08")',
+        ),
+        ("09+1", {}, '09: value too great for base (error token is "09")'),
+        ("1#1", {}, '1#1: invalid arithmetic base (error token is "1#1")'),
+        ("10#", {}, '10#: invalid integer constant (error token is "10#")'),
+        (
+            "2 * x",
+            {"x": " 1+ "},
+            '1+ : syntax error: operand expected (error token is "+ ")',
+        ),
+        (
+            "x",
+            {"x": "y", "y": "x"},
+            'y: expression recursion level exceeded (error token is "y")',
+        ),
+    ],
+)
+def test_an_error_names_the_expression_it_happened_in(expr, env, line):
+    with pytest.raises(ArithError) as caught:
+        evaluate_arith(expr, env)
+    assert str(caught.value) == line
+
+
+@pytest.mark.parametrize(
+    ("expr", "value"),
+    [
+        # `++` and `--` bind to a name next to them, else read as signs.
+        ("1++2", 3),
+        ("1--1", 2),
+        ("++5", 5),
+        ("---1", -1),
+        ("x+++y", 6),
+        ("x---1", 4),
+        ("++ x", 6),
+        ("0x", 0),
+        ("99999999999999999999", 7766279631452241919),
+        ("3 ** 41", -420491770248316829),
+        ("-2 ** 2", 4),
+        ("1 ? 2, 3 : 4", 3),
+        ("0 ? 1/0 : 2", 2),
+        ("0 && 1/0", 0),
+    ],
+)
+def test_a_value_is_what_bash_reads(expr, value):
+    assert evaluate_arith(expr, {"x": "5", "y": "1"}).value == value
+
+
+def test_the_writes_before_an_error_are_kept():
+    with pytest.raises(ArithError) as caught:
+        evaluate_arith("x=7, y++ +", {"y": "1"})
+    assert _writes_of(caught.value) == [("x", None, "7"), ("y", None, "2")]
+
+
+def test_a_name_assigned_is_not_read():
+    result = evaluate_arith("x=5", {"x": "1+"})
+    assert result.value == 5
+
+
+def test_an_error_in_a_subscript_is_marked():
+    elements = ElementOps(
+        resolve=lambda name, sub, env: sub,
+        read=lambda name, key: "1",
+        is_assoc=lambda name: False,
+    )
+    with pytest.raises(ArithError) as caught:
+        evaluate_arith("a[1+] + 1", {}, elements=elements)
+    assert str(caught.value) == (
+        '1+: syntax error: operand expected (error token is "+")'
+    )
+    assert caught.value.in_subscript
+    signal = caught.value.signal("let")
+    assert (signal.exit_code, signal.contained_code) == (1, 1)
+    assert signal.stderr == (
+        b'bash: 1+: syntax error: operand expected (error token is "+")\n'
+    )
 
 
 def test_empty_expression_is_zero():

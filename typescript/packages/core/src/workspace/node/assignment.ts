@@ -24,7 +24,7 @@ import {
   buildAssocLiteral,
   buildIndexedLiteral,
 } from '../../shell/array.ts'
-import { ArithError, DiscardSignal, ExitSignal } from '../../shell/errors.ts'
+import { ArithError, DiscardSignal } from '../../shell/errors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { appended, type ShellValue, VarAttr } from '../../shell/variable.ts'
@@ -46,24 +46,6 @@ import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
-/**
- * One assignment through the session door; denial is fatal.
- *
- * Every assignment spelling (scalar, array literal, subscript, append)
- * computes its resulting value and stores through `view.set`, so the
- * gate and the storage invariant live in the door, not here. Denial
- * mirrors the readonly case: a fatal variable-assignment error that
- * abandons the rest of the line.
- */
-/**
- * The line's death for a subscript that does not evaluate: bash aborts
- * the line on `a[1/0]=v` with `1/0: division by 0`, the way it does for a
- * bad `-i` value.
- */
-function arithFatal(err: ArithError): ExitSignal {
-  return new ExitSignal(1, encodeText(`bash: ${err.message}\n`), null, 1)
-}
-
 /** `subscriptIndex` whose failure ends the line, in bash's words. */
 async function fatalIndex(
   context: EvaluationContext,
@@ -74,7 +56,7 @@ async function fatalIndex(
   try {
     return await subscriptIndex(session, subscript, view)
   } catch (err) {
-    if (err instanceof ArithError) throw arithFatal(err)
+    if (err instanceof ArithError) throw err.signal('', true)
     throw err
   }
 }
@@ -89,11 +71,20 @@ async function fatalIndexLiteral(
   try {
     return await buildIndexedLiteral(held, items, append, indexOf)
   } catch (err) {
-    if (err instanceof ArithError) throw arithFatal(err)
+    if (err instanceof ArithError) throw err.signal('', true)
     throw err
   }
 }
 
+/**
+ * One assignment through the session door; denial is fatal.
+ *
+ * Every assignment spelling (scalar, array literal, subscript, append)
+ * computes its resulting value and stores through `view.set`, so the
+ * gate and the storage invariant live in the door, not here. Denial
+ * mirrors the readonly case: a fatal variable-assignment error that
+ * abandons the rest of the line.
+ */
 async function assignVar(
   view: SessionView,
   key: string,
@@ -106,12 +97,7 @@ async function assignVar(
     if (err instanceof PolicyDenied) {
       throw new DiscardSignal(encodeText(`${err.message}\n`))
     }
-    if (err instanceof ArithError) {
-      // The `-i` coercion refused the text. GNU ends the shell with 1 the
-      // way a subscript that does not evaluate does, in the evaluator's
-      // voice with the text led.
-      throw new ExitSignal(1, encodeText(`bash: ${err.message}\n`), null, 1)
-    }
+    if (err instanceof ArithError) throw err.signal('', true)
     throw err
   }
 }

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ShellArray } from './array.ts'
+import { INTEGER_APPEND } from './constants.ts'
 
 /** What a shell variable can hold. */
 export type ShellValue = string | ShellArray | Record<string, string>
@@ -204,13 +205,14 @@ export function withAttr(v: ShellVar, attr: VarAttr, on = true): ShellVar {
  */
 /**
  * The text a `+=` stores: the old text then the added one, or on an integer
- * the expression the door evaluates to their sum. Each side is evaluated on
- * its own and an empty side counts as 0, as bash does: with `N='1?2:3'`
- * under `-i`, `N+=4` stores 6, and `N+=''` keeps the old value.
+ * the two joined by `INTEGER_APPEND` for the door's coercion to evaluate
+ * apart and add. Each side is evaluated on its own and an empty side counts
+ * as 0, as bash does: with `N='1?2:3'` under `-i`, `N+=4` stores 6,
+ * `N+=''` keeps the old value, and `N+=1+` names `1+`.
  */
 export function appended(old: string, added: string, integer: boolean): string {
   if (!integer) return old + added
-  return `(${old.trim() || '0'}) + (${added.trim() || '0'})`
+  return `${old}${INTEGER_APPEND}${added}`
 }
 
 /**

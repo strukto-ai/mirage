@@ -153,25 +153,26 @@ SLICE_CASES = [
         'sales=(1 2); echo "a${sales[vid]:.2f}b"',
         1,
         "",
-        'bash: sales[vid]: .2f: syntax error: invalid character "."\n',
+        "bash: sales[vid]: .2f: syntax error: operand expected"
+        ' (error token is ".2f")\n',
     ),
     (
         'x=; echo "a${x:.2f}b"',
         1,
         "",
-        'bash: x: .2f: syntax error: invalid character "."\n',
+        'bash: x: .2f: syntax error: operand expected (error token is ".2f")\n',
     ),
     (
         'set -- ""; echo "a${1:.2f}b"',
         1,
         "",
-        'bash: 1: .2f: syntax error: invalid character "."\n',
+        'bash: 1: .2f: syntax error: operand expected (error token is ".2f")\n',
     ),
     (
         'a=(); a[3]=x; echo "[${a[@]:.2f}]"',
         1,
         "",
-        'bash: a[@]: .2f: syntax error: invalid character "."\n',
+        'bash: a[@]: .2f: syntax error: operand expected (error token is ".2f")\n',
     ),
     ('set -u; echo "a${x:.2f}b"', 127, "", "bash: x: unbound variable\n"),
     (

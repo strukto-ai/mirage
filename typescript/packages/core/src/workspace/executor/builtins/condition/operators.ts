@@ -15,7 +15,7 @@
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
 import { CycleError, dottedSpelling, resolvePath, resolveSymlinks } from '../../../../utils/path.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
-import { ArithError, ExitSignal } from '../../../../shell/errors.ts'
+import { ArithError } from '../../../../shell/errors.ts'
 import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
 import { isEfbig } from '../../../../errors/fs.ts'
@@ -26,7 +26,6 @@ import { elementIsSet } from '../../../session/elements.ts'
 import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY } from './constants.ts'
 import { CondError, type CondContext } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 
 /** Resolve a file operand to an addressable scope. */
 function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
@@ -87,9 +86,7 @@ export async function applyUnary(
     } catch (err) {
       // bash aborts the line on `[[ -v a[1/0] ]]` with `1/0: division by
       // 0`, a test's grammar error being the only other thing that ends it.
-      if (err instanceof ArithError) {
-        throw new ExitSignal(1, encodeText(`bash: ${err.message}\n`), null, 1)
-      }
+      if (err instanceof ArithError) throw err.signal('', true)
       throw err
     }
   }

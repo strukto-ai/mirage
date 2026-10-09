@@ -13,22 +13,29 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable, Mapping
-from typing import Any
 
 from mirage.shell.constants import (
     ARITH_ASSIGN_OPS,
-    ARITH_ELEM,
+    ARITH_BLANKS,
+    ARITH_LITERAL,
     ARITH_MAX_DEPTH,
     ARITH_NAME,
+    ARITH_OPERATOR,
+    ARITH_PRECEDENCE,
     ARITH_SIGN,
-    ARITH_TOKEN,
+    ARITH_UNARY_OPS,
     ARITH_WRAP,
 )
 from mirage.shell.errors import ArithError, ReadonlyError, UnboundVariable
-from mirage.shell.types import ArithResult, ArithWrite, ElementOps
+from mirage.shell.types import (
+    ArithResult,
+    ArithTokenKind,
+    ArithWrite,
+    ElementOps,
+)
 
 
-def _matching_bracket(expr: str, start: int) -> int:
+def _matching_bracket(expr: str, start: int) -> int | None:
     """Index of the ``]`` closing the ``[`` at ``start``, quote-aware.
 
     Quotes matter because an associative key may hold a bracket
@@ -38,6 +45,9 @@ def _matching_bracket(expr: str, start: int) -> int:
     Args:
         expr (str): the whole expression.
         start (int): index of the opening bracket.
+
+    Returns:
+        int | None: the index, or None when the bracket never closes.
     """
     depth = 0
     i = start
@@ -47,7 +57,7 @@ def _matching_bracket(expr: str, start: int) -> int:
         if ch in "\"'":
             close = expr.find(ch, i + 1)
             if close == -1:
-                break
+                return None
             i = close + 1
             continue
         if ch == "[":
@@ -57,335 +67,529 @@ def _matching_bracket(expr: str, start: int) -> int:
             if depth == 0:
                 return i
         i += 1
-    raise ArithError('syntax error: "]" expected')
-
-
-def _tokenize(expr: str) -> list[str]:
-    tokens: list[str] = []
-    pos = 0
-    n = len(expr)
-    while pos < n:
-        match = ARITH_TOKEN.match(expr, pos)
-        if match is None:
-            raise ArithError(f'syntax error: invalid character "{expr[pos]}"')
-        kind = match.lastgroup
-        end = match.end()
-        if kind == "name" and end < n and expr[end] == "[":
-            # A name adjacent to a bracket is one element reference, so
-            # the subscript rides inside the token: its interior is not
-            # arithmetic (an associative key can be any text at all) and
-            # only the resolver knows which grammar applies.
-            close = _matching_bracket(expr, end)
-            tokens.append(expr[match.start() : close + 1])
-            pos = close + 1
-            continue
-        pos = end
-        if kind == "ws":
-            continue
-        if kind == "bad":
-            raise ArithError(f'syntax error: invalid character "{match[0]}"')
-        tokens.append(match[0])
-    return tokens
-
-
-def _target_node(tok: str) -> tuple[Any, ...] | None:
-    """The lvalue node one token spells, or None when it spells none.
-
-    Args:
-        tok (str): the token to classify.
-    """
-    if ARITH_NAME.fullmatch(tok):
-        return ("var", tok)
-    elem = ARITH_ELEM.fullmatch(tok)
-    if elem is not None:
-        return ("elem", elem.group(1), elem.group(2))
     return None
 
 
-def _wrap(value: int) -> int:
+def wrap_int64(value: int) -> int:
+    """``value`` wrapped to a signed 64-bit integer, as bash's arithmetic
+    wraps.
+
+    Args:
+        value (int): any integer.
+    """
     value &= ARITH_WRAP - 1
     return value - ARITH_WRAP if value & ARITH_SIGN else value
 
 
-def _trunc_div(a: int, b: int) -> int:
-    if b == 0:
-        raise ArithError("division by 0")
-    q = a // b
-    if q < 0 and q * b != a:
-        q += 1
-    return q
-
-
-def _trunc_mod(a: int, b: int) -> int:
-    return a - _trunc_div(a, b) * b
-
-
 def _base_digit(ch: str, base: int) -> int:
+    """The value of one digit of a ``base#digits`` constant.
+
+    Args:
+        ch (str): the digit.
+        base (int): the constant's base; below 37 upper- and lowercase
+            letters are interchangeable, above it uppercase continues
+            the range.
+    """
     if ch.isdigit():
         return ord(ch) - ord("0")
     if "a" <= ch <= "z":
         return ord(ch) - ord("a") + 10
     if "A" <= ch <= "Z":
-        # Below base 37 upper- and lowercase are interchangeable; above,
-        # uppercase continues the digit range (bash base#value rules).
         return ord(ch) - ord("A") + (10 if base <= 36 else 36)
     if ch == "@":
         return 62
     return 63
 
 
-def _parse_base_literal(text: str) -> int:
-    base_text, _, digits = text.partition("#")
-    base = int(base_text)
-    if base < 2 or base > 64:
-        raise ArithError(f'invalid arithmetic base (error token is "{text}")')
+def _digits_value(digits: str, base: int) -> int | None:
+    """The value of ``digits`` in ``base``, or None when one is too great.
+
+    Args:
+        digits (str): the digits.
+        base (int): the base, 2 to 64.
+    """
     value = 0
     for ch in digits:
         digit = _base_digit(ch, base)
         if digit >= base:
-            raise ArithError(
-                f'value too great for base (error token is "{text}")'
-            )
+            return None
         value = value * base + digit
     return value
 
 
-def _parse_literal(text: str) -> int:
+def _constant(text: str) -> int | str:
+    """The value of an integer constant, or what bash says of a bad one.
+
+    Decimal, octal after a leading ``0``, hexadecimal after ``0x`` (bare
+    ``0x`` is 0), or ``base#digits`` for a base from 2 to 64 written as
+    a constant itself; the value wraps to 64 bits.
+
+    Args:
+        text (str): the constant as read.
+    """
     if "#" in text:
-        return _parse_base_literal(text)
-    if text.lower().startswith("0x"):
-        return int(text, 16)
-    if text.startswith("0") and text != "0":
-        try:
-            return int(text, 8)
-        except ValueError:
-            raise ArithError(
-                f'value too great for base (error token is "{text}")'
-            ) from None
-    return int(text)
+        base_text, _, digits = text.partition("#")
+        base = _constant(base_text)
+        if isinstance(base, str):
+            return base
+        if base < 2 or base > 64:
+            return "invalid arithmetic base"
+        if not digits:
+            return "invalid integer constant"
+        value = _digits_value(digits, base)
+    elif text[:2] in ("0x", "0X"):
+        value = _digits_value(text[2:], 16)
+    elif text.startswith("0"):
+        value = _digits_value(text, 8)
+    else:
+        value = _digits_value(text, 10)
+    if value is None:
+        return "value too great for base"
+    return wrap_int64(value)
 
 
-class ArithParser:
-    """Recursive-descent parser producing tuple AST nodes.
+def _binop(op: str, a: int, b: int) -> int:
+    """One binary operator over 64-bit wrapping integers, ``/``, ``%`` and
+    ``**`` aside.
 
-    Grammar mirrors bash arithmetic precedence (comma, assignment,
-    ternary, ``||``, ``&&``, ``|``, ``^``, ``&``, equality, relational,
-    shift, additive, multiplicative, ``**``, unary, ``++``/``--``,
-    primary). Evaluation is separate so ``&&``/``||``/ternary can
-    short-circuit side effects.
+    Args:
+        op (str): the operator.
+        a (int): the left value.
+        b (int): the right value.
+    """
+    if op == "+":
+        return wrap_int64(a + b)
+    if op == "-":
+        return wrap_int64(a - b)
+    if op == "*":
+        return wrap_int64(a * b)
+    if op == "<<":
+        return wrap_int64(a << (b & 63))
+    if op == ">>":
+        return a >> (b & 63)
+    if op == "&":
+        return a & b
+    if op == "|":
+        return a | b
+    if op == "^":
+        return a ^ b
+    if op == "==":
+        return int(a == b)
+    if op == "!=":
+        return int(a != b)
+    if op == "<":
+        return int(a < b)
+    if op == "<=":
+        return int(a <= b)
+    if op == ">":
+        return int(a > b)
+    return int(a >= b)
+
+
+def _power(base: int, exponent: int) -> int:
+    """``base ** exponent`` modulo 2**64.
+
+    Args:
+        base (int): the base.
+        exponent (int): a non-negative exponent.
+    """
+    return wrap_int64(pow(base, exponent, ARITH_WRAP))
+
+
+def _split_target(target: str) -> tuple[str, str | None]:
+    """A target's name and its subscript, None for a bare name.
+
+    Args:
+        target (str): the name, with its subscript if it has one.
+    """
+    name, bracket, rest = target.partition("[")
+    return name, rest[:-1] if bracket else None
+
+
+class _Reader:
+    """Reads one arithmetic expression and evaluates it as it goes, as
+    bash does.
+
+    A token is read only when the grammar needs it, and every value is
+    computed the moment its operands are, so an assignment before an
+    error has already been made (``x=7, 1+`` leaves x at 7) and an error
+    names the text from the token the reader stood on (``tp``). Inside
+    the branch ``&&``, ``||`` or ``?:`` skips (``skip``) nothing is read
+    from a variable or written to one and a zero divisor is no error, but
+    the grammar is still checked, an integer constant still judged and a
+    negative exponent still refused.
+
+    Args:
+        record (_ArithRecord): the evaluation the expression belongs to.
+        text (str): the expression, leading blanks dropped.
+        depth (int): how many variable values deep the expression is.
+        subscript (bool): the expression is an indexed subscript.
     """
 
-    def __init__(self, tokens: list[str]) -> None:
-        self.tokens = tokens
+    def __init__(
+        self, record: "_ArithRecord", text: str, depth: int, subscript: bool
+    ) -> None:
+        self.record = record
+        self.text = text
+        self.depth = depth
+        self.subscript = subscript
         self.pos = 0
+        self.tp = 0
+        self.kind: ArithTokenKind = "end"
+        self.tok = ""
+        self.value = 0
+        self.skip = 0
 
-    def peek(self) -> str | None:
-        return self.tokens[self.pos] if self.pos < len(self.tokens) else None
+    def fail(self, message: str, at: int | None = None) -> ArithError:
+        """The error bash reports at the token the reader stands on.
 
-    def take(self) -> str:
-        tok = self.peek()
-        if tok is None:
-            raise ArithError("syntax error: operand expected")
-        self.pos += 1
-        return tok
+        Args:
+            message (str): what went wrong.
+            at (int | None): where the error token starts, when it is not
+                the reader's own token.
+        """
+        start = self.tp if at is None else at
+        return ArithError(message, self.text, self.text[start:])
 
-    def expect(self, tok: str) -> None:
-        if self.take() != tok:
-            raise ArithError(f'syntax error: "{tok}" expected')
+    def advance(self) -> None:
+        """Read the next token.
 
-    def parse(self) -> tuple[Any, ...]:
-        node = self.comma()
-        if self.peek() is not None:
-            raise ArithError(f'syntax error: unexpected token "{self.peek()}"')
-        return node
+        ``++`` and ``--`` after a name are its postfix operators, before
+        a name (blanks between allowed) its prefix ones, and anywhere
+        else two signs (``1++2`` is ``1 + +2``). A name joined to a
+        ``[`` takes its subscript along unread. At the end the reader
+        stays on the last token, which an error then names.
+        """
+        text = self.text
+        pos = self.pos
+        n = len(text)
+        while pos < n and text[pos] in ARITH_BLANKS:
+            pos += 1
+        after_name = self.kind == "name"
+        if pos >= n:
+            self.pos, self.kind, self.tok = pos, "end", ""
+            return
+        self.tp = pos
+        name = ARITH_NAME.match(text, pos)
+        if name is not None:
+            end = name.end()
+            if end < n and text[end] == "[":
+                close = _matching_bracket(text, end)
+                if close is None:
+                    raise self.fail("bad array subscript")
+                end = close + 1
+            self.pos, self.kind, self.tok = end, "name", text[pos:end]
+            return
+        constant = ARITH_LITERAL.match(text, pos)
+        if constant is not None:
+            value = _constant(constant[0])
+            if isinstance(value, str):
+                raise ArithError(value, text[: constant.end()], constant[0])
+            self.pos, self.kind, self.tok = constant.end(), "num", constant[0]
+            self.value = value
+            return
+        operator = ARITH_OPERATOR.match(text, pos)
+        if operator is None:
+            self.pos, self.kind, self.tok = pos + 1, "bad", text[pos]
+            return
+        op = operator[0]
+        if op in ("++", "--"):
+            if after_name:
+                self.pos, self.kind, self.tok = pos + 2, "post", op
+                return
+            ahead = pos + 2
+            while ahead < n and text[ahead] in ARITH_BLANKS:
+                ahead += 1
+            if ARITH_NAME.match(text, ahead) is not None:
+                self.pos, self.kind, self.tok = pos + 2, "pre", op
+                return
+            op = op[0]
+        self.pos, self.kind, self.tok = pos + len(op), "op", op
 
-    def comma(self) -> tuple[Any, ...]:
-        parts = [self.assign()]
-        while self.peek() == ",":
-            self.take()
-            parts.append(self.assign())
-        return parts[0] if len(parts) == 1 else ("comma", parts)
+    def at(self, op: str) -> bool:
+        return self.kind == "op" and self.tok == op
 
-    def assign(self) -> tuple[Any, ...]:
-        tok = self.peek()
-        if (
-            tok is not None
-            and self.pos + 1 < len(self.tokens)
-            and self.tokens[self.pos + 1] in ARITH_ASSIGN_OPS
-            and _target_node(tok) is not None
-        ):
-            target = _target_node(self.take())
-            op = self.take()
-            return ("assign", target, op, self.assign())
-        return self.ternary()
+    def stray(self, message: str) -> ArithError:
+        """The error for a token where an operator or closer belongs.
 
-    def ternary(self) -> tuple[Any, ...]:
-        cond = self.logic_or()
-        if self.peek() != "?":
+        Args:
+            message (str): what a token bash can read means there.
+        """
+        if self.kind == "bad":
+            return self.fail("syntax error: invalid arithmetic operator")
+        return self.fail(message)
+
+    def run(self) -> int:
+        self.advance()
+        if self.kind == "end":
+            return 0
+        value = self.comma()
+        if self.kind != "end":
+            raise self.stray("syntax error in expression")
+        return value
+
+    def comma(self) -> int:
+        value = self.assign()
+        while self.at(","):
+            self.advance()
+            value = self.assign()
+        return value
+
+    def assign(self) -> int:
+        if self.kind == "name":
+            saved = (self.pos, self.tp, self.kind, self.tok)
+            target = self.tok
+            self.advance()
+            if self.kind == "op" and self.tok in ARITH_ASSIGN_OPS:
+                return self.assignment(target)
+            self.pos, self.tp, self.kind, self.tok = saved
+        value = self.ternary()
+        if self.kind == "op" and self.tok in ARITH_ASSIGN_OPS:
+            raise self.fail("attempted assignment to non-variable")
+        return value
+
+    def assignment(self, target: str) -> int:
+        """An assignment to ``target``, the reader on its operator.
+
+        bash evaluates a plain assignment's right side before it resolves
+        the target's subscript (``x=0, a[x++]=x++`` stores 0 at index 1),
+        and a compound one reads its target before the right side.
+
+        Args:
+            target (str): the name, with its subscript if it has one.
+        """
+        op = self.tok
+        self.advance()
+        divisor = self.tp
+        if self.skip:
+            return self.assign()
+        record = self.record
+        if op == "=":
+            value = self.assign()
+            key = record.key_of(target, self.depth)
+        else:
+            key = record.key_of(target, self.depth)
+            current = record.read_target(
+                target, key, self.depth, self.subscript
+            )
+            value = self.apply(op[:-1], current, self.assign(), divisor)
+        record.write_target(target, key, value, self.subscript)
+        return value
+
+    def ternary(self) -> int:
+        cond = self.binary(1)
+        if not self.at("?"):
             return cond
-        self.take()
-        then = self.assign()
-        self.expect(":")
-        other = self.assign()
-        return ("ternary", cond, then, other)
+        self.advance()
+        if self.kind == "end" or self.at(":"):
+            raise self.fail("expression expected")
+        self.skip += cond == 0
+        then = self.comma()
+        self.skip -= cond == 0
+        if not self.at(":"):
+            raise self.stray("`:' expected for conditional expression")
+        self.advance()
+        if self.kind == "end":
+            raise self.fail("expression expected")
+        self.skip += cond != 0
+        other = self.ternary()
+        self.skip -= cond != 0
+        return then if cond else other
 
-    def logic_or(self) -> tuple[Any, ...]:
-        node = self.logic_and()
-        while self.peek() == "||":
-            self.take()
-            node = ("logic", "||", node, self.logic_and())
-        return node
+    def binary(self, floor: int) -> int:
+        """Binary operators binding at least as tightly as ``floor``.
 
-    def logic_and(self) -> tuple[Any, ...]:
-        node = self.bit_or()
-        while self.peek() == "&&":
-            self.take()
-            node = ("logic", "&&", node, self.bit_or())
-        return node
+        Args:
+            floor (int): the loosest precedence this level takes.
+        """
+        left = self.unary()
+        while self.kind == "op":
+            op = self.tok
+            precedence = ARITH_PRECEDENCE.get(op, 0)
+            if precedence < floor:
+                break
+            self.advance()
+            divisor = self.tp
+            if op in ("&&", "||"):
+                skipped = (left == 0) == (op == "&&")
+                self.skip += skipped
+                right = self.binary(precedence + 1)
+                self.skip -= skipped
+                left = int(
+                    left != 0 and right != 0
+                    if op == "&&"
+                    else left != 0 or right != 0
+                )
+                continue
+            right = self.binary(precedence + (op != "**"))
+            left = self.apply(op, left, right, divisor)
+        return left
 
-    def bit_or(self) -> tuple[Any, ...]:
-        node = self.bit_xor()
-        while self.peek() == "|":
-            self.take()
-            node = ("binop", "|", node, self.bit_xor())
-        return node
+    def apply(self, op: str, a: int, b: int, divisor: int) -> int:
+        """One binary operator over 64-bit wrapping integers.
 
-    def bit_xor(self) -> tuple[Any, ...]:
-        node = self.bit_and()
-        while self.peek() == "^":
-            self.take()
-            node = ("binop", "^", node, self.bit_and())
-        return node
+        Division truncates toward zero and ``%`` takes the dividend's
+        sign, as in C.
 
-    def bit_and(self) -> tuple[Any, ...]:
-        node = self.equality()
-        while self.peek() == "&":
-            self.take()
-            node = ("binop", "&", node, self.equality())
-        return node
+        Args:
+            op (str): the operator.
+            a (int): the left value.
+            b (int): the right value.
+            divisor (int): where the right operand starts, which a
+                division by 0 names.
+        """
+        if op in ("/", "%"):
+            if b == 0:
+                if self.skip:
+                    return 0
+                raise self.fail("division by 0", divisor)
+            quotient = abs(a) // abs(b)
+            if (a < 0) != (b < 0):
+                quotient = -quotient
+            return wrap_int64(quotient if op == "/" else a - quotient * b)
+        if op == "**":
+            if b < 0:
+                raise self.fail("exponent less than 0")
+            return _power(a, b)
+        return _binop(op, a, b)
 
-    def equality(self) -> tuple[Any, ...]:
-        node = self.relational()
-        while self.peek() in ("==", "!="):
-            op = self.take()
-            node = ("binop", op, node, self.relational())
-        return node
+    def unary(self) -> int:
+        if self.kind == "op" and self.tok in ARITH_UNARY_OPS:
+            op = self.tok
+            self.advance()
+            value = self.unary()
+            if op == "!":
+                return int(value == 0)
+            if op == "~":
+                return wrap_int64(~value)
+            if op == "-":
+                return wrap_int64(-value)
+            return value
+        if self.kind == "pre":
+            step = 1 if self.tok == "++" else -1
+            self.advance()
+            target = self.tok
+            self.advance()
+            if self.kind == "post":
+                raise self.fail(f"{self.tok}: assignment requires lvalue")
+            return self.step(target, step, True)
+        return self.primary()
 
-    def relational(self) -> tuple[Any, ...]:
-        node = self.shift()
-        while self.peek() in ("<", "<=", ">", ">="):
-            op = self.take()
-            node = ("binop", op, node, self.shift())
-        return node
+    def step(self, target: str, step: int, prefix: bool) -> int:
+        """``++`` or ``--`` on ``target``: the new value before it, the
+        old one after it.
 
-    def shift(self) -> tuple[Any, ...]:
-        node = self.additive()
-        while self.peek() in ("<<", ">>"):
-            op = self.take()
-            node = ("binop", op, node, self.additive())
-        return node
+        Args:
+            target (str): the name, with its subscript if it has one.
+            step (int): 1 or -1.
+            prefix (bool): the operator stands before the name.
+        """
+        if self.skip:
+            return 0
+        record = self.record
+        key = record.key_of(target, self.depth)
+        value = record.read_target(target, key, self.depth, self.subscript)
+        stepped = wrap_int64(value + step)
+        record.write_target(target, key, stepped, self.subscript)
+        return stepped if prefix else value
 
-    def additive(self) -> tuple[Any, ...]:
-        node = self.multiplicative()
-        while self.peek() in ("+", "-"):
-            op = self.take()
-            node = ("binop", op, node, self.multiplicative())
-        return node
-
-    def multiplicative(self) -> tuple[Any, ...]:
-        node = self.power()
-        while self.peek() in ("*", "/", "%"):
-            op = self.take()
-            node = ("binop", op, node, self.power())
-        return node
-
-    def power(self) -> tuple[Any, ...]:
-        node = self.unary()
-        if self.peek() == "**":
-            self.take()
-            return ("binop", "**", node, self.power())
-        return node
-
-    def unary(self) -> tuple[Any, ...]:
-        tok = self.peek()
-        if tok in ("!", "~", "-", "+"):
-            self.take()
-            return ("unary", tok, self.unary())
-        if tok in ("++", "--"):
-            self.take()
-            target = _target_node(self.take())
-            if target is None:
-                raise ArithError(f'syntax error: "{tok}" requires a variable')
-            return ("pre", tok, target)
-        return self.postfix()
-
-    def postfix(self) -> tuple[Any, ...]:
-        node = self.primary()
-        if self.peek() in ("++", "--") and node[0] in ("var", "elem"):
-            op = self.take()
-            return ("post", op, node)
-        return node
-
-    def primary(self) -> tuple[Any, ...]:
-        tok = self.take()
-        if tok == "(":
-            node = self.comma()
-            self.expect(")")
-            return node
-        target = _target_node(tok)
-        if target is not None:
-            return target
-        try:
-            return ("num", _parse_literal(tok))
-        except ArithError:
-            raise
-        except ValueError:
-            raise ArithError(
-                f'syntax error: unexpected token "{tok}"'
-            ) from None
+    def primary(self) -> int:
+        if self.at("("):
+            self.advance()
+            value = self.comma()
+            if not self.at(")"):
+                raise self.stray("missing `)'")
+            self.advance()
+            return value
+        if self.kind == "num":
+            value = self.value
+            self.advance()
+            return value
+        if self.kind == "name":
+            target = self.tok
+            self.advance()
+            if self.kind == "post":
+                step = 1 if self.tok == "++" else -1
+                self.advance()
+                return self.step(target, step, False)
+            if self.skip:
+                return 0
+            record = self.record
+            key = record.key_of(target, self.depth)
+            return record.read_target(target, key, self.depth, self.subscript)
+        raise self.fail("syntax error: operand expected")
 
 
-class ArithEvaluator:
-    """Evaluates the tuple AST against an env, recording assignments.
+class _ArithRecord:
+    """One evaluation: what it reads and every write it makes.
 
     Reads resolve through ``updates`` first, then ``env``; every write
-    lands in ``updates`` (or ``elem_updates`` for an element lvalue) so
-    the caller decides what to apply to the session (bash arithmetic
-    assignments are real assignments). ``writes`` is the one ordered
-    record across both kinds, every write in turn, so the caller lands
-    them in the order the expression made them. A write to a name
-    ``frozen`` holds stops the evaluation there (``ReadonlyError``),
-    noting whether it was made inside an array subscript
-    (``subscript``).
+    lands in ``updates`` (or ``elem_updates`` for an element) and in
+    ``writes``, the one ordered record across both kinds, so the caller
+    lands them in the order the expression made them. A variable's value
+    and an indexed subscript are expressions of their own, read in this
+    same record (``x='y=5'; $((x))`` leaves y at 5) one level deeper. A
+    write to a name ``frozen`` holds stops the evaluation there
+    (``ReadonlyError``).
+
+    Args:
+        env (Mapping[str, str]): variable environment for reads.
+        elements (ElementOps | None): array-element callbacks.
+        read_var (Callable[[str], str | None] | None): dynamic reads.
+        wrote_var (Callable[[str, str], None] | None): told of each
+            scalar write.
+        nounset (bool): ``set -u`` for the names read.
+        frozen (Callable[[str], str | None] | None): the readonly name a
+            write reaches, or None.
     """
 
     def __init__(
         self,
         env: Mapping[str, str],
-        updates: dict[str, str],
-        elem_updates: dict[tuple[str, str], str],
-        writes: list[ArithWrite],
-        depth: int,
         elements: ElementOps | None,
         read_var: Callable[[str], str | None] | None,
-        wrote_var: Callable[[str, str], None] | None = None,
-        nounset: bool = False,
-        frozen: Callable[[str], str | None] | None = None,
-        subscript: bool = False,
+        wrote_var: Callable[[str, str], None] | None,
+        nounset: bool,
+        frozen: Callable[[str], str | None] | None,
     ) -> None:
         self.env = env
-        self.updates = updates
-        self.elem_updates = elem_updates
-        self.writes = writes
-        self.depth = depth
         self.elements = elements
         self.read_var = read_var
         self.wrote_var = wrote_var
         self.nounset = nounset
         self.frozen = frozen
-        self.subscript = subscript
+        self.updates: dict[str, str] = {}
+        self.elem_updates: dict[tuple[str, str], str] = {}
+        self.writes: list[ArithWrite] = []
 
-    def _merged_env(self) -> dict[str, str]:
+    def evaluate(self, text: str, depth: int, subscript: bool) -> int:
+        """The value of ``text`` read as an expression in this record.
+
+        Args:
+            text (str): the expression.
+            depth (int): how many variable values deep it is.
+            subscript (bool): it is an indexed subscript.
+        """
+        text = text.lstrip(ARITH_BLANKS)
+        if depth >= ARITH_MAX_DEPTH and text:
+            raise ArithError("expression recursion level exceeded", text, text)
+        return _Reader(self, text, depth, subscript).run()
+
+    def coerce(self, raw: str | None, depth: int, subscript: bool) -> int:
+        """A variable's value as a number: its text read as an expression.
+
+        Args:
+            raw (str | None): the stored text, None when unset.
+            depth (int): the depth of the expression that read it.
+            subscript (bool): that expression is a subscript's.
+        """
+        raw = raw or ""
+        number = raw.strip(ARITH_BLANKS)
+        if number.isdecimal() and number.isascii() and number[0] != "0":
+            return wrap_int64(int(number))
+        return self.evaluate(raw, depth + 1, subscript)
+
+    def merged_env(self) -> dict[str, str]:
         merged = {
             name: value
             for name in self.env
@@ -394,69 +598,68 @@ class ArithEvaluator:
         merged.update(self.updates)
         return merged
 
-    def _coerce(self, raw: str | None) -> int:
-        raw = (raw or "").strip()
-        if not raw:
-            return 0
-        try:
-            return _parse_literal(raw)
-        except (ValueError, ArithError):
-            return self._nested(raw)
+    def key_of(self, target: str, depth: int) -> str | None:
+        """The canonical element key a target names, None for a scalar.
 
-    def _nested(self, raw: str, subscript: bool = False) -> int:
-        """Evaluate text as an expression in this expression's record.
-
-        bash evaluates a variable's stored text, and an indexed
-        subscript, in the same context as the expression around them:
-        an assignment they make lands with the expression's own
-        (``x='y=5'; $((x))`` leaves y at 5, ``$((a[x=5] + x))`` is 12),
-        a name they read sees the pending updates, and a ``RANDOM`` seed
-        reaches the reader. So the nested run shares this evaluator's
-        record rather than starting a fresh one.
+        Resolved once per reference: a compound assignment or a ``++``
+        reads and writes the same element, and a subscript that draws
+        (``a[RANDOM]+=1``) draws once.
 
         Args:
-            raw (str): the text to evaluate.
-            subscript (bool): the text is an indexed subscript.
+            target (str): the name, with its subscript if it has one.
+            depth (int): the depth of the expression naming it.
         """
-        if self.depth >= ARITH_MAX_DEPTH:
+        name, inner = _split_target(target)
+        if inner is None:
+            return None
+        elements = self.elements
+        if elements is None:
             raise ArithError(
-                f'expression recursion level exceeded (error token is "{raw}")'
+                "syntax error: operand expected", target, target[len(name) :]
             )
-        nested = ArithEvaluator(
-            self.env,
-            self.updates,
-            self.elem_updates,
-            self.writes,
-            self.depth + 1,
-            self.elements,
-            self.read_var,
-            self.wrote_var,
-            self.nounset,
-            self.frozen,
-            self.subscript or subscript,
-        )
-        return nested.run(ArithParser(_tokenize(raw)).parse())
+        is_assoc = elements.is_assoc
+        if is_assoc is not None and is_assoc(name):
+            return elements.resolve(name, inner, self.merged_env())
+        try:
+            index = int(inner.strip())
+        except ValueError:
+            try:
+                index = self.evaluate(inner, depth + 1, True)
+            except ArithError as exc:
+                exc.in_subscript = True
+                raise
+        return elements.resolve(name, str(index), self.merged_env())
 
-    def lookup(self, name: str) -> int:
-        # A dynamic name is asked first: the reader has been told of every
-        # assignment this expression made (`wrote_var`), so
-        # `RANDOM=42, RANDOM` draws from the new seed rather than reading
-        # the seed back out of the pending update.
+    def read_target(
+        self, target: str, key: str | None, depth: int, subscript: bool
+    ) -> int:
+        """The value a target holds.
+
+        A bare name a dynamic reader answers (``RANDOM``) is asked first,
+        the pending writes next, then the environment; an array's bare
+        name reads element 0.
+
+        Args:
+            target (str): the name, with its subscript if it has one.
+            key (str | None): its element key, None for a scalar.
+            depth (int): the depth of the expression reading it.
+            subscript (bool): that expression is a subscript's.
+        """
+        name = _split_target(target)[0]
+        if key is not None:
+            raw = self.elem_updates.get((name, key))
+            if raw is None and self.elements is not None:
+                raw = self.elements.read(name, key)
+            return self.coerce(raw, depth, subscript)
         if self.read_var is not None:
             dynamic = self.read_var(name)
             if dynamic is not None:
-                return self._coerce(dynamic)
+                return self.coerce(dynamic, depth, subscript)
         raw = self.updates.get(name)
         if raw is None:
             value = self.env.get(name)
             if value is None and self.elements is not None:
-                # A bare array name reads as element 0 (`a=(4 5)` then
-                # `$((a))` is 4); the env holds scalars only, so the
-                # element resolver answers for the arrays.
                 value = self.elements.read(name, "0")
-            # Under `set -u` a name no variable holds is fatal, as it
-            # is in bash's arithmetic; an array counts whatever its
-            # element 0 holds.
             if (
                 value is None
                 and self.nounset
@@ -468,182 +671,31 @@ class ArithEvaluator:
             ):
                 raise UnboundVariable(name)
             raw = "" if value is None else str(value)
-        return self._coerce(raw)
-
-    def elem_key(self, name: str, subscript: str) -> str:
-        if self.elements is None:
-            raise ArithError(
-                'syntax error: operand expected (error token is "[")'
-            )
-        is_assoc = self.elements.is_assoc
-        if is_assoc is not None and not is_assoc(name):
-            # An indexed subscript is arithmetic in this expression's
-            # own record (`_nested`), so what it assigns the rest of the
-            # expression reads and the expression lands; the resolver
-            # only normalizes the index it is handed (a negative one
-            # counts from the extent). A literal index skips the run.
-            try:
-                index = int(subscript.strip())
-            except ValueError:
-                index = self._nested(subscript, subscript=True)
-            return self.elements.resolve(name, str(index), self._merged_env())
-        return self.elements.resolve(name, subscript, self._merged_env())
-
-    def key_of(self, target: tuple[Any, ...]) -> str | None:
-        """The canonical element key of a target, None for a scalar.
-
-        Resolved once per reference: a compound assignment or a ``++``
-        reads and writes the same element, and a subscript that draws
-        (``a[RANDOM]+=1``) must draw once, as bash's does.
-
-        Args:
-            target (tuple[Any, ...]): a ``var`` or ``elem`` target node.
-        """
-        if target[0] == "var":
-            return None
-        return self.elem_key(target[1], target[2])
-
-    def read_target(
-        self, target: tuple[Any, ...], key: str | None = None
-    ) -> int:
-        if target[0] == "var":
-            return self.lookup(target[1])
-        if key is None:
-            key = self.elem_key(target[1], target[2])
-        raw = self.elem_updates.get((target[1], key))
-        if raw is None and self.elements is not None:
-            raw = self.elements.read(target[1], key)
-        return self._coerce(raw)
+        return self.coerce(raw, depth, subscript)
 
     def write_target(
-        self, target: tuple[Any, ...], value: int, key: str | None = None
+        self, target: str, key: str | None, value: int, subscript: bool
     ) -> None:
-        name = target[1]
-        if target[0] == "elem" and key is None:
-            key = self.elem_key(name, target[2])
+        """Record a write, or refuse one to a readonly name.
+
+        Args:
+            target (str): the name, with its subscript if it has one.
+            key (str | None): its element key, None for a scalar.
+            value (int): the value written.
+            subscript (bool): the write is made inside a subscript.
+        """
+        name = _split_target(target)[0]
         refused = self.frozen(name) if self.frozen is not None else None
         if refused is not None:
-            raise ReadonlyError(refused, self.subscript)
+            raise ReadonlyError(refused, subscript)
         text = str(value)
-        if key is None:
-            self.updates[name] = text
-            self._record(name, None, text)
-            if self.wrote_var is not None:
-                self.wrote_var(name, text)
-            return
-        self.elem_updates[(name, key)] = text
-        self._record(name, key, text)
-
-    def _record(self, name: str, key: str | None, text: str) -> None:
         self.writes.append(ArithWrite(name, key, text))
-
-    def run(self, node: tuple[Any, ...]) -> int:
-        kind = node[0]
-        if kind == "num":
-            return node[1]
-        if kind in ("var", "elem"):
-            return self.read_target(node)
-        if kind == "comma":
-            value = 0
-            for part in node[1]:
-                value = self.run(part)
-            return value
-        if kind == "assign":
-            _, target, op, rhs = node
-            if op == "=":
-                # bash evaluates the right side before it resolves a
-                # plain assignment's subscript: `x=0, a[x++]=x++` stores
-                # 0 at index 1 and leaves x at 2.
-                value = self.run(rhs)
-                key = self.key_of(target)
-            else:
-                # A compound assignment reads its target first, and bash
-                # reads it before the right side, which a dynamic name
-                # makes observable: `RANDOM=42, RANDOM-=RANDOM` is the
-                # first draw minus the second.
-                key = self.key_of(target)
-                current = self.read_target(target, key)
-                value = self.apply_binop(op[:-1], current, self.run(rhs))
-            self.write_target(target, value, key)
-            return value
-        if kind == "ternary":
-            _, cond, then, other = node
-            return self.run(then) if self.run(cond) != 0 else self.run(other)
-        if kind == "logic":
-            _, op, left, right = node
-            lval = self.run(left)
-            if op == "&&":
-                return 1 if lval != 0 and self.run(right) != 0 else 0
-            return 1 if lval != 0 or self.run(right) != 0 else 0
-        if kind == "binop":
-            _, op, left, right = node
-            return self.apply_binop(op, self.run(left), self.run(right))
-        if kind == "unary":
-            _, op, operand = node
-            value = self.run(operand)
-            if op == "!":
-                return 0 if value != 0 else 1
-            if op == "~":
-                return _wrap(~value)
-            if op == "-":
-                return _wrap(-value)
-            return value
-        if kind == "pre":
-            _, op, target = node
-            key = self.key_of(target)
-            value = _wrap(
-                self.read_target(target, key) + (1 if op == "++" else -1)
-            )
-            self.write_target(target, value, key)
-            return value
-        if kind == "post":
-            _, op, target = node
-            key = self.key_of(target)
-            value = self.read_target(target, key)
-            self.write_target(
-                target, _wrap(value + (1 if op == "++" else -1)), key
-            )
-            return value
-        raise ArithError(f"unsupported node: {kind}")
-
-    def apply_binop(self, op: str, a: int, b: int) -> int:
-        if op == "+":
-            return _wrap(a + b)
-        if op == "-":
-            return _wrap(a - b)
-        if op == "*":
-            return _wrap(a * b)
-        if op == "/":
-            return _wrap(_trunc_div(a, b))
-        if op == "%":
-            return _wrap(_trunc_mod(a, b))
-        if op == "**":
-            if b < 0:
-                raise ArithError("exponent less than 0")
-            return _wrap(a**b)
-        if op == "<<":
-            return _wrap(a << (b & 63))
-        if op == ">>":
-            return _wrap(a >> (b & 63))
-        if op == "&":
-            return _wrap(a & b)
-        if op == "|":
-            return _wrap(a | b)
-        if op == "^":
-            return _wrap(a ^ b)
-        if op == "==":
-            return 1 if a == b else 0
-        if op == "!=":
-            return 1 if a != b else 0
-        if op == "<":
-            return 1 if a < b else 0
-        if op == "<=":
-            return 1 if a <= b else 0
-        if op == ">":
-            return 1 if a > b else 0
-        if op == ">=":
-            return 1 if a >= b else 0
-        raise ArithError(f'unsupported operator "{op}"')
+        if key is not None:
+            self.elem_updates[(name, key)] = text
+            return
+        self.updates[name] = text
+        if self.wrote_var is not None:
+            self.wrote_var(name, text)
 
 
 def evaluate_arith(
@@ -658,15 +710,15 @@ def evaluate_arith(
 ) -> ArithResult:
     """Evaluate a bash arithmetic expression.
 
-    Implements bash's arithmetic grammar over 64-bit wrapping integers:
-    comma sequences, assignment operators, the ternary, short-circuit
-    ``&&``/``||``, bitwise/relational/shift/additive/multiplicative
-    operators, right-associative ``**``, unary operators, and
-    prefix/postfix ``++``/``--``. Division truncates toward zero and
-    ``%`` takes the dividend's sign (C semantics, unlike Python's
-    floor). A variable whose value is not a plain integer literal is
-    evaluated recursively like bash (``x="1+2"; $((x))`` is 3).
-    ``base#value`` literals are not supported.
+    bash's grammar over 64-bit wrapping integers, read and evaluated in
+    one pass as bash does (``_Reader``): comma sequences, assignment
+    operators, the ternary, short-circuit ``&&``/``||``, the bitwise,
+    comparison, shift and arithmetic operators, right-grouping ``**``,
+    unary operators, ``++``/``--``, and integer constants in any base
+    from 2 to 64. A variable whose value is not a plain number is read as
+    an expression of its own (``x="1+2"; $((x))`` is 3). An error is
+    worded as bash's line, naming the innermost expression it happened in
+    (``x='1+'; $((x+1))`` names ``1+``).
 
     Element references (``a[i]``, ``m[key]``) resolve and assign through
     ``elements``; with None every subscript is a syntax error, which is
@@ -675,13 +727,12 @@ def evaluate_arith(
     Args:
         expr (str): the expression text, already ``$``-expanded.
         env (Mapping[str, str]): variable environment for reads.
-        depth (int): recursion depth for variable re-evaluation.
+        depth (int): how many variable values deep ``expr`` is.
         elements (ElementOps | None): array-element callbacks; None
             outside a session.
         read_var (Callable[[str], str | None] | None): dynamic scalar
             reads, asked before the pending assignments and the
-            environment; a None answer falls back to them. Called only
-            for evaluated nodes, including recursive variable expressions.
+            environment; a None answer falls back to them.
         wrote_var (Callable[[str, str], None] | None): told of every
             scalar assignment as it is made, name and value, so a dynamic
             name's reader can act on it at once (bash seeds ``RANDOM`` at
@@ -699,32 +750,15 @@ def evaluate_arith(
         the caller to apply to the session.
 
     Raises:
-        ArithError: on syntax errors, division by zero, or a negative
-            exponent, with a bash-style message.
+        ArithError: bash's arithmetic error line; its ``writes`` are the
+            assignments made before it.
         ReadonlyError: an assignment named a ``frozen`` name; the
             evaluation stopped there.
     """
-    tokens = _tokenize(expr)
-    if not tokens:
-        return ArithResult(0)
-    node = ArithParser(tokens).parse()
-    updates: dict[str, str] = {}
-    elem_updates: dict[tuple[str, str], str] = {}
-    writes: list[ArithWrite] = []
+    record = _ArithRecord(env, elements, read_var, wrote_var, nounset, frozen)
     try:
-        value = ArithEvaluator(
-            env,
-            updates,
-            elem_updates,
-            writes,
-            depth,
-            elements,
-            read_var,
-            wrote_var,
-            nounset,
-            frozen,
-        ).run(node)
+        value = record.evaluate(expr, depth, False)
     except (ArithError, ReadonlyError) as exc:
-        exc.writes = tuple(writes)
+        exc.writes = tuple(record.writes)
         raise
-    return ArithResult(value, tuple(writes))
+    return ArithResult(value, tuple(record.writes))

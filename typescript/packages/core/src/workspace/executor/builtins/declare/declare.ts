@@ -40,7 +40,7 @@ import {
 import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { arithRefusal, isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
+import { isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import {
   ANSI_C_ESCAPES,
@@ -386,7 +386,9 @@ export async function storeStagedArrays(
       await view.set(name, base)
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal(cmd, err)
-      if (err instanceof ArithError) return arithRefusal(cmd, err)
+      // An element or subscript of a literal names no builtin, as an
+      // assignment's does (`declare -ai A=(2+)` is `2+: ...`).
+      if (err instanceof ArithError) throw err.signal('', true)
       throw err
     }
     if (stored !== null) stored.set(position, checked)
@@ -856,7 +858,7 @@ export async function markVariables(
     }
   } catch (err) {
     if (err instanceof PolicyDenied) return refusal(cmd, err)
-    if (err instanceof ArithError) return arithRefusal(cmd, err)
+    if (err instanceof ArithError) throw err.signal(cmd, true)
     throw err
   }
   return refused ?? declarationResult(cmd, errors, warnings)

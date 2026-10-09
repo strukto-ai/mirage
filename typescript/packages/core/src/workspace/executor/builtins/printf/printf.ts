@@ -15,6 +15,7 @@
 import { quoteText } from '../../../../commands/quote.ts'
 import { usageHint } from '../../../../commands/spec/usage.ts'
 import { isProgramInvocation } from '../../../../context/session_context.ts'
+import { concat } from '../../../../io/cachable_iterator.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { SessionView } from '../../../../view/types.ts'
@@ -230,13 +231,10 @@ export async function handlePrintf(
     } catch (err) {
       if (err instanceof ArithError) {
         // The target carries `-i` and the formatted text does not
-        // evaluate; bash voices the evaluator after the builtin name.
-        const bad = encodeText(messages.join('') + `bash: printf: ${err.message}\n`)
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: bad }),
-          new ExecutionNode({ command: 'printf', exitCode: 1, stderr: bad }),
-        ]
+        // evaluate, which ends the shell as any `-i` value does.
+        const signal = err.signal('printf', true)
+        signal.stderr = concat([encodeText(messages.join('')), signal.stderr])
+        throw signal
       }
       if (!(err instanceof PolicyDenied)) throw err
       const denied = encodeText(messages.join('') + `bash: ${err.message}\n`)

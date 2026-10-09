@@ -445,6 +445,8 @@ async def handle_for(
                 IOResult(exit_code=1, stderr=encode_text(f"{exc.strerror}\n"))
             )
             break
+        except ArithError as exc:
+            raise exc.signal(fatal=True) from exc
         try:
             stdout, io, _ = await execute_body(
                 execute_node,
@@ -633,6 +635,8 @@ async def handle_cfor(
             err = encode_text(f"bash: {exc}\n")
         elif isinstance(exc, PolicyDenied):
             err = encode_text(f"bash: {exc.strerror}\n")
+        elif exc.in_subscript:
+            raise exc.signal() from exc
         else:
             err = encode_text(f"bash: ((: {exc}\n")
         merged_io = await merged_io.merge(IOResult(exit_code=1, stderr=err))
@@ -895,6 +899,8 @@ async def handle_select(
                 IOResult(exit_code=1, stderr=encode_text(f"{exc.strerror}\n"))
             )
             break
+        except ArithError as exc:
+            raise exc.signal(fatal=True) from exc
         try:
             stdout, io, _ = await execute_body(
                 execute_node,

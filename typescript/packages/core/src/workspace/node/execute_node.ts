@@ -176,13 +176,47 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
 }
 
 /**
+ * A C-style for slot's text as bash evaluates it: its source up to the `;`
+ * or `))` that ends it, each node's expansions substituted. Mirrors
+ * Python's _slot_text.
+ */
+async function slotText(
+  exprs: readonly TSNodeLike[],
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
+  view?: SessionView,
+): Promise<string> {
+  const first = exprs[0]
+  const last = exprs[exprs.length - 1]
+  if (first === undefined || last === undefined) return ''
+  const parent = first.parent ?? null
+  const source = parent?.text ?? ''
+  const base = parent?.startIndex ?? 0
+  const parts: string[] = []
+  let at = first.startIndex ?? 0
+  for (const expr of exprs) {
+    const start = expr.startIndex ?? at
+    parts.push(source.slice(at - base, start - base))
+    parts.push(
+      expr.isNamed === true
+        ? await expandArith(expr, context, executeFn, callStack, view)
+        : expr.text,
+    )
+    at = expr.endIndex ?? start + expr.text.length
+  }
+  const end = last.nextSibling?.startIndex ?? at
+  parts.push(source.slice(at - base, end - base))
+  return parts.join('')
+}
+
+/**
  * Evaluate one C-style for expression slot: the slot's integer value,
  * or the default for an empty slot (1 for the condition so `for
- * ((;;))` loops, 0 for init/update). Re-raises ArithError with the
- * expression text prepended so the loop can print bash's
- * `((: expr: reason` diagnostic, and throws ReadonlyError when the
- * expression assigns to a readonly variable, once the writes before it
- * land (ExitSignal for one inside a subscript).
+ * ((;;))` loops, 0 for init/update). Throws the slot's ArithError, which
+ * the loop prints as bash's `((: expr: reason` diagnostic, and
+ * ReadonlyError when the expression assigns to a readonly variable, once
+ * the writes before it land (ExitSignal for one inside a subscript).
  */
 async function evalCforExpr(
   exprs: readonly TSNodeLike[],
@@ -194,11 +228,7 @@ async function evalCforExpr(
 ): Promise<number> {
   const session = context.session
   if (exprs.length === 0) return dflt
-  // One comma expression, evaluated once, so an assignment early in the
-  // slot is seen by the expressions after it.
-  const parts: string[] = []
-  for (const expr of exprs) parts.push(await expandArith(expr, context, executeFn, callStack, view))
-  const text = parts.join(', ')
+  const text = await slotText(exprs, context, executeFn, callStack, view)
   const reader = randomReader(session)
   let error: ArithError | ReadonlyError | null = null
   let writes: readonly ArithWrite[] = []
@@ -223,7 +253,7 @@ async function evalCforExpr(
     if (error.inSubscript) throw error.signal()
     throw error
   }
-  if (error !== null) throw new ArithError(`${text}: ${error.message}`)
+  if (error !== null) throw error
   return Number(value)
 }
 
@@ -1396,7 +1426,8 @@ async function executeNodeBody(
       ]
     }
     if (error !== null) {
-      const errBytes = encodeText(`bash: ((: ${expr}: ${error.message}\n`)
+      if (error.inSubscript) throw error.signal()
+      const errBytes = encodeText(`bash: ((: ${error.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: errBytes }),

@@ -30,7 +30,7 @@
       "command": "(( 1 / 0 )) 2>&1; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "bash: ((: 1 / 0: division by 0\ncode=1\n",
+        "stdout": "bash: ((: 1 / 0 : division by 0 (error token is \"0 \")\ncode=1\n",
         "stderr": ""
       }
     }

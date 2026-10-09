@@ -14,7 +14,7 @@
 
 import type { SessionView } from '../../view/types.ts'
 import { PolicyDenied, preSessionGate, type Policies } from '../../policy/index.ts'
-import { evaluateArith } from '../../shell/arith.ts'
+import { evaluateArith, wrapInt64 } from '../../shell/arith.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import {
   arrayExtent,
@@ -27,6 +27,7 @@ import {
 } from '../../shell/array.ts'
 import {
   FUNCNAME,
+  INTEGER_APPEND,
   PIPESTATUS,
   RANDOM,
   RANDOM_MODULUS,
@@ -356,7 +357,7 @@ class SessionElements implements ElementOps {
       const arr = visibleArrays(this.session)[name]
       if (arr !== undefined) idx += arrayExtent(arr)
       else if (envGet(this.session, name) !== null) idx += 1
-      if (idx < 0) throw new ArithError(`${name}[${subscript}]: bad array subscript`)
+      if (idx < 0) throw new ArithError('bad array subscript', `${name}[${subscript}]`)
     }
     return String(idx)
   }
@@ -475,7 +476,7 @@ export async function subscriptIndex(
   )
   reader.settle()
   if (error instanceof ReadonlyError) throw error.signal(true)
-  if (error !== null) throw new ArithError(`${subscript.trim()}: ${error.message}`)
+  if (error !== null) throw error
   return idx
 }
 
@@ -716,7 +717,9 @@ class IntegerCoercion {
 
   /**
    * The value `text` evaluates to, keeping the writes it made before an
-   * ArithError or a ReadonlyError.
+   * ArithError or a ReadonlyError. The two sides of an integer `+=`
+   * (`appended`) evaluate apart and add, so an error names the side that
+   * made it, as bash's does (`N+=1+` is `1+: syntax error`).
    */
   evaluate(text: string): string {
     const session = this.session
@@ -724,17 +727,24 @@ class IntegerCoercion {
     // scope, as bash's does (`local H=2; declare -gi G=H` stores 2), while
     // the value lands on the global.
     const reachAgain = stepBack(session)
+    let total = 0n
     try {
-      const result = sessionArith(session, text, this.reader)
-      this.writes.push(...result.writes)
-      return result.value.toString()
-    } catch (err) {
-      if (err instanceof ArithError || err instanceof ReadonlyError) this.writes.push(...err.writes)
-      if (err instanceof ArithError) throw new ArithError(`${text}: ${err.message}`)
-      throw err
+      for (const side of text.split(INTEGER_APPEND)) {
+        try {
+          const result = sessionArith(session, side, this.reader)
+          this.writes.push(...result.writes)
+          total += result.value
+        } catch (err) {
+          if (err instanceof ArithError || err instanceof ReadonlyError) {
+            this.writes.push(...err.writes)
+          }
+          throw err
+        }
+      }
     } finally {
       reachAgain()
     }
+    return wrapInt64(total).toString()
   }
 }
 

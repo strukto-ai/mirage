@@ -412,6 +412,7 @@ export async function handleFor(
     try {
       await view.set(variable, textVal)
     } catch (err) {
+      if (err instanceof ArithError) throw err.signal('', true)
       if (!(err instanceof PolicyDenied)) throw err
       mergedIo = await mergedIo.merge(
         new IOResult({ exitCode: 1, stderr: encodeText(`${err.message}\n`) }),
@@ -620,6 +621,7 @@ export async function handleCfor(
     ) {
       throw err
     }
+    if (err instanceof ArithError && err.inSubscript) throw err.signal()
     const prefix = err instanceof ArithError ? 'bash: ((: ' : 'bash: '
     const errBytes = encodeText(`${prefix}${err.message}\n`)
     mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: errBytes }))
@@ -861,6 +863,7 @@ export async function handleSelect(
       if (showMenu) continue
       await view.set(variable, index >= 1 && index <= words.length ? (words[index - 1] ?? '') : '')
     } catch (err) {
+      if (err instanceof ArithError) throw err.signal('', true)
       if (!(err instanceof PolicyDenied)) throw err
       mergedIo = await mergedIo.merge(
         new IOResult({ exitCode: 1, stderr: encodeText(`${err.message}\n`) }),

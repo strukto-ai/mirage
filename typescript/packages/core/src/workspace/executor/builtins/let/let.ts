@@ -77,7 +77,8 @@ export async function handleLet(
       return readonlyRefusal('let', error.varName)
     }
     if (error !== null) {
-      const errBytes = encodeText(`bash: let: ${expr}: ${error.message}\n`)
+      if (error.inSubscript) throw error.signal()
+      const errBytes = encodeText(`bash: let: ${error.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: errBytes }),

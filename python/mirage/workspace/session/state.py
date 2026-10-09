@@ -19,7 +19,7 @@ from dataclasses import replace
 
 from mirage.policy import Policies, PolicyDenied, pre_session_gate
 from mirage.policy.types import SessionContext
-from mirage.shell.arith import evaluate_arith
+from mirage.shell.arith import evaluate_arith, wrap_int64
 from mirage.shell.array import (
     ShellArray,
     array_extent,
@@ -33,6 +33,7 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import (
     FUNCNAME,
+    INTEGER_APPEND,
     PIPESTATUS,
     RANDOM,
     RANDOM_MODULUS,
@@ -501,7 +502,7 @@ async def subscript_index(
     if isinstance(error, ReadonlyError):
         raise error.signal(fatal=True) from error
     if error is not None:
-        raise ArithError(f"{subscript.strip()}: {error}") from error
+        raise error
     return idx
 
 
@@ -553,7 +554,7 @@ class _SessionElements:
             elif env_get(self._session, name) is not None:
                 idx += 1
             if idx < 0:
-                raise ArithError(f"{name}[{subscript}]: bad array subscript")
+                raise ArithError("bad array subscript", f"{name}[{subscript}]")
         return str(idx)
 
     def is_assoc(self, name: str) -> bool:
@@ -890,6 +891,10 @@ class _IntegerCoercion:
         """The value ``text`` evaluates to, keeping the writes it made
         before an ``ArithError`` or a ``ReadonlyError``.
 
+        The two sides of an integer ``+=`` (``appended``) evaluate apart
+        and add, so an error names the side that made it, as bash's does
+        (``N+=1+`` is ``1+: syntax error``).
+
         Args:
             text (str): the expression.
         """
@@ -898,17 +903,19 @@ class _IntegerCoercion:
         # function's scope, as bash's does (`local H=2; declare -gi
         # G=H` stores 2), while the value lands on the global.
         reach_again = _step_back(session)
+        total = 0
         try:
-            result = session_arith(session, text, self.reader)
-        except (ArithError, ReadonlyError) as exc:
-            self.writes.extend(exc.writes)
-            if isinstance(exc, ArithError):
-                raise ArithError(f"{text}: {exc}") from exc
-            raise
+            for side in text.split(INTEGER_APPEND):
+                try:
+                    result = session_arith(session, side, self.reader)
+                except (ArithError, ReadonlyError) as exc:
+                    self.writes.extend(exc.writes)
+                    raise
+                self.writes.extend(result.writes)
+                total += result.value
         finally:
             reach_again()
-        self.writes.extend(result.writes)
-        return str(result.value)
+        return str(wrap_int64(total))
 
 
 async def _land_coercion(

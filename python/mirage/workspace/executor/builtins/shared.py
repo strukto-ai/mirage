@@ -19,7 +19,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import decode_text, encode_text
-from mirage.shell.errors import ArithError
 from mirage.types import PathSpec, word_text
 from mirage.utils.path import resolve_path
 from mirage.view.types import SessionView
@@ -279,28 +278,6 @@ def readonly_refusal(cmd: str, name: str) -> Result:
         name (str): the frozen variable.
     """
     err = encode_text(readonly_line(cmd, name) + "\n")
-    return (
-        None,
-        IOResult(exit_code=1, stderr=err),
-        ExecutionNode(command=cmd, exit_code=1, stderr=err),
-    )
-
-
-def arith_refusal(cmd: str, exc: ArithError) -> Result:
-    """Render the ``-i`` coercion's arithmetic error as bash does.
-
-    GNU voices it as the evaluator's own line, prefixed by the builtin
-    and the offending text (``bash: read: 1+: syntax error: operand
-    expected``), and fails the builtin with 1 while the variable keeps
-    its old value, which is what the door's copy-then-store already
-    guarantees. A plain assignment (``n=1+``) is fatal instead and is
-    voiced by the executor without a builtin name.
-
-    Args:
-        cmd (str): builtin name for the node.
-        exc (ArithError): the evaluator's refusal, text already led.
-    """
-    err = encode_text(f"bash: {cmd}: {exc}\n")
     return (
         None,
         IOResult(exit_code=1, stderr=err),

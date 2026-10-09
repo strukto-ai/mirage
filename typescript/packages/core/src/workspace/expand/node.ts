@@ -26,13 +26,7 @@ import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { splitBacktickRegion } from '../../shell/backticks.ts'
-import {
-  ArithError,
-  BadSubstitution,
-  DiscardSignal,
-  ReadonlyError,
-  named,
-} from '../../shell/errors.ts'
+import { ArithError, BadSubstitution, ReadonlyError, named } from '../../shell/errors.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from '../../shell/escapes.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
 import { scanParameter } from '../../shell/parameter.ts'
@@ -43,7 +37,7 @@ import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { ExecutionScope } from '../execution.ts'
 import { recordStatus } from '../executor/statement.ts'
-import { decodeText, encodeText } from '../../shell/bytes.ts'
+import { decodeText } from '../../shell/bytes.ts'
 
 /**
  * The executor's door for a nested line. `node` is the node whose text
@@ -202,21 +196,6 @@ async function substituteDollarRefs(
 // evaluator can resolve and assign them (`$(( y = 3 ))` needs `y`, not
 // its value).
 /**
- * The fatal shape of an arithmetic expansion error.
- *
- * bash discards the rest of the line on a bad `$((...))`: the command
- * never runs, `$?` is 1, and a subshell or pipeline segment containing it
- * reports 1. The old return of the expansion's own text printed `$((1/0))` with
- * exit 0, the silent wrong answer the fail-loud rule forbids. The
- * diagnostic is the expression as typed, trimmed, in the house style that
- * drops bash's `line N:` prefix and its `(error token is ...)` suffix, the
- * same shape `(( ))` reports.
- */
-export function arithExit(expr: string, err: ArithError): DiscardSignal {
-  return new DiscardSignal(encodeText(`bash: ${expr.trim()}: ${err.message}\n`))
-}
-
-/**
  * Reconstruct arithmetic expression text for the shared evaluator. A bad
  * substitution names the expression as written.
  */
@@ -285,7 +264,7 @@ async function arithText(
     }
   }
   parts.push(tsNode.text.slice(end))
-  return parts.join('').trim()
+  return parts.join('')
 }
 
 /**
@@ -541,7 +520,7 @@ async function arithValue(
   } catch (err) {
     if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
     await landArithWrites(session, view, err.writes, reader)
-    throw err instanceof ReadonlyError ? err.signal() : arithExit(expr, err)
+    throw err.signal()
   }
   await landArithWrites(session, view, result.writes, reader)
   return result.value.toString()

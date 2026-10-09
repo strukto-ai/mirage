@@ -15,7 +15,7 @@
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Protocol, TypeAlias
+from typing import Any, Literal, Protocol, TypeAlias
 
 
 class TSNodeLike(Protocol):
@@ -138,6 +138,12 @@ class ArithWrite:
     name: str
     key: str | None
     value: str
+
+
+# What an arithmetic expression's reader stands on: the end, a name (with
+# its subscript), an integer constant, an operator, a `++`/`--` bound to
+# the name after or before it, or a character bash reads no token from.
+ArithTokenKind = Literal["end", "name", "num", "op", "pre", "post", "bad"]
 
 
 @dataclass(frozen=True, slots=True)

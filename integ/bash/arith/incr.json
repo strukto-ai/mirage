@@ -33,6 +33,40 @@
         "stdout": "code=1 i=1\ncode=0 i=2\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arith_reads_signs_constants_and_a_comma_branch",
+      "seq": 863,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "zx=5 zy=1; for e in '1++2' '1--1' '++5' '---1' 'zx+++zy' '0x' '-2**2' '99999999999999999999' '1 ? 2, 3 : 4'; do printf '%s ' \"$((e))\"; done; echo \"zx=$zx\"; unset zx zy e",
+      "expect": {
+        "exit": 0,
+        "stdout": "3 2 5 -1 6 0 4 7766279631452241919 3 zx=6\n",
+        "stderr": ""
+      }
     }
   ]
 }

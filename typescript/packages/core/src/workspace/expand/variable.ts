@@ -758,12 +758,7 @@ class ArithOperand {
       }
       if (!(err instanceof ArithError)) throw err
       await landArithWrites(this.session, this.view, err.writes, reader)
-      throw new ExitSignal(
-        1,
-        encodeText(`bash: ${this.ref}: ${text.trim()}: ${err.message}\n`),
-        null,
-        1,
-      )
+      throw err.signal(this.ref)
     }
     await landArithWrites(this.session, this.view, result.writes, reader)
     return Number(result.value)
@@ -935,6 +930,58 @@ function valueOp(op: string, val: string, groups: string[]): string {
 }
 
 /**
+ * The line's death for a refused expansion-time write: the gate's own
+ * reason discards the line, as a readonly name's does, and so does the
+ * `-i` coercion refusing the text, as `n=1+` does.
+ */
+function writeRefusal(err: PolicyDenied | ArithError): ExitSignal {
+  return err instanceof PolicyDenied
+    ? new DiscardSignal(encodeText(`bash: ${err.message}\n`))
+    : err.signal('', true)
+}
+
+/**
+ * `subscriptIndex` in the expansion's voice: the subscript's assignments
+ * land as the index resolves (`${a[x=3]}` leaves x at 3, `${a[RANDOM=42]}`
+ * seeds), and a refused one dies the way `expansionWrite`'s does.
+ */
+async function expansionIndex(
+  session: SessionState,
+  view: SessionView | undefined,
+  subscript: string,
+): Promise<number> {
+  try {
+    return await subscriptIndex(session, subscript, view ?? null)
+  } catch (err) {
+    if (err instanceof PolicyDenied || err instanceof ArithError) throw writeRefusal(err)
+    throw err
+  }
+}
+
+/**
+ * Land an arithmetic expansion's assignments and settle its draws. Each
+ * write goes through `expansionWrite` in evaluation order; then the
+ * `RANDOM` reader replays the draws the expression made after it seeded
+ * the generator, now that the door holds the seed. One door for a
+ * completed expression and for one that failed partway, since bash
+ * binds each assignment as it is made.
+ */
+export async function landArithWrites(
+  session: SessionState,
+  view: SessionView | undefined,
+  writes: readonly ArithWrite[],
+  reader: RandomReader,
+): Promise<void> {
+  try {
+    for (const write of writes) {
+      await expansionWrite(session, view, write.name, write.key, write.value)
+    }
+  } finally {
+    reader.settle()
+  }
+}
+
+/**
  * One expansion-time write, through the session plane's door.
  *
  * `${X:=d}`, `${a[i]:=d}` and `$((X=5))` are assignments the shell
@@ -958,59 +1005,6 @@ function valueOp(op: string, val: string, groups: string[]): string {
  * shape `${var:?}` uses); a readonly name discards the line too, and ends a
  * `( )` subshell with `contained`.
  */
-/**
- * Land an arithmetic expansion's assignments and settle its draws. Each
- * write goes through `expansionWrite` in evaluation order; then the
- * `RANDOM` reader replays the draws the expression made after it seeded
- * the generator, now that the door holds the seed. One door for a
- * completed expression and for one that failed partway, since bash
- * binds each assignment as it is made.
- */
-/**
- * The line's death for a refused expansion-time write: the gate's own
- * reason discards the line, as a readonly name's does; the `-i` coercion
- * refusing the text ends the shell with 1, as `n=1+` does.
- */
-function writeRefusal(err: PolicyDenied | ArithError): ExitSignal {
-  const stderr = encodeText(`bash: ${err.message}\n`)
-  return err instanceof PolicyDenied
-    ? new DiscardSignal(stderr)
-    : new ExitSignal(1, stderr, null, 1)
-}
-
-/**
- * `subscriptIndex` in the expansion's voice: the subscript's assignments
- * land as the index resolves (`${a[x=3]}` leaves x at 3, `${a[RANDOM=42]}`
- * seeds), and a refused one dies the way `expansionWrite`'s does.
- */
-async function expansionIndex(
-  session: SessionState,
-  view: SessionView | undefined,
-  subscript: string,
-): Promise<number> {
-  try {
-    return await subscriptIndex(session, subscript, view ?? null)
-  } catch (err) {
-    if (err instanceof PolicyDenied || err instanceof ArithError) throw writeRefusal(err)
-    throw err
-  }
-}
-
-export async function landArithWrites(
-  session: SessionState,
-  view: SessionView | undefined,
-  writes: readonly ArithWrite[],
-  reader: RandomReader,
-): Promise<void> {
-  try {
-    for (const write of writes) {
-      await expansionWrite(session, view, write.name, write.key, write.value)
-    }
-  } finally {
-    reader.settle()
-  }
-}
-
 export async function expansionWrite(
   session: SessionState,
   view: SessionView | undefined,

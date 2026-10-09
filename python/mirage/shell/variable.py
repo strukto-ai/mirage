@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from mirage.shell.array import ShellArray
+from mirage.shell.constants import INTEGER_APPEND
 
 ShellValue = str | ShellArray | dict[str, str]
 
@@ -205,11 +206,12 @@ def with_attr(var: ShellVar, attr: VarAttr, on: bool = True) -> ShellVar:
 
 def appended(old: str, added: str, integer: bool) -> str:
     """The text a ``+=`` stores: the old text then the added one, or on
-    an integer the expression the door evaluates to their sum.
+    an integer the two joined by ``INTEGER_APPEND`` for the door's
+    coercion to evaluate apart and add.
 
     Each side is evaluated on its own and an empty side counts as 0, as
-    bash does: with ``N='1?2:3'`` under ``-i``, ``N+=4`` stores 6, and
-    ``N+=''`` keeps the old value.
+    bash does: with ``N='1?2:3'`` under ``-i``, ``N+=4`` stores 6,
+    ``N+=''`` keeps the old value, and ``N+=1+`` names ``1+``.
 
     Args:
         old (str): what the slot holds, "" when unset.
@@ -218,7 +220,7 @@ def appended(old: str, added: str, integer: bool) -> str:
     """
     if not integer:
         return old + added
-    return f"({old.strip() or 0}) + ({added.strip() or 0})"
+    return f"{old}{INTEGER_APPEND}{added}"
 
 
 def coerce_scalar(

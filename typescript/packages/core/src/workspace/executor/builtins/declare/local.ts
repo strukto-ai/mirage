@@ -29,7 +29,7 @@ import {
 } from '../../../session/state.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { arithRefusal, isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
+import { isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
 import { SUBSCRIPT_RE } from './constants.ts'
 import {
   declarationResult,
@@ -209,7 +209,7 @@ async function declareOperands(
     if (refused !== null) return refused
   } catch (err) {
     if (err instanceof PolicyDenied) return refusal(cmd, err)
-    if (err instanceof ArithError) return arithRefusal(cmd, err)
+    if (err instanceof ArithError) throw err.signal(cmd, true)
     throw err
   }
   return declarationResult(cmd, errors, warnings)

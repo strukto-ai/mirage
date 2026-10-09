@@ -42,7 +42,6 @@ from mirage.workspace.executor.builtins.declare.types import (
     DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.shared import (
-    arith_refusal,
     is_valid_name,
     readonly_line,
     refusal,
@@ -261,7 +260,7 @@ async def _declare_operands(
     except PolicyDenied as exc:
         return refusal(cmd, exc)
     except ArithError as exc:
-        return arith_refusal(cmd, exc)
+        raise exc.signal(cmd, fatal=True) from exc
     return declaration_result(cmd, errors, warnings)
 
 

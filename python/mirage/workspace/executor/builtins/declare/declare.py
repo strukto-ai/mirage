@@ -48,7 +48,6 @@ from mirage.workspace.executor.builtins.declare.types import (
     DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.shared import (
-    arith_refusal,
     is_valid_name,
     readonly_line,
     refusal,
@@ -518,7 +517,9 @@ async def store_staged_arrays(
         except PolicyDenied as exc:
             return refusal(cmd, exc)
         except ArithError as exc:
-            return arith_refusal(cmd, exc)
+            # An element or subscript of a literal names no builtin, as
+            # an assignment's does (`declare -ai A=(2+)` is `2+: ...`).
+            raise exc.signal(fatal=True) from exc
         if stored is not None:
             stored[position] = checked
     return None
@@ -1060,7 +1061,7 @@ async def mark_variables(
     except PolicyDenied as exc:
         return refusal(cmd, exc)
     except ArithError as exc:
-        return arith_refusal(cmd, exc)
+        raise exc.signal(cmd, fatal=True) from exc
     if refused is not None:
         return refused
     return declaration_result(cmd, errors, warnings)

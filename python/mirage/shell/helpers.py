@@ -456,10 +456,10 @@ def get_cfor_parts(
 
     The expression slots are positional between the (( )) delimiters,
     separated by `;` tokens, and any of them may be empty (an empty
-    list): `for ((;;))`. A slot holds every comma-separated expression
-    the parser found in it, in order, since bash evaluates
-    `for ((a=1, i=0; ...))` as one comma expression; keeping only the
-    last child dropped `a=1`.
+    list): `for ((;;))`. A slot holds every node and token the parser
+    found in it, in order, commas and stray operators included, since
+    bash evaluates the slot's text as one expression: `for ((a=1, i=0;
+    ...))` assigns both, and `i<1 2` is an error, not two expressions.
 
     Args:
         node (TSNodeLike): the c_style_for_statement node.
@@ -478,7 +478,7 @@ def get_cfor_parts(
         if inside:
             if child.type == NT.SEMI:
                 slot += 1
-            elif child.is_named and slot < 3:
+            elif slot < 3:
                 exprs[slot].append(child)
             continue
         if child.type == NT.DO_GROUP:

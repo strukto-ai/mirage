@@ -155,9 +155,11 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
                 raise CondError(f"bash: {error}", exit_code=1, fatal=False)
             if error is not None:
                 # bash: `[[: 1/0: division by 0`, status 1, and the line
-                # goes on; only a grammar error is fatal.
+                # goes on; one in a subscript discards it.
+                if error.in_subscript:
+                    raise error.signal()
                 raise CondError(
-                    f"bash: {ctx.name}: {operand}: {error}",
+                    f"bash: {ctx.name}: {error}",
                     exit_code=1,
                     fatal=False,
                 )

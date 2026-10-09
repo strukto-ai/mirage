@@ -29,7 +29,7 @@ from mirage.shell.array import (
 )
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.errors import ArithError, DiscardSignal, ExitSignal
+from mirage.shell.errors import ArithError, DiscardSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import ShellValue, VarAttr, appended
@@ -51,20 +51,6 @@ from mirage.workspace.session.state import (
 from mirage.workspace.types import ExecutionNode
 
 
-def _arith_fatal(exc: ArithError) -> ExitSignal:
-    """The line's death for a subscript that does not evaluate.
-
-    bash aborts the line on ``a[1/0]=v`` with ``1/0: division by 0``,
-    the way it does for a bad ``-i`` value.
-
-    Args:
-        exc (ArithError): the evaluator's refusal, subscript leading.
-    """
-    return ExitSignal(
-        1, stderr=encode_text(f"bash: {exc}\n"), contained_code=1
-    )
-
-
 async def _fatal_index(
     context: EvaluationContext, subscript: str, view: SessionView | None
 ) -> int:
@@ -79,7 +65,7 @@ async def _fatal_index(
     try:
         return await subscript_index(session, subscript, view)
     except ArithError as exc:
-        raise _arith_fatal(exc) from exc
+        raise exc.signal(fatal=True) from exc
 
 
 async def _fatal_index_literal(
@@ -100,7 +86,7 @@ async def _fatal_index_literal(
     try:
         return await build_indexed_literal(held, items, append, index_of)
     except ArithError as exc:
-        raise _arith_fatal(exc) from exc
+        raise exc.signal(fatal=True) from exc
 
 
 async def _assign_var(
@@ -129,12 +115,7 @@ async def _assign_var(
     except PolicyDenied as exc:
         raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
     except ArithError as exc:
-        # The `-i` coercion refused the text. GNU ends the shell with 1
-        # the way a subscript that does not evaluate does, voicing the
-        # evaluator's own message after the offending value:
-        # `bash: 1+: syntax error: ...`.
-        err = encode_text(f"bash: {exc}\n")
-        raise ExitSignal(1, stderr=err, contained_code=1) from exc
+        raise exc.signal(fatal=True) from exc
 
 
 async def expand_array_items(

@@ -271,13 +271,10 @@ async def handle_printf(
             )
         except ArithError as exc:
             # The target carries `-i` and the formatted text does not
-            # evaluate; bash voices the evaluator after the text.
-            err_bytes += encode_text(f"bash: printf: {exc}\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err_bytes),
-                ExecutionNode(command="printf", exit_code=1, stderr=err_bytes),
-            )
+            # evaluate, which ends the shell as any `-i` value does.
+            signal = exc.signal("printf", fatal=True)
+            signal.stderr = err_bytes + signal.stderr
+            raise signal from exc
         if status != "ok":
             if status == "readonly":
                 refusal = f"bash: {base}: readonly variable\n"

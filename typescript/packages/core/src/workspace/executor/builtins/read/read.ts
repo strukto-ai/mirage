@@ -16,7 +16,6 @@ import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.
 import { type AsyncLineIterator, lineBuffer } from '../../../../io/async_line_iterator.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
-import { ArithError } from '../../../../shell/errors.ts'
 import { isFsError } from '../../../../errors/fs.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
@@ -24,14 +23,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import {
-  arithRefusal,
-  isValidName,
-  readonlyRefusal,
-  recordDelimiter,
-  refusal,
-  requireView,
-} from '../shared.ts'
+import { isValidName, readonlyRefusal, recordDelimiter, refusal, requireView } from '../shared.ts'
 import { TARGET_RE } from '../constants.ts'
 import { READ_USAGE, READ_VALUE_LETTERS } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
@@ -347,7 +339,6 @@ async function readStore(
       await view.set(varName, value)
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal('read', err)
-      if (err instanceof ArithError) return arithRefusal('read', err)
       throw err
     }
     return null
@@ -357,7 +348,6 @@ async function readStore(
     status = await assignElement(session, view, base, subscript, value)
   } catch (err) {
     if (err instanceof PolicyDenied) return refusal('read', err)
-    if (err instanceof ArithError) return arithRefusal('read', err)
     throw err
   }
   if (status === 'readonly') return readonlyRefusal('read', base)
