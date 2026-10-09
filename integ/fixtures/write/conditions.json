@@ -1,5 +1,5 @@
 {
-  "_note": "Which write conditions each VFS honours, per operation, for write: conditional. put = PutObject If-Match; copy = CopyObject If-Match / x-amz-copy-source-if-match; delete = DeleteObject If-Match and the DeleteObjects per-key ETag. A VFS with no op cannot mount conditional. Both hosts' WRITE_CONDITIONS must equal this table, and it must name every registered VFS.",
+  "_note": "Which write conditions each VFS honours, per operation, for write: conditional. put = PutObject If-Match; copy = CopyObject If-Match / x-amz-copy-source-if-match; delete = DeleteObject If-Match and the DeleteObjects per-key ETag. For box and dropbox, copy is the conditioned delete that clears an existing destination of the service's own copy or move (Box If-Match, before the copy; Dropbox parent_rev, after the copy answers to/conflict, then the copy again); the copy itself sends no condition. A VFS with no op cannot mount conditional. Both hosts' WRITE_CONDITIONS must equal this table, and it must name every registered VFS.",
   "_evidence": {
     "s3": "measured: AWS S3 us-west-2, 2026-10-04 (put, create, copy If-Match, multipart, delete If-Match) and 2026-10-06 (copy If-None-Match, CopySourceIfMatch, DeleteObjects ETag)",
     "seaweedfs": "measured: SeaweedFS 4.48 local, 2026-10-04 and 2026-10-06, all cases honoured",

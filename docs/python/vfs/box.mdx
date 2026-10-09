@@ -114,6 +114,20 @@ A write records the `sha1` its upload reply names, so a `fresh` read
 right after a `tee` or `sed -i` downloads nothing. See
 [Writes](/home/cache#writes).
 
+## Conditional writes
+
+A Box mount accepts [`write: conditional`](/home/yaml#the-write-policy). A
+write or a file delete compares the `sha1` mirage holds with the one the
+folder listing it walks anyway shows, and refuses a file changed since it
+was read before sending anything; the request then carries the file's
+`etag` as `If-Match`, so Box refuses (412) a change that lands in between.
+A conditional write costs no request more than a plain one. `rm -r` walks
+the folder file by file, and a `mv` within the mount is Box's own move,
+which is not refused when its source changed (a `mv` to another mount is a
+copy and a conditioned delete, so there a changed source stays and `mv`
+reports the failed removal); see
+[which backends](/home/yaml#which-backends).
+
 ## Reads under `fresh`
 
 A Box mount accepts `read: fresh`. The token is the file's `sha1`, which a
