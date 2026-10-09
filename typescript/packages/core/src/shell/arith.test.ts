@@ -381,6 +381,8 @@ describe('an error names the expression it happened in', () => {
     ['10#', {}, '10#: invalid integer constant (error token is "10#")'],
     ['64##', {}, '64##: invalid integer constant (error token is "64##")'],
     ['64#1#2', {}, '64#1#2: invalid number (error token is "64#1#2")'],
+    ['0x10#f', {}, '0x10#f: invalid number (error token is "0x10#f")'],
+    ['08#7', {}, '08#7: value too great for base (error token is "08#7")'],
     ['1 || 2**(--x)', { x: '1' }, '1 || 2**(--x): exponent less than 0 (error token is ")")'],
     ['1 || 2**(x-=2)', { x: '1' }, '1 || 2**(x-=2): exponent less than 0 (error token is ")")'],
     ['2 * x', { x: ' 1+ ' }, '1+ : syntax error: operand expected (error token is "+ ")'],

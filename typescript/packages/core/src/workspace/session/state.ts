@@ -769,9 +769,9 @@ async function landCoercion(
 /**
  * Evaluate `text` as an `-i` write coerces it, land what it assigns through
  * `view`, and give back the value: a `declare -ni r=M` value, which bash
- * evaluates before refusing the reference (`M='X=5'` sets X), and an
- * integer `+=` (`appended`), whose `added` text evaluates after `text` in
- * the same evaluation and adds to it. Inside a `declare -g` it reads the
+ * evaluates before refusing the reference (`M='X=5'` sets X), and its
+ * `r+=M` form, whose `added` text evaluates after `text` in the same
+ * evaluation and adds to it. Inside a `declare -g` it reads the
  * function's scope, as the coercion does. A hidden name throws
  * PolicyDenied and a readonly one ExitSignal, which ends the shell as
  * bash's does, the assignments before it landed; a malformed text throws
@@ -796,20 +796,14 @@ export async function evaluateInteger(
 }
 
 /**
- * The text a `+=` stores: the old text then the added one, or on an integer
- * the two read as arithmetic in turn and summed (`evaluateInteger`), landing
- * the sides' assignments through `view`. The held value evaluates too, so
- * `n='x=5'; declare -i n; n+=x` stores 10, and an empty side counts as 0.
+ * What a `+=` hands `setVar`: the held text then the added one, or on an
+ * integer the held text with the added one as `added`, the two evaluating
+ * there in turn and summing behind the store's refusals. The held value
+ * evaluates too, so `n='x=5'; declare -i n; n+=x` stores 10, and an empty
+ * side counts as 0.
  */
-export async function appended(
-  session: SessionState,
-  view: SessionView,
-  old: string,
-  added: string,
-  integer: boolean,
-): Promise<string> {
-  if (!integer) return old + added
-  return evaluateInteger(session, view, old, added)
+export function appended(held: string, added: string, integer: boolean): [string, string | null] {
+  return integer ? [held, added] : [held + added, null]
 }
 
 export function ensureVarVisible(session: SessionState, name: string): void {
@@ -826,6 +820,7 @@ async function setVar(
   followRef = true,
   diagnostics?: (string | Uint8Array)[],
   assigned: ReadonlySet<number | string> | null = null,
+  added: string | null = null,
 ): Promise<void> {
   if (followRef) name = deref(session, name) || name
   ensureVarVisible(session, name)
@@ -851,7 +846,7 @@ async function setVar(
   let shaped: ShellValue = value
   if (existing !== undefined && existing.attrs.size > 0) {
     try {
-      shaped = coerceValue(value, existing.attrs, coercion.run, assigned)
+      shaped = coerceValue(value, existing.attrs, (text) => coercion.run(text, added), assigned)
     } catch (err) {
       // bash bound what the expression assigned before it failed
       // (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a RANDOM
@@ -1236,8 +1231,8 @@ export function sessionView(
   return {
     get: (name) => envGet(session, name),
     snapshot: () => envSnapshot(session),
-    set: (name, value, followRef = true, assigned = null) =>
-      setVar(session, policies, name, value, followRef, diagnostics, assigned),
+    set: (name, value, followRef = true, assigned = null, added = null) =>
+      setVar(session, policies, name, value, followRef, diagnostics, assigned, added),
     unset: (name, followRef = true) => unsetVar(session, policies, name, followRef),
     mark: (name, attr, on, followRef = true) =>
       markVar(session, policies, name, attr, on, followRef),

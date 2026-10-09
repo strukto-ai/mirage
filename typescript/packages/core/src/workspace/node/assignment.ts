@@ -28,7 +28,7 @@ import { ArithError, DiscardSignal } from '../../shell/errors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { type ShellValue, VarAttr } from '../../shell/variable.ts'
-import { type SessionState, sessionEntry } from '../session/session.ts'
+import { sessionEntry } from '../session/session.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../view/types.ts'
@@ -90,31 +90,10 @@ async function assignVar(
   key: string,
   value: ShellValue,
   assigned: ReadonlySet<number | string> | null = null,
+  added: string | null = null,
 ): Promise<void> {
   try {
-    await view.set(key, value, true, assigned)
-  } catch (err) {
-    if (err instanceof PolicyDenied) {
-      throw new DiscardSignal(encodeText(`${err.message}\n`))
-    }
-    if (err instanceof ArithError) throw err.signal('', true)
-    throw err
-  }
-}
-
-/**
- * What an assignment's `+=` stores (`appended`), its errors fatal as a
- * store's are (`assignVar`).
- */
-async function appendedValue(
-  session: SessionState,
-  view: SessionView,
-  old: string,
-  added: string,
-  integer: boolean,
-): Promise<string> {
-  try {
-    return await appended(session, view, old, added, integer)
+    await view.set(key, value, true, assigned, added)
   } catch (err) {
     if (err instanceof PolicyDenied) {
       throw new DiscardSignal(encodeText(`${err.message}\n`))
@@ -324,9 +303,9 @@ export async function executeAssignment(
       // The subscript is the key: no arithmetic, `m[1+1]` writes the
       // key "1+1".
       const newMap = { ...heldMap }
-      if (append) val = await appendedValue(session, view, heldMap[subText] ?? '', val, integer)
-      newMap[subText] = val
-      await assignVar(view, key, newMap, new Set([subText]))
+      const [slot, added] = append ? appended(heldMap[subText] ?? '', val, integer) : [val, null]
+      newMap[subText] = slot
+      await assignVar(view, key, newMap, new Set([subText]), added)
       const mapCode = assignmentStatus(context.frame, subSeq)
       return [
         null,
@@ -349,9 +328,9 @@ export async function executeAssignment(
       const nameText = text.slice(0, eq).replace(/\+$/, '')
       throw new DiscardSignal(encodeText(`bash: ${nameText}: bad array subscript\n`))
     }
-    if (append) val = await appendedValue(session, view, arrayGet(arr, idx), val, integer)
-    arraySet(arr, idx, val)
-    await assignVar(view, key, arr, new Set([idx]))
+    const [slot, added] = append ? appended(arrayGet(arr, idx), val, integer) : [val, null]
+    arraySet(arr, idx, slot)
+    await assignVar(view, key, arr, new Set([idx]), added)
     const subCode = assignmentStatus(context.frame, subSeq)
     return [
       null,
@@ -361,6 +340,7 @@ export async function executeAssignment(
   }
   const heldMap = session.assocs[key]
   const heldArr = session.arrays[key]
+  let [stored, added]: [string, string | null] = [val, null]
   if (append) {
     // `a+=x` appends onto element 0 (key "0" of a map); `n+=3` on an
     // integer name adds: `declare -i n=5; n+=3` stores 8.
@@ -368,21 +348,21 @@ export async function executeAssignment(
     if (heldMap !== undefined) old = heldMap['0'] ?? ''
     else if (heldArr !== undefined) old = arrayGet(heldArr, 0)
     else old = session.env[key] ?? ''
-    val = await appendedValue(session, view, old, val, integer)
+    ;[stored, added] = appended(old, val, integer)
   }
   if (heldMap !== undefined) {
     // `m=x` on an associative array writes the literal key "0" and
     // keeps every other key, as bash does.
     const newMap = { ...heldMap }
-    newMap['0'] = val
-    await assignVar(view, key, newMap, new Set(['0']))
+    newMap['0'] = stored
+    await assignVar(view, key, newMap, new Set(['0']), added)
   } else if (heldArr !== undefined) {
     // `a=x` writes element 0 and keeps the rest.
     const newArr = [...heldArr]
-    arraySet(newArr, 0, val)
-    await assignVar(view, key, newArr, new Set([0]))
+    arraySet(newArr, 0, stored)
+    await assignVar(view, key, newArr, new Set([0]), added)
   } else {
-    await assignVar(view, key, val)
+    await assignVar(view, key, stored, null, added)
   }
   // Reassigning OPTIND (even to its current value) restarts the getopts
   // scan, matching bash's internal char pointer.

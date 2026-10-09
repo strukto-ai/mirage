@@ -84,8 +84,8 @@ function digitsValue(digits: string, base: number): bigint | null {
 /**
  * The value of an integer constant, or what bash says of a bad one:
  * decimal, octal after a leading `0`, hexadecimal after `0x` (bare `0x` is
- * 0), or `base#digits` for a base from 2 to 64 written as a constant
- * itself; the value wraps to 64 bits.
+ * 0), or `base#digits` for a base from 2 to 64 written in decimal
+ * (`0x10#f` is an invalid number); the value wraps to 64 bits.
  */
 function constant(text: string): bigint | string {
   let value: bigint | null
@@ -93,6 +93,7 @@ function constant(text: string): bigint | string {
   if (hash !== -1) {
     const base = constant(text.slice(0, hash))
     if (typeof base === 'string') return base
+    if (text.startsWith('0')) return 'invalid number'
     if (base < 2n || base > 64n) return 'invalid arithmetic base'
     const digits = text.slice(hash + 1)
     if (digits === '' || digits.startsWith('#')) return 'invalid integer constant'

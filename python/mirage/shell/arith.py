@@ -123,8 +123,8 @@ def _constant(text: str) -> int | str:
     """The value of an integer constant, or what bash says of a bad one.
 
     Decimal, octal after a leading ``0``, hexadecimal after ``0x`` (bare
-    ``0x`` is 0), or ``base#digits`` for a base from 2 to 64 written as
-    a constant itself; the value wraps to 64 bits.
+    ``0x`` is 0), or ``base#digits`` for a base from 2 to 64 written in
+    decimal (``0x10#f`` is an invalid number); the value wraps to 64 bits.
 
     Args:
         text (str): the constant as read.
@@ -134,6 +134,8 @@ def _constant(text: str) -> int | str:
         base = _constant(base_text)
         if isinstance(base, str):
             return base
+        if base_text.startswith("0"):
+            return "invalid number"
         if base < 2 or base > 64:
             return "invalid arithmetic base"
         if not digits or digits[0] == "#":

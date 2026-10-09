@@ -198,7 +198,7 @@ def scalar_value(
     elements as stored; otherwise ``-A`` makes the map ``([0]=value)``
     and ``-a`` the one-element array, a held scalar converting to that
     element first, and with neither the value stays a scalar. A
-    ``NAME+=value`` arrives here already joined onto ``held_slot``.
+    ``NAME+=value`` arrives here as ``appended`` hands it.
 
     Args:
         held (ShellValue | None): the value the declaration lands on.
@@ -1114,18 +1114,14 @@ async def _mark_operand(
     if val is not None and conflict is None:
         checked = deref(session, key)
         target = session.vars.get(checked)
-        if append:
-            val = await appended(
-                session,
-                view,
-                held_slot(held),
-                val,
-                target is not None and VarAttr.INTEGER in target.attrs,
-            )
+        integer = target is not None and VarAttr.INTEGER in target.attrs
+        val, added = (
+            appended(held_slot(held), val, integer) if append else (val, None)
+        )
         value, assigned = scalar_value(held, val, kind)
         if kind is not None:
             await drop_reference(session, view, key)
-        await view.set(key, value, assigned=assigned)
+        await view.set(key, value, assigned=assigned, added=added)
         # Rides on the gate the `view.set` above passed, unless the
         # write re-aimed a reference (`mark_written`).
         await mark_written(session, view, key, checked, attr, on)

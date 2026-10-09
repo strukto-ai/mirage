@@ -621,7 +621,9 @@ export async function handleCfor(
     ) {
       throw err
     }
-    if (err instanceof ArithError && err.inSubscript) throw err.signal()
+    if (err instanceof ArithError && err.inSubscript) {
+      throw await carried(err.signal(), chainNonNull(allStdout), mergedIo)
+    }
     const prefix = err instanceof ArithError ? 'bash: ((: ' : 'bash: '
     const errBytes = encodeText(`${prefix}${err.message}\n`)
     mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: errBytes }))

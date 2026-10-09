@@ -329,10 +329,10 @@ async function declareOperand(
   const checked = deref(session, key) || key
   await premark(view, key, shaping)
   const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
-  const slot = append ? await appended(session, view, heldSlot(held), given, integer) : given
+  const [slot, added] = append ? appended(heldSlot(held), given, integer) : [given, null]
   const [value, assigned] = scalarValue(held, slot, kind)
   if (kind !== null) await dropReference(session, view, key)
-  await view.set(key, value, true, assigned)
+  await view.set(key, value, true, assigned, added)
   await stampMarks(session, view, key, checked, marks)
   return null
 }

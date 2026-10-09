@@ -150,6 +150,8 @@ def test_an_error_is_worded_as_bash_names_it(expr, env, line):
         ("10#", {}, '10#: invalid integer constant (error token is "10#")'),
         ("64##", {}, '64##: invalid integer constant (error token is "64##")'),
         ("64#1#2", {}, '64#1#2: invalid number (error token is "64#1#2")'),
+        ("0x10#f", {}, '0x10#f: invalid number (error token is "0x10#f")'),
+        ("08#7", {}, '08#7: value too great for base (error token is "08#7")'),
         (
             "1 || 2**(--x)",
             {"x": "1"},

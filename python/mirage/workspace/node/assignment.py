@@ -42,7 +42,6 @@ from mirage.workspace.expand import expand_and_classify, expand_node
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     appended,
     conversion_scalar,
@@ -96,6 +95,7 @@ async def _assign_var(
     key: str,
     value: ShellValue,
     assigned: frozenset[int | str] | None = None,
+    added: str | None = None,
 ) -> None:
     """One assignment through the session view; denial is fatal.
 
@@ -111,34 +111,10 @@ async def _assign_var(
         value (ShellValue): the resulting value to store.
         assigned (frozenset[int | str] | None): the elements written,
             None for the whole value.
+        added (str | None): an integer ``+=``'s text (``appended``).
     """
     try:
-        await view.set(key, value, assigned=assigned)
-    except PolicyDenied as exc:
-        raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
-    except ArithError as exc:
-        raise exc.signal(fatal=True) from exc
-
-
-async def appended_value(
-    session: SessionState,
-    view: SessionView,
-    old: str,
-    added: str,
-    integer: bool,
-) -> str:
-    """What an assignment's ``+=`` stores (``appended``), its errors
-    fatal as a store's are (``_assign_var``).
-
-    Args:
-        session (SessionState): shell session state.
-        view (SessionView): the gated session view.
-        old (str): what the slot holds, "" when unset.
-        added (str): the text appended.
-        integer (bool): the variable carries ``-i``.
-    """
-    try:
-        return await appended(session, view, old, added, integer)
+        await view.set(key, value, assigned=assigned, added=added)
     except PolicyDenied as exc:
         raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
     except ArithError as exc:
@@ -373,12 +349,12 @@ async def execute_assignment(
             # The subscript is the key: no arithmetic, `m[1+1]`
             # writes the key "1+1".
             new_map = dict(amap)
-            if append:
-                val = await appended_value(
-                    session, view, amap.get(sub_text, ""), val, integer
-                )
-            new_map[sub_text] = val
-            await _assign_var(view, key, new_map, frozenset({sub_text}))
+            new_map[sub_text], added = (
+                appended(amap.get(sub_text, ""), val, integer)
+                if append
+                else (val, None)
+            )
+            await _assign_var(view, key, new_map, frozenset({sub_text}), added)
             code = assignment_status(context.frame, sub_seq)
             return (
                 None,
@@ -400,12 +376,13 @@ async def execute_assignment(
             raise DiscardSignal(
                 encode_text(f"bash: {name_text}: bad array subscript\n")
             )
-        if append:
-            val = await appended_value(
-                session, view, array_get(arr, idx), val, integer
-            )
-        array_set(arr, idx, val)
-        await _assign_var(view, key, arr, frozenset({idx}))
+        slot, added = (
+            appended(array_get(arr, idx), val, integer)
+            if append
+            else (val, None)
+        )
+        array_set(arr, idx, slot)
+        await _assign_var(view, key, arr, frozenset({idx}), added)
         code = assignment_status(context.frame, sub_seq)
         return (
             None,
@@ -414,6 +391,7 @@ async def execute_assignment(
         )
     held_map = session.assocs.get(key)
     held_arr = session.arrays.get(key)
+    stored, added = val, None
     if append:
         # `a+=x` appends onto element 0 (key "0" of a map); `n+=3` on
         # an integer name adds: `declare -i n=5; n+=3` stores 8.
@@ -423,20 +401,20 @@ async def execute_assignment(
             old = array_get(held_arr, 0)
         else:
             old = session.env.get(key, "")
-        val = await appended_value(session, view, old, val, integer)
+        stored, added = appended(old, val, integer)
     if held_map is not None:
         # `m=x` on an associative array writes the literal key "0"
         # and keeps every other key, as bash does.
         new_map = dict(held_map)
-        new_map["0"] = val
-        await _assign_var(view, key, new_map, frozenset({"0"}))
+        new_map["0"] = stored
+        await _assign_var(view, key, new_map, frozenset({"0"}), added)
     elif held_arr is not None:
         # `a=x` writes element 0 and keeps the rest.
         new_arr = list(held_arr)
-        array_set(new_arr, 0, val)
-        await _assign_var(view, key, new_arr, frozenset({0}))
+        array_set(new_arr, 0, stored)
+        await _assign_var(view, key, new_arr, frozenset({0}), added)
     else:
-        await _assign_var(view, key, val)
+        await _assign_var(view, key, stored, added=added)
     # Reassigning OPTIND (even to its current value) restarts the
     # getopts scan, matching bash's internal char pointer.
     if key == "OPTIND":

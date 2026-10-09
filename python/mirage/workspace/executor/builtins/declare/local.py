@@ -414,12 +414,13 @@ async def _declare_operand(
     await premark(view, key, shaping)
     target = session.vars.get(checked)
     integer = target is not None and VarAttr.INTEGER in target.attrs
-    if append:
-        val = await appended(session, view, held_slot(held), val, integer)
+    val, added = (
+        appended(held_slot(held), val, integer) if append else (val, None)
+    )
     value, assigned = scalar_value(held, val, kind)
     if kind is not None:
         await drop_reference(session, view, key)
-    await view.set(key, value, assigned=assigned)
+    await view.set(key, value, assigned=assigned, added=added)
     await stamp_marks(session, view, key, checked, marks)
     return None
 

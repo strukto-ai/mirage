@@ -951,14 +951,14 @@ async def evaluate_integer(
     """Evaluate ``text`` as an ``-i`` write coerces it, land what it
     assigns through ``view``, and give back the value: a ``declare -ni
     r=M`` value, which bash evaluates before refusing the reference
-    (``M='X=5'`` sets X), and an integer ``+=`` (``appended``). Inside a
-    ``declare -g`` it reads the function's scope, as the coercion does.
+    (``M='X=5'`` sets X). Inside a ``declare -g`` it reads the
+    function's scope, as the coercion does.
 
     Args:
         session (SessionState): shell session state.
         view (SessionView): the gated session view.
-        text (str): the value, the held one for a ``+=``.
-        added (str | None): a ``+=``'s added text, evaluated after
+        text (str): the value, the held one for a ``r+=M``.
+        added (str | None): a ``r+=M``'s added text, evaluated after
             ``text`` in the same evaluation and added to it.
 
     Raises:
@@ -976,30 +976,19 @@ async def evaluate_integer(
         await _land_coercion(session, view.set, coercion)
 
 
-async def appended(
-    session: SessionState,
-    view: SessionView,
-    old: str,
-    added: str,
-    integer: bool,
-) -> str:
-    """The text a ``+=`` stores: the old text then the added one, or on
-    an integer the two read as arithmetic in turn and summed
-    (``evaluate_integer``). The held value evaluates too, so
-    ``n='x=5'; declare -i n; n+=x`` stores 10, and an empty side counts
-    as 0.
+def appended(held: str, added: str, integer: bool) -> tuple[str, str | None]:
+    """What a ``+=`` hands ``set_var``: the held text then the added one,
+    or on an integer the held text with the added one as ``added``, the
+    two evaluating there in turn and summing behind the store's
+    refusals. The held value evaluates too, so ``n='x=5'; declare -i n;
+    n+=x`` stores 10, and an empty side counts as 0.
 
     Args:
-        session (SessionState): shell session state.
-        view (SessionView): the gated session view, through which the
-            sides' assignments land.
-        old (str): what the slot holds, "" when unset.
+        held (str): what the slot holds, "" when unset.
         added (str): the text appended.
         integer (bool): the variable carries ``-i``.
     """
-    if not integer:
-        return old + added
-    return await evaluate_integer(session, view, old, added)
+    return (held, added) if integer else (held + added, None)
 
 
 def ensure_var_visible(session: SessionState, name: str) -> None:
@@ -1092,6 +1081,7 @@ async def set_var(
     follow_ref: bool = True,
     *,
     assigned: frozenset[int | str] | None = None,
+    added: str | None = None,
     diagnostics: list[str | bytes] | None = None,
 ) -> None:
     """Write one variable through the session plane's gate.
@@ -1105,8 +1095,10 @@ async def set_var(
     every writer states them the same way whichever tier or spelling
     asked. Writers with richer mechanics (subscripts, appends, holes)
     compute the resulting value on a copy and hand it here, so a
-    denial never leaves a half-applied write. None policies gate
-    nothing (a writer outside a workspace).
+    denial never leaves a half-applied write; an integer ``+=`` hands
+    its held text and the added one (``appended``), which evaluate here
+    behind the same refusals. None policies gate nothing (a writer
+    outside a workspace).
 
     Args:
         session (SessionState): the session being written.
@@ -1121,6 +1113,8 @@ async def set_var(
             writer that re-aims the reference instead, and passes False.
         assigned (frozenset[int | str] | None): the elements an array
             write assigns (``coerce_value``), None for the whole value.
+        added (str | None): an integer ``+=``'s text, which the assigned
+            value evaluates after its held one in one evaluation.
 
     Raises:
         ReadonlyVariableError: the name is readonly.
@@ -1157,7 +1151,12 @@ async def set_var(
     )
     if existing is not None and existing.attrs:
         try:
-            value = coerce_value(value, existing.attrs, coercion, assigned)
+            value = coerce_value(
+                value,
+                existing.attrs,
+                functools.partial(coercion, added=added),
+                assigned,
+            )
         except (ArithError, ExitSignal):
             # bash bound what the expression assigned before it failed
             # (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a

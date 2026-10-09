@@ -900,10 +900,10 @@ async function markOperand(
   if (val !== null && conflict === null) {
     const checked = deref(session, key) || key
     const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
-    const slot = append ? await appended(session, view, heldSlot(held), val, integer) : val
+    const [slot, added] = append ? appended(heldSlot(held), val, integer) : [val, null]
     const [value, assigned] = scalarValue(held, slot, kind)
     if (kind !== null) await dropReference(session, view, key)
-    await view.set(key, value, true, assigned)
+    await view.set(key, value, true, assigned, added)
     // Rides on the gate the `view.set` above passed, unless the write
     // re-aimed a reference (`markWritten`).
     await markWritten(session, view, key, checked, attr, on)
