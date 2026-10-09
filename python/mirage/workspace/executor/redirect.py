@@ -674,7 +674,6 @@ async def handle_redirect(
             if command is not None
             else None
         )
-        consumed: set[int] = set()
 
         async def write(
             file: FileDescription, data: bytes, *, replace: bool = False
@@ -705,31 +704,32 @@ async def handle_redirect(
                 io.exit_code = 1
 
         try:
-            if not refused:
-                # Distinct descriptions can reach the same file through aliases.
-                # Combine output only when one description owns every chunk.
-                for file in files:
-                    if chunks and all(dest(key) is file for key, _ in chunks):
-                        consumed.add(id(file))
-                        await write(
-                            file,
-                            b"".join(data for _, data in chunks),
-                            replace=file is complete_output,
-                        )
-                        break
-            for key, data in chunks:
+            pending = iter(chunks)
+            chunk = next(pending, None)
+            while chunk is not None:
+                key, data = chunk
                 target = dest(key)
-                if target is _TO_STDOUT:
+                chunk = next(pending, None)
+                if isinstance(target, FileDescription):
+                    # Only adjacent writes can combine: distinct descriptions
+                    # may reach the same file through aliases.
+                    parts = [data]
+                    while chunk is not None and dest(chunk[0]) is target:
+                        parts.append(chunk[1])
+                        chunk = next(pending, None)
+                    await write(
+                        target,
+                        b"".join(parts),
+                        replace=not refused
+                        and target is complete_output
+                        and len(parts) == len(chunks),
+                    )
+                elif target is _TO_STDOUT:
                     routed.append((Channel.STDOUT, data))
                 elif target is _TO_STDERR:
                     routed.append((Channel.STDERR, data))
                 elif isinstance(target, Inherited):
                     routed.append((target, data))
-                elif (
-                    isinstance(target, FileDescription)
-                    and id(target) not in consumed
-                ):
-                    await write(target, data)
         finally:
             if write_token is not None:
                 reset_redirect_paths(write_token)

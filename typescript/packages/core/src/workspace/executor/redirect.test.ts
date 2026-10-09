@@ -388,8 +388,26 @@ describe('fd-table routing end-to-end', () => {
         for (const redirects of [`2>/data/m1 >${path}`, `>${path} 2>/data/m1`]) {
           expect(await runExit(ws, `printf '%d\\n' abc ${redirects}`)).toBe(1)
           expect(await run(ws, 'cat /data/m1')).toContain('abc')
-          expect(await runExit(ws, `{ printf abcdef >&2; printf XY; } ${redirects}`)).toBe(0)
-          expect(await run(ws, 'cat /data/m1')).toBe('XYcdef')
+          const writes = vi.spyOn(data, 'pwrite')
+          try {
+            expect(
+              await runExit(
+                ws,
+                '{ printf ab >&2; printf cd >&2; printf ef >&2;' +
+                  ' printf X; printf Y; printf G >&2; printf H >&2;' +
+                  ` printf Z; } ${redirects}`,
+              ),
+            ).toBe(0)
+            expect(writes.mock.calls.map(([, bytes, offset]) => [decode(bytes), offset])).toEqual([
+              ['abcdef', 0],
+              ['XY', 0],
+              ['GH', 6],
+              ['Z', 2],
+            ])
+          } finally {
+            writes.mockRestore()
+          }
+          expect(await run(ws, 'cat /data/m1')).toBe('XYZdefGH')
         }
       }
     } finally {

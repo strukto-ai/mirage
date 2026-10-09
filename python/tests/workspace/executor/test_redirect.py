@@ -297,11 +297,22 @@ async def test_multiple_stdout_redirects_truncate_all_write_last(monkeypatch):
             io = await ws.shell(f"printf '%d\\n' abc {redirects}")
             assert io.exit_code == 1
             assert "abc" in await _out(ws, "cat /data/m1")
-            io = await ws.shell(
-                f"{{ printf abcdef >&2; printf XY; }} {redirects}"
-            )
-            assert io.exit_code == 0
-            assert await _out(ws, "cat /data/m1") == "XYcdef"
+            with monkeypatch.context() as patched:
+                pwrite = AsyncMock(wraps=vfs.pwrite)
+                patched.setattr(vfs, "pwrite", pwrite)
+                io = await ws.shell(
+                    "{ printf ab >&2; printf cd >&2; printf ef >&2;"
+                    " printf X; printf Y; printf G >&2; printf H >&2;"
+                    f" printf Z; }} {redirects}"
+                )
+                assert io.exit_code == 0
+                assert [call.args[1:3] for call in pwrite.await_args_list] == [
+                    (b"abcdef", 0),
+                    (b"XY", 0),
+                    (b"GH", 6),
+                    (b"Z", 2),
+                ]
+            assert await _out(ws, "cat /data/m1") == "XYZdefGH"
 
 
 @pytest.mark.asyncio

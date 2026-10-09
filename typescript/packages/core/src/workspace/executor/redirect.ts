@@ -537,7 +537,6 @@ export async function handleRedirect(
     }
     const routed: [Channel | Inherited, Uint8Array][] = []
     const writeFiles = async () => {
-      const consumed = new Set<FileDescription>()
       const write = async (file: FileDescription, data: Uint8Array, replace = false) => {
         try {
           if (replace && file.source === null && file.offset === 0) {
@@ -557,23 +556,28 @@ export async function handleRedirect(
           io.exitCode = 1
         }
       }
-      if (!refused)
-        // Distinct descriptions can reach the same file through aliases.
-        // Combine output only when one description owns every chunk.
-        for (const file of files) {
-          if (chunks.length > 0 && chunks.every(([key]) => dest(key) === file)) {
-            consumed.add(file)
-            await write(file, concat(chunks.map(([, data]) => data)), file === completeOutput)
-            break
-          }
-        }
-      for (const [key, data] of chunks) {
+      const pending = chunks.values()
+      let chunk = pending.next()
+      while (!chunk.done) {
+        const [key, data] = chunk.value
         const target = dest(key)
-        if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
+        chunk = pending.next()
+        if (target instanceof FileDescription) {
+          // Only adjacent writes can combine: distinct descriptions
+          // may reach the same file through aliases.
+          const parts = [data]
+          while (!chunk.done && dest(chunk.value[0]) === target) {
+            parts.push(chunk.value[1])
+            chunk = pending.next()
+          }
+          await write(
+            target,
+            concat(parts),
+            !refused && target === completeOutput && parts.length === chunks.length,
+          )
+        } else if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
         else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
         else if (target instanceof Inherited) routed.push([target, data])
-        else if (target instanceof FileDescription && !consumed.has(target))
-          await write(target, data)
       }
     }
     if (command === null) await writeFiles()
