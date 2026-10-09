@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
-import { read } from './read.ts'
+import { read, readStream } from './read.ts'
 
 interface RecordedCall {
   method: DiscordMethod
@@ -272,4 +272,44 @@ describe('read unknown', () => {
       read(new DiscordAccessor(t), spec('/mnt/discord', '/mnt/discord')),
     ).rejects.toMatchObject({ code: 'EISDIR' })
   })
+})
+
+it('closes an attachment stream before fetching its tail', async () => {
+  let closed = false
+  const body = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode('first\n'))
+      },
+      cancel() {
+        closed = true
+      },
+    },
+    { highWaterMark: 0 },
+  )
+  vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(body)))
+  const index = new RAMIndexCacheStore()
+  const path = spec('/Guild__G1/channels/general__C1/2026-04-24/files/report__F1.txt')
+  await index.setDir(path.virtual.slice(0, path.virtual.lastIndexOf('/')), [
+    [
+      'report__F1.txt',
+      new IndexEntry({
+        id: 'F1',
+        name: 'report.txt',
+        vfsName: 'report__F1.txt',
+        resourceType: 'discord/attachment',
+        extra: { url: 'https://cdn.test/report' },
+      }),
+    ],
+  ])
+  try {
+    const stream = readStream(new DiscordAccessor(new FakeDiscordTransport()), path, index)
+    const first = await stream.next()
+    if (first.done) throw new Error('attachment stream ended before its first chunk')
+    expect(new TextDecoder().decode(first.value)).toBe('first\n')
+    await stream.return()
+    expect(closed).toBe(true)
+  } finally {
+    vi.unstubAllGlobals()
+  }
 })

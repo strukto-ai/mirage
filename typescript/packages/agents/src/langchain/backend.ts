@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Workspace } from '@struktoai/mirage-node'
+import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type {
@@ -148,7 +149,7 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
     return new Session(this.ws, this.sessionId).vfs
   }
 
-  private exec(command: string): ReturnType<Workspace['shell']> {
+  private exec(command: string): Promise<ExecuteResult> {
     return this.ws.shell(command, this.sessionId === undefined ? {} : { sessionId: this.sessionId })
   }
 

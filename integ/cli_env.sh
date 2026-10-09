@@ -61,9 +61,7 @@ YML
   $cli workspace create "$yaml" --id env1 >/dev/null </dev/null
   echo "create=exit$?"
 
-  # `execute` prints a JSON envelope carrying the streams, and the two
-  # hosts spell its keys differently, so every probe greps a distinctive
-  # value out of it rather than reading lines.
+  # Match each distinctive marker in the command's raw output.
   echo "literal=$($cli shell -w env1 -c 'echo $APP_NAME' </dev/null | grep -o 'lit-app-name' | head -1)"
 
   $cli shell -w env1 -c 'EDITOR=x' >"/tmp/cli-env-$lang-ro.txt" 2>&1 </dev/null

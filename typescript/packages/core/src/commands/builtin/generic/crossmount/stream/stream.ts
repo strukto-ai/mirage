@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { asyncChain } from '../../../../../io/stream.ts'
+import { concat } from '../../../../../io/cachable_iterator.ts'
+import { OutputStream } from '../../../../../io/stdio.ts'
+import { asyncChain, closeQuietly, drain } from '../../../../../io/stream.ts'
 import { readFailExitCodeFromLine } from '../../../../spec/usage.ts'
-import { IOResult, materialize, type ByteSource } from '../../../../../io/types.ts'
+import { IOResult, OutputState, materialize, type ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { revoiceFsErrorLine } from '../../../../../errors/render.ts'
 import { LINE_STREAM_COMMANDS } from '../constants.ts'
@@ -66,60 +68,90 @@ export async function runStream(
   flagKwargs: Record<string, FlagValue>,
   runSingle: RunSingle,
 ): Promise<CrossResult> {
-  let mergedIo = new IOResult()
-  const sources: ByteSource[] = []
-  let failed = false
-  // The real command's code for the worst failed fetch. The fetch runs as
-  // Cmd.CAT, so its own code is cat's 1 whatever went wrong; the stderr is
-  // already respelled into the real command's voice and the code has to
-  // follow it, or `sort a /other/missing` answers 1 while `sort missing`
-  // answers 2.
-  let failCode = 0
-  for (const scope of scopes) {
-    const [out, io] = await runSingle(Cmd.CAT, [scope], [], {})
-    if (io.exitCode !== 0) {
-      failed = true
-      if (io.stderr !== null) {
+  const result = new IOResult()
+  const state = new OutputState()
+  result.output = state
+  const fetches: { scope: PathSpec; out: ByteSource | null; io: IOResult }[] = []
+  let sources: ByteSource[] = []
+  async function finish(final: IOResult | null = null): Promise<void> {
+    let merged = new IOResult()
+    let failCode = 0
+    for (const { scope, io } of fetches) {
+      if (io.exitCode !== 0) {
         let rendered = await materialize(io.stderr)
-        if (cmdName !== Cmd.CAT) {
-          rendered = respellFetchStderr(rendered, cmdName, scope)
-          io.stderr = rendered
-        }
-        failCode = Math.max(failCode, readFailExitCodeFromLine(cmdName, DEC.decode(rendered)))
+        if (cmdName !== Cmd.CAT) rendered = respellFetchStderr(rendered, cmdName, scope)
+        io.stderr = rendered
+        failCode = Math.max(failCode, readFailExitCodeFromLine(cmdName, DEC.decode(rendered)), 1)
+        io.exitCode = 0
       }
-      // The fetch ran as cat, so its exit code is cat's whatever went
-      // wrong. failCode already carries the real command's, and merging
-      // cat's over it would win the `||` below.
-      io.exitCode = 0
-      mergedIo = await mergedIo.merge(io)
-      continue
+      merged = await merged.merge(io)
     }
-    mergedIo = await mergedIo.merge(io)
-    if (out !== null) sources.push(out)
+    if (final !== null) merged = await merged.merge(final)
+    result.reads = merged.reads
+    result.writes = merged.writes
+    result.cache = merged.cache
+    result.renames = merged.renames
+    result.matchedRuns = merged.matchedRuns
+    result.sizedRuns = merged.sizedRuns
+    result.countedRuns = merged.countedRuns
+    result.refusal = result.refusal ?? merged.refusal
+    const stderr = concat([await materialize(merged.stderr), await materialize(result.stderr)])
+    result.stderr = stderr.byteLength > 0 ? stderr : null
+    result.exitCode = result.exitCode || merged.exitCode || failCode
+    state.finish()
   }
-  // sort aborts on any failed operand like GNU (it needs every input
-  // before emitting anything), matching the single-mount builder.
-  if (failed && cmdName === Cmd.SORT) {
-    mergedIo.exitCode = mergedIo.exitCode || failCode || 1
-    return [null, mergedIo]
+  async function closeFetches(): Promise<void> {
+    await Promise.all(fetches.map(({ out }) => closeQuietly(out)))
   }
-
-  const merged =
-    LINE_STREAM_COMMANDS.has(cmdName) && sources.length > 0
-      ? [...sources.slice(0, -1).map(lineEnded), ...sources.slice(-1)]
-      : sources
-  const body: ByteSource = asyncChain(merged)
-
-  if (cmdName === Cmd.CAT && !hasActiveFlags(flagKwargs)) {
-    if (failed) mergedIo.exitCode = mergedIo.exitCode || failCode || 1
-    return [body, mergedIo]
+  let out: ByteSource | null
+  let final: IOResult | null = null
+  try {
+    for (const scope of scopes) {
+      const [source, io] = await runSingle(Cmd.CAT, [scope], [], {})
+      fetches.push({ scope, out: source, io })
+      result.producer = io.producer
+      result.refusal = io.refusal ?? result.refusal
+      if (io.exitCode !== 0) await drain(source)
+      else if (source !== null) sources.push(source)
+    }
+    if (cmdName === Cmd.SORT && fetches.some(({ io }) => io.exitCode !== 0)) {
+      await closeFetches()
+      await finish()
+      return [null, result]
+    }
+    if (LINE_STREAM_COMMANDS.has(cmdName) && sources.length > 0)
+      sources = [...sources.slice(0, -1).map(lineEnded), ...sources.slice(-1)]
+    const body: ByteSource = asyncChain(sources)
+    if (cmdName === Cmd.CAT && !hasActiveFlags(flagKwargs)) out = body
+    else
+      [out, final] = await runSingle(cmdName, [], [...textArgs], flagKwargs, {
+        stdin: body,
+        resolveHint: scopes[0] ?? null,
+      })
+    if (final !== null) {
+      result.producer = final.producer
+      result.refusal = final.refusal ?? result.refusal
+    }
+  } catch (error) {
+    await closeFetches()
+    throw error
   }
-
-  const [out, io] = await runSingle(cmdName, [], [...textArgs], flagKwargs, {
-    stdin: body,
-    resolveHint: scopes[0] ?? null,
-  })
-  mergedIo = await mergedIo.merge(io)
-  if (failed) mergedIo.exitCode = mergedIo.exitCode || failCode || 1
-  return [out, mergedIo]
+  let closing: Promise<void> | undefined
+  async function finalize(): Promise<void> {
+    await Promise.all([closeQuietly(out), closeFetches()])
+    await finish(final)
+  }
+  function close(): Promise<void> {
+    return (closing ??= finalize())
+  }
+  async function* output(): AsyncGenerator<Uint8Array> {
+    try {
+      for await (const data of asyncChain(out === null ? [] : [out])) {
+        if (cmdName !== Cmd.SORT || !fetches.some(({ io }) => io.exitCode !== 0)) yield data
+      }
+    } finally {
+      await close()
+    }
+  }
+  return [new OutputStream(output(), close), result]
 }

@@ -12,90 +12,41 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from collections import deque
 from collections.abc import AsyncIterator
 
+from mirage.io.pipe import CAPACITY, BytePipe
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.types import Channel
-from mirage.shell.errors import PipeClosed
 
 
 class PipeConsole(JobConsole):
-    """A single-reader pipe with a kernel-sized buffer.
+    """Route a shell's piped channels through the shared bounded byte pipe."""
 
-    A write succeeds while the reader is open and the buffer has room, as
-    in bash, where a producer that finishes before ``head`` closes keeps
-    its status. A lazy source is pulled only after ``drain``, so closing
-    after one chunk does not fetch another backend page first.
-    """
-
-    def __init__(self, pipe_stderr: bool = False) -> None:
+    def __init__(
+        self, pipe_stderr: bool = False, buffer_bytes: int = CAPACITY
+    ) -> None:
         super().__init__()
         self._pipe_stderr = pipe_stderr
-        self._chunks: deque[bytes] = deque()
-        self._bytes = 0
-        self._ended = False
-        self._delivered = 0
-        self._accepted = 0
-        self._reader_closed = False
-        self._failure: BaseException | None = None
-        self._changed = asyncio.Event()
+        self._pipe = BytePipe(buffer_bytes)
 
     async def emit(self, channel: Channel, data: bytes) -> None:
         if channel != Channel.STDOUT and not self._pipe_stderr:
             await super().emit(channel, data)
-            return
-        if not data:
-            return
-        while self._bytes >= 65536 and not self._reader_closed:
-            self._changed.clear()
-            await self._changed.wait()
-        if self._reader_closed:
-            raise PipeClosed()
-        self._chunks.append(data)
-        self._bytes += len(data)
-        self._delivered += 1
-        self._changed.set()
+        else:
+            await self._pipe.write(data)
 
     async def drain(self) -> None:
-        """Wait until the reader has taken every chunk or closed."""
-        while self._accepted < self._delivered and not self._reader_closed:
-            self._changed.clear()
-            await self._changed.wait()
+        await self._pipe.drain()
 
     @property
     def closed_reader(self) -> bool:
-        return self._reader_closed
+        return self._pipe.closed_reader
 
     def end(self, error: BaseException | None = None) -> None:
-        if error is not None:
-            self._failure = error
-        self._ended = True
-        self._changed.set()
+        self._pipe.end(error)
 
     def close_reader(self) -> None:
-        self._reader_closed = True
-        self._chunks.clear()
-        self._bytes = 0
-        self._changed.set()
+        self._pipe.close_reader()
 
-    async def stream(self) -> AsyncIterator[bytes]:
-        try:
-            while True:
-                if self._chunks:
-                    chunk = self._chunks.popleft()
-                    self._bytes -= len(chunk)
-                    self._changed.set()
-                    yield chunk
-                    self._accepted += 1
-                    self._changed.set()
-                elif self._ended:
-                    if self._failure is not None:
-                        raise self._failure
-                    return
-                else:
-                    self._changed.clear()
-                    await self._changed.wait()
-        finally:
-            self.close_reader()
+    def stream(self) -> AsyncIterator[bytes]:
+        return self._pipe.stream()

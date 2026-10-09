@@ -22,13 +22,18 @@ import asyncio
 import errno
 import json
 import sys
+from contextlib import aclosing
 from pathlib import Path
 from typing import Any
 
-from mirage.commands.cli.types import CLISpec
+from mirage import ShellExecution
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
+from mirage.io.cooperative import chunks
+from mirage.io.types import IOResult
 from mirage.policy import Policy, PolicyDenied
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
@@ -50,7 +55,7 @@ from mirage.runtime.types import ScriptSource
 from mirage.server import io_serde
 from mirage.server.vfs_calls import VFS_CALL_BY_NAME
 from mirage.shell.console import Channel, JobConsole
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs, register_vfs
@@ -77,6 +82,88 @@ class CachedRAMVFS(RAMVFS):
 
 
 register_vfs("cached-ram", CachedRAMVFS)
+
+
+class TrackedStreamVFS(CachedRAMVFS):
+    """A chunked source whose pull and close counts are shared corpus assertions."""
+
+    def __init__(
+        self,
+        files: dict[str, str] | None = None,
+        chunk_size: int = 16384,
+        fail_after: int | None = None,
+        stall_after: int | None = None,
+        repeat: int = 1,
+    ) -> None:
+        super().__init__(
+            {path: data * repeat for path, data in (files or {}).items()}
+        )
+        self.chunk_size = chunk_size
+        self.fail_after = fail_after
+        self.stall_after = stall_after
+        self.pulls = 0
+        self.closed = 0
+
+    async def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ):
+        data = await super().read(path, index)
+        try:
+            for offset in range(0, len(data), self.chunk_size):
+                self.pulls += 1
+                if (
+                    self.stall_after is not None
+                    and offset // self.chunk_size >= self.stall_after
+                ):
+                    await asyncio.Event().wait()
+                if (
+                    self.fail_after is not None
+                    and offset // self.chunk_size >= self.fail_after
+                ):
+                    raise OSError("stream tail fetched")
+                yield data[offset : offset + self.chunk_size]
+        finally:
+            self.closed += 1
+
+
+register_vfs("tracked-stream", TrackedStreamVFS)
+
+
+class TrackedStreamCLI:
+    """A registered CLI exercising stdin, deferred status, and producer closure."""
+
+    def __init__(
+        self, exit_code: int = 0, stderr: str = "", writer: bool = False
+    ) -> None:
+        self.exit_code = exit_code
+        self.writer = writer
+        self.stderr = stderr.encode()
+        self.pulls = 0
+        self.closed = 0
+
+    async def invoke(self, inv: CLIInvocation):
+        if self.writer:
+            assert inv.stdio is not None
+            try:
+                async for chunk in inv.stdio.stdin:
+                    self.pulls += 1
+                    await inv.stdio.stdout.write(chunk)
+                await inv.stdio.stderr.write(self.stderr)
+                return IOResult(exit_code=self.exit_code)
+            finally:
+                self.closed += 1
+        result = IOResult(stderr=self.stderr)
+        return self.output(inv, result), result
+
+    async def output(self, inv: CLIInvocation, result: IOResult):
+        try:
+            async with aclosing(chunks(inv.stdin or b"")) as source:
+                async for chunk in source:
+                    self.pulls += 1
+                    yield chunk
+            result.exit_code = self.exit_code
+        finally:
+            self.closed += 1
 
 
 class RulePolicy(Policy):
@@ -204,6 +291,24 @@ async def action(
             ones; ``snapshot`` stores the state dict ``checkout`` applies.
     """
     op = step["op"]
+    if op == "register_stream_cli":
+        cli = TrackedStreamCLI(
+            step.get("exit_code", 0),
+            step.get("stderr", ""),
+            step.get("writer", False),
+        )
+        held.setdefault("stream_clis", {})[step["name"]] = cli
+        ws.register_cli(
+            step["name"], CLISpec(name=step["name"], fn=cli.invoke)
+        )
+        return None
+    if op == "stream_cli_stats":
+        cli = held["stream_clis"][step["name"]]
+        return {"pulls": cli.pulls, "closed": cli.closed}
+    if op == "stream_stats":
+        vfs = ws.mount(step["path"]).vfs
+        assert isinstance(vfs, TrackedStreamVFS)
+        return {"pulls": vfs.pulls, "closed": vfs.closed}
     if op == "cached":
         value = await ws.cache.get(step["path"])
         return value.decode() if value is not None else None
@@ -289,6 +394,62 @@ async def action(
         )
         child.stdin.close()
         return child.pid
+    elif op == "stream_exec":
+        session = Session(ws, step.get("session"))
+        execution: ShellExecution = await session.shell(
+            step["command"], stream=True
+        )
+        completion = asyncio.create_task(execution.wait())
+        events = []
+        first_before_done = False
+        value = {}
+        try:
+            async for event in execution.events:
+                if not events:
+                    first_before_done = not completion.done()
+                events.append(
+                    {"stream": event.stream, "data": list(event.data)}
+                )
+                if "consume_delay_ms" in step:
+                    await asyncio.sleep(step["consume_delay_ms"] / 1000)
+                if step.get("stop") == "cancel":
+                    execution.cancel()
+                    break
+                if step.get("stop") == "close":
+                    await execution.aclose()
+                    break
+            try:
+                result = await completion
+                value = {
+                    "exit_code": result.exit_code,
+                    "stdout": await result.stdout_str(),
+                    "stderr": await result.stderr_str(),
+                    "refusal": result.refusal.reason
+                    if result.refusal
+                    else None,
+                }
+            except MirageAbortError:
+                value = {"aborted": True}
+        finally:
+            await execution.aclose()
+            await asyncio.gather(completion, return_exceptions=True)
+        return {
+            "has_id": bool(execution.id),
+            "events": events,
+            "bounded": all(len(event["data"]) <= 16384 for event in events),
+            "stdout_bytes": sum(
+                len(event["data"])
+                for event in events
+                if event["stream"] == "stdout"
+            ),
+            "stderr_bytes": sum(
+                len(event["data"])
+                for event in events
+                if event["stream"] == "stderr"
+            ),
+            "first_before_done": first_before_done,
+            **value,
+        }
     elif op == "exec":
         cancel = asyncio.Event() if "cancel_after_ms" in step else None
         sink = (

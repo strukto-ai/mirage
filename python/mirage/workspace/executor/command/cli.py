@@ -14,9 +14,9 @@
 
 import inspect
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.builtin.utils.limit import (
@@ -39,8 +39,11 @@ from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.concurrency.limiter import run_blocking
 from mirage.errors.types import CommandTimeoutError, FsCondition
 from mirage.io import IOResult
-from mirage.io.stream import materialize
-from mirage.io.types import ByteSource, CommandOutput
+from mirage.io.cooperative import chunks
+from mirage.io.pipe import CAPACITY
+from mirage.io.stdio import OutputStream, Stdio, invoke
+from mirage.io.stream import close_quietly, materialize
+from mirage.io.types import ByteSource, CommandOutput, HandlerResult
 from mirage.policy import resolve_limit
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
@@ -283,6 +286,7 @@ class CLIContext:
 
     shell: Callable[[str], Awaitable[IOResult]] | None = None
     command_limits: Mapping[str, Limit] | None = None
+    buffer_bytes: int = CAPACITY
     entries: list[Runtime] | None = None
     dispatch: DispatchFn | None = None
     stat_path: StatPath | None = None
@@ -538,6 +542,8 @@ async def handle_cli(
         profile_limits=session.command_limits,
     )
     timeout = limit.timeout_seconds if limit is not None else None
+    body: Awaitable[CommandOutput | None]
+    native = leaf.script is None
     if leaf.script is not None:
         runtime, refused = _select_runtime(
             prog, leaf, entries or [], context.routing
@@ -571,13 +577,32 @@ async def handle_cli(
             raise RuntimeError(
                 f"walk returned a leaf without a handler for {prog!r}"
             )
-        body = call_leaf(fn, inv)
+
+        async def run(stdio: Stdio) -> HandlerResult:
+            nonlocal active
+            try:
+                return cast(
+                    HandlerResult,
+                    await run_with_timeout(
+                        call_leaf(fn, replace(inv, stdio=stdio)), timeout, prog
+                    ),
+                )
+            finally:
+                active = False
+                if leaf.write and drop_caches is not None:
+                    await drop_caches()
+
+        body = invoke(run, stdin, buffer_bytes=context.buffer_bytes)
     # The leaf's declared limit bounds the handler body and its
     # streams, exactly like mount dispatch: without the wrap a blocking
     # leaf hangs forever and an unbounded-output leaf ignores its own
     # limits.
     try:
-        out = await run_with_timeout(body, timeout, prog)
+        out = (
+            await body
+            if native
+            else await run_with_timeout(body, timeout, prog)
+        )
     except UsageError as exc:
         # Leaf-raised usage errors (a malformed --json) keep the bare
         # message and exit 2, matching the refusal branch above.
@@ -595,7 +620,7 @@ async def handle_cli(
         # (exit 124), not here. The cancelled leaf may already have sent
         # its request, and a service that accepted it will not roll it
         # back, so the mounts stop trusting their caches now.
-        if leaf.write and drop_caches is not None:
+        if not native and leaf.write and drop_caches is not None:
             await drop_caches()
         raise
     except Exception as exc:
@@ -607,7 +632,7 @@ async def handle_cli(
         # request (a PUT whose --jq program fails filters a response the
         # service already applied); without the drop a github mount keeps
         # serving its pre-write bytes.
-        if leaf.write and drop_caches is not None:
+        if not native and leaf.write and drop_caches is not None:
             await drop_caches()
         err_stderr = encode_text(f"{prog}: {exc}\n")
         err_io = IOResult(exit_code=1, stderr=err_stderr)
@@ -618,7 +643,8 @@ async def handle_cli(
             ExecutionNode(command=cmd_str, exit_code=1, stderr=err_stderr),
         )
     finally:
-        active = False
+        if not native:
+            active = False
     if out is None:
         stdout, io = None, IOResult()
     else:
@@ -626,7 +652,7 @@ async def handle_cli(
     # The spec's `write` is the one answer: what policy calls a write,
     # the cache does too, so a verb that can mutate (`gh api` under any
     # method) costs the mounts a reload rather than a stale read.
-    if leaf.write and drop_caches is not None:
+    if not native and leaf.write and drop_caches is not None:
         await drop_caches()
     io.producer = Producer(command=prog, declared=leaf.limit)
 
@@ -635,7 +661,43 @@ async def handle_cli(
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = warn + existing
 
+    owned = stdout if io.output is not None else None
+    if owned is not None:
+        stdout = _cli_output(owned, io, prog)
     stdout = maybe_with_timeout(stdout, limit, prog)
+    if (
+        owned is not None
+        and stdout is not None
+        and not isinstance(stdout, bytes)
+    ):
+        wrapped = stdout
+
+        async def close() -> None:
+            await close_quietly(owned)
+            await close_quietly(wrapped)
+
+        stdout = OutputStream(wrapped, close)
     io.stderr = maybe_with_timeout(io.stderr, limit, prog)
 
     return stdout, io, await exec_node(cmd_str, io, parsed.paths)
+
+
+async def _cli_output(
+    source: ByteSource, io: IOResult, prog: str
+) -> AsyncIterator[bytes]:
+    try:
+        async for data in chunks(source):
+            yield data
+    except CommandTimeoutError:
+        raise
+    except Exception as exc:
+        if isinstance(exc, PartialOutputError) and exc.stdout is not None:
+            async for data in chunks(exc.stdout):
+                yield data
+        message = (
+            f"{exc}\n" if isinstance(exc, UsageError) else f"{prog}: {exc}\n"
+        )
+        io.stderr = await io.materialize_stderr() + encode_text(message)
+        io.exit_code = exc.exit_code if isinstance(exc, UsageError) else 1
+    finally:
+        await close_quietly(source)

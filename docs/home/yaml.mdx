@@ -16,6 +16,7 @@ A workspace can be described entirely in YAML and loaded with one call — `load
 | `mode` | `read` \| `write` \| `exec` | `write` | The mode a mount inherits when it declares none. |
 | `read` | `fresh` \| `bounded` | `bounded` | The read policy a mount inherits when it declares none. There is deliberately no top-level `ttl:` — see [the bound](#the-bound). |
 | `write` | `unconditional` \| `conditional` | `unconditional` | The write policy a mount inherits when it declares none. See [the write policy](#the-write-policy). |
+| `io` | block | `{buffer_bytes: 65536}` | Capacity of each streaming byte queue. See [I/O buffers](#io-buffers). |
 | `command_limits` | map | — | Per-command caps for every session. See [command limits](#command-limits). |
 | `clis` | map | — | Installed CLIs, keyed by head word. |
 | `runtimes` | list | — | The workspace's ordered runtime world. |
@@ -57,6 +58,34 @@ mounts:
   /scratch:
     vfs: ram
 ```
+
+## I/O buffers
+
+```yaml
+io:
+  buffer_bytes: 262144  # 256 KiB per queue
+mounts:
+  /:
+    vfs: ram
+```
+
+`buffer_bytes` defaults to 65536 (64 KiB). It must be an integer from 16384
+through 9007199254740991. Unknown keys are rejected. Chunks remain at most
+16 KiB; capacity controls how many bytes can wait before writers pause.
+A larger value, such as 256 KiB or 1 MiB, absorbs longer bursts at the cost
+of more memory per active queue. It does not guarantee faster execution.
+
+The immutable workspace setting applies to shell pipes, command output,
+process stdin/stdout/stderr, SDK events and HTTP upload/output queues.
+HTTP output counts encoded NDJSON bytes, including base64 overhead; its
+raw payload records remain at most 8 KiB. SDK and handler queues count raw bytes.
+CLI and MCP calls use their workspace's setting, including MCP over SSE
+and stdio. Configure it when creating the workspace; shell calls and MCP
+tool arguments do not override it. Snapshots and copies preserve it.
+
+This is a per-queue limit, not a workspace memory limit. One execution can
+have several queues. Collected results and whole-output policy buffers
+are separate and can exceed this size.
 
 ## Command limits
 

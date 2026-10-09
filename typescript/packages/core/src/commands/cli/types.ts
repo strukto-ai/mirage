@@ -13,11 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProcessView } from '../../process/view.ts'
-import type { ByteSource, IOResult } from '../../io/types.ts'
+import {
+  type IOResult,
+  type ByteSource,
+  type CommandOutput,
+  type HandlerResult,
+} from '../../io/types.ts'
+import type { Stdio } from '../../io/stdio.ts'
 import type { Limit, PathSpec } from '../../types.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../view/types.ts'
 import { type ScriptSource, type DispatchFn } from '../../runtime/types.ts'
-import type { CommandFnResult } from '../config.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { compileSpec } from '../spec/compile.ts'
 
@@ -97,6 +102,7 @@ export interface CLIInvocation<ConfigT = unknown> {
   flags: Record<string, FlagValue>
   /** Piped input, null when the line has none. */
   stdin: ByteSource | null
+  stdio?: Stdio
   /**
    * The session's environment variables, as one frozen process-view
    * snapshot. A leaf that wants the live, gated handle reads
@@ -132,12 +138,14 @@ export interface CLIInvocation<ConfigT = unknown> {
  * does with the config: wrap it in an accessor, build its own client, or
  * ignore it, is the author's business.
  */
-export type CLIVerbFn = (inv: CLIInvocation) => Promise<CommandFnResult> | CommandFnResult
+export type CLIVerbFn<Result = CommandOutput | null> = (
+  inv: CLIInvocation,
+) => Promise<Result> | Result
 
 export interface CLISpecInit extends CommandSpecInit {
   name: string
   aliases?: readonly string[]
-  fn?: CLIVerbFn | null
+  fn?: CLIVerbFn<HandlerResult> | null
   subcommands?: readonly CLISpec[]
   write?: boolean
   limit?: Limit | null
@@ -177,7 +185,7 @@ export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, un
 export class CLISpec extends CommandSpec {
   readonly name: string
   readonly aliases: readonly string[]
-  readonly fn: CLIVerbFn | null
+  readonly fn: CLIVerbFn<HandlerResult> | null
   readonly subcommands: readonly CLISpec[]
   readonly write: boolean
   readonly limit: Limit | null

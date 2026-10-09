@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { apiRequest } from '../api/client.ts'
+import { apiRequest, apiStream } from '../api/client.ts'
 import { fileIdName } from '../../utils/naming.ts'
 import { windowFor } from '../../utils/ranges.ts'
 
@@ -55,4 +55,12 @@ export async function downloadFile(
     read: 'bytes',
     ...(window !== undefined ? { window } : {}),
   })) as Uint8Array
+}
+
+/** Stream an attachment with bounded reads and response cleanup. */
+export function downloadFileStream(
+  url: string,
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array, void> {
+  return apiStream(url, { errorOf: downloadError, ...(signal === undefined ? {} : { signal }) })
 }

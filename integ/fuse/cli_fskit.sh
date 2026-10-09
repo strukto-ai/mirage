@@ -43,7 +43,7 @@ mount_row() { mount | grep -F "$1" | head -1; }
 
 vfs_out() {
   local cli="$1" cmd="$2"
-  $cli shell -w cfk -c "$cmd" </dev/null 2>/dev/null | jq -r '.stdout' | tr '\n' '|'
+  $cli shell --json -w cfk -c "$cmd" </dev/null 2>/dev/null | jq -r '.stdout' | tr '\n' '|'
 }
 
 # Run the battery against one CLI; emit one "key=value" line per probe.

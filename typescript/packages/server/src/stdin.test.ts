@@ -14,7 +14,9 @@
 
 import { Buffer } from 'node:buffer'
 import { describe, expect, it } from 'vitest'
-import { MAX_CHUNKS, UploadStdin } from './stdin.ts'
+import { CHUNK_SIZE } from '@struktoai/mirage-core/io/cooperative'
+import { CAPACITY } from '@struktoai/mirage-core/io/pipe'
+import { UploadStdin } from './stdin.ts'
 
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 50))
 
@@ -40,19 +42,35 @@ describe('UploadStdin', () => {
     expect(got.map((c) => Buffer.from(c).toString())).toEqual(['a', 'b'])
   })
 
-  it('makes a full upload wait for the reader', async () => {
-    const upload = new UploadStdin()
-    for (let i = 0; i < MAX_CHUNKS; i++) await upload.feed(new Uint8Array([i]))
-    const blocked = upload.feed(Buffer.from('next'))
-    expect(await settled(blocked)).toBe(false)
-    const reading = upload[Symbol.asyncIterator]()
-    expect((await reading.next()).value).toEqual(new Uint8Array([0]))
-    await blocked
-  })
+  it.each([CAPACITY, CAPACITY * 2])(
+    'makes a %i-byte upload wait for the reader',
+    async (capacity) => {
+      const upload = new UploadStdin(capacity)
+      for (let i = 0; i < capacity / CHUNK_SIZE; i++)
+        await upload.feed(new Uint8Array(CHUNK_SIZE).fill(i))
+      const blocked = upload.feed(Buffer.from('next'))
+      expect(await settled(blocked)).toBe(false)
+      const reading = upload[Symbol.asyncIterator]()
+      expect((await reading.next()).value).toEqual(new Uint8Array(CHUNK_SIZE))
+      await blocked
+      upload.close()
+      const remaining: Uint8Array[] = []
+      for await (const chunk of reading) remaining.push(chunk)
+      expect(Buffer.concat(remaining)).toEqual(
+        Buffer.concat([
+          ...Array.from({ length: capacity / CHUNK_SIZE - 1 }, (_, i) =>
+            Buffer.alloc(CHUNK_SIZE, i + 1),
+          ),
+          Buffer.from('next'),
+        ]),
+      )
+    },
+  )
 
   it('frees a waiting feed on discard and drops the rest', async () => {
     const upload = new UploadStdin()
-    for (let i = 0; i < MAX_CHUNKS; i++) await upload.feed(new Uint8Array([i]))
+    for (let i = 0; i < CAPACITY / CHUNK_SIZE; i++)
+      await upload.feed(new Uint8Array(CHUNK_SIZE).fill(i))
     const blocked = upload.feed(Buffer.from('next'))
     expect(await settled(blocked)).toBe(false)
     upload.discard()

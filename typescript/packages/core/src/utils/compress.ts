@@ -15,16 +15,21 @@
 import {
   ZStream,
   Z_NO_FLUSH,
+  Z_FINISH,
   Z_OK,
   Z_STREAM_END,
   Z_BUF_ERROR,
   zlibInflate,
   zlibInflateInit2,
   zlibInflateEnd,
+  zlibDeflate,
+  zlibDeflateInit2,
+  zlibDeflateEnd,
   gzip as pakoGzip,
 } from 'pako'
 import { yieldBytes } from '../io/stream.ts'
 import { concat } from '../io/cachable_iterator.ts'
+import { CHUNK_SIZE, chunks } from '../io/cooperative.ts'
 
 /**
  * Why `gzip -d` cannot decompress one input, in gzip's words.
@@ -151,6 +156,46 @@ export async function gzip(
 
 export async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
   return runThrough(bytes, new DecompressionStream('gzip'))
+}
+
+/** Gzip bounded input chunks, yielding bounded output and closing an abandoned source. */
+export async function* gzipCompressStream(
+  source: AsyncIterable<Uint8Array>,
+  level: number | null = null,
+): AsyncGenerator<Uint8Array, void> {
+  const stream = new ZStream()
+  if (zlibDeflateInit2(stream, level ?? -1, GZIP_DEFLATED, 31, 8, 0) !== Z_OK) {
+    throw new Error('gzip compressor initialization failed')
+  }
+  function* compress(finish: boolean): Generator<Uint8Array> {
+    for (;;) {
+      stream.output = new Uint8Array(CHUNK_SIZE)
+      stream.next_out = 0
+      stream.avail_out = CHUNK_SIZE
+      const status = zlibDeflate(stream, finish ? Z_FINISH : Z_NO_FLUSH)
+      if (status !== Z_OK && status !== Z_STREAM_END && !(status === Z_BUF_ERROR && !finish)) {
+        throw new Error(stream.msg || 'gzip compression failed')
+      }
+      if (stream.next_out > 0) yield stream.output.subarray(0, stream.next_out)
+      if (status === Z_STREAM_END || (!finish && stream.avail_in === 0 && stream.avail_out > 0)) {
+        return
+      }
+    }
+  }
+  try {
+    for await (const chunk of chunks(source)) {
+      stream.input = chunk
+      stream.next_in = 0
+      stream.avail_in = chunk.byteLength
+      yield* compress(false)
+    }
+    stream.input = new Uint8Array(0)
+    stream.next_in = 0
+    stream.avail_in = 0
+    yield* compress(true)
+  } finally {
+    zlibDeflateEnd(stream)
+  }
 }
 
 /** Whether bytes open with the gzip magic. */

@@ -21,7 +21,7 @@ from mirage import MountMode, Workspace
 from mirage.runtime.sandbox.apple_container import AppleContainerRuntime
 from mirage.runtime.sandbox.apple_container.constants import PRELUDE
 from mirage.runtime.table import build_runtime
-from mirage.runtime.types import ProcessExecution, ShellExecution
+from mirage.runtime.types import ProcessExecution, ShellRequest
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 
@@ -228,7 +228,7 @@ async def test_process_preserves_argv_and_probes_the_container_once():
         b"input",
     )
     await runtime.execute(
-        ShellExecution(line="pwd", cwd=PathSpec.from_str_path("/work"))
+        ShellRequest(line="pwd", cwd=PathSpec.from_str_path("/work"))
     )
     assert runtime.inspected() == ["box"]
     assert runtime.capabilities.process and runtime.capabilities.shell

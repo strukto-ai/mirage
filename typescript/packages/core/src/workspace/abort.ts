@@ -65,6 +65,12 @@ export function lineStatusWriter(session: SessionState): StatusWriter | null {
   return frames.length === 1 ? (frames[0]?.writer ?? null) : null
 }
 
+/** The active line's cancellation channel, when it can be attributed to this session. */
+export function lineSignal(session: SessionState): AbortSignal | undefined {
+  const frames = lineAbortContext.liveStores().filter((frame) => frame.sessions.includes(session))
+  return frames.length === 1 ? frames[0]?.signal : undefined
+}
+
 /**
  * The aborted signal of the line stamping on `session`, or undefined
  * when that line is still wanted, or when no line is running at all (a

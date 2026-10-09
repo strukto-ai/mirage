@@ -17,6 +17,27 @@ import { CachableAsyncIterator, concat } from './cachable_iterator.ts'
 import { chunks } from './cooperative.ts'
 
 export type ByteSource = Uint8Array | AsyncIterable<Uint8Array>
+export type StreamName = 'stdout' | 'stderr'
+
+export interface OutputEvent {
+  stream: StreamName
+  data: Uint8Array
+}
+
+export type CommandOutput = [ByteSource | null, IOResult]
+export type HandlerResult = CommandOutput | IOResult | null
+
+/** Routing and settlement shared by a live handler's result and drain. */
+export class OutputState {
+  stderr: ((data: Uint8Array) => Promise<void>) | null = null
+  settled = false
+  readonly callbacks: (() => void)[] = []
+
+  finish(): void {
+    this.settled = true
+    for (const callback of this.callbacks.splice(0)) callback()
+  }
+}
 
 /**
  * Standard input redirected from a character device (`< /dev/null`). It reads
@@ -146,6 +167,7 @@ export class IOResult {
   // policy layer as context. Facts ride the envelope as policy
   // input; the decision a chain hands down rides beside them as
   // `refusal`, written after the last hook has spoken.
+  output: OutputState | null = null
   outputFinalized = false
   producer: Producer | null
   // Why the line did not run, when a policy or an unanswered ask
@@ -238,6 +260,7 @@ export class IOResult {
       producer: other.producer,
       refusal: other.refusal ?? this.refusal,
     })
+    result.output = other.output
     result.outputFinalized = other.outputFinalized
     result.streamSource = other
     return result

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOConfig } from '../../io/config.ts'
 import { commandsFor } from '../../commands/builtin/backends.ts'
 import type { ProcessView } from '../../process/view.ts'
 import type { SessionState } from '../session/session.ts'
@@ -226,6 +227,7 @@ export class MountRegistry {
     defaultRead: ReadSpec = DEFAULT_READ_SPEC,
     readOverrides: Record<string, ReadSpec> = {},
     placements: RegistryPlacements = {},
+    readonly io: IOConfig = new IOConfig(),
   ) {
     this.indexConfig = placements.index
     const list: MountEntry[] = []

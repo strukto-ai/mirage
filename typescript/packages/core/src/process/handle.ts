@@ -1,4 +1,5 @@
 import type { ProcessInfo, ProcessRunner } from './types.ts'
+import { runWithExecution } from '../execution/context.ts'
 
 /** Host-side runner lifecycle; cancellation and actual completion are separate.
  * Joining covers the runner's finally blocks, not untracked native descendants.
@@ -16,7 +17,12 @@ export class ProcessHandle {
   ) {
     this.current = Object.freeze(info)
     // Register identity before executing even a synchronous runner prelude.
-    this.task = Promise.resolve().then(run)
+    this.task = Promise.resolve().then(() =>
+      runWithExecution(
+        { id: info.executionId, parentId: info.parentExecutionId, rootId: info.rootExecutionId },
+        run,
+      ),
+    )
     this.completion = this.task.then(
       (code) => this.settle(code, null, finished),
       (error: unknown) => {

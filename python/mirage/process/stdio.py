@@ -1,13 +1,13 @@
 from collections.abc import AsyncIterator
 
+from mirage.io.errors import PipeClosed
+from mirage.io.pipe import CAPACITY, BytePipe
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.console.pipe import PipeConsole
-from mirage.shell.errors import PipeClosed
 
 
 class ProcessInput:
-    def __init__(self) -> None:
-        self.pipe = PipeConsole()
+    def __init__(self, capacity: int = CAPACITY) -> None:
+        self.pipe = BytePipe(capacity)
         self.closed = False
         self.bytes_read = 0
 
@@ -16,8 +16,7 @@ class ProcessInput:
             return
         if self.closed:
             raise PipeClosed()
-        for start in range(0, len(data), 65536):
-            await self.pipe.emit(Channel.STDOUT, data[start : start + 65536])
+        await self.pipe.write(data)
 
     def close(self) -> None:
         self.closed = True
@@ -34,11 +33,13 @@ class ProcessInput:
 
 
 class ProcessOutput(JobConsole):
-    def __init__(self, merge_stderr: bool = False) -> None:
+    def __init__(
+        self, merge_stderr: bool = False, buffer_bytes: int = CAPACITY
+    ) -> None:
         super().__init__()
         self.merge_stderr = merge_stderr
-        self.stdout = ProcessInput()
-        self.stderr = ProcessInput()
+        self.stdout = ProcessInput(buffer_bytes)
+        self.stderr = ProcessInput(buffer_bytes)
 
     async def emit(self, channel: Channel, data: bytes) -> None:
         target = (

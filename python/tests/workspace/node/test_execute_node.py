@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from mirage.commands.config import ExecContext
 from mirage.io import IOResult
+from mirage.io.config import IOConfig
 from mirage.io.stream import materialize
 from mirage.policy import Policies
 from mirage.shell import parse
@@ -93,6 +94,7 @@ def _mock_registry():
 
     reg = MagicMock()
     reg.file_cache = None
+    reg.io = IOConfig()
     reg.mount_for = MagicMock(return_value=mount)
     reg.try_mount_for = MagicMock(return_value=mount)
     reg.resolve_mount = AsyncMock(return_value=mount)

@@ -13,28 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Command } from 'commander'
-import { makeClient, type DaemonClient } from './client.ts'
-import { emit, exitCodeFromResponse, fail, handleResponse } from './output.ts'
+import { makeClient } from './client.ts'
+import { emit, fail, handleResponse } from './output.ts'
 import { loadDaemonSettings } from './settings.ts'
 import { answer, post } from './vfs.ts'
-
-const WAIT_SLICE_S = 30
-const INTERRUPTED = 130
-
-/** Wait until a daemon job settles. */
-async function waitJob(
-  client: DaemonClient,
-  jobId: string,
-): Promise<{ status: string; finished_at: number | null; result: unknown; error: string | null }> {
-  for (;;) {
-    const job = (await handleResponse(
-      await client.request('POST', `/v1/jobs/${jobId}/wait`, {
-        body: JSON.stringify({ timeout_s: WAIT_SLICE_S }),
-      }),
-    )) as Awaited<ReturnType<typeof waitJob>>
-    if (job.finished_at !== null) return job
-  }
-}
 
 interface ExplainedNode {
   type: string
@@ -82,13 +64,10 @@ function explainedLines(node: ExplainedNode, depth: number, out: string[]): void
 }
 
 /**
- * Run a shell line in a workspace. The line is a daemon job. With piped
- * stdin it is one request that streams the input to the line as it
- * reads it, so the line starts before the input ends; Ctrl-C drops the
- * request, which cancels the job, and exits 130. Without piped stdin it
- * is submitted, then waited on, and Ctrl-C, from the submit on, cancels
- * it through `DELETE /v1/jobs/:id`. `--bg` returns the job id at once
- * instead, after any piped stdin has been sent.
+ * Run a shell line with raw stdout and stderr streamed as bytes. `--json`
+ * collects the same streams into the final result. Piped stdin uploads
+ * concurrently in either mode, and Ctrl-C cancels the request with exit130.
+ * `--bg` returns the job id after stdin uploads; `--explain` runs nothing.
  */
 export function registerShellCommand(program: Command): void {
   program
@@ -100,6 +79,7 @@ export function registerShellCommand(program: Command): void {
     .option('--cwd <path>', 'Working directory for this line (a workspace path)')
     .option('--runtime <name>', "Workspace runtime entry to place this line's captured stages on")
     .option('--bg', 'Background; return job_id immediately')
+    .option('--json', 'Collect output and print the final result as JSON')
     .option('--explain', 'Say what the line would do, as a tree; run nothing')
     .action(
       async (opts: {
@@ -110,13 +90,14 @@ export function registerShellCommand(program: Command): void {
         runtime?: string
         bg?: boolean
         explain?: boolean
+        json?: boolean
       }) => {
         const body: Record<string, unknown> = { command: opts.command }
         if (opts.cwd !== undefined) body.cwd = opts.cwd
         if (opts.runtime !== undefined) body.runtime = opts.runtime
         if (opts.explain === true) {
           const said = await answer(await post(opts, 'shell', body))
-          emit(said as ExplanationRecord, formatExplanation)
+          emit(said as ExplanationRecord, opts.json === true ? undefined : formatExplanation)
           return
         }
         const session =
@@ -128,64 +109,25 @@ export function registerShellCommand(program: Command): void {
         const background =
           session === '' ? `${path}?background=true` : `${path}?${session}&background=true`
         const piped = !process.stdin.isTTY
-        if (piped && opts.bg !== true) {
-          const stop = new AbortController()
-          const interrupt = (): void => {
-            stop.abort()
-          }
-          process.on('SIGINT', interrupt)
-          let answered: Response
+        if (opts.bg !== true) {
+          const { streamShell } = await import('./stream.ts')
           try {
-            answered = await c.requestUpload(
-              'POST',
-              foreground,
+            process.exitCode = await streamShell(
+              c,
+              `${foreground}${session === '' ? '?' : '&'}stream=true`,
               body,
-              { name: 'stdin', data: process.stdin },
-              stop.signal,
+              piped,
+              opts.json === true,
             )
           } catch (error) {
-            if (stop.signal.aborted) process.exit(INTERRUPTED)
-            throw error
-          } finally {
-            process.off('SIGINT', interrupt)
+            fail(error instanceof Error ? error.message : String(error), 2)
           }
-          if (answered.status === 499) fail('job canceled', INTERRUPTED)
-          const result = await handleResponse(answered)
-          emit(result)
-          process.exitCode = exitCodeFromResponse(result)
           return
         }
-        const state: { interrupted: boolean; jobId?: string } = { interrupted: false }
-        const interrupt = (): void => {
-          if (state.interrupted) return
-          state.interrupted = true
-          if (state.jobId !== undefined) void c.request('DELETE', `/v1/jobs/${state.jobId}`)
-        }
-        if (opts.bg !== true) process.on('SIGINT', interrupt)
-        let job: Awaited<ReturnType<typeof waitJob>>
-        try {
-          const submittedResponse = piped
-            ? await c.requestUpload('POST', background, body, {
-                name: 'stdin',
-                data: process.stdin,
-              })
-            : await c.request('POST', background, { body: JSON.stringify(body) })
-          const submitted = (await handleResponse(submittedResponse)) as { job_id: string }
-          if (opts.bg === true) {
-            emit(submitted)
-            return
-          }
-          state.jobId = encodeURIComponent(submitted.job_id)
-          if (state.interrupted) await c.request('DELETE', `/v1/jobs/${state.jobId}`)
-          job = await waitJob(c, state.jobId)
-        } finally {
-          process.off('SIGINT', interrupt)
-        }
-        if (state.interrupted) process.exit(INTERRUPTED)
-        if (job.status === 'failed') fail(`shell failed: ${String(job.error)}`, 2)
-        if (job.status === 'canceled') fail('job canceled', INTERRUPTED)
-        emit(job.result)
-        process.exitCode = exitCodeFromResponse(job.result)
+        const response = piped
+          ? await c.requestUpload('POST', background, body, { name: 'stdin', data: process.stdin })
+          : await c.request('POST', background, { body: JSON.stringify(body) })
+        emit(await handleResponse(response))
       },
     )
 }

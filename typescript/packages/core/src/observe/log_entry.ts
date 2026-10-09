@@ -23,6 +23,7 @@ export const STDOUT_TRUNCATE = 4096
 export type EventType = 'op' | 'command' | 'clear' | 'delete'
 
 export interface LogEntryInit {
+  executionId?: string
   type: EventType
   agent: string
   session: string
@@ -40,6 +41,7 @@ export interface LogEntryInit {
 }
 
 export class LogEntry {
+  readonly executionId: string | undefined
   readonly type: EventType
   readonly agent: string
   readonly session: string
@@ -56,6 +58,7 @@ export class LogEntry {
   readonly offset: number | undefined
 
   constructor(init: LogEntryInit) {
+    this.executionId = init.executionId
     this.type = init.type
     this.agent = init.agent
     this.session = init.session
@@ -85,6 +88,7 @@ export class LogEntry {
       durationMs: rec.durationMs,
     }
     if (cwd !== undefined) init.cwd = cwd
+    if (rec.executionId !== null) init.executionId = rec.executionId
     return new LogEntry(init)
   }
 
@@ -105,6 +109,7 @@ export class LogEntry {
     if (this.exitCode !== undefined) obj.exit_code = this.exitCode
     if (this.stdout !== undefined) obj.stdout = this.stdout
     if (this.offset !== undefined) obj.offset = this.offset
+    if (this.executionId !== undefined) obj.execution_id = this.executionId
     return JSON.stringify(obj)
   }
 }

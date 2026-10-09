@@ -70,6 +70,7 @@ from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.stdio import OutputStream, invoke
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
@@ -978,6 +979,7 @@ class MountEntry:
         return CommandOpts(
             command=cmd_name,
             stdin=context.stdin,
+            buffer_bytes=context.buffer_bytes,
             flags=flags,
             cwd=PathSpec(
                 virtual=cwd,
@@ -1128,10 +1130,19 @@ class MountEntry:
             else None
         )
         with host_io():
-            return await run_with_timeout(
-                cmd.fn(self.vfs.accessor, paths, texts, opts),
-                cmd_timeout,
-                cmd_name,
+            return await invoke(
+                lambda stdio: run_with_timeout(
+                    cmd.fn(
+                        self.vfs.accessor,
+                        paths,
+                        texts,
+                        dataclasses.replace(opts, stdio=stdio),
+                    ),
+                    cmd_timeout,
+                    cmd_name,
+                ),
+                opts.stdin,
+                buffer_bytes=context.buffer_bytes,
             )
 
     def _wrap_output(
@@ -1161,7 +1172,14 @@ class MountEntry:
             declared=cmd.limit,
         )
         if stream is not None and not isinstance(stream, bytes):
-            stream = _command_output(stream, io, cmd_name, paths)
+
+            async def close() -> None:
+                await close_quietly(result[0])
+                await close_quietly(stream)
+
+            return OutputStream(
+                _command_output(stream, io, cmd_name, paths), close
+            ), io
         return stream, io
 
     def answers_at(self, name: str, path: str) -> bool:

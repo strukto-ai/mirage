@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { Client, StreamableHTTPClientTransport, type Progress } from '@modelcontextprotocol/client'
 import { McpServer } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { VERSION } from '@struktoai/mirage-core/version'
@@ -33,9 +33,53 @@ export class McpRelay {
     const inner = this.server.server
     inner.registerCapabilities({ tools: {} })
     inner.setRequestHandler('tools/list', (request) => this.upstream.listTools(request.params))
-    inner.setRequestHandler('tools/call', (request, ctx) =>
-      this.upstream.callTool(request.params, { signal: ctx.mcpReq.signal }),
-    )
+    inner.setRequestHandler('tools/call', async (request, ctx) => {
+      const token = ctx.mcpReq._meta?.progressToken
+      if (token === undefined)
+        return this.upstream.callTool(request.params, { signal: ctx.mcpReq.signal })
+      const controller = new AbortController()
+      const cancel = (): void => {
+        controller.abort(ctx.mcpReq.signal.reason)
+      }
+      ctx.mcpReq.signal.addEventListener('abort', cancel, { once: true })
+      if (ctx.mcpReq.signal.aborted) cancel()
+      let pending: Progress | undefined
+      let sending: Promise<void> | undefined
+      let failure: { reason: unknown } | undefined
+      const flush = async (): Promise<void> => {
+        try {
+          while (pending !== undefined) {
+            const update = pending
+            pending = undefined
+            await ctx.mcpReq.notify({
+              method: 'notifications/progress',
+              params: { ...update, progressToken: token },
+            })
+          }
+        } catch (error) {
+          failure = { reason: error }
+          controller.abort(error)
+        } finally {
+          sending = undefined
+        }
+      }
+      try {
+        const result = await this.upstream.callTool(request.params, {
+          signal: controller.signal,
+          onprogress: (update) => {
+            pending = update
+            sending ??= flush()
+          },
+        })
+        await sending
+        if (failure !== undefined) throw failure.reason
+        return result
+      } finally {
+        controller.abort()
+        ctx.mcpReq.signal.removeEventListener('abort', cancel)
+        await sending
+      }
+    })
   }
 }
 

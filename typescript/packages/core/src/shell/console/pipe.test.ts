@@ -63,9 +63,12 @@ describe('PipeConsole', () => {
     expect(written).toBe(false)
     const stream = pipe.stream()
     const full = await stream.next()
-    expect((full.value as Uint8Array).byteLength).toBe(65536)
+    expect((full.value as Uint8Array).byteLength).toBe(16384)
     await writer
+    for (let i = 0; i < 3; i += 1)
+      expect(((await stream.next()).value as Uint8Array).byteLength).toBe(16384)
     expect(dec((await stream.next()).value as Uint8Array)).toBe('y')
+    await stream.return(undefined)
   })
 
   it('lets a writer that is not blocked finish its burst after the reader stops', async () => {

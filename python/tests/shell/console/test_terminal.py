@@ -16,6 +16,7 @@ import asyncio
 
 import pytest
 
+from mirage.io.cooperative import CHUNK_SIZE
 from mirage.shell.console import Channel, JobConsole, Tee, Terminal
 from mirage.shell.descriptors import Recorder
 
@@ -88,6 +89,27 @@ async def test_a_reader_gets_what_waited_and_then_everything():
     await tty.emit(Channel.STDOUT, b"now\n")
     assert await reader.snapshot(Channel.STDOUT) == b"waited\nnow\n"
     assert tty.take() == (b"", b"")
+
+
+@pytest.mark.asyncio
+async def test_streamed_stdout_prefix_is_bounded_and_resets_per_line():
+    tty = Terminal()
+    await tty.jobs.emit(Channel.STDOUT, b"queued ")
+    reader = JobConsole()
+    await tty.attach(reader)
+    payload = ("€" * CHUNK_SIZE).encode()
+    await tty.emit(Channel.STDOUT, payload[:2])
+    await tty.emit(Channel.STDERR, b"warning")
+    await tty.emit(Channel.STDOUT, payload[2:])
+    assert tty.stdout_prefix == (b"queued " + payload)[:CHUNK_SIZE]
+    assert await reader.snapshot(Channel.STDOUT) == b"queued " + payload
+    assert tty.take() == (b"", b"")
+    assert tty.stdout_prefix == b""
+    await tty.attach(JobConsole())
+    await tty.emit(Channel.STDOUT, b"next")
+    assert tty.stdout_prefix == b"next"
+    tty.drop_line()
+    assert tty.stdout_prefix == b""
 
 
 @pytest.mark.asyncio

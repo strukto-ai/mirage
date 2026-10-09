@@ -15,9 +15,8 @@
 import asyncio
 from typing import Protocol
 
-# How many received chunks an upload may run ahead of the line reading
-# it before the server stops reading the request body.
-MAX_CHUNKS = 16
+from mirage.io.errors import PipeClosed
+from mirage.io.pipe import CAPACITY, BytePipe
 
 
 class StdinSource(Protocol):
@@ -57,51 +56,36 @@ class LoopStdin:
 
 
 class UploadStdin:
-    """An HTTP upload's stdin part, a few chunks ahead of the line.
+    """An upload backed by the same bounded byte pipe as process stdin."""
 
-    The request reader feeds each chunk as it arrives and waits while
-    ``MAX_CHUNKS`` are unread, so a slow line slows the upload instead
-    of filling memory. Once the line is done the rest is discarded, so
-    the upload can finish and the caller can read the answer.
-    """
-
-    def __init__(self) -> None:
-        self._queue: asyncio.Queue[bytes] = asyncio.Queue(MAX_CHUNKS)
+    def __init__(self, capacity: int = CAPACITY) -> None:
+        self._pipe = BytePipe(capacity)
+        self._reader = self._pipe.stream()
         self._discarding = False
 
     async def feed(self, data: bytes) -> None:
-        """Queue a chunk of the upload.
+        """Accept an upload chunk, waiting for byte capacity.
 
         Args:
-            data (bytes): the chunk; empty chunks are skipped.
+            data (bytes): received bytes; empty chunks are skipped.
         """
-        if data and not self._discarding:
-            await self._queue.put(data)
+        if self._discarding:
+            return
+        try:
+            await self._pipe.write(data)
+        except PipeClosed:
+            if not self._discarding:
+                raise
 
     async def close(self) -> None:
         """Mark the end of the upload."""
-        if not self._discarding:
-            await self._queue.put(b"")
+        self._pipe.end()
 
     def discard(self) -> None:
-        """Drop what is queued and everything still to come.
-
-        A reader waiting for the next chunk gets the end instead.
-        """
+        """Release readers and feeders, dropping unread bytes."""
         self._discarding = True
-        while not self._queue.empty():
-            self._queue.get_nowait()
-        self._queue.put_nowait(b"")
+        self._pipe.close_reader()
 
     async def read(self) -> bytes:
-        """The next chunk.
-
-        Returns:
-            bytes: the chunk, or ``b""`` at the end of the upload.
-        """
-        if self._discarding:
-            return b""
-        data = await self._queue.get()
-        if not data:
-            self._queue.put_nowait(b"")
-        return data
+        """Return the next chunk, or empty bytes once the upload ends."""
+        return await anext(self._reader, b"")

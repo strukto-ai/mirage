@@ -16,6 +16,7 @@ import json
 import time
 from typing import Any
 
+from mirage.execution.context import current_execution_id
 from mirage.io.types import IOResult
 from mirage.observe.log_entry import (
     EVENT_CLEAR,
@@ -127,6 +128,7 @@ class Observer:
                 command=command,
                 exit_code=io.exit_code,
                 stdout=stdout.decode(errors="replace")[:STDOUT_TRUNCATE],
+                execution_id=current_execution_id(),
             )
         )
 

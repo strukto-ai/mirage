@@ -68,9 +68,9 @@ probe() {
     emit "$lang.$tag.sum=WORKSPACE_CREATE_FAILED"
     return
   fi
-  emit "$lang.$tag.sum=$($cli shell -w "$id" -c 'tally sum 2 3 4' </dev/null | sout | tr -d '\n')"
-  emit "$lang.$tag.man=$($cli shell -w "$id" -c "man tally | grep -c '^  sum '" </dev/null | sout | tr -d '\n')"
-  emit "$lang.$tag.type=$($cli shell -w "$id" -c 'type -t tally' </dev/null | sout | tr -d '\n')"
+  emit "$lang.$tag.sum=$($cli shell --json -w "$id" -c 'tally sum 2 3 4' </dev/null | sout | tr -d '\n')"
+  emit "$lang.$tag.man=$($cli shell --json -w "$id" -c "man tally | grep -c '^  sum '" </dev/null | sout | tr -d '\n')"
+  emit "$lang.$tag.type=$($cli shell --json -w "$id" -c 'type -t tally' </dev/null | sout | tr -d '\n')"
   $cli workspace delete "$id" >/dev/null 2>&1 </dev/null || true
 }
 

@@ -13,7 +13,11 @@
           "op": "readdir",
           "path": "/",
           "expect": {
-            "value": ["/.bash_history", "/dev", "/usr"]
+            "value": [
+              "/.bash_history",
+              "/dev",
+              "/usr"
+            ]
           }
         },
         {
@@ -67,7 +71,11 @@
           "op": "readdir",
           "path": "/",
           "expect": {
-            "value": ["/.bash_history", "/dev", "/usr"]
+            "value": [
+              "/.bash_history",
+              "/dev",
+              "/usr"
+            ]
           }
         },
         {
@@ -132,7 +140,11 @@
           "op": "readdir",
           "path": "/",
           "expect": {
-            "value": ["/.bash_history", "/dev", "/usr"]
+            "value": [
+              "/.bash_history",
+              "/dev",
+              "/usr"
+            ]
           }
         },
         {
@@ -209,7 +221,11 @@
           "op": "readdir",
           "path": "/",
           "expect": {
-            "value": ["/.bash_history", "/dev", "/usr"]
+            "value": [
+              "/.bash_history",
+              "/dev",
+              "/usr"
+            ]
           }
         },
         {
@@ -252,7 +268,10 @@
         "profiles": {
           "default": {
             "paths": {
-              "hide": ["/a", "/b"]
+              "hide": [
+                "/a",
+                "/b"
+              ]
             }
           }
         }
@@ -292,7 +311,11 @@
           "op": "readdir",
           "path": "/",
           "expect": {
-            "value": ["/.bash_history", "/dev", "/usr"]
+            "value": [
+              "/.bash_history",
+              "/dev",
+              "/usr"
+            ]
           }
         },
         {
@@ -345,7 +368,11 @@
           "op": "readdir",
           "path": "/",
           "expect": {
-            "value": ["/.bash_history", "/dev", "/usr"]
+            "value": [
+              "/.bash_history",
+              "/dev",
+              "/usr"
+            ]
           }
         },
         {
@@ -538,7 +565,11 @@
           "op": "readdir",
           "path": "/",
           "expect": {
-            "value": ["/.bash_history", "/dev", "/usr"]
+            "value": [
+              "/.bash_history",
+              "/dev",
+              "/usr"
+            ]
           }
         },
         {
@@ -600,7 +631,13 @@
         {
           "op": "mounts",
           "expect": {
-            "value": ["/", "/.bash_history/", "/data/", "/dev/", "/usr/bin/"]
+            "value": [
+              "/",
+              "/.bash_history/",
+              "/data/",
+              "/dev/",
+              "/usr/bin/"
+            ]
           }
         },
         {
@@ -639,7 +676,11 @@
           "op": "readdir",
           "path": "/",
           "expect": {
-            "value": ["/.bash_history", "/dev", "/usr"]
+            "value": [
+              "/.bash_history",
+              "/dev",
+              "/usr"
+            ]
           }
         },
         {
@@ -697,7 +738,9 @@
             "config": {}
           }
         },
-        "runtimes": ["workspace"]
+        "runtimes": [
+          "workspace"
+        ]
       },
       "steps": [
         {
@@ -948,7 +991,11 @@
         {
           "op": "runtimes",
           "expect": {
-            "value": ["workspace", "monty", "quickjs"]
+            "value": [
+              "workspace",
+              "monty",
+              "quickjs"
+            ]
           }
         },
         {
@@ -978,7 +1025,10 @@
         {
           "op": "runtimes",
           "expect": {
-            "value": ["workspace", "quickjs"]
+            "value": [
+              "workspace",
+              "quickjs"
+            ]
           }
         },
         {
@@ -1072,7 +1122,9 @@
             "config": {}
           }
         },
-        "runtimes": ["workspace"]
+        "runtimes": [
+          "workspace"
+        ]
       },
       "steps": [
         {
@@ -1090,8 +1142,12 @@
         {
           "op": "register_policy",
           "id": "first",
-          "commands": ["echo"],
-          "paths": ["/work/data"],
+          "commands": [
+            "echo"
+          ],
+          "paths": [
+            "/work/data"
+          ],
           "reason": "first gate"
         },
         {
@@ -1116,7 +1172,9 @@
         {
           "op": "register_policy",
           "id": "second",
-          "commands": ["echo"],
+          "commands": [
+            "echo"
+          ],
           "reason": "second gate"
         },
         {
@@ -1203,7 +1261,9 @@
         {
           "op": "register_policy",
           "id": "first",
-          "commands": ["echo"],
+          "commands": [
+            "echo"
+          ],
           "reason": "replacement gate"
         },
         {
@@ -1248,7 +1308,9 @@
             "config": {}
           }
         },
-        "runtimes": ["workspace"]
+        "runtimes": [
+          "workspace"
+        ]
       },
       "steps": [
         {
@@ -1485,7 +1547,10 @@
             "config": {}
           }
         },
-        "runtimes": ["monty", "workspace"]
+        "runtimes": [
+          "monty",
+          "workspace"
+        ]
       },
       "steps": [
         {
@@ -1691,7 +1756,9 @@
             "config": {}
           }
         },
-        "runtimes": ["workspace"]
+        "runtimes": [
+          "workspace"
+        ]
       },
       "steps": [
         {
@@ -1756,7 +1823,9 @@
             "mounts": {
               "/work": {
                 "paths": {
-                  "hide": ["/work/aaa/*.txt"]
+                  "hide": [
+                    "/work/aaa/*.txt"
+                  ]
                 }
               }
             },
@@ -1848,7 +1917,9 @@
           "op": "set_profile",
           "profile": {
             "paths": {
-              "hide": ["/work/aaa"]
+              "hide": [
+                "/work/aaa"
+              ]
             }
           },
           "session": "viewer"
@@ -1877,7 +1948,9 @@
           "op": "set_profile",
           "profile": {
             "paths": {
-              "hide": ["/work"]
+              "hide": [
+                "/work"
+              ]
             }
           },
           "session": "viewer"
@@ -1933,7 +2006,9 @@
             "mounts": {
               "/work": {
                 "paths": {
-                  "hide": ["/work/aaa/*.txt"]
+                  "hide": [
+                    "/work/aaa/*.txt"
+                  ]
                 }
               }
             }
@@ -1981,7 +2056,9 @@
             "config": {}
           }
         },
-        "runtimes": ["workspace"]
+        "runtimes": [
+          "workspace"
+        ]
       },
       "steps": [
         {
@@ -2449,7 +2526,9 @@
         {
           "op": "register_policy",
           "id": "gate",
-          "vars": ["SECRET"],
+          "vars": [
+            "SECRET"
+          ],
           "reason": "no secrets in the shell"
         },
         {
@@ -2767,10 +2846,18 @@
         {
           "op": "exec",
           "command": "kill %1",
-          "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": ""}},
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          },
           "session": "capped"
         },
-        { "op": "drain_processes" },
+        {
+          "op": "drain_processes"
+        },
         {
           "op": "exec",
           "command": "(echo sub)",
@@ -2920,7 +3007,10 @@
         },
         {
           "op": "spawn",
-          "argv": ["sleep", "30"],
+          "argv": [
+            "sleep",
+            "30"
+          ],
           "session": "capped",
           "expect": {
             "value": 1
@@ -2961,7 +3051,8 @@
         "mode": "write",
         "mounts": {
           "/data": {
-            "vfs": "ram", "mode": "write"
+            "vfs": "ram",
+            "mode": "write"
           }
         },
         "runtimes": []
@@ -2970,7 +3061,11 @@
         {
           "op": "exec",
           "command": "true",
-          "expect": {"value": {"exit_code": 0}}
+          "expect": {
+            "value": {
+              "exit_code": 0
+            }
+          }
         },
         {
           "op": "exec",
@@ -2999,7 +3094,8 @@
         "mode": "write",
         "mounts": {
           "/data": {
-            "vfs": "ram", "mode": "write"
+            "vfs": "ram",
+            "mode": "write"
           }
         },
         "runtimes": []
@@ -3008,7 +3104,11 @@
         {
           "op": "exec",
           "command": "true",
-          "expect": {"value": {"exit_code": 0}}
+          "expect": {
+            "value": {
+              "exit_code": 0
+            }
+          }
         },
         {
           "op": "exec",
@@ -3037,7 +3137,8 @@
         "mode": "write",
         "mounts": {
           "/data": {
-            "vfs": "ram", "mode": "write"
+            "vfs": "ram",
+            "mode": "write"
           }
         },
         "runtimes": []
@@ -3046,7 +3147,11 @@
         {
           "op": "exec",
           "command": "true",
-          "expect": {"value": {"exit_code": 0}}
+          "expect": {
+            "value": {
+              "exit_code": 0
+            }
+          }
         },
         {
           "op": "exec",
@@ -3075,7 +3180,8 @@
         "mode": "write",
         "mounts": {
           "/data": {
-            "vfs": "ram", "mode": "write"
+            "vfs": "ram",
+            "mode": "write"
           }
         },
         "runtimes": []
@@ -3084,7 +3190,11 @@
         {
           "op": "exec",
           "command": "true",
-          "expect": {"value": {"exit_code": 0}}
+          "expect": {
+            "value": {
+              "exit_code": 0
+            }
+          }
         },
         {
           "op": "exec",
@@ -3117,7 +3227,8 @@
         "mode": "write",
         "mounts": {
           "/data": {
-            "vfs": "ram", "mode": "write"
+            "vfs": "ram",
+            "mode": "write"
           }
         },
         "runtimes": []
@@ -3130,7 +3241,11 @@
         {
           "op": "exec",
           "command": "true",
-          "expect": {"value": {"exit_code": 0}}
+          "expect": {
+            "value": {
+              "exit_code": 0
+            }
+          }
         },
         {
           "op": "concurrent",
@@ -3702,6 +3817,893 @@
               "exit_code": 127,
               "stdout": "",
               "stderr": "late: command not found\n"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_head_closes_without_fetching_tail",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 6,
+              "fail_after": 1
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "head -n 1 /data/log.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "first\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "pulls": 1,
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_grep_quiet_closes_without_fetching_tail",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 6,
+              "fail_after": 1
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "grep -q first /data/log.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "pulls": 1,
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_split_utf8_completes_cache",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "é\n世界\n"
+              },
+              "chunk_size": 1
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cat /data/log.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "é\n世界\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "pulls": 10,
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": "é\n世界\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_failure_closes_without_caching_prefix",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 6,
+              "fail_after": 1
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cat /data/log.txt",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stderr_contains": "stream tail fetched"
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "pulls": 2,
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_cli_preserves_stdin_stderr_and_deferred_status",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 6
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "register_stream_cli",
+          "name": "stream-copy",
+          "exit_code": 7,
+          "stderr": "diagnostic\n"
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/log.txt | stream-copy",
+          "expect": {
+            "value": {
+              "stdout": "first\nlast\n",
+              "stderr": "diagnostic\n",
+              "exit_code": 7
+            }
+          }
+        },
+        {
+          "op": "stream_cli_stats",
+          "name": "stream-copy",
+          "expect": {
+            "value": {
+              "pulls": 2,
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "pulls": 2,
+              "closed": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_cli_pipeline_stops_on_early_consumer_exit",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlater\n"
+              },
+              "chunk_size": 6,
+              "repeat": 100000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "register_stream_cli",
+          "name": "stream-copy"
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/log.txt | stream-copy | head -n 1",
+          "expect": {
+            "value": {
+              "stdout": "first\n",
+              "stderr": "",
+              "exit_code": 0
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_cli_stats",
+          "name": "stream-copy",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_cli_pipeline_cancels_stalled_backend",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 6,
+              "stall_after": 1
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "register_stream_cli",
+          "name": "stream-copy"
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/log.txt | stream-copy | cat",
+          "cancel_after_ms": 30,
+          "expect": {
+            "value": {
+              "aborted": true
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_cli_stats",
+          "name": "stream-copy",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "pulls": 2,
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "native_stream_cli_preserves_stdin_stderr_and_deferred_status",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 6
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "register_stream_cli",
+          "name": "stream-copy",
+          "exit_code": 7,
+          "stderr": "diagnostic\n",
+          "writer": true
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/log.txt | stream-copy",
+          "expect": {
+            "value": {
+              "stdout": "first\nlast\n",
+              "stderr": "diagnostic\n",
+              "exit_code": 7
+            }
+          }
+        },
+        {
+          "op": "stream_cli_stats",
+          "name": "stream-copy",
+          "expect": {
+            "value": {
+              "pulls": 2,
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "pulls": 2,
+              "closed": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "native_stream_cli_pipeline_stops_on_early_consumer_exit",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlater\n"
+              },
+              "chunk_size": 6,
+              "repeat": 100000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "register_stream_cli",
+          "name": "stream-copy",
+          "writer": true
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/log.txt | stream-copy | head -n 1",
+          "expect": {
+            "value": {
+              "stdout": "first\n",
+              "stderr": "",
+              "exit_code": 0
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_cli_stats",
+          "name": "stream-copy",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "native_stream_cli_pipeline_cancels_stalled_backend",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 6,
+              "stall_after": 1
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "register_stream_cli",
+          "name": "stream-copy",
+          "writer": true
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/log.txt | stream-copy | cat",
+          "cancel_after_ms": 30,
+          "expect": {
+            "value": {
+              "aborted": true
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_cli_stats",
+          "name": "stream-copy",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "pulls": 2,
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "sdk_stream_orders_streams_and_keeps_final_status",
+      "settings": {
+        "mounts": {
+          "/": {
+            "vfs": "ram"
+          }
+        },
+        "mode": "write"
+      },
+      "steps": [
+        {
+          "op": "stream_exec",
+          "command": "printf out; printf err >&2; printf 'hé\\000世界'; exit 7",
+          "expect": {
+            "value": {
+              "has_id": true,
+              "bounded": true,
+              "events": [
+                {
+                  "stream": "stdout",
+                  "data": [
+                    111,
+                    117,
+                    116
+                  ]
+                },
+                {
+                  "stream": "stderr",
+                  "data": [
+                    101,
+                    114,
+                    114
+                  ]
+                },
+                {
+                  "stream": "stdout",
+                  "data": [
+                    104,
+                    195,
+                    169,
+                    0,
+                    228,
+                    184,
+                    150,
+                    231,
+                    149,
+                    140
+                  ]
+                }
+              ],
+              "exit_code": 7,
+              "stdout": "",
+              "stderr": "",
+              "refusal": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sdk_stream_mutates_the_calling_session",
+      "settings": {
+        "mounts": {
+          "/": {
+            "vfs": "ram"
+          }
+        },
+        "mode": "write"
+      },
+      "steps": [
+        {
+          "op": "session",
+          "id": "stream-agent"
+        },
+        {
+          "op": "stream_exec",
+          "session": "stream-agent",
+          "command": "mkdir /work; cd /work; export MARK=kept; echo ready",
+          "expect": {
+            "value": {
+              "has_id": true,
+              "bounded": true,
+              "events": [
+                {
+                  "stream": "stdout",
+                  "data": [
+                    114,
+                    101,
+                    97,
+                    100,
+                    121,
+                    10
+                  ]
+                }
+              ],
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "session": "stream-agent",
+          "command": "pwd; echo $MARK",
+          "expect": {
+            "value": {
+              "stdout": "/work\nkept\n",
+              "exit_code": 0
+            }
+          }
+        },
+        {
+          "op": "stream_exec",
+          "session": "stream-agent",
+          "command": "export QUIET=also-kept",
+          "expect": {
+            "value": {
+              "has_id": true,
+              "bounded": true,
+              "events": [],
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "session": "stream-agent",
+          "command": "echo $QUIET",
+          "expect": {
+            "value": {
+              "stdout": "also-kept\n",
+              "exit_code": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sdk_stream_cancel_joins_stalled_source",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 6,
+              "stall_after": 1
+            }
+          }
+        },
+        "mode": "write"
+      },
+      "steps": [
+        {
+          "op": "stream_exec",
+          "command": "cat /data/log.txt; echo leaked > /data/leak.txt",
+          "stop": "cancel",
+          "expect": {
+            "value": {
+              "has_id": true,
+              "bounded": true,
+              "events": [
+                {
+                  "stream": "stdout",
+                  "data": [
+                    102,
+                    105,
+                    114,
+                    115,
+                    116,
+                    10
+                  ]
+                }
+              ],
+              "first_before_done": true,
+              "aborted": true
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "stat",
+          "path": "/data/leak.txt",
+          "expect": {
+            "errno": "ENOENT"
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "sdk_stream_close_joins_stalled_source",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 6,
+              "stall_after": 1
+            }
+          }
+        },
+        "mode": "write"
+      },
+      "steps": [
+        {
+          "op": "stream_exec",
+          "command": "cat /data/log.txt; echo leaked > /data/leak.txt",
+          "stop": "close",
+          "expect": {
+            "value": {
+              "has_id": true,
+              "bounded": true,
+              "events": [
+                {
+                  "stream": "stdout",
+                  "data": [
+                    102,
+                    105,
+                    114,
+                    115,
+                    116,
+                    10
+                  ]
+                }
+              ],
+              "first_before_done": true,
+              "aborted": true
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "stat",
+          "path": "/data/leak.txt",
+          "expect": {
+            "errno": "ENOENT"
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "sdk_stream_bounds_large_source_chunks",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/large.bin": "hé\u0000"
+              },
+              "repeat": 20000,
+              "chunk_size": 50000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "stream_exec",
+          "command": "cat /data/large.bin; echo error >&2",
+          "consume_delay_ms": 1,
+          "expect": {
+            "value": {
+              "has_id": true,
+              "bounded": true,
+              "stdout_bytes": 80000,
+              "stderr_bytes": 6,
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
             }
           }
         }

@@ -21,6 +21,7 @@ export const StateKey = Object.freeze({
   DEFAULT_SESSION_ID: 'default_session_id',
   DEFAULT_AGENT_ID: 'default_agent_id',
   CURRENT_AGENT_ID: 'current_agent_id',
+  IO: 'io',
   CACHE: 'cache',
   HISTORY: 'history',
   JOBS: 'jobs',
@@ -58,6 +59,7 @@ export const CacheKey = Object.freeze({
 } as const)
 
 export const JobKey = Object.freeze({
+  EXECUTION_ID: 'execution_id',
   ID: 'id',
   COMMAND: 'command',
   CWD: 'cwd',

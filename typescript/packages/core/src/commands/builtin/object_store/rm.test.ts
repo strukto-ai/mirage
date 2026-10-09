@@ -1,3 +1,4 @@
+import { invoke } from '../../../io/stdio.ts'
 import { expect, it, vi } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
@@ -42,12 +43,15 @@ it.each([
       walkError: refusal,
     })
     const valid = PathSpec.fromStrPath('/data/ok')
-    const result = await command.fn({} as Accessor, [refused, valid], [], {
-      flags: { f: force },
-      stdin: null,
-      cwd: '/',
-      io,
-    })
+    const result = await invoke(() =>
+      command.fn({} as Accessor, [refused, valid], [], {
+        flags: { f: force },
+        stdin: null,
+        cwd: '/',
+        io,
+      }),
+    )
+    await materialize(result?.[0] ?? null)
     expect(result?.[1].exitCode).toBe(code)
     expect(new TextDecoder().decode(await materialize(result?.[1].stderr ?? null))).toBe(err)
     expect(stat).toHaveBeenCalledTimes(1)
