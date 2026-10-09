@@ -36,6 +36,7 @@ function etag(data: string): string {
 
 const ONE = { IfMatch: etag('one\n') }
 const GEE = { IfMatch: etag('gee\n') }
+const EMPTY = { IfMatch: etag('') }
 
 function minioVfs(): MinIOVFS {
   return new MinIOVFS({
@@ -129,35 +130,53 @@ describe('conditional writes on an S3 mount', () => {
   }
 
   it.each([
-    ['redirect', ['echo a > /s3/new'], 'echo b > /s3/new', 'PutObject', [{ IfMatch: etag('a\n') }]],
+    [
+      'redirect',
+      ['echo a > /s3/new'],
+      'echo b > /s3/new',
+      'PutObject',
+      [{ IfMatch: etag('a\n') }, EMPTY],
+    ],
     [
       'sed',
       ['sed -i s/one/ONE/ /s3/f'],
       'echo x > /s3/f',
       'PutObject',
-      [{ IfMatch: etag('ONE\n') }],
+      [{ IfMatch: etag('ONE\n') }, EMPTY],
     ],
-    ['grep', ['grep o /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE]],
-    ['head', ['head -n1 /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE]],
-    ['wc', ['wc -l /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE]],
-    ['append', ['echo a >> /s3/f'], 'echo z > /s3/f', 'PutObject', [{ IfMatch: etag('one\na\n') }]],
-    ['truncate', ['truncate -s 2 /s3/f'], 'echo z > /s3/f', 'PutObject', [{ IfMatch: etag('on') }]],
+    ['grep', ['grep o /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE, EMPTY]],
+    ['head', ['head -n1 /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE, EMPTY]],
+    ['wc', ['wc -l /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE, EMPTY]],
+    [
+      'append',
+      ['echo a >> /s3/f'],
+      'echo z > /s3/f',
+      'PutObject',
+      [{ IfMatch: etag('one\na\n') }, EMPTY],
+    ],
+    [
+      'truncate',
+      ['truncate -s 2 /s3/f'],
+      'echo z > /s3/f',
+      'PutObject',
+      [{ IfMatch: etag('on') }, EMPTY],
+    ],
     [
       'cross-cp',
       ['echo hi > /ram/x; cp /ram/x /s3/y'],
       'echo z > /s3/y',
       'PutObject',
-      [{ IfMatch: etag('hi\n') }],
+      [{ IfMatch: etag('hi\n') }, EMPTY],
     ],
-    ['removed', ['cat /s3/f', 'rm /s3/f'], 'echo x > /s3/f', 'PutObject', [{}]],
+    ['removed', ['cat /s3/f', 'rm /s3/f'], 'echo x > /s3/f', 'PutObject', [{}, EMPTY]],
     ['unread-tee', [], 'echo y | tee /s3/g', 'PutObject', [{}]],
     ['unread-cross-cp', [], 'echo r > /ram/r; cp /ram/r /s3/g', 'PutObject', [{}]],
     ['unread-cp', [], 'cp /s3/f /s3/g', 'CopyObject', [{}]],
-    ['rm-on-line', [], 'cat /s3/f; rm /s3/f; echo x > /s3/f', 'PutObject', [{}]],
-    ['mv-on-line', [], 'cat /s3/g; mv /s3/g /s3/h; echo y > /s3/g', 'PutObject', [{}]],
-    ['rm-r-on-line', [], 'cat /s3/d/a; rm -r /s3/d; echo x > /s3/d/a', 'PutObject', [{}]],
-    ['rm-r', ['cat /s3/d/a; rm -r /s3/d'], 'echo x > /s3/d/a', 'PutObject', [{}]],
-    ['dir-mv', ['cat /s3/d/a; mv /s3/d /s3/e'], 'echo x > /s3/d/a', 'PutObject', [{}]],
+    ['rm-on-line', [], 'cat /s3/f; rm /s3/f; echo x > /s3/f', 'PutObject', [{}, EMPTY]],
+    ['mv-on-line', [], 'cat /s3/g; mv /s3/g /s3/h; echo y > /s3/g', 'PutObject', [{}, EMPTY]],
+    ['rm-r-on-line', [], 'cat /s3/d/a; rm -r /s3/d; echo x > /s3/d/a', 'PutObject', [{}, EMPTY]],
+    ['rm-r', ['cat /s3/d/a; rm -r /s3/d'], 'echo x > /s3/d/a', 'PutObject', [{}, EMPTY]],
+    ['dir-mv', ['cat /s3/d/a; mv /s3/d /s3/e'], 'echo x > /s3/d/a', 'PutObject', [{}, EMPTY]],
     [
       'dir-mv-copies',
       [],
