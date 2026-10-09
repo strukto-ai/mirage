@@ -16,6 +16,7 @@ import git from 'isomorphic-git'
 
 import { visibleEntries, matched, repoRelative } from './pathspec.ts'
 
+import { fsStrerror, isEacces } from '../../../../errors/fs.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { LinkView, StatPath } from '../../../../view/types.ts'
 import { FileType, type FileStat } from '../../../../types.ts'
@@ -28,6 +29,7 @@ import {
   NothingSpecifiedError,
   NoWorkspaceError,
   PathspecError,
+  UnindexableFileError,
   UnknownPathspecError,
 } from './errors.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
@@ -197,10 +199,20 @@ export async function stageChanges(
   for (const path of [...stage].sort(compareCodePoints)) {
     const info = found.files.get(path)
     if (info === undefined) continue
-    const data = await entryBytes(dispatch, repo.location.worktree.join(path), info)
+    const before = entries.get(path)
+    let data: Uint8Array
+    try {
+      data = await entryBytes(dispatch, repo.location.worktree.join(path), info)
+    } catch (err) {
+      if (!isEacces(err)) throw err
+      throw new UnindexableFileError(
+        path,
+        fsStrerror(err) ?? 'Permission denied',
+        before !== undefined,
+      )
+    }
     const oid = await git.writeBlob({ ...repoArgs(repo), blob: data })
     const entry = stagedEntry(oid, info, data.length)
-    const before = entries.get(path)
     if (before === undefined) added.push(path)
     else if (before.oid !== entry.oid || before.mode !== entry.mode) changed.push([path, 'add'])
     staged.set(path, entry)

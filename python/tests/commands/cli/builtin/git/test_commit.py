@@ -271,3 +271,25 @@ async def test_a_move_is_summarized_as_a_rename(git_rw):
         b" 1 file changed, 0 insertions(+), 0 deletions(-)\n"
         b" rename b.txt => c.txt (100%)\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_all_refuses_an_unreadable_file_in_git_words(
+    git_rw, repo_path: Path
+):
+    (repo_path / "a.txt").write_text("new\n", encoding="utf-8")
+    await git_rw.set_session_profile(
+        git_rw.default_session_id,
+        {
+            "commands": {
+                "deny": [{"reason": "sealed", "paths": ["/repo/a.txt"]}]
+            }
+        },
+    )
+    assert await run(git_rw, "commit -a -m x") == (
+        128,
+        b"",
+        b'error: open("a.txt"): Permission denied\n'
+        b"error: unable to index file 'a.txt'\n"
+        b"fatal: updating files failed\n",
+    )

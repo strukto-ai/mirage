@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from pathlib import Path
+
 import pytest
 
 
@@ -72,3 +74,23 @@ async def test_an_unknown_revision_is_a_fatal(git_ws):
     result = await git_ws.shell("git -C /repo diff nope HEAD")
     assert result.exit_code == 128
     assert result.stderr.startswith(b"fatal: ambiguous argument 'nope'")
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_work_tree_file_is_refused_in_git_words(
+    git_rw, repo_path: Path
+):
+    (repo_path / "a.txt").write_text("new\n", encoding="utf-8")
+    await git_rw.set_session_profile(
+        git_rw.default_session_id,
+        {
+            "commands": {
+                "deny": [{"reason": "sealed", "paths": ["/repo/a.txt"]}]
+            }
+        },
+    )
+    result = await git_rw.shell("git -C /repo diff")
+    assert result.exit_code == 128
+    assert result.stderr == (
+        b'error: open("a.txt"): Permission denied\nfatal: cannot hash a.txt\n'
+    )

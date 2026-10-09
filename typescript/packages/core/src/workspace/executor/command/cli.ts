@@ -39,6 +39,8 @@ import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForLanguage } from '../../../runtime/routing/decide.ts'
+import type { RouteDecision } from '../../../runtime/routing/index.ts'
+import { admissionDenial } from './run.ts'
 import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
@@ -82,15 +84,21 @@ function parseSpecFor(leaf: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): [
  * A `runtime:` pin names the entry, and the entry must speak the
  * script's language, so `runtime: monty` on a `.mjs` fails loud
  * instead of feeding JS to a python interpreter. Without a pin the
- * first entry speaking the language serves (runtimeForLanguage).
- * Every refusal names the world so the fix (add or rename an entry)
- * is visible.
+ * program runs where this line runs its language's own interpreter
+ * (the tier's head word, `python3` or `node`), so a route policy or a
+ * runtime's script places it as it places that command, and a line
+ * every capturer refused is refused here too (126). With no line
+ * decision the first entry speaking the language serves
+ * (runtimeForLanguage). Every other refusal names the world so the fix
+ * (add or rename an entry) is visible (127). Mirrors Python's
+ * `_select_runtime`.
  */
 function selectRuntime(
   prog: string,
   leaf: CLISpec,
   entries: readonly Runtime[],
-): [LanguageRuntime | null, string | null] {
+  routing?: RouteDecision,
+): [LanguageRuntime, null] | [null, IOResult] {
   const script = leaf.script
   if (script === null) {
     throw new Error(`selecting a runtime for '${prog}' without a script`)
@@ -99,10 +107,16 @@ function selectRuntime(
   if (leaf.runtime !== null) {
     const pinned = entries.find((entry) => entry.name === leaf.runtime) ?? null
     if (pinned === null) {
-      return [null, `${prog}: unknown runtime: '${leaf.runtime}' (workspace runtimes: ${known})`]
+      return [
+        null,
+        missing(`${prog}: unknown runtime: '${leaf.runtime}' (workspace runtimes: ${known})`),
+      ]
     }
     if (!(pinned instanceof LanguageRuntime) || pinned.language !== script.language) {
-      return [null, `${prog}: runtime '${pinned.name}' does not run ${script.language} scripts`]
+      return [
+        null,
+        missing(`${prog}: runtime '${pinned.name}' does not run ${script.language} scripts`),
+      ]
     }
     return [pinned, null]
   }
@@ -110,10 +124,23 @@ function selectRuntime(
   if (entry === null) {
     return [
       null,
-      `${prog}: no workspace runtime runs ${script.language} scripts (workspace runtimes: ${known})`,
+      missing(
+        `${prog}: no workspace runtime runs ${script.language} scripts (workspace runtimes: ${known})`,
+      ),
     ]
   }
+  if (routing === undefined) return [entry, null]
+  const head = (entry.constructor as { commands?: readonly string[] }).commands?.[0]
+  if (head === undefined) return [entry, null]
+  const bound = head in routing.bindings ? routing.bindings[head] : routing.fallback
+  if (bound === null || bound === undefined) return [null, admissionDenial(prog)]
+  if (bound instanceof LanguageRuntime && bound.language === script.language) return [bound, null]
   return [entry, null]
+}
+
+/** The 127 a script CLI answers when no entry can run its program. */
+function missing(message: string): IOResult {
+  return new IOResult({ exitCode: 127, stderr: encodeText(`${message}\n`) })
 }
 
 /**
@@ -181,6 +208,8 @@ export interface CLIContext {
   ns?: NamespaceView
   sessionView?: SessionView
   processes?: ProcessView
+  /** The line's placement, which a script leaf runs its program under. */
+  routing?: RouteDecision
 }
 
 /**
@@ -382,15 +411,16 @@ export async function handleCli(
   const abort = new AbortController()
   let body: Promise<[ByteSource | null, IOResult] | null>
   if (leaf.script !== null) {
-    const [runtime, refused] = selectRuntime(prog, leaf, context.entries ?? [])
+    const [runtime, refused] = selectRuntime(prog, leaf, context.entries ?? [], context.routing)
     if (runtime === null) {
       // The interpreter is missing, not the command: 127 like an
-      // interpreter command no runtime entry captures.
-      const stderr = encodeText(`${refused ?? ''}\n`)
+      // interpreter command no runtime entry captures, or 126 when this
+      // line's capturers all refused it.
+      const stderr = await materialize(refused.stderr)
       return [
         null,
-        new IOResult({ exitCode: 127, stderr }),
-        new ExecutionNode({ command: cmdStr, exitCode: 127, stderr }),
+        new IOResult({ exitCode: refused.exitCode, stderr }),
+        new ExecutionNode({ command: cmdStr, exitCode: refused.exitCode, stderr }),
       ]
     }
     body = scriptOutput(inv, leaf.script, runtime, prog, timeout, abort.signal)

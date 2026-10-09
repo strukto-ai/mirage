@@ -14,6 +14,7 @@
 
 import { PyodideUnavailableError } from '../errors.ts'
 import { EvalError } from '../../../errors.ts'
+import { classify } from '../../../../errors/classify.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
 import type { BridgeDispatchFn, EvalResult, RunResult } from '../../../types.ts'
 import type { RuntimeContext } from '../../../binding.ts'
@@ -262,9 +263,11 @@ export class PyodideWorkerClient {
           try {
             await applyMutation(files, mutation)
           } catch (error) {
+            const code = classify(error)
             return {
               message: `python3: failed to ${mutation.kind} ${mutation.path} on mount: ${error instanceof Error ? error.message : String(error)}`,
               skipped: mutations.length - index - 1,
+              ...(code === null ? {} : { code }),
             } satisfies FlushFailure
           }
         }

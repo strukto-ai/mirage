@@ -296,6 +296,7 @@ export async function handleCommand(
           ...(registry.processView === undefined
             ? {}
             : { processes: registry.processView(session) }),
+          ...(routingDecision === undefined ? {} : { routing: routingDecision }),
         },
         dropsMountCaches(cliInstall.spec) ? () => dropMountCaches(registry) : null,
       ),

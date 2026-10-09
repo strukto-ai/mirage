@@ -45,14 +45,17 @@ from mirage.policy import resolve_limit
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.routing import runtime_for_language
+from mirage.runtime.routing import RouteDecision, runtime_for_language
 from mirage.runtime.types import CodeExecution, DispatchFn, ScriptSource
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
 from mirage.view.types import NamespaceView, SessionView, StatPath
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
-from mirage.workspace.executor.command.run import exec_node
+from mirage.workspace.executor.command.run import (
+    admission_denial,
+    exec_node,
+)
 from mirage.workspace.lookup.lookup import verb_visible
 from mirage.workspace.mount.namespace.probe import miss_condition
 from mirage.workspace.session import SessionState, env_snapshot
@@ -120,21 +123,30 @@ def parse_spec_for(
 
 
 def _select_runtime(
-    prog: str, leaf: CLISpec, entries: list[Runtime]
-) -> tuple[LanguageRuntime | None, str | None]:
+    prog: str,
+    leaf: CLISpec,
+    entries: list[Runtime],
+    routing: RouteDecision | None = None,
+) -> tuple[LanguageRuntime | None, IOResult | None]:
     """Pick the workspace entry that runs a script leaf.
 
     A ``runtime:`` pin names the entry, and the entry must speak the
     script's language, so ``runtime: monty`` on a ``.mjs`` fails loud
     instead of feeding JS to a python interpreter. Without a pin the
-    first entry speaking the language serves (runtime_for_language).
-    Every refusal names the world so the fix (add or rename an entry)
-    is visible.
+    program runs where this line runs its language's own interpreter
+    (the tier's head word, ``python3`` or ``node``), so a route policy
+    or a runtime's script places it as it places that command, and a
+    line every capturer refused is refused here too (126). With no
+    line decision the first entry speaking the language serves
+    (runtime_for_language). Every other refusal names the world so the
+    fix (add or rename an entry) is visible (127).
 
     Args:
         prog (str): display path for message attribution.
         leaf (CLISpec): the script-bearing node.
         entries (list[Runtime]): the workspace's ordered world.
+        routing (RouteDecision | None): the line's placement, None
+            outside a routed line.
     """
     script = leaf.script
     if script is None:
@@ -147,7 +159,7 @@ def _select_runtime(
             (entry for entry in entries if entry.name == leaf.runtime), None
         )
         if pinned is None:
-            return None, (
+            return None, _missing(
                 f"{prog}: unknown runtime: {leaf.runtime!r} "
                 f"(workspace runtimes: {known})"
             )
@@ -155,19 +167,39 @@ def _select_runtime(
             not isinstance(pinned, LanguageRuntime)
             or pinned.language != script.language
         ):
-            return None, (
+            return None, _missing(
                 f"{prog}: runtime {pinned.name!r} does not run "
                 f"{script.language} scripts"
             )
         return pinned, None
     entry = runtime_for_language(entries, script.language)
     if entry is None:
-        return None, (
+        return None, _missing(
             f"{prog}: no workspace runtime runs "
             f"{script.language} scripts "
             f"(workspace runtimes: {known})"
         )
+    heads = type(entry).captures
+    if routing is None or not heads:
+        return entry, None
+    bound = routing.bindings.get(heads[0], routing.fallback)
+    if bound is None:
+        return None, admission_denial(prog)
+    if (
+        isinstance(bound, LanguageRuntime)
+        and bound.language == script.language
+    ):
+        return bound, None
     return entry, None
+
+
+def _missing(message: str) -> IOResult:
+    """The 127 a script CLI answers when no entry can run its program.
+
+    Args:
+        message (str): the refusal, naming the world.
+    """
+    return IOResult(exit_code=127, stderr=encode_text(f"{message}\n"))
 
 
 async def _script_output(
@@ -241,6 +273,8 @@ class CLIContext:
             (``ns.mounts.root_of``), so it needs no door of its own.
         session_view (SessionView | None): the session plane's live,
             gated handle; ``inv.env`` stays the frozen process view.
+        routing (RouteDecision | None): the line's placement, which a
+            script leaf runs its program under.
     """
 
     shell: Callable[[str], Awaitable[IOResult]] | None = None
@@ -251,6 +285,7 @@ class CLIContext:
     ns: NamespaceView | None = None
     session_view: SessionView | None = None
     processes: ProcessView | None = None
+    routing: RouteDecision | None = None
 
 
 def drops_mount_caches(spec: CLISpec) -> bool:
@@ -500,17 +535,21 @@ async def handle_cli(
     )
     timeout = limit.timeout_seconds if limit is not None else None
     if leaf.script is not None:
-        runtime, refused = _select_runtime(prog, leaf, entries or [])
+        runtime, refused = _select_runtime(
+            prog, leaf, entries or [], context.routing
+        )
         if runtime is None:
             # The interpreter is missing, not the command: 127 like an
-            # interpreter command no runtime entry captures (run_code).
-            sel_stderr = encode_text(f"{refused}\n")
-            sel_io = IOResult(exit_code=127, stderr=sel_stderr)
+            # interpreter command no runtime entry captures (run_code),
+            # or 126 when this line's capturers all refused it.
+            assert refused is not None
             return (
                 None,
-                sel_io,
+                refused,
                 ExecutionNode(
-                    command=cmd_str, exit_code=127, stderr=sel_stderr
+                    command=cmd_str,
+                    exit_code=refused.exit_code,
+                    stderr=await refused.materialize_stderr(),
                 ),
             )
         body = _script_output(

@@ -185,11 +185,12 @@ export class RuntimeFiles {
   /**
    * A file's bytes, or the range of them a handle asked for. `raw` reads
    * the stored bytes rather than a rendering, which is what an edit that is
-   * written back must start from. Mirrors Python's `RuntimeFiles.read`.
+   * written back must start from; `direct` reads what the backend holds
+   * now, past the file cache. Mirrors Python's `RuntimeFiles.read`.
    */
   async read(
     path: string,
-    options: { offset?: number; size?: number; raw?: boolean } = {},
+    options: { offset?: number; size?: number; raw?: boolean; direct?: boolean } = {},
   ): Promise<Uint8Array> {
     const out = await this.dispatch('read', path, undefined, undefined, options)
     if (!(out instanceof Uint8Array)) {
@@ -509,7 +510,7 @@ export class RuntimeFiles {
     if (await this.appendDelta(path, tail)) return
     let base: Uint8Array = new Uint8Array()
     try {
-      base = await this.read(path, { raw: true })
+      base = await this.read(path, { raw: true, direct: true })
     } catch (err) {
       if (!isMissingPath(err)) throw err
     }

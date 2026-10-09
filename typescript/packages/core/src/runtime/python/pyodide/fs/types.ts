@@ -20,6 +20,8 @@ import type { MirageMutation } from './journal.ts'
 export interface FlushFailure {
   message: string
   skipped: number
+  /** The failed entry's errno name, which the guest call it fails raises. */
+  code?: string
 }
 
 export interface SyncVFS {

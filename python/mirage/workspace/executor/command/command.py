@@ -310,6 +310,7 @@ async def handle_command(
                 processes=registry.process_view(session)
                 if registry.process_view is not None
                 else None,
+                routing=routing_decision,
             ),
             drop_caches=(
                 functools.partial(drop_mount_caches, registry)

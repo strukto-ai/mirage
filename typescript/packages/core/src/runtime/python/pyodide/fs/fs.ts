@@ -200,7 +200,9 @@ export class PyodideFs {
     }
     const streamOps: StreamOps = {
       open: this.streamOpen.bind(this),
-      close: () => undefined,
+      close: () => {
+        this.settle()
+      },
       read: this.streamRead.bind(this),
       write: this.streamWrite.bind(this),
       llseek: this.llseek.bind(this),
@@ -277,28 +279,30 @@ export class PyodideFs {
     // the real mount for a node the mount does not have.
     const isDevice = isCharDevice(node.mode)
     const fields = finalizing || isDevice ? null : changedAttrs(node, attr)
-    if (attr.mode !== undefined) node.mode = attr.mode
-    if (attr.atime !== undefined) node.atime = attr.atime
-    if (attr.mtime !== undefined) node.mtime = attr.mtime
-    if (attr.ctime !== undefined) node.ctime = attr.ctime
+    const size = isDevice ? undefined : attr.size
+    if (size !== undefined && size > 0) this.loadContents(node)
     if (fields !== null) {
       // A link's own attrs go to the link, since the tree resolved to
       // the link node itself and the target's row is not what changed.
       if (this.host.isLink(node.mode)) fields.nofollow = true
       this.journal.markSetattr(this.nodes.pathOf(node), fields)
     }
-    if (attr.size === undefined || isDevice) return
-    if (attr.size > 0) this.loadContents(node)
-    const old = node.contents ?? new Uint8Array(0)
-    const next = new Uint8Array(attr.size)
-    next.set(old.subarray(0, Math.min(old.length, attr.size)))
-    node.contents = next
-    node.usedBytes = attr.size
-    node.loaded = true
     // A resize goes as a truncate to the new length. Recording here rather
     // than at close is what makes a bare `os.truncate(path, n)`, which
     // opens no handle at all, reach the mount.
-    this.journal.markTruncate(this.nodes.pathOf(node), attr.size)
+    if (size !== undefined) this.journal.markTruncate(this.nodes.pathOf(node), size)
+    this.settle()
+    if (attr.mode !== undefined) node.mode = attr.mode
+    if (attr.atime !== undefined) node.atime = attr.atime
+    if (attr.mtime !== undefined) node.mtime = attr.mtime
+    if (attr.ctime !== undefined) node.ctime = attr.ctime
+    if (size === undefined) return
+    const old = node.contents ?? new Uint8Array(0)
+    const next = new Uint8Array(size)
+    next.set(old.subarray(0, Math.min(old.length, size)))
+    node.contents = next
+    node.usedBytes = size
+    node.loaded = true
   }
 
   private lookup(parent: FSNode, name: string): FSNode {
@@ -331,26 +335,29 @@ export class PyodideFs {
   }
 
   private mknod(parent: FSNode, name: string, mode: number, rdev: number): FSNode {
-    const node = this.nodes.makeNode(parent, name, mode)
-    node.rdev = rdev
     // A character device is not mount content. pyodide makes one of its own
     // at runtime -- `API.capture_stderr` calls FS.createDevice, which lands
     // here as mknod -- and journaling it queued a write of /dev/capture_stderr
     // against the real mount, which then failed on replay. Devices live in
     // this tree only.
-    if (isCharDevice(mode)) return node
-    const path = this.nodes.pathOf(node)
-    if (this.host.isDir(mode)) this.journal.markMkdir(path)
-    else {
-      // The create is what carries a file that is made and never written
-      // (`Path.touch()`, `open(p,'w').close()`) through to the mount.
-      this.journal.markCreate(path)
-      // FS.open finalizes a new file with a chmod of its own, right
-      // here and on this node. Only a file is marked: a directory gets
-      // no such call, so a marker left on one would swallow the guest's
-      // next chmod instead.
-      this.fresh = node
+    if (isCharDevice(mode)) {
+      const device = this.nodes.makeNode(parent, name, mode)
+      device.rdev = rdev
+      return device
     }
+    const path = this.nodes.pathOf(parent) + '/' + name
+    if (this.host.isDir(mode)) this.journal.markMkdir(path)
+    // The create is what carries a file that is made and never written
+    // (`Path.touch()`, `open(p,'w').close()`) through to the mount.
+    else this.journal.markCreate(path)
+    this.settle()
+    const node = this.nodes.makeNode(parent, name, mode)
+    node.rdev = rdev
+    // FS.open finalizes a new file with a chmod of its own, right here
+    // and on this node. Only a file is marked: a directory gets no such
+    // call, so a marker left on one would swallow the guest's next chmod
+    // instead.
+    if (!this.host.isDir(mode)) this.fresh = node
     return node
   }
 
@@ -364,14 +371,16 @@ export class PyodideFs {
     if (this.mountOf(from) !== this.mountOf(to)) {
       throw errnoError(this.host, this.errno, 'EXDEV')
     }
-    this.nodes.move(node, newDir, newName)
     this.journal.markRename(from, to)
+    this.settle()
+    this.nodes.move(node, newDir, newName)
   }
 
   private unlink(parent: FSNode, name: string): void {
     const path = this.nodes.pathOf(parent) + '/' + name
-    this.nodes.detach(parent, name)
     this.journal.markUnlink(path)
+    this.settle()
+    this.nodes.detach(parent, name)
   }
 
   private rmdir(parent: FSNode, name: string): void {
@@ -379,8 +388,9 @@ export class PyodideFs {
       throw errnoError(this.host, this.errno, 'ENOTEMPTY')
     }
     const path = this.nodes.pathOf(parent) + '/' + name
-    this.nodes.detach(parent, name)
     this.journal.markRmdir(path)
+    this.settle()
+    this.nodes.detach(parent, name)
   }
 
   /**
@@ -410,6 +420,21 @@ export class PyodideFs {
 
   invalidate(): void {
     this.nodes.invalidate()
+  }
+
+  /**
+   * Send the journal to the mount now, so the call that just recorded an
+   * entry fails with the mount's errno if the mount refuses it, as the
+   * syscall would. Without a worker there is no mount to send it to yet,
+   * and the journal waits for the run's end.
+   */
+  private settle(): void {
+    if (this.sync === undefined) return
+    try {
+      this.sync.flush(this.journal.takeMutations())
+    } catch (error) {
+      throw errnoError(this.host, this.errno, classify(error) ?? 'EIO')
+    }
   }
 
   private readThrough<T>(read: () => T): T {
@@ -487,9 +512,10 @@ export class PyodideFs {
    *   target: what it points at, verbatim.
    */
   private symlink(parent: FSNode, name: string, target: string): FSNode {
+    this.journal.markSymlink(this.nodes.pathOf(parent) + '/' + name, target)
+    this.settle()
     const node = this.nodes.makeNode(parent, name, LINK_MODE)
     node.link = target
-    this.journal.markSymlink(this.nodes.pathOf(node), target)
     return node
   }
 

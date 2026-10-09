@@ -1224,7 +1224,11 @@ class Dispatcher:
             time.time() if name in STAMP_WRITE_OPS and not opened else None
         )
         await self.invalidate_after_write(
-            mount, path, observed=observed, times=not opened
+            mount,
+            path,
+            observed=observed,
+            times=not opened,
+            removed=name in ("unlink", "rmdir"),
         )
         for _, other in _operands(name, kwargs):
             await self.invalidate_after_write(mount, other)
@@ -1354,7 +1358,9 @@ class Dispatcher:
         channel = _MountChannel(
             mount,
             self._boundary(mount),
-            functools.partial(self.invalidate_after_write, mount),
+            functools.partial(
+                self.invalidate_after_write, mount, removed=True
+            ),
         )
         try:
             await remove_remnants(channel, visible, path)
@@ -2078,6 +2084,7 @@ class Dispatcher:
         path: PathSpec,
         observed: float | None = None,
         times: bool = True,
+        removed: bool = False,
     ) -> None:
         """Drop what a write to ``path`` made stale above the store.
 
@@ -2088,11 +2095,16 @@ class Dispatcher:
                 record, None for a removal.
             times (bool): drop the overlay times a content write moves;
                 False for an open that wrote nothing.
+            removed (bool): the write removed ``path`` (unlink, rmdir),
+                so its own listing goes too, as a core's removal drops it.
         """
         if times:
             await self._namespace.clear_times(path.virtual, observed=observed)
         manager = self._manager_for(mount)
-        await manager.invalidate_after_write(path)
+        if removed:
+            await manager.invalidate_after_unlink(path)
+        else:
+            await manager.invalidate_after_write(path)
         await manager.invalidate_ancestors(path)
 
     async def invalidate_after_rename(

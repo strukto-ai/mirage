@@ -38,16 +38,17 @@ import {
   type ArmedInterrupt,
   type PyodideInterrupter,
 } from './interrupt.ts'
+import { noWorker } from './errors.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { applyMutation, createJournal, type MutationJournal } from './fs/journal.ts'
-import { preloadInto } from './fs/preload.ts'
 import { PyodideFs } from './fs/fs.ts'
+import { preloadInto } from './fs/preload.ts'
 import { PyodideFsSeed } from './fs/seed.ts'
 import { PyodideExecution } from './execution.ts'
 import { mainFilename } from '../execution.ts'
 import { unhonoredNotice, type InitFlags } from '../flags.ts'
-import type { SyncVFS, XattrOp } from './fs/types.ts'
+import type { FlushFailure, SyncVFS, XattrOp } from './fs/types.ts'
 import { classify } from '../../../errors/index.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
@@ -461,6 +462,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         context,
       )) as EvalResult
     }
+    if (context !== undefined && this.sync === undefined) throw noWorker()
     if (opts.session !== undefined) {
       const repl = await this.runOneRepl(
         code,
@@ -624,10 +626,12 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
 
   /**
    * Rebuild mount nodes before each run so cached bytes never survive a
-   * session change. Workers populate nodes on lookup/open; the fallback
-   * for hosts without shared memory collects a complete seed instead.
-   * Removed mounts disappear, and nested mounts share their parent's
-   * Emscripten mountpoint while retaining workspace routing boundaries.
+   * session change. Workers populate nodes on lookup/open. The fallback
+   * for hosts without shared memory would collect a complete seed of
+   * every mount instead, so a bound run with no worker is refused before
+   * it gets here (`noWorker`). Removed mounts disappear, and nested
+   * mounts share their parent's Emscripten mountpoint while retaining
+   * workspace routing boundaries.
    */
   private async syncMounts(pyodide: PyodideInterface): Promise<void> {
     const files = this.files
@@ -678,16 +682,26 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
                   this.syncSkipped += mutations.length
                   throw new Error(this.syncFailures[0])
                 }
+                let failure: FlushFailure | undefined
                 try {
-                  const failure = sync.flush(mutations)
-                  if (failure !== undefined) {
-                    this.syncSkipped += failure.skipped
-                    throw new Error(failure.message)
-                  }
+                  failure = sync.flush(mutations)
                 } catch (error) {
                   this.syncFailures.push(error instanceof Error ? error.message : String(error))
                   throw error
                 }
+                if (failure === undefined) return
+                // Nothing after the failed entry: it was the call that
+                // asked for this flush, which fails with the mount's errno
+                // as a syscall would, and later calls go on. Entries after
+                // it were dropped, so those keep the run's report.
+                if (failure.skipped > 0) {
+                  this.syncSkipped += failure.skipped
+                  this.syncFailures.push(failure.message)
+                }
+                throw Object.assign(
+                  new Error(failure.message),
+                  failure.code === undefined ? {} : { code: failure.code },
+                )
               },
             },
       )
@@ -859,6 +873,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         signal,
       )) as RunResult
     }
+    if (context !== undefined && this.sync === undefined) throw noWorker()
     const pyodide = await this.ensureLoaded()
     // Seeding happened inside ensureLoaded; its notices ride out on
     // this run's stderr, beside any flush failure and any init switch

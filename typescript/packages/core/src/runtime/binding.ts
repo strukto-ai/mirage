@@ -151,6 +151,7 @@ export function workspaceBridge(
           kwargs.offset = attrs.offset ?? 0
           kwargs.size = attrs.size ?? null
         }
+        if (attrs?.direct === true) kwargs.direct = true
         return (await dispatch('read', path, [], kwargs)) as Uint8Array
       }
       case 'write': {

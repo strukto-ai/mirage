@@ -534,6 +534,11 @@
    "typescript_only": {
     "atimeMs": "Nanoseconds in python and milliseconds in TypeScript, as mtime_ns and mtimeMs: epoch nanoseconds are past 2**53, so a JS number cannot hold them exactly, while a python int can and preview1 asks in them."
    }
+  },
+  "runtime/python/local/config": {
+   "typescript_only": {
+    "LOCAL_CONFIG_KEYS": "A TypeScript config interface lists its keys so an unknown one fails loud at construction; Python's dataclass refuses an unknown field by itself (RuntimeConfig.coerce)."
+   }
   }
  }
 }

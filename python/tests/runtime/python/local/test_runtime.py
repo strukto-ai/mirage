@@ -81,7 +81,7 @@ async def test_filesystem_operations(tmp_path, program, expected):
             0,
             b"v1\n",
             None,
-            id="env-overlays-host",
+            id="env-is-the-sessions",
         ),
         pytest.param(
             RunArgs(
@@ -137,6 +137,25 @@ def test_script_cli_stdin_is_not_embedded_in_process_argv(stdin):
     )
 
 
+@pytest.mark.asyncio
+async def test_the_program_gets_none_of_the_host_environment(monkeypatch):
+    monkeypatch.setenv("MIRAGE_TEST_HOST_ONLY", "host")
+    runtime = LocalRuntime(config={"env": {"MIRAGE_TEST_CONFIG": "config"}})
+    try:
+        result = await runtime.run(
+            RunArgs(
+                code=(
+                    "import os; print(os.environ.get('MIRAGE_TEST_HOST_ONLY'),"
+                    " os.environ['MIRAGE_TEST_CONFIG'], os.environ['MY_VAR'])"
+                ),
+                env={"MY_VAR": "session"},
+            )
+        )
+    finally:
+        await runtime.close()
+    assert (result.exit_code, result.stdout) == (0, b"None config session\n")
+
+
 def test_local_name():
     assert LocalRuntime().name == "local"
 
@@ -145,7 +164,7 @@ def test_local_name():
 @pytest.mark.parametrize(
     "mode", [MountMode.READ, MountMode.WRITE, MountMode.EXEC]
 )
-async def test_version_process_uses_only_host_environment(
+async def test_version_process_gets_none_of_the_session_environment(
     tmp_path, monkeypatch, mode
 ):
     monkeypatch.setenv("MIRAGE_TEST_VERSION_ENV", "host")
@@ -167,7 +186,7 @@ async def test_version_process_uses_only_host_environment(
     runtime = LocalRuntime(config={"home": str(probe)})
     baseline = await runtime.version({})
     expected = json.loads(baseline.stdout)
-    assert expected["MIRAGE_TEST_VERSION_ENV"] == "host"
+    assert expected["MIRAGE_TEST_VERSION_ENV"] is None
     ws = Workspace({"/": RAMVFS()}, mode=mode, runtimes=[runtime, "workspace"])
     try:
         for line in ["python --version", "python3 -V", "python -VV"]:

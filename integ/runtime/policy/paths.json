@@ -79,13 +79,6 @@
                 "create /ro/new.txt"
               ]
             }
-          },
-          "expect_on": {
-            "pyodide": {
-              "exit": 1,
-              "stdout": "FileNotFoundError\nPermissionError\nopened\nOSError\n",
-              "stderr_contains": "failed to create /ro/new.txt on mount: mount /ro/ is read-only"
-            }
           }
         },
         {
@@ -135,6 +128,58 @@
           "expect": {
             "exit": 0,
             "stdout": "open.txt\nsealed\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_hidden_mount_is_not_named",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "a\n"
+            }
+          },
+          "/secret": {
+            "vfs": "ram",
+            "files": {
+              "k.txt": "k\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/secret"
+              ]
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nfrom pathlib import Path\nprint(sorted(n for n in os.listdir('/') if n in ('data', 'secret')), Path('/secret').is_dir())",
+            "js": "const [names] = os.readdir('/')\nconsole.log(JSON.stringify(names.filter((n) => n === 'data' || n === 'secret').sort()), os.stat('/secret')[1])"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "['data'] False\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "[\"data\"] 44\n"
+            }
           }
         }
       ]

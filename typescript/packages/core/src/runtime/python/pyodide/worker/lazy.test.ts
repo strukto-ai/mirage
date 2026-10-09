@@ -62,7 +62,7 @@ const runArgs = (code: string, args: string[] = []): RunArgs => ({
 
 describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
   it.each(['first', 'bad', 'later'])(
-    'counts all writes discarded after %s fails',
+    'fails the open whose truncate the mount refuses (%s)',
     async (rejected) => {
       const names = ['first', 'bad', 'later', 'after', 'last']
       const files = new Map<string, Uint8Array>(
@@ -98,14 +98,16 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
           ),
         )
         const failedAt = names.indexOf(rejected)
+        // The refused truncate fails the open that asked for it, so the
+        // program stops there: what it wrote before landed at each close,
+        // and nothing after it was attempted.
         expect(result.exitCode).toBe(1)
-        // Each file is a truncate and a pwrite: the failed truncate's own
-        // pwrite is skipped too.
-        expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe(
-          `python3: failed to truncate /data/${rejected} on mount: denied\n` +
-            `python3: skipped ${String(2 * (4 - failedAt) + 1)} later mutation(s) after that failure\n`,
-        )
+        const stderr = DEC.decode(result.stderr ?? new Uint8Array())
+        expect(stderr).toContain(`OSError: [Errno 29] I/O error: '/data/${rejected}'`)
+        expect(stderr).not.toContain('python3: failed to')
         expect(writes).toEqual(names.slice(0, failedAt + 1).map((name) => `/data/${name}`))
+        for (const name of names.slice(0, failedAt))
+          expect(DEC.decode(files.get(`/data/${name}`))).toBe('new')
         for (const name of names.slice(failedAt))
           expect(DEC.decode(files.get(`/data/${name}`))).toBe('old')
         const next = await rt.run(runArgs("with open('/data/last', 'w') as f: f.write('fresh')"))

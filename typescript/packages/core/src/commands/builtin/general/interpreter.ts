@@ -22,6 +22,7 @@ import type { DispatchFn, RunResult } from '../../../runtime/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { ExecutionNode } from '../../../workspace/types.ts'
+import { isMissingPath } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 
 /**
@@ -233,14 +234,16 @@ export function makeInterpreterHandler(spec: InterpreterSpec): InterpreterHandle
 
     if (code === null) {
       if (pathScope === null) return errorResult(cmdStr, `${label}: no input\n`, 1)
+      let data: unknown
       try {
-        const [data] = await dispatch('read', toPathSpec(pathScope))
-        const bytes = await readAllBytes(data)
-        code = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
-        if (opts.transformSource !== undefined) code = opts.transformSource(code)
-      } catch {
+        data = (await dispatch('read', toPathSpec(pathScope)))[0]
+      } catch (err) {
+        if (!isMissingPath(err)) throw err
         return errorResult(cmdStr, `${label}: ${pathScope.virtual}: No such file\n`, 1)
       }
+      const bytes = await readAllBytes(data)
+      code = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+      if (opts.transformSource !== undefined) code = opts.transformSource(code)
     }
 
     let stdinBytes: Uint8Array | null = null

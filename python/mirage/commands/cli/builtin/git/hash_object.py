@@ -136,7 +136,7 @@ async def _content(dispatch: DispatchFn, base: PathSpec, name: str) -> bytes:
         )
     except IsADirectoryError as exc:
         raise GitError(f"Unable to hash {name}") from exc
-    except (FileNotFoundError, NotADirectoryError) as exc:
+    except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
         reason = fs_strerror(exc) or "No such file or directory"
         raise GitError(
             f"could not open '{name}' for reading: {reason}"

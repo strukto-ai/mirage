@@ -29,6 +29,7 @@ from mirage.commands.cli.builtin.git.errors import (
     NothingSpecifiedError,
     NoWorkspaceError,
     PathspecError,
+    UnindexableFileError,
     UnknownPathspecError,
 )
 from mirage.commands.cli.builtin.git.ignore import IgnoreStack, load_ignores
@@ -59,6 +60,7 @@ from mirage.commands.cli.builtin.git.worktree import (
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.fs import fs_strerror
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
@@ -275,12 +277,19 @@ async def stage_changes(
     changed: list[tuple[str, str]] = []
     added: list[str] = []
     for path in sorted(stage):
-        data = await entry_bytes(
-            dispatch, location.worktree.join(path), found.files[path]
-        )
+        before = state.entries.get(path.encode())
+        try:
+            data = await entry_bytes(
+                dispatch, location.worktree.join(path), found.files[path]
+            )
+        except PermissionError as exc:
+            raise UnindexableFileError(
+                path,
+                fs_strerror(exc) or "Permission denied",
+                before is not None,
+            ) from exc
         sha = await store_blob(dispatch, location.commondir, data)
         entry = staged_entry(sha, found.files[path], len(data))
-        before = state.entries.get(path.encode())
         if before is None:
             added.append(path)
         elif (before.sha, before.mode) != (entry.sha, entry.mode):

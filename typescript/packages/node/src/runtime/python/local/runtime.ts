@@ -13,21 +13,47 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ChildProcess, spawn } from 'node:child_process'
-import { HOME_CONFIG_KEYS } from '@struktoai/mirage-core/runtime/config'
-import type { HomeConfig } from '@struktoai/mirage-core/runtime/config'
+import { accessSync, constants, statSync } from 'node:fs'
+import { delimiter, join } from 'node:path'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
 import { initArgv, type InitFlags } from '@struktoai/mirage-core/runtime/python/flags'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunArgs, RunResult, RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
+import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
+
+/**
+ * Where the host's own PATH finds an interpreter, as Python's `shutil.which`
+ * finds the twin's: the program's environment carries no host PATH, so the
+ * lookup cannot be left to spawn. A name with a slash is taken as given, and
+ * one the PATH lacks too, so spawn reports it missing.
+ */
+function onHostPath(name: string): string {
+  if (name.includes('/')) return name
+  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+    if (dir === '') continue
+    const candidate = join(dir, name)
+    try {
+      if (statSync(candidate).isFile()) {
+        accessSync(candidate, constants.X_OK)
+        return candidate
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === undefined) throw err
+    }
+  }
+  return name
+}
 
 /**
  * Run Python code on a host interpreter as a subprocess.
  *
  * Each run spawns `<interpreter> -c <code>`; the code sees the host
- * filesystem and environment, not the workspace mounts. Mirrors the
+ * filesystem, not the workspace mounts. Its environment is the session's
+ * and the config `env`, nothing of mirage's own, as a sandlock child
+ * gets. Mirrors the
  * python LocalRuntime: the interpreter defaults to `python3` on PATH
  * (node has no embedded python, unlike the python package which
  * defaults to its own interpreter); point the config `home` or the
@@ -45,10 +71,10 @@ export class LocalRuntime extends PythonRuntime {
   private readonly children = new Set<ChildProcess>()
 
   constructor(options: RuntimeOptions = {}) {
-    super(options, HOME_CONFIG_KEYS)
-    const home = (this.config as HomeConfig).home
+    super(options, LOCAL_CONFIG_KEYS)
+    const home = (this.config as LocalConfig).home
     const chosen = home !== undefined && home !== '' ? home : process.env[LOCAL_HOME_ENV]
-    this.python = chosen !== undefined && chosen !== '' ? chosen : 'python3'
+    this.python = onHostPath(chosen !== undefined && chosen !== '' ? chosen : 'python3')
   }
 
   override version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {
@@ -80,7 +106,7 @@ export class LocalRuntime extends PythonRuntime {
       // proc.kill() on cancellation) and 'close' settles the promise.
       const child = spawn(this.python, argv, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, ...env },
+        env: { ...(this.config as LocalConfig).env, ...env },
         ...(signal !== undefined ? { signal, killSignal: 'SIGKILL' } : {}),
       })
       this.children.add(child)

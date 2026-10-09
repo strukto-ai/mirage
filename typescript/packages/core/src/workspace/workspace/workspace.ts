@@ -99,7 +99,9 @@ import {
   runWithRefusalSink,
   runWithSession,
   runAsProgram,
+  sessionVisibility,
 } from '../../context/session_context.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import { namespaceViewOf } from '../mount/namespace/view.ts'
 import { asyncContextIsolatesTasks, createAsyncContext } from '../../utils/async_context.ts'
 import { makeVar, VarAttr } from '../../shell/variable.ts'
@@ -537,13 +539,17 @@ export class Workspace {
    * mounted: the workspace adds it so arg-less commands and root listing
    * have somewhere to resolve, so announcing it as a mount would make
    * every runtime report a claim on a VFS the embedder never asked for.
+   * A mount the bound session hides is withheld too: a runtime that builds
+   * its own tree from this list (Pyodide) would otherwise show its name.
    */
   private sandboxVisibleMounts(): string[] {
+    const vis = sessionVisibility()
     const prefixes: string[] = []
     for (const m of this.registry.allMounts()) {
       if (m.prefix === HISTORY_PREFIX || m.prefix === HISTORY_PREFIX + '/') continue
       if (m.prefix === BIN_PREFIX + '/') continue
       if (this.syntheticRootAnchor && m.prefix === '/') continue
+      if (!pathVisible(vis, rstripSlash(m.prefix) || '/')) continue
       prefixes.push(m.prefix)
     }
     return prefixes

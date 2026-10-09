@@ -72,7 +72,7 @@ describe('LocalRuntime', () => {
   )
 
   it.each([MountMode.READ, MountMode.WRITE, MountMode.EXEC])(
-    'uses only the host environment for the version process in %s mode',
+    'gives the version process none of the session environment in %s mode',
     async (mode) => {
       const dir = await mkdtemp(join(tmpdir(), 'mirage-local-version-env-'))
       vi.stubEnv('MIRAGE_TEST_VERSION_ENV', 'host')
@@ -96,7 +96,7 @@ describe('LocalRuntime', () => {
       const rt = new LocalRuntime({ config: { home: probe } })
       const baseline = await rt.version({})
       const expected: unknown = JSON.parse(DEC.decode(baseline.stdout))
-      expect(expected).toMatchObject({ MIRAGE_TEST_VERSION_ENV: 'host' })
+      expect(expected).toMatchObject({ MIRAGE_TEST_VERSION_ENV: null })
       const ws = new Workspace({ '/': new RAMVFS() }, { mode, runtimes: [rt, 'workspace'] })
       try {
         for (const line of ['python --version', 'python3 -V', 'python -VV']) {
@@ -161,6 +161,27 @@ describe('LocalRuntime', () => {
     })
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe("['alpha', 'beta'] piped V\n")
+  })
+
+  it('gives the program none of the host environment', async () => {
+    vi.stubEnv('MIRAGE_TEST_HOST_ONLY', 'host')
+    const rt = new LocalRuntime({ config: { env: { MIRAGE_TEST_CONFIG: 'config' } } })
+    try {
+      const result = await rt.run({
+        code:
+          "import os; print(os.environ.get('MIRAGE_TEST_HOST_ONLY'), " +
+          "os.environ['MIRAGE_TEST_CONFIG'], os.environ['MY_VAR'])",
+        args: [],
+        stdin: null,
+        env: { MY_VAR: 'session' },
+        flags: {},
+      })
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe('None config session\n')
+    } finally {
+      vi.unstubAllEnvs()
+      await rt.close()
+    }
   })
 
   it('hands the init switches to the host interpreter', async () => {

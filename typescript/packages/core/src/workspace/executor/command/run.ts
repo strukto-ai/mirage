@@ -103,7 +103,7 @@ interface RunOnMountOpts {
 }
 
 /** The 126 result for a command no runtime accepted. */
-function admissionDenial(cmdName: string): IOResult {
+export function admissionDenial(cmdName: string): IOResult {
   const msg = `${cmdName}: no runtime accepted this line\n`
   return new IOResult({ exitCode: 126, stderr: encodeText(msg) })
 }

@@ -12,20 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export class PyodideUnavailableError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options)
-    this.name = 'PyodideUnavailableError'
-  }
-}
+import { HOME_CONFIG_KEYS, type HomeConfig } from '@struktoai/mirage-core/runtime/config'
 
 /**
- * A run bound to a workspace with no worker to run it in. The guest reaches
- * the mounts only through the worker's synchronous bridge, so without one
- * every file of every mount would have to be copied in before each run.
+ * The host interpreter and the environment its program runs with. Mirrors
+ * Python's LocalConfig.
  */
-export function noWorker(): PyodideUnavailableError {
-  return new PyodideUnavailableError(
-    'pyodide reaches the workspace only from its worker, which needs SharedArrayBuffer (a cross-origin isolated page)',
-  )
+export interface LocalConfig extends HomeConfig {
+  /**
+   * Environment set for the program beside the session's; nothing else of
+   * the host's own environment is passed, as for a sandlock child.
+   */
+  env?: Record<string, string>
 }
+
+export const LOCAL_CONFIG_KEYS: readonly string[] = [...HOME_CONFIG_KEYS, 'env']

@@ -23,6 +23,7 @@ import { Limit } from '../../../types.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
+import { PythonRuntime } from '../../../runtime/python/base.ts'
 import type { RunArgs, RunResult, RuntimeLanguage } from '../../../runtime/types.ts'
 import { SessionState } from '../../session/session.ts'
 import { dropsMountCaches, handleCli } from './cli.ts'
@@ -310,6 +311,19 @@ class FakePyRuntime extends LanguageRuntime {
   }
 }
 
+class TierPyRuntime extends PythonRuntime {
+  seen: RunArgs[] = []
+
+  constructor(readonly name: string) {
+    super()
+  }
+
+  run(args: RunArgs): Promise<RunResult> {
+    this.seen.push(args)
+    return Promise.resolve({ stdout: new TextEncoder().encode('ran\n'), stderr: null, exitCode: 0 })
+  }
+}
+
 class OtherPyRuntime extends FakePyRuntime {
   override readonly name = 'otherpy'
 }
@@ -569,6 +583,41 @@ describe('handleCli script arm', () => {
     expect(io.exitCode).toBe(0)
     expect(first.seen).toEqual([])
     expect(pinned.seen).toHaveLength(1)
+  })
+
+  // A route policy or a runtime's script that places this line's python3
+  // on the second entry places the script there too.
+  it('runs where the line runs its interpreter', async () => {
+    const first = new TierPyRuntime('first')
+    const second = new TierPyRuntime('second')
+    const [, io] = await handleCli(
+      scriptInstall(),
+      ['pager'],
+      new SessionState({ sessionId: 't' }),
+      null,
+      {
+        entries: [first, second],
+        routing: { bindings: { python3: second, python: second }, fallback: null },
+      },
+    )
+    expect(io.exitCode).toBe(0)
+    expect(first.seen).toEqual([])
+    expect(second.seen).toHaveLength(1)
+  })
+
+  it('is refused when the line refused its interpreter', async () => {
+    const py = new TierPyRuntime('first')
+    const [, io, node] = await handleCli(
+      scriptInstall(),
+      ['pager'],
+      new SessionState({ sessionId: 't' }),
+      null,
+      { entries: [py], routing: { bindings: { python3: null }, fallback: null } },
+    )
+    expect(io.exitCode).toBe(126)
+    expect(dec.decode(await materialize(io.stderr))).toBe('pager: no runtime accepted this line\n')
+    expect(node.exitCode).toBe(126)
+    expect(py.seen).toEqual([])
   })
 
   it('an unknown pin exits 127', async () => {

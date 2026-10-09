@@ -50,6 +50,7 @@ from mirage.context import (
     reset_explaining,
     reset_program_invocation,
     reset_refusal_sink,
+    session_visibility,
     set_current_session,
     set_explaining,
     set_program_invocation,
@@ -118,6 +119,7 @@ from mirage.types import (
     WritePolicy,
     parse_mount_mode,
 )
+from mirage.utils.hidden import path_visible
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.bin import BinViewVFS
@@ -1015,8 +1017,11 @@ class Workspace:
         so arg-less commands and root listing have somewhere to resolve,
         so announcing it as a mount would make every runtime report a
         claim on a VFS the embedder never asked for (TS
-        ``sandboxVisibleMounts``).
+        ``sandboxVisibleMounts``). A mount the bound session hides is
+        withheld too: a runtime that builds its own tree from this list
+        would otherwise show the hidden mount's name.
         """
+        vis = session_visibility()
         prefixes: list[str] = []
         for entry in self._registry.mounts():
             if entry.prefix in (
@@ -1026,6 +1031,8 @@ class Workspace:
             ):
                 continue
             if self._implicit_root and entry.prefix == "/":
+                continue
+            if not path_visible(vis, entry.prefix.rstrip("/") or "/"):
                 continue
             prefixes.append(entry.prefix)
         return prefixes
