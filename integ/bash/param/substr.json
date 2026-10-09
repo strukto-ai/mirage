@@ -367,11 +367,11 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "x=abcdef; echo \"${x:08}\"",
+      "command": "zo=(x y); zo[010]=z; zo[ 9 ]=n; echo \"${!zo[@]}\"; unset zo; bash -c 'a=(x y); echo \"${a[08]}\"; echo no'; bash -c 'a=(x y); a[1_0]=1; echo no'; x=abcdef; echo \"${x:08}\"",
       "expect": {
         "exit": 1,
-        "stdout": "",
-        "stderr": "bash: x: 08: value too great for base (error token is \"08\")\n"
+        "stdout": "0 1 8 9\n",
+        "stderr": "bash: 08: value too great for base (error token is \"08\")\nbash: 1_0: value too great for base (error token is \"1_0\")\nbash: x: 08: value too great for base (error token is \"08\")\n"
       }
     },
     {
