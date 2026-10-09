@@ -70,7 +70,9 @@ class LocalRuntime(PythonRuntime):
                     "(from the runtime entry's config `home` or "
                     f"{LOCAL_HOME_ENV})"
                 )
-            self._python = resolved
+            # Absolute: the program's env has no host PATH to resolve a
+            # name found through an empty or `.` entry against.
+            self._python = os.path.abspath(resolved)
         else:
             self._python = sys.executable
 

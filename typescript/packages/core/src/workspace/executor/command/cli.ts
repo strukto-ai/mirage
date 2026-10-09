@@ -25,7 +25,7 @@ import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/c
 import { CLISpec, type CLIInvocation, type CLIView } from '../../../commands/cli/types.ts'
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import { verbVisible } from '../../lookup/lookup.ts'
-import { type DispatchFn, type ScriptSource } from '../../../runtime/types.ts'
+import { type DispatchFn, type RunResult, type ScriptSource } from '../../../runtime/types.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../../view/types.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle, Operand, type FlagValue } from '../../../commands/spec/types.ts'
@@ -41,9 +41,10 @@ import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForLanguage } from '../../../runtime/routing/decide.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import { admissionDenial } from './run.ts'
-import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
+import { runOutput, runtimeUnavailable } from '../../../commands/builtin/general/interpreter.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
+import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { optionError, parseFlags } from './flags.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
 import { encodeText } from '../../../shell/bytes.ts'
@@ -87,10 +88,12 @@ function parseSpecFor(leaf: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): [
  * program runs where this line runs its language's own interpreter
  * (the tier's head word, `python3` or `node`), so a route policy or a
  * runtime's script places it as it places that command, and a line
- * every capturer refused is refused here too (126). With no line
- * decision the first entry speaking the language serves
- * (runtimeForLanguage). Every other refusal names the world so the fix
- * (add or rename an entry) is visible (127). Mirrors Python's
+ * every capturer refused is refused here too (126). The first entry
+ * speaking the language serves when there is no line decision or the
+ * workspace serves that interpreter itself (runtimeForLanguage); a
+ * placement on a runtime that does not run the script's language is
+ * refused like such a pin. Every other refusal names the world so the
+ * fix (add or rename an entry) is visible (127). Mirrors Python's
  * `_select_runtime`.
  */
 function selectRuntime(
@@ -104,38 +107,42 @@ function selectRuntime(
     throw new Error(`selecting a runtime for '${prog}' without a script`)
   }
   const known = entries.map((entry) => `'${entry.name}'`).join(', ') || 'none'
+  let chosen: Runtime | null | undefined
   if (leaf.runtime !== null) {
-    const pinned = entries.find((entry) => entry.name === leaf.runtime) ?? null
-    if (pinned === null) {
+    chosen = entries.find((entry) => entry.name === leaf.runtime) ?? null
+    if (chosen === null) {
       return [
         null,
         missing(`${prog}: unknown runtime: '${leaf.runtime}' (workspace runtimes: ${known})`),
       ]
     }
-    if (!(pinned instanceof LanguageRuntime) || pinned.language !== script.language) {
+  } else {
+    const entry = runtimeForLanguage(entries, script.language)
+    if (entry === null) {
       return [
         null,
-        missing(`${prog}: runtime '${pinned.name}' does not run ${script.language} scripts`),
+        missing(
+          `${prog}: no workspace runtime runs ${script.language} scripts (workspace runtimes: ${known})`,
+        ),
       ]
     }
-    return [pinned, null]
+    const head = (entry.constructor as { commands?: readonly string[] }).commands?.[0]
+    chosen =
+      routing === undefined || head === undefined
+        ? entry
+        : head in routing.bindings
+          ? routing.bindings[head]
+          : routing.fallback
+    if (chosen === null || chosen === undefined) return [null, admissionDenial(prog)]
+    if (chosen instanceof WorkspaceRuntime) chosen = entry
   }
-  const entry = runtimeForLanguage(entries, script.language)
-  if (entry === null) {
+  if (!(chosen instanceof LanguageRuntime) || chosen.language !== script.language) {
     return [
       null,
-      missing(
-        `${prog}: no workspace runtime runs ${script.language} scripts (workspace runtimes: ${known})`,
-      ),
+      missing(`${prog}: runtime '${chosen.name}' does not run ${script.language} scripts`),
     ]
   }
-  if (routing === undefined) return [entry, null]
-  const head = (entry.constructor as { commands?: readonly string[] }).commands?.[0]
-  if (head === undefined) return [entry, null]
-  const bound = head in routing.bindings ? routing.bindings[head] : routing.fallback
-  if (bound === null || bound === undefined) return [null, admissionDenial(prog)]
-  if (bound instanceof LanguageRuntime && bound.language === script.language) return [bound, null]
-  return [entry, null]
+  return [chosen, null]
 }
 
 /** The 127 a script CLI answers when no entry can run its program. */
@@ -167,22 +174,30 @@ async function scriptOutput(
     env[CLI_CONFIG_ENV] = JSON.stringify(inv.config)
   }
   const stdin = inv.stdin !== null ? await materialize(inv.stdin) : null
-  // A .mjs source needs the engine's module mode, the same bit the js
-  // command derives from the operand's extension.
-  const result = await runtime.execute({
-    kind: 'code',
-    language: runtime.language,
-    code: script.source,
-    args: [...inv.argv],
-    prog,
-    scriptCli: true,
-    cwd: inv.cwd,
-    env,
-    stdin,
-    signal,
-    ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
-    ...(script.module ? { flags: { module: true } } : {}),
-  })
+  let result: RunResult
+  try {
+    // A .mjs source needs the engine's module mode, the same bit the js
+    // command derives from the operand's extension.
+    result = await runtime.execute({
+      kind: 'code',
+      language: runtime.language,
+      code: script.source,
+      args: [...inv.argv],
+      prog,
+      scriptCli: true,
+      cwd: inv.cwd,
+      env,
+      stdin,
+      signal,
+      ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
+      ...(script.module ? { flags: { module: true } } : {}),
+    })
+  } catch (err) {
+    // The interpreter is missing, not the program: 127, as the
+    // interpreter command answers for the same runtime.
+    if (!runtimeUnavailable(err)) throw err
+    return [null, missing(`${prog}: ${err.message}`)]
+  }
   return runOutput(result)
 }
 

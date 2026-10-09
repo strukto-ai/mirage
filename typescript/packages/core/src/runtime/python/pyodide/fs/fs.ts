@@ -25,6 +25,7 @@ import type { PyodideFsSeed } from './seed.ts'
 import { NodeTable } from './nodes.ts'
 import type {
   ErrnoCodes,
+  FlushFailure,
   FSAttr,
   FSHost,
   FSNode,
@@ -172,6 +173,9 @@ export class PyodideFs {
    *     One mountpoint serves every mirage mount nested under its
    *     prefix, so this is the only boundary fact left to check ops
    *     against; Emscripten's own cross-mount checks cannot see it.
+   *   sync: the worker's blocking way to the mounts, absent without one.
+   *   deferred: the refusals the mount gave a path whose call has not
+   *     come yet, shared by every mountpoint as the journal is.
    */
   constructor(
     host: FSHost,
@@ -180,6 +184,7 @@ export class PyodideFs {
     prefix: string,
     mountOf: (path: string) => string | null,
     private readonly sync?: SyncVFS,
+    private readonly deferred = new Map<string, FlushFailure>(),
   ) {
     this.host = host
     this.prefix = prefix
@@ -200,8 +205,8 @@ export class PyodideFs {
     }
     const streamOps: StreamOps = {
       open: this.streamOpen.bind(this),
-      close: () => {
-        this.settle()
+      close: (stream) => {
+        this.settle(this.nodes.pathOf(stream.node))
       },
       read: this.streamRead.bind(this),
       write: this.streamWrite.bind(this),
@@ -291,7 +296,7 @@ export class PyodideFs {
     // than at close is what makes a bare `os.truncate(path, n)`, which
     // opens no handle at all, reach the mount.
     if (size !== undefined) this.journal.markTruncate(this.nodes.pathOf(node), size)
-    this.settle()
+    this.settle(this.nodes.pathOf(node))
     if (attr.mode !== undefined) node.mode = attr.mode
     if (attr.atime !== undefined) node.atime = attr.atime
     if (attr.mtime !== undefined) node.mtime = attr.mtime
@@ -309,8 +314,8 @@ export class PyodideFs {
     const sync = this.sync
     let found = this.nodes.childOf(parent, name)
     if (found === undefined && sync !== undefined) {
-      found = this.readThrough(() => {
-        const path = this.nodes.pathOf(parent) + '/' + name
+      const path = this.nodes.pathOf(parent) + '/' + name
+      found = this.readThrough([path], () => {
         let stat: VFSStat
         try {
           stat = sync.stat(path)
@@ -350,7 +355,7 @@ export class PyodideFs {
     // The create is what carries a file that is made and never written
     // (`Path.touch()`, `open(p,'w').close()`) through to the mount.
     else this.journal.markCreate(path)
-    this.settle()
+    this.settle(path)
     const node = this.nodes.makeNode(parent, name, mode)
     node.rdev = rdev
     // FS.open finalizes a new file with a chmod of its own, right here
@@ -372,14 +377,14 @@ export class PyodideFs {
       throw errnoError(this.host, this.errno, 'EXDEV')
     }
     this.journal.markRename(from, to)
-    this.settle()
+    this.settle(from, to)
     this.nodes.move(node, newDir, newName)
   }
 
   private unlink(parent: FSNode, name: string): void {
     const path = this.nodes.pathOf(parent) + '/' + name
     this.journal.markUnlink(path)
-    this.settle()
+    this.settle(path)
     this.nodes.detach(parent, name)
   }
 
@@ -389,7 +394,7 @@ export class PyodideFs {
     }
     const path = this.nodes.pathOf(parent) + '/' + name
     this.journal.markRmdir(path)
-    this.settle()
+    this.settle(path)
     this.nodes.detach(parent, name)
   }
 
@@ -404,7 +409,7 @@ export class PyodideFs {
   private readdir(node: FSNode): string[] {
     const sync = this.sync
     if (sync !== undefined) {
-      this.readThrough(() => {
+      this.readThrough([], () => {
         const dir = this.nodes.pathOf(node) + '/'
         const again = node.listed === true
         for (const entry of sync.readdir(dir, !again)) {
@@ -423,23 +428,46 @@ export class PyodideFs {
   }
 
   /**
-   * Send the journal to the mount now, so the call that just recorded an
-   * entry fails with the mount's errno if the mount refuses it, as the
-   * syscall would. Without a worker there is no mount to send it to yet,
-   * and the journal waits for the run's end.
+   * Send the journal to the mount now, in guest order. An entry the mount
+   * refuses fails the call that touched its path with the mount's errno,
+   * this call or that file's next one (its close), as a deferred write
+   * error does; that path's later entries go with it, and every other
+   * file's still land. Without a worker there is no mount to send to
+   * yet, and the journal waits for the run's end.
+   *
+   * Args:
+   *   paths: the paths this call touched.
    */
-  private settle(): void {
-    if (this.sync === undefined) return
+  private settle(...paths: string[]): void {
+    const sync = this.sync
+    if (sync === undefined) return
+    let pending = this.journal.takeMutations()
     try {
-      this.sync.flush(this.journal.takeMutations())
+      while (pending.length > 0) {
+        const failure = sync.flush(pending)
+        if (failure === undefined) break
+        const rest = pending.length - failure.skipped
+        const failed = pending[rest - 1]
+        if (failed === undefined) break
+        this.deferred.set(failed.path, failure)
+        pending = pending
+          .slice(rest)
+          .filter((m) => m.path !== failed.path && !(m.kind === 'rename' && m.dst === failed.path))
+      }
     } catch (error) {
       throw errnoError(this.host, this.errno, classify(error) ?? 'EIO')
     }
+    for (const path of paths) {
+      const failure = this.deferred.get(path)
+      if (failure === undefined) continue
+      this.deferred.delete(path)
+      throw errnoError(this.host, this.errno, failure.code ?? 'EIO')
+    }
   }
 
-  private readThrough<T>(read: () => T): T {
+  private readThrough<T>(paths: readonly string[], read: () => T): T {
+    this.settle(...paths)
     try {
-      this.sync?.flush(this.journal.takeMutations())
       return read()
     } catch (error) {
       throw errnoError(this.host, this.errno, classify(error) ?? 'EIO')
@@ -481,7 +509,8 @@ export class PyodideFs {
   private classifyNode(node: FSNode): void {
     const sync = this.sync
     if (sync === undefined) throw errnoError(this.host, this.errno, 'EIO')
-    const stat = this.readThrough(() => sync.stat(this.nodes.pathOf(node)))
+    const path = this.nodes.pathOf(node)
+    const stat = this.readThrough([path], () => sync.stat(path))
     node.unclassified = false
     this.nodes.retype(node, stat.mode)
     node.rdev = stat.rdev ?? 0
@@ -492,7 +521,8 @@ export class PyodideFs {
   private loadContents(node: FSNode): void {
     const sync = this.sync
     if (node.loaded !== false || sync === undefined) return
-    const bytes = this.readThrough(() => sync.read(this.nodes.pathOf(node)))
+    const path = this.nodes.pathOf(node)
+    const bytes = this.readThrough([path], () => sync.read(path))
     node.contents = bytes
     node.usedBytes = bytes.length
     node.loaded = true
@@ -512,8 +542,9 @@ export class PyodideFs {
    *   target: what it points at, verbatim.
    */
   private symlink(parent: FSNode, name: string, target: string): FSNode {
-    this.journal.markSymlink(this.nodes.pathOf(parent) + '/' + name, target)
-    this.settle()
+    const path = this.nodes.pathOf(parent) + '/' + name
+    this.journal.markSymlink(path, target)
+    this.settle(path)
     const node = this.nodes.makeNode(parent, name, LINK_MODE)
     node.link = target
     return node

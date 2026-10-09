@@ -120,6 +120,71 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     },
   )
 
+  it('drops the name of a mount a named console no longer sees', async () => {
+    let prefixes = ['/data/', '/secret/']
+    const dispatch: BridgeDispatchFn = (_op, path) =>
+      Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' }))
+    const rt = new PyodideRuntime()
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => prefixes)))
+    const names = "import os; print(sorted(n for n in os.listdir('/') if n in ('data', 'secret')))"
+    try {
+      expect(DEC.decode((await rt.eval(names, { session: 'one' })).stdout)).toBe(
+        "['data', 'secret']\n",
+      )
+      prefixes = ['/data/']
+      expect(DEC.decode((await rt.eval(names, { session: 'one' })).stdout)).toBe("['data']\n")
+    } finally {
+      await rt.close()
+    }
+  })
+
+  it("fails only the close of the file whose write the mount refuses, not another file's", async () => {
+    const files = new Map<string, Uint8Array>(
+      ['bad', 'good', 'later'].map((name) => [`/data/${name}`, ENC.encode('old')]),
+    )
+    const dispatch: BridgeDispatchFn = async (op, path, bytes) => {
+      await Promise.resolve()
+      const data = files.get(path)
+      if (data === undefined) throw Object.assign(new Error(path), { code: 'ENOENT' })
+      if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: data.length })
+      if (op === 'read') return data
+      if (op === 'pwrite') {
+        if (path === '/data/bad') throw new Error('denied')
+        files.set(path, bytes ?? new Uint8Array())
+        return
+      }
+      throw new Error(`unexpected op: ${op}`)
+    }
+    const rt = new PyodideRuntime()
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
+    try {
+      const result = await rt.run(
+        runArgs(
+          [
+            "bad = open('/data/bad', 'r+')",
+            "good = open('/data/good', 'r+')",
+            "bad.write('new'); bad.flush()",
+            "good.write('new'); good.flush()",
+            'good.close()',
+            'try:',
+            '    bad.close()',
+            'except OSError as e:',
+            "    print('bad', e.errno)",
+            "with open('/data/later', 'r+') as f: f.write('new')",
+          ].join('\n'),
+        ),
+      )
+      expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe('bad 29\n')
+      expect(DEC.decode(files.get('/data/bad'))).toBe('old')
+      expect(DEC.decode(files.get('/data/good'))).toBe('new')
+      expect(DEC.decode(files.get('/data/later'))).toBe('new')
+    } finally {
+      await rt.close()
+    }
+  })
+
   it.each([false, true])(
     'stops a timed-out script CLI and recovers (warm worker: %s)',
     async (warm) => {

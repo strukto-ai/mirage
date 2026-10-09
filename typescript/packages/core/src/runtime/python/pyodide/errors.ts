@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { failureText } from './worker/failure.ts'
+
 export class PyodideUnavailableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options)
@@ -23,9 +25,18 @@ export class PyodideUnavailableError extends Error {
  * A run bound to a workspace with no worker to run it in. The guest reaches
  * the mounts only through the worker's synchronous bridge, so without one
  * every file of every mount would have to be copied in before each run.
+ *
+ * Args:
+ *   cause: what stopped the worker from starting, absent when the host
+ *     has no shared memory to start one with.
  */
-export function noWorker(): PyodideUnavailableError {
-  return new PyodideUnavailableError(
-    'pyodide reaches the workspace only from its worker, which needs SharedArrayBuffer (a cross-origin isolated page)',
-  )
+export function noWorker(cause?: unknown): PyodideUnavailableError {
+  if (cause === undefined) {
+    return new PyodideUnavailableError(
+      'pyodide reaches the workspace only from its worker, which needs SharedArrayBuffer (a cross-origin isolated page)',
+    )
+  }
+  return new PyodideUnavailableError(`pyodide could not start its worker: ${failureText(cause)}`, {
+    cause,
+  })
 }

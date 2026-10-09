@@ -544,6 +544,11 @@
    "typescript_only": {
     "onHostPath": "Finds the interpreter on the host PATH before the child gets a clean env; Python uses shutil.which, and node's standard library has no PATH lookup."
    }
+  },
+  "commands/builtin/general/interpreter": {
+   "typescript_only": {
+    "runtimeUnavailable": "A TypeScript engine (Pyodide, Monty, QuickJS) can find it cannot run only when a run starts, and says so with its own error, which the interpreter and a script CLI both answer with 127; a Python entry that cannot run fails to build and is left out of the world, so no run raises it."
+   }
   }
  }
 }

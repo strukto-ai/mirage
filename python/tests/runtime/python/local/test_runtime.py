@@ -14,6 +14,7 @@
 
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -158,6 +159,23 @@ async def test_the_program_gets_none_of_the_host_environment(monkeypatch):
 
 def test_local_name():
     assert LocalRuntime().name == "local"
+
+
+@pytest.mark.asyncio
+async def test_a_bare_home_found_through_an_empty_path_entry_runs(
+    tmp_path, monkeypatch
+):
+    # An empty PATH entry is the current directory; the name resolves to
+    # an absolute path, since the program's environment has no PATH.
+    probe = tmp_path / "mirage-probe"
+    probe.write_text(f"#!{sys.executable}\nprint('probe')\n")
+    probe.chmod(0o755)
+    monkeypatch.setenv("PATH", os.pathsep)
+    monkeypatch.chdir(tmp_path)
+    runtime = LocalRuntime(config={"home": "mirage-probe"})
+    monkeypatch.chdir("/")
+    result = await runtime.version({})
+    assert result.stdout == b"probe\n"
 
 
 @pytest.mark.asyncio

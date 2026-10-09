@@ -26,10 +26,12 @@ from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import Action, Deny, Policy
 from mirage.policy.types import SessionContext
+from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.variable import VarAttr
 from mirage.types import Limit, MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
@@ -616,6 +618,10 @@ class TierPyRuntime(PythonRuntime):
         return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
 
 
+class LineBox(Runtime):
+    name = "box"
+
+
 @pytest.mark.asyncio
 async def test_script_runs_where_the_line_runs_its_interpreter():
     # A route policy or a runtime's script that places this line's
@@ -648,6 +654,40 @@ async def test_script_is_refused_when_the_line_refused_its_interpreter():
     assert io.stderr == b"pager: no runtime accepted this line\n"
     assert node.exit_code == 126
     assert py.seen == []
+
+
+@pytest.mark.asyncio
+async def test_script_is_refused_where_the_line_runs_python3_without_python():
+    # A line whose python3 runs inside a sandbox runs no script there, and
+    # the entry the line passed over does not run it either.
+    py = TierPyRuntime("first")
+    _, io, _ = await handle_cli(
+        script_install(),
+        ["pager"],
+        SessionState("t"),
+        context=CLIContext(
+            entries=[py],
+            routing=RouteDecision(bindings={"python3": LineBox()}),
+        ),
+    )
+    assert io.exit_code == 127
+    assert io.stderr == b"pager: runtime 'box' does not run python scripts\n"
+    assert py.seen == []
+
+
+@pytest.mark.asyncio
+async def test_script_runs_on_the_first_entry_where_the_workspace_serves_python3():
+    py = TierPyRuntime("first")
+    _, io, _ = await handle_cli(
+        script_install(),
+        ["pager"],
+        SessionState("t"),
+        context=CLIContext(
+            entries=[py], routing=RouteDecision(fallback=WorkspaceRuntime())
+        ),
+    )
+    assert io.exit_code == 0
+    assert len(py.seen) == 1
 
 
 @pytest.mark.asyncio

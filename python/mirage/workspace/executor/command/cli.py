@@ -47,6 +47,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import RouteDecision, runtime_for_language
 from mirage.runtime.types import CodeExecution, DispatchFn, ScriptSource
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
 from mirage.view.types import NamespaceView, SessionView, StatPath
@@ -136,10 +137,13 @@ def _select_runtime(
     program runs where this line runs its language's own interpreter
     (the tier's head word, ``python3`` or ``node``), so a route policy
     or a runtime's script places it as it places that command, and a
-    line every capturer refused is refused here too (126). With no
-    line decision the first entry speaking the language serves
-    (runtime_for_language). Every other refusal names the world so the
-    fix (add or rename an entry) is visible (127).
+    line every capturer refused is refused here too (126). The first
+    entry speaking the language serves when there is no line decision
+    or the workspace serves that interpreter itself
+    (runtime_for_language); a placement on a runtime that does not run
+    the script's language is refused like such a pin. Every other
+    refusal names the world so the fix (add or rename an entry) is
+    visible (127).
 
     Args:
         prog (str): display path for message attribution.
@@ -154,43 +158,43 @@ def _select_runtime(
             f"selecting a runtime for {prog!r} without a script"
         )
     known = ", ".join(repr(entry.name) for entry in entries) or "none"
+    chosen: Runtime | None
     if leaf.runtime is not None:
-        pinned = next(
+        chosen = next(
             (entry for entry in entries if entry.name == leaf.runtime), None
         )
-        if pinned is None:
+        if chosen is None:
             return None, _missing(
                 f"{prog}: unknown runtime: {leaf.runtime!r} "
                 f"(workspace runtimes: {known})"
             )
-        if (
-            not isinstance(pinned, LanguageRuntime)
-            or pinned.language != script.language
-        ):
+    else:
+        entry = runtime_for_language(entries, script.language)
+        if entry is None:
             return None, _missing(
-                f"{prog}: runtime {pinned.name!r} does not run "
-                f"{script.language} scripts"
+                f"{prog}: no workspace runtime runs "
+                f"{script.language} scripts "
+                f"(workspace runtimes: {known})"
             )
-        return pinned, None
-    entry = runtime_for_language(entries, script.language)
-    if entry is None:
-        return None, _missing(
-            f"{prog}: no workspace runtime runs "
-            f"{script.language} scripts "
-            f"(workspace runtimes: {known})"
+        heads = type(entry).captures
+        chosen = (
+            entry
+            if routing is None or not heads
+            else routing.bindings.get(heads[0], routing.fallback)
         )
-    heads = type(entry).captures
-    if routing is None or not heads:
-        return entry, None
-    bound = routing.bindings.get(heads[0], routing.fallback)
-    if bound is None:
-        return None, admission_denial(prog)
+        if chosen is None:
+            return None, admission_denial(prog)
+        if isinstance(chosen, WorkspaceRuntime):
+            chosen = entry
     if (
-        isinstance(bound, LanguageRuntime)
-        and bound.language == script.language
+        not isinstance(chosen, LanguageRuntime)
+        or chosen.language != script.language
     ):
-        return bound, None
-    return entry, None
+        return None, _missing(
+            f"{prog}: runtime {chosen.name!r} does not run "
+            f"{script.language} scripts"
+        )
+    return chosen, None
 
 
 def _missing(message: str) -> IOResult:

@@ -14,7 +14,7 @@
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import { accessSync, constants, statSync } from 'node:fs'
-import { delimiter, join } from 'node:path'
+import { delimiter, resolve } from 'node:path'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
 import { initArgv, type InitFlags } from '@struktoai/mirage-core/runtime/python/flags'
@@ -26,15 +26,15 @@ const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
 
 /**
  * Where the host's own PATH finds an interpreter, as Python's `shutil.which`
- * finds the twin's: the program's environment carries no host PATH, so the
- * lookup cannot be left to spawn. A name with a slash is taken as given, and
- * one the PATH lacks too, so spawn reports it missing.
+ * finds the twin's, as an absolute path: the program's environment carries
+ * no host PATH, so the lookup cannot be left to spawn. An empty entry is the
+ * current directory, as for the shell. A name with a slash is taken as
+ * given, and one the PATH lacks too, so spawn reports it missing.
  */
 function onHostPath(name: string): string {
   if (name.includes('/')) return name
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
-    if (dir === '') continue
-    const candidate = join(dir, name)
+    const candidate = resolve(dir, name)
     try {
       if (statSync(candidate).isFile()) {
         accessSync(candidate, constants.X_OK)

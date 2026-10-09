@@ -52,9 +52,18 @@ it.each(['construction', 'startup'])(
     rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
     try {
       for (let i = 0; i < 2; i++) {
-        await expect(
-          rt.run({ code: "print(open('/data/one.txt').read())", args: [], env: {}, stdin: null }),
-        ).rejects.toBeInstanceOf(PyodideUnavailableError)
+        const run = rt.run({
+          code: "print(open('/data/one.txt').read())",
+          args: [],
+          env: {},
+          stdin: null,
+        })
+        await expect(run).rejects.toBeInstanceOf(PyodideUnavailableError)
+        // What stopped the worker, not the shared-memory hint a host
+        // that has shared memory cannot act on.
+        await expect(run).rejects.toThrow(
+          `pyodide could not start its worker: ${mode === 'startup' ? 'worker module blocked' : 'workers blocked'}`,
+        )
       }
       expect(calls).toEqual([])
       expect(state.terminated).toBe(mode === 'startup' ? 2 : 0)
