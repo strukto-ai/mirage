@@ -291,6 +291,17 @@ async def test_multiple_stdout_redirects_truncate_all_write_last(monkeypatch):
     )
     assert io.exit_code == 0
     assert await _out(ws, "cat /data/m1") == "xail"
+    await ws.shell("ln -s /data/m1 /data/alias; ln -s /data /data/parent")
+    for path in ("/data/m1", "/data/alias", "/data/parent/m1"):
+        for redirects in (f"2>/data/m1 >{path}", f">{path} 2>/data/m1"):
+            io = await ws.shell(f"printf '%d\\n' abc {redirects}")
+            assert io.exit_code == 1
+            assert "abc" in await _out(ws, "cat /data/m1")
+            io = await ws.shell(
+                f"{{ printf abcdef >&2; printf XY; }} {redirects}"
+            )
+            assert io.exit_code == 0
+            assert await _out(ws, "cat /data/m1") == "XYcdef"
 
 
 @pytest.mark.asyncio

@@ -1401,10 +1401,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "({ printf A; printf B >&3; printf C; } >/data/f 3>&1; cat /data/f; echo; { printf A >&3; printf B; printf C >&3; } >/data/f 3>&1; cat /data/f; echo)",
+      "command": "({ printf A; printf B >&3; printf C; } >/data/f 3>&1; cat /data/f; echo; { printf A >&3; printf B; printf C >&3; } >/data/f 3>&1; cat /data/f; echo; ln -s f /data/redirect-alias; { printf abcdef >&2; printf XY; } 2>/data/f >/data/redirect-alias; cat /data/f; echo; { printf abcdef >&2; printf XY; } >/data/redirect-alias 2>/data/f; cat /data/f; echo; printf '%d\\n' abc 2>/data/f >/data/redirect-alias; test $(wc -c </data/f) -gt 2 && echo retained; rm /data/redirect-alias)",
       "expect": {
         "exit": 0,
-        "stdout": "ABC\nABC\n",
+        "stdout": "ABC\nABC\nXYcdef\nXYcdef\nretained\n",
         "stderr": ""
       },
       "note": "Pinned against GNU Bash 5.2.37 in debian:stable-slim; aliases and the enclosing stdout share emission order."

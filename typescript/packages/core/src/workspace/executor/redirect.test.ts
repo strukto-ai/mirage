@@ -383,6 +383,15 @@ describe('fd-table routing end-to-end', () => {
         await runExit(ws, 'printf x > /data/m1 2> "$(printf tail > /data/m1; echo /data/m2)"'),
       ).toBe(0)
       expect(await run(ws, 'cat /data/m1')).toBe('xail')
+      await ws.shell('ln -s /data/m1 /data/alias; ln -s /data /data/parent')
+      for (const path of ['/data/m1', '/data/alias', '/data/parent/m1']) {
+        for (const redirects of [`2>/data/m1 >${path}`, `>${path} 2>/data/m1`]) {
+          expect(await runExit(ws, `printf '%d\\n' abc ${redirects}`)).toBe(1)
+          expect(await run(ws, 'cat /data/m1')).toContain('abc')
+          expect(await runExit(ws, `{ printf abcdef >&2; printf XY; } ${redirects}`)).toBe(0)
+          expect(await run(ws, 'cat /data/m1')).toBe('XYcdef')
+        }
+      }
     } finally {
       await ws.close()
     }

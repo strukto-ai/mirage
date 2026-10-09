@@ -558,15 +558,13 @@ export async function handleRedirect(
         }
       }
       if (!refused)
+        // Distinct descriptions can reach the same file through aliases.
+        // Combine output only when one description owns every chunk.
         for (const file of files) {
-          const unique =
-            files.filter((other) => other.scope.virtual === file.scope.virtual).length === 1
-          if (unique) {
+          if (chunks.length > 0 && chunks.every(([key]) => dest(key) === file)) {
             consumed.add(file)
-            const data = concat(
-              chunks.filter(([key]) => dest(key) === file).map(([, data]) => data),
-            )
-            if (data.byteLength > 0) await write(file, data, file === completeOutput)
+            await write(file, concat(chunks.map(([, data]) => data)), file === completeOutput)
+            break
           }
         }
       for (const [key, data] of chunks) {

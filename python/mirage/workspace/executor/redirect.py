@@ -706,23 +706,17 @@ async def handle_redirect(
 
         try:
             if not refused:
+                # Distinct descriptions can reach the same file through aliases.
+                # Combine output only when one description owns every chunk.
                 for file in files:
-                    unique = (
-                        sum(
-                            other.scope.virtual == file.scope.virtual
-                            for other in files
-                        )
-                        == 1
-                    )
-                    if unique:
+                    if chunks and all(dest(key) is file for key, _ in chunks):
                         consumed.add(id(file))
-                        data = b"".join(
-                            data for key, data in chunks if dest(key) is file
+                        await write(
+                            file,
+                            b"".join(data for _, data in chunks),
+                            replace=file is complete_output,
                         )
-                        if data:
-                            await write(
-                                file, data, replace=file is complete_output
-                            )
+                        break
             for key, data in chunks:
                 target = dest(key)
                 if target is _TO_STDOUT:
