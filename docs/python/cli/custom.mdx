@@ -1,44 +1,37 @@
 ---
-title: Author a Custom CLI
-description: Build, register, validate, and safely expose a typed Python CLI to people and agents.
+title: Customize CLI
+description: "Define a typed or script CLI with shared parsing, account config and VFS access."
 icon: code
 ---
 
-A custom CLI is a typed program tree installed under a workspace head word.
-Use one when an agent should act on a service through verbs such as
-`incident ack` or `ticket close`, while using the VFS and ordinary shell tools
-to discover and inspect state.
+Define a custom CLI when an agent needs service operations with a stable
+command grammar. Use a typed `CLISpec` for parsed commands and generated help,
+or a script CLI when the program should parse its own arguments.
 
-The authoring contract is public: import `CLISpec`, `CLIInvocation`, `Option`,
-`Operand`, and `register_cli_spec` from `mirage`. A leaf receives exactly one
-`CLIInvocation`; it does not depend on Mirage's executor internals.
+## Define a typed command
 
-## Start from the worked example
-
-[`examples/python/cli/pager.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/cli/pager.py)
-is the runnable reference. It defines a fictional, in-memory incident service
-so the example needs no account, credentials, or network access. A production
-CLI would construct its client from `inv.config` and keep the same program-tree
-shape.
+Each handler receives one `CLIInvocation`. The example below shows the
+registration and parsing contract; the runnable [pager example](https://github.com/strukto-ai/mirage/blob/main/examples/python/cli/pager.py)
+adds a mutable incident service and shared cross-language coverage.
 
 ```python
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-from mirage import (CLIInvocation, CLISpec, Operand, Option, RAMVFS,
+from mirage import (CLIInvocation, CLISpec, FlagView, Operand, Option,
                     Workspace)
 from mirage.io import IOResult
 
 
 class PagerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     account: Literal["engineering", "support"]
 
 
-async def acknowledge(inv: CLIInvocation[PagerConfig]):
+async def acknowledge(inv: CLIInvocation[PagerConfig]) -> tuple[bytes, IOResult]:
     incident_id = inv.texts[0]
-    by = inv.flags["by"]
-    # A real implementation calls its service here.
+    by = FlagView(inv.flags, inv.spec).as_str("by")
     return f"acknowledged {incident_id} by {by}\n".encode(), IOResult()
 
 
@@ -57,55 +50,38 @@ PAGER = CLISpec(
     ),
 )
 
-ws = Workspace({"/workspace": RAMVFS()})
+ws = Workspace({})
 ws.register_cli("pager-eng", PAGER, {"account": "engineering"})
 ws.register_cli("pager-support", PAGER, {"account": "support"})
 ```
 
-The full example deliberately demonstrates details a smaller hello-world would
-hide:
 
-- One immutable `CLISpec` is installed twice, with independently validated
-  account config and different head words.
-- The mutating leaf declares `write=True`; policy can classify it as a write.
-- `Operand(type="str")` keeps an incident ID textual instead of treating it as
-  a VFS path.
-- A missing `__proto__` identifier exercises the error path. The TypeScript
-  twin uses an own-property check so an untrusted service ID cannot resolve
-  through JavaScript's prototype chain.
-- Help, discovery, success, failure, mutation, and cross-account isolation are
-  pinned by one shared truth file in CI for Python and TypeScript.
+The same spec can be installed for multiple accounts. Service IDs use textual
+operands; file operands use `type="path"`. Read flags through `FlagView(inv.flags, inv.spec)`
+so a read of an undeclared option fails rather than looking like an omitted flag.
 
-## Define the program tree
+## Choose the command shape
 
-A `CLISpec` is a `CommandSpec` plus identity, nesting, and behavior. A node has
-exactly one execution shape:
+| Node | Declares | Handler input |
+| --- | --- | --- |
+| Leaf | `fn`, options and operands | Parsed flags, paths and text on `inv` |
+| Group | `subcommands`, optional inherited options | Dispatches to a leaf |
+| Script root | `script`, optional runtime | Raw argv, stdin and environment |
 
-- A leaf has `fn` and may declare options, positional operands, and `rest`.
-- A group has `subcommands` and may declare options inherited by its leaves.
-- A script root has `script`; the program parses its own argv.
+A node has exactly one of these shapes. Names and aliases are single words;
+child names and aliases share one namespace. Options cannot collide across
+ancestors and descendants. Construction validates the tree and compiles the
+grammar; do not repeat parser validation in every handler.
 
-Every function leaf has the fixed signature `fn(inv)`. The invocation contains
-both the process view (`argv`, `stdin`, `env`) and the parsed view (`config`,
-`paths`, `texts`, `flags`). Use the parsed view for typed trees. Use `argv` when
-wrapping an API whose vocabulary is easier to preserve verbatim.
+Declare `config_model` only on the root of an account CLI. Registration validates
+each installation, and `inv.config` holds that account's settings. Without a
+config model, a typed CLI accepts no config and receives `None`.
 
-`config_model` is optional. Declare it on the root for an account or service
-CLI, and read the validated model from `inv.config`. Omit it for a
-credential-free CLI whose subject is a workspace file tree. A missing model is
-not an untyped-config mode: the install must have no config and `inv.config` is
-`None`.
+Mark mutating leaves `write=True`. This classifies the command for policy and
+cache invalidation; it does not grant permission or perform the mutation.
+Descriptions, options and operands supply `--help` and `man` at every level.
 
-Mark every mutating leaf `write=True`. This is policy metadata; it does not
-perform the mutation or grant access. The handler still owns the service call.
-It is also the one cache signal: after a write verb of a CLI with a
-`config_model`, the executor expires every mount's cached listings and bodies,
-because an account CLI writes by id and no mount can see that write. A script
-root counts too, since its config is opaque and its program may reach anything.
-A CLI with neither gets no such drop, since its writes go through the op
-dispatcher, which invalidates per path.
-
-## Install it
+## Register the program
 
 Installing a tree directly is the shortest path:
 
@@ -151,67 +127,32 @@ shell `install` or `uninstall` command, so an agent can use a CLI it was given
 but cannot remove it. A deployment that must pin the head word should enforce
 that with policy; shell functions can otherwise shadow it like they do in bash.
 
-## Validate and discover it
 
-Construction is the first validation boundary. Importing an invalid tree raises
-immediately:
+## Use workspace files
 
-- Names and aliases are non-empty single words.
-- A node has exactly one of `fn`, `subcommands`, or `script`.
-- Group operands belong on leaves; child names and aliases share one namespace.
-- `config_model` and `script` are root-only; `runtime` requires `script`.
-- Every inherited option/operand grammar compiles, including duplicate option
-  spelling and ancestor/descendant flag collision checks.
+Build the service client from `inv.config`. A CLI should not find a matching
+VFS to obtain credentials or a backend accessor. Reuse core service functions
+between CLI and VFS implementations where their behavior is the same.
 
-Installation is the second boundary: `config_model` validates each install's
-config before the workspace can execute it. Do not repeat either check in every
-leaf.
+File arguments use `inv.view`:
 
-The spec is also the agent-facing discovery surface:
+| Entry point | Purpose |
+| --- | --- |
+| `dispatch` | Read, write and other filesystem operations with workspace policy and mount modes |
+| `stat_path` | Classify paths, including directories represented by prefix stores |
+| `ns` | Namespace facts such as symlinks, mount boundaries and attributes |
+| `session_view` | Live, gated session reads and writes; `inv.env` is the frozen invocation snapshot |
 
-```bash
-man
-man pager-eng
-man pager-eng ack
-type -t pager-eng
-which pager-eng
-```
+Declare file options and operands with `type="path"`; preserve the resulting
+`PathSpec` values when dispatching. Use `PathSpec.from_str_path(value, cwd=inv.cwd)` for a path string from
+config, and derive paths with `join` and `parent`. Do not convert them to plain
+strings before filesystem access. Direct handler callers may omit the view;
+a handler requiring files must refuse when the needed entry point is absent.
 
-`man` and `--help` use the same renderer, so descriptions, options, operands,
-and subcommands cannot disagree. Before handing a CLI to an agent, inspect both
-the root help and every write leaf's help; terse names without descriptions are
-technically valid but not reliably discoverable.
-
-## The VFS and CLI loop
-
-For an account CLI, the service client comes from `inv.config`; the CLI does not
-consult a mount that mirrors the same account. That would create two sources of
-truth. The expected loop is:
-
-1. Discover records with `find`, `grep`, `cat`, or `jq` over a mount.
-2. Take the stable ID rendered in that record or path.
-3. Pass the ID to a CLI write verb.
-4. Read the mount again to verify the new state.
-
-A verb may read an unrelated workspace file explicitly named by the user, such
-as an attachment. That is different from treating a mount as the CLI's service
-client. Such a leaf opts into workspace access through `inv.view`; do not
-assume those entry points exist outside a workspace.
-
-Declare file operands and options with `type="path"`. The handler receives
-`PathSpec` objects in `inv.paths` and through `FlagView.as_path()` /
-`as_paths()`; pass those objects directly to `inv.view.dispatch` or
-`stat_path`. For a path string read from configuration, use
-`PathSpec.from_str_path(filename, cwd=base)`. Derive workspace paths with
-`path.join("subdir", "file")` and `path.parent`. These retain the spelling
-and directory walk needed for profile checks; converting back to a string
-before filesystem access discards that information.
-
-If a CLI and a Mirage VFS back the same service, neither names the other.
-A write verb on a CLI with a config model expires every mount's cached reads
-after it runs, and a write that throws may already have reached the service, so
-Mirage also expires on that path. Do not widen `CLISpec`, `Option`, or
-`Operand` to point a CLI at a VFS.
+Account CLI writes, including failed writes that may have reached the service,
+expire mounted caches. Config-free filesystem CLIs rely on the dispatcher's
+per-path invalidation. A script marked as a write also expires caches because
+its config and service access are opaque.
 
 ## Snapshots and credentials
 
@@ -342,31 +283,15 @@ The tables below explain how an author should use that surface.
 | `env` | Frozen environment snapshot for this invocation. |
 | `view` | Optional workspace state-plane access for verbs that explicitly need it. |
 
-## Checklist for agents
 
-When asking an agent to add a task-specific CLI, give it this page and the
-worked example, then require these outcomes:
+## Verify a custom CLI
 
-- Use only the documented public imports; do not copy builtin internals.
-- Reuse one `CLISpec` across installs and put account identity in validated
-  per-install config.
-- Give every node, option, and operand enough description/name information for
-  `man` to be useful.
-- Keep the one-argument leaf signature and read only declared invocation
-  fields.
-- Mark writes, test at least one refusal, and verify two installs cannot mutate
-  each other's state.
-- Treat service IDs as untrusted input and use own-key lookup for mapping-backed
-  fakes or clients.
-- Keep account service access in config; use `view` only for explicitly named
-  workspace files.
-- Verify snapshot restore with redacted credentials or document why the CLI has
-  no secrets.
-- Add or extend a runnable example with shared Python/TypeScript truth coverage
-  when the authoring surface changes.
+Check help, successful execution, a refusal and isolation between two account
+installations. Exercise VFS access with path and mount policy, and verify
+snapshot restoration with credentials supplied again. Keep service request
+construction and internal edge cases in unit tests; put observable shell
+results in shared integration cases when both hosts implement the program.
 
-Do not add a shared `CLISpec`, `Option`, or `Operand` field for one program's
-unusual parser behavior. These types are also the command grammar for the whole
-repository. Prefer the existing argparse/POSIX-shaped fields, handle a truly
-program-specific rule in the leaf, or use a script CLI when the whole program
-must parse its own argv.
+The shared grammar also serves shell commands. Prefer its existing argparse
+and POSIX concepts; keep a program-specific rule in its handler, or use a
+script when the whole program needs to own parsing.

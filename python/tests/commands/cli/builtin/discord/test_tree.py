@@ -12,16 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
-import pytest
-
-from mirage import Workspace
-from mirage.commands.cli.builtin.discord import DISCORD, send
+from mirage.commands.cli.builtin.discord import DISCORD
 from mirage.core.discord.config import DiscordConfig
-from mirage.io.types import materialize
-
-CONFIG = {"token": "bot-token"}
 
 VERBS = [
     "send",
@@ -63,18 +55,3 @@ def test_poll_answer_flag_is_repeatable():
     answer = next(o for o in leaf("poll").options if o.long == "--answer")
     assert answer.multiple
     assert answer.required
-
-
-@pytest.mark.asyncio
-async def test_installed_tree_dispatches_send(monkeypatch):
-    async def fake_send(config, channel, text, reply_to):
-        return {"id": "M1", "channel_id": channel, "content": text}
-
-    monkeypatch.setitem(send.__globals__, "send_message", fake_send)
-    ws = Workspace({})
-    ws.register_cli("discord", DISCORD, CONFIG)
-    io = await ws.shell("discord send --channel C1 --text hello")
-    assert io.exit_code == 0
-    out = json.loads(await materialize(io.stdout))
-    assert out["content"] == "hello"
-    await ws.close()

@@ -1,8 +1,56 @@
 ---
 title: Overview
-icon: circle-info
+icon: wrench
 description: Set up Mirage CLIs with Python or TypeScript.
 ---
 
-Each page below includes Python and TypeScript setup. Account CLIs reuse the
-credentials documented under **VFS**; `git` needs no account config.
+Mirage bundles ten command-line programs for its workspace shell. The
+[host `mirage` CLI](/home/access/cli) connects to a workspace; these programs
+run inside it. Each setup page includes Python and TypeScript registration.
+
+{/* BEGIN GENERATED CLI COMMANDS */}
+| Program | Supported operations | Commands |
+| --- | --- | --- |
+| [airtable](/home/setup/cli/airtable) | Query bases and tables; read, create, update and delete records; add comments | 10 |
+| [discord](/home/setup/cli/discord) | Read and send messages; edit, react, create threads and polls; inspect guilds | 10 |
+| [gh](/home/setup/cli/gh) | Manage repositories, issues, pull requests, releases and Actions; call GitHub APIs | 43 |
+| [git](/home/setup/cli/git) | Inspect history, stage and commit files, manage branches and tags, clone and fetch | 37 |
+| [gws](/home/setup/cli/gws) | Call Drive, Sheets, Docs, Slides, Calendar, Forms and Gmail APIs | 48 |
+| [hf](/home/setup/cli/hf) | Download and upload Hub files; create repositories; manage tags and delete files | 11 |
+| [himalaya](/home/setup/cli/himalaya) | List and search mail; read, compose, reply, forward and send messages | 7 |
+| [linear](/home/setup/cli/linear) | Query teams, issues, projects and documents; update issues and comments | 26 |
+| [ntn](/home/setup/cli/ntn) | Read and edit Markdown pages, query data sources and call Notion APIs | 9 |
+| [slack](/home/setup/cli/slack) | Read and send messages; manage reactions and pins; find members and search | 11 |
+{/* END GENERATED CLI COMMANDS */}
+
+Account CLIs use their own validated config and can run without a service
+mount. Credentials can be reused with the corresponding VFS; mounting a
+service does not register its CLI. `git` needs no account config and uses
+repositories on workspace mounts.
+
+All ten are available in Python and TypeScript on Node. TypeScript exports
+`hf` and `himalaya` from `@struktoai/mirage-node`, and the other eight from
+`@struktoai/mirage-core`.
+
+Use `<program> --help` for its groups, `<program> <command> --help` for flags,
+and `man <program>` for its manual. The [Python](/python/cli/index) and
+[TypeScript](/typescript/cli/index) references list the implemented commands
+and explain how CLI file arguments use the VFS.
+
+## Compatibility and licenses
+
+Each CLI reference links the original project or service API and defines the
+implemented subset. Compatibility covers the documented commands, flags,
+output and behavior; it does not promise every upstream feature. Git also
+names its actual runtime dependencies: Dulwich in Python and isomorphic-git
+in TypeScript.
+
+Mirage-authored code is [Apache-2.0 licensed](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
+Behavioral compatibility does not change the license of any project's code.
+Copied or ported source and redistributed dependencies must satisfy their own
+license and notice requirements. The
+[Python notices](https://github.com/strukto-ai/mirage/blob/main/python/THIRD_PARTY_NOTICES)
+and [TypeScript notices](https://github.com/strukto-ai/mirage/blob/main/typescript/packages/core/THIRD_PARTY_NOTICES)
+cover incorporated third-party code; installed libraries also include their
+own license files. A compatibility claim is not a substitute for checking
+source provenance and the contents of a distribution.

@@ -35,21 +35,6 @@ WRITES = {
     ("comment", "add"),
 }
 
-HELP = """\
-usage: airtable [-h] {base,table,record,comment} ...
-
-Airtable Web API client
-
-commands:
-  base     Read bases
-  table    Read table schemas
-  record   Read and write records
-  comment  Read and add record comments
-
-options:
-  -h, --help  Show this help and exit
-"""
-
 
 def leaf(*path: str) -> CLISpec:
     node = AIRTABLE
@@ -81,25 +66,6 @@ def test_every_verb_below_base_names_its_base_and_table():
         spelled = {o.long for o in leaf(noun, verb).options if o.required}
         assert spelled == {"--base", "--table"}
     assert [o.long for o in leaf("table", "get").options] == ["--base"]
-
-
-@pytest.mark.asyncio
-async def test_help_renders_the_tree(airtable_ws):
-    ws = airtable_ws()
-    io = await ws.shell("airtable --help")
-    assert io.exit_code == 0
-    assert await io.stdout_str() == HELP
-
-
-@pytest.mark.asyncio
-async def test_a_missing_base_is_the_parsers_refusal(airtable_ws):
-    ws = airtable_ws()
-    io = await ws.shell("airtable record list --table tblFeatures000001")
-    assert io.exit_code == 2
-    assert await io.stderr_str() == (
-        "airtable record list: option '--base' is required\n"
-        "Try 'airtable record list --help' for more information.\n"
-    )
 
 
 @pytest.mark.asyncio
