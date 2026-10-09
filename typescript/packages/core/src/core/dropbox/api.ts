@@ -12,8 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { dropboxRpc } from './client.ts'
+import { DropboxApiError, dropboxRpc } from './client.ts'
 import type { DropboxTokenManager } from './client.ts'
+import { stale } from '../../cache/context.ts'
+import type { WriteCondition } from '../../cache/types.ts'
+import type { StaleWriteError } from '../../errors/types.ts'
+import type { PathSpec } from '../../types.ts'
+import { GONE_SUMMARIES, LOST_SUMMARIES, MISS_SUMMARIES } from './constants.ts'
 
 type DropboxEntryTag = 'file' | 'folder' | 'deleted'
 
@@ -152,8 +157,47 @@ export async function createFolder(tm: DropboxTokenManager, path: string): Promi
   await dropboxRpc(tm, '/files/create_folder_v2', { path, autorename: false })
 }
 
-export async function deletePath(tm: DropboxTokenManager, path: string): Promise<void> {
-  await dropboxRpc(tm, '/files/delete_v2', { path })
+export async function deletePath(
+  tm: DropboxTokenManager,
+  path: string,
+  parentRev: string | null = null,
+): Promise<void> {
+  await dropboxRpc(
+    tm,
+    '/files/delete_v2',
+    parentRev === null ? { path } : { path, parent_rev: parentRev },
+  )
+}
+
+/** An entry's metadata, null when Dropbox has nothing at the path. Mirrors Python's `lookup`. */
+export async function lookup(tm: DropboxTokenManager, path: string): Promise<DropboxEntry | null> {
+  try {
+    return await getMetadata(tm, path)
+  } catch (err) {
+    if (err instanceof DropboxApiError && MISS_SUMMARIES.some((s) => err.summary.startsWith(s))) {
+      return null
+    }
+    throw err
+  }
+}
+
+/**
+ * The refusal a write sent with a rev met, null for any other failure; a
+ * write that sent no rev went plain, so its failure keeps its own meaning. A
+ * refusal keeps `cond`'s content token. Mirrors Python's `refused`.
+ */
+export async function refused(
+  path: PathSpec,
+  err: unknown,
+  cond: WriteCondition | null,
+  rev: string | null,
+): Promise<StaleWriteError | null> {
+  if (rev === null || rev === '' || !(err instanceof DropboxApiError)) return null
+  if (LOST_SUMMARIES.some((s) => err.summary.startsWith(s))) {
+    return stale(path, { version: cond?.ifMatch ?? null })
+  }
+  if (GONE_SUMMARIES.some((s) => err.summary.startsWith(s))) return stale(path, { gone: true })
+  return null
 }
 
 /**

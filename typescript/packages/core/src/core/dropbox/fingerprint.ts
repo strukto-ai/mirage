@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CONTENT_HASH, RESULT_HEADER } from './constants.ts'
+import type { LiveVersion } from '../../cache/types.ts'
+import type { DropboxEntry } from './api.ts'
+import { CONTENT_HASH, RESULT_HEADER, REV } from './constants.ts'
 
 /**
  * A file's content token: its content_hash, or null. stat, readdir and read
@@ -21,6 +23,12 @@ import { CONTENT_HASH, RESULT_HEADER } from './constants.ts'
  */
 export function tokenOf(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null
+}
+
+/** A looked-up entry's live tokens, null when it is no file. Mirrors Python's `live_of`. */
+export function liveOf(entry: DropboxEntry | null): LiveVersion | null {
+  if (entry?.['.tag'] !== 'file') return null
+  return { content: tokenOf(entry[CONTENT_HASH]), native: tokenOf(entry[REV]) }
 }
 
 /**

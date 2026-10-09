@@ -146,9 +146,13 @@ def _upload_error(
 
 
 async def dropbox_upload(
-    tm: DropboxTokenManager, path: str, data: bytes
+    tm: DropboxTokenManager, path: str, data: bytes, rev: str | None = None
 ) -> JsonValue:
     """Upload one file, overwriting, and return the reply as decoded.
+
+    Given a ``rev``, the upload goes in ``update`` mode: Dropbox stores it
+    only while the file is still that revision, and answers a 409
+    ``path/conflict`` otherwise.
 
     The reply is the stored FileMetadata; it is not checked here, since
     the upload has landed once the call returns and the writer's
@@ -158,15 +162,14 @@ async def dropbox_upload(
         tm (DropboxTokenManager): token manager.
         path (str): the Dropbox path to write.
         data (bytes): file content.
+        rev (str | None): the revision the file must still be, or None.
     """
     headers = await dropbox_auth_headers(tm)
-    headers["Dropbox-API-Arg"] = json.dumps(
-        {
-            "path": path,
-            "mode": "overwrite",
-            "mute": True,
-        }
-    )
+    arg: dict[str, Any] = {"path": path, "mode": "overwrite", "mute": True}
+    if rev is not None:
+        arg["mode"] = {".tag": "update", "update": rev}
+        arg["autorename"] = False
+    headers["Dropbox-API-Arg"] = json.dumps(arg)
     headers["Content-Type"] = "application/octet-stream"
     resp = await api_request(
         "POST",

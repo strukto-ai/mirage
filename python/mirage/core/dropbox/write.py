@@ -17,8 +17,12 @@ from mirage.cache.context import (
     evict_after,
     invalidate_after_write,
     invalidate_ancestors,
+    native_condition,
+    write_condition,
 )
-from mirage.core.dropbox.client import dropbox_upload
+from mirage.core.dropbox.api import lookup, refused
+from mirage.core.dropbox.client import DropboxApiError, dropbox_upload
+from mirage.core.dropbox.fingerprint import live_of
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.core.dropbox.stat import stat_from_entry
 from mirage.observe.context import record, start_op
@@ -33,19 +37,27 @@ async def write(
     need upload sessions, not supported here).
 
     A failed upload still evicts the path: Dropbox may have stored the
-    bytes before its reply broke off.
+    bytes before its reply broke off. On a ``write: conditional`` mount a
+    held version is checked against the file's live content_hash, which
+    costs one get_metadata, and its rev goes out in ``update`` mode, so a
+    file changed since it was read is refused.
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
         path (PathSpec): target path.
         data (bytes): file content.
     """
+    tm = accessor.token_manager
+    api_path = dropbox_path_of(accessor, path)
+    cond = await write_condition(path, "put")
+    rev = None
+    if cond is not None and cond.if_match:
+        live = live_of(await lookup(tm, api_path))
+        rev = await native_condition(path, cond, live, "put")
     timer = start_op()
 
     async def send() -> None:
-        entry = await dropbox_upload(
-            accessor.token_manager, dropbox_path_of(accessor, path), data
-        )
+        entry = await dropbox_upload(tm, api_path, data, rev)
         token = upload_token(entry, stat_from_entry, path.virtual)
         record(
             "write",
@@ -60,4 +72,10 @@ async def write(
         await invalidate_after_write(path)
         await invalidate_ancestors(path)
 
-    await evict_after(send(), evict)
+    try:
+        await evict_after(send(), evict)
+    except DropboxApiError as exc:
+        lost = await refused(path, exc, cond, rev)
+        if lost is not None:
+            raise lost from exc
+        raise

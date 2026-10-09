@@ -13,28 +13,61 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { invalidateAfterUnlink } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import {
+  deleteCondition,
+  invalidateAfterUnlink,
+  invalidateAncestors,
+  nativeCondition,
+} from '../../cache/context.ts'
+import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
 import { DropboxApiError } from './client.ts'
-import { deletePath, getMetadata } from './api.ts'
-import { invalidateAncestors } from '../../cache/context.ts'
+import { deletePath, getMetadata, refused, type DropboxEntry } from './api.ts'
+import { liveOf } from './fingerprint.ts'
 import { dropboxPathOf } from './paths.ts'
+
+/**
+ * Delete a looked-up file, conditioned on a `write: conditional` mount. A
+ * delete needs no read of its own, only that nobody wrote since: the version
+ * the mount holds, else the content_hash its own lookup found, is held against
+ * the live one, and the rev goes out as `parent_rev`. Mirrors Python's
+ * `delete_resolved`.
+ *
+ * @throws a stale-write error when the file changed or went since it was measured
+ */
+export async function deleteResolved(
+  accessor: DropboxAccessor,
+  path: PathSpec,
+  entry: DropboxEntry,
+): Promise<void> {
+  const live = liveOf(entry)
+  const cond = await deleteCondition(path, live?.content ?? null)
+  const rev = await nativeCondition(path, cond, live, 'delete')
+  try {
+    await deletePath(accessor.tokenManager, dropboxPathOf(accessor, path), rev)
+  } catch (err) {
+    const lost = await refused(path, err, cond, rev)
+    if (lost !== null) throw lost
+    throw err
+  }
+}
 
 export async function unlink(accessor: DropboxAccessor, path: PathSpec): Promise<void> {
   const apiPath = dropboxPathOf(accessor, path)
-  let tag: string
+  let entry: DropboxEntry
   try {
-    tag = (await getMetadata(accessor.tokenManager, apiPath))['.tag']
+    entry = await getMetadata(accessor.tokenManager, apiPath)
   } catch (err) {
     if (err instanceof DropboxApiError && err.status === 409) throw enoent(path.virtual)
     throw err
   }
-  if (tag === 'folder') throw eisdir(path.virtual)
+  if (entry['.tag'] === 'folder') throw eisdir(path.virtual)
   const timer = startOp()
-  await deletePath(accessor.tokenManager, apiPath)
+  const upto = lostCount()
+  await deleteResolved(accessor, path, entry)
   record('unlink', path.virtual, 'dropbox', 0, timer)
   await invalidateAfterUnlink(path)
   await invalidateAncestors(path)
+  liftLost(path, upto)
 }

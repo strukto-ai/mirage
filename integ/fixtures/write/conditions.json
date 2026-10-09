@@ -7,7 +7,8 @@
     "s3+endpoint": "type: s3 with a non-AWS endpoint_url may be any S3-compatible server, MinIO included, so it gets MinIO's row",
     "assumed": "aliyun, backblaze, ceph, digitalocean, gcs, oci, qingstor, r2, scaleway, supabase, tencent, wasabi: ASSUMED via the shared S3 protocol by user decision (2026-10-05); not measured per provider",
     "sdk": "botocore 1.40.61 / aiobotocore 2.25.1; @aws-sdk/client-s3 3.1033.0",
-    "box": "measured: Box API, 2026-10-05 (new-version upload If-Match: stale etag 412, current 201) and 2026-10-08 (DELETE /files/{id} If-Match: stale 412 precondition_failed, current 204, gone 404). The cache holds the file's sha1; a write compares it with the live sha1 and sends the live etag. A copy, move or upload onto a taken name answers 409 item_name_in_use with context_info.conflicts naming the item there, file or folder (2026-10-08)."
+    "box": "measured: Box API, 2026-10-05 (new-version upload If-Match: stale etag 412, current 201) and 2026-10-08 (DELETE /files/{id} If-Match: stale 412 precondition_failed, current 204, gone 404). The cache holds the file's sha1; a write compares it with the live sha1 and sends the live etag. A copy, move or upload onto a taken name answers 409 item_name_in_use with context_info.conflicts naming the item there, file or folder (2026-10-08).",
+    "dropbox": "measured: Dropbox API, 2026-10-04/05 (upload update mode: stale rev 409 path/conflict, current 200) and 2026-10-08 (delete_v2 parent_rev: stale 409 path_write/conflict/file/, current 200, gone path_lookup/not_found/). The cache holds the file's content_hash; a write compares it with the live one (one get_metadata) and sends the live rev."
   },
   "ops": [
     "put",
@@ -52,7 +53,11 @@
     ],
     "discord": [],
     "disk": [],
-    "dropbox": [],
+    "dropbox": [
+      "put",
+      "copy",
+      "delete"
+    ],
     "email": [],
     "gcal": [],
     "gcs": [
