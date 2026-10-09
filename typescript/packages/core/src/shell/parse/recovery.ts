@@ -14,7 +14,23 @@
 
 import { type NativeParser } from './engine.ts'
 import { scanParameter } from '../parameter.ts'
-import { ARITH_OPEN_TOKEN, QUOTES } from './constants.ts'
+import {
+  ARITH_OPEN_TOKEN,
+  BARE_WORDS,
+  DIGIT_RUN,
+  ESCAPED_BLANK,
+  HEADER_FOLLOWER,
+  HEADER_NAME,
+  LAST_CASE_ARM,
+  LIST_TOKENS,
+  LITERAL_DOLLAR,
+  QUOTES,
+  STATEMENT_NODES,
+  TEST_PARTS,
+  UNLEXED,
+  WORD_BREAKS,
+  WORD_START,
+} from './constants.ts'
 import { expansionSource } from './expansion.ts'
 import { protectedSource } from './heredoc/index.ts'
 import { delimiterEnd } from './heredoc/reader.ts'
@@ -75,51 +91,9 @@ export function isArithmetic(parser: NativeParser, command: string, start: numbe
   return !span?.rootNode.hasError
 }
 
-const UNLEXED = new Set([
-  'test_command',
-  'arithmetic_expansion',
-  'string_content',
-  'raw_string',
-  'ansi_c_string',
-  'expansion',
-  'heredoc_content',
-  'comment',
-  'binary_expression',
-  'unary_expression',
-  'postfix_expression',
-])
-
-const WORD_START = ' \t\n;&|(){}'
-
-const DIGITS = /\d+/y
-
-const ESCAPED_BLANK = /\\[ \t]/g
-
-const LAST_ARM = /^\s*esac(?![^\s;&|()<>])/
-
-// Test operators the grammar lexes apart from a word in an argument list or
-// an error region, where bash reads a word.
-const BARE_WORDS: ReadonlySet<string> = new Set(['==', '=~'])
-
-// A `$` that no name, digit, special parameter, brace, paren, bracket or
-// quote follows, which bash reads as a literal `$`.
-const LITERAL_DOLLAR = /\$(?![\w@*#?$!{(['"[-])/y
-
-const WORD_BREAK = ' \t\n;&|()<>'
-
-const LIST_TOKENS = new Set(['&&', '||', '|', '|&', ';', '&', ';;'])
-
-const TEST_PARTS = new Set([
-  'binary_expression',
-  'unary_expression',
-  'negation_expression',
-  'parenthesized_expression',
-  'ERROR',
-])
-
 /** Whether `text[at]` ends a word: the end of the text, a blank or an operator. */
 function breaksWord(text: string, at: number): boolean {
-  return at < 0 || at >= text.length || WORD_BREAK.includes(text[at] ?? '')
+  return at < 0 || at >= text.length || WORD_BREAKS.has(text[at] ?? '')
 }
 
 /**
@@ -211,6 +185,8 @@ function skippedEscapes(text: string, root: ShellNode): number[] {
   return offsets
 }
 
+/** One respelling pass of `operatorSource` over one parse. Mirrors Python's
+ * _respelled. */
 function respelled(text: string, root: ShellNode): string {
   const out = text.split('')
   for (const at of skippedEscapes(text, root)) {
@@ -246,7 +222,7 @@ function respelled(text: string, root: ShellNode): string {
       out[start + 2] = ' '
     } else if (
       (node.type === ';&' || node.type === ';;&') &&
-      LAST_ARM.test(text.slice(node.endIndex))
+      LAST_CASE_ARM.test(text.slice(node.endIndex))
     ) {
       out[start] = ';'
       out[start + 1] = ';'
@@ -254,8 +230,8 @@ function respelled(text: string, root: ShellNode): string {
     }
     if (node.childCount > 0 || text[start] !== '0') continue
     if (start > 0 && !WORD_START.includes(text[start - 1] ?? '')) continue
-    DIGITS.lastIndex = start
-    const end = start + (DIGITS.exec(text)?.[0].length ?? 0)
+    DIGIT_RUN.lastIndex = start
+    const end = start + (DIGIT_RUN.exec(text)?.[0].length ?? 0)
     if (text[end] === '<' || text[end] === '>') out[start] = '1'
   }
   return out.join('')
@@ -384,12 +360,19 @@ export function repairOrphanedDollars(
   return root
 }
 
+/**
+ * Quote a lone dash the grammar drops before a descriptor redirect.
+ * tree-sitter-bash loses a bare `-` written right before an explicit
+ * descriptor's redirect (`echo - 2>&1`). Only a dash standing alone in a gap
+ * between two nodes is quoted, never text inside a word or a body, and the
+ * repair stands only if the reparse has no error. Returns the tree and source
+ * to run. Mirrors Python's repair_redirect_dashes.
+ */
 export function repairRedirectDashes(
   parser: NativeParser,
   root: ShellNode,
   text: string,
 ): [ShellNode, string] {
-  // Quote only an uncovered dash before a redirect, never word or heredoc text.
   const offsets: number[] = []
   const stack = [root]
   while (stack.length > 0) {
@@ -414,10 +397,12 @@ export function repairRedirectDashes(
   return retried.hasError ? [root, text] : [retried, repaired]
 }
 
-const NAME = /^\w+$/
-
-const FOLLOWER = /^\s*(in|do)(?![^\s;&|()<>])/
-
+/**
+ * The insertions that let each for or select header parse, as offset and
+ * text: an omitted list becomes `in "$@"`, which bash iterates, and a
+ * variable that is not a name moves into a list behind `0 in`, where the loop
+ * refuses it at run time as bash does. Mirrors Python's _header_inserts.
+ */
 function headerInserts(root: ShellNode, text: string): [number, string][] {
   const heads: number[] = []
   const stack = [root]
@@ -432,8 +417,8 @@ function headerInserts(root: ShellNode, text: string): [number, string][] {
   for (const head of heads) {
     const start = text.length - text.slice(head).replace(/^[ \t]+/, '').length
     const end = delimiterEnd(text, start) ?? start
-    const word = FOLLOWER.exec(text.slice(end))?.[1]
-    const named = NAME.test(text.slice(start, end))
+    const word = HEADER_FOLLOWER.exec(text.slice(end))?.[1]
+    const named = HEADER_NAME.test(text.slice(start, end))
     if (end === start || (named && word === 'in')) continue
     const tail = word === 'do' ? ';' : ''
     if (named) inserts.push([end, ` in "$@"${tail}`])
@@ -442,13 +427,17 @@ function headerInserts(root: ShellNode, text: string): [number, string][] {
   return inserts
 }
 
+/**
+ * Repair for and select headers (`headerInserts`) until none is left: a
+ * header inside a repaired one shows only on the reparse. The repair stands
+ * only if it adds no error. Returns the tree and source to run. Mirrors
+ * Python's repair_for_headers.
+ */
 export function repairForHeaders(
   parser: NativeParser,
   root: ShellNode,
   text: string,
 ): [ShellNode, string] {
-  // Encode invalid names for runtime validation and supply omitted "$@".
-  // Repeat to expose nested headers; accept only repairs adding no errors.
   let [repaired, retried] = [text, root]
   for (let inserts = headerInserts(root, text); inserts.length > 0;) {
     for (const [offset, insert] of inserts.sort((a, b) => b[0] - a[0])) {
@@ -462,6 +451,7 @@ export function repairForHeaders(
     : [retried, repaired]
 }
 
+/** The spans of a tree's error and missing nodes. Mirrors Python's _errors. */
 function errors(root: ShellNode): Set<string> {
   const spans = new Set<string>()
   const stack = [root]
@@ -493,16 +483,7 @@ export function statementBoundaries(parser: NativeParser, text: string): string 
     const node = stack.pop()
     if (node === undefined) break
     stack.push(...node.children)
-    if (
-      ![
-        'command',
-        'declaration_command',
-        'file_redirect',
-        'redirected_statement',
-        'unset_command',
-      ].includes(node.type)
-    )
-      continue
+    if (!STATEMENT_NODES.has(node.type)) continue
     const children = node.children
     for (let i = 1; i < children.length; i += 1) {
       const left = children[i - 1]

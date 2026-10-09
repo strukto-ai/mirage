@@ -13,8 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import Callable, Iterable, Iterator
-from typing import NamedTuple, NoReturn
+from collections.abc import Callable, Iterable
+from typing import NoReturn
 
 from mirage.io import IOResult
 from mirage.shell.bytes import decode_text, encode_text
@@ -50,79 +50,23 @@ from mirage.shell.parse.constants import (
     UNARY_TESTS,
     WORD_BREAKS,
 )
+from mirage.shell.parse.errors import ReaderRefusal, TestFailure
 from mirage.shell.parse.heredoc.delimiter import (
     clean_delimiter,
     delimiter_quoted,
+    joined,
 )
+from mirage.shell.parse.heredoc.line import ends_escaped
 from mirage.shell.parse.heredoc.types import HeredocPlan
-from mirage.shell.parse.types import SyntaxDiagnostic
+from mirage.shell.parse.types import (
+    ReaderHeredoc,
+    ReaderState,
+    ReaderToken,
+    SyntaxDiagnostic,
+)
 from mirage.shell.types import TSNodeLike
 
 logger = logging.getLogger(__name__)
-
-
-class _Token(NamedTuple):
-    kind: str
-    text: str
-    start: int
-    end: int
-    plain: bool = False
-    assign: bool = False
-
-
-class _Heredoc(NamedTuple):
-    at: int
-    delimiter: str
-    strip: bool
-    quoted: bool
-
-
-class _Refusal(Exception):
-    """An error bash reports while reading a line, in its own words.
-
-    Args:
-        lines (list[str]): the diagnostic lines, without a prefix.
-        status (int): the status bash refuses the line with.
-        offending (str): the text bash names, empty at the end of input.
-        start (int): where that text starts in the line.
-        end (int): where it ends.
-        eof (bool): the input ended inside a construct.
-    """
-
-    def __init__(
-        self,
-        lines: list[str],
-        status: int,
-        offending: str,
-        start: int,
-        end: int,
-        eof: bool,
-    ) -> None:
-        super().__init__(lines)
-        self.lines = lines
-        self.status = status
-        self.offending = offending
-        self.start = start
-        self.end = end
-        self.eof = eof
-
-
-class _TestFailure(Exception):
-    """A ``[[ ]]`` expression bash refuses, before the line naming where.
-
-    Args:
-        lines (list[str]): the conditional's own diagnostic lines.
-        token (_Token): the token it stopped at.
-        eof (bool): the input ended inside the expression.
-    """
-
-    def __init__(
-        self, lines: list[str], token: _Token, eof: bool = False
-    ) -> None:
-        super().__init__(lines)
-        self.lines = lines
-        self.token = token
-        self.eof = eof
 
 
 def check_syntax(
@@ -159,7 +103,9 @@ def check_syntax(
     except RecursionError:
         logger.debug("line nested past the host's stack, refused")
         found = [
-            _Refusal(["syntax error: nesting too deep"], 2, "", 0, 0, False)
+            ReaderRefusal(
+                ["syntax error: nesting too deep"], 2, "", 0, 0, False
+            )
         ]
     if not found:
         return None
@@ -225,8 +171,8 @@ def find_syntax_issue(node: TSNodeLike) -> SyntaxDiagnostic | None:
     Parameter syntax is judged as the word expands (a bad substitution),
     a ``[`` test's arguments by that builtin, and a ``$(...)`` body as the
     line it runs as; the words of an associative subscript may hold
-    blanks, and the grammar recovers a quoted heredoc's last line and a
-    ``for`` header's ``in`` as errors of its own, and the ``;`` it misses
+    blanks, and the grammar recovers a ``for`` header's ``in`` as an
+    error of its own, and the ``;`` it misses
     between a compound command and the reserved word closing around it
     (``{ { a; } }``) as a missing token.
 
@@ -245,7 +191,6 @@ def find_syntax_issue(node: TSNodeLike) -> SyntaxDiagnostic | None:
         and node.children[0].type == "["
     ):
         return None
-    previous = None
     for child in node.children:
         if (
             node.type == "subscript"
@@ -267,16 +212,11 @@ def find_syntax_issue(node: TSNodeLike) -> SyntaxDiagnostic | None:
                 and (child.text or b"").strip() == b"in"
             )
         ):
-            if _is_recovered_quoted_heredoc_end(previous, child):
-                previous = child
-                continue
             return _issue(child)
         if child.type != "ERROR":
             nested = find_syntax_issue(child)
             if nested is not None:
                 return nested
-        if child.is_named:
-            previous = child
     return None
 
 
@@ -304,48 +244,6 @@ def _is_structural_error(node: TSNodeLike) -> bool:
         or child.type in SEPARATOR_TOKENS
         for child in node.children
     )
-
-
-def _walk_named(node: TSNodeLike) -> Iterator[TSNodeLike]:
-    stack = [node]
-    while stack:
-        current = stack.pop()
-        yield current
-        stack.extend(reversed(current.named_children))
-
-
-def _is_recovered_quoted_heredoc_end(
-    previous: TSNodeLike | None, error: TSNodeLike
-) -> bool:
-    """Whether an ERROR is a quoted heredoc's last line the grammar missed.
-
-    Args:
-        previous (TSNodeLike | None): the named sibling before it.
-        error (TSNodeLike): the ERROR node.
-    """
-    if previous is None:
-        return False
-    error_text = decode_text(error.text or b"").strip()
-    if not error_text:
-        return False
-    for candidate in _walk_named(previous):
-        if candidate.type != "heredoc_redirect":
-            continue
-        start = None
-        end = None
-        for child in candidate.named_children:
-            if child.type == "heredoc_start":
-                start = decode_text(child.text or b"")
-            elif child.type == "heredoc_end":
-                end = decode_text(child.text or b"")
-        if (
-            start is not None
-            and ("'" in start or '"' in start)
-            and not end
-            and start.replace("'", "").replace('"', "") == error_text
-        ):
-            return True
-    return False
 
 
 def _mirage_wording(line: str) -> str:
@@ -430,7 +328,7 @@ def _semicolons(body: str) -> int:
     return count
 
 
-def _test_text(tok: _Token) -> str:
+def _test_text(tok: ReaderToken) -> str:
     if tok.kind == "newline":
         return "newline"
     if tok.kind == "eof":
@@ -438,13 +336,8 @@ def _test_text(tok: _Token) -> str:
     return tok.text
 
 
-def _is_test_close(tok: _Token) -> bool:
+def _is_test_close(tok: ReaderToken) -> bool:
     return tok.kind == "word" and tok.plain and tok.text == "]]"
-
-
-_ReaderState = tuple[
-    int, tuple[int, int, _Token] | None, tuple[_Heredoc, ...], int, bool
-]
 
 
 class _LineReader:
@@ -471,11 +364,11 @@ class _LineReader:
     ) -> None:
         self.text = text
         self.n = len(text)
-        self.quoted_end = (len(text) - len(text.rstrip("\\"))) % 2 == 1
+        self.quoted_end = ends_escaped(text)
         self.aliases = aliases
         self.own = own
         self.subs: dict[
-            tuple[int, int | None], tuple[int, tuple[_Heredoc, ...]]
+            tuple[int, int | None], tuple[int, tuple[ReaderHeredoc, ...]]
         ] = {}
         self.bodies: dict[int, tuple[int, int]] = {}
         self.closes: list[tuple[int, tuple[int, ...]]] = []
@@ -488,28 +381,28 @@ class _LineReader:
         self.limit: int | None = None
         self.floor = 0
         self.frames: list[str] = []
-        self.heredocs: tuple[_Heredoc, ...] = ()
+        self.heredocs: tuple[ReaderHeredoc, ...] = ()
         self.carried = 0
-        self.peeked: tuple[int, int, _Token] | None = None
+        self.peeked: tuple[int, int, ReaderToken] | None = None
         self.after = False
         self.matching = False
         self.depth = 0
         self.nesting = 0
         self.braces = 0
 
-    def refusals(self) -> list[_Refusal]:
+    def refusals(self) -> list[ReaderRefusal]:
         """Every error bash reports for the line, in order.
 
         An array bash cannot read discards the rest of its line only, so
         the next line is read on; an end of input inside a quote then
         leaves the status as it was.
         """
-        found: list[_Refusal] = []
+        found: list[ReaderRefusal] = []
         while True:
             try:
                 self.program()
                 return found
-            except _Refusal as refusal:
+            except ReaderRefusal as refusal:
                 if found and self.matching:
                     refusal.status = found[-1].status
                 found.append(refusal)
@@ -538,13 +431,15 @@ class _LineReader:
     def refuse(
         self, lines: list[str], eof: bool, offending: str, start: int, end: int
     ) -> NoReturn:
-        raise _Refusal(lines, self.status(eof), offending, start, end, eof)
+        raise ReaderRefusal(
+            lines, self.status(eof), offending, start, end, eof
+        )
 
-    def fail_token(self, tok: _Token) -> NoReturn:
+    def fail_token(self, tok: ReaderToken) -> NoReturn:
         """Refuse the line at a token bash cannot take where it stands.
 
         Args:
-            tok (_Token): the token.
+            tok (ReaderToken): the token.
         """
         if tok.kind == "eof":
             self.fail_eof()
@@ -707,12 +602,12 @@ class _LineReader:
             quoted (bool): inside double quotes.
         """
         text = self.text
-        at = self.joined(i + 1)
+        at = joined(self.text, i + 1)
         nxt = text[at : at + 1]
         if nxt == "$":
             return at + 1
         if nxt == "(":
-            inner = self.joined(at + 1)
+            inner = joined(self.text, at + 1)
             if text[inner : inner + 1] == "(":
                 end = self.matched(inner + 1, i)
                 if text[end + 1 : end + 2] == ")":
@@ -750,7 +645,7 @@ class _LineReader:
         Args:
             i (int): the ``<`` or ``>``.
         """
-        at = self.joined(i + 1)
+        at = joined(self.text, i + 1)
         if self.char_at(at + 1) == "(":
             return self.matched(at + 1, i) + 1
         return self.substitution(i, at + 1)
@@ -837,10 +732,10 @@ class _LineReader:
 
     # -- nested reads -------------------------------------------------------
 
-    def save(self) -> _ReaderState:
+    def save(self) -> ReaderState:
         return (self.pos, self.peeked, self.heredocs, self.carried, self.after)
 
-    def restore(self, state: _ReaderState) -> None:
+    def restore(self, state: ReaderState) -> None:
         self.pos, self.peeked, self.heredocs, self.carried, self.after = state
 
     def substitution(self, opened: int, j: int) -> int:
@@ -860,7 +755,7 @@ class _LineReader:
             return known[0]
         if self.nesting >= MAX_NESTING:
             opener = self.text[opened:j].replace("\\\n", "")
-            self.fail_token(_Token("op", opener, opened, j))
+            self.fail_token(ReaderToken("op", opener, opened, j))
         state = self.save()
         self.pos, self.peeked = j, None
         self.heredocs, self.carried = (), 0
@@ -886,7 +781,7 @@ class _LineReader:
                 self.fail_token(tok)
         self.nesting -= 1
         self.frames.pop()
-        pending: tuple[_Heredoc, ...] = self.heredocs
+        pending: tuple[ReaderHeredoc, ...] = self.heredocs
         fresh = tuple(h.at for h in pending if h.at not in self.warned)
         if fresh:
             self.closes.append((tok.start, fresh))
@@ -976,7 +871,7 @@ class _LineReader:
                 return op, ends[len(op) - 1]
         return None
 
-    def peek(self, mode: int = 0) -> _Token:
+    def peek(self, mode: int = 0) -> ReaderToken:
         """The next token, read in ``mode``, without taking it.
 
         Args:
@@ -992,12 +887,12 @@ class _LineReader:
         self.peeked = (self.pos, mode, tok)
         return tok
 
-    def peek_after(self) -> _Token:
+    def peek_after(self) -> ReaderToken:
         """The token after a command. After a compound one it is read as
         where a command starts: reserved words, arrays and arithmetic."""
         return self.peek(READ_FOLLOW if self.after else 0)
 
-    def take(self, tok: _Token) -> None:
+    def take(self, tok: ReaderToken) -> None:
         self.peeked = None
         self.pos = tok.end
         if tok.kind == "newline":
@@ -1026,11 +921,7 @@ class _LineReader:
                 end = text.find("\n", i, n)
                 end = n if end < 0 else end
                 line = text[i:end]
-                while (
-                    not quoted
-                    and end < n
-                    and (len(line) - len(line.rstrip("\\"))) % 2
-                ):
+                while not quoted and end < n and ends_escaped(line):
                     nxt = text.find("\n", end + 1, n)
                     nxt = n if nxt < 0 else nxt
                     line = line[:-1] + text[end + 1 : nxt]
@@ -1054,7 +945,7 @@ class _LineReader:
         return i
 
     def pend(
-        self, heredocs: Iterable[_Heredoc], carried: bool = False
+        self, heredocs: Iterable[ReaderHeredoc], carried: bool = False
     ) -> None:
         """Add heredocs whose bodies the next newline reads, each once: a
         word read again in another mode opens the same ones again. bash
@@ -1062,7 +953,7 @@ class _LineReader:
         their substitutions close, then the ones opened directly.
 
         Args:
-            heredocs (Iterable[_Heredoc]): the heredocs, by where they open.
+            heredocs (Iterable[ReaderHeredoc]): the heredocs, by where they open.
             carried (bool): they come out of a substitution.
         """
         known = {heredoc.at for heredoc in self.heredocs}
@@ -1074,17 +965,6 @@ class _LineReader:
         self.heredocs = self.heredocs[:at] + new + self.heredocs[at:]
         self.carried += len(new)
 
-    def joined(self, i: int) -> int:
-        """Where the next character is once continued lines are joined, as
-        bash joins them before it reads one.
-
-        Args:
-            i (int): where to look.
-        """
-        while self.text.startswith("\\\n", i):
-            i += 2
-        return i
-
     def char_at(self, i: int) -> str:
         """The character at ``i`` once continued lines are joined, or ``''``
         at the end of the line.
@@ -1092,10 +972,10 @@ class _LineReader:
         Args:
             i (int): where to look.
         """
-        i = self.joined(i)
+        i = joined(self.text, i)
         return self.text[i : i + 1]
 
-    def lex(self, i: int, mode: int) -> _Token:
+    def lex(self, i: int, mode: int) -> ReaderToken:
         """Read the token at ``i``.
 
         Args:
@@ -1111,21 +991,21 @@ class _LineReader:
                 continue
             break
         if self.limit is not None and i >= self.limit:
-            return _Token("eof", "", i, i)
+            return ReaderToken("eof", "", i, i)
         if i >= n:
             if self.ended:
-                return _Token("eof", "", n, n)
-            return _Token("newline", "\n", n, n)
+                return ReaderToken("eof", "", n, n)
+            return ReaderToken("newline", "\n", n, n)
         c = text[i]
         if c == "\n":
-            return _Token("newline", "\n", i, i + 1)
+            return ReaderToken("newline", "\n", i, i + 1)
         if mode & READ_ARITH and text.startswith("((", i):
             return self.arith_command(i, bool(mode & READ_START))
         if c in "<>" and self.char_at(i + 1) == "(":
             return self.word(i, 0)
         op = self.operator(i)
         if op is not None:
-            return _Token("op", op[0], i, op[1])
+            return ReaderToken("op", op[0], i, op[1])
         if c == "{" and not mode & READ_TEST:
             close = text.find("}", i, n)
             if (
@@ -1134,16 +1014,18 @@ class _LineReader:
                 and text[close + 1 : close + 2] in ("<", ">")
                 and text[close + 2 : close + 3] != "("
             ):
-                return _Token("redirvar", text[i : close + 1], i, close + 1)
+                return ReaderToken(
+                    "redirvar", text[i : close + 1], i, close + 1
+                )
         if c.isdigit() and not mode & READ_TEST:
             j = i
             while j < n and text[j].isdigit():
                 j += 1
             if j < n and text[j] in "<>" and text[j + 1 : j + 2] != "(":
-                return _Token("number", text[i:j], i, j)
+                return ReaderToken("number", text[i:j], i, j)
         return self.word(i, mode)
 
-    def word(self, i: int, mode: int) -> _Token:
+    def word(self, i: int, mode: int) -> ReaderToken:
         """Read a word, and the assignment or array it may open.
 
         Args:
@@ -1207,8 +1089,8 @@ class _LineReader:
             if state == "equals":
                 assign = True
                 state = "none"
-                i = (i if c == "=" else self.joined(i + 1)) + 1
-                opener = self.joined(i)
+                i = (i if c == "=" else joined(self.text, i + 1)) + 1
+                opener = joined(self.text, i)
                 if mode & READ_ARRAYS and text[opener : opener + 1] == "(":
                     i = self.array(opener, mode)
                     plain = False
@@ -1217,7 +1099,7 @@ class _LineReader:
                 plain = False
                 state = "none"
             i = self.word_char(i)
-        return _Token(
+        return ReaderToken(
             "word",
             text[start:i].replace("\\\n", ""),
             start,
@@ -1241,7 +1123,7 @@ class _LineReader:
             j += 1
         return None
 
-    def arith_command(self, i: int, start: bool) -> _Token:
+    def arith_command(self, i: int, start: bool) -> ReaderToken:
         """Read ``((`` as arithmetic, or as the ``(`` of a subshell when it
         does not close as ``))``.
 
@@ -1256,10 +1138,10 @@ class _LineReader:
         text = self.text
         end = self.matched(i + 2, i)
         if text[end + 1 : end + 2] == ")":
-            return _Token("arith", text[i : end + 2], i, end + 2)
+            return ReaderToken("arith", text[i : end + 2], i, end + 2)
         if start and (end + 1 >= self.n or text[end + 1] == "\n"):
             if self.nesting >= MAX_NESTING:
-                self.fail_token(_Token("op", "(", i, i + 1))
+                self.fail_token(ReaderToken("op", "(", i, i + 1))
             self.nesting += 1
             state = self.save()
             outer = (self.limit, self.floor)
@@ -1271,18 +1153,18 @@ class _LineReader:
                 self.limit, self.floor = outer
                 self.restore(state)
             self.fail_near(end + 1)
-        return _Token("op", "(", i, i + 1)
+        return ReaderToken("op", "(", i, i + 1)
 
     # -- grammar ------------------------------------------------------------
 
-    def keyword(self, tok: _Token) -> str | None:
+    def keyword(self, tok: ReaderToken) -> str | None:
         """The reserved word a token is where a command starts, if any.
 
         A closing word an alias spells is a command, except inside that
         alias's own text and inside a substitution.
 
         Args:
-            tok (_Token): the token.
+            tok (ReaderToken): the token.
         """
         if (
             tok.kind != "word"
@@ -1320,7 +1202,7 @@ class _LineReader:
                 self.fail_token(tok)
 
     def stops(
-        self, tok: _Token, words: frozenset[str], ops: frozenset[str]
+        self, tok: ReaderToken, words: frozenset[str], ops: frozenset[str]
     ) -> bool:
         if tok.kind == "op":
             return tok.text in ops
@@ -1331,7 +1213,7 @@ class _LineReader:
         words: frozenset[str] = frozenset(),
         ops: frozenset[str] = frozenset(),
         empty: bool = False,
-    ) -> _Token:
+    ) -> ReaderToken:
         """Parse commands up to a closing word or operator; return it.
 
         Args:
@@ -1436,12 +1318,12 @@ class _LineReader:
             return
         self.fail_token(tok)
 
-    def compound(self, tok: _Token) -> None:
+    def compound(self, tok: ReaderToken) -> None:
         """Parse a compound command, a function definition or a coproc;
         one nested ``MAX_NESTING`` deep is refused at its opener.
 
         Args:
-            tok (_Token): the token it opens with.
+            tok (ReaderToken): the token it opens with.
         """
         if self.nesting >= MAX_NESTING:
             self.fail_token(tok)
@@ -1490,11 +1372,11 @@ class _LineReader:
             else:
                 return
 
-    def redirect(self, tok: _Token) -> None:
+    def redirect(self, tok: ReaderToken) -> None:
         """Parse a redirection: its operator and target word.
 
         Args:
-            tok (_Token): its descriptor or operator.
+            tok (ReaderToken): its descriptor or operator.
         """
         if tok.kind in ("number", "redirvar"):
             self.take(tok)
@@ -1510,7 +1392,7 @@ class _LineReader:
             word = self.text[target.start : target.end]
             self.pend(
                 (
-                    _Heredoc(
+                    ReaderHeredoc(
                         tok.start,
                         clean_delimiter(word),
                         tok.text == "<<-",
@@ -1589,12 +1471,12 @@ class _LineReader:
             return
         self.fail_token(tok)
 
-    def function(self, tok: _Token) -> None:
+    def function(self, tok: ReaderToken) -> None:
         """Parse ``function NAME [()] body``; a ``(`` not followed by
         ``)`` opens a subshell body.
 
         Args:
-            tok (_Token): the ``function`` word.
+            tok (ReaderToken): the ``function`` word.
         """
         self.take(tok)
         name = self.peek()
@@ -1613,12 +1495,12 @@ class _LineReader:
         self.linebreak()
         self.function_body()
 
-    def coproc(self, tok: _Token) -> None:
+    def coproc(self, tok: ReaderToken) -> None:
         """Parse ``coproc [NAME] command``: a name only before a compound
         command, and ``time`` is a command here.
 
         Args:
-            tok (_Token): the ``coproc`` word.
+            tok (ReaderToken): the ``coproc`` word.
         """
         self.take(tok)
         tok = self.peek(READ_COMMAND)
@@ -1658,7 +1540,7 @@ class _LineReader:
             return
         self.fail_token(tok)
 
-    def if_clause(self, tok: _Token) -> None:
+    def if_clause(self, tok: ReaderToken) -> None:
         self.take(tok)
         self.take(self.compound_list(words=frozenset({"then"})))
         end = self.compound_list(words=frozenset({"elif", "else", "fi"}))
@@ -1690,13 +1572,13 @@ class _LineReader:
         else:
             self.fail_token(tok)
 
-    def for_clause(self, tok: _Token) -> None:
+    def for_clause(self, tok: ReaderToken) -> None:
         """Parse ``for``/``select NAME [in WORDS ;] body``, or an arithmetic
         ``for``; a brace body needs a separator before it, and a ``;``
         after the name cannot follow a newline.
 
         Args:
-            tok (_Token): the ``for`` or ``select`` word.
+            tok (ReaderToken): the ``for`` or ``select`` word.
         """
         arith = tok.text == "for"
         self.take(tok)
@@ -1767,7 +1649,7 @@ class _LineReader:
                 end + 2,
             )
 
-    def case_clause(self, tok: _Token) -> None:
+    def case_clause(self, tok: ReaderToken) -> None:
         """Parse ``case WORD in [(]PATTERN[|PATTERN]...) LIST ;; ... esac``.
 
         Inside a brace group a ``}`` where a pattern word starts closes the
@@ -1775,7 +1657,7 @@ class _LineReader:
         line.
 
         Args:
-            tok (_Token): the ``case`` word.
+            tok (ReaderToken): the ``case`` word.
         """
         self.take(tok)
         subject = self.peek()
@@ -1826,12 +1708,12 @@ class _LineReader:
 
     # -- [[ ... ]] --------------------------------------------------------------
 
-    def conditional(self, tok: _Token) -> None:
+    def conditional(self, tok: ReaderToken) -> None:
         """Parse ``[[ ... ]]``, whose errors bash words in their own family:
         its own lines, then the text it stopped at or the end of input.
 
         Args:
-            tok (_Token): the ``[[`` word.
+            tok (ReaderToken): the ``[[`` word.
         """
         self.take(tok)
         outer = self.depth
@@ -1839,7 +1721,7 @@ class _LineReader:
         try:
             self.test_or()
             self.test_close()
-        except _TestFailure as failure:
+        except TestFailure as failure:
             lines = list(failure.lines)
             if failure.eof:
                 lines.append(self.eof_line())
@@ -1854,19 +1736,19 @@ class _LineReader:
         finally:
             self.depth = outer
 
-    def test_peek(self) -> _Token:
+    def test_peek(self) -> ReaderToken:
         self.linebreak()
         return self.peek(READ_TEST)
 
-    def test_word(self) -> _Token:
+    def test_word(self) -> ReaderToken:
         return self.peek(READ_TEST)
 
-    def test_after(self) -> _Token:
+    def test_after(self) -> ReaderToken:
         """The token after a whole test; ending inside a quote there, bash
         adds that it was looking for ``]]``."""
         try:
             return self.test_peek()
-        except _Refusal as refusal:
+        except ReaderRefusal as refusal:
             if refusal.eof and not self.depth:
                 refusal.lines.append("unexpected EOF while looking for `]]'")
             raise
@@ -1877,12 +1759,12 @@ class _LineReader:
             self.take(tok)
             return
         if tok.kind == "eof":
-            raise _TestFailure(
+            raise TestFailure(
                 ["unexpected EOF while looking for `]]'"], tok, True
             )
         if tok.kind == "word":
-            raise _TestFailure(["syntax error in conditional expression"], tok)
-        raise _TestFailure(
+            raise TestFailure(["syntax error in conditional expression"], tok)
+        raise TestFailure(
             [
                 "syntax error in conditional expression: unexpected token "
                 f"`{_test_text(tok)}'"
@@ -1907,11 +1789,11 @@ class _LineReader:
         OP WORD`` or ``WORD``."""
         tok = self.test_peek()
         if tok.kind == "eof":
-            raise _TestFailure(
+            raise TestFailure(
                 ["unexpected token `EOF' in conditional command"], tok, True
             )
         if _is_test_close(tok):
-            raise _TestFailure([], tok)
+            raise TestFailure([], tok)
         if tok.kind == "word" and tok.plain and tok.text == "!":
             self.take(tok)
             self.test_term()
@@ -1920,7 +1802,7 @@ class _LineReader:
             self.test_group(tok)
             return
         if tok.kind != "word":
-            raise _TestFailure(
+            raise TestFailure(
                 [
                     f"unexpected token `{_test_text(tok)}' in conditional command"
                 ],
@@ -1930,7 +1812,7 @@ class _LineReader:
             self.take(tok)
             arg = self.test_operand("unary", self.test_word)
             if arg.kind != "word" or _is_test_close(arg):
-                raise _TestFailure(
+                raise TestFailure(
                     [
                         f"unexpected argument `{_test_text(arg)}' to "
                         "conditional unary operator"
@@ -1942,7 +1824,7 @@ class _LineReader:
         self.take(tok)
         try:
             op = self.peek(READ_TEST)
-        except _Refusal as refusal:
+        except ReaderRefusal as refusal:
             if refusal.eof:
                 refusal.lines.append("conditional binary operator expected")
             raise
@@ -1957,7 +1839,7 @@ class _LineReader:
                 reader = self.pattern_word
             arg = self.test_operand("binary", reader)
             if arg.kind != "word" or _is_test_close(arg):
-                raise _TestFailure(
+                raise TestFailure(
                     [
                         f"unexpected argument `{_test_text(arg)}' to "
                         "conditional binary operator"
@@ -1971,8 +1853,8 @@ class _LineReader:
         ) or _is_test_close(op):
             return
         if op.kind == "word":
-            raise _TestFailure(["conditional binary operator expected"], op)
-        raise _TestFailure(
+            raise TestFailure(["conditional binary operator expected"], op)
+        raise TestFailure(
             [
                 f"unexpected token `{_test_text(op)}', conditional binary "
                 "operator expected"
@@ -1981,12 +1863,12 @@ class _LineReader:
             op.kind == "eof",
         )
 
-    def test_group(self, tok: _Token) -> None:
+    def test_group(self, tok: ReaderToken) -> None:
         """Parse ``( EXPR )``; every error inside adds that bash expected
         the ``)``.
 
         Args:
-            tok (_Token): the ``(``.
+            tok (ReaderToken): the ``(``.
         """
         if self.nesting >= MAX_NESTING:
             self.fail_token(tok)
@@ -1996,10 +1878,10 @@ class _LineReader:
         try:
             self.test_or()
             close = self.test_peek()
-        except _TestFailure as failure:
+        except TestFailure as failure:
             failure.lines.append("expected `)'")
             raise
-        except _Refusal as refusal:
+        except ReaderRefusal as refusal:
             if refusal.eof:
                 refusal.lines.append("expected `)'")
             raise
@@ -2010,31 +1892,33 @@ class _LineReader:
             self.take(close)
             return
         if close.kind == "word" and not _is_test_close(close):
-            raise _TestFailure(["expected `)'"], close)
-        raise _TestFailure(
+            raise TestFailure(["expected `)'"], close)
+        raise TestFailure(
             [f"unexpected token `{_test_text(close)}', expected `)'"],
             close,
             close.kind == "eof",
         )
 
-    def test_operand(self, kind: str, reader: Callable[[], _Token]) -> _Token:
+    def test_operand(
+        self, kind: str, reader: Callable[[], ReaderToken]
+    ) -> ReaderToken:
         """Read an operator's operand; ending inside a quote there, bash
         adds that the operator's argument is missing.
 
         Args:
             kind (str): ``unary`` or ``binary``.
-            reader (Callable[[], _Token]): reads the operand.
+            reader (Callable[[], ReaderToken]): reads the operand.
         """
         try:
             return reader()
-        except _Refusal as refusal:
+        except ReaderRefusal as refusal:
             if refusal.eof:
                 refusal.lines.append(
                     f"unexpected argument to conditional {kind} operator"
                 )
             raise
 
-    def pattern_word(self) -> _Token:
+    def pattern_word(self) -> ReaderToken:
         """The right side of ``==``, ``=`` or ``!=``, read with extglob on."""
         i = self.blank_end(self.pos)
         text, n = self.text, self.n
@@ -2056,9 +1940,9 @@ class _LineReader:
             j = self.word_char(j)
         if not extended:
             return tok
-        return _Token("word", text[i:j].replace("\\\n", ""), i, j)
+        return ReaderToken("word", text[i:j].replace("\\\n", ""), i, j)
 
-    def regex_word(self) -> _Token:
+    def regex_word(self) -> ReaderToken:
         """The right side of ``=~``: parentheses group blanks into it and
         ``|`` is part of it; ``;``, ``<``, ``>``, ``)`` and ``&`` end it,
         and one of them first is an empty pattern. A ``#`` first starts a
@@ -2068,7 +1952,7 @@ class _LineReader:
         if i >= n or text[i] in "\n#":
             return self.lex(i, 0)
         if text[i] in ";<>)&":
-            return _Token("word", "", i, i)
+            return ReaderToken("word", "", i, i)
         j = i
         while j < n:
             c = text[j]
@@ -2079,4 +1963,4 @@ class _LineReader:
                 break
             j = self.word_char(j)
         word = text[i:j].replace("\\\n", "")
-        return _Token("word", word, i, j, word == "]]")
+        return ReaderToken("word", word, i, j, word == "]]")

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import Iterator
 
 from mirage.shell.bytes import decode_text
@@ -20,11 +19,10 @@ from mirage.shell.parse.constants import (
     ARITH_OPEN_TOKEN,
     ARITH_TEST_OPERATORS,
     DECLARING_NODES,
+    IDENTIFIER_RE,
     TARGET_NAME_FIELDS,
 )
 from mirage.shell.types import TSNodeLike
-
-_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _collect_names(node: TSNodeLike, out: set[str]) -> None:
@@ -211,7 +209,7 @@ def identifier_names(text: str) -> frozenset[str]:
     Args:
         text (str): an expression or value string.
     """
-    return frozenset(_IDENTIFIER_RE.findall(text))
+    return frozenset(IDENTIFIER_RE.findall(text))
 
 
 def _arith_region_names(region: TSNodeLike, out: set[str]) -> None:

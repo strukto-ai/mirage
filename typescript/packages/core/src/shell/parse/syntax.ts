@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SyntaxDiagnostic } from './types.ts'
-import { cleanDelimiter, delimiterQuoted } from './heredoc/delimiter.ts'
+import { ReaderRefusal, TestFailure } from './errors.ts'
+import type { ReaderHeredoc, ReaderState, ReaderToken, SyntaxDiagnostic } from './types.ts'
+import { cleanDelimiter, delimiterQuoted, joined } from './heredoc/delimiter.ts'
+import { endsEscaped } from './heredoc/line.ts'
 import type { HeredocPlan } from './heredoc/types.ts'
 
 import { IOResult } from '../../io/types.ts'
@@ -53,22 +55,6 @@ import {
   WORD_BREAKS,
 } from './constants.ts'
 
-interface Token {
-  readonly kind: string
-  readonly text: string
-  readonly start: number
-  readonly end: number
-  readonly plain: boolean
-  readonly assign: boolean
-}
-
-interface Heredoc {
-  readonly at: number
-  readonly delimiter: string
-  readonly strip: boolean
-  readonly quoted: boolean
-}
-
 function token(
   kind: string,
   text: string,
@@ -76,40 +62,8 @@ function token(
   end: number,
   plain = false,
   assign = false,
-): Token {
+): ReaderToken {
   return { kind, text, start, end, plain, assign }
-}
-
-/** An error bash reports while reading a line, in its own words: the lines
- * without a prefix, the status it refuses the line with, the text it names
- * (empty at the end of input), where that text sits, and whether the input
- * ended inside a construct. */
-class Refusal extends Error {
-  constructor(
-    readonly lines: string[],
-    public status: number,
-    readonly offending: string,
-    readonly start: number,
-    readonly end: number,
-    readonly eof: boolean,
-  ) {
-    super(lines.join('\n'))
-    this.name = 'Refusal'
-  }
-}
-
-/** A `[[ ]]` expression bash refuses, before the line naming where: its own
- * diagnostic lines, the token it stopped at, and whether the input ended
- * inside the expression. */
-class TestFailure extends Error {
-  constructor(
-    readonly lines: string[],
-    readonly token: Token,
-    readonly eof = false,
-  ) {
-    super(lines.join('\n'))
-    this.name = 'TestFailure'
-  }
 }
 
 /**
@@ -134,12 +88,12 @@ export function checkSyntax(
   aliases: ReadonlySet<string> = new Set(),
   own: ((name: string, at: number) => boolean) | null = null,
 ): SyntaxDiagnostic | null {
-  let found: Refusal[]
+  let found: ReaderRefusal[]
   try {
     found = new LineReader(command, aliases, own).refusals()
   } catch (err) {
-    if (!(err instanceof RangeError)) throw err
-    found = [new Refusal(['syntax error: nesting too deep'], 2, '', 0, 0, false)]
+    if (!(err instanceof RangeError && err.message.includes('call stack'))) throw err
+    found = [new ReaderRefusal(['syntax error: nesting too deep'], 2, '', 0, 0, false)]
   }
   const first = found[0]
   const last = found.at(-1)
@@ -160,7 +114,7 @@ export function heredocPlan(command: string): HeredocPlan | null {
   try {
     if (reader.refusals().length > 0) return null
   } catch (err) {
-    if (!(err instanceof RangeError)) throw err
+    if (!(err instanceof RangeError && err.message.includes('call stack'))) throw err
     return null
   }
   return {
@@ -181,8 +135,8 @@ export function syntaxErrorResult(found: SyntaxDiagnostic): IOResult {
  * worded as an unexpected token, status 2. Parameter syntax is judged as the
  * word expands (a bad substitution), a `[` test's arguments by that builtin,
  * and a `$(...)` body as the line it runs as; the words of an associative
- * subscript may hold blanks, and the grammar recovers a quoted heredoc's last
- * line and a `for` header's `in` as errors of its own, and the `;` it misses
+ * subscript may hold blanks, and the grammar recovers a `for` header's `in` as
+ * an error of its own, and the `;` it misses
  * between a compound command and the reserved word closing around it
  * (`{ { a; } }`) as a missing token.
  */
@@ -190,7 +144,6 @@ export function findSyntaxIssue(node: TSNodeLike): SyntaxDiagnostic | null {
   if (node.type === 'expansion' || !node.hasError) return null
   if (node.type === 'command_substitution' && node.text.startsWith('$(')) return null
   if (node.type === 'test_command' && node.children[0]?.type === '[') return null
-  let previous: TSNodeLike | null = null
   for (const child of node.children) {
     if (
       node.type === 'subscript' &&
@@ -204,18 +157,12 @@ export function findSyntaxIssue(node: TSNodeLike): SyntaxDiagnostic | null {
       child.type === 'ERROR' &&
       isStructuralError(child) &&
       !(node.type === 'for_statement' && child.text.trim() === 'in')
-    ) {
-      if (isRecoveredQuotedHeredocEnd(previous, child)) {
-        previous = child
-        continue
-      }
+    )
       return issue(child)
-    }
     if (child.type !== 'ERROR') {
       const nested = findSyntaxIssue(child)
       if (nested !== null) return nested
     }
-    if (child.isNamed) previous = child
   }
   return null
 }
@@ -241,42 +188,6 @@ function isStructuralError(node: TSNodeLike): boolean {
       STRUCTURAL_TOKENS.has(child.type) ||
       SEPARATOR_TOKENS.has(child.type),
   )
-}
-
-function* walkNamed(node: TSNodeLike): Generator<TSNodeLike> {
-  const stack = [node]
-  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
-    yield current
-    const children = current.namedChildren
-    for (let i = children.length - 1; i >= 0; i -= 1) {
-      const child = children[i]
-      if (child !== undefined) stack.push(child)
-    }
-  }
-}
-
-/** Whether an ERROR is a quoted heredoc's last line the grammar missed. */
-function isRecoveredQuotedHeredocEnd(previous: TSNodeLike | null, error: TSNodeLike): boolean {
-  if (previous === null) return false
-  const errorText = error.text.trim()
-  if (errorText.length === 0) return false
-  for (const candidate of walkNamed(previous)) {
-    if (candidate.type !== 'heredoc_redirect') continue
-    let start: string | null = null
-    let end: string | null = null
-    for (const child of candidate.namedChildren) {
-      if (child.type === 'heredoc_start') start = child.text
-      else if (child.type === 'heredoc_end') end = child.text
-    }
-    if (
-      start !== null &&
-      (start.includes("'") || start.includes('"')) &&
-      (end === null || end.length === 0) &&
-      start.replaceAll("'", '').replaceAll('"', '') === errorText
-    )
-      return true
-  }
-  return false
 }
 
 /** One of bash's diagnostic lines as mirage prints it. */
@@ -336,29 +247,15 @@ function semicolons(body: string): number {
   return count
 }
 
-function testText(tok: Token): string {
+function testText(tok: ReaderToken): string {
   if (tok.kind === 'newline') return 'newline'
   if (tok.kind === 'eof') return 'EOF'
   return tok.text
 }
 
-function isTestClose(tok: Token): boolean {
+function isTestClose(tok: ReaderToken): boolean {
   return tok.kind === 'word' && tok.plain && tok.text === ']]'
 }
-
-function trailingBackslashes(text: string): number {
-  let count = 0
-  while (count < text.length && text.charAt(text.length - 1 - count) === '\\') count += 1
-  return count
-}
-
-type ReaderState = readonly [
-  number,
-  readonly [number, number, Token] | null,
-  readonly Heredoc[],
-  number,
-  boolean,
-]
 
 /**
  * bash's reader over one line: a lexer whose modes the grammar sets. The line
@@ -376,15 +273,15 @@ class LineReader {
   private limit: number | null = null
   private floor = 0
   private frames: string[] = []
-  private heredocs: readonly Heredoc[] = []
+  private heredocs: readonly ReaderHeredoc[] = []
   private carried = 0
-  private peeked: readonly [number, number, Token] | null = null
+  private peeked: readonly [number, number, ReaderToken] | null = null
   private after = false
   private matching = false
   private depth = 0
   private nesting = 0
   private braces = 0
-  private readonly subs = new Map<string, readonly [number, readonly Heredoc[]]>()
+  private readonly subs = new Map<string, readonly [number, readonly ReaderHeredoc[]]>()
   readonly bodies = new Map<number, readonly [number, number]>()
   readonly closes: (readonly [number, readonly number[]])[] = []
   private readonly warned = new Set<number>()
@@ -395,7 +292,7 @@ class LineReader {
     private readonly own: ((name: string, at: number) => boolean) | null,
   ) {
     this.n = text.length
-    this.quotedEnd = trailingBackslashes(text) % 2 === 1
+    this.quotedEnd = endsEscaped(text)
     this.reset(0)
   }
 
@@ -418,14 +315,14 @@ class LineReader {
   /** Every error bash reports for the line, in order. An array bash cannot
    * read discards the rest of its line only, so the next line is read on; an
    * end of input inside a quote then leaves the status as it was. */
-  refusals(): Refusal[] {
-    const found: Refusal[] = []
+  refusals(): ReaderRefusal[] {
+    const found: ReaderRefusal[] = []
     for (;;) {
       try {
         this.program()
         return found
       } catch (err) {
-        if (!(err instanceof Refusal)) throw err
+        if (!(err instanceof ReaderRefusal)) throw err
         const previous = found.at(-1)
         if (previous !== undefined && this.matching) err.status = previous.status
         found.push(err)
@@ -449,11 +346,11 @@ class LineReader {
   }
 
   refuse(lines: string[], eof: boolean, offending: string, start: number, end: number): never {
-    throw new Refusal(lines, this.status(eof), offending, start, end, eof)
+    throw new ReaderRefusal(lines, this.status(eof), offending, start, end, eof)
   }
 
   /** Refuse the line at a token bash cannot take where it stands. */
-  failToken(tok: Token): never {
+  failToken(tok: ReaderToken): never {
     if (tok.kind === 'eof') this.failEof()
     if (tok.kind === 'redirvar') {
       const [start, end] = this.nearSpan(tok.end + 1)
@@ -567,11 +464,11 @@ class LineReader {
    * `$"` open nothing. */
   dollar(i: number, quoted: boolean): number {
     const text = this.text
-    const at = this.joined(i + 1)
+    const at = joined(this.text, i + 1)
     const next = text.charAt(at)
     if (next === '$') return at + 1
     if (next === '(') {
-      const inner = this.joined(at + 1)
+      const inner = joined(this.text, at + 1)
       if (text.charAt(inner) === '(') {
         const end = this.matched(inner + 1, i)
         if (text.charAt(end + 1) === ')') return end + 2
@@ -599,7 +496,7 @@ class LineReader {
   /** Skip `<(` or `>(`: parsed, unless `((` follows, which bash matches as
    * text. */
   processSubstitution(i: number): number {
-    const at = this.joined(i + 1)
+    const at = joined(this.text, i + 1)
     if (this.charAt(at + 1) === '(') return this.matched(at + 1, i) + 1
     return this.substitution(i, at + 1)
   }
@@ -690,7 +587,7 @@ class LineReader {
     this.frames.push('sub')
     this.nesting += 1
     this.linebreak()
-    let tok: Token
+    let tok: ReaderToken
     for (;;) {
       tok = this.peek(READ_COMMAND)
       if (tok.kind === 'op' && tok.text === ')') break
@@ -732,7 +629,7 @@ class LineReader {
     this.peeked = null
     this.frames.push('array')
     const element = READ_ELEMENT | ((mode & READ_KEYS) !== 0 ? READ_SUBSCRIPTS : 0)
-    let tok: Token
+    let tok: ReaderToken
     for (;;) {
       tok = this.peek(element)
       if (
@@ -795,7 +692,7 @@ class LineReader {
   }
 
   /** The next token, read in `mode` (the `READ_*` flags), without taking it. */
-  peek(mode = 0): Token {
+  peek(mode = 0): ReaderToken {
     const peeked = this.peeked
     if (peeked !== null && peeked[0] === this.pos && peeked[1] === mode) return peeked[2]
     const tok = this.lex(this.pos, mode)
@@ -805,11 +702,11 @@ class LineReader {
 
   /** The token after a command. After a compound one it is read as where a
    * command starts: reserved words, arrays and arithmetic. */
-  peekAfter(): Token {
+  peekAfter(): ReaderToken {
     return this.peek(this.after ? READ_FOLLOW : 0)
   }
 
-  take(tok: Token): void {
+  take(tok: ReaderToken): void {
     this.peeked = null
     this.pos = tok.end
     if (tok.kind === 'newline') {
@@ -833,7 +730,7 @@ class LineReader {
         let end = text.indexOf('\n', i)
         if (end < 0) end = n
         let line = text.slice(i, end)
-        while (!quoted && end < n && trailingBackslashes(line) % 2 === 1) {
+        while (!quoted && end < n && endsEscaped(line)) {
           let next = text.indexOf('\n', end + 1)
           if (next < 0) next = n
           line = line.slice(0, -1) + text.slice(end + 1, next)
@@ -868,7 +765,7 @@ class LineReader {
    * again in another mode opens the same ones again. bash reads the ones
    * `carried` out of a substitution first, in the order their substitutions
    * close, then the ones opened directly. */
-  pend(heredocs: readonly Heredoc[], carried = false): void {
+  pend(heredocs: readonly ReaderHeredoc[], carried = false): void {
     const known = new Set(this.heredocs.map((heredoc) => heredoc.at))
     const added = heredocs.filter((heredoc) => !known.has(heredoc.at))
     if (!carried) {
@@ -880,21 +777,14 @@ class LineReader {
     this.carried += added.length
   }
 
-  /** Where the next character is once continued lines are joined, as bash
-   * joins them before it reads one. */
-  joined(i: number): number {
-    while (this.text.startsWith('\\\n', i)) i += 2
-    return i
-  }
-
   /** The character at `i` once continued lines are joined, or `''` at the
    * end of the line. */
   charAt(i: number): string {
-    return this.text.charAt(this.joined(i))
+    return this.text.charAt(joined(this.text, i))
   }
 
   /** Read the token at `i` in `mode`. */
-  lex(i: number, mode: number): Token {
+  lex(i: number, mode: number): ReaderToken {
     const text = this.text
     const n = this.n
     for (;;) {
@@ -940,7 +830,7 @@ class LineReader {
   }
 
   /** Read a word, and the assignment or array it may open. */
-  word(i: number, mode: number): Token {
+  word(i: number, mode: number): ReaderToken {
     const text = this.text
     const start = i
     let plain = true
@@ -990,8 +880,8 @@ class LineReader {
       if (state === 'equals') {
         assign = true
         state = 'none'
-        i = (c === '=' ? i : this.joined(i + 1)) + 1
-        const opener = this.joined(i)
+        i = (c === '=' ? i : joined(this.text, i + 1)) + 1
+        const opener = joined(this.text, i)
         if ((mode & READ_ARRAYS) !== 0 && text.charAt(opener) === '(') {
           i = this.array(opener, mode)
           plain = false
@@ -1020,7 +910,7 @@ class LineReader {
    * close as `))`. Where a command starts, arithmetic that does not close on
    * its line is read again as two subshells up to that point, and running
    * out there is bash's `syntax error near `X'`. */
-  arithCommand(i: number, start: boolean): Token {
+  arithCommand(i: number, start: boolean): ReaderToken {
     const text = this.text
     const end = this.matched(i + 2, i)
     if (text.charAt(end + 1) === ')') return token('arith', text.slice(i, end + 2), i, end + 2)
@@ -1049,7 +939,7 @@ class LineReader {
   /** The reserved word a token is where a command starts, if any. A closing
    * word an alias spells is a command, except inside that alias's own text
    * and inside a substitution. */
-  keyword(tok: Token): string | null {
+  keyword(tok: ReaderToken): string | null {
     if (tok.kind !== 'word' || !tok.plain || !RESERVED_WORDS.has(tok.text)) return null
     if (CLOSING_WORDS.has(tok.text) && this.aliases.has(tok.text) && !this.frames.includes('sub')) {
       if (!(this.own?.(tok.text, tok.start) ?? false)) return null
@@ -1076,7 +966,7 @@ class LineReader {
     }
   }
 
-  stops(tok: Token, words: ReadonlySet<string>, ops: ReadonlySet<string>): boolean {
+  stops(tok: ReaderToken, words: ReadonlySet<string>, ops: ReadonlySet<string>): boolean {
     if (tok.kind === 'op') return ops.has(tok.text)
     const word = this.keyword(tok)
     return word !== null && words.has(word)
@@ -1085,7 +975,7 @@ class LineReader {
   /** Parse commands up to one of the reserved `words` or `ops` that end the
    * list; return it. With `empty` the list may hold no command (a case
    * item). */
-  compoundList(words: ReadonlySet<string>, ops: ReadonlySet<string>, empty = false): Token {
+  compoundList(words: ReadonlySet<string>, ops: ReadonlySet<string>, empty = false): ReaderToken {
     this.linebreak()
     let seen = false
     for (;;) {
@@ -1189,7 +1079,7 @@ class LineReader {
 
   /** Parse a compound command, a function definition or a coproc; one nested
    * `MAX_NESTING` deep is refused at its opener. */
-  compound(tok: Token): void {
+  compound(tok: ReaderToken): void {
     if (this.nesting >= MAX_NESTING) this.failToken(tok)
     this.nesting += 1
     const word = this.keyword(tok)
@@ -1232,7 +1122,7 @@ class LineReader {
   }
 
   /** Parse a redirection: its descriptor or operator, then its target word. */
-  redirect(tok: Token): void {
+  redirect(tok: ReaderToken): void {
     if (tok.kind === 'number' || tok.kind === 'redirvar') {
       this.take(tok)
       tok = this.peek()
@@ -1266,7 +1156,7 @@ class LineReader {
     let mode = READ_PREFIX
     let assigned = false
     let prefixed = false
-    let tok: Token
+    let tok: ReaderToken
     for (;;) {
       tok = this.peek(mode)
       if (
@@ -1332,7 +1222,7 @@ class LineReader {
 
   /** Parse `function NAME [()] body`; a `(` not followed by `)` opens a
    * subshell body. */
-  function(tok: Token): void {
+  function(tok: ReaderToken): void {
     this.take(tok)
     const name = this.peek()
     if (name.kind !== 'word') this.failToken(name)
@@ -1351,7 +1241,7 @@ class LineReader {
 
   /** Parse `coproc [NAME] command`: a name only before a compound command,
    * and `time` is a command here. */
-  coproc(tok: Token): void {
+  coproc(tok: ReaderToken): void {
     this.take(tok)
     tok = this.peek(READ_COMMAND)
     let word = this.keyword(tok)
@@ -1385,7 +1275,7 @@ class LineReader {
     this.failToken(tok)
   }
 
-  ifClause(tok: Token): void {
+  ifClause(tok: ReaderToken): void {
     const none: ReadonlySet<string> = new Set()
     this.take(tok)
     this.take(this.compoundList(new Set(['then']), none))
@@ -1419,7 +1309,7 @@ class LineReader {
   /** Parse `for`/`select NAME [in WORDS ;] body`, or an arithmetic `for`; a
    * brace body needs a separator before it, and a `;` after the name cannot
    * follow a newline. */
-  forClause(tok: Token): void {
+  forClause(tok: ReaderToken): void {
     const arith = tok.text === 'for'
     this.take(tok)
     const start = this.blankEnd(this.pos)
@@ -1475,7 +1365,7 @@ class LineReader {
   /** Parse `case WORD in [(]PATTERN[|PATTERN]...) LIST ;; ... esac`. Inside a
    * brace group a `}` where a pattern word starts closes the group, as bash
    * reads it, but for the word right after `in` on its line. */
-  caseClause(tok: Token): void {
+  caseClause(tok: ReaderToken): void {
     this.take(tok)
     const subject = this.peek()
     if (subject.kind !== 'word') this.failToken(subject)
@@ -1525,7 +1415,7 @@ class LineReader {
 
   /** Parse `[[ ... ]]`, whose errors bash words in their own family: its own
    * lines, then the text it stopped at or the end of input. */
-  conditional(tok: Token): void {
+  conditional(tok: ReaderToken): void {
     this.take(tok)
     const outer = this.depth
     this.depth = 0
@@ -1549,22 +1439,22 @@ class LineReader {
     }
   }
 
-  testPeek(): Token {
+  testPeek(): ReaderToken {
     this.linebreak()
     return this.peek(READ_TEST)
   }
 
-  testWord(): Token {
+  testWord(): ReaderToken {
     return this.peek(READ_TEST)
   }
 
   /** The token after a whole test; ending inside a quote there, bash adds
    * that it was looking for `]]`. */
-  testAfter(): Token {
+  testAfter(): ReaderToken {
     try {
       return this.testPeek()
     } catch (err) {
-      if (err instanceof Refusal && err.eof && this.depth === 0)
+      if (err instanceof ReaderRefusal && err.eof && this.depth === 0)
         err.lines.push("unexpected EOF while looking for `]]'")
       throw err
     }
@@ -1639,11 +1529,12 @@ class LineReader {
       return
     }
     this.take(tok)
-    let op: Token
+    let op: ReaderToken
     try {
       op = this.peek(READ_TEST)
     } catch (err) {
-      if (err instanceof Refusal && err.eof) err.lines.push('conditional binary operator expected')
+      if (err instanceof ReaderRefusal && err.eof)
+        err.lines.push('conditional binary operator expected')
       throw err
     }
     if (
@@ -1651,7 +1542,7 @@ class LineReader {
       (op.kind === 'op' && (op.text === '<' || op.text === '>'))
     ) {
       this.take(op)
-      let reader = (): Token => this.testWord()
+      let reader = (): ReaderToken => this.testWord()
       if (op.text === '=~') reader = () => this.regexWord()
       else if (op.text === '==' || op.text === '=' || op.text === '!=')
         reader = () => this.patternWord()
@@ -1678,17 +1569,17 @@ class LineReader {
   }
 
   /** Parse `( EXPR )`; every error inside adds that bash expected the `)`. */
-  testGroup(tok: Token): void {
+  testGroup(tok: ReaderToken): void {
     if (this.nesting >= MAX_NESTING) this.failToken(tok)
     this.take(tok)
     this.depth += 1
     this.nesting += 1
-    let close: Token
+    let close: ReaderToken
     try {
       this.testOr()
       close = this.testPeek()
     } catch (err) {
-      if (err instanceof TestFailure || (err instanceof Refusal && err.eof))
+      if (err instanceof TestFailure || (err instanceof ReaderRefusal && err.eof))
         err.lines.push("expected `)'")
       throw err
     } finally {
@@ -1709,18 +1600,18 @@ class LineReader {
 
   /** Read an operator's operand; ending inside a quote there, bash adds that
    * the operator's argument is missing. */
-  testOperand(kind: string, reader: () => Token): Token {
+  testOperand(kind: string, reader: () => ReaderToken): ReaderToken {
     try {
       return reader()
     } catch (err) {
-      if (err instanceof Refusal && err.eof)
+      if (err instanceof ReaderRefusal && err.eof)
         err.lines.push(`unexpected argument to conditional ${kind} operator`)
       throw err
     }
   }
 
   /** The right side of `==`, `=` or `!=`, read with extglob on. */
-  patternWord(): Token {
+  patternWord(): ReaderToken {
     const i = this.blankEnd(this.pos)
     const text = this.text
     const tok = this.lex(i, READ_TEST)
@@ -1745,7 +1636,7 @@ class LineReader {
   /** The right side of `=~`: parentheses group blanks into it and `|` is
    * part of it; `;`, `<`, `>`, `)` and `&` end it, and one of them first is
    * an empty pattern. A `#` first starts a comment, as at any word's start. */
-  regexWord(): Token {
+  regexWord(): ReaderToken {
     const i = this.blankEnd(this.pos)
     const text = this.text
     if (i >= this.n || '\n#'.includes(text.charAt(i))) return this.lex(i, 0)

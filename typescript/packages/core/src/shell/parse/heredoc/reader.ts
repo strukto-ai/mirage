@@ -14,7 +14,7 @@
 
 import { COMMENT_PRECEDERS, QUOTE_OPENERS } from './constants.ts'
 import { cleanDelimiter, delimiterQuoted } from './delimiter.ts'
-import { constructCloser, constructEnd, operatorLineEnd, quoteEnd } from './line.ts'
+import { constructCloser, constructEnd, endsEscaped, operatorLineEnd, quoteEnd } from './line.ts'
 import type { BodyRead, Heredoc, HeredocOperator, HeredocPlan } from './types.ts'
 
 export function delimiterEnd(text: string, start: number): number | null {
@@ -59,9 +59,7 @@ export function readBody(
       line += text.slice(begin, end)
       for (let i = begin; i < end; i += 1) places.push(i)
       position = newline < 0 ? text.length : newline + 1
-      let trailing = 0
-      for (let i = line.length - 1; i >= 0 && line[i] === '\\'; i -= 1) trailing += 1
-      continued = !quoted && trailing % 2 === 1 && newline >= 0
+      continued = !quoted && endsEscaped(line) && newline >= 0
       if (continued) {
         line = line.slice(0, -1)
         places.pop()

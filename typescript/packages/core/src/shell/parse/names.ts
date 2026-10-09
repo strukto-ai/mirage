@@ -17,10 +17,9 @@ import {
   ARITH_OPEN_TOKEN,
   ARITH_TEST_OPERATORS,
   DECLARING_NODES,
+  IDENTIFIER_RE,
   TARGET_NAME_FIELDS,
 } from './constants.ts'
-
-const IDENTIFIER_RE = /[A-Za-z_][A-Za-z0-9_]*/g
 
 /**
  * Whether two facade nodes name the same tree node. Web-tree-sitter
@@ -223,7 +222,7 @@ function substringArithNames(expansion: TSNodeLike, out: Set<string>): void {
   let seenColon = false
   for (const child of expansion.children) {
     if (!seenColon) {
-      seenColon = child.text === ':'
+      seenColon = child.isNamed !== true && child.text === ':'
       continue
     }
     if (child.isNamed === true || expansion.namedChildren.some((n) => sameNode(n, child))) {
