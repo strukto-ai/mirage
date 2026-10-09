@@ -25,6 +25,10 @@ from mirage.commands.quote import quote_text
 from mirage.shell.bytes import byte_char, encode_text
 from mirage.shell.escapes import code_point_text
 
+# C's int, which bounds a ``*`` width or precision.
+_INT_MAX = (1 << 31) - 1
+_INT_MIN = -(1 << 31)
+
 # The integer strtoimax and strtoumax read at base 0 in the C locale: the
 # blanks and sign, then hex after 0x, binary after 0b (glibc 2.38 on),
 # octal after a leading 0, else decimal. A 0x or 0b with no digit after
@@ -97,7 +101,7 @@ def _read_int(text: str, signed: bool) -> tuple[int, int, bool]:
     elif octal is not None:
         n = int(octal, 8)
     else:
-        n = int(decimal)
+        n = int(decimal) if len(decimal) <= 20 else UINTMAX + 1
     if signed:
         limit = INTMAX + (sign == "-")
         value = min(n, limit)
@@ -153,16 +157,18 @@ def _numeric_error(
 
 
 def _character_value(
-    raw: str, program: bool, warnings: list[str]
+    raw: str, program: bool, posix: bool, warnings: list[str]
 ) -> tuple[int, str | None]:
     """The value of a leading-quote argument: its next character's code.
 
     bash's builtin takes a lone quote as 0. GNU's program refuses it, and
-    warns that it ignored any characters after the first.
+    warns that it ignored any characters after the first unless
+    ``POSIXLY_CORRECT`` is in its environment.
 
     Args:
         raw (str): the argument, opening with ``'`` or ``"``.
         program (bool): the coreutils program's voice, not the builtin's.
+        posix (bool): the program runs with ``POSIXLY_CORRECT`` set.
         warnings (list[str]): collects the warning.
     """
     rest = raw[1:]
@@ -173,7 +179,7 @@ def _character_value(
                 f"printf: '{quote_text(raw)}': expected a numeric value\n",
             )
         return 0, None
-    if program and len(rest) > 1:
+    if program and not posix and len(rest) > 1:
         warnings.append(
             f"printf: warning: {rest[1:]}: character(s) following character"
             " constant have been ignored\n"
@@ -182,7 +188,7 @@ def _character_value(
 
 
 def _int_argument(
-    raw: str, signed: bool, program: bool, warnings: list[str]
+    raw: str, signed: bool, program: bool, posix: bool, warnings: list[str]
 ) -> tuple[int, str | None]:
     """An integer argument's value and the error it fails printf with.
 
@@ -191,26 +197,28 @@ def _int_argument(
         signed (bool): read for ``%d``/``%i`` (and a ``*`` width or
             precision) rather than ``%o %u %x %X``.
         program (bool): the coreutils program's voice, not the builtin's.
+        posix (bool): the program runs with ``POSIXLY_CORRECT`` set.
         warnings (list[str]): collects the warnings.
     """
     if raw[:1] in ("'", '"'):
-        return _character_value(raw, program, warnings)
+        return _character_value(raw, program, posix, warnings)
     value, read, erange = _read_int(raw, signed)
     return value, _numeric_error(raw, read, erange, program, warnings)
 
 
 def _float_argument(
-    raw: str, program: bool, warnings: list[str]
+    raw: str, program: bool, posix: bool, warnings: list[str]
 ) -> tuple[float, str | None]:
     """A floating-point argument's value and the error it fails printf with.
 
     Args:
         raw (str): the argument as typed.
         program (bool): the coreutils program's voice, not the builtin's.
+        posix (bool): the program runs with ``POSIXLY_CORRECT`` set.
         warnings (list[str]): collects the warnings.
     """
     if raw[:1] in ("'", '"'):
-        code, err = _character_value(raw, program, warnings)
+        code, err = _character_value(raw, program, posix, warnings)
         return float(code), err
     found = STRTOD.match(raw)
     if found is None:
@@ -218,6 +226,49 @@ def _float_argument(
     return strtod_double(found), _numeric_error(
         raw, found.end(), strtold_erange(found), program, warnings
     )
+
+
+def _star_value(
+    star: str,
+    precision: bool,
+    following: str | None,
+    program: bool,
+    posix: bool,
+    warnings: list[str],
+) -> tuple[int, str | None, bool]:
+    """A ``*`` width or precision, held to C's ``int``.
+
+    GNU's program refuses one outside it and stops, except a precision
+    under it, which reads as omitted. bash's builtin holds it at the
+    bound and warns, naming the argument after the ``*``.
+
+    Args:
+        star (str): the ``*`` argument as typed.
+        precision (bool): it is a precision rather than a width.
+        following (str | None): the argument after it, if any.
+        program (bool): the coreutils program's voice, not the builtin's.
+        posix (bool): the program runs with ``POSIXLY_CORRECT`` set.
+        warnings (list[str]): collects the warnings.
+
+    Returns:
+        tuple[int, str | None, bool]: the value, the error that fails
+            printf, and whether that error stops it.
+    """
+    value, err = _int_argument(star, True, program, posix, warnings)
+    if _INT_MIN <= value <= _INT_MAX:
+        return value, err, False
+    if program:
+        if precision and value < 0:
+            return value, err, False
+        if err is not None:
+            warnings.append(err)
+        field = "precision" if precision else "field width"
+        return value, f"printf: invalid {field}: '{quote_text(star)}'\n", True
+    if following is not None:
+        warnings.append(
+            f"printf: warning: {following}: Numerical result out of range\n"
+        )
+    return max(_INT_MIN, min(value, _INT_MAX)), err, False
 
 
 def _apply_pad(
@@ -571,7 +622,7 @@ def _read_conversion(
 
 
 def run_printf(
-    fmt: str, args: list[str], program: bool = False
+    fmt: str, args: list[str], program: bool = False, posix: bool = False
 ) -> tuple[str, list[str], bool, str | None]:
     """Apply GNU printf's format-reuse semantics: scan ``fmt`` once per
     cycle, consuming arguments; repeat while arguments remain and a cycle
@@ -593,6 +644,7 @@ def run_printf(
         args (list[str]): remaining positional arguments.
         program (bool): word numeric errors as the coreutils program
             does rather than as bash's builtin.
+        posix (bool): the program runs with ``POSIXLY_CORRECT`` set.
     """
     out: list[str] = []
     messages: list[str] = []
@@ -624,10 +676,15 @@ def run_printf(
                     star = args[arg_i] if arg_i < total else "0"
                     if arg_i < total:
                         arg_i += 1
-                    wv, err = _int_argument(star, True, program, messages)
+                    following = args[arg_i] if arg_i < total else None
+                    wv, err, fatal = _star_value(
+                        star, False, following, program, posix, messages
+                    )
                     if err is not None:
                         messages.append(err)
                         failed = True
+                    if fatal:
+                        return "".join(out), messages, True, None
                     if wv < 0:
                         flags += "-"
                         width = -wv
@@ -637,10 +694,15 @@ def run_printf(
                     star = args[arg_i] if arg_i < total else "0"
                     if arg_i < total:
                         arg_i += 1
-                    pv, err = _int_argument(star, True, program, messages)
+                    following = args[arg_i] if arg_i < total else None
+                    pv, err, fatal = _star_value(
+                        star, True, following, program, posix, messages
+                    )
                     if err is not None:
                         messages.append(err)
                         failed = True
+                    if fatal:
+                        return "".join(out), messages, True, None
                     precision = None if pv < 0 else pv
                 raw = args[arg_i] if arg_i < total else None
                 if raw is not None:
@@ -648,7 +710,7 @@ def run_printf(
                 w = width if isinstance(width, int) else None
                 p = precision if isinstance(precision, int) else None
                 text, err, stop = _convert(
-                    conv, raw, flags, w, p, program, messages
+                    conv, raw, flags, w, p, program, posix, messages
                 )
                 if err is not None:
                     messages.append(err)
@@ -672,6 +734,7 @@ def _convert(
     width: int | None,
     precision: int | None,
     program: bool,
+    posix: bool,
     warnings: list[str],
 ) -> tuple[str, str | None, bool]:
     """Render one conversion. Returns (text, error message or None, stop),
@@ -686,6 +749,7 @@ def _convert(
         precision (int | None): resolved precision.
         program (bool): word numeric errors as the coreutils program
             does rather than as bash's builtin.
+        posix (bool): the program runs with ``POSIXLY_CORRECT`` set.
         warnings (list[str]): collects the escape warnings of a ``%b``
             argument and the numeric warnings.
     """
@@ -712,11 +776,15 @@ def _convert(
         value, err = (
             (0, None)
             if raw is None
-            else _int_argument(raw, conv in ("d", "i"), program, warnings)
+            else _int_argument(
+                raw, conv in ("d", "i"), program, posix, warnings
+            )
         )
         return _format_int(value, conv, flags, width, precision), err, False
     value_f, err = (
-        (0.0, None) if raw is None else _float_argument(raw, program, warnings)
+        (0.0, None)
+        if raw is None
+        else _float_argument(raw, program, posix, warnings)
     )
     if conv in ("a", "A"):
         return (

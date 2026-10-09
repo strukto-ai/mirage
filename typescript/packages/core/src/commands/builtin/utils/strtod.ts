@@ -23,10 +23,11 @@
 export const STRTOD =
   /^[ \t\n\v\f\r]*([+-]?)(?:(0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?)|((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)|([iI][nN][fF](?:[iI][nN][iI][tT][yY])?)|([nN][aA][nN](?:\([0-9A-Za-z_]*\))?))/
 
-// The binary128 long double strtold rounds to, written 0.DIGITS x 10**EXP:
-// the largest finite value and the least normal one.
-const LDBL_MAX: [number, string] = [4933, '118973149535723176508575932662800702']
-const LDBL_MIN: [number, string] = [-4931, '336210314311209350626267781732175260']
+// The binary128 long double strtold rounds to: a value from 2**16384 -
+// 2**16270 up (LDBL_MAX plus half its ulp, a tie rounding to the even
+// infinity) overflows, one under 2**-16382 is tiny, and a tiny one is held
+// exactly only on the subnormal grid of 2**-16494.
+const OVERFLOW = ((1n << 114n) - 1n) << 16270n
 
 // A STRTOD match spanning the whole word, as xstrtod demands, or null.
 // Mirrors Python's strtod_whole.
@@ -80,41 +81,53 @@ export function strtodDouble(found: RegExpExecArray): number {
   return sign === '-' ? -value : value
 }
 
-// Whether strtold reports ERANGE for a STRTOD match: past the largest finite
-// long double, and for a nonzero value under the least normal one that it
-// cannot hold exactly. A decimal never lands on the binary grid there, while
-// a hex float does unless it has a bit below 2**-16494. An infinity or nan
-// as typed is no error. The long double is binary128, as on arm64; x86-64's
-// 80-bit format has the same exponent range. Mirrors Python's strtold_erange.
+// An exponent as typed, held to 10**9 either way: past that bound it cannot
+// change whether a value is in range. Mirrors Python's _saturated.
+function saturated(power: string): number {
+  const digits = power.replace(/^[+-]/, '').replace(/^0+/, '')
+  const value = digits.length > 9 ? 1e9 : Number(digits || '0')
+  return power.startsWith('-') ? -value : value
+}
+
+// Whether strtold reports ERANGE for a STRTOD match: when the value rounds
+// past the largest finite long double, and when a nonzero value under the
+// least normal one cannot be held exactly. Tininess is judged before
+// rounding, so a value that rounds up to the least normal one is still out
+// of range. An infinity or nan as typed is no error. The long double is
+// binary128, as on arm64; x86-64's 80-bit format has the same exponent
+// range. Mirrors Python's strtold_erange.
 export function strtoldErange(found: RegExpExecArray): boolean {
   const [, , hexa, decimal] = found
+  let significand: bigint
+  let exponent: number
+  let base: bigint
   if (hexa !== undefined) {
-    const [mantissa = '', power = '0'] = hexa.slice(2).toLowerCase().split('p')
+    const [mantissa = '', power = ''] = hexa.slice(2).toLowerCase().split('p')
     const [whole = '', fraction = ''] = mantissa.split('.')
-    const significand = BigInt('0x' + (whole + fraction || '0'))
+    significand = BigInt('0x' + (whole + fraction || '0'))
     if (significand === 0n) return false
-    const exponent = Number(power) - 4 * fraction.length
-    const bits = significand.toString(2)
-    const top = bits.length - 1 + exponent
-    const low = bits.length - 1 - bits.lastIndexOf('1') + exponent
-    return top >= 16384 || (top < -16382 && low < -16494)
-  }
-  if (decimal === undefined) return false
-  const [mantissa = '', power = '0'] = decimal.toLowerCase().split('e')
-  const [whole = '', fraction = ''] = mantissa.split('.')
-  const joined = whole + fraction
-  const unled = joined.replace(/^0+/, '')
-  const digits = unled.replace(/0+$/, '')
-  if (digits === '') return false
-  // Both sides are 0.DIGITS x 10**EXP with a nonzero lead digit and no
-  // trailing zero, so equal exponents order by the digits as text.
-  const exponent = whole.length - (joined.length - unled.length) + Number(power)
-  const [maxExponent, maxDigits] = LDBL_MAX
-  const [minExponent, minDigits] = LDBL_MIN
-  return (
-    exponent > maxExponent ||
-    (exponent === maxExponent && digits > maxDigits) ||
-    exponent < minExponent ||
-    (exponent === minExponent && digits < minDigits)
-  )
+    exponent = saturated(power) - 4 * fraction.length
+    const top = significand.toString(2).length - 1 + exponent
+    if (top >= -16382 && top < 16383) return false
+    if (top >= 16384 || top < -16495) return true
+    base = 2n
+  } else if (decimal !== undefined) {
+    const [mantissa = '', power = ''] = decimal.toLowerCase().split('e')
+    const [whole = '', fraction = ''] = mantissa.split('.')
+    const joined = whole + fraction
+    const unled = joined.replace(/^0+/, '')
+    const digits = unled.replace(/0+$/, '')
+    if (digits === '') return false
+    // The value is 0.DIGITS x 10**scale.
+    const scale = whole.length - (joined.length - unled.length) + saturated(power)
+    if (scale >= -4930 && scale <= 4932) return false
+    if (scale >= 4934 || scale <= -4966) return true
+    significand = BigInt(digits)
+    exponent = scale - digits.length
+    base = 10n
+  } else return false
+  const num = significand * base ** BigInt(Math.max(exponent, 0))
+  const den = base ** BigInt(Math.max(-exponent, 0))
+  if (num >= OVERFLOW * den) return true
+  return num << 16382n < den && (num << 16494n) % den !== 0n
 }

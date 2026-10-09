@@ -33,6 +33,10 @@ const PRINTF_SIMPLE_ESCAPES: Record<string, string> = {
   v: '\v',
 }
 
+// C's int, which bounds a `*` width or precision.
+const INT_MAX = (1n << 31n) - 1n
+const INT_MIN = -(1n << 31n)
+
 // The integer strtoimax and strtoumax read at base 0 in the C locale: the
 // blanks and sign, then hex after 0x, binary after 0b (glibc 2.38 on), octal
 // after a leading 0, else decimal. A 0x or 0b with no digit after it reads
@@ -79,7 +83,7 @@ function readInt(text: string, signed: boolean): [bigint, number, boolean] {
   if (hexa !== undefined) n = BigInt('0x' + hexa)
   else if (binary !== undefined) n = BigInt('0b' + binary)
   else if (octal !== undefined) n = BigInt('0o' + octal)
-  else n = BigInt(decimal ?? '0')
+  else n = (decimal ?? '0').length <= 20 ? BigInt(decimal ?? '0') : UINTMAX + 1n
   const read = found[0].length
   if (signed) {
     const limit = INTMAX + (sign === '-' ? 1n : 0n)
@@ -126,11 +130,13 @@ function numericError(
 /**
  * The value of a leading-quote argument: its next character's code. bash's
  * builtin takes a lone quote as 0. GNU's program refuses it, and warns that
- * it ignored any characters after the first.
+ * it ignored any characters after the first unless `POSIXLY_CORRECT` is in
+ * its environment (`posix`).
  */
 function characterValue(
   raw: string,
   program: boolean,
+  posix: boolean,
   warnings: string[],
 ): [number, string | null] {
   const rest = raw.slice(1)
@@ -138,7 +144,7 @@ function characterValue(
   if (code === undefined)
     return [0, program ? `printf: '${quoteText(raw)}': expected a numeric value\n` : null]
   const after = rest.slice(String.fromCodePoint(code).length)
-  if (program && after !== '')
+  if (program && !posix && after !== '')
     warnings.push(
       `printf: warning: ${after}: character(s) following character constant have been ignored\n`,
     )
@@ -150,10 +156,11 @@ function intArgument(
   raw: string,
   signed: boolean,
   program: boolean,
+  posix: boolean,
   warnings: string[],
 ): [bigint, string | null] {
   if (raw.startsWith("'") || raw.startsWith('"')) {
-    const [code, err] = characterValue(raw, program, warnings)
+    const [code, err] = characterValue(raw, program, posix, warnings)
     return [BigInt(code), err]
   }
   const [value, read, erange] = readInt(raw, signed)
@@ -161,14 +168,48 @@ function intArgument(
 }
 
 /** A floating-point argument's value and the error it fails printf with. */
-function floatArgument(raw: string, program: boolean, warnings: string[]): [number, string | null] {
-  if (raw.startsWith("'") || raw.startsWith('"')) return characterValue(raw, program, warnings)
+function floatArgument(
+  raw: string,
+  program: boolean,
+  posix: boolean,
+  warnings: string[],
+): [number, string | null] {
+  if (raw.startsWith("'") || raw.startsWith('"'))
+    return characterValue(raw, program, posix, warnings)
   const found = STRTOD.exec(raw)
   if (found === null) return [0, numericError(raw, 0, false, program, warnings)]
   return [
     strtodDouble(found),
     numericError(raw, found[0].length, strtoldErange(found), program, warnings),
   ]
+}
+
+/**
+ * A `*` width or precision, held to C's `int`: the value, the error that
+ * fails printf, and whether that error stops it. GNU's program refuses one
+ * outside the range and stops, except a precision under it, which reads as
+ * omitted. bash's builtin holds it at the bound and warns, naming the
+ * argument after the `*` (`following`).
+ */
+function starValue(
+  star: string,
+  precision: boolean,
+  following: string | null,
+  program: boolean,
+  posix: boolean,
+  warnings: string[],
+): [bigint, string | null, boolean] {
+  const [value, err] = intArgument(star, true, program, posix, warnings)
+  if (value >= INT_MIN && value <= INT_MAX) return [value, err, false]
+  if (program) {
+    if (precision && value < 0n) return [value, err, false]
+    if (err !== null) warnings.push(err)
+    const field = precision ? 'precision' : 'field width'
+    return [value, `printf: invalid ${field}: '${quoteText(star)}'\n`, true]
+  }
+  if (following !== null)
+    warnings.push(`printf: warning: ${following}: Numerical result out of range\n`)
+  return [value < INT_MIN ? INT_MIN : value > INT_MAX ? INT_MAX : value, err, false]
 }
 
 /** Pad `prefix + body` to `width` per the justify/zero flags. */
@@ -656,6 +697,7 @@ function convert(
   width: number | null,
   precision: number | null,
   program: boolean,
+  posix: boolean,
   warnings: string[],
 ): [string, string | null, boolean] {
   if (conv === 's') return [formatPrintfStr(raw ?? '', flags, width, precision), null, false]
@@ -668,10 +710,12 @@ function convert(
   if (conv === 'q') return [applyPad('', quoteShell(raw ?? ''), flags, width, false), null, false]
   if ('diouxX'.includes(conv)) {
     const [value, err] =
-      raw === null ? [0n, null] : intArgument(raw, conv === 'd' || conv === 'i', program, warnings)
+      raw === null
+        ? [0n, null]
+        : intArgument(raw, conv === 'd' || conv === 'i', program, posix, warnings)
     return [formatInt(value, conv, flags, width, precision), err, false]
   }
-  const [value, err] = raw === null ? [0, null] : floatArgument(raw, program, warnings)
+  const [value, err] = raw === null ? [0, null] : floatArgument(raw, program, posix, warnings)
   if (conv === 'f' || conv === 'F')
     return [formatF(value, flags, width, precision, conv === 'F'), err, false]
   if (conv === 'e' || conv === 'E')
@@ -695,12 +739,14 @@ function convert(
  * `%b` returns there with the status it has so far, and only the end of
  * the builtin folds an invalid number into it, so bash 5.2.37 exits 0 for
  * `printf '%d%b' abc '\c'`. `program` words numeric errors as the
- * coreutils program does rather than as bash's builtin.
+ * coreutils program does rather than as bash's builtin, and `posix` says
+ * the program runs with `POSIXLY_CORRECT` set.
  */
 export function runPrintf(
   fmt: string,
   args: string[],
   program = false,
+  posix = false,
 ): [string, string[], boolean, string | null] {
   const out: string[] = []
   const messages: string[] = []
@@ -739,11 +785,13 @@ export function runPrintf(
         if (widthStar === '*') {
           const star = argI < total ? (args[argI] ?? '0') : '0'
           if (argI < total) argI += 1
-          const [wv, err] = intArgument(star, true, program, messages)
+          const following = argI < total ? (args[argI] ?? null) : null
+          const [wv, err, fatal] = starValue(star, false, following, program, posix, messages)
           if (err !== null) {
             messages.push(err)
             failed = true
           }
+          if (fatal) return [out.join(''), messages, true, null]
           const w = Number(wv)
           if (w < 0) {
             flags += '-'
@@ -754,17 +802,28 @@ export function runPrintf(
         if (precStar === '*') {
           const star = argI < total ? (args[argI] ?? '0') : '0'
           if (argI < total) argI += 1
-          const [pv, err] = intArgument(star, true, program, messages)
+          const following = argI < total ? (args[argI] ?? null) : null
+          const [pv, err, fatal] = starValue(star, true, following, program, posix, messages)
           if (err !== null) {
             messages.push(err)
             failed = true
           }
+          if (fatal) return [out.join(''), messages, true, null]
           const p = Number(pv)
           precision = p < 0 ? null : p
         }
         const raw = argI < total ? (args[argI] ?? '') : null
         if (raw !== null) argI += 1
-        const [text, err, stopHere] = convert(conv, raw, flags, width, precision, program, messages)
+        const [text, err, stopHere] = convert(
+          conv,
+          raw,
+          flags,
+          width,
+          precision,
+          program,
+          posix,
+          messages,
+        )
         if (err !== null) {
           messages.push(err)
           failed = true

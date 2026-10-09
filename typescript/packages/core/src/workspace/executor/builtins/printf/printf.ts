@@ -26,7 +26,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { runPrintf } from './format.ts'
 import type { BuiltinCall, Result } from '../types.ts'
-import { sessionView } from '../../../session/state.ts'
+import { envSnapshot, sessionView } from '../../../session/state.ts'
 import { TARGET_RE } from '../constants.ts'
 
 // bash 5.2.21's own string, which both the usage error and the invalid-option
@@ -211,10 +211,12 @@ export async function handlePrintf(
       new ExecutionNode({ command: 'printf', exitCode: 2, stderr: err }),
     ]
   }
+  const program = isProgramInvocation(session)
   const [output, rawMessages, failed, excess] = runPrintf(
     args[0] ?? '',
     args.slice(1),
-    isProgramInvocation(session),
+    program,
+    program && Object.hasOwn(envSnapshot(session), 'POSIXLY_CORRECT'),
   )
   const voice = isProgramInvocation(session) ? '' : 'bash: '
   const messages = rawMessages.map((message) => voice + message)

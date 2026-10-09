@@ -29,7 +29,7 @@ from mirage.workspace.executor.builtins.printf.format import run_printf
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.elements import assign_element
-from mirage.workspace.session.state import session_view
+from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.types import ExecutionNode
 
 # bash 5.2.21's own string, which both the usage error and the
@@ -246,8 +246,12 @@ async def handle_printf(
             IOResult(exit_code=2, stderr=err),
             ExecutionNode(command="printf", exit_code=2),
         )
+    program = program_invocation(session)
     output, messages, failed, excess = run_printf(
-        args[0], args[1:], program_invocation(session)
+        args[0],
+        args[1:],
+        program,
+        program and "POSIXLY_CORRECT" in env_snapshot(session),
     )
     voice = "" if program_invocation(session) else "bash: "
     err_bytes = encode_text("".join(voice + message for message in messages))

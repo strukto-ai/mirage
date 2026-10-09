@@ -2691,11 +2691,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "env printf '[%d]' x 1x '' 99999999999999999999 \"a'b\" $'\\t'; echo \" $?\"; env printf '[%d]' \"'ab\"; echo \" $?\"; env printf '[%d]' \"'\" 0b11; echo \" $?\"; env printf '[%f]' 1.5.5 1e99999 3e-4932; echo \" $?\"",
+      "command": "env printf '[%d]' x 1x '' 99999999999999999999 \"a'b\" $'\\t'; echo \" $?\"; env printf '[%d]' \"'ab\"; echo \" $?\"; env printf '[%d]' \"'\" 0b11; echo \" $?\"; env printf '[%f]' 1.5.5 1e99999 3e-4932; echo \" $?\"\nenv printf 'a[%*s]' 2147483648 abc; echo \" $?\"; env printf 'a[%.*s]' 2147483648 abc; echo \" $?\"; env printf '[%*d]' 0b10000000000000000000000000000000000000000000000000000000000000000 1; echo \" $?\"; env printf '[%.*s]' -2147483649 abc; echo \" $?\"; env POSIXLY_CORRECT= printf '[%d]' \"'ab\"; echo \" $?\"; (POSIXLY_CORRECT=1; env printf '[%d]' \"'ab\"; echo \" $?\")",
       "expect": {
         "exit": 0,
-        "stdout": "[0][1][0][9223372036854775807][0][0] 1\n[97] 0\n[0][3] 1\n[1.500000][inf][0.000000] 1\n",
-        "stderr": "printf: 'x': expected a numeric value\nprintf: '1x': value not completely converted\nprintf: '': expected a numeric value\nprintf: '99999999999999999999': Numerical result out of range\nprintf: 'a\\'b': expected a numeric value\nprintf: '\\t': expected a numeric value\nprintf: warning: b: character(s) following character constant have been ignored\nprintf: '\\'': expected a numeric value\nprintf: '1.5.5': value not completely converted\nprintf: '1e99999': Numerical result out of range\nprintf: '3e-4932': Numerical result out of range\n"
+        "stdout": "[0][1][0][9223372036854775807][0][0] 1\n[97] 0\n[0][3] 1\n[1.500000][inf][0.000000] 1\na[ 1\na[ 1\n[ 1\n[abc] 0\n[97] 0\n[97] 0\n",
+        "stderr": "printf: 'x': expected a numeric value\nprintf: '1x': value not completely converted\nprintf: '': expected a numeric value\nprintf: '99999999999999999999': Numerical result out of range\nprintf: 'a\\'b': expected a numeric value\nprintf: '\\t': expected a numeric value\nprintf: warning: b: character(s) following character constant have been ignored\nprintf: '\\'': expected a numeric value\nprintf: '1.5.5': value not completely converted\nprintf: '1e99999': Numerical result out of range\nprintf: '3e-4932': Numerical result out of range\nprintf: invalid field width: '2147483648'\nprintf: invalid precision: '2147483648'\nprintf: '0b10000000000000000000000000000000000000000000000000000000000000000': Numerical result out of range\nprintf: invalid field width: '0b10000000000000000000000000000000000000000000000000000000000000000'\nprintf: warning: b: character(s) following character constant have been ignored\n"
       }
     }
   ]

@@ -75,9 +75,9 @@ describe('strtod', () => {
   })
 
   // Where glibc's strtold reports ERANGE for a binary128 long double, pinned
-  // with bash 5.2.37's printf: past the largest finite value, and under the
-  // least normal one unless the value sits on the binary grid. Mirrors
-  // test_strtod.py.
+  // with bash 5.2.37's printf: when the value rounds past the largest finite
+  // one, and when it is under the least normal one and off the subnormal
+  // grid, judged before rounding. Mirrors test_strtod.py.
   it.each([
     ['1e400', false],
     ['1.1e4932', false],
@@ -90,7 +90,16 @@ describe('strtod', () => {
     ['0x1p99999', true],
     ['0x1p-16400', false],
     ['-inf', false],
-  ])('marks %j out of a long double range: %j', (text, erange) => {
+    ['1.18973149535723176508575932662800703e4932', false],
+    ['1.18973149535723176508575932662800708e4932', true],
+    ['0x1.fffffffffffffffffffffffffffffp16383', true],
+    ['0x1.ffffffffffffffffffffffffffff8p16383', true],
+    ['3.3621031431120935062626778173217525e-4932', true],
+    ['1e' + '9'.repeat(5000), true],
+    ['1e' + '0'.repeat(5000) + '1', false],
+    // 2**-16400 spelled out in decimal: a subnormal held exactly.
+    [`${(5n ** 16400n).toString()}e-16400`, false],
+  ])('marks %s out of a long double range: %j', (text, erange) => {
     const found = STRTOD.exec(text)
     if (found === null) throw new Error(`no number in ${text}`)
     expect(strtoldErange(found)).toBe(erange)

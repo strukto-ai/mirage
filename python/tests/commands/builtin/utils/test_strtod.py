@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import math
+from decimal import Decimal, localcontext
 
 import pytest
 
@@ -98,10 +99,17 @@ def test_every_nan_spelling_is_one_quiet_nan(text):
     assert math.copysign(1.0, value) == 1.0
 
 
+# 2**-16400 spelled out in decimal, all 11,463 significant digits: a
+# subnormal the long double holds exactly.
+with localcontext() as _context:
+    _context.prec = 20000
+    _EXACT_SUBNORMAL = format(Decimal(1) / Decimal(2) ** 16400, "e")
+
+
 # Where glibc's strtold reports ERANGE for a binary128 long double, pinned
-# with bash 5.2.37's printf: past the largest finite value, and under the
-# least normal one unless the value sits on the binary grid. Mirrored in
-# strtod.test.ts.
+# with bash 5.2.37's printf: when the value rounds past the largest finite
+# one, and when it is under the least normal one and off the subnormal
+# grid, judged before rounding. Mirrored in strtod.test.ts.
 @pytest.mark.parametrize(
     "text,erange",
     [
@@ -116,6 +124,14 @@ def test_every_nan_spelling_is_one_quiet_nan(text):
         ("0x1p99999", True),
         ("0x1p-16400", False),
         ("-inf", False),
+        ("1.18973149535723176508575932662800703e4932", False),
+        ("1.18973149535723176508575932662800708e4932", True),
+        ("0x1.fffffffffffffffffffffffffffffp16383", True),
+        ("0x1.ffffffffffffffffffffffffffff8p16383", True),
+        ("3.3621031431120935062626778173217525e-4932", True),
+        ("1e" + "9" * 5000, True),
+        ("1e" + "0" * 5000 + "1", False),
+        (_EXACT_SUBNORMAL, False),
     ],
 )
 def test_strtold_erange_marks_what_a_long_double_cannot_hold(text, erange):
