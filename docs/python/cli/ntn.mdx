@@ -109,7 +109,16 @@ files. Reuse its IDs, or obtain them through the API; no mount is required.
 Interactive login/logout, update, workers, deployment and file-management
 commands are absent. The config supplies the credential.
 
-Parser errors follow CLAP style and exit 5; malformed request bodies exit 1.
+Command-line parsing follows CLAP style. Exit codes distinguish these failures:
+
+| Failure | Exit code |
+| --- | --- |
+| Unknown options or missing required arguments, such as `ntn --bogus` or `ntn pages get` | 2 |
+| Invalid JSON in a nonempty `ntn api --data` body or stdin | 1 |
+| Empty `--data`, invalid inline request input, or conflicting body sources | 5 |
+| Notion API authentication failure (HTTP 401) | 4 |
+| Other Notion API failures | 5 |
+
 The shared conformance suite checks the implemented surface against `ntn`.
 The suite pins `ntn` 0.21.9, whose
 [package metadata](https://registry.npmjs.org/ntn/0.21.9) declares MIT.

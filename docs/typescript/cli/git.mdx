@@ -105,15 +105,22 @@ use the same VFS operations as the shell.
 
 ## Stage and change files
 
+Continue from the initial commit above. Record a second version before using
+`HEAD~1` to restore the original:
+
 ```bash
+echo updated > /repo/hello.txt
+git -C /repo commit -am 'Update greeting'
 git -C /repo add -A
 git -C /repo reset -- hello.txt
 git -C /repo restore -- hello.txt
 git -C /repo restore --staged -- hello.txt
 git -C /repo restore --source HEAD~1 -- hello.txt
+git -C /repo commit -am 'Restore original greeting'
 git -C /repo mv hello.txt greeting.txt
+git -C /repo commit -m 'Rename greeting'
 git -C /repo rm greeting.txt
-git -C /repo commit -am 'Update tracked files'
+git -C /repo commit -am 'Remove greeting'
 ```
 
 | Command | Behavior |
