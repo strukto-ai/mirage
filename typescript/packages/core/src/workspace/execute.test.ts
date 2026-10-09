@@ -1,3 +1,8 @@
+import { CLISpec } from '../commands/cli/types.ts'
+import { command } from '../commands/config.ts'
+import { CommandSpec } from '../commands/spec/types.ts'
+import { IOResult } from '../io/types.ts'
+import type { Stdio } from '../io/stdio.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -387,5 +392,76 @@ describe('Object.prototype-colliding names', () => {
     const gone = await ws.shell('toString() { echo ran; }; unset -f toString; toString')
     expect(gone.exitCode).toBe(127)
     await ws.close()
+  })
+})
+
+describe('native writer handlers', () => {
+  it.each(['cli', 'mount'])('routes %s channels in order and settles status', async (kind) => {
+    const { ws } = buildWorkspace()
+    const write = async (stdio: Stdio | undefined): Promise<IOResult> => {
+      if (stdio === undefined) throw new Error('expected handler stdio')
+      await stdio.stdout.write(new Uint8Array(100000).fill(97))
+      await stdio.stderr.write(new Uint8Array(100000).fill(101))
+      await stdio.stdout.write(new TextEncoder().encode('z'))
+      return new IOResult({ exitCode: 7 })
+    }
+    if (kind === 'cli')
+      ws.registerCli('writer', new CLISpec({ name: 'writer', fn: (inv) => write(inv.stdio) }))
+    else
+      ws.mount('/ram').registerCommands(
+        command({
+          name: 'writer',
+          vfs: 'ram',
+          spec: new CommandSpec(),
+          fn: (_accessor, _paths, _texts, opts) => write(opts.stdio),
+        }),
+      )
+    try {
+      await ws.shell('cd /ram')
+      let result = await ws.shell('writer')
+      expect(new TextDecoder().decode(result.stdout)).toBe('a'.repeat(100000) + 'z')
+      expect(new TextDecoder().decode(result.stderr)).toBe('e'.repeat(100000))
+      expect(result.exitCode).toBe(7)
+      result = await ws.shell('writer 2>&1')
+      expect(new TextDecoder().decode(result.stdout)).toBe(
+        'a'.repeat(100000) + 'e'.repeat(100000) + 'z',
+      )
+      expect(new TextDecoder().decode(result.stderr)).toBe('')
+      expect(result.exitCode).toBe(7)
+      await ws.shell('writer > /ram/log 2>&1')
+      result = await ws.shell('cat /ram/log')
+      expect(new TextDecoder().decode(result.stdout)).toBe(
+        'a'.repeat(100000) + 'e'.repeat(100000) + 'z',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('joins a writer when a downstream reader exits early', async () => {
+    const { ws } = buildWorkspace()
+    let closed = false
+    ws.registerCli(
+      'writer',
+      new CLISpec({
+        name: 'writer',
+        fn: async (inv) => {
+          try {
+            if (inv.stdio === undefined) throw new Error('expected handler stdio')
+            for (;;) await inv.stdio.stdout.write(new Uint8Array(16384).fill(120))
+          } finally {
+            closed = true
+          }
+        },
+      }),
+    )
+    try {
+      const result = await ws.shell('writer | head -c 1')
+      expect(new TextDecoder().decode(result.stdout)).toBe('x')
+      expect(result.exitCode).toBe(0)
+      expect(closed).toBe(true)
+    } finally {
+      await ws.close()
+    }
   })
 })

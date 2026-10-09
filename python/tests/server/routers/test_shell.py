@@ -639,3 +639,138 @@ async def test_stdin_before_the_request_part_is_refused():
         )
         assert r.status_code == 400, r.text
         assert "before 'stdin'" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_shell_inherits_io_config_from_http_workspace_creation():
+    app = build_app(idle_grace_seconds=10.0)
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            config = _minimal_config()
+            config["config"]["io"] = {"buffer_bytes": 131072}
+            created = await client.post("/v1/workspaces", json=config)
+            assert created.status_code == 201, created.text
+            wid = created.json()["id"]
+            assert (
+                app.state.registry.get(wid).runner.ws.io.buffer_bytes == 131072
+            )
+            data = bytes(range(256)) * 1025
+            response = await client.post(
+                f"/v1/workspaces/{wid}/shell?stream=true",
+                files={
+                    "request": (
+                        None,
+                        json.dumps({"command": "cat; printf err >&2"}),
+                    ),
+                    "stdin": ("stdin.bin", data),
+                },
+            )
+            assert response.status_code == 200, response.text
+            events = [json.loads(line) for line in response.text.splitlines()]
+            assert (
+                b"".join(
+                    base64.b64decode(event["data"])
+                    for event in events
+                    if event.get("stream") == "stdout"
+                )
+                == data
+            )
+            assert (
+                b"".join(
+                    base64.b64decode(event["data"])
+                    for event in events
+                    if event.get("stream") == "stderr"
+                )
+                == b"err"
+            )
+            assert events[-1]["status"] == "done"
+            assert events[-1]["result"]["exit_code"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "padding", ["", "x" * (128 * 1024 + 1)], ids=["small", "large"]
+)
+async def test_shell_stream_preserves_bytes_channels_and_final_status(padding):
+    app = build_app(idle_grace_seconds=10.0)
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            wid = await _create_workspace(client)
+            response = await client.post(
+                f"/v1/workspaces/{wid}/shell?stream=true",
+                json={
+                    "command": f"printf '\\377\\000x{padding}'; printf err >&2; false"
+                },
+            )
+            assert response.status_code == 200
+            assert response.headers["content-type"] == "application/x-ndjson"
+            events = [json.loads(line) for line in response.text.splitlines()]
+            stdout = b"".join(
+                base64.b64decode(e["data"])
+                for e in events
+                if e.get("stream") == "stdout"
+            )
+            stderr = b"".join(
+                base64.b64decode(e["data"])
+                for e in events
+                if e.get("stream") == "stderr"
+            )
+            assert stdout == b"\xff\x00x" + padding.encode()
+            assert stderr == b"err"
+            assert all(
+                len(base64.b64decode(event["data"])) <= 8 * 1024
+                for event in events
+                if "stream" in event
+            )
+            assert events[-1]["status"] == "done"
+            assert events[-1]["result"]["exit_code"] == 1
+            assert events[-1]["result"]["stdout"] == ""
+            assert events[-1]["result"]["stderr"] == ""
+            job = await client.get(
+                f"/v1/jobs/{response.headers['X-Mirage-Job-Id']}"
+            )
+            assert job.json()["status"] == "done"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("other", ["background", "explain"])
+async def test_shell_stream_refuses_incompatible_mode(other):
+    app = build_app(idle_grace_seconds=10.0)
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            wid = await _create_workspace(client)
+            response = await client.post(
+                f"/v1/workspaces/{wid}/shell?stream=true&{other}=true",
+                json={"command": "echo no"},
+            )
+            assert response.status_code == 400
+            assert (await client.get("/v1/jobs")).json() == []
+
+
+@pytest.mark.asyncio
+async def test_shell_stream_sends_prefix_before_completion_and_cancels_on_disconnect():
+    async with _served() as client:
+        wid = await _create_workspace(client)
+        async with client.stream(
+            "POST",
+            f"/v1/workspaces/{wid}/shell?stream=true",
+            json={"command": "echo ready; sleep 30"},
+        ) as response:
+            job_id = response.headers["X-Mirage-Job-Id"]
+            lines = response.aiter_lines()
+            first = json.loads(await asyncio.wait_for(anext(lines), 3))
+            assert base64.b64decode(first["data"]) == b"ready\n"
+            assert (await client.get(f"/v1/jobs/{job_id}")).json()[
+                "status"
+            ] == "running"
+        waited = await client.post(
+            f"/v1/jobs/{job_id}/wait", json={"timeout_s": 3}
+        )
+        assert waited.json()["status"] == "canceled"
+        assert waited.json()["finished_at"] is not None

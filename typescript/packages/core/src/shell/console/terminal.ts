@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { concat } from '../../io/cachable_iterator.ts'
+import { CHUNK_SIZE } from '../../io/cooperative.ts'
 import { JobConsole } from './job_console.ts'
 import { Channel, type OwnedStream } from './types.ts'
 
@@ -34,6 +35,20 @@ export class Terminal extends JobConsole {
   ended = 0
   attaching: Promise<void> | null = null
   private attached: () => void = () => undefined
+  private prefix = new Uint8Array()
+  private prefixSize = 0
+
+  /** A bounded prefix of stdout handed to the current line's reader. */
+  get stdoutPrefix(): Uint8Array {
+    return this.prefix.subarray(0, this.prefixSize)
+  }
+
+  private remember(channel: Channel, data: Uint8Array): void {
+    if (channel !== Channel.STDOUT) return
+    const part = data.subarray(0, CHUNK_SIZE - this.prefixSize)
+    this.prefix.set(part, this.prefixSize)
+    this.prefixSize += part.byteLength
+  }
 
   /** Take what the line wrote. */
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
@@ -47,6 +62,7 @@ export class Terminal extends JobConsole {
   async put(channel: Channel, data: Uint8Array, job: boolean): Promise<void> {
     if (data.byteLength === 0) return
     if (this.reader !== null) {
+      this.remember(channel, data)
       await this.reader.emit(channel, data)
       return
     }
@@ -64,6 +80,8 @@ export class Terminal extends JobConsole {
    * that never attaches the reader.
    */
   async attach(reader: JobConsole | null): Promise<void> {
+    this.prefix = reader === null ? new Uint8Array() : new Uint8Array(CHUNK_SIZE)
+    this.prefixSize = 0
     if (reader === null) {
       this.reader = null
       return
@@ -78,6 +96,7 @@ export class Terminal extends JobConsole {
     try {
       let chunk = this.chunks.shift()
       while (chunk !== undefined) {
+        this.remember(chunk[0], chunk[1])
         await reader.emit(chunk[0], chunk[1])
         if (this.ended !== ended) return
         chunk = this.chunks.shift()
@@ -121,6 +140,8 @@ export class Terminal extends JobConsole {
   /** Detach the line's reader and let go the writers waiting on its attach. */
   private end(): void {
     this.reader = null
+    this.prefix = new Uint8Array()
+    this.prefixSize = 0
     this.ended += 1
     this.attaching = null
     this.attached()

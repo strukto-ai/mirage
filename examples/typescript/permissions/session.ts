@@ -86,7 +86,7 @@ function codeOf(err: unknown): string {
 interface Handle {
   shell(
     cmd: string,
-    options?: SessionExecuteOptions,
+    options?: SessionExecuteOptions & { stream?: false },
   ): Promise<{
     stdout: Uint8Array | null;
     stderr: Uint8Array | null;
@@ -100,7 +100,7 @@ async function line(
   handle: Handle,
   cmd: string,
   note: string,
-  options: SessionExecuteOptions = {},
+  options: SessionExecuteOptions & { stream?: false } = {},
 ): Promise<void> {
   const res = await handle.shell(cmd, options);
   const out = res.stdout === null ? "" : dec.decode(res.stdout);

@@ -80,6 +80,24 @@ describe('McpRelay', () => {
       message: 'Tool nope not found',
     })
   })
+
+  it('forwards request-scoped progress and preserves the final tool result', async () => {
+    const { client } = await relayed()
+    const updates: { progress: number; message?: string | undefined }[] = []
+    const result = await client.callTool(
+      { name: 'shell', arguments: { command: 'echo out; echo err >&2; false' } },
+      {
+        onprogress: (update) => {
+          updates.push(update)
+        },
+      },
+    )
+    expect(firstText(result.content)).toBe('out\n\nerr\n')
+    expect(result.isError).toBe(true)
+    expect(updates[0]?.message).toBe('[stdout] out\n')
+    expect(updates.at(-1)?.message).toBe('[stderr] err\n')
+    expect(updates.map((update) => update.progress)).toEqual([1, 2])
+  })
 })
 
 describe('McpRelay cancel', () => {

@@ -21,10 +21,11 @@ from enum import Enum
 import asyncssh
 from asyncssh.editor import SSHLineEditorChannel
 
-from mirage.io.cooperative import chunks
 from mirage.io.types import IOResult
 from mirage.server.ssh.constants import REFUSAL_WINDOW
 from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.console.types import Channel
+from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.tools.io_text import refusal_line
 
 logger = logging.getLogger(__name__)
@@ -462,38 +463,50 @@ def head_window(prefix: bytes, total: int) -> bytes:
     return prefix[: prefix.rfind(b"\n", 0, REFUSAL_WINDOW) + 1]
 
 
-async def deliver(io: IOResult, send: Send) -> None:
-    """Stream a line's stdout, then its stderr, through ``send``, then
+async def deliver(execution: ShellExecution, send: Send) -> IOResult:
+    """Stream a line's output through ``send`` as it is produced, then
     the refusal's line on stderr when a policy refused part of it.
 
     The terminal's output goes out as the line printed it; the policy's
-    reason is the one line ``refusal_line`` appends, read once both
-    streams are drained, since an op a streaming command reads late is
-    refused only then. Whether the output already says why is read off
-    each stream's first and last ``REFUSAL_WINDOW`` bytes: the first runs
-    on to the end of the line it cuts (at most a window more) and keeps
+    reason is the one line ``refusal_line`` appends, read once the line
+    has ended, since an op a streaming command reads late is refused
+    only then. Whether the output already says why is read off each
+    stream's first and last ``REFUSAL_WINDOW`` bytes: the first runs on
+    to the end of the line it cuts (at most a window more) and keeps
     whole lines only, so a line split at a cut can neither pose as the
     diagnostic nor hide one. A diagnostic deep inside a long output may
     be missed, which repeats the reason and never drops it.
 
     Args:
-        io (IOResult): the line's result.
+        execution (ShellExecution): the running line.
         send (Send): where each chunk goes.
+
+    Returns:
+        IOResult: the line's final status, its output already sent.
     """
-    said: list[bytes] = []
-    for source, is_stderr in ((io.stdout, False), (io.stderr, True)):
-        if source is None:
+    prefix = {Channel.STDOUT: b"", Channel.STDERR: b""}
+    tail = dict(prefix)
+    total = dict.fromkeys(prefix, 0)
+    async for event in execution.events:
+        if not event.data:
             continue
-        prefix = tail = b""
-        total = 0
-        async for chunk in chunks(source):
-            if chunk:
-                total += len(chunk)
-                if len(prefix) < 2 * REFUSAL_WINDOW:
-                    prefix += chunk[: 2 * REFUSAL_WINDOW - len(prefix)]
-                tail = (tail + chunk[-REFUSAL_WINDOW:])[-REFUSAL_WINDOW:]
-                await send(chunk, is_stderr)
-        said += [head_window(prefix, total), tail]
-    line = refusal_line(decode_text(b"\n".join(said)), io.refusal)
+        stream = Channel(event.stream)
+        total[stream] += len(event.data)
+        if len(prefix[stream]) < 2 * REFUSAL_WINDOW:
+            prefix[stream] += event.data[
+                : 2 * REFUSAL_WINDOW - len(prefix[stream])
+            ]
+        tail[stream] = (tail[stream] + event.data[-REFUSAL_WINDOW:])[
+            -REFUSAL_WINDOW:
+        ]
+        await send(event.data, stream == Channel.STDERR)
+    result = await execution.wait()
+    said = [
+        part
+        for stream in prefix
+        for part in (head_window(prefix[stream], total[stream]), tail[stream])
+    ]
+    line = refusal_line(decode_text(b"\n".join(said)), result.refusal)
     if line:
         await send(encode_text(line), True)
+    return result

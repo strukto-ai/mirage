@@ -1,11 +1,15 @@
 import { YieldBudget } from '../io/yield_budget.ts'
+import { newExecutionId } from '../execution/context.ts'
 import { makeAbortError } from '../utils/abort.ts'
 
-/** One scheduling budget shared by a foreground call and its evaluations. */
+/** Identity and scheduling budget shared by a call and its evaluations. */
 export class ExecutionScope {
   private readonly budget = new YieldBudget()
 
-  constructor(private onStart?: () => Promise<void>) {}
+  constructor(
+    private onStart?: () => Promise<void>,
+    readonly id: string = newExecutionId(),
+  ) {}
 
   /** Publish admission once, after acquiring the session and before effects. */
   async start(): Promise<void> {

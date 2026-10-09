@@ -245,10 +245,11 @@ async def open_session(
 async def run_line(
     ws: Workspace, session_id: str, line: str, stdin: LoopStdin, send: Send
 ) -> int:
-    """Run one line as the session and stream its output back.
+    """Run one line as the session and stream its output back as the
+    line produces it.
 
-    Runs on the workspace's loop. The status is read after the streams
-    drain, because a streaming command settles it only then.
+    Runs on the workspace's loop. The status is read once the output
+    has ended, because a streaming command settles it only then.
 
     Args:
         ws (Workspace): the workspace.
@@ -261,12 +262,16 @@ async def run_line(
         int: the line's exit status.
     """
     try:
-        io = await ws.shell(
-            line, session_id=session_id, stdin=stdin, agent_id=AGENT_ID
-        )
+        async with await ws.shell(
+            line,
+            session_id=session_id,
+            stdin=stdin,
+            agent_id=AGENT_ID,
+            stream=True,
+        ) as execution:
+            io = await deliver(execution, send)
     except MirageAbortError:
         return INTERRUPTED
-    await deliver(io, send)
     return io.exit_code
 
 

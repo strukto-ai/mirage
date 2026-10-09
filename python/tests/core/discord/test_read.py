@@ -13,10 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from unittest.mock import patch
 
 import pytest
 
-from mirage.core.discord.read import read, read_range
+from mirage.core.discord.read import read, read_range, read_stream
 from mirage.core.discord.render import history_jsonl_bytes
 from mirage.types import PathSpec
 from tests.core.discord.conftest import DAY, MESSAGES, SEALED_DAY
@@ -109,3 +110,25 @@ async def test_read_tombstoned_attachment_is_enoent(api, accessor, index):
         await read(
             accessor, spec(f"/{CHANNEL}/{DAY}/files/tombstoned__A2.txt"), index
         )
+
+
+async def test_attachment_stream_closes_before_fetching_tail(
+    api, accessor, index
+):
+    path = spec(f"/{CHANNEL}/{DAY}/files/kept__A1.txt")
+    closed = []
+
+    async def source():
+        try:
+            yield b"first\n"
+            raise AssertionError("fetched tail")
+        finally:
+            closed.append(True)
+
+    with patch(
+        "mirage.core.discord.read.download_file_stream", return_value=source()
+    ):
+        stream = read_stream(accessor, path, index)
+        assert await anext(stream) == b"first\n"
+        await stream.aclose()
+    assert closed == [True]

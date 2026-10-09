@@ -16,8 +16,38 @@ import asyncio
 
 import pytest
 
+from mirage import MountMode, Workspace
 from mirage.execution.ram import RAMExecutionStore
 from mirage.server.jobs import JobStatus, JobTable
+from mirage.vfs.ram import RAMVFS
+
+
+@pytest.mark.asyncio
+async def test_admitted_record_identity_reaches_workspace_history_and_process():
+    table = JobTable()
+    ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.WRITE)
+    identities = []
+
+    async def run(scope):
+        identities.append(scope.id)
+        result = await ws.shell(
+            "echo tracked > /ram/file", execution_scope=scope
+        )
+        return result.exit_code
+
+    try:
+        job = await table.submit(
+            "ws", "write", run, session_id=ws.default_session_id
+        )
+        assert (await table.wait(job.id)).status == JobStatus.DONE
+        assert identities == [job.id]
+        events = await ws.observer.events()
+        assert events and all(
+            event.get("execution_id") == job.id for event in events
+        )
+    finally:
+        await table.close()
+        await ws.close()
 
 
 async def submit(table, work):
@@ -250,4 +280,81 @@ async def test_shutdown_joins_every_runner_even_when_cancel_writes_fail():
         assert record.status == JobStatus.CANCELED
         assert record.cancel_requested
         assert record.finished_at is not None
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_store_outage_cannot_prevent_local_cancellation_or_cleanup():
+    entered, cleanup, release = (asyncio.Event() for _ in range(3))
+
+    class BrokenStore(RAMExecutionStore):
+        offline = False
+
+        async def get(self, execution_id):
+            if self.offline:
+                raise OSError("storage unavailable")
+            return await super().get(execution_id)
+
+    async def work():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleanup.set()
+            await release.wait()
+
+    store = BrokenStore()
+    table = JobTable(store)
+    job = await submit(table, work)
+    await entered.wait()
+    store.offline = True
+    with pytest.raises(OSError, match="storage unavailable"):
+        await table.cancel(job.id)
+    await asyncio.wait_for(cleanup.wait(), 1)
+    draining = asyncio.create_task(table.drain(job.id))
+    with pytest.raises(OSError, match="storage unavailable"):
+        await table.cancel(job.id)
+    await asyncio.sleep(0)
+    assert not draining.done()
+    release.set()
+    await asyncio.wait_for(draining, 1)
+    store.offline = False
+    assert (await store.get(job.id)).finished_at is None
+    await table.close()
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_store_cannot_keep_cancelled_work_running():
+    entered, cleanup, resume = (asyncio.Event() for _ in range(3))
+
+    class StalledStore(RAMExecutionStore):
+        stalled = False
+
+        async def get(self, execution_id):
+            if self.stalled:
+                await resume.wait()
+            return await super().get(execution_id)
+
+    async def work():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleanup.set()
+
+    store = StalledStore()
+    table = JobTable(store)
+    job = await submit(table, work)
+    await entered.wait()
+    store.stalled = True
+    cancelling = asyncio.create_task(table.cancel(job.id))
+    try:
+        await asyncio.wait_for(cleanup.wait(), 1)
+        assert not cancelling.done()
+    finally:
+        resume.set()
+    assert await asyncio.wait_for(cancelling, 1)
+    assert (await table.wait(job.id)).status == JobStatus.CANCELED
+    await table.close()
     await store.close()

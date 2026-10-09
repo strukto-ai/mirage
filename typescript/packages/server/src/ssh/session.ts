@@ -260,14 +260,19 @@ export class ShellChannel {
       controller.abort()
     })
     try {
-      const result = await ws.shell(line, {
+      const execution = await ws.shell(line, {
         sessionId: this.sessionId,
         stdin: channelStdin(this.input),
         agentId: AGENT_ID,
         signal: controller.signal,
+        stream: true,
       })
-      await deliver(result, this.output)
-      return result.exitCode
+      try {
+        const result = await deliver(execution, (data, stderr) => this.output.write(data, stderr))
+        return result.exitCode
+      } finally {
+        await execution.close()
+      }
     } catch (err) {
       if (controller.signal.aborted) {
         if (this.lost) return INTERRUPTED

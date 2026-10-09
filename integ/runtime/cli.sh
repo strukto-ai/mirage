@@ -221,7 +221,7 @@ exec_step() {
     cmd+=" $(jq -Rrs '@sh' "$SUITE_DIR/../fixtures/runtime/$script")"
   fi
   runtime=$(jq -r '.runtime // empty' <<<"$step")
-  local args=("$@" -c "$cmd")
+  local args=("$@" --json -c "$cmd")
   [ -n "$runtime" ] && args+=(--runtime "$runtime")
   if jq -e 'has("stdin")' >/dev/null <<<"$step"; then
     jq -j '.stdin' <<<"$step" > "$dir/stdin.bin"
@@ -230,7 +230,7 @@ exec_step() {
   fi
   $cli "${args[@]}" < "$dir/stdin.bin" > "$dir/got.out" 2> "$dir/got.err"
   echo $? > "$dir/exit"
-  # Both CLIs emit a JSON envelope on a non-tty stdout; unwrap the
+  # Explicit --json captures a JSON envelope on both hosts; unwrap the
   # command's own streams from it (raw output stays the fallback
   # for CLI-level errors).
   if jq -e '.kind == "io"' "$dir/got.out" >/dev/null 2>&1; then

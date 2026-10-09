@@ -17,7 +17,7 @@ import json
 import pytest
 
 from mirage.runtime.sandbox.smolvm import SmolvmRuntime
-from mirage.runtime.types import ProcessExecution, ShellExecution
+from mirage.runtime.types import ProcessExecution, ShellRequest
 from mirage.types import PathSpec
 
 
@@ -153,7 +153,7 @@ async def test_process_preserves_argv_and_shares_the_shell_connection():
         b"input",
     )
     await runtime.execute(
-        ShellExecution(line="pwd", cwd=PathSpec.from_str_path("/work"))
+        ShellRequest(line="pwd", cwd=PathSpec.from_str_path("/work"))
     )
     assert sum(args[1] == "status" for args, _ in runtime.calls) == 1
     assert runtime.capabilities.process and runtime.capabilities.shell

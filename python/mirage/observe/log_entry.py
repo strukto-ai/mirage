@@ -60,6 +60,7 @@ class LogEntry:
     exit_code: int | None = None
     stdout: str | None = None
     offset: int | None = None
+    execution_id: str | None = None
 
     @staticmethod
     def from_op_record(
@@ -90,6 +91,7 @@ class LogEntry:
             source=rec.source,
             bytes=rec.bytes,
             duration_ms=rec.duration_ms,
+            execution_id=rec.execution_id,
         )
 
     def to_json_line(self) -> str:

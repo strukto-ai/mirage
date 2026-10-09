@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   NO_RETRY,
   apiRequest,
+  apiStream,
   bodyDelay,
   flooredDelay,
   headerDelay,
@@ -401,4 +402,95 @@ describe('a repeated header', () => {
       expect(out.headers.etag).toBe('"one", "two"')
     },
   )
+})
+
+describe('apiStream', () => {
+  it('bounds chunks, pulls on demand and cancels an abandoned response', async () => {
+    let pulls = 0
+    const cancel = vi.fn()
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pulls++
+          controller.enqueue(new Uint8Array(65536).fill(42))
+        },
+        cancel,
+      },
+      { highWaterMark: 0 },
+    )
+    const response = new Response(body)
+    const materialize = vi.spyOn(response, 'arrayBuffer')
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(response)
+    const source = apiStream(TARGET, { errorOf, fetchFn: fakeFetch })
+    expect(pulls).toBe(0)
+    expect((await source.next()).value).toEqual(new Uint8Array(16384).fill(42))
+    expect((await source.next()).value?.byteLength).toBe(16384)
+    expect(pulls).toBe(1)
+    expect(materialize).not.toHaveBeenCalled()
+    await source.return()
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
+  })
+
+  it('preserves bytes split through UTF-8 and maps HTTP errors before yielding', async () => {
+    const data = new TextEncoder().encode(('a'.repeat(16383) + 'é\n').repeat(4))
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(data))
+    const parts: Uint8Array[] = []
+    for await (const part of apiStream(TARGET, { errorOf, fetchFn: fakeFetch })) {
+      expect(part.byteLength).toBeLessThanOrEqual(16384)
+      parts.push(part)
+    }
+    expect(await new Blob(parts as BlobPart[]).text()).toBe(new TextDecoder().decode(data))
+    fakeFetch.mockResolvedValue(new Response('denied', { status: 403 }))
+    await expect(apiStream(TARGET, { errorOf, fetchFn: fakeFetch }).next()).rejects.toMatchObject({
+      status: 403,
+      body: 'denied',
+    })
+  })
+
+  it('releases a response whose body fails after the first chunk', async () => {
+    let pulls = 0
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (pulls++ === 0) controller.enqueue(new Uint8Array([1]))
+          else controller.error(new Error('broken body'))
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(body))
+    const source = apiStream(TARGET, { errorOf, fetchFn: fakeFetch })
+    await source.next()
+    await expect(source.next()).rejects.toThrow('broken body')
+    expect(body.locked).toBe(false)
+  })
+})
+
+it('releases a stalled streamed response when its fetch signal is aborted', async () => {
+  const abort = new AbortController()
+  let pending: ReadableStreamDefaultController<Uint8Array> | undefined
+  const body = new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        pending = controller
+      },
+    },
+    { highWaterMark: 0 },
+  )
+  const fakeFetch = vi.fn<typeof fetch>((_url, init) => {
+    init?.signal?.addEventListener(
+      'abort',
+      () => {
+        pending?.error(new DOMException('cancelled', 'AbortError'))
+      },
+      { once: true },
+    )
+    return Promise.resolve(new Response(body))
+  })
+  const source = apiStream(TARGET, { errorOf, fetchFn: fakeFetch, signal: abort.signal })
+  const pulling = source.next()
+  abort.abort()
+  await expect(pulling).rejects.toMatchObject({ name: 'AbortError' })
+  expect(body.locked).toBe(false)
 })

@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     )
     from mirage.commands.spec.types import UsageStyle
     from mirage.io import IOResult
+    from mirage.io.config import IOConfig
     from mirage.policy import (
         Action,
         Ask,
@@ -91,7 +92,7 @@ if TYPE_CHECKING:
         RunArgs,
         RunResult,
         RuntimeCapabilities,
-        ShellExecution,
+        ShellRequest,
     )
     from mirage.secrets.registry import known_sources, register_secrets
     from mirage.types import (
@@ -136,8 +137,11 @@ if TYPE_CHECKING:
     )
     from mirage.workspace.fuse import FuseManager
     from mirage.workspace.mount.spec import Mount
+    from mirage.workspace.shell_execution import ShellExecution
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.io.config": ("IOConfig",),
+    "mirage.workspace.shell_execution": ("ShellExecution",),
     "mirage.vfs.disk": ("DiskVFS",),
     "mirage.vfs.ram": ("RAMVFS",),
     "mirage.commands.config": ("command",),
@@ -240,7 +244,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "RunArgs",
         "RunResult",
         "CodeExecution",
-        "ShellExecution",
+        "ShellRequest",
         "ProcessExecution",
         "ExecutionRequest",
         "RuntimeCapabilities",
@@ -257,6 +261,8 @@ _MODULE_OF = {
 }
 
 __all__ = [
+    "ShellExecution",
+    "IOConfig",
     "ReadFixture",
     "check_read_contract",
     "__version__",
@@ -329,7 +335,7 @@ __all__ = [
     "RouteContext",
     "RouteResult",
     "CodeExecution",
-    "ShellExecution",
+    "ShellRequest",
     "ProcessExecution",
     "ExecutionRequest",
     "RuntimeContext",

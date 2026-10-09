@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invoke } from '../../../io/stdio.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from '../../../core/dify/client.ts'
 
@@ -106,7 +107,7 @@ describe('slug-tree find under a hide', () => {
       ns: viewOf(sess.visibility),
     }
     const result = await runWithSession(sess, async () =>
-      find.fn(accessor, [guides], ['-empty'], opts),
+      invoke(() => find.fn(accessor, [guides], ['-empty'], opts)),
     )
     const [stdout, io] = result ?? [null, null]
     expect(new TextDecoder().decode(await materialize(stdout))).toBe('/knowledge/guides/deep\n')
@@ -181,7 +182,7 @@ describe('chroma find', () => {
         ns: viewOf(sess.visibility),
       }
       const [stdout, io] = await runWithSession(sess, async () => {
-        const result = await find.fn(accessor, [root], texts, opts)
+        const result = await invoke(() => find.fn(accessor, [root], texts, opts))
         const [bytes, ioResult] = result ?? [null, null]
         return [new TextDecoder().decode(await materialize(bytes)), ioResult] as const
       })

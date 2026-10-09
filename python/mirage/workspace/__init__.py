@@ -18,10 +18,12 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from mirage.workspace.runner import WorkspaceRunner
     from mirage.workspace.session import SessionState
+    from mirage.workspace.shell_execution import ShellExecution
     from mirage.workspace.types import ExecutionNode
     from mirage.workspace.workspace import Session, Workspace
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.workspace.shell_execution": ("ShellExecution",),
     "mirage.workspace.runner": ("WorkspaceRunner",),
     "mirage.workspace.session": ("SessionState",),
     "mirage.workspace.types": ("ExecutionNode",),
@@ -32,6 +34,7 @@ _MODULE_OF = {
 }
 
 __all__ = [
+    "ShellExecution",
     "ExecutionNode",
     "SessionState",
     "Session",

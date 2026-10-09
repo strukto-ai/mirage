@@ -16,7 +16,8 @@ import asyncio
 import json
 import logging
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncGenerator, Callable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, Literal, TypeAlias
@@ -32,6 +33,7 @@ from tenacity import (
     stop_after_attempt,
 )
 
+from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow, range_header, window_of
 
@@ -164,6 +166,36 @@ class SessionPool:
 
 
 SessionArg = aiohttp.ClientSession | SessionPool | None
+
+
+async def api_stream(
+    url: str,
+    *,
+    error_of: ErrorOf,
+    headers: Mapping[str, str] | None = None,
+    session: SessionArg = None,
+) -> AsyncGenerator[bytes, None]:
+    """Pull a GET response in bounded chunks, closing it on early exit.
+
+    Args:
+        url (str): full download URL.
+        error_of (ErrorOf): maps an HTTP failure to the backend's error.
+        headers (Mapping[str, str] | None): request headers.
+        session (SessionArg): pool or live session to borrow, else owned here.
+    """
+    sess, own = resolve_session(session)
+    try:
+        async with sess.get(url, headers=headers) as response:
+            if response.status >= 400:
+                raise error_of(response, await response.text())
+            async with aclosing(
+                chunks(response.content.iter_chunked(CHUNK_SIZE))
+            ) as source:
+                async for chunk in source:
+                    yield chunk
+    finally:
+        if own:
+            await sess.close()
 
 
 def resolve_session(

@@ -27,7 +27,9 @@ class RAMExecutionStore(ExecutionStore):
         if self._closed:
             raise RuntimeError("execution store is closed")
         cutoff = time.time() - self._retention_seconds
-        for execution_id, record in list(self._completed.items()):
+        for execution_id, record in sorted(
+            self._completed.items(), key=lambda item: item[1].finished_at or 0
+        ):
             if (
                 len(self._completed) <= self._max_completed
                 and record.finished_at is not None
@@ -46,7 +48,11 @@ class RAMExecutionStore(ExecutionStore):
         self._prune()
         if record.id in self._records:
             return False
-        self._records[record.id] = deepcopy(record)
+        snapshot = deepcopy(record)
+        self._records[record.id] = snapshot
+        if record.finished_at is not None:
+            self._completed[record.id] = snapshot
+        self._prune()
         self._notify()
         return True
 

@@ -14,9 +14,12 @@
 
 import asyncio
 
+import pytest
+
 from mirage.commands.builtin.generic.crossmount.stream import run_stream
 from mirage.io import IOResult
-from mirage.io.stream import materialize
+from mirage.io.stdio import invoke
+from mirage.io.stream import close_quietly, materialize
 from mirage.types import PathSpec
 
 
@@ -110,3 +113,164 @@ def test_cat_with_flags_reapplies_cat_on_the_merged_stream():
     assert _run(materialize(out)) == b"FINAL:12\n"
     assert rs.calls[-1]["cmd"] == "cat"
     assert rs.calls[-1]["flags"] == {"n": True}
+
+
+@pytest.mark.asyncio
+async def test_owned_failed_fetch_is_drained_before_merging_stderr():
+    async def run_single(cmd, paths, texts, flags, **kwargs):
+        async def run(stdio):
+            if paths[0].virtual == "/b/missing":
+                return IOResult(
+                    stdout=b"discarded",
+                    stderr=b"cat: /b/missing: No such file or directory\n",
+                    exit_code=1,
+                )
+            return IOResult(stdout=b"kept\n")
+
+        return await invoke(run)
+
+    out, io = await run_stream(
+        "cat", [_scope("/a/file"), _scope("/b/missing")], [], {}, run_single
+    )
+    assert await materialize(out) == b"kept\n"
+    assert (
+        await io.materialize_stderr()
+        == b"cat: /b/missing: No such file or directory\n"
+    )
+    assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_late_fetch_diagnostics_and_claims_merge_in_operand_order():
+    async def run_single(cmd, paths, texts, flags, **kwargs):
+        path = paths[0].virtual
+        result = IOResult()
+
+        async def source():
+            yield path.encode() + b"\n"
+            result.stderr = f"cat: {path}: late diagnostic\n".encode()
+            result.reads[path] = b"saved"
+            result.cache.append(path)
+            result.exit_code = 1
+
+        async def run(stdio):
+            return source(), result
+
+        return await invoke(run)
+
+    out, io = await run_stream(
+        "cat", [_scope("/a/x"), _scope("/b/y")], [], {}, run_single
+    )
+    assert await materialize(out) == b"/a/x\n/b/y\n"
+    assert (
+        await io.materialize_stderr()
+        == b"cat: /a/x: late diagnostic\ncat: /b/y: late diagnostic\n"
+    )
+    assert io.exit_code == 1
+    assert io.reads == {"/a/x": b"saved", "/b/y": b"saved"}
+    assert io.cache == ["/a/x", "/b/y"]
+
+
+@pytest.mark.asyncio
+async def test_late_final_command_diagnostic_and_status_survive():
+    async def run_single(cmd, paths, texts, flags, stdin=None, **kwargs):
+        result = IOResult()
+
+        async def source():
+            yield await materialize(stdin)
+            result.stderr = b"cut: late diagnostic\n"
+            result.exit_code = 7
+
+        async def run(stdio):
+            return (b"kept\n", result) if paths else (source(), result)
+
+        return await invoke(run)
+
+    out, io = await run_stream("cut", [_scope("/a/x")], [], {}, run_single)
+    assert await materialize(out) == b"kept\n"
+    assert await io.materialize_stderr() == b"cut: late diagnostic\n"
+    assert io.exit_code == 7
+
+
+@pytest.mark.asyncio
+async def test_close_before_first_pull_closes_every_owned_fetch():
+    closed = []
+
+    async def run_single(cmd, paths, texts, flags, **kwargs):
+        path = paths[0].virtual
+
+        async def run(stdio):
+            try:
+                await stdio.stdout.write(b"ready")
+                await stdio.wait_cancelled()
+            finally:
+                closed.append(path)
+
+        return await invoke(run)
+
+    out, _ = await run_stream(
+        "cat", [_scope("/a/x"), _scope("/b/y")], [], {}, run_single
+    )
+    await asyncio.wait_for(close_quietly(out), 1)
+    assert closed == ["/a/x", "/b/y"]
+
+
+@pytest.mark.asyncio
+async def test_failed_sort_closes_unread_fetch_and_respells_diagnostic():
+    closed = asyncio.Event()
+
+    async def run_single(cmd, paths, texts, flags, **kwargs):
+        async def run(stdio):
+            if paths[0].virtual == "/b/missing":
+                return IOResult(
+                    stderr=b"cat: /b/missing: No such file or directory\n",
+                    exit_code=1,
+                )
+            try:
+                await stdio.stdout.write(b"unread")
+                await stdio.wait_cancelled()
+            finally:
+                closed.set()
+
+        return await invoke(run)
+
+    out, io = await asyncio.wait_for(
+        run_stream(
+            "sort", [_scope("/a/x"), _scope("/b/missing")], [], {}, run_single
+        ),
+        1,
+    )
+    assert out is None
+    assert closed.is_set()
+    assert io.exit_code == 2
+    assert (
+        await io.materialize_stderr()
+        == b"sort: /b/missing: No such file or directory\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_close_while_next_fetch_pull_is_pending():
+    closed = []
+
+    async def run_single(cmd, paths, texts, flags, **kwargs):
+        path = paths[0].virtual
+
+        async def run(stdio):
+            try:
+                await stdio.stdout.write(path.encode())
+                await stdio.wait_cancelled()
+            finally:
+                closed.append(path)
+
+        return await invoke(run)
+
+    out, _ = await run_stream(
+        "cat", [_scope("/a/x"), _scope("/b/y")], [], {}, run_single
+    )
+    assert await anext(out) == b"/a/x"
+    pending = asyncio.create_task(anext(out))
+    await asyncio.sleep(0)
+    await asyncio.wait_for(close_quietly(out), 1)
+    await asyncio.gather(pending, return_exceptions=True)
+    assert sorted(closed) == ["/a/x", "/b/y"]

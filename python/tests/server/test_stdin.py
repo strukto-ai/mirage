@@ -17,7 +17,9 @@ import threading
 
 import pytest
 
-from mirage.server.stdin import MAX_CHUNKS, LoopStdin, UploadStdin
+from mirage.io.cooperative import CHUNK_SIZE
+from mirage.io.pipe import CAPACITY
+from mirage.server.stdin import LoopStdin, UploadStdin
 
 
 @pytest.mark.asyncio
@@ -31,22 +33,34 @@ async def test_an_upload_reads_back_in_order_then_ends():
 
 
 @pytest.mark.asyncio
-async def test_a_full_upload_waits_for_the_reader():
-    upload = UploadStdin()
-    for i in range(MAX_CHUNKS):
-        await upload.feed(bytes([i]))
+@pytest.mark.parametrize("capacity", [CAPACITY, CAPACITY * 2])
+async def test_a_full_upload_waits_for_the_reader(capacity):
+    upload = UploadStdin(capacity)
+    for i in range(capacity // CHUNK_SIZE):
+        await upload.feed(bytes([i]) * CHUNK_SIZE)
     blocked = asyncio.ensure_future(upload.feed(b"next"))
     await asyncio.sleep(0.05)
     assert not blocked.done()
-    assert await upload.read() == b"\x00"
+    assert await upload.read() == b"\x00" * CHUNK_SIZE
     await asyncio.wait_for(blocked, 1)
+    await upload.close()
+    remaining = []
+    while chunk := await upload.read():
+        remaining.append(chunk)
+    assert (
+        b"".join(remaining)
+        == b"".join(
+            bytes([i]) * CHUNK_SIZE for i in range(1, capacity // CHUNK_SIZE)
+        )
+        + b"next"
+    )
 
 
 @pytest.mark.asyncio
 async def test_discard_frees_a_waiting_feed_and_drops_the_rest():
     upload = UploadStdin()
-    for i in range(MAX_CHUNKS):
-        await upload.feed(bytes([i]))
+    for i in range(CAPACITY // CHUNK_SIZE):
+        await upload.feed(bytes([i]) * CHUNK_SIZE)
     blocked = asyncio.ensure_future(upload.feed(b"next"))
     await asyncio.sleep(0.05)
     upload.discard()

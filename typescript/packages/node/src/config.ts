@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOConfig } from '@struktoai/mirage-core/io/config'
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -181,6 +182,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // tabled here like the rest.
 const TOP_LEVEL_KEYS = [
   'mounts',
+  'io',
   'command_limits',
   'clis',
   'runtimes',
@@ -478,6 +480,11 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
       throw new Error(`unknown profile ${JSON.stringify(raw.profile)}`)
     }
   }
+  if (raw.io !== undefined) {
+    if (!isPlainObject(raw.io)) throw new Error('io must be a mapping')
+    rejectUnknownKeys(raw.io, ['buffer_bytes'], 'io')
+    new IOConfig(camelizeKeys(raw.io))
+  }
   validateTypedBlock(raw.cache, CACHE_KEYS, 'cache')
   validateTypedBlock(raw.index, INDEX_KEYS, 'index')
   validateIndexValues(raw.index, 'index')
@@ -543,6 +550,7 @@ function validateEnvBlock(value: unknown): void {
 // the store block is, rather than edited.
 function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unknown> {
   const out = camelizeKeys(raw)
+  if (isPlainObject(out.io)) out.io = camelizeKeys(out.io)
   if (isPlainObject(out.cache)) out.cache = camelizeKeys(out.cache)
   if (isPlainObject(out.index)) out.index = camelizeKeys(out.index)
   if (isPlainObject(out.console)) out.console = camelizeKeys(out.console)
@@ -777,6 +785,7 @@ interface CLIBlock {
 }
 
 export interface WorkspaceConfigRaw {
+  io?: Partial<IOConfig>
   commandLimits?: unknown
   mounts: Record<string, MountBlock>
   clis?: Record<string, CLIBlock> | null
@@ -1148,6 +1157,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
     options: {
       mode: wsMode,
       commandLimits: parseCommandLimits(cfg.commandLimits),
+      io: new IOConfig(cfg.io),
       read: defaultRead,
       write: defaultWrite,
       ...(cfg.defaultSessionId !== undefined ? { sessionId: cfg.defaultSessionId } : {}),

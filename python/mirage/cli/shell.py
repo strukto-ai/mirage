@@ -13,26 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-import signal
 import sys
-from types import FrameType
 from typing import IO, Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import typer
 
-from mirage.cli.client import DaemonClient, make_client
+from mirage.cli.client import make_client
 from mirage.cli.output import (
     emit,
-    exit_code_from_response,
     fail,
     handle_response,
 )
 from mirage.cli.vfs import answer, post
-from mirage.execution.types import ExecutionStatus as JobStatus
-
-WAIT_SLICE_S = 30.0
-INTERRUPTED = 130
 
 app = typer.Typer(
     invoke_without_command=True, help="Run a shell line in a workspace."
@@ -67,6 +60,11 @@ def shell_cmd(
         "--bg",
         help="Don't wait; return job_id immediately.",
     ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Collect output and print the final result as JSON.",
+    ),
     explain: bool = typer.Option(
         False,
         "--explain",
@@ -75,14 +73,11 @@ def shell_cmd(
 ) -> None:
     """Run a shell line in a workspace.
 
-    The line is a daemon job. With piped stdin it is one request that
-    streams the input to the line as it reads it, so the line starts
-    before the input ends; Ctrl-C drops the request, which cancels the
-    job, and exits 130. Without piped stdin it is submitted, then
-    waited on, and Ctrl-C, from the submit on, cancels it through
-    ``DELETE /v1/jobs/{id}``. ``--background`` returns the job id at
-    once instead, after any piped stdin has been sent. ``--explain``
-    prints what the line would do instead, running none of it.
+    Foreground output streams to stdout and stderr as bytes. ``--json``
+    collects those same streams into the final result. Piped input uploads
+    concurrently in either mode. Ctrl-C cancels the request and exits 130.
+    ``--background`` returns the job id after input uploads. ``--explain``
+    describes the line without running it.
     """
     query: dict[str, str] = {"session_id": session_id} if session_id else {}
     payload: dict[str, Any] = {"command": command}
@@ -92,75 +87,52 @@ def shell_cmd(
         payload["runtime"] = runtime
     if explain:
         said = answer(post(workspace_id, "shell", payload, session_id, True))
-        emit(said, human=_format_explanation)
+        emit(said, human=None if json_output else _format_explanation)
         return
     path = f"/v1/workspaces/{quote(workspace_id, safe='')}/shell"
     piped = not sys.stdin.isatty()
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        if piped and not background:
-            try:
-                r = client.request(
-                    "POST",
-                    path,
-                    params=query,
-                    files=_upload(payload),
-                    timeout=None,
-                )
-            except KeyboardInterrupt:
-                raise typer.Exit(code=INTERRUPTED) from None
-            if r.status_code == 499:
-                fail("job canceled", exit_code=INTERRUPTED)
-            result = handle_response(r)
-            emit(result)
-            raise typer.Exit(code=exit_code_from_response(result))
-        interrupted = False
+        if not background:
+            import asyncio
 
-        def interrupt(signum: int, frame: FrameType | None) -> None:
-            nonlocal interrupted
-            interrupted = True
+            from mirage.cli.stream import stream_shell
 
-        held = None if background else signal.signal(signal.SIGINT, interrupt)
-        try:
-            if piped:
-                r = client.request(
-                    "POST",
-                    path,
-                    params={**query, "background": "true"},
-                    files=_upload(payload),
-                )
-            else:
-                r = client.request(
-                    "POST",
-                    path,
-                    params={**query, "background": "true"},
-                    json=payload,
-                )
-        finally:
-            if held is not None:
-                signal.signal(signal.SIGINT, held)
-        submitted = handle_response(r)
-        if not isinstance(submitted, dict):
-            fail(f"unexpected daemon response: {submitted!r}")
-        if background:
-            emit(submitted)
-            return
-        job_id = quote(str(submitted["job_id"]), safe="")
-        if not interrupted:
             try:
-                job = wait_job(client, job_id)
+                with asyncio.Runner() as runner:
+                    code = runner.run(
+                        stream_shell(
+                            client,
+                            path
+                            + "?"
+                            + urlencode({**query, "stream": "true"}),
+                            payload,
+                            piped,
+                            json_output=json_output,
+                        )
+                    )
             except KeyboardInterrupt:
-                interrupted = True
-        if interrupted:
-            client.request("DELETE", f"/v1/jobs/{job_id}")
-            wait_job(client, job_id)
-            raise typer.Exit(code=INTERRUPTED)
-    if job["status"] == JobStatus.FAILED:
-        fail(f"shell failed: {job['error']}", exit_code=2)
-    if job["status"] == JobStatus.CANCELED:
-        fail("job canceled", exit_code=INTERRUPTED)
-    emit(job["result"])
-    raise typer.Exit(code=exit_code_from_response(job["result"]))
+                raise typer.Exit(code=130) from None
+            except BrokenPipeError:
+                raise typer.Exit(code=141) from None
+            except (OSError, RuntimeError, ValueError) as exc:
+                fail(str(exc), exit_code=2)
+            raise typer.Exit(code=code)
+        if piped:
+            response = client.request(
+                "POST",
+                path,
+                params={**query, "background": "true"},
+                files=_upload(payload),
+            )
+        else:
+            response = client.request(
+                "POST",
+                path,
+                params={**query, "background": "true"},
+                json=payload,
+            )
+        emit(handle_response(response))
 
 
 class _Pipe:
@@ -232,27 +204,3 @@ def _explained_lines(node: dict[str, Any], depth: int, out: list[str]) -> None:
         out.append(line)
     for child in node["children"]:
         _explained_lines(child, depth + 1, out)
-
-
-def wait_job(client: DaemonClient, job_id: str) -> dict[str, Any]:
-    """Wait until a daemon job settles.
-
-    Args:
-        client (DaemonClient): the daemon client.
-        job_id (str): the job, already quoted for a path.
-
-    Returns:
-        dict[str, Any]: the settled job.
-    """
-    while True:
-        job = handle_response(
-            client.request(
-                "POST",
-                f"/v1/jobs/{job_id}/wait",
-                json={"timeout_s": WAIT_SLICE_S},
-            )
-        )
-        if not isinstance(job, dict):
-            fail(f"unexpected daemon response: {job!r}")
-        if job["finished_at"] is not None:
-            return job

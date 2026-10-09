@@ -15,7 +15,11 @@
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { DU_MAX_ENTRIES } from '../../core/slack/constants.ts'
-import { read as slackRead, readRange as slackReadRange } from '../../core/slack/read.ts'
+import {
+  read as slackRead,
+  readRange as slackReadRange,
+  readStream as slackReadStream,
+} from '../../core/slack/read.ts'
 import { readdir as slackReaddir } from '../../core/slack/readdir.ts'
 import { stat as slackStat } from '../../core/slack/stat.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
@@ -41,6 +45,14 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   ): Promise<Uint8Array> {
     if (offset === 0 && size === null) return slackRead(this.accessor, path, index)
     return slackReadRange(this.accessor, path, index, size === null ? { offset } : { offset, size })
+  }
+
+  override readStream(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    signal?: AbortSignal,
+  ): AsyncIterable<Uint8Array> {
+    return slackReadStream(this.accessor, path, index, signal)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {

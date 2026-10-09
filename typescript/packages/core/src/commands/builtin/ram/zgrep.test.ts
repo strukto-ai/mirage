@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invoke } from '../../../io/stdio.ts'
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { zgrepGeneric } from '../generic/zgrep.ts'
@@ -37,12 +38,14 @@ async function runZgrep(
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_ZGREP[0]
   if (cmd === undefined) throw new Error('zgrep not registered')
-  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
-    stdin,
-    flags,
-    io: commandIo(vfs),
-    cwd: '/',
-  })
+  const result = await invoke(() =>
+    cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
+      stdin,
+      flags,
+      io: commandIo(vfs),
+      cwd: '/',
+    }),
+  )
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =
@@ -309,13 +312,15 @@ it('under a UTF-8 locale leaves out a line no character owns', async () => {
   const cmd = RAM_ZGREP[0]
   if (cmd === undefined) throw new Error('zgrep not registered')
   const path = PathSpec.fromStrPath('/u.gz')
-  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [path], ['a'], {
-    stdin: null,
-    flags: {},
-    io: commandIo(vfs),
-    cwd: '/',
-    env: { LC_ALL: 'C.UTF-8' },
-  })
+  const result = await invoke(() =>
+    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [path], ['a'], {
+      stdin: null,
+      flags: {},
+      io: commandIo(vfs),
+      cwd: '/',
+      env: { LC_ALL: 'C.UTF-8' },
+    }),
+  )
   if (result === null) throw new Error('zgrep answered nothing')
   const [out, io] = result
   expect(DEC.decode(await materialize(out as AsyncIterable<Uint8Array>))).toBe('a1\na2\n')

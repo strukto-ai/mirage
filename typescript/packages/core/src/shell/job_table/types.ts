@@ -90,4 +90,8 @@ export class Job {
   get pid(): number {
     return this.process?.info.pid ?? this.id
   }
+
+  get executionId(): string | null {
+    return this.process?.info.executionId ?? this.console.executionId
+  }
 }

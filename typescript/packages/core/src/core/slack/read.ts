@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../io/cooperative.ts'
 import { dayChannelId, guardDay } from '../time_range.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -106,3 +107,22 @@ export const read = makeRead<SlackAccessor>(detectScope, {
 export const readRange = makeReadRange<SlackAccessor>(detectScope, read, {
   file_blob: readBlobRange,
 })
+
+/** Stream attachments; preserve the rendered order of JSON records. */
+export async function* readStream(
+  accessor: SlackAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array, void> {
+  if (detectScope(path).kind === 'file_blob') {
+    const url = await blobUrl(accessor, path, index)
+    const source =
+      accessor.transport.downloadFileStream === undefined
+        ? await downloadBlob(accessor, url, 0, null)
+        : accessor.transport.downloadFileStream(url, signal)
+    yield* chunks(source, signal)
+  } else {
+    yield* chunks(await read(accessor, path, index), signal)
+  }
+}

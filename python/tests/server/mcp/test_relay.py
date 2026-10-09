@@ -177,3 +177,24 @@ async def test_relay_stdio_asks_for_the_token_on_every_request(
         tools = by_id[n]["result"]["tools"]
         assert "shell" in {tool["name"] for tool in tools}
     assert len(asked) >= 3
+
+
+@pytest.mark.asyncio
+async def test_relays_request_scoped_progress_and_preserves_final_output():
+    updates = []
+
+    async def progress(value, total, message):
+        updates.append((value, total, message))
+
+    async with Client(upstream_server().server) as upstream:
+        async with Client(McpRelay(upstream).server) as client:
+            result = await client.call_tool(
+                "shell",
+                {"command": "echo out; echo err >&2; false"},
+                progress_callback=progress,
+                meta={"progress_token": "preview-test"},
+            )
+    assert result.content[0].text == "out\n\nerr\n"
+    assert result.is_error
+    assert updates[0] == (1, None, "[stdout] out\n")
+    assert updates[-1][2] == "[stderr] err\n"

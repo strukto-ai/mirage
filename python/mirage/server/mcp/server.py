@@ -38,6 +38,7 @@ from mirage.server.io_serde import (
     explanation_to_dict,
     failure_to_dict,
 )
+from mirage.server.mcp.progress import McpToolOperations, OutputProgress
 from mirage.server.vfs_calls import VFS_CALLS, VfsCall, schema_of
 from mirage.types import JsonValue
 from mirage.workspace.tools.tool_descriptions import (
@@ -174,7 +175,7 @@ class MirageMcpServer:
         session_id (str | None): The session the tools act as; None is
             the workspace's default session.
         operations (MirageToolOperations | None): The tool table to
-            serve; the session's own (``session.tools``) when None. The
+            serve; a streaming table for the session when None. The
             daemon passes one that runs each call through its API.
         all_calls (bool): Also serve the VFS calls and explain.
     """
@@ -194,11 +195,9 @@ class MirageMcpServer:
         self._all_calls = all_calls
         if operations is not None:
             self._ops = operations
-        elif stale_write_protection:
-            self._ops = session.tools
         else:
-            self._ops = MirageToolOperations(
-                session, stale_write_protection=False
+            self._ops = McpToolOperations(
+                workspace, session_id, stale_write_protection
             )
         self.server: Server[dict[str, Any]] = Server(
             name,
@@ -235,8 +234,7 @@ class MirageMcpServer:
         """Report the tool table.
 
         Args:
-            ctx (ServerRequestContext[dict[str, Any]]): The request
-                context; unused.
+            ctx (ServerRequestContext[dict[str, Any]]): The request context.
             params (PaginatedRequestParams | None): The page cursor;
                 every tool fits on one page.
 
@@ -305,6 +303,26 @@ class MirageMcpServer:
                     self._session.explain.shell(given["command"])
                 )
                 return _json(explanation_to_dict(said))
+            if params.name == "shell" and isinstance(
+                self._ops, McpToolOperations
+            ):
+                token = (
+                    ctx.meta.get("progress_token")
+                    if ctx.meta is not None
+                    else None
+                )
+                progress = None
+                if isinstance(token, (str, int)):
+
+                    async def send(value: float, message: str) -> None:
+                        await ctx.session.report_progress(
+                            value, message=message
+                        )
+
+                    progress = OutputProgress(send)
+                return _to_mcp(
+                    await self._ops.shell(given["command"], progress)
+                )
             return _to_mcp(await self._ops.call(params.name, given))
         except Exception as exc:
             logger.debug("mcp tool %s failed", params.name, exc_info=True)

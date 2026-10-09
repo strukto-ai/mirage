@@ -22,6 +22,7 @@ from mirage.commands.constants import ROOT_CWD
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import CommandSpec, FlagValue, UsageStyle
+from mirage.io.stdio import Stdio
 from mirage.io.types import ByteSource, IOResult
 from mirage.process.view import ProcessView
 from mirage.runtime.types import DispatchFn, ScriptSource
@@ -139,6 +140,7 @@ class CLIInvocation(Generic[ConfigT]):
     cwd: PathSpec = ROOT_CWD
     flags: Mapping[str, FlagValue] = field(default_factory=dict)
     stdin: ByteSource | None = None
+    stdio: Stdio | None = None
     env: Mapping[str, str] = field(default_factory=dict)
     view: CLIView | None = None
     spec: "CLISpec | None" = None
