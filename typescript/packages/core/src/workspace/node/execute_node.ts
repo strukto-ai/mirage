@@ -303,6 +303,7 @@ async function recurseLifted(
     callStack,
     signal,
     processes,
+    opts?.sink,
   )
 }
 
@@ -386,6 +387,7 @@ async function runPipeline(
   callStack: CallStack | null,
   signal?: AbortSignal,
   processes?: ProcessSupervisor,
+  sink?: JobConsole,
 ): Promise<Result> {
   const session = context.session
   if (stages.lead !== null) {
@@ -429,6 +431,7 @@ async function runPipeline(
       processes,
       executeFn,
       registry.io.bufferBytes,
+      sink,
     )
   const [stdout, io, execNode] = stages.negated
     ? await ignoringErrexit(context.session, piped)
@@ -1076,13 +1079,15 @@ async function executeNodeBody(
 
   // A sink turns this walk from "return your output" into "write your
   // output". Sequencing constructs pass it to their children so each
-  // statement lands as it finishes; everything else runs unchanged and
-  // has its result drained here. Only STREAMING_KINDS inherit a sink,
-  // so capture sites keep receiving their output as a value.
+  // statement lands as it finishes, and a pipeline streams its last
+  // stage; everything else runs unchanged and has its result drained
+  // here. Only these kinds inherit a sink, so capture sites keep
+  // receiving their output as a value.
   if (
     sink !== undefined &&
     !STREAMING_KINDS.has(kind) &&
     kind !== NodeKind.COMMAND &&
+    kind !== NodeKind.PIPELINE &&
     kind !== NodeKind.REDIRECT &&
     kind !== NodeKind.VAR_ASSIGN &&
     kind !== NodeKind.VAR_ASSIGNS
@@ -1206,7 +1211,7 @@ async function executeNodeBody(
     // followed by `|` closes over everything to its left, so the stages
     // are read the way bash reads them rather than as the parse nested
     // them (see getPipelineStages).
-    return runPipeline(
+    const result = await runPipeline(
       recurse,
       dispatch,
       executeFn,
@@ -1218,7 +1223,9 @@ async function executeNodeBody(
       callStack,
       deps.signal,
       jobTable.processes,
+      sink,
     )
+    return sink === undefined ? result : drained(sink, ...result)
   }
 
   if (kind === NodeKind.LIST) {

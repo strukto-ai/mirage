@@ -243,6 +243,22 @@ describe('ShellExecution', () => {
     }
   })
 
+  it('a pipeline streams its last stage', async () => {
+    const ws = new Workspace({}, { shellParser: await getTestParser() })
+    try {
+      const execution = await ws.shell('{ echo ready; sleep 60; echo never; } | cat', {
+        stream: true,
+      })
+      for await (const event of execution.events) {
+        expect(event.data).toEqual(enc.encode('ready\n'))
+        break
+      }
+      await execution.close()
+    } finally {
+      await ws.close()
+    }
+  }, 5000)
+
   it('breaking iteration cancels and joins the running invocation', async () => {
     const ws = new Workspace({}, { shellParser: await getTestParser() })
     try {

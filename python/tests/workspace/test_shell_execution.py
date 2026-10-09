@@ -279,3 +279,17 @@ async def test_cancel_reaches_a_held_output_drain():
     finally:
         await execution.aclose()
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_streams_its_last_stage():
+    ws = Workspace({})
+    try:
+        execution = await ws.shell(
+            "{ echo ready; sleep 60; echo never; } | cat", stream=True
+        )
+        async with execution:
+            event = await asyncio.wait_for(anext(execution.events), 5)
+            assert event.data == b"ready\n"
+    finally:
+        await ws.close()

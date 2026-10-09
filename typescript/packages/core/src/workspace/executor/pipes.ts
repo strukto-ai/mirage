@@ -82,6 +82,9 @@ export async function handlePipe(
   // this when it ends.
   executeFn: ExecuteFn | null = null,
   bufferBytes = CAPACITY,
+  // Where the statement's output goes as it arrives; the last stage
+  // streams into it instead of being collected first.
+  sink?: JobConsole,
 ): Promise<Result> {
   const session = context.session
   // Reassociated pipelines can enter here without executeNode resetting
@@ -217,11 +220,11 @@ export async function handlePipe(
     const completed = Promise.all(tasks)
     // Attach the rejection handler before reading the last segment: an
     // upstream failure must settle the pipeline even if nobody reads it.
+    const last = pipes[pipes.length - 1]?.stream() ?? null
+    const reading =
+      sink === undefined ? materialize(last) : pump(sink, Channel.STDOUT, last).then(() => null)
     const result = await runWithTimeout(
-      abortable(
-        Promise.all([materialize(pipes[pipes.length - 1]?.stream() ?? null), completed]),
-        parentSignal,
-      ),
+      abortable(Promise.all([reading, completed]), parentSignal),
       session.pipelineTimeoutSeconds,
       'pipeline',
     )

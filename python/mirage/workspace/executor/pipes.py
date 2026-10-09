@@ -86,11 +86,13 @@ async def handle_pipe(
     processes: ProcessSupervisor | None = None,
     execute_fn: Callable[..., Any] | None = None,
     buffer_bytes: int = CAPACITY,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Connect commands via pipes: stdout -> stdin.
 
     Each stage is a child shell, which runs its own EXIT action through
-    ``execute_fn`` when it ends.
+    ``execute_fn`` when it ends. With a ``sink`` the last stage streams
+    into it as it runs instead of being collected first.
     """
     session = context.session
     # Reassociated pipelines can enter here without execute_node resetting
@@ -207,8 +209,14 @@ async def handle_pipe(
                 ) from exc
             children[i].session.process_id = process.info.pid
             tasks.append(process.task)
+        last = pipes[-1].stream()
         result = await run_with_timeout(
-            asyncio.gather(materialize(pipes[-1].stream()), *tasks),
+            asyncio.gather(
+                materialize(last)
+                if sink is None
+                else pump(sink, Channel.STDOUT, last),
+                *tasks,
+            ),
             session.pipeline_timeout_seconds,
             "pipeline",
         )
