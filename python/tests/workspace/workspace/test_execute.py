@@ -623,8 +623,8 @@ async def test_line_queued_behind_a_running_one_is_refused_once_close_starts():
     queued = asyncio.ensure_future(ws.shell("echo queued"))
     await asyncio.sleep(0.01)
     closing = asyncio.ensure_future(ws.close())
-    gate.set()
-    await first
+    with pytest.raises(asyncio.CancelledError):
+        await first
     with pytest.raises(RuntimeError, match="Workspace is closed"):
         await queued
     await closing
