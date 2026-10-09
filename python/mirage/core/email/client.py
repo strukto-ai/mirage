@@ -15,9 +15,8 @@
 import re
 from typing import Any
 
-import aioimaplib
-
 from mirage.accessor.email import EmailAccessor
+from mirage.accessor.imap import IMAPClient, IMAPResponse
 from mirage.core.email._parse import parse_rfc822, parse_with_payloads
 
 INTERNAL_DATE_KEY = "internal_date"
@@ -54,7 +53,7 @@ def quote_string(value: str) -> str:
 def quote_mailbox(folder: str) -> str:
     """Spell a mailbox name as an IMAP quoted string.
 
-    aioimaplib joins a command's arguments with spaces exactly as
+    The IMAP client joins a command's arguments with spaces exactly as
     given, so a bare mailbox name containing one arrives as two
     arguments and the server reads only the first word. That is not
     exotic: the sent mailbox is ``Sent Items`` on Exchange and
@@ -96,7 +95,9 @@ def read_quoted(text: str) -> tuple[str, str]:
     return "".join(chars), ""
 
 
-def parse_folder_line(line: str | bytes) -> tuple[str, tuple[str, ...]] | None:
+def parse_folder_line(
+    line: str | bytes | bytearray,
+) -> tuple[str, tuple[str, ...]] | None:
     """Read one LIST response line as a name and its attributes.
 
     The grammar is ``(attrs) delimiter mailbox``, and the mailbox is an
@@ -106,7 +107,7 @@ def parse_folder_line(line: str | bytes) -> tuple[str, tuple[str, ...]] | None:
     atom form, so the three tokens are walked in order instead.
 
     Args:
-        line (str | bytes): one line of the LIST response.
+        line (str | bytes | bytearray): one line of the LIST response.
 
     Returns:
         tuple[str, tuple[str, ...]] | None: the mailbox name and its
@@ -148,7 +149,7 @@ async def list_folder_entries(
     return entries
 
 
-async def select_folder(imap: aioimaplib.IMAP4, folder: str) -> None:
+async def select_folder(imap: IMAPClient, folder: str) -> None:
     """Select a mailbox, failing loudly when it does not exist.
 
     An unchecked SELECT leaves the session in AUTH state, and the next
@@ -157,7 +158,7 @@ async def select_folder(imap: aioimaplib.IMAP4, folder: str) -> None:
     problem.
 
     Args:
-        imap (aioimaplib.IMAP4): the connected client.
+        imap (IMAPClient): the connected client.
         folder (str): the mailbox to select.
 
     Raises:
@@ -187,10 +188,7 @@ async def list_message_uids(
         raise ValueError(f"IMAP rejected the search: {search_criteria}")
     if not response.lines:
         return []
-    raw = response.lines[0]
-    if isinstance(raw, (bytes, bytearray)):
-        raw = bytes(raw).decode()
-    seq_nums = raw.split() if raw.strip() else []
+    seq_nums = bytes(response.lines[0]).decode().split()
     if not seq_nums:
         return []
     if max_results is not None:
@@ -201,11 +199,7 @@ async def list_message_uids(
         batch = seq_nums[i : i + batch_size]
         seq_set = ",".join(batch)
         uid_response = await imap.fetch(seq_set, "(UID)")
-        for item in uid_response.lines:
-            if isinstance(item, (bytes, bytearray)):
-                line = bytes(item).decode(errors="replace")
-            else:
-                line = str(item)
+        for line in _text_lines(uid_response):
             if "UID" in line:
                 try:
                     uid_idx = line.index("UID") + 4
@@ -288,44 +282,69 @@ async def fetch_attachment(
     return None
 
 
-def _extract_body(response) -> bytes:
+def _text_lines(response: IMAPResponse) -> list[str]:
+    """An answer's text lines, decoded, its literals left out: a message
+    whose own text names FLAGS or INTERNALDATE must not be read as the
+    mailbox's.
+
+    Args:
+        response (IMAPResponse): the answer.
+    """
+    return [
+        item.decode(errors="replace")
+        for item in response.lines
+        if not isinstance(item, bytearray)
+    ]
+
+
+def _extract_body(response: IMAPResponse) -> bytes:
+    """The message a FETCH answer carries: its literal.
+
+    Args:
+        response (IMAPResponse): the answer to a BODY.PEEK[] fetch.
+    """
     for item in response.lines:
-        if isinstance(item, (bytearray,)) and len(item) > 20:
+        if isinstance(item, bytearray):
             return bytes(item)
-        if isinstance(item, bytes) and len(item) > 100:
-            return item
     return b""
 
 
-def _extract_flags(response) -> list[str]:
-    for item in response.lines:
-        if isinstance(item, (bytes, bytearray)):
-            line = bytes(item).decode(errors="replace")
-        else:
-            line = str(item)
+def _extract_flags(response: IMAPResponse) -> list[str]:
+    """The flags a FETCH answer reports.
+
+    Args:
+        response (IMAPResponse): the answer.
+    """
+    for line in _text_lines(response):
         if "FLAGS" in line:
-            try:
-                start = line.index("(", line.index("FLAGS")) + 1
-                end = line.index(")", start)
-                return line[start:end].split()
-            except ValueError:
-                # tolerant IMAP parse: skip lines that do not match the shape
-                pass
+            return _extract_flags_from_line(line)
     return []
 
 
-def _parse_multi_fetch(response, uids: list[str]) -> list[dict[str, Any]]:
+def _parse_multi_fetch(
+    response: IMAPResponse, uids: list[str]
+) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     current_uid = None
     current_flags: list[str] = []
     current_internal = ""
 
     for item in response.lines:
-        if isinstance(item, (bytes, bytearray)):
-            line = bytes(item).decode(errors="replace")
-        else:
-            line = str(item)
-
+        if isinstance(item, bytearray):
+            # Full parse (not headers_only): listings need the MIME
+            # structure to surface attachment dirs.
+            msg_dict = parse_rfc822(bytes(item))
+            msg_dict["uid"] = current_uid or (
+                uids[len(results)] if len(results) < len(uids) else ""
+            )
+            msg_dict["flags"] = current_flags
+            msg_dict[INTERNAL_DATE_KEY] = current_internal
+            results.append(msg_dict)
+            current_uid = None
+            current_flags = []
+            current_internal = ""
+            continue
+        line = item.decode(errors="replace")
         if "FETCH" in line and "UID" in line:
             try:
                 uid_idx = line.index("UID") + 4
@@ -341,22 +360,6 @@ def _parse_multi_fetch(response, uids: list[str]) -> list[dict[str, Any]]:
             if "FLAGS" in line:
                 current_flags = _extract_flags_from_line(line)
             current_internal = _internal_date_from_line(line)
-            continue
-
-        if isinstance(item, (bytearray,)) and len(item) > 20:
-            raw = bytes(item)
-            # Full parse (not headers_only): listings need the MIME
-            # structure to surface attachment dirs.
-            msg_dict = parse_rfc822(raw)
-            msg_dict["uid"] = current_uid or (
-                uids[len(results)] if len(results) < len(uids) else ""
-            )
-            msg_dict["flags"] = current_flags
-            msg_dict[INTERNAL_DATE_KEY] = current_internal
-            results.append(msg_dict)
-            current_uid = None
-            current_flags = []
-            current_internal = ""
 
     return results
 
@@ -366,17 +369,13 @@ def _internal_date_from_line(line: str) -> str:
     return match.group(1) if match else ""
 
 
-def _extract_internal_date(response) -> str:
-    for item in response.lines:
-        # Literal payload arrives as a bytearray (same tell _extract_body
-        # uses); a message whose own text quotes an INTERNALDATE must not
-        # be read as the mailbox's.
-        if isinstance(item, bytearray):
-            continue
-        if isinstance(item, bytes):
-            line = item.decode(errors="replace")
-        else:
-            line = str(item)
+def _extract_internal_date(response: IMAPResponse) -> str:
+    """The INTERNALDATE a FETCH answer reports.
+
+    Args:
+        response (IMAPResponse): the answer.
+    """
+    for line in _text_lines(response):
         found = _internal_date_from_line(line)
         if found:
             return found

@@ -42,10 +42,6 @@ def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
 
 
 sys.modules.setdefault(
-    "aioimaplib",
-    SimpleNamespace(IMAP4=object, IMAP4_SSL=object),
-)
-sys.modules.setdefault(
     "aiosmtplib",
     SimpleNamespace(SMTP=object, send=AsyncMock()),
 )

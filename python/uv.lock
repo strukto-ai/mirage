@@ -256,15 +256,6 @@ wheels = [
 ]
 
 [[package]]
-name = "aioimaplib"
-version = "2.0.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ee/da/a454c47fb8522e607425e15bf1f49ccfdb3d75f4071f40b63ebd49573495/aioimaplib-2.0.1.tar.gz", hash = "sha256:5a494c3b75f220977048f5eb2c7ba9c0570a3148aaf38bee844e37e4d7af8648", size = 35555, upload-time = "2025-01-16T10:38:23.14Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/52/48aaa287fb3c4c995edcb602370b10d182dc5c48371df7cb3a404356733f/aioimaplib-2.0.1-py3-none-any.whl", hash = "sha256:727e00c35cf25106bd34611dddd6e2ddf91a5f1a7e72d9269f3ce62486b31e14", size = 34729, upload-time = "2025-01-16T10:38:20.427Z" },
-]
-
-[[package]]
 name = "aioitertools"
 version = "0.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3957,7 +3948,6 @@ agno = [
 all = [
     { name = "agno" },
     { name = "aioboto3" },
-    { name = "aioimaplib" },
     { name = "aiosmtplib" },
     { name = "asyncpg" },
     { name = "asyncssh" },
@@ -4011,7 +4001,6 @@ e2b = [
     { name = "e2b" },
 ]
 email = [
-    { name = "aioimaplib" },
     { name = "aiosmtplib" },
 ]
 fuse = [
@@ -4084,7 +4073,6 @@ s3 = [
 ]
 sandbox = [
     { name = "aioboto3" },
-    { name = "aioimaplib" },
     { name = "aiosmtplib" },
     { name = "asyncpg" },
     { name = "asyncssh" },
@@ -4131,7 +4119,6 @@ requires-dist = [
     { name = "aioboto3", marker = "extra == 's3'", specifier = ">=15.5.0" },
     { name = "aiofiles", specifier = ">=24.1.0" },
     { name = "aiohttp", specifier = ">=3.14.2" },
-    { name = "aioimaplib", marker = "extra == 'email'", specifier = ">=2.0.1" },
     { name = "aiosmtplib", marker = "extra == 'email'", specifier = ">=5.1.0" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.30.0" },
     { name = "asyncssh", marker = "extra == 'ssh'", specifier = ">=2.23.0" },
