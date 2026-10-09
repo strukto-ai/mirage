@@ -280,17 +280,29 @@ async def test_a_move_lifts_a_kept_version(dropbox, workspace, line, key):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "policy, downloads",
-    [(WritePolicy.UNCONDITIONAL, 1), (WritePolicy.CONDITIONAL, 0)],
+    "policy",
+    [WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL],
     ids=["unconditional", "conditional"],
 )
-async def test_an_empty_resize_reads_only_where_writes_go_plain(
-    dropbox, workspace, policy, downloads
-):
+async def test_an_empty_resize_reads_nothing(dropbox, workspace, policy):
     ws = workspace(policy)
     assert await _run(ws, "truncate -s 0 /dbx/f") == (0, "", "")
-    assert dropbox.count("download") == downloads
+    assert dropbox.count("download") == 0
     assert dropbox.read("f") == b""
+
+
+@pytest.mark.asyncio
+async def test_a_read_through_an_outdated_listing_holds_its_own_bytes(
+    dropbox, workspace
+):
+    ws = workspace()
+    await _run(ws, "ls /dbx")
+    dropbox.write("f", b"B\n")
+    assert await _run(ws, "cat /dbx/f") == (0, "B\n", "")
+    dropbox.write("f", b"C\n")
+    code, _, err = await _run(ws, "echo mine > /dbx/f")
+    assert (code, err) == (1, f"/dbx/f: {STALE}\n")
+    assert dropbox.read("f") == b"C\n"
 
 
 @pytest.mark.asyncio

@@ -195,7 +195,7 @@ async def copy(
     accessor: DropboxAccessor, src: PathSpec, dst: PathSpec
 ) -> None:
     """copy_v2 copies files and folder subtrees server-side; an existing
-    destination FILE is replaced like GNU cp (see ``replace_onto``).
+    destination FILE is replaced, as cp does (see ``replace_onto``).
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.

@@ -187,7 +187,10 @@ reports the failed removal); see
 A Box mount accepts `read: fresh`. The token is the file's `sha1`, which a
 folder listing and `GET /files/{id}` both carry; a download names no version,
 so a whole read stamps the listed `sha1` only when the downloaded bytes hash
-to it, and a ranged read stamps nothing. `modified_at` is never the token:
+to it, and a ranged read stamps nothing. On a
+[`write: conditional`](/home/yaml#the-write-policy) mount a whole read stamps
+the `sha1` of the bytes it downloaded, so a listing another client has since
+outdated cannot leave the next write without the version the agent read. `modified_at` is never the token:
 two same-size edits in one second share it.
 
 Checking a cached file costs one request, `GET /files/{id}` by the id the

@@ -30,7 +30,7 @@ async def rename(
     one: a file outright, and a directory when it is empty. So a
     conflict deletes the target and retries, except for a folder that
     still lists a child, where the original error propagates and the
-    generic mv reports GNU's "Directory not empty" (mirrors msgraph's
+    generic mv reports "Directory not empty" (mirrors msgraph's
     rename_replace). A destination mirage holds a version of that a
     folder has taken is refused, with nothing deleted (``replace_onto``).
 

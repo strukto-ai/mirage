@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { publishRead } from '../../cache/context.ts'
+import { publishRead, writesConditioned } from '../../cache/context.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -28,7 +28,11 @@ import { eisdir, enoent } from '../../errors/fs.ts'
 import { windowFor } from '../../utils/ranges.ts'
 
 /**
- * Read a file, optionally only a byte range of it.
+ * Read a file, optionally only a byte range of it. On a `write: conditional`
+ * mount a whole read stamps the sha1 of the bytes it returned, which is Box's
+ * own token for them, even when the listing row it resolved through is older:
+ * the next write must hold the version the agent read, or it goes out plain
+ * over a later change.
  *
  * Args:
  *   accessor: Box accessor.
@@ -69,7 +73,9 @@ export async function read(
   // prefers WebCrypto's native SHA-1, falling back to incremental Sha1
   // when unavailable. Streams use incremental Sha1 without buffering.
   const hashable = window === undefined && entryToken(entry) !== null
-  const fingerprint = hashable ? readToken(entry, await sha1Hex(data)) : null
+  const digest = hashable ? await sha1Hex(data) : null
+  let fingerprint: string | null = null
+  if (digest !== null) fingerprint = writesConditioned(path) ? digest : readToken(entry, digest)
   publishRead(path.virtual, data, fingerprint)
   record('read', path.virtual, 'box', data.byteLength, timer, {
     fingerprint,
@@ -81,7 +87,8 @@ export async function read(
  * Stream a file, stamped with its sha1 once it has been read whole. When a
  * token can result (a recorder is bound and the row has a sha1), each chunk
  * feeds a running SHA-1; the token lands only after the last chunk, so a
- * stream abandoned part-way stamps nothing.
+ * stream abandoned part-way stamps nothing. The token is chosen as `read`
+ * chooses it.
  *
  * Args:
  *   accessor: Box accessor.
@@ -112,11 +119,15 @@ export async function* readStream(
   if (entry === null) throw enoent(path.virtual)
   if (entry.resourceType === 'box/folder') throw eisdir(path.virtual)
   const rec = recordStream('read', path.virtual, 'box')
+  const conditioned = writesConditioned(path)
   const digest = rec !== null && entryToken(entry) !== null ? new Sha1() : null
   for await (const chunk of downloadFileStream(accessor.tokenManager, entry.id)) {
     digest?.update(chunk)
     if (rec !== null) rec.bytes += chunk.byteLength
     yield chunk
   }
-  if (rec !== null && digest !== null) rec.fingerprint = readToken(entry, digest.digest())
+  if (rec !== null && digest !== null) {
+    const token = digest.digest()
+    rec.fingerprint = conditioned ? token : readToken(entry, token)
+  }
 }

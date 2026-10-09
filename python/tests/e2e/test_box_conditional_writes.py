@@ -293,17 +293,29 @@ async def test_a_move_lifts_a_kept_version(box, workspace, line, key):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "policy, downloads",
-    [(WritePolicy.UNCONDITIONAL, 1), (WritePolicy.CONDITIONAL, 0)],
+    "policy",
+    [WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL],
     ids=["unconditional", "conditional"],
 )
-async def test_an_empty_resize_reads_only_where_writes_go_plain(
-    box, workspace, policy, downloads
-):
+async def test_an_empty_resize_reads_nothing(box, workspace, policy):
     ws = workspace(policy)
     assert await _run(ws, "truncate -s 0 /box/f") == (0, "", "")
-    assert box.count("content") == downloads
+    assert box.count("content") == 0
     assert box.read("f") == b""
+
+
+@pytest.mark.asyncio
+async def test_a_read_through_an_outdated_listing_holds_its_own_bytes(
+    box, workspace
+):
+    ws = workspace()
+    await _run(ws, "ls /box")
+    box.write("f", b"B\n")
+    assert await _run(ws, "cat /box/f") == (0, "B\n", "")
+    box.write("f", b"C\n")
+    code, _, err = await _run(ws, "echo mine > /box/f")
+    assert (code, err) == (1, f"/box/f: {STALE}\n")
+    assert box.read("f") == b"C\n"
 
 
 @pytest.mark.asyncio

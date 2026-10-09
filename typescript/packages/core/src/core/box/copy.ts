@@ -107,7 +107,7 @@ async function copyInto(
   const dstParts = pathParts(dst)
   const existing = await resolveItem(accessor, dstParts)
   if (item.type === 'folder' && existing !== null && existing.type === 'folder') {
-    // Merge into an existing folder (GNU cp -r semantics): copy each child
+    // Merge into an existing folder, as cp -r does: copy each child
     // rather than replacing the folder, so pre-existing entries survive.
     for (const child of await listFolderItems(tm, item.id)) {
       await copyInto(accessor, child, childSpec(dst, child.name), changed, sent)

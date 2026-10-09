@@ -14,7 +14,7 @@
 
 import { enotsup } from '../../errors/fs.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { runWithOwnVersion, writesConditioned } from '../../cache/context.ts'
+import { runWithOwnVersion } from '../../cache/context.ts'
 import { OwnRead } from '../../cache/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { sha1Hex } from '../../utils/hash.ts'
@@ -23,6 +23,12 @@ import { liveOf } from './fingerprint.ts'
 import { pathParts, resolveItem } from './resolve.ts'
 import { write } from './write.ts'
 
+/**
+ * Resize a file by rewriting it whole. Emptying reads nothing, so its write
+ * carries the version the agent read. Any other length downloads the file and
+ * hands its write the sha1 of those bytes; a file Box keeps no sha1 for hands
+ * none, and its write goes out plain. Mirrors Python's `truncate`.
+ */
 export async function truncate(
   accessor: BoxAccessor,
   path: PathSpec,
@@ -30,8 +36,7 @@ export async function truncate(
   noCreate = false,
 ): Promise<void> {
   if (noCreate) throw enotsup('box', 'truncate --no-create', path)
-  if (length === 0 && writesConditioned(path)) {
-    // Emptying carries the agent's version; no read needed.
+  if (length === 0) {
     await write(accessor, path, new Uint8Array(0))
     return
   }

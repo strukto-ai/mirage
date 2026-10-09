@@ -29,6 +29,17 @@ from mirage.types import PathSpec
 
 
 async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
+    """Move a file or folder with Box's own move.
+
+    Only a destination it replaces is measured: Box moves the item whole,
+    so a write that landed on the source moves with it. Both ends are
+    recorded, since the source left and the destination was replaced.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        src (PathSpec): the item to move.
+        dst (PathSpec): where it lands.
+    """
     tm = accessor.token_manager
     src_parts = path_parts(src)
     dst_parts = path_parts(dst)
@@ -39,14 +50,13 @@ async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     if dst_parent is None:
         raise enoent(dst.virtual)
     new_name = dst_parts[-1]
-    # GNU mv overwrites the destination; Box 409s on a name clash, so clear
+    # mv overwrites the destination; Box 409s on a name clash, so clear
     # an existing dst first. A type mismatch is refused with rename(2)'s own
     # errnos and outranks emptiness, since real rename answers EISDIR for a
     # file onto a directory whether or not that directory has children. Only
     # a folder gives way to a folder, and then only an empty one: a non-empty
     # one is mv's "Directory not empty", which recursive=false gets from Box
     # for free, exactly as rmdir does.
-    # Only dst is measured: Box moves the item whole.
     upto = lost_count()
     timer = start_op()
     cond: WriteCondition | None = None
@@ -81,7 +91,6 @@ async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     # rules one out. The type checks above refused a file onto a folder,
     # so dst held nothing below it unless the moved item is a folder.
     folder = item.get("type") != "file"
-    # Both ends changed: src left and dst was replaced.
     op = "rename_prefix" if folder else "rename"
     record(op, src.virtual, "box", 0, timer)
     record(op, dst.virtual, "box", 0, timer)

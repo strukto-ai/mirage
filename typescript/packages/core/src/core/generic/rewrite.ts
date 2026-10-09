@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readVersioned, runWithOwnVersion, writesConditioned } from '../../cache/context.ts'
+import { readVersioned, runWithOwnVersion } from '../../cache/context.ts'
 import { OwnRead } from '../../cache/types.ts'
 import { eexist, einval, eisdir, enotsup, isEnotdir, isMissingPath } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../types.ts'
@@ -122,7 +122,8 @@ export async function pwriteByRewrite(
  * Resize by reading the file and writing it back padded or cut.
  *
  * For a store with no partial write. It cannot hold `noCreate` atomically,
- * so it refuses that before writing anything. Mirrors Python's
+ * so it refuses that before writing anything. Emptying reads nothing, so its
+ * write carries the version the agent read. Mirrors Python's
  * `truncate_by_rewrite`.
  */
 export async function truncateByRewrite(
@@ -133,8 +134,7 @@ export async function truncateByRewrite(
   noCreate: boolean,
 ): Promise<void> {
   if (noCreate) throw enotsup('emulated', 'truncate --no-create', path)
-  if (length === 0 && writesConditioned(path)) {
-    // Emptying carries the agent's version; no read needed.
+  if (length === 0) {
     await write(path, new Uint8Array(0))
     return
   }

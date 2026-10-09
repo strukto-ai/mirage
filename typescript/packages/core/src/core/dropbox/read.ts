@@ -86,7 +86,6 @@ export async function read(
   const [data, result] = download
   const token = resultToken(result)
   record('read', path.virtual, 'dropbox', data.byteLength, timer, { fingerprint: token })
-  // Only a conditional mount hands its read's token on.
   if (window === undefined && writesConditioned(path)) publishRead(path.virtual, data, token)
   return data
 }

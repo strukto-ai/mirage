@@ -24,7 +24,7 @@ import { dropboxPathOf } from './paths.ts'
 // a file outright, and a directory when it is empty. So a conflict
 // deletes the target and retries, except for a folder that still lists a
 // child, where the original error propagates and the generic mv reports
-// GNU's "Directory not empty" (mirrors msgraph's renameReplace). A held
+// "Directory not empty" (mirrors msgraph's renameReplace). A held
 // destination a folder has taken is refused, with nothing deleted. The source
 // is not measured: move_v2 moves the entry whole, so only replacing the
 // destination can lose a write, and that delete carries its measured rev.

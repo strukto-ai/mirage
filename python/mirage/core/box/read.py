@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator
 from functools import partial
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import publish_read
+from mirage.cache.context import publish_read, writes_conditioned
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.cache.index.warm import entry_or_warm
 from mirage.core.box.api import download_file, download_file_stream
@@ -68,6 +68,11 @@ async def read(
 ) -> bytes:
     """Read a file, optionally only a byte range of it.
 
+    On a ``write: conditional`` mount a whole read stamps the sha1 of the
+    bytes it returned, which is Box's own token for them, even when the
+    listing row it resolved through is older: the next write must hold
+    the version the agent read, or it goes out plain over a later change.
+
     Args:
         accessor (BoxAccessor): Box accessor.
         path (PathSpec): the path to read.
@@ -85,7 +90,10 @@ async def read(
     # being bound (tests/vfs/test_read_revalidatable.py holds each declarer
     # to it).
     if window is None and entry_token(entry) is not None:
-        fingerprint = read_token(entry, hashlib.sha1(data).hexdigest())
+        digest = hashlib.sha1(data).hexdigest()
+        fingerprint = (
+            digest if writes_conditioned() else read_token(entry, digest)
+        )
     publish_read(path.virtual, data, fingerprint)
     record(
         "read", path.virtual, "box", len(data), timer, fingerprint=fingerprint
@@ -102,7 +110,8 @@ async def read_stream(
 
     When a token can result (a recorder is bound and the row has a sha1),
     each chunk feeds a running SHA-1; the token lands only after the last
-    chunk, so a stream abandoned part-way stamps nothing.
+    chunk, so a stream abandoned part-way stamps nothing. The token is
+    chosen as :func:`read` chooses it.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -111,6 +120,7 @@ async def read_stream(
     """
     entry = await _resolve_entry(accessor, path, index)
     rec = record_stream("read", path.virtual, "box")
+    conditioned = writes_conditioned()
     digest = (
         hashlib.sha1()
         if rec is not None and entry_token(entry) is not None
@@ -123,4 +133,5 @@ async def read_stream(
             rec.bytes += len(chunk)
         yield chunk
     if rec is not None and digest is not None:
-        rec.fingerprint = read_token(entry, digest.hexdigest())
+        token = digest.hexdigest()
+        rec.fingerprint = token if conditioned else read_token(entry, token)

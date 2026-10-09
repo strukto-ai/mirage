@@ -311,6 +311,54 @@
         "stderr": ""
       },
       "note": "A folder mv records both ends as subtrees, so a file the line read under the old name holds no version there afterwards and a new file written in its place goes out plain."
+    },
+    {
+      "id": "write_conditional_drive_a_read_through_an_outdated_listing_holds_its_bytes",
+      "seq": 310101,
+      "targets": [
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/l1.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "ls /data > /dev/null"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/l1.txt > /dev/null; echo B > /data/l1.txt"
+          }
+        },
+        {
+          "command": "cat /data/l1.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/l1.txt > /dev/null; echo C > /data/l1.txt"
+          }
+        },
+        {
+          "command": "echo mine > /data/l1.txt; echo $?"
+        },
+        {
+          "command": "cat /data/l1.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "B\n1\nC\n",
+        "stderr": "/data/l1.txt: changed since it was read; read it again before writing\n"
+      },
+      "note": "A read through a listing row another client has since outdated holds the version of the bytes it returned (on Box their sha1, on Dropbox the download's content_hash), so a write after a further change is refused rather than sent plain."
     }
   ]
 }

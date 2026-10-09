@@ -134,7 +134,7 @@ async def _copy_into(
         and existing is not None
         and existing.get("type") == "folder"
     ):
-        # Merge into an existing folder (GNU cp -r semantics): copy each child
+        # Merge into an existing folder, as cp -r does: copy each child
         # rather than replacing the folder, so pre-existing entries survive.
         for child in await list_folder_items(tm, item["id"]):
             await _copy_into(

@@ -29,7 +29,7 @@ async function clearDest(
   dstParts: string[],
   src: BoxItem,
 ): Promise<WriteCondition | null> {
-  // GNU mv/cp overwrite; Box 409s on a name clash, so clear an existing dst.
+  // mv and cp overwrite; Box 409s on a name clash, so clear an existing dst.
   // A type mismatch is refused with rename(2)'s own errnos and outranks
   // emptiness, since real rename answers EISDIR for a file onto a directory
   // whether or not that directory has children. Only a folder gives way to a
@@ -48,6 +48,12 @@ async function clearDest(
   return null
 }
 
+/**
+ * Move a file or folder with Box's own move. Only a destination it replaces is
+ * measured: Box moves the item whole, so a write that landed on the source
+ * moves with it. Both ends are recorded, since the source left and the
+ * destination was replaced. Mirrors Python's `rename`.
+ */
 export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const tm = accessor.tokenManager
   const item = await resolveItem(accessor, pathParts(src))
@@ -55,7 +61,6 @@ export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec
   const dstParts = pathParts(dst)
   const dstParent = await resolveParentId(accessor, dstParts)
   if (dstParent === null) throw enoent(dst.virtual)
-  // Only dst is measured: Box moves the item whole.
   const upto = lostCount()
   const timer = startOp()
   const cond = await clearDest(accessor, dst, dstParts, item)
@@ -71,7 +76,6 @@ export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec
   // one out. clearDest refused a file onto a folder, so dst held nothing
   // below it unless the moved item is a folder.
   const folder = item.type !== 'file'
-  // Both ends changed: src left and dst was replaced.
   const op = folder ? 'rename_prefix' : 'rename'
   record(op, src.virtual, 'box', 0, timer)
   record(op, dst.virtual, 'box', 0, timer)

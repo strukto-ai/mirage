@@ -151,7 +151,7 @@ export function notAFolder(existing: DropboxEntry): Promise<boolean> {
 
 /**
  * copy_v2 copies files and folder subtrees server-side; an existing
- * destination FILE is replaced like GNU cp (see `replaceOnto`).
+ * destination FILE is replaced, as cp does (see `replaceOnto`).
  */
 export async function copy(accessor: DropboxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const from = dropboxPathOf(accessor, src)

@@ -253,13 +253,24 @@ describe('conditional writes on a Dropbox mount', () => {
   })
 
   it.each([
-    ['unconditional', WritePolicy.UNCONDITIONAL, 1],
-    ['conditional', WritePolicy.CONDITIONAL, 0],
-  ])('an empty resize reads only where writes go plain: %s', async (_name, policy, downloads) => {
+    ['unconditional', WritePolicy.UNCONDITIONAL],
+    ['conditional', WritePolicy.CONDITIONAL],
+  ])('an empty resize reads nothing: %s', async (_name, policy) => {
     const ws = await workspace(policy)
     expect(await run(ws, 'truncate -s 0 /dbx/f')).toEqual([0, '', ''])
-    expect(dropbox.count('download')).toBe(downloads)
+    expect(dropbox.count('download')).toBe(0)
     expect(text(dropbox, 'f')).toBe('')
+  })
+
+  it('holds the bytes a read through an outdated listing returned', async () => {
+    const ws = await workspace()
+    await run(ws, 'ls /dbx')
+    dropbox.write('f', ENC.encode('B\n'))
+    expect(await run(ws, 'cat /dbx/f')).toEqual([0, 'B\n', ''])
+    dropbox.write('f', ENC.encode('C\n'))
+    const [code, , err] = await run(ws, 'echo mine > /dbx/f')
+    expect([code, err]).toEqual([1, `/dbx/f: ${STALE}\n`])
+    expect(text(dropbox, 'f')).toBe('C\n')
   })
 
   it.each([

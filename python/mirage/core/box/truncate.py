@@ -15,7 +15,7 @@
 import hashlib
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import own_write_version, writes_conditioned
+from mirage.cache.context import own_write_version
 from mirage.cache.types import OwnRead
 from mirage.core.box.api import download_file
 from mirage.core.box.fingerprint import live_of
@@ -28,10 +28,22 @@ from mirage.types import PathSpec
 async def truncate(
     accessor: BoxAccessor, path: PathSpec, length: int, no_create: bool = False
 ) -> None:
+    """Resize a file by rewriting it whole.
+
+    Emptying reads nothing, so its write carries the version the agent
+    read. Any other length downloads the file and hands its write the sha1
+    of those bytes; a file Box keeps no sha1 for hands none, and its write
+    goes out plain.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        path (PathSpec): the file.
+        length (int): the new size.
+        no_create (bool): refuse to create a missing file (unsupported).
+    """
     if no_create:
         raise enotsup("box", "truncate --no-create", path)
-    if length == 0 and writes_conditioned():
-        # Emptying carries the agent's version; no read needed.
+    if length == 0:
         await write(accessor, path, b"")
         return
     item = await resolve_item(accessor, path_parts(path))

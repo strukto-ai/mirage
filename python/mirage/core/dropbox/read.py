@@ -117,7 +117,6 @@ async def read(
         "read", path.virtual, "dropbox", len(data), timer, fingerprint=token
     )
     if window is None and writes_conditioned():
-        # Only a conditional mount hands its read's token on.
         publish_read(path.virtual, data, token)
     return data
 

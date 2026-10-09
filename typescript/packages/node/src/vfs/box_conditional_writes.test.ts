@@ -264,13 +264,24 @@ describe('conditional writes on a Box mount', () => {
   })
 
   it.each([
-    ['unconditional', WritePolicy.UNCONDITIONAL, 1],
-    ['conditional', WritePolicy.CONDITIONAL, 0],
-  ])('an empty resize reads only where writes go plain: %s', async (_name, policy, downloads) => {
+    ['unconditional', WritePolicy.UNCONDITIONAL],
+    ['conditional', WritePolicy.CONDITIONAL],
+  ])('an empty resize reads nothing: %s', async (_name, policy) => {
     const ws = await workspace(policy)
     expect(await run(ws, 'truncate -s 0 /box/f')).toEqual([0, '', ''])
-    expect(box.count('content')).toBe(downloads)
+    expect(box.count('content')).toBe(0)
     expect(text(box, 'f')).toBe('')
+  })
+
+  it('holds the bytes a read through an outdated listing returned', async () => {
+    const ws = await workspace()
+    await run(ws, 'ls /box')
+    box.write('f', ENC.encode('B\n'))
+    expect(await run(ws, 'cat /box/f')).toEqual([0, 'B\n', ''])
+    box.write('f', ENC.encode('C\n'))
+    const [code, , err] = await run(ws, 'echo mine > /box/f')
+    expect([code, err]).toEqual([1, `/box/f: ${STALE}\n`])
+    expect(text(box, 'f')).toBe('C\n')
   })
 
   it('rm -r skips a web link already gone', async () => {
