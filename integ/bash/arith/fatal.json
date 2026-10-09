@@ -435,11 +435,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "bash -c 'readonly R=1; X=0; : $(( X=5, R=3 )); echo no\necho \"a=$? X=$X\"'; bash -c 'readonly Q; : ${Q:=x}; echo no\necho \"d=$?\"'; bash -c 'readonly Q; eval \": \\${Q:=x}; echo no\"; echo \"e=$?\"'; bash -c 'readonly r=1 a=(1); r=$(echo side >&2)$((x=5)); echo no\na[y=6]=$(echo elem >&2); echo no\na=($(echo literal >&2)); echo no\necho \"x=$x y=$y\"; r=$(echo prefix >&2) echo cmd; echo \"c=$?\"'",
+      "command": "bash -c 'readonly R=1; X=0; : $(( X=5, R=3 )); echo no\necho \"a=$? X=$X\"'; bash -c 'readonly Q; : ${Q:=x}; echo no\necho \"d=$?\"'; bash -c 'readonly Q; eval \": \\${Q:=x}; echo no\"; echo \"e=$?\"'; bash -c 'readonly r=1 a=(1); r=$(echo side >&2)$((x=5)); echo no\na[y=6]=$(echo elem >&2); echo no\na=($(echo literal >&2)); echo no\na[2**40]=$(echo big >&2); echo no\necho \"x=$x y=$y\"; r=$(echo prefix >&2) echo cmd; echo \"c=$?\"'",
       "expect": {
         "exit": 0,
         "stdout": "a=1 X=5\nd=1\ne=1\nx=5 y=6\ncmd\nc=0\n",
-        "stderr": "bash: R: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nside\nbash: r: readonly variable\nelem\nbash: a: readonly variable\nbash: a: readonly variable\nbash: r: readonly variable\n"
+        "stderr": "bash: R: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nside\nbash: r: readonly variable\nelem\nbash: a: readonly variable\nbash: a: readonly variable\nbig\nbash: a: readonly variable\nbash: r: readonly variable\n"
       }
     },
     {

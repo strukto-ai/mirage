@@ -20,6 +20,7 @@ import {
   arrayExtent,
   arrayGet,
   arraySet,
+  arrayWith,
   buildAssocLiteral,
   buildIndexedLiteral,
 } from '../../shell/array.ts'
@@ -72,6 +73,19 @@ async function fatalIndexLiteral(
   } catch (err) {
     if (err instanceof ArithError) throw err.signal('', true)
     throw err
+  }
+}
+
+/**
+ * Discard the line on a write to a readonly `key` before its new value is
+ * built: bash refuses an array literal before expanding it, and an element
+ * write once its value and subscript are read, before the array would grow
+ * to the index (`a[2**40]=x`). The store refuses every other spelling
+ * (`assignVar`).
+ */
+function refuseReadonly(view: SessionView, key: string): void {
+  if (view.isReadonly(key, false)) {
+    throw new DiscardSignal(encodeText(`bash: ${key}: readonly variable\n`))
   }
 }
 
@@ -221,12 +235,7 @@ export async function executeAssignment(
         .join(' ')
       context.frame.diagnostics.push(encodeText(`+ ${spelled}${append ? '+=' : '='}(${words})\n`))
     }
-    // bash refuses an array literal before expanding it; every other
-    // spelling expands its value and subscript first and meets the
-    // refusal at the store (`assignVar`).
-    if (session.readonlyVars.has(key)) {
-      throw new DiscardSignal(encodeText(`bash: ${key}: readonly variable\n`))
-    }
+    refuseReadonly(view, key)
     const items = await expandArrayItems(
       firstVal,
       context,
@@ -273,7 +282,7 @@ export async function executeAssignment(
   }
   if (xtrace) {
     const target = subscriptNode === null ? spelled : getText(subscriptNode)
-    context.frame.diagnostics.push(traceAssignment(target, val, append))
+    context.frame.diagnostics.push(encodeText(`${traceAssignment(target, val, append)}\n`))
   }
   if (subscriptNode !== null) {
     const subText = await subscriptKeyText(
@@ -304,13 +313,10 @@ export async function executeAssignment(
       await assignVar(view, key, newMap, new Set([subText]), added)
       return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
     }
-    const existing = session.arrays[key]
-    let arr: ShellArray
-    if (existing === undefined) {
+    let arr: ShellArray | undefined = session.arrays[key]
+    if (arr === undefined) {
       const scalar = conversionScalar(session, key)
       arr = scalar === undefined ? [] : [scalar]
-    } else {
-      arr = [...existing]
     }
     let idx = await fatalIndex(context, subText, view)
     if (idx < 0) idx += arrayExtent(arr)
@@ -319,9 +325,9 @@ export async function executeAssignment(
       const nameText = text.slice(0, eq).replace(/\+$/, '')
       throw new DiscardSignal(encodeText(`bash: ${nameText}: bad array subscript\n`))
     }
+    refuseReadonly(view, key)
     const [slot, added] = append ? appended(arrayGet(arr, idx), val, integer) : [val, null]
-    arraySet(arr, idx, slot)
-    await assignVar(view, key, arr, new Set([idx]), added)
+    await assignVar(view, key, arrayWith(arr, idx, slot), new Set([idx]), added)
     return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
   }
   const heldMap = session.assocs[key]

@@ -23,6 +23,7 @@ from mirage.shell.array import (
     array_extent,
     array_get,
     array_set,
+    array_with,
     build_assoc_literal,
     build_indexed_literal,
 )
@@ -89,6 +90,21 @@ async def _fatal_index_literal(
         return await build_indexed_literal(held, items, append, index_of)
     except ArithError as exc:
         raise exc.signal(fatal=True) from exc
+
+
+def _refuse_readonly(view: SessionView, key: str) -> None:
+    """Discard the line on a write to a readonly ``key`` before its new
+    value is built: bash refuses an array literal before expanding it,
+    and an element write once its value and subscript are read, before
+    the array would grow to the index (``a[2**40]=x``). The store refuses
+    every other spelling (``_assign_var``).
+
+    Args:
+        view (SessionView): the gated session view.
+        key (str): the variable being written.
+    """
+    if view.is_readonly(key, False):
+        raise DiscardSignal(encode_text(f"bash: {key}: readonly variable\n"))
 
 
 async def _assign_var(
@@ -290,13 +306,7 @@ async def execute_assignment(
             context.frame.diagnostics.append(
                 encode_text(f"+ {spelled}{op}({words})\n")
             )
-        if key in session.readonly_vars:
-            # bash refuses an array literal before expanding it; every
-            # other spelling expands its value and subscript first and
-            # meets the refusal at the store (`_assign_var`).
-            raise DiscardSignal(
-                encode_text(f"bash: {key}: readonly variable\n")
-            )
+        _refuse_readonly(view, key)
         items = await expand_array_items(
             val_nodes[0], context, execute_fn, registry, namespace, cs
         )
@@ -344,7 +354,9 @@ async def execute_assignment(
         target = (
             spelled if subscript_node is None else get_text(subscript_node)
         )
-        context.frame.diagnostics.append(trace_assignment(target, val, append))
+        context.frame.diagnostics.append(
+            encode_text(trace_assignment(target, val, append) + "\n")
+        )
     if subscript_node is not None:
         sub_text = await _subscript_key_text(
             subscript_node, spelled, context, execute_fn, cs, view
@@ -379,8 +391,6 @@ async def execute_assignment(
         if arr is None:
             scalar = conversion_scalar(session, key)
             arr = [] if scalar is None else [scalar]
-        else:
-            arr = list(arr)
         idx = await _fatal_index(context, sub_text, view)
         if idx < 0:
             idx += array_extent(arr)
@@ -390,13 +400,15 @@ async def execute_assignment(
             raise DiscardSignal(
                 encode_text(f"bash: {name_text}: bad array subscript\n")
             )
+        _refuse_readonly(view, key)
         slot, added = (
             appended(array_get(arr, idx), val, integer)
             if append
             else (val, None)
         )
-        array_set(arr, idx, slot)
-        await _assign_var(view, key, arr, frozenset({idx}), added)
+        await _assign_var(
+            view, key, array_with(arr, idx, slot), frozenset({idx}), added
+        )
         return result(
             text, exit_code=assignment_status(context.frame, sub_seq)
         )

@@ -59,6 +59,8 @@ import {
 import type { Result } from '../types.ts'
 import type { AttrMarks, DeclarationOperand } from './types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { traceAssignment } from '../../../../shell/xtrace.ts'
+import { concat } from '../../../../io/cachable_iterator.ts'
 
 /**
  * Put a declaration's value-shaping marks on a name before its value
@@ -530,10 +532,11 @@ export function declarationResult(
   cmd: string,
   errors: readonly string[],
   warnings: readonly string[] = [],
+  failed: boolean = errors.length > 0,
 ): Result {
   const lines = [...warnings, ...errors.filter((line) => line !== '')]
   return result(cmd, {
-    exitCode: errors.length > 0 ? 1 : 0,
+    exitCode: failed ? 1 : 0,
     stderr: lines.map((line) => `${line}\n`).join(''),
   })
 }
@@ -819,6 +822,11 @@ export async function markFunctions(
  * own place. So `readonly R=1 R=2 X=3` keeps 1, refuses the second write and
  * still sets `X`, and `readonly A=(1) A=(2)` keeps `(2)` while a later `A=3`
  * refuses.
+ *
+ * Under `set -x` each assignment is traced as it is made, among the refusals
+ * and under the command's redirects (`+ r=2` then `r: readonly variable`); a
+ * bad name or option traces nothing, and with `-a` / `-A` bash assigns as
+ * `declare` does, untraced.
  */
 export async function markVariables(
   cmd: string,
@@ -843,12 +851,19 @@ export async function markVariables(
     stored,
     kind,
   )
+  const traced = kind === null && session.shellOptions.xtrace === true
+  let failed = false
   try {
     for (const [position, operand] of operands.entries()) {
       if (typeof operand === 'string') {
         const line =
-          refused !== null ? null : await markOperand(cmd, session, view, operand, attr, on, kind)
-        if (line !== null) errors.push(line)
+          refused !== null
+            ? null
+            : await markOperand(cmd, session, view, operand, attr, on, kind, traced ? errors : null)
+        if (line !== null) {
+          errors.push(line)
+          failed = true
+        }
       } else {
         // A literal is marked at its place, even when a policy refused a
         // later literal.
@@ -858,10 +873,15 @@ export async function markVariables(
     }
   } catch (err) {
     if (err instanceof PolicyDenied) return refusal(cmd, err)
-    if (err instanceof ArithError) throw err.signal(cmd, true)
+    if (err instanceof ArithError) {
+      const signal = err.signal(cmd, true)
+      const shown = [...warnings, ...errors].filter((line) => line !== '')
+      signal.stderr = concat([encodeText(shown.map((line) => `${line}\n`).join('')), signal.stderr])
+      throw signal
+    }
     throw err
   }
-  return refused ?? declarationResult(cmd, errors, warnings)
+  return refused ?? declarationResult(cmd, errors, warnings, failed)
 }
 
 /**
@@ -872,9 +892,10 @@ export async function markVariables(
  * marked, bash's own third state (`export Z` prints `declare -x Z` and stays
  * out of `env`). Still gated, since marking is a session write: through
  * `setAttr` a deployment refusing `AWS_*` saw `readonly AWS_KEY` exit 0 and
- * freeze the name against every later write. Returns the operand's refusal
- * line, or null; a policy denial or an `-i` value that does not evaluate
- * throws.
+ * freeze the name against every later write. Under `set -x` the
+ * assignment's trace line goes to `traced` before it is made. Returns the
+ * operand's refusal line, or null; a policy denial or an `-i` value that
+ * does not evaluate throws.
  */
 async function markOperand(
   cmd: string,
@@ -884,10 +905,12 @@ async function markOperand(
   attr: VarAttr,
   on: boolean,
   kind: VarKind | null,
+  traced: string[] | null,
 ): Promise<string | null> {
   const badName = identifierRefusal(cmd, word)
   if (badName !== null) return badName
   const [key, append, val] = operandParts(word)
+  if (traced !== null && val !== null) traced.push(traceAssignment(key, val, append))
   if (val !== null && view.isReadonly(key)) return readonlyLine(cmd, key)
   const held = val !== null ? heldValue(session, key) : null
   const conflict = val !== null ? kindConflict(held, kind) : null

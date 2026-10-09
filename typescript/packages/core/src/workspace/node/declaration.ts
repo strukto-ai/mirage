@@ -14,7 +14,7 @@
 
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import { IOResult, materialize } from '../../io/types.ts'
+import { IOResult } from '../../io/types.ts'
 import { fail } from '../executor/builtins/shared.ts'
 import type { Result } from '../executor/builtins/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -38,13 +38,11 @@ import {
 import {
   declaredKind,
   heldValue,
-  identifierRefusal,
   kindConflict,
   markNames,
-  operandParts,
   startLocal,
 } from '../executor/builtins/declare/declare.ts'
-import { traceArray, traceAssignment, traceCommand } from '../../shell/xtrace.ts'
+import { traceArray, traceCommand } from '../../shell/xtrace.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -264,8 +262,7 @@ export async function executeDeclaration(
   }
   const cmdWord = keyword === NT.LOCAL ? 'local' : keyword
   const words = operands.filter((operand) => typeof operand === 'string')
-  const xtrace = session.shellOptions.xtrace === true
-  if (xtrace) {
+  if (session.shellOptions.xtrace === true) {
     // Traced once expanded, before the builtin runs and outside its
     // redirects: each array operand, then the command naming them.
     const staged = operands.filter((op) => typeof op !== 'string')
@@ -282,18 +279,7 @@ export async function executeDeclaration(
     // only expands and stages. The flags pass through so -p, the bare
     // listing and bad options work.
     const attr = keyword === 'readonly' ? VarAttr.Readonly : VarAttr.Export
-    const result = await markNames([...flagWords, ...operands], session, view, attr, parser)
-    if (xtrace) {
-      // Each assignment these two make is traced as it is made, under the
-      // command's own redirects.
-      const lines = words
-        .filter((word) => identifierRefusal(cmdWord, word) === null)
-        .map(operandParts)
-        .filter(([, , val]) => val !== null)
-        .map(([key, add, val]) => traceAssignment(key, val ?? '', add))
-      result[1].stderr = concat([...lines, await materialize(result[1].stderr)])
-    }
-    return result
+    return await markNames([...flagWords, ...operands], session, view, attr, parser)
   }
   const refused = declareOptionRefusal(cmdWord, flagChars, plusChars)
   if (refused !== null) return refused

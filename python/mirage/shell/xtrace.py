@@ -17,23 +17,42 @@ from collections.abc import Iterable
 
 from mirage.shell.bytes import encode_text
 
-_UNSAFE = re.compile(r"[^\w@%+=:,./-]")
+_META = re.compile(r"[ \t\n!\"$&'()*;<>?\[\\\]^`{|}]|^[#~]|[=:]~")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_CONTROL_ESCAPES = {
+    "\a": "\\a",
+    "\b": "\\b",
+    "\v": "\\v",
+    "\f": "\\f",
+    "\r": "\\r",
+    "\x1b": "\\E",
+}
 
 
 def _quoted(word: str) -> str:
     return "'" + word.replace("'", "'\\''") + "'"
 
 
+def _control_escape(match: re.Match[str]) -> str:
+    char = match[0]
+    return _CONTROL_ESCAPES.get(char) or f"\\{ord(char):03o}"
+
+
 def _trace_quote(word: str) -> str:
-    """One word as bash's trace writes it: bare when every character is
-    safe, else single-quoted with each ``'`` spelled ``'\\''``.
+    """One word as bash's trace writes it (pinned on 5.2.37 in a UTF-8
+    locale): single-quoted, each ``'`` spelled ``'\\''``, when it is
+    empty, holds a blank or a shell metacharacter, starts with ``#`` or
+    ``~``, or has a ``~`` after ``=`` or ``:``; else ``$'...'`` when it
+    holds a control character; else bare, non-ASCII letters included.
 
     Args:
         word (str): the expanded word.
     """
-    if not word:
-        return "''"
-    return _quoted(word) if _UNSAFE.search(word) else word
+    if not word or _META.search(word):
+        return _quoted(word)
+    if _CONTROL.search(word):
+        return "$'" + _CONTROL.sub(_control_escape, word) + "'"
+    return word
 
 
 def trace_command(words: Iterable[str]) -> bytes:
@@ -45,8 +64,10 @@ def trace_command(words: Iterable[str]) -> bytes:
     return encode_text("+ " + " ".join(map(_trace_quote, words)) + "\n")
 
 
-def trace_assignment(key: str, val: str, append: bool) -> bytes:
-    """Render one `set -x` trace line for a scalar assignment.
+def trace_assignment(key: str, val: str, append: bool) -> str:
+    """The `set -x` trace line for a scalar assignment, without its
+    newline: an assignment traces it into the shell's diagnostics, and
+    ``export`` / ``readonly`` among their own refusals.
 
     Args:
         key (str): variable name.
@@ -54,7 +75,7 @@ def trace_assignment(key: str, val: str, append: bool) -> bytes:
         append (bool): `+=` form instead of `=`.
     """
     op = "+=" if append else "="
-    return encode_text(f"+ {key}{op}{_trace_quote(val) if val else ''}\n")
+    return f"+ {key}{op}{_trace_quote(val) if val else ''}"
 
 
 def trace_array(key: str, items: Iterable[str], append: bool) -> bytes:

@@ -30,6 +30,7 @@ from mirage.shell.variable import (
     VarKind,
     attr_letters,
 )
+from mirage.shell.xtrace import trace_assignment
 from mirage.utils.hidden import var_hidden
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.constants import (
@@ -629,7 +630,10 @@ def identifier_refusal(cmd: str, word: str) -> str | None:
 
 
 def declaration_result(
-    cmd: str, errors: list[str], warnings: list[str] | None = None
+    cmd: str,
+    errors: list[str],
+    warnings: list[str] | None = None,
+    failed: bool | None = None,
 ) -> Result:
     """A declaration's answer once every operand ran.
 
@@ -644,11 +648,14 @@ def declaration_result(
         cmd (str): builtin name for the node.
         errors (list[str]): the refusal lines, in operand order.
         warnings (list[str] | None): lines that print without failing.
+        failed (bool | None): whether an operand refused, when
+            ``errors`` also carries the ``set -x`` traces among the
+            refusals; None reads it off ``errors``.
     """
     lines = [*(warnings or []), *(line for line in errors if line)]
     return result(
         cmd,
-        exit_code=1 if errors else 0,
+        exit_code=1 if (bool(errors) if failed is None else failed) else 0,
         stderr="".join(f"{line}\n" for line in lines),
     )
 
@@ -1039,6 +1046,11 @@ async def mark_variables(
     1, refuses the second write and still sets ``X``, and ``readonly
     A=(1) A=(2)`` keeps ``(2)`` while a later ``A=3`` refuses.
 
+    Under ``set -x`` each assignment is traced as it is made, among the
+    refusals and under the command's redirects (``+ r=2`` then ``r:
+    readonly variable``); a bad name or option traces nothing, and with
+    ``-a`` / ``-A`` bash assigns as ``declare`` does, untraced.
+
     Args:
         cmd (str): the builtin's own name for a diagnostic.
         session (SessionState): shell session state.
@@ -1062,6 +1074,8 @@ async def mark_variables(
         stored=stored,
         kind=kind,
     )
+    traced = kind is None and session.shell_options.get("xtrace")
+    failed = False
     try:
         for position, operand in enumerate(operands):
             if isinstance(operand, str):
@@ -1069,11 +1083,19 @@ async def mark_variables(
                     None
                     if refused is not None
                     else await _mark_operand(
-                        cmd, session, view, operand, attr, on, kind
+                        cmd,
+                        session,
+                        view,
+                        operand,
+                        attr,
+                        on,
+                        kind,
+                        errors if traced else None,
                     )
                 )
                 if line is not None:
                     errors.append(line)
+                    failed = True
             elif position in stored:
                 # A literal is marked at its place, even when a policy
                 # refused a later literal.
@@ -1083,10 +1105,13 @@ async def mark_variables(
     except PolicyDenied as exc:
         return refusal(cmd, exc)
     except ArithError as exc:
-        raise exc.signal(cmd, fatal=True) from exc
+        signal = exc.signal(cmd, fatal=True)
+        shown = "".join(f"{line}\n" for line in [*warnings, *errors] if line)
+        signal.stderr = encode_text(shown) + signal.stderr
+        raise signal from exc
     if refused is not None:
         return refused
-    return declaration_result(cmd, errors, warnings)
+    return declaration_result(cmd, errors, warnings, failed)
 
 
 async def _mark_operand(
@@ -1097,6 +1122,7 @@ async def _mark_operand(
     attr: VarAttr,
     on: bool,
     kind: VarKind | None,
+    traced: list[str] | None = None,
 ) -> str | None:
     """Assign and mark one ``export`` / ``readonly`` word.
 
@@ -1117,6 +1143,8 @@ async def _mark_operand(
         attr (VarAttr): EXPORT or READONLY.
         on (bool): set the mark rather than clear it.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
+        traced (list[str] | None): under ``set -x``, where the
+            assignment's trace line goes before it is made.
 
     Returns:
         The operand's refusal line, or None.
@@ -1129,6 +1157,8 @@ async def _mark_operand(
     if bad_name is not None:
         return bad_name
     key, append, val = operand_parts(word)
+    if traced is not None and val is not None:
+        traced.append(trace_assignment(key, val, append))
     if val is not None and view.is_readonly(key):
         return readonly_line(cmd, key)
     held = held_value(session, key) if val is not None else None
