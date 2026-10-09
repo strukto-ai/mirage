@@ -117,3 +117,18 @@ def test_quoted_bracket_pattern_remains_one_operand(command):
             strings.append(node.text)
     assert strings
     assert all(value in (b'"@"', b'"$x"') for value in strings)
+
+
+def test_extended_pattern_keeps_process_substitution_in_one_word():
+    root = parse("echo @(<(printf a)|b)")
+    command = root.named_children[0]
+    assert len(command.named_children) == 2
+    word = command.named_children[1]
+    assert word.type == "concatenation"
+    sub = next(
+        child
+        for child in word.named_children
+        if child.type == "process_substitution"
+    )
+    assert sub.text == b"<(printf a)"
+    assert sub.children[0].type == "<("

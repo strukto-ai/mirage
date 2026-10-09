@@ -24,7 +24,7 @@
 // raising, and a leading ^ negates a class like ! does (bash/glibc
 // semantics; CPython keeps ^ literal, as `fnmatchcase` below does). Mirrors
 // the Python mirage.utils.fnmatch wrapper.
-import { translateBracket } from './posix.ts'
+import { POSIX_CLASSES } from './posix.ts'
 
 export const QUOTED_CHARS: Readonly<Record<string, string>> = Object.fromEntries(
   ['*', '?', '[', '@', '+', '!', '(', ')', '|'].map((ch, i) => [
@@ -70,10 +70,6 @@ class Positions implements Iterable<number> {
     return this.spans.some(([lo, hi]) => lo <= position && position < hi)
   }
 
-  union(other: Positions): Positions {
-    return new Positions([...this.spans, ...other.spans])
-  }
-
   subtract(other: Positions): Positions {
     const out: [number, number][] = []
     let j = 0
@@ -93,6 +89,18 @@ class Positions implements Iterable<number> {
     }
     return new Positions(out)
   }
+}
+
+/** Next unvisited position, with successor-chain compression. */
+function unseen(links: Uint32Array, position: number): number {
+  let root = position
+  while (links[root] !== root) root = links[root] ?? root
+  while (links[position] !== position) {
+    const next = links[position] ?? position
+    links[position] = root
+    position = next
+  }
+  return root
 }
 
 /**
@@ -158,39 +166,81 @@ class Matcher {
   }
 
   private ends(lo: number, hi: number, start: number): Positions {
-    const key = `${String(lo)}:${String(hi)}:${String(start)}`
-    const cached = this.memo.get(key)
-    if (cached) return cached
+    const stack = [
+      { key: `${String(lo)}:${String(hi)}:${String(start)}`, frame: this.evaluate(lo, hi, start) },
+    ]
+    let answer = new Positions()
+    while (stack.length > 0) {
+      const current = stack.at(-1)
+      if (!current) break
+      const step = current.frame.next(answer)
+      if (step.done) {
+        answer = step.value
+        this.memo.set(current.key, answer)
+        stack.pop()
+        continue
+      }
+      const [a, b, position] = step.value
+      const key = `${String(a)}:${String(b)}:${String(position)}`
+      const cached = this.memo.get(key)
+      if (cached) answer = cached
+      else stack.push({ key, frame: this.evaluate(a, b, position) })
+    }
+    return answer
+  }
+
+  /** Yield dependencies so nested groups never consume the host stack. */
+  private *evaluate(
+    lo: number,
+    hi: number,
+    start: number,
+  ): Generator<[number, number, number], Positions, Positions> {
     let positions = new Positions([[start, start + 1]])
     let i = lo
     while (i < hi && positions.spans.length > 0) {
       const c = this.pattern[i] ?? ''
       const group = this.groups.get(i)
       if (group && group.end <= hi) {
-        let reached = new Positions()
+        const spans: (readonly [number, number])[] = []
         for (const position of positions) {
-          let once = new Positions()
-          for (const [a, b] of group.branches) once = once.union(this.ends(a, b, position))
+          const matched: (readonly [number, number])[] = []
+          for (const [a, b] of group.branches) {
+            const once = yield [a, b, position]
+            for (const span of once.spans) matched.push(span)
+          }
+          let once = new Positions(matched)
           if (c === '!') {
             if (this.period && position === 0) continue
             once = new Positions([[position, this.name.length + 1]]).subtract(once)
           }
-          reached = reached.union(once)
+          for (const span of once.spans) spans.push(span)
         }
-        if (c === '*' || c === '?') reached = reached.union(positions)
+        if (c === '*' || c === '?') {
+          for (const span of positions.spans) spans.push(span)
+        }
+        let reached = new Positions(spans)
         if (c === '*' || c === '+') {
-          const pending = [...reached]
+          const discovered = [...reached]
+          const pending = discovered.slice()
+          const links = Uint32Array.from({ length: this.name.length + 2 }, (_, i) => i)
+          for (const position of discovered) links[position] = position + 1
           while (pending.length > 0) {
             const current = pending.pop()
             if (current === undefined) break
             for (const [a, b] of group.branches) {
-              const fresh = this.ends(a, b, current).subtract(reached)
-              if (fresh.spans.length > 0) {
-                reached = reached.union(fresh)
-                for (const target of fresh) pending.push(target)
+              const once = yield [a, b, current]
+              for (const [lower, upper] of once.spans) {
+                let target = unseen(links, lower)
+                while (target < upper) {
+                  links[target] = target + 1
+                  discovered.push(target)
+                  pending.push(target)
+                  target = unseen(links, target)
+                }
               }
             }
           }
+          reached = new Positions(discovered.map((p) => [p, p + 1]))
         }
         positions = reached
         i = group.end
@@ -220,27 +270,41 @@ class Matcher {
       positions = new Positions(spans)
       i = end
     }
-    this.memo.set(key, positions)
     return positions
   }
 }
 
 function extendedClassMatches(char: string, pattern: string): boolean {
-  if (!pattern.includes('[:') && !QUOTED_RE.test(pattern)) return fnmatch(char, pattern)
-  const out: string[] = []
-  const source = pattern.startsWith('[!') ? '[^' + pattern.slice(2) : pattern
-  try {
-    translateBracket(source, 0, out)
-    let expression = out.join('')
-    for (const [mark, literal] of Object.entries(QUOTED_CHARS)) {
-      expression = expression.replaceAll(mark, '\\x' + literal.charCodeAt(0).toString(16))
+  const chars = Array.from(pattern)
+  const end = chars.length - 1
+  const negate = chars[1] === '!' || chars[1] === '^'
+  let i = negate ? 2 : 1
+  let found = false
+  while (i < end) {
+    if (chars[i] === '[' && chars[i + 1] === ':') {
+      let close = i + 2
+      while (close < end && !(chars[close] === ':' && chars[close + 1] === ']')) close += 1
+      if (close < end) {
+        const name = chars.slice(i + 2, close).join('')
+        const members = Object.hasOwn(POSIX_CLASSES, name) ? POSIX_CLASSES[name] : undefined
+        if (members === undefined) return false
+        found ||= new RegExp('^[' + members + ']$', 'u').test(char)
+        i = close + 2
+        continue
+      }
     }
-    return new RegExp('^(?:' + expression + ')$', 'u').test(char)
-  } catch (err) {
-    if (!(err instanceof SyntaxError)) throw err
-    console.debug(`Invalid glob character class ${pattern}: ${String(err)}`)
-    return false
+    const low = QUOTED_CHARS[chars[i] ?? ''] ?? chars[i] ?? ''
+    if (i + 2 < end && chars[i + 1] === '-' && !(chars[i + 2] === '[' && chars[i + 3] === ':')) {
+      const high = QUOTED_CHARS[chars[i + 2] ?? ''] ?? chars[i + 2] ?? ''
+      const code = char.codePointAt(0) ?? 0
+      found ||= (low.codePointAt(0) ?? 0) <= code && code <= (high.codePointAt(0) ?? 0)
+      i += 3
+    } else {
+      found ||= low === char
+      i += 1
+    }
   }
+  return negate ? !found : found
 }
 
 /** Replace extended groups with a wildcard for word classification. */
@@ -259,6 +323,30 @@ export function patternShape(pattern: string): string {
       i += 1
     }
   }
+  return out
+}
+
+/** Split a pathname without splitting slashes inside extended groups. */
+export function patternParts(pattern: string): string[] {
+  if (!/[@?*+!]\(/.test(pattern)) return pattern.split('/')
+  const groups = new Matcher('', pattern).groups
+  const chars = Array.from(pattern)
+  const out: string[] = []
+  let start = 0
+  let i = 0
+  while (i < chars.length) {
+    const group = groups.get(i)
+    if (group) {
+      i = group.end
+      continue
+    }
+    if (chars[i] === '/') {
+      out.push(chars.slice(start, i).join(''))
+      start = i + 1
+    }
+    i += 1
+  }
+  out.push(chars.slice(start).join(''))
   return out
 }
 

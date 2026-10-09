@@ -230,3 +230,22 @@ def test_repeated_wildcards_match_long_values(pattern):
     value = "a" * 10000
     assert fnmatch(value, pattern, extglob=True)
     assert not fnmatch(value, pattern + "b", extglob=True)
+
+
+@pytest.mark.parametrize("operator", ["@", "?", "+", "*"])
+def test_deep_extended_groups_use_an_explicit_stack(operator):
+    pattern = (operator + "(") * 1200 + "a" + ")" * 1200
+    assert fnmatch("a", pattern, extglob=True)
+    assert not fnmatch("b", pattern, extglob=True)
+
+
+def test_sparse_repetition_keeps_discovery_linear():
+    assert fnmatch("a" * 16000, "+(aa)", extglob=True)
+    assert not fnmatch("a" * 16001, "+(aa)", extglob=True)
+
+
+@pytest.mark.parametrize(
+    "char,expected", [("5", True), ("z", False), ("a", False)]
+)
+def test_invalid_range_does_not_erase_a_posix_class(char, expected):
+    assert fnmatch(char, "[[:digit:]z-a]", extglob=True) == expected

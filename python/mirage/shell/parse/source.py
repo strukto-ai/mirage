@@ -67,6 +67,16 @@ class SourceNode:
         )
 
     @property
+    def type(self) -> str:
+        if self._node.type == "$(" and self.text in (b"<(", b">("):
+            return decode_text(self.text)
+        if self._node.type == "command_substitution" and self.text.startswith(
+            (b"<(", b">(")
+        ):
+            return "process_substitution"
+        return self._node.type
+
+    @property
     def text(self) -> bytes:
         return self._data[self._node.start_byte : self._node.end_byte]
 

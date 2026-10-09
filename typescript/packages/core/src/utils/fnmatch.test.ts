@@ -283,3 +283,22 @@ it.each(['+(*)', '*(*)', '+(a|*)', '*+(*)'])(
     expect(fnmatch(value, pattern + 'b', true)).toBe(false)
   },
 )
+
+it.each(['@', '?', '+', '*'])('deep %s groups use an explicit stack', (operator) => {
+  const pattern = (operator + '(').repeat(1200) + 'a' + ')'.repeat(1200)
+  expect(fnmatch('a', pattern, true)).toBe(true)
+  expect(fnmatch('b', pattern, true)).toBe(false)
+})
+
+it('keeps sparse repetition discovery linear', () => {
+  expect(fnmatch('a'.repeat(16000), '+(aa)', true)).toBe(true)
+  expect(fnmatch('a'.repeat(16001), '+(aa)', true)).toBe(false)
+})
+
+it.each([
+  ['5', true],
+  ['z', false],
+  ['a', false],
+] as const)('invalid ranges preserve POSIX class membership: %s', (char, expected) => {
+  expect(fnmatch(char, '[[:digit:]z-a]', true)).toBe(expected)
+})

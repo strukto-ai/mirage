@@ -22,6 +22,7 @@ import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import {
   globNameMatches,
+  globParts,
   globPattern,
   hasGlob as hasGlobChars,
   literalWord,
@@ -297,9 +298,9 @@ async function walk(
   links: NamespaceLinks | null,
   globstar: boolean,
 ): Promise<PathSpec[]> {
-  const typed = stripSlash(item.dotted ?? item.virtual).split('/')
+  const typed = globParts(stripSlash(item.dotted ?? item.virtual))
   const first = typed.findIndex((seg) => hasGlobChars(seg) || seg === '.' || seg === '..')
-  const raw = rstripSlash(unmarkGlobs(item.rawPath)).split('/')
+  const raw = globParts(rstripSlash(unmarkGlobs(item.rawPath)))
   let spelledHead = raw.slice(0, raw.length - (typed.length - first)).join('/')
   if (item.rawPath.startsWith('/') && spelledHead === '') spelledHead = '/'
   // The head above the first glob or dot segment is a real directory, so a
@@ -406,7 +407,7 @@ function withTrailingSlash(spec: PathSpec): PathSpec {
 }
 
 function hasGlobstarSegment(item: PathSpec): boolean {
-  return unmarkGlobs(item.virtual).split('/').includes('**')
+  return globParts(unmarkGlobs(item.virtual)).includes('**')
 }
 
 export async function resolveGlobs(
@@ -554,7 +555,7 @@ export async function resolveGlobs(
 // The fixed directory above a word's first glob segment.
 function globHead(spec: PathSpec): string {
   const fixed: string[] = []
-  for (const seg of spec.virtual.split('/')) {
+  for (const seg of globParts(spec.virtual)) {
     if (hasGlobChars(seg)) break
     fixed.push(seg)
   }

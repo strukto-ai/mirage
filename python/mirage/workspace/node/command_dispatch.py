@@ -428,40 +428,65 @@ async def _dispatch_command_body(
     proc_sub_stderr = []
     clean_parts = []
     try:
-        for p in parts:
-            if p.type != NT.PROCESS_SUBSTITUTION:
-                clean_parts.append(p)
-                continue
-            if get_process_sub_direction(p) == ProcessSubDirection.OUTPUT:
-                err = b"mirage: unsupported: process substitution >(...)\n"
-                return (
-                    None,
-                    IOResult(exit_code=2, stderr=err),
-                    ExecutionNode(
-                        command=name or "process_sub", exit_code=2, stderr=err
-                    ),
-                )
-            if dev is None:
-                dev, _, _ = registry.resolve("/dev/null")
-                assert isinstance(dev, DevVFS)
-            path, allocation = dev.allocate_input()
-            proc_sub_inputs.append((path, allocation))
-            inner = get_process_sub_body(p)
-            if inner:
-                io_ps = await child_line(
-                    context, execute_fn, inner, p, call_stack
-                )
-                data = await materialize(io_ps.stdout)
-                dev.set_input(path, allocation, data)
-                proc_sub_stderr.append(await materialize(io_ps.stderr))
-            clean_parts.append(
-                SimpleNamespace(
-                    type=NT.WORD,
-                    text=encode_text(path),
-                    children=[],
-                    named_children=[],
-                )
+        for word in parts:
+            children = (
+                word.children if word.type == NT.CONCATENATION else [word]
             )
+            if not any(p.type == NT.PROCESS_SUBSTITUTION for p in children):
+                clean_parts.append(word)
+                continue
+            clean_children = []
+            for p in children:
+                if p.type != NT.PROCESS_SUBSTITUTION:
+                    clean_children.append(p)
+                    continue
+                if get_process_sub_direction(p) == ProcessSubDirection.OUTPUT:
+                    err = b"mirage: unsupported: process substitution >(...)\n"
+                    return (
+                        None,
+                        IOResult(exit_code=2, stderr=err),
+                        ExecutionNode(
+                            command=name or "process_sub",
+                            exit_code=2,
+                            stderr=err,
+                        ),
+                    )
+                if dev is None:
+                    dev, _, _ = registry.resolve("/dev/null")
+                    assert isinstance(dev, DevVFS)
+                path, allocation = dev.allocate_input()
+                proc_sub_inputs.append((path, allocation))
+                inner = get_process_sub_body(p)
+                if inner:
+                    io_ps = await child_line(
+                        context, execute_fn, inner, p, call_stack
+                    )
+                    data = await materialize(io_ps.stdout)
+                    dev.set_input(path, allocation, data)
+                    proc_sub_stderr.append(await materialize(io_ps.stderr))
+                clean_children.append(
+                    SimpleNamespace(
+                        type=NT.WORD,
+                        is_named=True,
+                        text=encode_text(path),
+                        children=[],
+                        named_children=[],
+                    )
+                )
+            if word.type == NT.CONCATENATION:
+                clean_parts.append(
+                    SimpleNamespace(
+                        type=NT.CONCATENATION,
+                        is_named=True,
+                        text=word.text,
+                        children=clean_children,
+                        named_children=[
+                            p for p in clean_children if p.is_named
+                        ],
+                    )
+                )
+            else:
+                clean_parts.extend(clean_children)
         parts = clean_parts
 
         argv = await _own_words(

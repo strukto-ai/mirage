@@ -13,13 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import fnmatch as _stdlib_fnmatch
-import logging
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator
 
-from mirage.utils.posix import translate_bracket
-
-logger = logging.getLogger(__name__)
+from mirage.utils.posix import POSIX_CLASSES
 
 QUOTED_CHARS = {chr(0xFDD0 + i): ch for i, ch in enumerate("*?[@+!()|")}
 QUOTED_RE = re.compile("[\ufdd0-\ufdd8]")
@@ -56,9 +53,6 @@ class _Positions:
     def contains(self, position: int) -> bool:
         return any(lo <= position < hi for lo, hi in self.spans)
 
-    def union(self, other: "_Positions") -> "_Positions":
-        return _Positions((*self.spans, *other.spans))
-
     def subtract(self, other: "_Positions") -> "_Positions":
         out: list[tuple[int, int]] = []
         j = 0
@@ -75,6 +69,21 @@ class _Positions:
             if cursor < hi:
                 out.append((cursor, hi))
         return _Positions(out)
+
+
+def _unseen(links: list[int], position: int) -> int:
+    """Find the next unvisited position, compressing the successor chain.
+
+    Args:
+        links (list[int]): next candidates, a position points to itself until visited.
+        position (int): first candidate.
+    """
+    root = position
+    while links[root] != root:
+        root = links[root]
+    while links[position] != position:
+        position, links[position] = links[position], root
+    return root
 
 
 class _Matcher:
@@ -168,8 +177,40 @@ class _Matcher:
             start (int): first character to match.
         """
         key = (lo, hi, start)
-        if key in self.memo:
-            return self.memo[key]
+        stack = [(key, self.evaluate(lo, hi, start), False)]
+        answer = _Positions()
+        while stack:
+            current, frame, started = stack[-1]
+            try:
+                if started:
+                    dependency = frame.send(answer)
+                else:
+                    stack[-1] = (current, frame, True)
+                    dependency = next(frame)
+            except StopIteration as done:
+                answer = done.value
+                self.memo[current] = answer
+                stack.pop()
+                continue
+            cached = self.memo.get(dependency)
+            if cached is not None:
+                answer = cached
+            else:
+                child = self.evaluate(*dependency)
+                stack.append((dependency, child, False))
+                answer = _Positions()
+        return answer
+
+    def evaluate(
+        self, lo: int, hi: int, start: int
+    ) -> Generator[tuple[int, int, int], _Positions, _Positions]:
+        """Yield dependencies so nested groups never consume the host stack.
+
+        Args:
+            lo (int): start of the pattern slice.
+            hi (int): end of the pattern slice.
+            start (int): first character to match.
+        """
         positions = _Positions(((start, start + 1),))
         i = lo
         while i < hi and positions:
@@ -177,29 +218,41 @@ class _Matcher:
             group = self.groups.get(i)
             if group is not None and group[0] <= hi:
                 end, branches = group
-                reached = _Positions()
+                spans: list[tuple[int, int]] = []
                 for position in positions:
-                    once = _Positions()
+                    matched: list[tuple[int, int]] = []
                     for a, b in branches:
-                        once = once.union(self.ends(a, b, position))
+                        once = yield (a, b, position)
+                        matched.extend(once.spans)
+                    once = _Positions(matched)
                     if c == "!":
                         if self.period and position == 0:
                             continue
                         once = _Positions(
                             ((position, len(self.name) + 1),)
                         ).subtract(once)
-                    reached = reached.union(once)
+                    spans.extend(once.spans)
                 if c in ("*", "?"):
-                    reached = reached.union(positions)
+                    spans.extend(positions.spans)
+                reached = _Positions(spans)
                 if c in ("*", "+"):
-                    pending = list(reached)
+                    discovered = list(reached)
+                    pending = discovered.copy()
+                    links = list(range(len(self.name) + 2))
+                    for position in discovered:
+                        links[position] = position + 1
                     while pending:
                         current = pending.pop()
                         for a, b in branches:
-                            fresh = self.ends(a, b, current).subtract(reached)
-                            if fresh:
-                                reached = reached.union(fresh)
-                                pending.extend(fresh)
+                            once = yield (a, b, current)
+                            for lower, upper in once.spans:
+                                target = _unseen(links, lower)
+                                while target < upper:
+                                    links[target] = target + 1
+                                    discovered.append(target)
+                                    pending.append(target)
+                                    target = _unseen(links, target)
+                    reached = _Positions((p, p + 1) for p in discovered)
                 positions, i = reached, end
                 continue
             if c == "*":
@@ -229,24 +282,38 @@ class _Matcher:
                 )
             )
             i = end
-        self.memo[key] = positions
         return positions
 
 
 def _extended_class_matches(char: str, pattern: str) -> bool:
-    if "[:" not in pattern and not QUOTED_RE.search(pattern):
-        return fnmatch(char, pattern)
-    out: list[str] = []
-    source = "[^" + pattern[2:] if pattern.startswith("[!") else pattern
-    try:
-        translate_bracket(source, 0, out)
-        expression = "".join(out)
-        for mark, literal in QUOTED_CHARS.items():
-            expression = expression.replace(mark, rf"\x{ord(literal):02x}")
-        return re.fullmatch(expression, char) is not None
-    except re.error:
-        logger.debug("invalid glob character class %r", pattern)
-        return False
+    end = len(pattern) - 1
+    negate = pattern[1:2] in ("!", "^")
+    i = 2 if negate else 1
+    found = False
+    while i < end:
+        if pattern.startswith("[:", i):
+            close = pattern.find(":]", i + 2)
+            if close >= 0:
+                name = pattern[i + 2 : close]
+                members = POSIX_CLASSES.get(name)
+                if members is None:
+                    return False
+                found |= re.fullmatch("[" + members + "]", char) is not None
+                i = close + 2
+                continue
+        low = QUOTED_CHARS.get(pattern[i], pattern[i])
+        if (
+            i + 2 < end
+            and pattern[i + 1] == "-"
+            and not pattern.startswith("[:", i + 2)
+        ):
+            high = QUOTED_CHARS.get(pattern[i + 2], pattern[i + 2])
+            found |= low <= char <= high
+            i += 3
+        else:
+            found |= low == char
+            i += 1
+    return not found if negate else found
 
 
 def pattern_shape(pattern: str) -> str:
@@ -266,6 +333,30 @@ def pattern_shape(pattern: str) -> str:
             out.append(pattern[i])
             i += 1
     return "".join(out)
+
+
+def pattern_parts(pattern: str) -> list[str]:
+    """Split a pathname without splitting slashes inside extended groups.
+
+    Args:
+        pattern (str): pathname with quote marks still intact.
+    """
+    if not any(c + "(" in pattern for c in "@?*+!"):
+        return pattern.split("/")
+    groups = _Matcher("", pattern).groups
+    out: list[str] = []
+    start = i = 0
+    while i < len(pattern):
+        group = groups.get(i)
+        if group is not None:
+            i = group[0]
+            continue
+        if pattern[i] == "/":
+            out.append(pattern[start:i])
+            start = i + 1
+        i += 1
+    out.append(pattern[start:])
+    return out
 
 
 def _normalize_negation(pattern: str) -> str:

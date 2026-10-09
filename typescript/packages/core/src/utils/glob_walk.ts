@@ -17,7 +17,7 @@ import { pathVisible } from './hidden.ts'
 import type { ChildMounts } from '../view/types.ts'
 import { type FileStat, FileType, PathSpec } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
-import { fnmatch, QUOTED_CHARS } from './fnmatch.ts'
+import { fnmatch, patternParts, QUOTED_CHARS } from './fnmatch.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 import { compareCodePoints } from './sort.ts'
@@ -309,6 +309,11 @@ export function isWordShaped(p: PathSpec): boolean {
   return rstripSlash(p.virtual) !== rstripSlash(p.directory)
 }
 
+/** Path components under the active shell's pattern grammar. */
+export function globParts(pattern: string): string[] {
+  return getCurrentSession()?.shopts.extglob ? patternParts(pattern) : pattern.split('/')
+}
+
 // Spell a match the way bash expansion would. Bash rewrites only the glob
 // segments of the typed word; everything before the first glob segment keeps
 // its typed spelling, so `../s*/x.txt` expands to `../sub/x.txt`. The walked
@@ -316,7 +321,7 @@ export function isWordShaped(p: PathSpec): boolean {
 // virtual path, so the spelling is the typed head plus the match's last
 // `walked` segments.
 export function spellMatch(raw: string, virtual: string, walked: number): string {
-  const head = rstripSlash(raw).split('/').slice(0, -walked)
+  const head = globParts(rstripSlash(raw)).slice(0, -walked)
   const tail = rstripSlash(virtual).split('/').slice(-walked)
   return [...head, ...tail].join('/')
 }
@@ -499,7 +504,7 @@ export async function expandPattern<A, I>(
   children?: ChildMounts,
 ): Promise<PathSpec[]> {
   const prefix = path.virtual.slice(0, rstripSlash(path.virtual).length - path.vfsPath.length)
-  const segments = path.vfsPath === '' ? [] : path.vfsPath.split('/')
+  const segments = path.vfsPath === '' ? [] : globParts(path.vfsPath)
   // Two spec shapes reach resolvers: a full pattern path (classify), where
   // the pattern is already the last segment, and a directory-shaped spec
   // (PathSpec.dir), where the pattern applies to the directory's entries.

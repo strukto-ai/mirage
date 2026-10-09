@@ -42,6 +42,9 @@ export class SourceNode implements WrappedNode {
     return this.node
   }
   get type(): string {
+    if (this.node.type === '$(' && (this.text === '<(' || this.text === '>(')) return this.text
+    if (this.node.type === 'command_substitution' && /^(?:<|>)\(/.test(this.text))
+      return 'process_substitution'
     return this.node.type
   }
   get text(): string {

@@ -429,33 +429,56 @@ async function runCommandBody(
   const procSubStderr: Uint8Array[] = []
   const cleanParts: TSNodeLike[] = []
   try {
-    for (const p of parts) {
-      if (p.type !== NT.PROCESS_SUBSTITUTION) {
-        cleanParts.push(p)
+    for (const word of parts) {
+      const children = word.type === NT.CONCATENATION ? word.children : [word]
+      if (!children.some((p) => p.type === NT.PROCESS_SUBSTITUTION)) {
+        cleanParts.push(word)
         continue
       }
-      if (getProcessSubDirection(p) === ProcessSubDirection.OUTPUT) {
-        const err = encodeText('mirage: unsupported: process substitution >(...)\n')
-        return [
-          null,
-          new IOResult({ exitCode: 2, stderr: err }),
-          new ExecutionNode({ command: name || 'process_sub', exitCode: 2, stderr: err }),
-        ]
+      const cleanChildren: TSNodeLike[] = []
+      for (const p of children) {
+        if (p.type !== NT.PROCESS_SUBSTITUTION) {
+          cleanChildren.push(p)
+          continue
+        }
+        if (getProcessSubDirection(p) === ProcessSubDirection.OUTPUT) {
+          const err = encodeText('mirage: unsupported: process substitution >(...)\n')
+          return [
+            null,
+            new IOResult({ exitCode: 2, stderr: err }),
+            new ExecutionNode({ command: name || 'process_sub', exitCode: 2, stderr: err }),
+          ]
+        }
+        if (dev === null) {
+          const [candidate] = registry.resolve('/dev/null')
+          if (!(candidate instanceof DevVFS)) throw new Error('missing device filesystem')
+          dev = candidate
+        }
+        const [path, allocation] = dev.allocateInput()
+        procSubInputs.push([path, allocation])
+        const inner = getProcessSubBody(p)
+        if (inner !== '') {
+          const io = await childLine(context, executeFn, inner, p, callStack)
+          dev.setInput(path, allocation, await materialize(io.stdout))
+          procSubStderr.push(await materialize(io.stderr))
+        }
+        cleanChildren.push({
+          type: NT.WORD,
+          isNamed: true,
+          text: path,
+          children: [],
+          namedChildren: [],
+        })
       }
-      if (dev === null) {
-        const [candidate] = registry.resolve('/dev/null')
-        if (!(candidate instanceof DevVFS)) throw new Error('missing device filesystem')
-        dev = candidate
-      }
-      const [path, allocation] = dev.allocateInput()
-      procSubInputs.push([path, allocation])
-      const inner = getProcessSubBody(p)
-      if (inner !== '') {
-        const io = await childLine(context, executeFn, inner, p, callStack)
-        dev.setInput(path, allocation, await materialize(io.stdout))
-        procSubStderr.push(await materialize(io.stderr))
-      }
-      cleanParts.push({ type: NT.WORD, text: path, children: [], namedChildren: [] })
+      if (word.type === NT.CONCATENATION) {
+        cleanParts.push({
+          type: NT.CONCATENATION,
+          isNamed: true,
+          text: word.text,
+          children: cleanChildren,
+          namedChildren: cleanChildren.filter((p) => p.isNamed ?? true),
+        })
+      } else cleanParts.push(...cleanChildren)
     }
 
     const argv = await ownWords(

@@ -536,3 +536,11 @@ it.each(['@', '+', '!', '(', ')', '|'])(
     }
   },
 )
+
+it('does not let a literal backslash escape a quoted bracket member', () => {
+  const pattern = '[' + escapeGlob('\\@') + ']'
+  for (const extglob of [false, true]) {
+    for (const char of ['\\', '@']) expect(fnmatch(char, pattern, extglob)).toBe(true)
+    for (const char of ['x', '4', '0']) expect(fnmatch(char, pattern, extglob)).toBe(false)
+  }
+})

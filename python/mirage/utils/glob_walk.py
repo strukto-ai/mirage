@@ -27,7 +27,7 @@ from mirage.context import (
 )
 from mirage.errors.constants import WALK_ERRORS
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.fnmatch import QUOTED_CHARS, fnmatch
+from mirage.utils.fnmatch import QUOTED_CHARS, fnmatch, pattern_parts
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import rekey
 from mirage.view.types import ChildMounts, LinkTargetStat
@@ -370,6 +370,18 @@ def is_word_shaped(p: PathSpec) -> bool:
     return p.virtual.rstrip("/") != p.directory.rstrip("/")
 
 
+def glob_parts(pattern: str) -> list[str]:
+    """Path components under the active shell's pattern grammar.
+
+    Args:
+        pattern (str): pathname with quote marks still intact.
+    """
+    session = get_current_session()
+    if session is not None and session.shopts.get("extglob"):
+        return pattern_parts(pattern)
+    return pattern.split("/")
+
+
 def spell_match(raw: str, virtual: str, walked: int) -> str:
     """Spell a match the way bash expansion would.
 
@@ -385,7 +397,7 @@ def spell_match(raw: str, virtual: str, walked: int) -> str:
         virtual (str): one match's absolute virtual path.
         walked (int): segment count from the first glob segment on.
     """
-    head = raw.rstrip("/").split("/")[:-walked]
+    head = glob_parts(raw.rstrip("/"))[:-walked]
     tail = virtual.rstrip("/").split("/")[-walked:]
     return "/".join([*head, *tail])
 
@@ -443,7 +455,7 @@ async def expand_pattern(
             is the union ``merge_readdir`` applies to a listing.
     """
     prefix = path.virtual[: len(path.virtual.rstrip("/")) - len(path.vfs_path)]
-    segments = path.vfs_path.split("/") if path.vfs_path else []
+    segments = glob_parts(path.vfs_path) if path.vfs_path else []
     # Two spec shapes reach resolvers: a full pattern path (classify), where
     # the pattern is already the last segment, and a directory-shaped spec
     # (PathSpec.dir), where the pattern applies to the directory's entries.

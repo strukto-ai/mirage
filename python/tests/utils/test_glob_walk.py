@@ -665,3 +665,12 @@ def test_quoted_extended_operators_remain_bracket_members(char, extglob):
     assert fnmatch("a", pattern, extglob=extglob)
     assert not fnmatch("z", pattern, extglob=extglob)
     assert not fnmatch(char + "]", pattern, extglob=extglob)
+
+
+def test_literal_backslash_cannot_escape_a_quoted_bracket_member():
+    pattern = "[" + escape_glob("\\@") + "]"
+    for extglob in (False, True):
+        for char in "\\@":
+            assert fnmatch(char, pattern, extglob=extglob)
+        for char in "x40":
+            assert not fnmatch(char, pattern, extglob=extglob)

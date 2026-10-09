@@ -84,7 +84,9 @@ def pattern_source(data: bytes) -> bytes:
 
     The syntax gate separately decides whether extglob is enabled. The
     structural parser always recognizes it, including the implicit mode
-    on the right of a conditional comparison.
+    on the right of a conditional comparison. Process substitutions borrow
+    the command-substitution grammar to remain inside one word; SourceNode
+    restores their original types and text.
 
     Args:
         data (bytes): encoded shell source.
@@ -98,7 +100,14 @@ def pattern_source(data: bytes) -> bytes:
     reader.refusals()
     out = list(command)
     for start, end in reader.patterns:
-        out[start:end] = ":" * (end - start)
+        if (
+            end == start + 1
+            and command[start] in "<>"
+            and command[start + 1 : start + 2] == "("
+        ):
+            out[start] = "$"
+        else:
+            out[start:end] = ":" * (end - start)
     return encode_text("".join(out))
 
 
@@ -635,6 +644,10 @@ class _LineReader:
             if c in "'\"`$\\":
                 j = self.word_char(j)
                 continue
+            if c in "<>" and self.char_at(j + 1) == "(":
+                self.patterns.append((j, j + 1))
+                j = self.process_substitution(j)
+                continue
             if c == "(":
                 depth += 1
             elif c == ")":
@@ -662,6 +675,7 @@ class _LineReader:
             if c == "}":
                 return j + 1
             if c in "<>" and self.char_at(j + 1) == "(":
+                self.patterns.append((j, j + 1))
                 j = self.process_substitution(j)
                 continue
             j = self.word_char(j)

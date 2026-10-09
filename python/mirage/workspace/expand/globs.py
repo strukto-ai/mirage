@@ -23,6 +23,7 @@ from mirage.shell.errors import DiscardSignal
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.glob_walk import (
     glob_name_matches,
+    glob_parts,
     glob_pattern,
     has_glob,
     literal_word,
@@ -384,11 +385,11 @@ async def _walk(
         links (NamespaceLinks | None): the namespace symlink table.
         globstar (bool): whether ``**`` reads as any depth.
     """
-    typed = (item.dotted or item.virtual).strip("/").split("/")
+    typed = glob_parts((item.dotted or item.virtual).strip("/"))
     first = next(
         i for i, seg in enumerate(typed) if has_glob(seg) or seg in (".", "..")
     )
-    raw = unmark_globs(item.raw_path).rstrip("/").split("/")
+    raw = glob_parts(unmark_globs(item.raw_path).rstrip("/"))
     spelled_head = "/".join(raw[: len(raw) - (len(typed) - first)])
     if item.raw_path.startswith("/") and not spelled_head:
         spelled_head = "/"
@@ -549,7 +550,7 @@ def _has_globstar_segment(item: PathSpec) -> bool:
     Args:
         item (PathSpec): the glob word.
     """
-    return "**" in unmark_globs(item.virtual).split("/")
+    return "**" in glob_parts(unmark_globs(item.virtual))
 
 
 async def resolve_globs(
@@ -715,7 +716,7 @@ def _glob_head(spec: PathSpec) -> str:
         spec (PathSpec): the glob word.
     """
     fixed: list[str] = []
-    for seg in spec.virtual.split("/"):
+    for seg in glob_parts(spec.virtual):
         if has_glob(seg):
             break
         fixed.append(seg)

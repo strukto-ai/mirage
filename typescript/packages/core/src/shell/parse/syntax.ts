@@ -218,7 +218,9 @@ function isTestClose(tok: ReaderToken): boolean {
   return tok.kind === 'word' && tok.plain && tok.text === ']]'
 }
 
-/** Shield pattern operators while preserving expansions and source spans. */
+/** Shield pattern operators while preserving expansions and source spans.
+ * Process substitutions borrow command-substitution grammar to remain inside
+ * one word; SourceNode restores their original types and text. */
 export function patternSource(text: string): string {
   if (!text.includes('[') && ![...constants.EXTGLOB_OPENERS].some((c) => text.includes(c + '(')))
     return text
@@ -226,7 +228,9 @@ export function patternSource(text: string): string {
   reader.refusals()
   const out = text.split('')
   for (const [start, end] of reader.patterns) {
-    for (let i = start; i < end; i += 1) out[i] = ':'
+    if (end === start + 1 && '<>'.includes(text.charAt(start)) && text.charAt(start + 1) === '(')
+      out[start] = '$'
+    else for (let i = start; i < end; i += 1) out[i] = ':'
   }
   return out.join('')
 }
@@ -467,6 +471,11 @@ class LineReader {
       const c = this.text.charAt(j)
       if ('\'"`$\\'.includes(c)) {
         j = this.wordChar(j)
+        continue
+      }
+      if ((c === '<' || c === '>') && this.text.charAt(j + 1) === '(') {
+        this.patterns.push([j, j + 1])
+        j = this.processSubstitution(j)
         continue
       }
       if (c === '(') depth += 1

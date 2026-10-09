@@ -123,3 +123,13 @@ it.each(['[[ @ == [a"@"] ]]', '[[ $x == [a"$x"] ]]', 'case "$x" in [a"$x"]) echo
     expect(strings.every((value) => ['"@"', '"$x"'].includes(value))).toBe(true)
   },
 )
+
+it('keeps process substitution in one extended-pattern word', () => {
+  const command = parser.parse('echo @(<(printf a)|b)').namedChildren[0]
+  expect(command?.namedChildren).toHaveLength(2)
+  const word = command?.namedChildren[1]
+  expect(word?.type).toBe('concatenation')
+  const sub = word?.namedChildren.find((child) => child.type === 'process_substitution')
+  expect(sub?.text).toBe('<(printf a)')
+  expect(sub?.children[0]?.type).toBe('<(')
+})
