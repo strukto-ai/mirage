@@ -3,10 +3,10 @@ import asyncio
 import pytest
 
 from mirage import ShellExecution, Workspace
-from mirage.io.config import IOConfig
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.policy import Action, ExecuteResultContext, Policy
+from mirage.shell.console import JobConsole
 from mirage.shell.console.types import Channel
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.execution import ExecutionScope
@@ -265,19 +265,30 @@ class _ApproveOutput(Policy):
         return None
 
 
+class _StuckSink(JobConsole):
+    def __init__(self) -> None:
+        super().__init__()
+        self.reached = asyncio.Event()
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        self.reached.set()
+        await asyncio.Event().wait()
+
+
 @pytest.mark.asyncio
 async def test_cancel_reaches_a_held_output_drain():
-    ws = Workspace({}, io=IOConfig(buffer_bytes=CHUNK_SIZE))
+    ws = Workspace({})
     ws.policies.add(_ApproveOutput())
-    execution = await ws.shell("seq 1 20000", stream=True)
+    sink = _StuckSink()
+    line = asyncio.create_task(ws.shell("echo held", sink=sink))
     try:
-        while execution._output.pipe.buffered_bytes < CHUNK_SIZE:
-            await asyncio.sleep(0.01)
+        await asyncio.wait_for(sink.reached.wait(), 5)
         assert await ws.cancel() == 1
         with pytest.raises(MirageAbortError):
-            await asyncio.wait_for(execution.wait(), 2)
+            await line
     finally:
-        await execution.aclose()
+        line.cancel()
+        await asyncio.gather(line, return_exceptions=True)
         await ws.close()
 
 

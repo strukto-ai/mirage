@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { IOConfig } from '../io/config.ts'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
 import type { Policy } from '../policy/base.ts'
 import type { Action, ExecuteResultContext } from '../policy/types.ts'
+import { JobConsole } from '../shell/console/job_console.ts'
 import { Channel } from '../shell/console/types.ts'
 import { ExecutionScope } from './execution.ts'
 import { ShellExecution } from './shell_execution.ts'
@@ -24,6 +24,18 @@ function gate(): { promise: Promise<void>; release: () => void } {
 class ApproveOutput implements Policy {
   postExecute(_ctx: ExecuteResultContext): Action | null {
     return null
+  }
+}
+
+class StuckSink extends JobConsole {
+  private entered!: () => void
+  readonly reached = new Promise<void>((resolve) => {
+    this.entered = resolve
+  })
+
+  override emit(): Promise<void> {
+    this.entered()
+    return new Promise<void>(() => undefined)
   }
 }
 
@@ -227,18 +239,16 @@ describe('ShellExecution', () => {
   })
 
   it('cancel reaches a held output drain', async () => {
-    const ws = new Workspace(
-      {},
-      { shellParser: await getTestParser(), io: new IOConfig({ bufferBytes: CHUNK_SIZE }) },
-    )
+    const ws = new Workspace({}, { shellParser: await getTestParser() })
     ws.policies.add(new ApproveOutput())
-    const execution = await ws.shell('seq 1 20000', { stream: true })
+    const sink = new StuckSink()
     try {
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      const line = ws.shell('echo held', { sink })
+      const aborted = expect(line).rejects.toMatchObject({ name: 'AbortError' })
+      await sink.reached
       expect(await ws.cancel()).toBe(1)
-      await expect(execution.wait()).rejects.toMatchObject({ name: 'AbortError' })
+      await aborted
     } finally {
-      await execution.close()
       await ws.close()
     }
   })
