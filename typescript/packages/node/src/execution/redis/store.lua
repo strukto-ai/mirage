@@ -1,5 +1,6 @@
 local records = KEYS[1]
 local completed = KEYS[2]
+local results = KEYS[3]
 local operation = ARGV[1]
 local id = ARGV[2]
 local cutoff = tonumber(ARGV[3]) - tonumber(ARGV[4])
@@ -8,6 +9,7 @@ local maximum = tonumber(ARGV[5])
 local function remove(ids)
     for _, key in ipairs(ids) do
         redis.call('HDEL', records, key)
+        redis.call('HDEL', results, key)
         redis.call('ZREM', completed, key)
     end
 end
@@ -22,7 +24,7 @@ end
 
 prune()
 if operation == 'get' then
-    return redis.call('HGET', records, id)
+    return {redis.call('HGET', records, id), redis.call('HGET', results, id)}
 elseif operation == 'list' then
     return redis.call('HVALS', records)
 end
@@ -51,6 +53,7 @@ end
 
 local replacement = cjson.decode(ARGV[6])
 redis.call('HSET', records, id, ARGV[6])
+redis.call('HSET', results, id, ARGV[8])
 if replacement.finished_at ~= cjson.null then
     redis.call('ZADD', completed, replacement.finished_at, id)
 end

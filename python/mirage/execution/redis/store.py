@@ -2,7 +2,7 @@ import asyncio
 import json
 import math
 import time
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -12,20 +12,28 @@ from mirage.execution.redis.constants import POLL_SECONDS, STORE_LUA
 from mirage.execution.types import ExecutionRecord, ExecutionStatus
 
 
-def encode(record: ExecutionRecord) -> str:
-    return json.dumps(asdict(record), ensure_ascii=False, allow_nan=False)
+def encode(record: ExecutionRecord) -> tuple[str, str]:
+    fields = asdict(record)
+    result = fields.pop("result")
+    return (
+        json.dumps(fields, ensure_ascii=False, allow_nan=False),
+        json.dumps(result, ensure_ascii=False, allow_nan=False),
+    )
 
 
-def decode(raw: bytes) -> ExecutionRecord:
+def decode(raw: bytes, result: bytes | None = None) -> ExecutionRecord:
     fields = json.loads(raw)
     fields["status"] = ExecutionStatus(fields["status"])
+    if result is not None:
+        fields["result"] = json.loads(result)
     return ExecutionRecord(**fields)
 
 
 class RedisExecutionStore(ExecutionStore):
     """Shared execution snapshots with atomic revisions and completed retention.
 
-    The snake_case JSON schema is shared with TypeScript. Active records never
+    The snake_case JSON schema is shared with TypeScript. Results live in
+    their own hash, so a listing never reads them. Active records never
     expire; reads and writes prune completed records by age and count. Waiters
     poll revisions, so a change before registration is not lost. Closing this
     instance releases its connection and waiters without deleting records.
@@ -55,7 +63,11 @@ class RedisExecutionStore(ExecutionStore):
         self.key_prefix = key_prefix
         self._client = aioredis.from_url(url)
         self._script = self._client.register_script(STORE_LUA)
-        self._keys = [f"{key_prefix}records", f"{key_prefix}completed"]
+        self._keys = [
+            f"{key_prefix}records",
+            f"{key_prefix}completed",
+            f"{key_prefix}results",
+        ]
         self._max_completed = max_completed
         self._retention_seconds = retention_seconds
         self._closed = asyncio.Event()
@@ -64,7 +76,7 @@ class RedisExecutionStore(ExecutionStore):
         self,
         operation: str,
         execution_id: str = "",
-        data: str = "",
+        data: tuple[str, str] = ("", ""),
         revision: int = 0,
     ) -> Any:
         if self._closed.is_set():
@@ -77,8 +89,9 @@ class RedisExecutionStore(ExecutionStore):
                 repr(time.time()),
                 repr(self._retention_seconds),
                 str(self._max_completed),
-                data,
+                data[0],
                 str(revision),
+                data[1],
             ],
         )
 
@@ -86,15 +99,15 @@ class RedisExecutionStore(ExecutionStore):
         return bool(await self._call("create", record.id, encode(record)) == 1)
 
     async def get(self, execution_id: str) -> ExecutionRecord | None:
-        raw = await self._call("get", execution_id)
-        return decode(raw) if raw is not None else None
+        raw, result = await self._call("get", execution_id)
+        return decode(raw, result) if raw is not None else None
 
     async def list(
         self, workspace_id: str | None = None
     ) -> list[ExecutionRecord]:
         records = [decode(raw) for raw in await self._call("list")]
         return [
-            replace(record, result=None)
+            record
             for record in records
             if workspace_id is None or record.workspace_id == workspace_id
         ]

@@ -44,7 +44,8 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     const client = createClient({ url: REDIS_URL })
     await client.connect()
     try {
-      for (const prefix of prefixes) await client.del([`${prefix}records`, `${prefix}completed`])
+      for (const prefix of prefixes)
+        await client.del([`${prefix}records`, `${prefix}completed`, `${prefix}results`])
       prefixes.clear()
     } finally {
       await client.quit()
@@ -141,9 +142,10 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
         cancel_requested: false,
         started_at: null,
         finished_at: finished.finishedAt,
-        result: { empty: [], nested: {}, stdout: ['hé'] },
         error: null,
       })
+      const result = await client.hGet(`${first.keyPrefix}results`, initial.id)
+      expect(JSON.parse(result ?? 'null')).toEqual({ empty: [], nested: {}, stdout: ['hé'] })
       expect(await client.ttl(`${first.keyPrefix}records`)).toBe(-1)
     } finally {
       await client.quit()

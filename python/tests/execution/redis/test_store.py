@@ -24,7 +24,9 @@ async def stores():
     for store in stores:
         await store.close()
     async with aioredis.from_url(REDIS_URL) as client:
-        await client.delete(f"{prefix}records", f"{prefix}completed")
+        await client.delete(
+            f"{prefix}records", f"{prefix}completed", f"{prefix}results"
+        )
 
 
 @pytest.mark.asyncio
@@ -107,8 +109,12 @@ async def test_terminal_records_wire_schema_and_independent_snapshots(stores):
     assert await first.list("workspace") == [replace(finished, result=None)]
     assert await first.list("other") == []
     async with aioredis.from_url(REDIS_URL) as client:
+        fields = asdict(finished)
+        result = fields.pop("result")
         raw = await client.hget(f"{first.key_prefix}records", record.id)
-        assert json.loads(raw) == asdict(finished)
+        assert json.loads(raw) == fields
+        raw = await client.hget(f"{first.key_prefix}results", record.id)
+        assert json.loads(raw) == result
         assert await client.ttl(f"{first.key_prefix}records") == -1
     await first.close()
     assert await second.get(record.id) == finished
