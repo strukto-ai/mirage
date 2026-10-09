@@ -1,5 +1,6 @@
 from typing import Any
 
+from mirage.shell.parse.names import walk_tree
 from mirage.shell.parse.recovery import parse_protected
 from mirage.shell.parse.source import SourceNode
 from mirage.shell.types import TSNodeLike
@@ -49,10 +50,7 @@ def _assignment_ends(root: TSNodeLike) -> set[int]:
         root (TSNodeLike): the tree to scan.
     """
     positions: set[int] = set()
-    pending = [root]
-    while pending:
-        node = pending.pop()
-        pending.extend(node.children)
+    for node in walk_tree(root):
         if node.type != "command":
             continue
         children = node.children

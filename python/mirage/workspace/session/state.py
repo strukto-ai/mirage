@@ -356,45 +356,6 @@ def strip_key_quotes(text: str) -> str:
     return text
 
 
-def element_index(
-    subscript: str,
-    env: Mapping[str, str],
-    elements: ElementOps | None = None,
-    read_var: Callable[[str], str | None] | None = None,
-    wrote_var: Callable[[str, str], None] | None = None,
-) -> int:
-    """Resolve an indexed subscript in arithmetic context.
-
-    bash evaluates indexed subscripts as arithmetic (``a[i+1]``); an
-    unresolvable expression indexes element 0, mirroring bash's
-    unset-name-is-zero arithmetic rule.
-
-    Args:
-        subscript (str): the raw subscript text.
-        env (Mapping[str, str]): environment for name resolution.
-        elements (ElementOps | None): element callbacks, so a nested
-            reference (``a[b[0]]``) resolves too.
-        read_var (Callable[[str], str | None] | None): dynamic reads,
-            the same ones the enclosing expression makes, so
-            ``a[RANDOM]`` draws.
-        wrote_var (Callable[[str, str], None] | None): told of the
-            subscript's assignments, as the enclosing expression is.
-    """
-    plain = plain_decimal(subscript)
-    if plain is not None:
-        return plain
-    try:
-        return evaluate_arith(
-            subscript,
-            env,
-            elements=elements,
-            read_var=read_var,
-            wrote_var=wrote_var,
-        ).value
-    except ArithError:
-        return 0
-
-
 async def _land_writes(
     session: SessionState, store: EnvSet, writes: Sequence[ArithWrite]
 ) -> None:
@@ -506,22 +467,16 @@ async def subscript_index(
 class _SessionElements:
     """The ``ElementOps`` implementation bound to one session.
 
-    A class rather than closures because the resolver recurses: an
-    indexed subscript is arithmetic and may itself hold an element
-    reference, so ``resolve`` hands the evaluator the same pair of
-    callbacks it is one of. It lives beside the other reader
-    projections because the session view needs it too: the ``-i``
-    coercion evaluates ``n=a[1]+1`` at the write, and a resolver that
-    imported the session view would close a cycle.
+    It lives beside the other reader projections because the session
+    view needs it too: the ``-i`` coercion evaluates ``n=a[1]+1`` at the
+    write, and a resolver that imported the session view would close a
+    cycle.
     """
 
-    __slots__ = ("_session", "_reader")
+    __slots__ = ("_session",)
 
-    def __init__(
-        self, session: SessionState, reader: "RandomReader | None" = None
-    ) -> None:
+    def __init__(self, session: SessionState) -> None:
         self._session = session
-        self._reader = reader
 
     def resolve(
         self, name: str, subscript: str, env: Mapping[str, str]
@@ -530,20 +485,15 @@ class _SessionElements:
 
         Args:
             name (str): the array variable's name.
-            subscript (str): the raw subscript text.
+            subscript (str): an associative array's raw subscript text,
+                or an indexed one's index, which the evaluator has
+                already read as arithmetic.
             env (Mapping[str, str]): the evaluator's current view,
                 pending assignments included.
         """
         if name in visible_assocs(self._session):
             return strip_key_quotes(subscript)
-        reader = self._reader
-        idx = element_index(
-            subscript,
-            env,
-            session_elements(self._session, reader),
-            reader.read if reader is not None else None,
-            reader.wrote if reader is not None else None,
-        )
+        idx = int(subscript)
         if idx < 0:
             arr = visible_arrays(self._session).get(name)
             if arr is not None:
@@ -593,18 +543,13 @@ class _SessionElements:
         return array_get(arr, idx) if array_has(arr, idx) else None
 
 
-def session_elements(
-    session: SessionState, reader: "RandomReader | None" = None
-) -> ElementOps:
+def session_elements(session: SessionState) -> ElementOps:
     """Element callbacks bound to one session, for ``evaluate_arith``.
 
     Args:
         session (SessionState): the session references resolve against.
-        reader (RandomReader | None): the expression's ``RANDOM``
-            reader, so a subscript draws from the same generator as the
-            expression around it; None where nothing draws.
     """
-    bound = _SessionElements(session, reader)
+    bound = _SessionElements(session)
     return ElementOps(
         resolve=bound.resolve,
         read=bound.read,
@@ -834,7 +779,7 @@ def session_arith(
     return evaluate_arith(
         text,
         visible_env(session),
-        elements=session_elements(session, reader),
+        elements=session_elements(session),
         read_var=reader.read,
         wrote_var=reader.wrote,
         nounset=nounset,
@@ -974,19 +919,28 @@ async def evaluate_integer(
         await _land_coercion(session, view.set, coercion)
 
 
-def appended(held: str, added: str, integer: bool) -> tuple[str, str | None]:
+def appended(
+    held: ShellValue | None, added: str, integer: bool
+) -> tuple[str, str | None]:
     """What a ``+=`` hands ``set_var``: the held text then the added one,
     or on an integer the held text with the added one as ``added``, the
     two evaluating there in turn and summing behind the store's
     refusals. The held value evaluates too, so ``n='x=5'; declare -i n;
-    n+=x`` stores 10, and an empty side counts as 0.
+    n+=x`` stores 10, and an empty side counts as 0. An array extends
+    element 0 and a map key ``"0"`` (``S=x; declare -a S+=y`` gives
+    ``([0]="xy")``).
 
     Args:
-        held (str): what the slot holds, "" when unset.
+        held (ShellValue | None): what the slot holds, None when unset.
         added (str): the text appended.
         integer (bool): the variable carries ``-i``.
     """
-    return (held, added) if integer else (held + added, None)
+    if isinstance(held, dict):
+        held = held.get("0")
+    elif isinstance(held, list):
+        held = array_get(held, 0)
+    text = held or ""
+    return (text, added) if integer else (text + added, None)
 
 
 def ensure_var_visible(session: SessionState, name: str) -> None:

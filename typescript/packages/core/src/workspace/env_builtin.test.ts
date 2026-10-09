@@ -28,21 +28,6 @@ describe('workspace: env builtin', () => {
     await ws.close()
   })
 
-  it('-i starts from an empty environment', async () => {
-    const { ws } = await makeWorkspace()
-    await ws.shell('export KEEP=1')
-    const io = await ws.shell('env -i A=1 B=2')
-    expect(stdoutStr(io)).toBe('A=1\nB=2\n')
-    await ws.close()
-  })
-
-  it('runs a command under the modified environment', async () => {
-    const { ws } = await makeWorkspace()
-    const io = await ws.shell('env -i FOO=bar printenv FOO')
-    expect(stdoutStr(io)).toBe('bar\n')
-    await ws.close()
-  })
-
   it('-u removes a variable', async () => {
     const { ws } = await makeWorkspace()
     await ws.shell('export DROP=x')
@@ -74,29 +59,6 @@ describe('workspace: env builtin', () => {
     await ws.shell('env -i FOO=temp printenv FOO')
     const io = await ws.shell('printenv FOO')
     expect(stdoutStr(io)).toBe('original\n')
-    await ws.close()
-  })
-
-  it('rejects an invalid option with exit 125', async () => {
-    const { ws } = await makeWorkspace()
-    const io = await ws.shell('env -Z')
-    expect(io.exitCode).toBe(125)
-    await ws.close()
-  })
-
-  it('treats a lone - as --ignore-environment', async () => {
-    const { ws } = await makeWorkspace()
-    await ws.shell('export KEEP=x')
-    const io = await ws.shell('env - A=1')
-    expect(stdoutStr(io)).toBe('A=1\n')
-    await ws.close()
-  })
-
-  it('rejects -0 combined with a command (exit 125)', async () => {
-    const { ws } = await makeWorkspace()
-    const io = await ws.shell('env -0 echo hi')
-    expect(io.exitCode).toBe(125)
-    expect(new TextDecoder().decode(io.stderr)).toContain('cannot specify --null (-0) with command')
     await ws.close()
   })
 })

@@ -169,42 +169,24 @@ def _constant(text: str) -> int | str:
     return wrap_int64(value)
 
 
-def _binop(op: str, a: int, b: int) -> int:
-    """One binary operator over 64-bit wrapping integers, ``/``, ``%`` and
-    ``**`` aside.
-
-    Args:
-        op (str): the operator.
-        a (int): the left value.
-        b (int): the right value.
-    """
-    if op == "+":
-        return wrap_int64(a + b)
-    if op == "-":
-        return wrap_int64(a - b)
-    if op == "*":
-        return wrap_int64(a * b)
-    if op == "<<":
-        return wrap_int64(a << (b & 63))
-    if op == ">>":
-        return a >> (b & 63)
-    if op == "&":
-        return a & b
-    if op == "|":
-        return a | b
-    if op == "^":
-        return a ^ b
-    if op == "==":
-        return int(a == b)
-    if op == "!=":
-        return int(a != b)
-    if op == "<":
-        return int(a < b)
-    if op == "<=":
-        return int(a <= b)
-    if op == ">":
-        return int(a > b)
-    return int(a >= b)
+# The binary operators over 64-bit wrapping integers, ``/``, ``%`` and
+# ``**`` aside.
+_BINARY: dict[str, Callable[[int, int], int]] = {
+    "+": lambda a, b: wrap_int64(a + b),
+    "-": lambda a, b: wrap_int64(a - b),
+    "*": lambda a, b: wrap_int64(a * b),
+    "<<": lambda a, b: wrap_int64(a << (b & 63)),
+    ">>": lambda a, b: a >> (b & 63),
+    "&": lambda a, b: a & b,
+    "|": lambda a, b: a | b,
+    "^": lambda a, b: a ^ b,
+    "==": lambda a, b: int(a == b),
+    "!=": lambda a, b: int(a != b),
+    "<": lambda a, b: int(a < b),
+    "<=": lambda a, b: int(a <= b),
+    ">": lambda a, b: int(a > b),
+    ">=": lambda a, b: int(a >= b),
+}
 
 
 def _power(base: int, exponent: int) -> int:
@@ -475,7 +457,7 @@ class _Reader:
             if b < 0:
                 raise self.fail("exponent less than 0")
             return _power(a, b)
-        return _binop(op, a, b)
+        return _BINARY[op](a, b)
 
     def unary(self) -> int:
         if self.kind == "op" and self.tok in ARITH_UNARY_OPS:
@@ -755,7 +737,6 @@ class _ArithRecord:
 def evaluate_arith(
     expr: str,
     env: Mapping[str, str],
-    depth: int = 0,
     elements: ElementOps | None = None,
     read_var: Callable[[str], str | None] | None = None,
     wrote_var: Callable[[str, str], None] | None = None,
@@ -782,7 +763,6 @@ def evaluate_arith(
     Args:
         expr (str): the expression text, already ``$``-expanded.
         env (Mapping[str, str]): variable environment for reads.
-        depth (int): how many variable values deep ``expr`` is.
         elements (ElementOps | None): array-element callbacks; None
             outside a session.
         read_var (Callable[[str], str | None] | None): dynamic scalar
@@ -817,9 +797,9 @@ def evaluate_arith(
     """
     record = _ArithRecord(env, elements, read_var, wrote_var, nounset, frozen)
     try:
-        value = record.evaluate(expr, depth, False)
+        value = record.evaluate(expr, 0, False)
         if added is not None:
-            value = wrap_int64(value + record.evaluate(added, depth, False))
+            value = wrap_int64(value + record.evaluate(added, 0, False))
     except (ArithError, ReadonlyError) as exc:
         exc.writes = tuple(record.writes)
         raise

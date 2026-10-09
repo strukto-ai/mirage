@@ -292,45 +292,14 @@ export function stripKeyQuotes(text: string): string {
 }
 
 /**
- * Resolve an indexed subscript in arithmetic context.
- *
- * bash evaluates indexed subscripts as arithmetic (`a[i+1]`); an
- * unresolvable expression indexes element 0, mirroring bash's
- * unset-name-is-zero arithmetic rule.
- */
-export function elementIndex(
-  subscript: string,
-  env: Readonly<Record<string, string>>,
-  elements: ElementOps | null = null,
-  readVar: ((name: string) => string | null) | null = null,
-  wroteVar: ((name: string, value: string) => void) | null = null,
-): number {
-  const plain = plainDecimal(subscript)
-  if (plain !== null) return Number(plain)
-  try {
-    return Number(evaluateArith(subscript, env, 0, elements, readVar, wroteVar).value)
-  } catch (error) {
-    if (error instanceof ArithError) return 0
-    throw error
-  }
-}
-
-/**
  * The `ElementOps` implementation bound to one session.
  *
- * A class rather than closures because the resolver recurses: an
- * indexed subscript is arithmetic and may itself hold an element
- * reference, so `resolve` hands the evaluator the same pair of
- * callbacks it is one of. It lives beside the other reader projections
- * because the session view needs it too: the `-i` coercion evaluates
- * `n=a[1]+1` at the write, and a resolver that imported the session view would
- * close a cycle.
+ * It lives beside the other reader projections because the session view
+ * needs it too: the `-i` coercion evaluates `n=a[1]+1` at the write, and a
+ * resolver that imported the session view would close a cycle.
  */
 class SessionElements implements ElementOps {
-  constructor(
-    private readonly session: SessionState,
-    private readonly reader: RandomReader | null = null,
-  ) {}
+  constructor(private readonly session: SessionState) {}
 
   isAssoc(name: string): boolean {
     return visibleAssocs(this.session)[name] !== undefined
@@ -340,18 +309,13 @@ class SessionElements implements ElementOps {
     return this.isAssoc(name) || visibleArrays(this.session)[name] !== undefined
   }
 
-  resolve(name: string, subscript: string, env: Readonly<Record<string, string>>): string {
+  /** `subscript` is an associative array's raw subscript text, or an indexed
+   * one's index, which the evaluator has already read as arithmetic. */
+  resolve(name: string, subscript: string): string {
     if (visibleAssocs(this.session)[name] !== undefined) {
       return stripKeyQuotes(subscript)
     }
-    const reader = this.reader
-    let idx = elementIndex(
-      subscript,
-      env,
-      sessionElements(this.session, reader),
-      reader?.read ?? null,
-      reader?.wrote ?? null,
-    )
+    let idx = Number(subscript)
     if (idx < 0) {
       const arr = visibleArrays(this.session)[name]
       if (arr !== undefined) idx += arrayExtent(arr)
@@ -375,15 +339,9 @@ class SessionElements implements ElementOps {
   }
 }
 
-/** Element callbacks bound to one session, for `evaluateArith`. `reader`
- * is the expression's `RANDOM` reader, so a subscript draws from the
- * same generator as the expression around it; null where nothing
- * draws. */
-export function sessionElements(
-  session: SessionState,
-  reader: RandomReader | null = null,
-): ElementOps {
-  return new SessionElements(session, reader)
+/** Element callbacks bound to one session, for `evaluateArith`. */
+export function sessionElements(session: SessionState): ElementOps {
+  return new SessionElements(session)
 }
 
 /**
@@ -495,7 +453,7 @@ export async function subscriptIndex(
  * without the generator on offer: a host word naming `RANDOM` would
  * otherwise draw, and the draw reseed, without end. */
 export function seedFrom(word: string, session: SessionState): number {
-  const value = evaluateArith(word, visibleEnv(session), 0, sessionElements(session)).value
+  const value = evaluateArith(word, visibleEnv(session), sessionElements(session)).value
   const modulus = BigInt(RANDOM_MODULUS)
   return Number(((value % modulus) + modulus) % modulus)
 }
@@ -665,8 +623,7 @@ export function sessionArith(
   return evaluateArith(
     text,
     visibleEnv(session),
-    0,
-    sessionElements(session, reader),
+    sessionElements(session),
     reader.read,
     reader.wrote,
     nounset,
@@ -800,10 +757,17 @@ export async function evaluateInteger(
  * integer the held text with the added one as `added`, the two evaluating
  * there in turn and summing behind the store's refusals. The held value
  * evaluates too, so `n='x=5'; declare -i n; n+=x` stores 10, and an empty
- * side counts as 0.
+ * side counts as 0. An array extends element 0 and a map key `"0"`
+ * (`S=x; declare -a S+=y` gives `([0]="xy")`), and `held` is null when unset.
  */
-export function appended(held: string, added: string, integer: boolean): [string, string | null] {
-  return integer ? [held, added] : [held + added, null]
+export function appended(
+  held: ShellValue | null,
+  added: string,
+  integer: boolean,
+): [string, string | null] {
+  const text =
+    typeof held === 'string' ? held : Array.isArray(held) ? arrayGet(held, 0) : (held?.['0'] ?? '')
+  return integer ? [text, added] : [text + added, null]
 }
 
 export function ensureVarVisible(session: SessionState, name: string): void {

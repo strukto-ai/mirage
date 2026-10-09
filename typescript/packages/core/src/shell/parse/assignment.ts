@@ -2,6 +2,7 @@ import { parseProtected } from './recovery.ts'
 import type { ShellNode } from '../types.ts'
 import type { NativeParser } from './engine.ts'
 import { SourceNode } from './source.ts'
+import { walkTree } from './names.ts'
 
 const MARKER = ' a='
 const SEPARATORS = new Set([';', '&', '&&', '||', '|'])
@@ -37,11 +38,7 @@ export function repairAssignments(parser: NativeParser, root: ShellNode, text: s
 /** Where each assignment-only redirect's assignment ends. */
 function assignmentEnds(root: ShellNode): Set<number> {
   const positions = new Set<number>()
-  const pending = [root]
-  while (pending.length > 0) {
-    const node = pending.pop()
-    if (node === undefined) break
-    pending.push(...node.children)
+  for (const node of walkTree(root)) {
     if (node.type !== 'command') continue
     const children = node.children
     const assignment = children[0]

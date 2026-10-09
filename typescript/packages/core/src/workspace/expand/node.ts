@@ -21,7 +21,7 @@ import { quotedParts } from '../../shell/helpers.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { SessionState } from '../session/session.ts'
-import { randomReader, sessionArith } from '../session/state.ts'
+import { landedArith } from '../session/elements.ts'
 import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
@@ -33,7 +33,7 @@ import { scanParameter } from '../../shell/parameter.ts'
 import { joinChunks, valuePiece } from './fields.ts'
 import { type Chunk, piece } from './types.ts'
 import { expandBraces, isAtSplat, landArithWrites, parameterChunks } from './variable.ts'
-import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { ExecutionScope } from '../execution.ts'
 import { recordStatus } from '../executor/statement.ts'
@@ -247,17 +247,11 @@ async function arithText(
       parts.push(await arithText(child, context, executeFn, callStack, view))
     } else if (child.type === 'subscript') {
       parts.push(await arithSubscript(child, context, executeFn, callStack, view))
-    } else if (ARITH_OPERATORS.has(child.type)) {
-      parts.push(child.text)
-    } else if (child.type === NT.NUMBER) {
-      parts.push(child.text)
     } else if (
-      child.type === NT.SIMPLE_EXPANSION ||
-      child.type === NT.EXPANSION ||
-      child.type === NT.COMMAND_SUBSTITUTION
+      ARITH_OPERATORS.has(child.type) ||
+      child.type === NT.NUMBER ||
+      child.type === NT.VARIABLE_NAME
     ) {
-      parts.push(await expandNode(child, context, executeFn, callStack, view))
-    } else if (child.type === NT.VARIABLE_NAME) {
       parts.push(child.text)
     } else {
       parts.push(await expandNode(child, context, executeFn, callStack, view))
@@ -500,32 +494,25 @@ async function stringChunks(
   return chunks
 }
 
-/** A command substitution's output or an arithmetic expansion's value. */
 /**
- * An arithmetic expansion's value. Reads resolve against the visible env,
- * so a hidden name counts as unset; the write-back goes through the session
- * view, so a preSession rule governs `$((X=5))` exactly as it
- * governs `X=5`. bash bound the assignments made before an error, RANDOM's
- * seed included; they land before the line dies.
+ * An arithmetic expansion's value. The write-back goes through the session
+ * view, so a preSession rule governs `$((X=5))` exactly as it governs
+ * `X=5`; an error unwinds as its `signal`.
  */
 async function arithValue(
   session: SessionState,
   view: SessionView | undefined,
   expr: string,
 ): Promise<string> {
-  const reader = randomReader(session)
-  let result: ArithResult
   try {
-    result = sessionArith(session, expr, reader)
+    return (await landedArith(session, view ?? null, expr, landArithWrites)).toString()
   } catch (err) {
-    if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
-    await landArithWrites(session, view, err.writes, reader)
-    throw err.signal()
+    if (err instanceof ArithError || err instanceof ReadonlyError) throw err.signal()
+    throw err
   }
-  await landArithWrites(session, view, result.writes, reader)
-  return result.value.toString()
 }
 
+/** A command substitution's output or an arithmetic expansion's value. */
 async function substitution(
   tsNode: TSNodeLike,
   context: EvaluationContext,

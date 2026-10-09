@@ -45,6 +45,12 @@ export function joined(token: string, index: number): number {
   return index
 }
 
+export function literalConstructEnd(token: string, start: number): number | null {
+  const closer = token[start] === '$' ? constructCloser(token, start, false) : null
+  if (closer !== null) return constructEnd(token, start, closer)
+  return token[start] === '`' ? quoteEnd(token, start) : null
+}
+
 /**
  * The delimiter word as bash reads it: quotes removed, escapes resolved.
  *
@@ -65,12 +71,6 @@ export function joined(token: string, index: number): number {
  * `EO\<newline>F` names `EOF`; single quotes keep both characters,
  * leaving a newline in the delimiter that no single line can equal.
  */
-export function literalConstructEnd(token: string, start: number): number | null {
-  const closer = token[start] === '$' ? constructCloser(token, start, false) : null
-  if (closer !== null) return constructEnd(token, start, closer)
-  return token[start] === '`' ? quoteEnd(token, start) : null
-}
-
 export function cleanDelimiter(token: string): string {
   let out = ''
   let quote: string | null = null

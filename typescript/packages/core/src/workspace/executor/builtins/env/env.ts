@@ -13,25 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runAsProgram } from '../../../../context/session_context.ts'
-import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { shellJoin } from '../../../../shell/join.ts'
-import { ownRecord, varsFromEnv } from '../../../session/session.ts'
+import { ownRecord, type SessionState, varsFromEnv } from '../../../session/session.ts'
 import type { ShellVar } from '../../../../shell/variable.ts'
-import type { SessionState } from '../../../session/session.ts'
 import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { ENV_HELP_HINT } from './constants.ts'
+import { fail, ok } from '../shared.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 function envError(message: string): Result {
-  const err = encodeText(`${message}\n${ENV_HELP_HINT}`)
-  return [
-    null,
-    new IOResult({ exitCode: 125, stderr: err }),
-    new ExecutionNode({ command: 'env', exitCode: 125, stderr: err }),
-  ]
+  return fail('env', `${message}\n${ENV_HELP_HINT}`, 125)
 }
 
 export async function handleEnv(
@@ -140,7 +134,7 @@ export async function handleEnv(
         .map(([k, v]) => `${k}=${v}${sep}`)
         .join(''),
     )
-    return [out, new IOResult(), new ExecutionNode({ command: 'env', exitCode: 0 })]
+    return ok('env', out)
   }
 
   // `env NAME=v cmd` runs the command with a replaced environment. Only

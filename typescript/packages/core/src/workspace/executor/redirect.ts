@@ -181,14 +181,21 @@ export class JobRoute extends JobOutput {
   }
 }
 
-/** Ordered descriptor bindings for one command, restored after execution.
- * Each target expands, is admitted, and opens before the next target expands.
- * Earlier opens affect later globs and substitutions; a failure stops the
- * remaining redirects. Descriptors share file descriptions and offsets.
- */
 const UNREADABLE: unique symbol = Symbol('unreadable')
 type Input = ByteSource | null | typeof UNREADABLE
 
+/** Ordered descriptor bindings for one command, restored after execution.
+ * Each target expands, is admitted, and opens before the next target expands.
+ * Earlier opens affect later globs and substitutions; a failure stops the
+ * remaining redirects. Descriptors share file descriptions and offsets. A
+ * stream the statement redirects is its own while it runs, in the lines it
+ * runs too (`eval`, `exec CMD`, `bash -c`): an earlier `exec >` binding of it
+ * waits until the statement ends. What the command wrote on its way out goes
+ * where it writes, and only adjacent writes to one file combine, as distinct
+ * descriptions may reach it through aliases. A job it started writes after
+ * its output, or straight through once it raised. When the program an `exec`
+ * ran cannot write its output, that failure's status is the shell's.
+ */
 export async function handleRedirect(
   executeNode: ExecuteNodeFn,
   dispatch: DispatchFn,
@@ -438,27 +445,14 @@ export async function handleRedirect(
   const jobOutput = session.jobOutput
   const route = new JobRoute(recorder, outputs, jobOutput ?? session.tty.jobs, dispatch, session)
   session.jobOutput = route
-  // A stream the statement redirects is its own while it runs, in the lines
-  // it runs too (`eval`, `exec CMD`, `bash -c`): an earlier `exec >` binding
-  // of it waits until the statement ends.
-  const held = {
-    ...(claimed.has(1)
-      ? {
-          execStdout: session.execStdout,
-          execStdoutAppend: session.execStdoutAppend,
-          execStdoutInput: session.execStdoutInput,
-        }
-      : {}),
-    ...(claimed.has(2)
-      ? {
-          execStderr: session.execStderr,
-          execStderrAppend: session.execStderrAppend,
-          execStderrInput: session.execStderrInput,
-        }
-      : {}),
+  const unbound = {
+    ...(claimed.has(1) ? EXEC_STREAM_UNBOUND[1] : {}),
+    ...(claimed.has(2) ? EXEC_STREAM_UNBOUND[2] : {}),
   }
-  if (claimed.has(1)) Object.assign(session, EXEC_STREAM_UNBOUND[1])
-  if (claimed.has(2)) Object.assign(session, EXEC_STREAM_UNBOUND[2])
+  const held = Object.fromEntries(
+    Object.keys(unbound).map((field) => [field, session[field as keyof typeof unbound]]),
+  )
+  Object.assign(session, unbound)
   try {
     const given = inputs.get(0) ?? null
     if (command === null) {
@@ -484,8 +478,6 @@ export async function handleRedirect(
   } catch (error) {
     if (!isUnwinding(error)) throw error
     unwound = error
-    // What the command wrote on its way out goes where it writes; an error
-    // expanding its own words came before its redirects.
     const output = await takeStdout(error)
     if (output.byteLength > 0) await recorder.emit(Channel.STDOUT, output)
     const own =
@@ -496,8 +488,6 @@ export async function handleRedirect(
     }
   } finally {
     Object.assign(session, held)
-    // A body that raised (an abort, an error) skips the writes below: its
-    // jobs write straight through.
     route.recorder = null
     session.jobOutput = jobOutput
     for (const file of files) file.emit = null
@@ -509,8 +499,6 @@ export async function handleRedirect(
     }
   }
   let stdout: Uint8Array | null = null
-  // What a job writes from here waits until the command's own output is
-  // written (`route.release()`).
   route.recorder = new Recorder()
   try {
     const chunks = recorder.chunks
@@ -540,8 +528,6 @@ export async function handleRedirect(
       const write = async (file: FileDescription, data: Uint8Array, replace = false) => {
         try {
           if (replace && file.source === null && file.offset === 0) {
-            // An output-only command's complete output needs no read of
-            // its freshly opened, unshared target, even on object stores.
             await createFile(dispatch, session, file.scope, data, file.append)
             file.offset += data.byteLength
           } else await writeDescription(dispatch, session, file, data)
@@ -563,8 +549,6 @@ export async function handleRedirect(
         const target = dest(key)
         chunk = pending.next()
         if (target instanceof FileDescription) {
-          // Only adjacent writes can combine: distinct descriptions
-          // may reach the same file through aliases.
           const parts = [data]
           while (!chunk.done && dest(chunk.value[0]) === target) {
             parts.push(chunk.value[1])
@@ -604,7 +588,6 @@ export async function handleRedirect(
   }
   if (unwound !== null) {
     if (unwound instanceof ExitSignal && unwound.replaced !== null && io.exitCode !== 0) {
-      // The replacing program's own write failed: its status is the shell's.
       unwound.exitCode = io.exitCode
       unwound.containedCode = io.exitCode
     }
@@ -846,8 +829,6 @@ async function openRefusal(
       try {
         ;[stat] = await dispatch('stat', scope)
       } catch (err) {
-        // No target to overwrite is the ordinary case the option allows;
-        // anything that is not a filesystem error is a bug and propagates.
         if (!isFsError(err)) throw err
         stat = null
       }

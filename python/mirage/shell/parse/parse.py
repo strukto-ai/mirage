@@ -55,6 +55,7 @@ def parse(command: str) -> TSNodeLike:
     Bodies become inline expansion words with reader-owned input metadata.
     The resulting nodes retain their original source for nested evaluation;
     neither delimiter recognition nor expansion depends on heredoc tokens.
+    A line the reader refuses takes its heredocs from the grammar's.
 
     A leading ``((`` is lexed as the arithmetic opener and the lexer
     cannot back out, so a subshell that immediately opens another
@@ -81,13 +82,10 @@ def parse(command: str) -> TSNodeLike:
     original = encode_text(command)
     source = None
     if b"<<" in original:
-        # bash's reading of the line names its heredocs and the order of
-        # their bodies; a line it refuses falls back to the grammar's.
         plan = heredoc_plan(command)
         if plan is not None:
             documents = read_planned(original, plan)
         else:
-            # The operators are read off a tree that lexes `0<<EOF` as one.
             hinted = TS_PARSER.parse(original).root_node
             lexed = operator_source(original, hinted)
             if lexed != original:
@@ -118,14 +116,6 @@ def parse(command: str) -> TSNodeLike:
     data = statement_boundaries(data)
     root = parse_protected(data)
     if root.has_error:
-        # Sitting inside an ERROR is not evidence that an opener is
-        # broken: tree-sitter's error region swallows neighbouring
-        # tokens, so a valid `((i++))` next to a bad opener reports as
-        # errored too. Splitting it would silently turn arithmetic into
-        # a subshell running `i++`, which is a wrong parse rather than a
-        # rejected one. Each opener is judged on its own span instead,
-        # in byte space throughout, because the offsets tree-sitter
-        # reports are byte offsets.
         offsets = [
             offset
             for offset in set(failed_arith_openers(root))
