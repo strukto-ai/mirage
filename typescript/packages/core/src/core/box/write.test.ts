@@ -310,6 +310,15 @@ describe('box write ops', () => {
     expect(vi.mocked(api.deleteFile)).not.toHaveBeenCalled()
   })
 
+  it('a rename onto its own name sends and records nothing', async () => {
+    vi.mocked(api.updateFile).mockClear()
+    const [, records] = await runWithRecording(() =>
+      rename(makeAccessor(), spec('/data/a.txt'), spec('/data/a.txt')),
+    )
+    expect(vi.mocked(api.updateFile)).not.toHaveBeenCalled()
+    expect(records).toEqual([])
+  })
+
   it('copy copies a file into the dst parent, recorded once', async () => {
     const [, records] = await runWithRecording(() =>
       copy(makeAccessor(), spec('/data/a.txt'), spec('/data/c.txt')),

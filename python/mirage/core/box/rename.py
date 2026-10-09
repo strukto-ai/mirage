@@ -31,6 +31,9 @@ from mirage.types import PathSpec
 async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     """Move a file or folder whole; only a destination it replaces is held.
 
+    A rename onto its own name is a no-op, as rename(2) is: nothing is
+    sent or recorded, so the line keeps the version it read.
+
     Args:
         accessor (BoxAccessor): Box accessor.
         src (PathSpec): the item to move.
@@ -42,6 +45,8 @@ async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     item = await resolve_item(accessor, src_parts)
     if item is None:
         raise enoent(src.virtual)
+    if src.virtual == dst.virtual:
+        return
     dst_parent = await resolve_parent_id(accessor, dst_parts)
     if dst_parent is None:
         raise enoent(dst.virtual)

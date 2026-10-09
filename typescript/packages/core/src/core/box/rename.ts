@@ -49,13 +49,15 @@ async function clearDest(
 }
 
 /**
- * Move a file or folder whole; only a destination it replaces is held. Mirrors
- * Python's `rename`.
+ * Move a file or folder whole; only a destination it replaces is held. A rename
+ * onto its own name is a no-op, as rename(2) is: nothing is sent or recorded,
+ * so the line keeps the version it read. Mirrors Python's `rename`.
  */
 export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const tm = accessor.tokenManager
   const item = await resolveItem(accessor, pathParts(src))
   if (item === null) throw enoent(src.virtual)
+  if (src.virtual === dst.virtual) return
   const dstParts = pathParts(dst)
   const dstParent = await resolveParentId(accessor, dstParts)
   if (dstParent === null) throw enoent(dst.virtual)

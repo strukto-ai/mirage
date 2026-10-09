@@ -604,6 +604,27 @@ async def test_a_replaced_file_is_recorded_only_once_its_copy_lands(
 
 
 @pytest.mark.asyncio
+async def test_a_rename_onto_its_own_name_sends_and_records_nothing(
+    root_accessor,
+):
+    scope = RecordingScope()
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+            patch(
+                "mirage.core.box.rename.update_file", new_callable=AsyncMock
+            ) as moved,
+        ):
+            await rename(
+                root_accessor, _spec("/data/a.txt"), _spec("/data/a.txt")
+            )
+    finally:
+        scope.close()
+    moved.assert_not_awaited()
+    assert scope.records == []
+
+
+@pytest.mark.asyncio
 async def test_write_records_the_virtual_path(root_accessor):
     # A key named like its mount: neither m/k.txt nor /m/k.txt is virtual.
     spec = PathSpec(
