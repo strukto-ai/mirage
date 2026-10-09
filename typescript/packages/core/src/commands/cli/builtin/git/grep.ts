@@ -1,0 +1,268 @@
+import git from 'isomorphic-git'
+import { concat } from '../../../../io/cachable_iterator.ts'
+import { IOResult } from '../../../../io/types.ts'
+import { byteView, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
+import { compilePosixRegex } from '../../../../utils/posix.ts'
+import { compilePattern } from '../../../builtin/grep_pattern.ts'
+import { RegexSyntax } from '../../../builtin/types.ts'
+import { BreError, PosixSyntax, translateEre } from '../../../builtin/utils/bre.ts'
+import type { CommandFnResult } from '../../../config.ts'
+import { UsageError as PatternError } from '../../../errors.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
+import type { CLIInvocation } from '../../types.ts'
+import { requireWorkTree } from './discover.ts'
+import {
+  NoWorkspaceError,
+  AmbiguousArgumentError,
+  GitError,
+  InvalidRevisionNameError,
+  UsageError,
+} from './errors.ts'
+import { readIndex } from './index_file.ts'
+import { exists, readOptional } from './io.ts'
+import { pathspecPatterns, pathspecSelects, repoRelative, visiblePath } from './pathspec.ts'
+import { quotePath, relativePath } from './render.ts'
+import { configBool, repoArgs, type Repo } from './repo.ts'
+import { opened } from './session.ts'
+import { resolveObject, unwrapped } from './revparse.ts'
+import { resolveTree, treeEntries, type TreeEntry } from './tree.ts'
+import { checkSwitches, fatal, splitMarked, startPoint, verbUsage } from './util.ts'
+
+/** A compiled search and presentation, independent of content source. */
+interface GrepFlags {
+  readonly patterns: readonly RegExp[]
+  readonly invert: boolean
+  readonly numbers: boolean
+  readonly count: boolean
+  readonly listing: string
+  readonly quiet: boolean
+  readonly filename: boolean
+  readonly nul: boolean
+  readonly binary: string
+  readonly utf8: boolean
+}
+
+/** Compile patterns once, retaining Git's option precedence and errors. */
+function parseFlags(
+  fl: FlagView,
+  patterns: readonly string[],
+  origin: string,
+  utf8: boolean,
+): GrepFlags {
+  let syntax = RegexSyntax.BASIC
+  let fixed = false
+  for (const [name] of fl.occurrences('basic_regexp', 'extended_regexp', 'fixed_strings')) {
+    syntax = name === 'extended_regexp' ? RegexSyntax.EXTENDED : RegexSyntax.BASIC
+    fixed = name === 'fixed_strings'
+  }
+  const compiled: RegExp[] = []
+  for (const value of patterns) {
+    for (const part of value.split('\n')) {
+      try {
+        let pattern =
+          syntax === RegexSyntax.EXTENDED && !fixed
+            ? compilePosixRegex(
+                translateEre(byteView(part, utf8), PosixSyntax.EXTENDED)[0],
+                fl.asBool('ignore_case') ? 'i' : '',
+                utf8,
+              )
+            : compilePattern(
+                byteView(part, utf8),
+                fl.asBool('ignore_case'),
+                fixed,
+                false,
+                syntax,
+                utf8,
+              )
+        if (fl.asBool('word_regexp'))
+          pattern = compilePosixRegex(`(?<!\\w)(?:${pattern.source})(?!\\w)`, pattern.flags, utf8)
+        compiled.push(pattern)
+      } catch (err) {
+        if (err instanceof PatternError || err instanceof BreError || err instanceof SyntaxError)
+          throw new GitError(`${origin}, '${part}': ${err.message.replace(/^grep: /, '')}`)
+        throw err
+      }
+    }
+  }
+  const listing = fl.asBool('files_without_match')
+    ? 'files_without_match'
+    : fl.asBool('files_with_matches')
+      ? 'files_with_matches'
+      : ''
+  let filename = true
+  for (const name of fl.typedOrder('h', 'H')) filename = name === 'H'
+  let binary = 'binary'
+  for (const name of fl.typedOrder('text', 'args_I')) binary = name === 'text' ? 'text' : 'skip'
+  return {
+    patterns: compiled,
+    invert: fl.asBool('invert_match'),
+    numbers: fl.asBool('line_number'),
+    count: fl.asBool('count'),
+    listing,
+    quiet: fl.asBool('quiet'),
+    filename,
+    nul: fl.asBool('null'),
+    binary,
+    utf8,
+  }
+}
+
+/** Select and render one file, preserving its content bytes. */
+function searched(data: Uint8Array, label: string, flags: GrepFlags): [Uint8Array, boolean] {
+  const binary = data.subarray(0, 8000).includes(0) && flags.binary !== 'text'
+  if (binary && flags.binary === 'skip') return [new Uint8Array(), false]
+  const selected: [number, Uint8Array][] = []
+  let number = 1
+  for (let start = 0; start < data.length; number++) {
+    const newline = data.indexOf(10, start)
+    const end = newline < 0 ? data.length : newline
+    const line = data.subarray(start, end)
+    if (flags.patterns.some((pattern) => pattern.test(byteView(line, flags.utf8))) !== flags.invert)
+      selected.push([number, line])
+    start = end + 1
+  }
+  const matched = selected.length > 0
+  const found = flags.listing === 'files_without_match' ? !matched : matched
+  if (!found || flags.quiet) return [new Uint8Array(), found]
+  const sep = flags.nul ? '\0' : ':'
+  if (flags.listing) return [encodeText(label + (flags.nul ? '\0' : '\n')), true]
+  const prefix = flags.filename ? label + sep : ''
+  if (flags.count) return [encodeText(prefix + String(selected.length) + '\n'), true]
+  if (binary) return [encodeText(`Binary file ${label} matches\n`), true]
+  return [
+    concat(
+      selected.flatMap(([lineNumber, line]) => [
+        encodeText(prefix + (flags.numbers ? String(lineNumber) + sep : '')),
+        line,
+        encodeText('\n'),
+      ]),
+    ),
+    true,
+  ]
+}
+
+/** Read one regular file's object. */
+async function blobData(repo: Repo, oid: string): Promise<Uint8Array> {
+  return (await git.readBlob({ ...repoArgs(repo), oid })).blob
+}
+
+/** The searchable leaves of a tree-ish, or a directly named blob. */
+async function searchEntries(repo: Repo, name: string): Promise<Map<string, TreeEntry>> {
+  const obj = await unwrapped(repo, await resolveObject(repo, name), name)
+  if (obj.type === 'blob') return new Map([['', { mode: '100644', oid: obj.oid }]])
+  return treeEntries(repo, await resolveTree(repo, name))
+}
+
+/** Search tracked working files, index blobs, or named historical trees. */
+export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
+  try {
+    checkSwitches(inv, inv.texts.slice(0, 1))
+    const [words, marked] = splitMarked(inv.texts, inv.argv)
+    if (words.at(-1) === '--') words.pop()
+    let paths = marked
+    let patterns = fl.asList('e')
+    const origin = patterns.length ? '-e option' : 'command line'
+    if (!patterns.length) {
+      const pattern = words.length ? words.shift() : paths.shift()
+      if (pattern === undefined) {
+        if (fl.asBool('h')) throw new UsageError(verbUsage(inv), '')
+        throw new GitError('no pattern given')
+      }
+      patterns = [pattern]
+    }
+    const flags = parseFlags(fl, patterns, origin, utf8Locale(inv.env))
+    const doors = inv.doors ?? {}
+    const repo = await opened(fl, doors)
+    const start = startPoint(fl).virtual
+    const prefix = repoRelative(repo.location, start, '.')
+    const trees: [string, Map<string, TreeEntry>][] = []
+    for (const [index, word] of words.entries()) {
+      if (word.startsWith('-') && !inv.argv.includes('--'))
+        throw new GitError(`option '${word}' must come before non-option arguments`)
+      try {
+        trees.push([word, await searchEntries(repo, word)])
+      } catch (err) {
+        if (!(err instanceof AmbiguousArgumentError || err instanceof InvalidRevisionNameError))
+          throw err
+        if (inv.argv.includes('--')) throw new GitError(`unable to resolve revision: ${word}`)
+        const relative = repoRelative(repo.location, start, word)
+        if (
+          !/[*?[]/.test(word) &&
+          !(await exists(repo.dispatch, repo.location.worktree.join(relative)))
+        )
+          throw new AmbiguousArgumentError(word)
+        console.debug('Git grep operand is a pathspec:', word)
+        paths = [...words.slice(index), ...paths]
+        break
+      }
+    }
+    if (trees.length && fl.asBool('cached')) throw new GitError('both --cached and trees are given')
+    if (!trees.length && !fl.asBool('cached')) {
+      if (doors.statPath === undefined) throw new NoWorkspaceError()
+      await requireWorkTree(
+        repo.dispatch,
+        doors.statPath,
+        repo.location,
+        fl.asPath('work_tree') !== undefined,
+      )
+    }
+    const specs = pathspecPatterns(repo.location, start, paths)
+    if (!specs.length) specs.push(prefix)
+    const fully = await configBool(repo, 'core.quotepath', true)
+    const sources = [...trees]
+    if (!trees.length) {
+      const state = await readIndex(repo, repo.dispatch)
+      const entries = new Map(
+        [...state.entries].map(([path, entry]) => [
+          path,
+          { mode: entry.mode.toString(8), oid: entry.oid },
+        ]),
+      )
+      if (!fl.asBool('cached')) {
+        for (const [path, conflict] of state.conflicts) {
+          for (const entry of [conflict.this, conflict.other, conflict.ancestor]) {
+            if (entry !== null && [0o100644, 0o100755].includes(entry.mode)) {
+              entries.set(path, { mode: entry.mode.toString(8), oid: entry.oid })
+              break
+            }
+          }
+        }
+      }
+      sources.push(['', entries])
+    }
+    const out: Uint8Array[] = []
+    let found = false
+    for (const [revision, entries] of sources) {
+      for (const [path, entry] of [...entries].sort(([a], [b]) =>
+        compareCodePoints(byteView(a), byteView(b)),
+      )) {
+        if (
+          !['100644', '100755'].includes(entry.mode) ||
+          (path && (!visiblePath(repo.location, path) || !pathspecSelects(path, specs)))
+        )
+          continue
+        let data: Uint8Array | null
+        if (revision || fl.asBool('cached')) data = await blobData(repo, entry.oid)
+        else {
+          const target = repo.location.worktree.join(path)
+          if (repo.location.ns?.links?.statAt(target.virtual)) continue
+          data = await readOptional(repo.dispatch, target)
+          if (data === null) continue
+        }
+        let label = path ? relativePath(path, prefix) : ''
+        if (!flags.nul) label = quotePath(label, false, fully)
+        if (revision) label = revision + (path ? ':' + label : '')
+        const [rendered, hit] = searched(data, label, flags)
+        found ||= hit
+        if (hit && flags.quiet) return [null, new IOResult()]
+        out.push(rendered)
+      }
+    }
+    return [concat(out), new IOResult({ exitCode: found ? 0 : 1 })]
+  } catch (err) {
+    if (err instanceof GitError) return fatal(err)
+    throw err
+  }
+}

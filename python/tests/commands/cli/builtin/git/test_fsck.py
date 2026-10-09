@@ -126,3 +126,105 @@ async def test_pack_permission_failure_keeps_path_and_git_error(failed_op):
         await check_pack(
             dispatch, PathSpec.from_str_path("/repo/denied.pack"), b"0" * 20
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("packed", [False, True])
+async def test_fsck_distinguishes_unreachable_from_dangling(repo_path, packed):
+    def native_git(*args, data=None):
+        return subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                *args,
+            ],
+            input=data,
+            stderr=subprocess.PIPE,
+        )
+
+    blob = native_git(
+        "hash-object", "-w", "--stdin", data=b"orphan content\n"
+    ).strip()
+    tree = native_git(
+        "mktree",
+        data=b"100644 blob "
+        + blob
+        + b"\torphan.txt\n160000 commit "
+        + b"a" * 40
+        + b"\tsubmodule\n",
+    ).strip()
+    commit = native_git("commit-tree", tree.decode(), data=b"orphan\n").strip()
+    tag = native_git(
+        "hash-object",
+        "-t",
+        "tag",
+        "-w",
+        "--stdin",
+        data=b"object " + commit + b"\ntype commit\ntag orphan\n"
+        b"tagger Test <test@example.com> 1 +0000\n\norphan tag\n",
+    ).strip()
+    head = native_git("rev-parse", "HEAD").strip()
+    head_tree = native_git("rev-parse", "HEAD^{tree}").strip()
+    logged = native_git(
+        "commit-tree",
+        head_tree.decode(),
+        "-p",
+        head.decode(),
+        data=b"only in reflog\n",
+    ).strip()
+    native_git(
+        "update-ref", "--create-reflog", "refs/heads/main", logged.decode()
+    )
+    native_git("update-ref", "refs/heads/main", head.decode())
+    (repo_path / "staged.txt").write_bytes(b"index only\n")
+    native_git("add", "staged.txt")
+    stages = []
+    for stage in (1, 2, 3):
+        oid = native_git(
+            "hash-object", "-w", "--stdin", data=f"stage {stage}\n".encode()
+        ).strip()
+        stages.append(b"100644 " + oid + f" {stage}\tconflict.txt\n".encode())
+    stages.append(b"160000 " + b"a" * 40 + b" 1\tgitlink\n")
+    native_git("update-index", "--index-info", data=b"".join(stages))
+    detached = native_git(
+        "commit-tree",
+        head_tree.decode(),
+        "-p",
+        head.decode(),
+        data=b"detached head\n",
+    ).strip()
+    (repo_path / ".git/HEAD").write_bytes(detached + b"\n")
+    if packed:
+        pack_everything(repo_path)
+    expected_unreachable = sorted(
+        [
+            b"unreachable blob " + blob,
+            b"unreachable tree " + tree,
+            b"unreachable commit " + commit,
+            b"unreachable tag " + tag,
+        ]
+    )
+    assert (
+        sorted(native_git("fsck", "--unreachable").splitlines())
+        == expected_unreachable
+    )
+    with mounted(repo_path) as ws:
+        ws.register_cli("git", GIT)
+        for options in [
+            "",
+            "--no-dangling",
+            "--unreachable",
+            "--unreachable --no-dangling",
+        ]:
+            expected = native_git("fsck", *options.split())
+            actual = await ws.shell("git -C /repo fsck " + options)
+            assert actual.exit_code == 0, await actual.stderr_str()
+            assert sorted((actual.stdout or b"").splitlines()) == sorted(
+                expected.splitlines()
+            )
+            assert not actual.stderr

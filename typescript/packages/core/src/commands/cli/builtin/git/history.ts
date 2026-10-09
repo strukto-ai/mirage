@@ -99,6 +99,8 @@ export interface LogFlags {
   readonly search: string | RegExp | null
   /** `-G`, the pattern an added or removed line must match. */
   readonly changed: RegExp | null
+  /** Search binary changed lines under `--text`. */
+  readonly forceText: boolean
   /** `--since` as an epoch second. */
   readonly since: number | null
   /** `--until` as an epoch second. */
@@ -345,6 +347,7 @@ export function parseFlags(
     reverse: fl.asBool('reverse'),
     search,
     changed: changed === null ? null : pickaxePattern(changed, ignoreCase),
+    forceText: fl.asBool('text'),
     since: timestamp(fl.asStr('after') ?? fl.asStr('since') ?? null, '--since'),
     until: timestamp(fl.asStr('before') ?? fl.asStr('until') ?? null, '--until'),
     allRefs: fl.asBool('all'),
@@ -761,7 +764,8 @@ function filtersPass(commit: CommitFacts, flags: LogFlags): boolean {
  * change in the count of a string or pattern.
  */
 async function picked(repo: Repo, commit: CommitFacts, flags: LogFlags): Promise<boolean> {
-  if (flags.changed !== null) return greps(repo, commit.oid, commit.parents, flags.changed)
+  if (flags.changed !== null)
+    return greps(repo, commit.oid, commit.parents, flags.changed, flags.forceText)
   if (flags.search === null) return true
   if (typeof flags.search === 'string') {
     return touches(repo, commit.oid, commit.parents, flags.search, flags.ignoreCase)

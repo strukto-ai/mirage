@@ -74,6 +74,7 @@ interface ZgrepFlags {
   readonly onlyMatching: boolean
   readonly quiet: boolean
   readonly wholeWord: boolean
+  readonly lineRegexp: boolean
   readonly maxCount: number | null
 }
 
@@ -102,6 +103,7 @@ function parseFlags(fl: FlagView, neverMatch: boolean): ZgrepFlags {
     onlyMatching: fl.asBool('o'),
     quiet: fl.asBool('q'),
     wholeWord: fl.asBool('w'),
+    lineRegexp: fl.asBool('line_regexp'),
     maxCount: fl.asInt('m') ?? null,
   }
 }
@@ -228,6 +230,7 @@ export async function zgrepGeneric(
             parsed.wholeWord,
             syntax,
             utf8,
+            parsed.lineRegexp,
           )
 
   const multi = paths.length > 1

@@ -37,6 +37,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-l' }),
       new Option({ short: '-L', long: '--files-without-match' }),
       new Option({ short: '-w' }),
+      new Option({ short: '-x', long: '--line-regexp' }),
       new Option({ short: '-F' }),
       new Option({ short: '-E' }),
       // -G asks for the basic expressions grep already reads by default; with
@@ -404,6 +405,7 @@ export const SPECS: Record<string, CommandSpec> = {
       // (gzip 1.13).
       new Option({ short: '-s' }),
       new Option({ short: '-w' }),
+      new Option({ short: '-x', long: '--line-regexp' }),
     ],
     positional: [new Operand({ type: 'str', providedBy: ['-e', '-f'] })],
     rest: new Operand({ type: 'path' }),

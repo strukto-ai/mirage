@@ -24,8 +24,11 @@ from mirage.commands.builtin.generic_bind.search import (
     narrow_scope,
     run_search,
 )
+from mirage.commands.builtin.grep_pushdown import grep_needs_every_file
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.search import make_search_op
 from mirage.errors.fs import efbig, enoent
@@ -205,7 +208,6 @@ def test_stream_first_pull_failure_falls_back_to_bytes():
 
 
 def test_stream_failure_after_data_is_reported():
-
     async def _breaking_stream(
         accessor: FakeAccessor, path: PathSpec, index=NULL_INDEX
     ):
@@ -424,3 +426,34 @@ def test_binary_candidates_are_dropped_and_may_leave_none():
     assert (used, [p.virtual for p in resolved]) == (True, ["/data/a.txt"])
     io, _ = _narrowing(answer=[_hit("/data/a.parquet")])
     assert _narrow(io) == ([], True)
+
+
+@pytest.mark.parametrize(
+    "pattern,expected,code", [("ada", b"", 1), ("y", b"y\n", 0)]
+)
+def test_whole_line_search_scans_instead_of_printing_native_substring_hits(
+    pattern, expected, code
+):
+    provider = AsyncMock(return_value=["provider substring hit"])
+    search = _search_command({"note": provider}, IO)
+    out, result = asyncio.run(
+        search(
+            FakeAccessor(),
+            [spec("/rooms/red/a.json")],
+            [pattern],
+            CommandOpts(flags={"line_regexp": True}),
+        )
+    )
+    assert asyncio.run(_drain(out)) == expected
+    assert result.exit_code == code
+    provider.assert_not_awaited()
+
+
+def test_whole_line_overrides_word_index_narrowing():
+    io, narrow = _narrowing()
+    flags = FlagView({"w": True, "line_regexp": True}, spec=SPECS["grep"])
+    assert _narrow(io, exact_file_set=grep_needs_every_file(flags)) == (
+        [_scope()],
+        False,
+    )
+    narrow.assert_not_awaited()

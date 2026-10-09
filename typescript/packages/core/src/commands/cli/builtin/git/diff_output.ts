@@ -30,6 +30,7 @@ export interface DiffFlags {
   raw: boolean
   abbrev: boolean
   functionContext: boolean
+  forceText: boolean
   context: number
   quotePathFully: boolean
   pathspecs: readonly string[]
@@ -89,6 +90,7 @@ export function parseDiffFlags(
   return {
     context,
     functionContext: fl.asBool('function_context'),
+    forceText: fl.asBool('text'),
     nameOnly,
     nameStatus,
     stat,
@@ -241,6 +243,7 @@ export async function renderChanges(repo: Repo, rows: Change[], flags: DiffFlags
           fully,
           flags.context,
           flags.functionContext,
+          flags.forceText,
         ),
       )
   }
@@ -348,6 +351,7 @@ export async function commitSummary(
   return renderChanges(repo, await compare(repo, before, after, RENAME_SCORE), {
     context: 3,
     functionContext: false,
+    forceText: false,
     nameOnly: false,
     nameStatus: false,
     stat: false,
@@ -466,6 +470,7 @@ export async function commitOutput(
   return [head + (head && body ? '\n' : '') + body]
 }
 
+/** Binary combined patches stay binary under `--text`, as in Git 2.50.1. */
 async function combinedPatch(
   repo: Repo,
   maps: Map<string, Change>[],

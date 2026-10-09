@@ -225,6 +225,7 @@ def grep_needs_every_file(fl: FlagView) -> bool:
     A narrowing holds only files matching the searched literal: -v, -c
     and -L also print from the rest, -f adds patterns the search never
     saw, and --text or --binary-files=text read what the walk skips.
+    -x overrides -w, so a word index cannot stand in for its line matcher.
 
     Args:
         fl (FlagView): the invocation's grep flags.
@@ -233,6 +234,7 @@ def grep_needs_every_file(fl: FlagView) -> bool:
         fl.as_bool("v")
         or fl.as_bool("c")
         or fl.as_bool("files_without_match")
+        or fl.as_bool("line_regexp")
         or bool(fl.raw("file"))
         or fl.as_bool("text")
         or fl.as_str("binary_files") == "text"

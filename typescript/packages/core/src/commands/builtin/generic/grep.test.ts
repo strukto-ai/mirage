@@ -80,3 +80,34 @@ it('recursive quiet grep visits every file when no match exists', async () => {
   expect(io.exitCode).toBe(1)
   expect(opened).toEqual(['/d/a/first', '/d/a/later', '/d/later'])
 })
+
+it.each([1, 7, 1024])('whole-line streaming output with %i-byte chunks', async (size) => {
+  const data = enc.encode('ab\r\nab\nabc\nab')
+  async function* stream(): AsyncIterable<Uint8Array> {
+    await Promise.resolve()
+    for (let at = 0; at < data.length; at += size) yield data.subarray(at, at + size)
+  }
+  const modes = [
+    [{ n: true, byte_offset: true }, '2:4:ab\n4:11:ab\n'],
+    [{ c: true }, '2\n'],
+    [{ v: true }, 'ab\r\nabc\n'],
+    [{ o: true }, 'ab\nab\n'],
+    [{ n: true, B: 1, m: 1 }, '1-ab\r\n2:ab\n'],
+  ] as const
+  for (const [flags, expected] of modes) {
+    const result = await grepGeneric(
+      'grep',
+      [PathSpec.fromStrPath('/data/a.txt')],
+      ['ab'],
+      { flags: { line_regexp: true, ...flags }, stdin: null, cwd: '/' },
+      stat,
+      readdir,
+      stream,
+    )
+    if (result === null) throw new Error('missing grep result')
+    const [out, io] = result
+    expect(dec.decode(await materialize(out))).toBe(expected)
+    expect(io.exitCode).toBe(0)
+    expect(io.stderr).toBeNull()
+  }
+})

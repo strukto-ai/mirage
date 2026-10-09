@@ -678,3 +678,39 @@ async def test_grep_flushes_binary_notice_on_early_close():
     await output.aclose()
     assert io.exit_code == 0
     assert io.stderr == b"grep: /data/a.txt: binary file matches\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chunk_size", [1, 7, 1024])
+@pytest.mark.parametrize(
+    "flags,expected",
+    [
+        ({"n": True, "byte_offset": True}, b"2:4:ab\n4:11:ab\n"),
+        ({"c": True}, b"2\n"),
+        ({"v": True}, b"ab\r\nabc\n"),
+        ({"o": True}, b"ab\nab\n"),
+        ({"n": True, "B": 1, "m": 1}, b"1-ab\r\n2:ab\n"),
+    ],
+)
+async def test_whole_line_matcher_preserves_stream_output_modes(
+    chunk_size, flags, expected
+):
+    readdir, stat, rb, _ = _make_backend({"/data/a.txt": b"ab\r\nab\nabc\nab"})
+
+    async def read_stream(path):
+        data = await rb(path)
+        for at in range(0, len(data), chunk_size):
+            yield data[at : at + chunk_size]
+
+    output, io = await grep_generic(
+        [_spec("/data/a.txt")],
+        ["ab"],
+        CommandOpts(flags={"line_regexp": True, **flags}),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=read_stream,
+    )
+    assert await _drain_async(output) == expected
+    assert io.exit_code == 0
+    assert not io.stderr

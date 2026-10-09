@@ -177,3 +177,79 @@ async def test_rev_parse_prints_toplevel_in_line_order(git_ws):
         "git -C /repo rev-parse HEAD --show-toplevel HEAD"
     )
     assert result.stdout == head + b"/repo\n" + head
+
+
+@pytest.mark.asyncio
+async def test_binary_diff_flags_match_git(repo_path):
+    def native_git(*args, data=None):
+        return subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                *args,
+            ],
+            input=data,
+            env=ENV,
+            stderr=subprocess.PIPE,
+        )
+
+    for content, message in [
+        (b"old\0\xff\n", "binary one"),
+        (b"new\0\xfe\nneedle\n", "binary two"),
+    ]:
+        (repo_path / "binary.dat").write_bytes(content)
+        native_git("add", "binary.dat")
+        native_git("commit", "-qm", message)
+    (repo_path / "binary.dat").write_bytes(b"new\0\xfe\nneedle\nmerged\n")
+    native_git("add", "binary.dat")
+    tree = native_git("write-tree").decode().strip()
+    merge = (
+        native_git(
+            "commit-tree",
+            tree,
+            "-p",
+            "HEAD",
+            "-p",
+            "HEAD~1",
+            data=b"binary merge\n",
+        )
+        .decode()
+        .strip()
+    )
+    native_git("update-ref", "refs/heads/binary-merge", merge)
+    native_git("reset", "--hard", "HEAD")
+    (repo_path / "binary.dat").write_bytes(b"new\0\xfe\nneedle\nsaved\n")
+    native_git("stash", "push", "-qm", "binary stash")
+    commands = [
+        "log -2 --format=%s -G needle",
+        "log -2 --format=%s -G needle --text",
+        "log -2 --format=%s -G needle -a",
+        "log -2 --format=%s -S needle --text",
+        "log -1 --format= -p --text",
+        "log -1 --format= --numstat --text",
+        "show --format= --text HEAD",
+        "show --format= --stat -p --text HEAD",
+        "diff HEAD~1 HEAD --text",
+        "diff-tree --no-commit-id -r -p --text HEAD",
+        "show --format= --cc --text binary-merge",
+        "show --format= -c -a binary-merge",
+        "show --format= -m --text binary-merge",
+        "stash show -p --text",
+    ]
+    assert native_git("log", "-2", "--format=%s", "-G", "needle") == b""
+    assert (
+        native_git("log", "-2", "--format=%s", "-G", "needle", "--text")
+        == b"binary two\n"
+    )
+    with mounted_rw(repo_path) as ws:
+        for command in commands:
+            expected = native_git(*shlex.split(command))
+            actual = await ws.shell("git -C /repo " + command)
+            assert actual.exit_code == 0, (command, await actual.stderr_str())
+            assert actual.stdout == expected, command
+            assert not actual.stderr, command

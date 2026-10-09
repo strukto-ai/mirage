@@ -189,7 +189,8 @@ export function wholeWordLiteral(
  * Whether a grep's output needs files a content narrowing drops: a narrowing
  * holds only files matching the searched literal, so -v, -c and -L also
  * print from the rest, -f adds patterns the search never saw, and --text or
- * --binary-files=text read what the walk skips. Mirrors Python's
+ * --binary-files=text read what the walk skips. -x overrides -w, so a word
+ * index cannot stand in for its line matcher. Mirrors Python's
  * `grep_needs_every_file`.
  */
 export function grepNeedsEveryFile(fl: FlagView): boolean {
@@ -197,6 +198,7 @@ export function grepNeedsEveryFile(fl: FlagView): boolean {
     fl.asBool('v') ||
     fl.asBool('c') ||
     fl.asBool('files_without_match') ||
+    fl.asBool('line_regexp') ||
     Boolean(fl.raw('file')) ||
     fl.asBool('text') ||
     fl.asStr('binary_files') === 'text'

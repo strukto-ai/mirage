@@ -22,6 +22,8 @@ import { CLISpec, type CLIInvocation } from '../../types.ts'
 import { add } from './add.ts'
 import { init } from './init.ts'
 import { fsck } from './fsck.ts'
+import { grep } from './grep.ts'
+import { lsTree } from './ls_tree.ts'
 import { hashObject, hashObjectReadOnly } from './hash_object.ts'
 import { stashList, stashShow } from './stash.ts'
 import { nodeHelp, findNode } from '../../walk.ts'
@@ -92,6 +94,7 @@ const DATE_OPTION = new Option({
 })
 
 const DIFF_OPTIONS = [
+  new Option({ short: '-a', long: '--text', description: 'Treat binary files as text' }),
   new Option({
     short: '-W',
     long: '--function-context',
@@ -679,6 +682,98 @@ export const GIT = new CLISpec({
       rest: PATHSPEC,
     }),
     new CLISpec({
+      name: 'grep',
+      fn: verb(grep),
+      description: 'Search tracked files in the working tree, index or named trees',
+      options: [
+        new Option({
+          long: '--cached',
+          description: 'Search index blobs instead of working files',
+        }),
+        new Option({ short: '-n', long: '--line-number', description: 'Show line numbers' }),
+        new Option({
+          short: '-i',
+          long: '--ignore-case',
+          description: 'Match without regard to case',
+        }),
+        new Option({ short: '-F', long: '--fixed-strings', description: 'Match literal strings' }),
+        new Option({
+          short: '-E',
+          long: '--extended-regexp',
+          description: 'Use extended regular expressions',
+        }),
+        new Option({
+          short: '-G',
+          long: '--basic-regexp',
+          description: 'Use basic regular expressions',
+        }),
+        new Option({ short: '-w', long: '--word-regexp', description: 'Match at word boundaries' }),
+        new Option({
+          short: '-v',
+          long: '--invert-match',
+          description: 'Select nonmatching lines',
+        }),
+        new Option({
+          short: '-c',
+          long: '--count',
+          description: 'Count selected lines in each matching file',
+        }),
+        new Option({
+          short: '-l',
+          long: '--files-with-matches',
+          description: 'Show only matching filenames',
+        }),
+        new Option({
+          short: '-L',
+          long: '--files-without-match',
+          description: 'Show only nonmatching filenames',
+        }),
+        new Option({
+          short: '-q',
+          long: '--quiet',
+          description: 'Report matches through exit status',
+        }),
+        new Option({
+          short: '-e',
+          type: 'str',
+          multiple: true,
+          description: 'Match an additional pattern',
+        }),
+        new Option({ short: '-a', long: '--text', description: 'Treat binary files as text' }),
+        new Option({ short: '-I', description: 'Skip binary files' }),
+        new Option({
+          short: '-z',
+          long: '--null',
+          description: 'Terminate filename fields with NUL',
+        }),
+        new Option({ short: '-h', description: 'Omit filenames from matching lines' }),
+        new Option({ short: '-H', description: 'Show filenames with matching lines' }),
+      ],
+      rest: new Operand({ type: 'str', remainder: true }),
+    }),
+    new CLISpec({
+      name: 'ls-tree',
+      fn: verb(lsTree),
+      description: 'List the contents of a tree object',
+      options: [
+        new Option({ short: '-r', description: 'Recurse into subtrees' }),
+        new Option({ short: '-t', description: 'Show trees when recursing' }),
+        new Option({ short: '-d', description: 'Only show trees' }),
+        new Option({ short: '-z', description: 'Terminate entries with NUL' }),
+        new Option({ long: '--name-only', description: 'Show only filenames' }),
+        new Option({ long: '--name-status', description: 'Alias of --name-only' }),
+        new Option({
+          long: '--full-name',
+          description: 'Show paths relative to the repository root',
+        }),
+        new Option({
+          long: '--full-tree',
+          description: 'List the whole tree, ignoring the current directory',
+        }),
+      ],
+      rest: REVISION,
+    }),
+    new CLISpec({
       name: 'ls-files',
       fn: verb(lsFiles),
       description: 'Show files in the index',
@@ -754,7 +849,11 @@ export const GIT = new CLISpec({
       name: 'fsck',
       fn: verb(fsck),
       description: 'Verify object hashes and connectivity',
-      options: [new Option({ long: '--full' }), new Option({ long: '--no-dangling' })],
+      options: [
+        new Option({ long: '--full' }),
+        new Option({ long: '--no-dangling' }),
+        new Option({ long: '--unreachable' }),
+      ],
     }),
     new CLISpec({
       name: 'stash',

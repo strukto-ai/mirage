@@ -67,6 +67,7 @@ class DiffFlags:
     raw: bool = False
     abbrev: bool = False
     function_context: bool = False
+    force_text: bool = False
     context: int = HUNK_CONTEXT
     quote_path_fully: bool = True
     pathspecs: tuple[str, ...] = ()
@@ -154,6 +155,7 @@ def parse_diff_flags(
     )
     return DiffFlags(
         function_context=fl.as_bool("function_context"),
+        force_text=fl.as_bool("text"),
         context=HUNK_CONTEXT if context is None else context,
         name_only=modes[0],
         name_status=modes[1],
@@ -342,6 +344,7 @@ def render_changes(
                     fully,
                     flags.context,
                     flags.function_context,
+                    flags.force_text,
                 )
             )
     if not (flags.name_only or flags.name_status):
@@ -618,7 +621,8 @@ def combined_patch(
     """Render ``-c``/``--cc`` for the paths that differ from every parent.
 
     A path with no hunk left and no mode change prints nothing at all,
-    and the headers follow git's show_combined_header.
+    and the headers follow git's show_combined_header. Binary combined
+    patches stay binary under ``--text``, as in Git 2.50.1.
 
     Args:
         repo (BaseRepo): repository to read blobs from.

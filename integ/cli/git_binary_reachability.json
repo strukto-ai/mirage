@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "git_binary_reachability_setup",
+      "seq": 568820,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git init -q -b main /repo/binary-reachability && printf '[user]\\n name = Test\\n email = test@example.com\\n' >> /repo/binary-reachability/.git/config && printf 'old\\0\\377\\n' > /repo/binary-reachability/binary.dat && git -C /repo/binary-reachability add binary.dat && git -C /repo/binary-reachability commit -qm 'binary one' && printf 'new\\0\\376\\nneedle\\n' > /repo/binary-reachability/binary.dat && git -C /repo/binary-reachability add binary.dat && git -C /repo/binary-reachability commit -qm 'binary two'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_text_searches_binary_changed_lines",
+      "seq": 568821,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/binary-reachability log -G needle --format=%s; git -C /repo/binary-reachability log -G needle --text --format=%s; git -C /repo/binary-reachability log -G needle -a --format=%s; git -C /repo/binary-reachability log -S needle --text --format=%s",
+      "expect": {
+        "exit": 0,
+        "stdout": "binary two\nbinary two\nbinary two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_text_patch_preserves_binary_statistics",
+      "seq": 568822,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/binary-reachability show --format= --numstat --text HEAD && git -C /repo/binary-reachability show --format= --text HEAD | tail -2 | od -An -tx1 | tr -d ' \\n'; printf '\\n'",
+      "expect": {
+        "exit": 0,
+        "stdout": "-\t-\tbinary.dat\n2b6e657700fe0a2b6e6565646c650a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_fsck_unreachable_graph_setup",
+      "seq": 568823,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/binary-reachability tag -a orphan -m orphan && git -C /repo/binary-reachability tag -d orphan > /dev/null && mirage_reachable_head=$(git -C /repo/binary-reachability rev-parse HEAD~1) && printf '%s\\n' \"$mirage_reachable_head\" > /repo/binary-reachability/.git/refs/heads/main && git -C /repo/binary-reachability reset > /dev/null && rm -rf /repo/binary-reachability/.git/logs",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_fsck_unreachable_includes_referenced_orphans",
+      "seq": 568824,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/binary-reachability fsck | cut -d ' ' -f 1,2; git -C /repo/binary-reachability fsck --unreachable | cut -d ' ' -f 1,2 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "dangling tag\nunreachable blob\nunreachable commit\nunreachable tag\nunreachable tree\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_fsck_no_dangling_keeps_unreachable_reporting",
+      "seq": 568825,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/binary-reachability fsck --no-dangling; git -C /repo/binary-reachability fsck --unreachable --no-dangling | cut -d ' ' -f 1,2 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "unreachable blob\nunreachable commit\nunreachable tag\nunreachable tree\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_fsck_index_roots_protect_staged_blobs",
+      "seq": 568826,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/binary-reachability add binary.dat && git -C /repo/binary-reachability fsck --unreachable | cut -d ' ' -f 1,2 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "unreachable commit\nunreachable tag\nunreachable tree\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_binary_reachability_cleanup",
+      "seq": 568827,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm -rf /repo/binary-reachability",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

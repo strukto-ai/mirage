@@ -204,3 +204,54 @@ def test_rust_escape_is_regex_escape():
     assert compile_pattern(
         "a.b", fixed_string=True, syntax=RegexSyntax.RUST
     ).search("a.b")
+
+
+@pytest.mark.parametrize("syntax", list(RegexSyntax))
+@pytest.mark.parametrize(
+    "pattern,subject,selected",
+    [
+        ("ab", "ab", True),
+        ("ab", "abc", False),
+        ("ab", "cab", False),
+        ("ab", "ab\r", False),
+        ("ab", "ab\n", False),
+        ("", "", True),
+        ("", "ab", False),
+        ("@", "@", True),
+    ],
+)
+def test_whole_line_bounds_all_dialects_and_overrides_word(
+    syntax, pattern, subject, selected
+):
+    pat = compile_pattern(
+        pattern, whole_word=True, syntax=syntax, line_regexp=True
+    )
+    assert bool(pat.search(subject)) is selected
+
+
+@pytest.mark.parametrize(
+    "pattern,syntax",
+    [(r"a\|ab", RegexSyntax.BASIC), ("a|ab", RegexSyntax.EXTENDED)],
+)
+def test_whole_line_backtracks_over_alternatives(pattern, syntax):
+    pat = compile_pattern(pattern, syntax=syntax, line_regexp=True)
+    assert pat.search("ab")
+    assert not pat.search("abc")
+
+
+def test_whole_line_fixed_pattern_list_preserves_case_and_literals():
+    pat = compile_pattern(
+        "a.b\nc+", ignore_case=True, fixed_string=True, line_regexp=True
+    )
+    assert pat.search("A.B")
+    assert pat.search("C+")
+    assert not pat.search("axb")
+    assert not pat.search("c++")
+
+
+def test_whole_line_preserves_basic_backreferences():
+    pat = compile_pattern(
+        r"\(ab\)\1", syntax=RegexSyntax.BASIC, line_regexp=True
+    )
+    assert pat.search("abab")
+    assert not pat.search("ababx")

@@ -25,6 +25,9 @@ import type { CommandFnResult, CommandOpts, CommandIO } from '../../config.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 
 import { narrowScope, runSearch } from './search.ts'
+import { grepNeedsEveryFile } from '../grep_pushdown.ts'
+import { FlagView } from '../../spec/flag_view.ts'
+import { specOf } from '../../spec/builtins.ts'
 import { makeSearchOp } from '../../../core/hierarchy/search.ts'
 
 const SCOPES: readonly Scope[] = [
@@ -294,6 +297,14 @@ describe('narrowScope', () => {
     })
   }
 
+  it('whole-line matching overrides word-index narrowing', async () => {
+    const { io, narrowPaths } = narrowing()
+    const fl = new FlagView({ w: true, line_regexp: true }, specOf('grep'))
+    const r = await run(io, { exactFileSet: grepNeedsEveryFile(fl) })
+    expect(r).toEqual({ resolved: [scope], usedSearch: false })
+    expect(narrowPaths).not.toHaveBeenCalled()
+  })
+
   it('narrows a recursive whole-word literal to its candidates', async () => {
     const { io, narrowPaths } = narrowing()
     const r = await run(io)
@@ -344,3 +355,25 @@ describe('narrowScope', () => {
     })
   })
 })
+
+it.each([
+  ['ada', '', 1],
+  ['y', 'y\n', 0],
+] as const)(
+  'whole-line %j scans instead of printing native substring hits',
+  async (pattern, expected, code) => {
+    const provider = vi.fn(() => Promise.resolve(['provider substring hit']))
+    const search = searchCommand({ note: provider }, makeIO(), {})
+    const [out, result] = unwrap(
+      await search(
+        new FakeAccessor(),
+        [spec('/rooms/red/a.json')],
+        [pattern],
+        opts({ line_regexp: true }),
+      ),
+    )
+    expect(await drain(out)).toBe(expected)
+    expect(result.exitCode).toBe(code)
+    expect(provider).not.toHaveBeenCalled()
+  },
+)

@@ -16,6 +16,7 @@ import git from 'isomorphic-git'
 
 import { decodeText } from '../../../../shell/bytes.ts'
 import { GitError } from './errors.ts'
+import { resolveObject, unwrapped } from './revparse.ts'
 import { repoArgs, type Repo } from './repo.ts'
 
 const SPACE = 0x20
@@ -113,4 +114,49 @@ export async function commitEntries(
   if (commitOid === null) return new Map()
   const { commit } = await git.readCommit({ ...repoArgs(repo), oid: commitOid })
   return treeEntries(repo, commit.tree)
+}
+
+/** Resolve a tree-ish through tags and commits. */
+export async function resolveTree(repo: Repo, name: string): Promise<string> {
+  const obj = await unwrapped(repo, await resolveObject(repo, name), name)
+  if (obj.type === 'commit')
+    return (await git.readCommit({ ...repoArgs(repo), oid: obj.oid })).commit.tree
+  if (obj.type === 'tree') return obj.oid
+  throw new GitError('not a tree object')
+}
+
+/** Literal tree prefixes; a trailing slash descends even without -r. */
+export async function listedTree(
+  repo: Repo,
+  tree: string,
+  patterns: readonly string[],
+  recursive: boolean,
+  trees: boolean,
+  directories: boolean,
+  prefix = '',
+): Promise<[string, string, string][]> {
+  const out: [string, string, string][] = []
+  for (const entry of await treeItems(repo, tree)) {
+    const path = prefix ? `${prefix}/${entry.path}` : entry.path
+    const selected =
+      patterns.length === 0 ||
+      patterns.some(
+        (pattern) =>
+          pattern === '' || path === pattern || path.startsWith(pattern.replace(/\/$/, '') + '/'),
+      )
+    const directory = entry.mode === TREE_MODE
+    const descend =
+      directory &&
+      ((recursive && selected) || patterns.some((pattern) => pattern.startsWith(path + '/')))
+    if (
+      (selected || (directory && descend && (trees || (directories && recursive)))) &&
+      ((directory && (!descend || trees || directories)) || (!directory && !directories))
+    )
+      out.push([path, entry.mode, entry.oid])
+    if (descend)
+      out.push(
+        ...(await listedTree(repo, entry.oid, patterns, recursive, trees, directories, path)),
+      )
+  }
+  return out
 }

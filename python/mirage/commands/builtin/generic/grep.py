@@ -169,6 +169,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         files_only=files_only,
         files_without_match=files_without_match,
         whole_word=fl.as_bool("w"),
+        line_regexp=fl.as_bool("line_regexp"),
         fixed_string=fl.as_bool("F") and not never_match,
         # grep reads a basic expression unless -E or -P says
         # otherwise; -G asks for the default explicitly.
@@ -235,6 +236,7 @@ async def grep_generic(
             f.whole_word,
             f.syntax,
             utf8,
+            f.line_regexp,
         )
     )
     warning = (

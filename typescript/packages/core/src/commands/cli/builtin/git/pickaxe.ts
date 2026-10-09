@@ -124,11 +124,13 @@ export async function greps(
   oid: string,
   parents: readonly string[],
   pattern: RegExp,
+  forceText = false,
 ): Promise<boolean> {
   for (const [oldOid, newOid] of await changes(repo, oid, parents)) {
     const old = await blob(repo, oldOid)
     const now = await blob(repo, newOid)
-    if ([old, now].some((data) => data.subarray(0, BINARY_SNIFF).includes(0))) continue
+    if (!forceText && [old, now].some((data) => data.subarray(0, BINARY_SNIFF).includes(0)))
+      continue
     const before = lines(old)
     const after = lines(now)
     for (const [tag, i1, i2, j1, j2] of getOpcodes(before, after)) {

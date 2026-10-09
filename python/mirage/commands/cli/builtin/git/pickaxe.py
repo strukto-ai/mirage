@@ -117,7 +117,10 @@ def _changes(
 
 
 def greps(
-    store: BaseObjectStore, commit: Commit, pattern: re.Pattern[str]
+    store: BaseObjectStore,
+    commit: Commit,
+    pattern: re.Pattern[str],
+    force_text: bool = False,
 ) -> bool:
     """Whether a commit's diff adds or removes a line the pattern matches,
     git's ``-G``; a binary side is skipped, as git does without ``--text``.
@@ -126,10 +129,13 @@ def greps(
         store (BaseObjectStore): object database holding the trees.
         commit (Commit): the commit to test.
         pattern (re.Pattern[str]): the compiled ``-G`` expression.
+        force_text (bool): include binary changed lines under ``--text``.
     """
     for old_sha, new_sha in _changes(store, commit):
         old, new = _blob(store, old_sha), _blob(store, new_sha)
-        if b"\0" in old[:BINARY_SNIFF] or b"\0" in new[:BINARY_SNIFF]:
+        if not force_text and (
+            b"\0" in old[:BINARY_SNIFF] or b"\0" in new[:BINARY_SNIFF]
+        ):
             continue
         before, after = byte_lines(old), byte_lines(new)
         matcher = SequenceMatcher(a=before, b=after, autojunk=False)

@@ -67,6 +67,40 @@
         "stdout": "/data/a.txt:3\n/data2/xm.txt:1\n/data/a.txt:3\n/data2/xm.txt:1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_grep_whole_line_count",
+      "seq": 16801099,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab\\nabc\\n' > /data/gx.txt; printf 'abc\\n' > /data2/gx.txt; grep -Fxc ab /data/gx.txt /data2/gx.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/gx.txt:1\n/data2/gx.txt:0\n",
+        "stderr": ""
+      }
     }
   ]
 }

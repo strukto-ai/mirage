@@ -58,6 +58,8 @@ jobs:
           # and typescript filters here and in runtime, as config itself does.
           predicate-quantifier: some-with-excludes
           filters: |
+            # Git's grep and ls-tree modules stay under these whole-host
+            # filters, so their disk/RAM CLI corpus runs with either twin.
             core:
               - 'integ/**'
               - 'data/**'

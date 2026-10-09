@@ -26,6 +26,7 @@ from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.fetch import fetch, fetch_read_only
 from mirage.commands.cli.builtin.git.for_each_ref import for_each_ref
 from mirage.commands.cli.builtin.git.fsck import fsck
+from mirage.commands.cli.builtin.git.grep import grep
 from mirage.commands.cli.builtin.git.hash_object import (
     hash_object,
     hash_object_read_only,
@@ -41,6 +42,7 @@ from mirage.commands.cli.builtin.git.inspect import (
 )
 from mirage.commands.cli.builtin.git.log import log
 from mirage.commands.cli.builtin.git.ls_files import ls_files
+from mirage.commands.cli.builtin.git.ls_tree import ls_tree
 from mirage.commands.cli.builtin.git.mv import mv
 from mirage.commands.cli.builtin.git.reflog import reflog
 from mirage.commands.cli.builtin.git.reset import reset
@@ -107,6 +109,9 @@ DATE_OPTION = Option(
 )
 
 DIFF_OPTIONS = (
+    Option(
+        short="-a", long="--text", description="Treat binary files as text"
+    ),
     Option(
         short="-W",
         long="--function-context",
@@ -800,6 +805,124 @@ GIT = CLISpec(
             rest=PATHSPEC,
         ),
         CLISpec(
+            name="grep",
+            fn=verb(grep),
+            description=(
+                "Search tracked files in the working tree, index or named trees"
+            ),
+            options=(
+                Option(
+                    long="--cached",
+                    description="Search index blobs instead of working files",
+                ),
+                Option(
+                    short="-n",
+                    long="--line-number",
+                    description="Show line numbers",
+                ),
+                Option(
+                    short="-i",
+                    long="--ignore-case",
+                    description="Match without regard to case",
+                ),
+                Option(
+                    short="-F",
+                    long="--fixed-strings",
+                    description="Match literal strings",
+                ),
+                Option(
+                    short="-E",
+                    long="--extended-regexp",
+                    description="Use extended regular expressions",
+                ),
+                Option(
+                    short="-G",
+                    long="--basic-regexp",
+                    description="Use basic regular expressions",
+                ),
+                Option(
+                    short="-w",
+                    long="--word-regexp",
+                    description="Match at word boundaries",
+                ),
+                Option(
+                    short="-v",
+                    long="--invert-match",
+                    description="Select nonmatching lines",
+                ),
+                Option(
+                    short="-c",
+                    long="--count",
+                    description="Count selected lines in each matching file",
+                ),
+                Option(
+                    short="-l",
+                    long="--files-with-matches",
+                    description="Show only matching filenames",
+                ),
+                Option(
+                    short="-L",
+                    long="--files-without-match",
+                    description="Show only nonmatching filenames",
+                ),
+                Option(
+                    short="-q",
+                    long="--quiet",
+                    description="Report matches through exit status",
+                ),
+                Option(
+                    short="-e",
+                    type="str",
+                    multiple=True,
+                    description="Match an additional pattern",
+                ),
+                Option(
+                    short="-a",
+                    long="--text",
+                    description="Treat binary files as text",
+                ),
+                Option(short="-I", description="Skip binary files"),
+                Option(
+                    short="-z",
+                    long="--null",
+                    description="Terminate filename fields with NUL",
+                ),
+                Option(
+                    short="-h",
+                    description="Omit filenames from matching lines",
+                ),
+                Option(
+                    short="-H",
+                    description="Show filenames with matching lines",
+                ),
+            ),
+            rest=Operand(type="str", remainder=True),
+        ),
+        CLISpec(
+            name="ls-tree",
+            fn=verb(ls_tree),
+            description="List the contents of a tree object",
+            options=(
+                Option(short="-r", description="Recurse into subtrees"),
+                Option(short="-t", description="Show trees when recursing"),
+                Option(short="-d", description="Only show trees"),
+                Option(short="-z", description="Terminate entries with NUL"),
+                Option(long="--name-only", description="Show only filenames"),
+                Option(
+                    long="--name-status", description="Alias of --name-only"
+                ),
+                Option(
+                    long="--full-name",
+                    description="Show paths relative to the repository root",
+                ),
+                Option(
+                    long="--full-tree",
+                    description="List the whole tree, ignoring the current directory",
+                ),
+            ),
+            rest=REVISION,
+        ),
+        CLISpec(
             name="ls-files",
             fn=verb(ls_files),
             description="Show files in the index",
@@ -903,7 +1026,11 @@ GIT = CLISpec(
             name="fsck",
             fn=verb(fsck),
             description="Verify object hashes and connectivity",
-            options=(Option(long="--full"), Option(long="--no-dangling")),
+            options=(
+                Option(long="--full"),
+                Option(long="--no-dangling"),
+                Option(long="--unreachable"),
+            ),
         ),
         CLISpec(
             name="stash",
