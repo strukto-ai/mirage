@@ -53,7 +53,8 @@ Bucket object keys map to virtual paths under the mount prefix: virtual
 Directory listings are cached with `indexTtl = 600` (10 minutes) and populate
 file-size/type entries that `stat` reads via a fast path, so a `readdir`
 followed by per-entry `stat` calls (what `ls` and most shell commands trigger)
-costs one HTTP request instead of N.
+costs one HTTP request instead of N. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it; see
+[index TTL](/home/cache#index-ttl).
 
 ## Shell Commands
 

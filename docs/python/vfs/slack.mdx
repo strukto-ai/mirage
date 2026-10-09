@@ -106,9 +106,8 @@ profile JSON from the Slack API.
 
 The Slack VFS uses `IndexCacheStore` (same as Discord and other
 mounts). Index entries store channel IDs, DM IDs, user IDs, and
-channel creation timestamps for date range computation. There is no
-separate content cache - file content caching is handled by the
-workspace `IOResult` mechanism.
+channel creation timestamps for date range computation. File bytes go through the workspace
+[file cache](/home/cache).
 
 ## Example
 

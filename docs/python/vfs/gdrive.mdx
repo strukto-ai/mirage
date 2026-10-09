@@ -153,8 +153,8 @@ and replay reads the live file rather than a pinned revision.
 
 The Google Drive VFS uses `IndexCacheStore` (same as Slack,
 Gmail, and other mounts). Index entries store folder IDs, file
-IDs, and file metadata. There is no separate content cache -- file
-content caching is handled by the workspace `IOResult` mechanism.
+IDs, and file metadata. File bytes go through the workspace
+[file cache](/home/cache).
 
 ## Example
 

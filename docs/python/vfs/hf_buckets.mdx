@@ -78,7 +78,8 @@ The HF Buckets VFS uses `IndexCacheStore` with `index_ttl = 600`
 (10 minutes). Directory listings are cached and populate file-size/type
 entries that `stat` reads via a fast path, so a `readdir` followed by
 per-entry `stat` calls (which is what `ls`, FUSE `getattr`, and most
-shell commands trigger) costs one HTTP request instead of N.
+shell commands trigger) costs one HTTP request instead of N. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it; see
+[index TTL](/home/cache#index-ttl).
 
 ## Example
 

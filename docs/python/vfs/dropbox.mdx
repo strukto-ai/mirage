@@ -103,8 +103,10 @@ are acceptable.
 ## Cache
 
 The Dropbox VFS caches directory listings via `IndexCacheStore` to
-reduce repeated API calls during traversal; listings live for the
-mount's `ttl` (600 s by default), at most 24 hours. File reads go
+reduce repeated API calls during traversal; with no `index:` configured, listings live
+for the mount's `ttl` (600 s by default), at most 24 hours; a configured
+`index:` uses its own `ttl`, still capped by the mount's `ttl:`
+([index TTL](/home/cache#index-ttl)). File reads go
 through the standard read cache (`caches_reads = True`).
 
 Under `read: fresh`, a cached file is checked against its `content_hash`
