@@ -58,6 +58,7 @@ vi.mock('../../cache/context.ts', async () => {
     invalidateAfterUnlink: vi.fn(() => Promise.resolve()),
     invalidateSubtree: vi.fn(() => Promise.resolve()),
     invalidateAfterMove: vi.fn(() => Promise.resolve()),
+    writesConditioned: vi.fn(actual.writesConditioned),
   }
 })
 
@@ -66,6 +67,7 @@ import {
   invalidateAfterMove,
   invalidateAfterWrite,
   invalidateSubtree,
+  writesConditioned,
 } from '../../cache/context.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
@@ -324,7 +326,7 @@ describe('box write ops', () => {
     expect(records.map((r) => [r.op, r.path])).toEqual([['copy_prefix', '/data/new']])
   })
 
-  it('a merge records each folder before copying the next', async () => {
+  it('a merge records and evicts each folder before the next', async () => {
     const tree: Record<string, ApiModule.BoxItem[]> = {
       '0': [{ type: 'folder', id: '100', name: 'data' }],
       '100': [
@@ -344,12 +346,20 @@ describe('box write ops', () => {
       H.order.push('copyFolder')
       return Promise.resolve({} as ApiModule.BoxItem)
     })
+    vi.mocked(invalidateSubtree).mockImplementation(() => {
+      H.order.push('evict')
+      return Promise.resolve()
+    })
+    const real = vi.mocked(writesConditioned).getMockImplementation()
+    vi.mocked(writesConditioned).mockReturnValue(true)
     H.order = []
     try {
       await runWithRecording(() => copy(makeAccessor(), spec('/data/sub'), spec('/data/dst')))
-      expect(H.order).toEqual(['copyFolder', 'record', 'copyFolder', 'record'])
+      expect(H.order).toEqual(['copyFolder', 'record', 'evict', 'copyFolder', 'record', 'evict'])
     } finally {
       vi.mocked(api.copyFolder).mockReset()
+      vi.mocked(invalidateSubtree).mockReset()
+      vi.mocked(writesConditioned).mockImplementation(real ?? (() => false))
     }
   })
 

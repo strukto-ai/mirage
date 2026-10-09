@@ -96,7 +96,7 @@ async def retaken(
     return await stale(dst, gone=True)
 
 
-def _landed(
+async def _landed(
     changed: list[tuple[PathSpec, bool]],
     dst: PathSpec,
     whole: bool,
@@ -107,7 +107,9 @@ def _landed(
 
     A later step of the same copy can take a while, and another stage of
     the line may read the path meanwhile: recorded now, the retract
-    stays older than that read.
+    stays older than that read. On a ``write: conditional`` mount the
+    path's cached bytes go with the retract, so that read cannot take the
+    old bytes without the version that would refuse a write of them.
 
     Args:
         changed (list[tuple[PathSpec, bool]]): the copy's changed paths.
@@ -120,6 +122,12 @@ def _landed(
     record("copy_prefix" if whole else "copy", dst.virtual, "box", 0, timer)
     if whole:
         lift_lost(dst, upto, subtree=True)
+    if not writes_conditioned():
+        return
+    if whole:
+        await invalidate_subtree(dst)
+    else:
+        await invalidate_after_write(dst)
 
 
 async def _copy_into(
@@ -176,7 +184,7 @@ async def _copy_into(
             raise enotdir(dst.virtual)
         sent.append((dst, False))
         cond = await replace_file(accessor, dst, existing)
-        _landed(changed, dst, False, timer, upto)
+        await _landed(changed, dst, False, timer, upto)
         cleared = True
     elif existing is None and item.get("type") == "file":
         cond = await replace_file(accessor, dst, None)
@@ -184,12 +192,12 @@ async def _copy_into(
         if item.get("type") == "folder":
             sent.append((dst, True))
             await copy_folder(tm, item["id"], dst_parent, name=new_name)
-            _landed(changed, dst, True, timer, upto)
+            await _landed(changed, dst, True, timer, upto)
         else:
             sent.append((dst, False))
             await copy_file(tm, item["id"], dst_parent, name=new_name)
             if not cleared:
-                _landed(changed, dst, False, timer, upto)
+                await _landed(changed, dst, False, timer, upto)
     except BoxApiError as exc:
         raise (await retaken(exc, cond, dst)) or exc
 
@@ -197,8 +205,10 @@ async def _copy_into(
 async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     """Copy a file or folder server-side, recording each path it changed.
 
-    Each path is recorded as it changes; the eviction runs once the copy
-    ends, also when it fails. A conditional mount evicts
+    Each path is recorded as it changes, and on a conditional mount
+    evicted with its record; a file is evicted again once the copy ends,
+    since a clear and the copy that lands after it are two steps. The
+    eviction runs also when the copy fails. A conditional mount evicts
     only what changed, and a request that raised keeps its held version. A
     folder copied whole also lifts the line's lost marks beneath it; one
     whose request raised evicts its subtree and records nothing.
@@ -223,9 +233,7 @@ async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
                 await invalidate_after_write(dst)
             return
         for spec, whole in changed:
-            if whole:
-                await invalidate_subtree(spec)
-            else:
+            if not whole:
                 await invalidate_after_write(spec)
         landed = {spec.virtual for spec, _whole in changed}
         for spec, whole in sent:

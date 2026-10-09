@@ -80,19 +80,23 @@ export async function retaken(
 /**
  * Record a path the copy changed, as soon as it changed. A later step of the
  * same copy can take a while, and another stage of the line may read the path
- * meanwhile: recorded now, the retract stays older than that read. Mirrors
- * Python's `_landed`.
+ * meanwhile: recorded now, the retract stays older than that read. On a `write:
+ * conditional` mount the path's cached bytes go with the retract, so that read
+ * cannot take the old bytes without the version that would refuse a write of
+ * them. Mirrors Python's `_landed`.
  */
-function landed(
+async function landed(
   changed: [PathSpec, boolean][],
   dst: PathSpec,
   whole: boolean,
   timer: OpTimer,
   upto: number,
-): void {
+): Promise<void> {
   changed.push([dst, whole])
   record(whole ? 'copy_prefix' : 'copy', dst.virtual, 'box', 0, timer)
   if (whole) liftLost(dst, upto, true)
+  if (!writesConditioned(dst)) return
+  await (whole ? invalidateSubtree(dst) : invalidateAfterWrite(dst))
 }
 
 /**
@@ -136,7 +140,7 @@ async function copyInto(
     if (item.type === 'folder') throw enotdir(dst.virtual)
     sent.push([dst, false])
     cond = await replaceFile(accessor, dst, existing)
-    landed(changed, dst, false, timer, upto)
+    await landed(changed, dst, false, timer, upto)
     cleared = true
   } else if (existing === null && item.type === 'file') {
     cond = await replaceFile(accessor, dst, null)
@@ -145,11 +149,11 @@ async function copyInto(
     if (item.type === 'folder') {
       sent.push([dst, true])
       await copyFolder(tm, item.id, dstParent, newName)
-      landed(changed, dst, true, timer, upto)
+      await landed(changed, dst, true, timer, upto)
     } else {
       sent.push([dst, false])
       await copyFile(tm, item.id, dstParent, newName)
-      if (!cleared) landed(changed, dst, false, timer, upto)
+      if (!cleared) await landed(changed, dst, false, timer, upto)
     }
   } catch (err) {
     throw (await retaken(err, cond, dst)) ?? err
@@ -158,7 +162,9 @@ async function copyInto(
 
 /**
  * Copy a file or folder server-side, recording each path it changed. Each path
- * is recorded as it changes; the eviction runs once the copy ends, also when it
+ * is recorded as it changes, and on a conditional mount evicted with its
+ * record; a file is evicted again once the copy ends, since a clear and the
+ * copy that lands after it are two steps. The eviction runs also when the copy
  * fails. A conditional mount evicts only what
  * changed, and a request that raised keeps its held version. A folder copied
  * whole also lifts the line's lost marks beneath it; one whose request raised
@@ -177,10 +183,7 @@ export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec):
         await (folder ? invalidateSubtree(dst) : invalidateAfterWrite(dst))
         return
       }
-      for (const [spec, whole] of changed) {
-        if (whole) await invalidateSubtree(spec)
-        else await invalidateAfterWrite(spec)
-      }
+      for (const [spec, whole] of changed) if (!whole) await invalidateAfterWrite(spec)
       const done = new Set(changed.map(([spec]) => spec.virtual))
       for (const [spec, whole] of sent) {
         if (done.has(spec.virtual)) continue
