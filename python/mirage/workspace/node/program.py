@@ -33,8 +33,7 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.control import (
     UNWINDING,
-    BreakSignal,
-    ContinueSignal,
+    LoopSignal,
     carried,
 )
 from mirage.workspace.executor.jobs import handle_background
@@ -88,7 +87,11 @@ async def execute_program(
     on into the caller, after what the program wrote; any other program
     is a shell of its own and ends there, running its EXIT action
     through ``execute_fn``. Either resumes at its next line after an
-    error that discards one, unless it runs in a child shell.
+    error that discards one, unless it runs in a child shell. ``set -n``
+    stops the loop at the next statement, so a later ``set +n`` never
+    runs. ``set -v`` echoes each input line once, as the first statement
+    on it runs, from the line after the last one echoed, comments and
+    blank lines included, so ``set -v; echo a`` echoes nothing.
     """
     session = context.session
     # Every program loop is one parse, which is the unit bash's alias
@@ -147,7 +150,6 @@ async def _run_program(
     all_stdout: list[Any] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="", exit_code=0)
-    # Source lines and the highest one `set -v` has already echoed.
     source_lines = get_text(node).split("\n")
     echoed_row = -1
     bound = fd0_binding(session)
@@ -156,38 +158,12 @@ async def _run_program(
     while i < len(children):
         child = children[i]
 
-        if (
-            not child.is_named
-            or child.type == NT.ERROR
-            or child.type == NT.COMMENT
-        ):
-            if child.type == NT.SEMI:
-                i += 1
-                continue
+        if not child.is_named or child.type in (NT.ERROR, NT.COMMENT):
             i += 1
             continue
-
-        # `set -n` reads without executing, so every statement after the
-        # one that set it is skipped. Checking here rather than deeper
-        # gives bash's one-way trip for free: a later `set +n` is itself
-        # a statement, so it never runs and cannot turn execution back
-        # on within the same input.
         if session.shell_options.get("noexec"):
             break
-
-        # `set -v` echoes input to stderr as the reader consumes it, and
-        # the unit is a *line*, not a statement: GNU answers
-        # `set -v; echo a` with nothing at all, because that whole line
-        # was already read before the option took effect, while
-        # `set -v\necho a` echoes the second line. So a line is echoed
-        # once, when the first statement on it runs, and a statement
-        # spanning several lines carries all of them.
         if child.start_point[0] > echoed_row:
-            # From the line after the last one echoed, not from this
-            # statement's own row: the reader consumes comments and
-            # blank lines too, so `# note`, an empty line and `echo ok`
-            # all reach stderr. Clamping to the next executable row
-            # dropped everything that carried no node.
             first = echoed_row + 1
             last = child.end_point[0]
             if session.shell_options.get("verbose") and last >= first:
@@ -198,12 +174,8 @@ async def _run_program(
                     all_stdout,
                     merged_io,
                 )
-            # Marked read either way: a line reaches the reader once, so
-            # a line whose own first statement turned the option on was
-            # already past it and is never echoed.
             echoed_row = last
 
-        # Check for background: named node followed by & token
         if i + 1 < len(children) and children[i + 1].type == NT.BACKGROUND:
             try:
                 stdout, io, last_exec = await handle_background(
@@ -263,8 +235,6 @@ async def _run_program(
                     call_stack,
                     sink=recorder,
                 )
-            # Materialize stdout so lazy exit codes (e.g. from
-            # exit_on_empty in grep) are finalized before $? is set.
             try:
                 stdout = await materialize(stdout)
             except OSError as exc:
@@ -354,7 +324,7 @@ async def _run_program(
 
 
 async def _unwound(
-    sig: BreakSignal | ContinueSignal | ReturnSignal | ExitSignal,
+    sig: LoopSignal | ReturnSignal | ExitSignal,
     child: TSNodeLike,
     context: EvaluationContext,
     stdin: ByteSource | None,
@@ -374,8 +344,7 @@ async def _unwound(
     error bash treats as one.
 
     Args:
-        sig (BreakSignal | ContinueSignal | ReturnSignal | ExitSignal):
-            one of ``UNWINDING``.
+        sig (LoopSignal | ReturnSignal | ExitSignal): one of ``UNWINDING``.
         child (TSNodeLike): the statement it left.
         context (EvaluationContext): the shell.
         stdin (ByteSource | None): its standard input.
@@ -427,7 +396,7 @@ async def _unwound(
         )
     if sig.stdout:
         all_stdout.append(sig.stdout)
-    if isinstance(sig, (BreakSignal, ContinueSignal)):
+    if isinstance(sig, LoopSignal):
         code, stderr = sig.io.exit_code, sig.io.stderr
     else:
         code, stderr = sig.exit_code, sig.stderr

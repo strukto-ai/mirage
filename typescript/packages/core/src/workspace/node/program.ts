@@ -26,13 +26,7 @@ import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { isFsError } from '../../errors/fs.ts'
-import {
-  BreakSignal,
-  ContinueSignal,
-  carried,
-  isUnwinding,
-  type Unwinding,
-} from '../executor/control.ts'
+import { carried, isUnwinding, LoopSignal, type Unwinding } from '../executor/control.ts'
 import { divertStatement } from '../executor/builtins/exec/index.ts'
 import { handleBackground } from '../executor/jobs.ts'
 import type { ExecuteNodeFn } from '../executor/command/types.ts'
@@ -60,6 +54,29 @@ import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
+/**
+ * Execute program node (root / semicolon-separated).
+ *
+ * `dispatch` is the dispatcher, threaded so an active `exec` redirect can
+ * send each statement's output to its file; undefined (a nested loop that
+ * is not the program root) leaves output undiverted. `handed` and
+ * `decisions` are the line's hand-off and its ledger, for a background job
+ * to borrow. `sink` takes each statement's output as it finishes, in the
+ * order it was written, instead of the result. The outermost program of a
+ * session's line routes what a statement wrote to the session's terminal
+ * through a copy (`exec 3>&1`); a nested one (`eval`, `source`) leaves that
+ * to it. An `inline` program runs on its caller's frames (`eval`, `source`,
+ * an alias, `$( )`), so an `exit`, `return`, `break` or `continue` goes on
+ * into the caller, after what the program wrote; any other program is a
+ * shell of its own and ends there, running its EXIT action through
+ * `executeFn`. Either resumes at its next line after an error that
+ * discards one, unless it runs in a child shell. `set -n` stops the loop at
+ * the next statement, so a later `set +n` never runs. `set -v` echoes each
+ * input line once, as the first statement on it runs, from the line after
+ * the last one echoed, comments and blank lines included, so `set -v; echo
+ * a` echoes nothing. An ERROR node is a fragment the grammar recovered from
+ * in a line bash reads (checkSyntax refuses the rest), skipped.
+ */
 export async function executeProgram(
   recurse: ExecuteNodeFn,
   node: TSNodeLike,
@@ -68,24 +85,10 @@ export async function executeProgram(
   callStack: CallStack | null,
   jobTable: JobTable,
   agentId: string,
-  // The dispatcher, threaded so an active `exec` redirect can send each
-  // statement's output to its file; undefined (a nested loop that is not
-  // the program root) leaves output undiverted.
   dispatch?: DispatchFn,
-  // The line's hand-off and its ledger, for a background job to borrow.
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
-  // Takes each statement's output as it finishes, in the order it was
-  // written, instead of the result. The outermost program of a session's
-  // line routes what a statement wrote to the session's terminal through a
-  // copy (`exec 3>&1`); a nested one (`eval`, `source`) leaves that to it.
   sink: JobConsole | null = null,
-  // An inline program runs on its caller's frames (`eval`, `source`, an
-  // alias, `$( )`), so an `exit`, `return`, `break` or `continue` goes on
-  // into the caller, after what the program wrote; any other program is a
-  // shell of its own and ends there, running its EXIT action through
-  // `executeFn`. Either resumes at its next line after an error that
-  // discards one, unless it runs in a child shell.
   inline = false,
   executeFn: ExecuteFn | null = null,
 ): Promise<Result> {
@@ -147,7 +150,6 @@ async function runProgram(
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: '', exitCode: 0 })
-  // Source lines and the highest one `set -v` has already echoed.
   const sourceLines = getText(node).split('\n')
   let echoedRow = -1
   const bound = fd0Binding(session)
@@ -155,43 +157,13 @@ async function runProgram(
   let i = 0
   while (i < children.length) {
     const child = children[i]
-    if (child === undefined) {
+    if (child?.isNamed !== true || child.type === NT.COMMENT || child.type === NT.ERROR) {
       i += 1
       continue
     }
-    if (child.isNamed !== true || child.type === NT.COMMENT) {
-      i += 1
-      continue
-    }
-    if (child.type === NT.ERROR) {
-      // A line bash refuses never gets here (checkSyntax gates it), so an
-      // ERROR node is a fragment the grammar recovered from in a line bash
-      // reads, which we deliberately skip.
-      i += 1
-      continue
-    }
-
-    // `set -n` reads without executing, so every statement after the
-    // one that set it is skipped. Checking here rather than deeper
-    // gives bash's one-way trip for free: a later `set +n` is itself
-    // a statement, so it never runs and cannot turn execution back
-    // on within the same input.
     if (session.shellOptions.noexec === true) break
-
-    // `set -v` echoes input to stderr as the reader consumes it, and
-    // the unit is a *line*, not a statement: GNU answers
-    // `set -v; echo a` with nothing at all, because that whole line
-    // was already read before the option took effect, while
-    // `set -v\necho a` echoes the second line. So a line is echoed
-    // once, when the first statement on it runs, and a statement
-    // spanning several lines carries all of them.
     const startRow = child.startPosition?.row ?? 0
     if (startRow > echoedRow) {
-      // From the line after the last one echoed, not from this
-      // statement's own row: the reader consumes comments and blank
-      // lines too, so `# note`, an empty line and `echo ok` all reach
-      // stderr. Clamping to the next executable row dropped everything
-      // that carried no node.
       const first = echoedRow + 1
       const last = child.endPosition?.row ?? startRow
       if (session.shellOptions.verbose === true && last >= first) {
@@ -203,9 +175,6 @@ async function runProgram(
           mergedIo,
         )
       }
-      // Marked read either way: a line reaches the reader once, so
-      // a line whose own first statement turned the option on was
-      // already past it and is never echoed.
       echoedRow = last
     }
 
@@ -428,7 +397,7 @@ async function unwound(
     throw await carried(err, parts.length > 0 ? asyncChain(parts) : null, mergedIo)
   }
   if (err.stdout !== null) allStdout.push(err.stdout)
-  const looped = err instanceof BreakSignal || err instanceof ContinueSignal
+  const looped = err instanceof LoopSignal
   const code = looped ? err.io.exitCode : err.exitCode
   mergedIo = await mergedIo.merge(
     new IOResult({ exitCode: code, stderr: looped ? err.io.stderr : err.stderr }),

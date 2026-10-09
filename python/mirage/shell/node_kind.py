@@ -23,8 +23,8 @@ class NodeKind(StrEnum):
     """Statement kinds the executor dispatches on.
 
     `node_kind` owns every tree-sitter node-type check, including the
-    lookahead that distinguishes `select` from `for` and `until` from
-    `while`.
+    lookahead that distinguishes `select` from `for`, `until` from
+    `while` and a `(( ))` command from a `{ }` group.
     """
 
     COMMENT = "comment"
@@ -36,6 +36,7 @@ class NodeKind(StrEnum):
     REDIRECT = "redirect"
     SUBSHELL = "subshell"
     COMPOUND = "compound"
+    ARITH = "arith"
     IF = "if"
     FOR = "for"
     CFOR = "cfor"
@@ -112,10 +113,6 @@ def pipeline_transparent(node: Any) -> bool:
         node (Any): tree-sitter node of the statement that just finished.
     """
     kind = node_kind(node)
-    if kind == NodeKind.COMPOUND:
-        # `(( ))` parses as a compound statement too, and it is a
-        # command of its own, not a group.
-        return not (node.children and node.children[0].type == NT.ARITH_OPEN)
     if kind == NodeKind.REDIRECT:
         # A redirected statement is as transparent as what it redirects:
         # `{ false | true; } >f` keeps the group's record, while
@@ -184,6 +181,9 @@ def node_kind(node: Any) -> NodeKind:
     """
     ntype = node.type
     simple = _SIMPLE_KINDS.get(ntype)
+    if simple == NodeKind.COMPOUND and node.children:
+        if node.children[0].type == NT.ARITH_OPEN:
+            return NodeKind.ARITH
     if simple is not None:
         return simple
     if ntype == NT.FOR_STATEMENT:

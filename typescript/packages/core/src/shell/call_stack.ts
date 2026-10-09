@@ -138,22 +138,8 @@ export class CallStack {
     return frames.reverse().map((frame) => frame.functionName)
   }
 
-  getPositional(index: number): string {
-    const pos = this.current.positional
-    if (index > 0 && index <= pos.length) return pos[index - 1] ?? ''
-    return ''
-  }
-
   getAllPositional(): string[] {
     return this.current.positional
-  }
-
-  getPositionalCount(): number {
-    return this.current.positional.length
-  }
-
-  shift(n = 1): void {
-    this.current.positional = this.current.positional.slice(n)
   }
 
   setPositional(values: string[]): void {
