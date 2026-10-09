@@ -27,7 +27,7 @@ const KNOWN = new Set(['run', 'epoch', 'tenants', 'fixture', 'extras'])
 // One body shape and one response shape, replacing five incompatible ones on
 // the same path. Every field but `run` is optional, and an unknown field
 // is refused rather than ignored: a host that sends `workspace` where the kit
-// wants `tenants` must fail loudly at the door, not silently reset the wrong
+// wants `tenants` must fail loudly on arrival, not silently reset the wrong
 // thing and then disagree with the other host.
 export function parseResetBody(
   raw: JsonValue,

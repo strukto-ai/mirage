@@ -1,0 +1,107 @@
+{
+  "cases": [
+    {
+      "note": "rmdir(2) refuses a non-empty directory, and the refusal has to come from the op, not from the command builder. The shell battery cannot see this: `rmdir` the builtin checks emptiness itself before it calls the op, so it passes on a backend whose op deletes the whole subtree. The facade is the surface FUSE, ws.vfs and the sandbox runtimes share, and it calls the op directly.",
+      "id": "rmdir_refuses_a_nonempty_directory",
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir -p /data/qrmdop && echo keep > /data/qrmdop/keep.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "rmdir",
+            "path": "/data/qrmdop"
+          },
+          "expect": {
+            "errno": "ENOTEMPTY"
+          }
+        },
+        {
+          "command": "cat /data/qrmdop/keep.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "keep\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rmdir_removes_an_empty_directory",
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir -p /data/qrmdhollow",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "rmdir",
+            "path": "/data/qrmdhollow"
+          },
+          "expect": {}
+        },
+        {
+          "facade": {
+            "method": "is_dir",
+            "path": "/data/qrmdhollow"
+          },
+          "expect": {
+            "value": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "rmdir_on_a_missing_directory_is_enoent",
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "rmdir",
+            "path": "/data/qrmdnever"
+          },
+          "expect": {
+            "errno": "ENOENT"
+          }
+        }
+      ]
+    }
+  ]
+}

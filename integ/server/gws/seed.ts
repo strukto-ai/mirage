@@ -43,7 +43,7 @@ export function seedCalendars(st: GwsState, entries: JsonObj[]): void {
     const timeZone = asStr(entry.timeZone) ?? DEFAULT_CALENDAR_TZ
     // Every timed event now renders in the calendar's zone, so an
     // unresolvable one would throw a RangeError out of Intl on read
-    // rather than here. The fake fails at the door instead.
+    // rather than here. The fake fails the reset instead.
     if (!isIanaZone(timeZone)) {
       throw new ResetBodyError(
         `seed calendar ${entry.id ?? ''} timeZone is not a zone: ${timeZone}`,

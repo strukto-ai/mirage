@@ -96,12 +96,12 @@ same PR.
   after theirs. `CLISpec` is a `CommandSpec`, so it gets no exemption.
 - **CLIs (`CLISpec`)** are the agent's tools, dispatched by name. An account
   CLI declares a `config_model` and consults no mount; `git` declares none
-  and reads its repository through `CLIDoors`. `register_cli` is host-side
+  and reads its repository through `CLIView`. `register_cli` is host-side
   only; there is no install builtin. A CLI that mimics a real program is
   gated against that program (`integ/ntn_conformance.ts`).
-- **Mount configs** are one snake_case block with one door per language,
-  `build_vfs` and `buildVfs` (`parseConfigWithSchema`). Field sets are gated
-  by live VFS manifests and `integ/config/`.
+- **Mount configs** are one snake_case block with one config loader per
+  language, `build_vfs` and `buildVfs` (`parseConfigWithSchema`). Field sets
+  are gated by live VFS manifests and `integ/config/`.
 - **YAML keys**, the `mirage` CLI output, the server API and the agent
   adapters are public. A TypeScript API change gets a changeset.
 - **Handlers** take `(accessor, paths, texts, opts)`. Read flags through a
@@ -170,7 +170,7 @@ parser, before classification.
 ### CLISpec
 
 `commands/cli/`: a typed program tree bound to a head word. One
-`CLIInvocation` per leaf; `inv.doors` (`dispatch`, `stat_path`, `ns`,
+`CLIInvocation` per leaf; `inv.view` (`dispatch`, `stat_path`, `ns`,
 `session_view`) is the only way to a mount. `man`, `--help`, `type -t` and
 `which` derive from the spec. `ntn` is the worked example (CLAP voice, a
 serde_json-faithful scanner, exit 1 for a bad body and 5 for a bad line).
