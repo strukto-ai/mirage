@@ -136,7 +136,7 @@ def written_verdict(
     return True, newest.fingerprint or None
 
 
-async def _set_cached(
+async def set_cached(
     cache: FileCacheMixin,
     path: str,
     data: bytes,
@@ -379,7 +379,7 @@ async def apply_io(
         if data is None:
             continue
         if isinstance(data, bytes):
-            await _set_cached(cache, path, data, written, records, cache_facts)
+            await set_cached(cache, path, data, written, records, cache_facts)
         elif isinstance(data, CachableAsyncIterator):
             if written is not None and (data.discarded or not data.exhausted):
                 # No claimer returns a written stream it did not finish
@@ -391,7 +391,7 @@ async def apply_io(
             if data.discarded:
                 continue
             if data.exhausted:
-                await _set_cached(
+                await set_cached(
                     cache,
                     path,
                     b"".join(data.buffered_chunks),

@@ -107,7 +107,7 @@ class _RenderingRAM(_CachingRAM):
 
 async def _seed(ws: Workspace, path: str) -> None:
     await ws.vfs.write(path, b"STORED")
-    await ws.apply_io(IOResult(reads={path: b"CACHED"}, cache=[path]))
+    await ws.cache.set(path, b"CACHED", ttl=ws.mount("/data/").read.ttl)
 
 
 @pytest.mark.asyncio

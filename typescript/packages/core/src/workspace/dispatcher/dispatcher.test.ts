@@ -939,6 +939,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
     // and the whole read, are served from it.
     const { ws, fetched } = counted()
     await ws.vfs.write('/data/f.count', 'STORED')
+    await ws.cache.remove('/data/f.count')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 2 }))).toBe('BO')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 2, size: 2 }))).toBe('DY')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 0 }))).toBe('')
@@ -978,18 +979,21 @@ describe('a cold read keeps its bytes for the next reader', () => {
     // A store that serves a range itself moved only that range.
     const { ws } = counted(false, '.count')
     await ws.vfs.write('/data/f.txt', '0123456789')
+    await ws.cache.remove('/data/f.txt')
     expect(DEC.decode(await ws.vfs.read('/data/f.txt', { offset: 2, size: 3 }))).toBe('234')
     expect(await ws.cache.exists('/data/f.txt')).toBe(false)
   })
 
   it('keeps nothing when a write races the fetch', async () => {
     // The write lands after the fetch began, so the bytes it read may be
-    // older than the file; keeping them would serve the old file.
+    // older than the file; keeping them would serve the old file. The
+    // write keeps its own bytes, which the next read is served.
     const { ws, fetched } = counted(true)
     await ws.vfs.write('/data/f.count', 'STORED')
+    await ws.cache.remove('/data/f.count')
     await ws.vfs.read('/data/f.count')
-    await ws.vfs.read('/data/f.count')
-    expect(fetched).toHaveLength(2)
+    expect(await ws.vfs.cat('/data/f.count')).toBe('NEWER')
+    expect(fetched).toHaveLength(1)
   })
 
   it.each([
@@ -1004,6 +1008,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
       // with no native range fills the whole file too.
       const { ws } = counted()
       await ws.vfs.write('/data/f.count', 'STORED')
+      await ws.cache.remove('/data/f.count')
       const mount = ws.mount('/data')
       const probe = ws.cache.get.bind(ws.cache)
       const ready = mount.ensureReady.bind(mount)
@@ -1676,7 +1681,7 @@ describe('a streamed read', () => {
       await ws.dispatch('write', TAPE, [ENC.encode('new')])
       expect((await pullAll(stream))[0]).toBe('0123456789')
       expect(DEC.decode((await ws.dispatch('read', TAPE)) as Uint8Array)).toBe('new')
-      expect(tape.reads).toBe(1)
+      expect(tape.reads).toBe(0)
     } finally {
       await ws.close()
     }

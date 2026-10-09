@@ -57,7 +57,7 @@ from mirage.observe.context import (
     record,
     start_op,
 )
-from mirage.observe.record import OpRecord
+from mirage.observe.record import WRITE_FINGERPRINT_OPS, OpRecord
 from mirage.policy.boundary import Boundary
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.types import EntryGate
@@ -1167,10 +1167,48 @@ class Dispatcher:
         async with AsyncExitStack() as held:
             for key in sorted(keys):
                 await held.enter_async_context(self._writers.with_lock(key))
-            result = await mount.call(call.name, call.path.virtual, **kwargs)
+            scope = RecordingScope(active=active_recorder() is None)
+            try:
+                with command_records() as mine:
+                    result = await mount.call(
+                        call.name, call.path.virtual, **kwargs
+                    )
+            finally:
+                scope.close()
             _served(call.report, result)
             await self._settle_write(mount, call.name, call.path, kwargs)
+            await self._keep_written(call, mount, mine)
         return result
+
+    async def _keep_written(
+        self, call: _Call, mount: MountEntry, records: list[OpRecord]
+    ) -> None:
+        """Keep a whole write's bytes for the next read, under its name's hold.
+
+        The write's own record labels them with the token the backend
+        answered, so a ``fresh`` mount does not refetch what it just wrote;
+        a record moving another length than was sent keeps nothing.
+
+        Args:
+            call (_Call): the write that ran.
+            mount (MountEntry): the mount it ran on.
+            records (list[OpRecord]): the records the write emitted.
+        """
+        data = call.kwargs.get("data")
+        facts = _facts_of(mount)
+        if (
+            call.name != "write"
+            or not isinstance(data, bytes)
+            or not facts.cacheable
+            or call.renders_read(mount)
+        ):
+            return
+        for rec in records:
+            if rec.op in WRITE_FINGERPRINT_OPS and rec.path == call.path.virtual:
+                rec.claimed = data
+        await cache_io.set_cached(
+            self._cache, call.path.virtual, data, data, records, lambda _: facts
+        )
 
     def _filter(self, call: _Call, result: Any) -> Any:
         """Merge the namespace into a backend answer and drop hidden names.

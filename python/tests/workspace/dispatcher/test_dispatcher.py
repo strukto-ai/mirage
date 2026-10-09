@@ -1219,6 +1219,7 @@ async def test_ranges_of_an_unranged_read_come_from_one_kept_read():
     # the rest, and the whole read, are served from it.
     ws, fetched = _counted_workspace()
     await ws.vfs.write("/data/f.count", b"STORED")
+    await ws.cache.remove("/data/f.count")
     assert await ws.vfs.read("/data/f.count", 0, 2) == b"BO"
     assert await ws.vfs.read("/data/f.count", 2, 2) == b"DY"
     assert await ws.vfs.read("/data/f.count", 0, 0) == b""
@@ -1261,6 +1262,7 @@ async def test_a_natively_ranged_read_keeps_nothing():
     # A store that serves a range itself moved only that range.
     ws, _ = _counted_workspace(filetype=".count")
     await ws.vfs.write("/data/f.txt", b"0123456789")
+    await ws.cache.remove("/data/f.txt")
     assert await ws.vfs.read("/data/f.txt", 2, 3) == b"234"
     assert not await ws.cache.exists("/data/f.txt")
 
@@ -1268,12 +1270,14 @@ async def test_a_natively_ranged_read_keeps_nothing():
 @pytest.mark.asyncio
 async def test_a_write_racing_the_fetch_keeps_the_read_out_of_the_cache():
     # The write lands after the fetch began, so the bytes it read may be
-    # older than the file; keeping them would serve the old file.
+    # older than the file; keeping them would serve the old file. The
+    # write keeps its own bytes, which the next read is served.
     ws, fetched = _counted_workspace(race=True)
     await ws.vfs.write("/data/f.count", b"STORED")
+    await ws.cache.remove("/data/f.count")
     await ws.vfs.read("/data/f.count")
-    await ws.vfs.read("/data/f.count")
-    assert len(fetched) == 2
+    assert await ws.vfs.read("/data/f.count") == b"NEWER"
+    assert len(fetched) == 1
 
 
 @pytest.mark.asyncio
@@ -1328,6 +1332,7 @@ async def test_a_renderer_registered_after_the_probe_is_not_kept(
     # store with no native range fills the whole file too.
     ws, _ = _counted_workspace()
     await ws.vfs.write("/data/f.count", b"STORED")
+    await ws.cache.remove("/data/f.count")
     mount = ws.mount("/data/")
     probe, ready = ws.cache.get, mount.ensure_ready
     probed = False
@@ -1769,7 +1774,7 @@ async def test_a_write_during_a_stream_keeps_none_of_it():
         await ws.dispatch("write", TAPE, data=b"new")
         assert [chunk async for chunk in stream][0] == b"0123456789"
         got, _ = await ws.dispatch("read", TAPE)
-        assert (got, tape.reads) == (b"new", 1)
+        assert (got, tape.reads) == (b"new", 0)
 
 
 @pytest.mark.asyncio

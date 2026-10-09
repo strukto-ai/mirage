@@ -119,6 +119,21 @@ describe('object-store write fingerprint (mocked S3)', () => {
     }
   })
 
+  it('a write outside a line keeps its bytes with the backend token', async () => {
+    // The dispatcher keeps a whole write's bytes for every caller, so a
+    // `fresh` mount serves them back after one probe, without a download.
+    const ws = makeWorkspace(FRESH)
+    try {
+      await ws.vfs.write('/s3/x.txt', 'hello\n')
+      mock.calls.clear()
+      expect(await ws.vfs.cat('/s3/x.txt')).toBe('hello\n')
+      expect(await ws.cache.isFresh('/s3/x.txt', etagOf('hello\n'))).toBe(true)
+      expect(mock.calls.get('GetObject') ?? 0).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('read-then-write on one line keeps the read token', async () => {
     // `IOResult.merge` unions a line's reads and writes, and applyIo
     // caches the read's bytes. If those bytes were stamped with the

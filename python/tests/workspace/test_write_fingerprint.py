@@ -151,6 +151,30 @@ def test_always_reads_a_written_path_from_cache():
     )
 
 
+def test_a_write_outside_a_line_keeps_its_bytes_with_the_backend_token():
+    # The dispatcher keeps a whole write's bytes for every caller, so a
+    # `fresh` mount serves them back after one probe, without a download.
+    store: dict[str, bytes] = {}
+    with _workspace(store, ReadSpec(policy=ReadPolicy.FRESH)) as (ws, client):
+
+        async def run() -> tuple[bytes, bool]:
+            try:
+                await ws.vfs.write("/s3/x.txt", b"hello\n")
+                client.calls.clear()
+                served = await ws.vfs.read("/s3/x.txt")
+                return served, await ws.cache.is_fresh(
+                    "/s3/x.txt", _etag(b"hello\n")
+                )
+            finally:
+                await ws.close()
+
+        served, tokened = asyncio.run(run())
+
+    assert served == b"hello\n"
+    assert tokened
+    assert client.calls["get_object"] == 0
+
+
 def test_read_then_write_on_one_line_keeps_the_read_token():
     """`IOResult.merge` unions a line's reads and writes, and apply_io
     caches the read's bytes. If those bytes were stamped with the write's

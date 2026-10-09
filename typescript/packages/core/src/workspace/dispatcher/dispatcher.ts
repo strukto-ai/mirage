@@ -14,7 +14,7 @@
 
 import type { OpKwargs } from '../../view/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { applyIo } from '../../cache/file/io.ts'
+import { applyIo, setCached } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { CacheManager } from '../../cache/manager.ts'
@@ -59,7 +59,7 @@ import {
   startOp,
 } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
-import type { OpRecord } from '../../observe/record.ts'
+import { WRITE_FINGERPRINT_OPS, type OpRecord } from '../../observe/record.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -1012,15 +1012,25 @@ export class Dispatcher {
         const keys = [...new Set([p.virtual, ...(renameDst !== null ? [renameDst.virtual] : [])])]
           .map((virtual) => `${String(this.storeId(vfs))}:${mountKey(virtual, prefix)}`)
           .sort(compareCodePoints)
+        let mine: OpRecord[] = []
+        const own = (onCall: (storeCall: Promise<unknown>) => void): Promise<unknown> =>
+          commandRecords((records) => {
+            mine = records
+            return run(fullKwargs, onCall)
+          })
         result = await this.holdWrite(
           keys,
           opTimeout,
           name,
           `${name} ${p.virtual}`,
-          (onCall) => run(fullKwargs, onCall),
+          (onCall) =>
+            activeRecords() === undefined
+              ? runWithRecording(() => own(onCall)).then(([value]) => value)
+              : own(onCall),
           async (value) => {
             served(report, value)
             await this.settleWrite(name, p, renameDst, fullArgs, operands(name, call.args, kwargs))
+            await this.keepWritten(call, mount, fullArgs, mine)
           },
         )
       } else {
@@ -1047,6 +1057,36 @@ export class Dispatcher {
     // erase a transfer the backend already made.
     served(report, result)
     return [result, renameDst, fullArgs]
+  }
+
+  /**
+   * Keep a whole write's bytes for the next read, under its name's hold.
+   *
+   * The write's own record labels them with the token the backend
+   * answered, so a `fresh` mount does not refetch what it just wrote; a
+   * record moving another length than was sent keeps nothing. Mirrors
+   * Python's Dispatcher._keep_written.
+   */
+  private async keepWritten(
+    call: Call,
+    mount: MountEntry,
+    args: readonly unknown[],
+    records: readonly OpRecord[],
+  ): Promise<void> {
+    const data = args[0]
+    const facts = factsOf(mount)
+    if (
+      call.name !== 'write' ||
+      !(data instanceof Uint8Array) ||
+      !facts.cacheable ||
+      this.rendersRead(call, mount)
+    ) {
+      return
+    }
+    for (const rec of records) {
+      if (WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === call.path.virtual) rec.claimed = data
+    }
+    await setCached(this.cache, call.path.virtual, data, data, records, () => facts)
   }
 
   /**
