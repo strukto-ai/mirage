@@ -628,7 +628,7 @@ async def handle_cfor(
         # bash: the loop aborts with status 1, keeping the output
         # of iterations that already ran. PolicyDenied is a header
         # expression assigning a hidden name, refused by the same
-        # entry point as any denied assignment.
+        # session view as any denied assignment.
         if isinstance(exc, ReadonlyError):
             err = encode_text(f"bash: {exc}\n")
         elif isinstance(exc, PolicyDenied):

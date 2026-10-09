@@ -822,7 +822,7 @@ export function betweenFiles(f: RgFlags): string {
 // itself whatever the filters say, and a directory walked. `boundary` is the
 // mounts --one-file-system keeps each walk to its operand's own, null when
 // the walk may enter any directory; `resolver` the namespace's links and the
-// entry point past them, which -L walks through.
+// dispatcher past them, which -L walks through.
 export async function* haystacks(
   paths: readonly PathSpec[],
   rd: (path: string) => Promise<string[]>,

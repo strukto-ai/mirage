@@ -22,5 +22,5 @@ export interface FlushStep {
   readonly length?: number
 }
 
-/** The entry point's read of `(offset, size)`; a null size reads to the end. */
+/** The file adapter's read of `(offset, size)`; a null size reads to the end. */
 export type FileFetch = (offset: number, size: number | null) => Promise<Uint8Array>

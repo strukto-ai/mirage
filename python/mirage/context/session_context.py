@@ -170,7 +170,7 @@ def get_current_session_unless_foreign(
 ) -> SessionState | None:
     """The bound session, unless another owner published it.
 
-    A dispatcher keeps the session it is reached under, so it never
+    An entry point keeps the session it is reached under, so it never
     widens a caller's view: a command's runtime, a kernel mount and a
     guest runtime all bind before they call. A binding that names an
     owner other than ``owner`` is another workspace's, and its session
@@ -431,7 +431,7 @@ def explaining() -> list[VfsExplanation] | DryRun | None:
 
 
 def note_refusal(refusal: Refusal) -> None:
-    """Hand an entry point's refusal to the line running in this context; a
+    """Hand an entry point's refusal to the line running in this context; an
     entry point reached outside any line (a programmatic op) has no line to
     tell, and the record rides the raised error alone.
 
@@ -455,11 +455,11 @@ def set_walk_probe(probe: WalkProbe) -> Token[Any]:
     Set by ``Mount.run_command`` around the handler, beside the mount
     gate: the command tier reaches its backend without passing the
     dispatcher, so the walk guard on its I/O proves an operand's
-    ``.`` and ``..`` with the entry point's stat and link follow through this
+    ``.`` and ``..`` with the dispatcher's stat and link follow through this
     binding.
 
     Args:
-        probe (WalkProbe): the entry point's stat and the namespace's follow.
+        probe (WalkProbe): the dispatcher's stat and the namespace's follow.
     """
     return _current_walk_probe.set(probe)
 
@@ -629,17 +629,17 @@ def program_invocation(session: SessionState) -> bool:
 
 
 def redirect_target_judged(virtual: str) -> bool:
-    """Whether a path is a redirect target the command entry point already
+    """Whether a path is a redirect target command admission already
     judged for the statement writing it now.
 
-    The dispatcher ask this, and unlike :func:`redirect_paths_for` it
+    The dispatcher asks this, and unlike :func:`redirect_paths_for` it
     takes no node id, because by the time the shell writes the file the
-    node has returned and an entry point sees only a path. The binding is what
+    node has returned and the dispatcher sees only a path. The binding is what
     keeps that honest: it exists only while one statement's targets are
     being written, and a statement whose targets a rule refused never
     reaches the write at all. So a bound target is one the line was
-    admitted with, and re-deriving a verdict for it from an entry point that
-    knows neither the line nor the nod it holds can only get it wrong.
+    admitted with, and re-deriving a verdict for it from the dispatcher, which
+    knows neither the line nor the nod it holds, can only get it wrong.
 
     Args:
         virtual (str): absolute virtual path of the op.

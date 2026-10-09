@@ -1351,7 +1351,7 @@ async def test_ln_refuses_a_name_a_file_already_holds():
 
     ``ln`` checked only its own table, so the link node landed on top of
     a live file: the bytes stayed in the backend, unreachable, and the
-    name read as a dangling link. The entry point owns the rule now, because it
+    name read as a dangling link. The dispatcher owns the rule now, because it
     is the only layer that sees both planes.
     """
     ws = _ws()
@@ -1409,7 +1409,7 @@ async def test_ln_sf_replaces_a_regular_file():
 
 @pytest.mark.asyncio
 async def test_mv_of_a_link_passes_the_admission_gate():
-    """The link rename is the entry point's, so a policy that denies it wins.
+    """The link rename is the dispatcher's, so a policy that denies it wins.
 
     mv used to move the node itself, which meant the one write in the
     shell that no admission policy could see.

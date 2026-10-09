@@ -152,7 +152,7 @@ function countNoun(count: number, singular: string, plural: string): string {
   return count === 1 ? singular : `${String(count)} ${plural}`
 }
 
-// Read a path through the workspace's entry point, on whatever mount holds it: a
+// Read a path through the workspace's dispatcher, on whatever mount holds it: a
 // checksum list names files anywhere, not on the list's mount. A stdin name
 // (`-`, /dev/stdin) reads the command's input through `stream`, on the
 // cursor the list itself reads from. Mirrors Python's dispatched_reader.

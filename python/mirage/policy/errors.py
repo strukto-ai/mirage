@@ -27,7 +27,7 @@ class PolicyError(Exception):
 
 
 class Explained(Exception):
-    """A dry run reached the op gate: the entry point stops there, before any
+    """A dry run reached the op gate: the dispatcher stops there, before any
     backend or cache is touched, with what the gate would answer noted
     for ``session.explain.vfs``."""
 
@@ -42,14 +42,14 @@ class PolicyDenied(PermissionError):
     handlers that special-case mount-mode refusals (the read-only
     wording) tell a policy deny apart without guessing from errno.
 
-    The error says what the terminal would (``Permission denied`` at an
+    The error says what the terminal would (``Permission denied`` at the
     dispatcher, ``<name>: permission denied`` at the session view), and
-    the policy's own words ride ``refusal``, never the strerror, so a
+    the policy's own words ride ``refusal``, never the strerror, so an
     entry point that renders the error stays byte-identical to a plain EACCES
     and an entry point that hands the agent text appends the record's line.
 
     It carries no accounting: a post_vfs refusal suppresses the result,
-    not the effect, and the entry point reports the completed op through the
+    not the effect, and the dispatcher reports the completed op through the
     caller's ``OpReport``, which covers this error and any foreign one
     the same way.
 

@@ -398,7 +398,7 @@ export class Workspace {
     )
     this.registry.policies.add(this.scriptPolicy)
     for (const entry of options.policies ?? []) this.registry.policies.add(entry)
-    // The approval entry point an Ask is taken to (design 3.9): grants live on
+    // The approval ledger an Ask is taken to (design 3.9): grants live on
     // the sessions, the host answers through `onAsk` (or just records
     // the question when none is wired) and reads `ws.decisions`.
     this.registry.decisions = new Decisions(this.sessionManager, options.onAsk ?? null)
@@ -1419,7 +1419,7 @@ export class Workspace {
    * The session the dispatcher would run a facade's op as, from here.
    *
    * The rule is `bindSession`'s, so an adapter that reads namespace
-   * state outside the entry point (a link table consulted before a dispatch)
+   * state outside the dispatcher (a link table consulted before a dispatch)
    * judges it as the session the dispatch will then run as, ambient
    * one included, rather than as the one it was configured with.
    * Sessions must already be hydrated: this is a lookup, not a bind.

@@ -108,8 +108,8 @@ async def test_a_read_leaves_its_sha_on_the_cache_entry(prefix):
 
 # Each cell is (dir listings, whole-tree walks, blob downloads) for one line
 # on a warm fresh mount. cat pays one probe, at routing, as hf's table does;
-# its own stat and the cache entry point both reuse that answer. cp skips
-# routing's probe, so the cache entry point asks, and cp's stat resolves
+# its own stat and the cache stage both reuse that answer. cp skips
+# routing's probe, so the cache stage asks, and cp's stat resolves
 # through the listing, which fresh re-checks once per command: on github that
 # is one check of the head, which replaces the tree refetch (Task 1.3).
 WARM = [
@@ -253,8 +253,8 @@ async def test_a_bounded_mount_asks_one_directory_per_stat_until_it_lists():
 @pytest.mark.asyncio
 async def test_a_revert_is_read_through_both_entry_points():
     # Content-addressed shas make every stamp source agree once the index is
-    # refilled, so this guards that both the stream entry point (cat) and the
-    # bytes entry point (cp) stamp, rather than telling stamp sources apart.
+    # refilled, so this guards that both the stream read (cat) and the
+    # bytes read (cp) stamp, rather than telling stamp sources apart.
     with serve(_hub()) as hub:
         ws = _ws(_vfs(hub))
         try:
@@ -471,7 +471,7 @@ async def test_a_truncated_parent_listing_is_not_absence():
             assert _kept(ws)
             # The routing probe's listing of docs/ is cut short, so it defers
             # to one walk of the whole tree, which finds the file; cat's own
-            # stat and the cache entry point reuse its answer.
+            # stat and the cache stage reuse its answer.
             assert hub.counts() == (1, 1, 0)
         finally:
             await ws.close()
@@ -499,7 +499,7 @@ async def test_a_truncated_repository_probes_one_directory():
             hub.log.clear()
             assert await _out(ws, f"cat {PATH}") == OLD
             # One listing of docs/, by the routing probe; cat's own stat and
-            # the cache entry point reuse its answer, so the truncated tree is
+            # the cache stage reuse its answer, so the truncated tree is
             # never walked folder by folder, which would reach docs/ by its
             # sha.
             assert hub.counts() == (1, 0, 0)

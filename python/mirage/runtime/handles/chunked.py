@@ -25,7 +25,7 @@ class ChunkedHandle:
     The read-side twin of ``FileHandle``, for a read-only open of a file
     larger than one chunk; a smaller file is read whole, since whole is
     what the file cache keeps. Nothing moves at open: a read fetches the
-    chunk it lands in through the entry point's ranged read, and that chunk is
+    chunk it lands in through the file adapter's ranged read, and that chunk is
     kept so a sequential read of small pieces costs one request per
     chunk. The file ends where a fetch comes back short, not at the size
     the open saw: a rendering need not be as long as the stored bytes a
@@ -34,7 +34,7 @@ class ChunkedHandle:
     Args:
         path (str): guest-absolute virtual path the handle is over.
         size (int): the file's length as the open saw it.
-        fetch (Callable[[int, int], bytes]): the entry point's ranged read,
+        fetch (Callable[[int, int], bytes]): the file adapter's ranged read,
             ``(offset, size)`` to the bytes there.
         pos (int): the read position.
     """

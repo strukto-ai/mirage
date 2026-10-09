@@ -175,7 +175,7 @@ def test_evaluator_of_prefers_a_language_match():
 
 
 def test_one_language_attribute_serves_both_entry_points():
-    # The eval entry point and the run dispatcher read the same
+    # The eval entry point and the run entry point read the same
     # Runtime.language, so an engine cannot be picked as a js interpreter and a
     # python evaluator at once. Two attributes could disagree, and the
     # disagreement only showed up as an unexplained 127 or a policy

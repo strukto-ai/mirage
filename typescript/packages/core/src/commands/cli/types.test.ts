@@ -98,13 +98,13 @@ describe('CLISpec', () => {
   })
 })
 
-describe('entry points parity with the command tier', () => {
-  it('spells every entry point the way CommandOpts spells it', () => {
+describe('view parity with the command tier', () => {
+  it('spells every view field the way CommandOpts spells it', () => {
     // A CLI leaf and a command handler reach the same planes. Spelling one
     // fact two ways is how the two tiers end up with two vocabularies for one
     // plane, and then with two behaviors. Checked at compile time because a
-    // TS interface has no fields to enumerate at runtime: a dispatcher CommandOpts
-    // does not declare fails to index, and a dispatcher whose type drifted fails to
+    // TS interface has no fields to enumerate at runtime: a field CommandOpts
+    // does not declare fails to index, and a field whose type drifted fails to
     // assign. The Python twin is tests/commands/cli/test_view_parity.py.
     type Shared = { [K in keyof CLIView]: CommandOpts[K] }
     const parity: Shared = {} as CLIView

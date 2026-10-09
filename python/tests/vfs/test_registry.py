@@ -219,7 +219,7 @@ def test_colon_reference_refuses_a_class_that_is_not_a_vfs(clean_registry):
     # Nothing validated this rung, so a class subclassing nothing reached
     # install_mounts and then crashed there on a method the caller never
     # called. The subclass check is the same one check_vfs makes at
-    # the mount entry point, moved to the dispatcher the author actually
+    # mount time, moved to the function the author actually
     # called.
     with pytest.raises(TypeError, match="not a BaseVFS subclass"):
         build_vfs("tests.vfs.test_registry:NotAVFS")

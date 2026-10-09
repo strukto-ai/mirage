@@ -37,7 +37,7 @@ export interface MontyClassInstanceOptions {
 }
 
 /**
- * The three entry point pieces `MontyFs` needs from the engine: the decline
+ * The three pieces `MontyFs` needs from the engine: the decline
  * sentinel, the handle class an `open` answer must be an instance of
  * (the engine wraps it into the guest's `_io.*` object),
  * and the wrapper that carries a host object into the guest as a class

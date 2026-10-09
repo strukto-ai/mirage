@@ -192,7 +192,7 @@ def test_an_exported_array_stays_out_of_the_process_view(shell):
 def test_a_bare_local_declares_without_assigning(shell):
     # The same third state `export Z` has: declared, unset, so `${L-d}`
     # still expands to `d` and `declare -p` prints no `=`. Writing `""`
-    # here was the invented-empty-string bug the mark entry point exists to
+    # here was the invented-empty-string bug the session view's mark exists to
     # fix.
     assert shell.mirage('f() { local L; echo "[${L-UNSET}]"; }; f') == (
         "[UNSET]\n"

@@ -116,7 +116,7 @@ async def cp(
     mkdir = partial(ops.mkdir, accessor) if ops.mkdir else None
     if ops.copy is None and ops.write is None:
         # Directory creation is not a usable copy step without a file
-        # transfer capability. Refuse it through the same guarded entry point
+        # transfer capability. Refuse it through the same guarded call
         # before the command leaves an uncopyable destination tree.
         mkdir = partial(
             require_op(replace(ops, mkdir=None), Operation.MKDIR), accessor

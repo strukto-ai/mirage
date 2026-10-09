@@ -282,7 +282,7 @@ describe('S3 cache consistency (mocked)', () => {
         mock.resetCalls()
         const single = await ws.shell(`cat ${bounded}/f.txt`)
         expect(DEC.decode(single.stdout)).toBe('v1\n')
-        // v2 or any send here means the routing dispatcher read another policy.
+        // v2 or any send here means the routing probe read another policy.
         expect([...ledger('fresh-bkt'), ...ledger('bounded-bkt')]).toEqual([0, 0, 0, 0, 0, 0])
       } finally {
         await ws.close()
@@ -507,7 +507,7 @@ describe('S3 cache consistency (mocked)', () => {
 
   it('a metadata command reconciles its operand', async () => {
     // `ls` reads no bytes, so the cache gate never fires for it. Routing is
-    // the one dispatcher a metadata command has to backend truth and must keep
+    // the one entry point a metadata command has to backend truth and must keep
     // probing there. The stat count cannot show it any more: ls's own operand
     // stat serves the routing probe's answer, so a warm `ls -l` is the probe
     // plus ls's readdir check of its operand, and with routing dark it is

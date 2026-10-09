@@ -41,7 +41,7 @@ import {
  * `preCommand` renders one `decide` call, which is where the law lives:
  * the allow list first (a line it does not cover is refused whole,
  * though its head was visible), then the winning rule, refused whole or
- * per operand by whether it names paths, or taken to the approval entry point
+ * per operand by whether it names paths, or taken to the approval ledger
  * when it asks. `preVfs` walks the deny rules that are pure paths, so
  * FUSE, programmatic ops and the warm cache cannot bypass a path the
  * profile protects. A path rule that asks is a question only where no
@@ -84,7 +84,7 @@ export class PermissionsPolicy implements Policy, SessionScoped {
     if (redirectTargetJudged(ctx.path.virtual)) return null
     // The grants belong to the line, not the session: a once grant is
     // spent as the command is admitted, so by the time its own walk
-    // reaches this entry point the session holds nothing and only the bound
+    // reaches the dispatcher the session holds nothing and only the bound
     // gate still remembers the nod.
     const gate = getAdmission()
     const ruled = opRuling(this.sessions.commandsOf(ctx.sessionId ?? ''), ctx, gate?.granted ?? [])
@@ -95,8 +95,8 @@ export class PermissionsPolicy implements Policy, SessionScoped {
   }
 
   /**
-   * Whether this session's rules speak at `hook`: always at the command
-   * entry point, and at the dispatcher only through a pure path rule, the one kind
+   * Whether this session's rules speak at `hook`: always at command
+   * admission, and at the dispatcher only through a pure path rule, the one kind
    * an op can meet (`opReach`).
    */
   wantsFor(hook: PolicyHook, sessionId: string): Promise<boolean> {

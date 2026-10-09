@@ -287,7 +287,7 @@ export function policyScopes(
  * for the session, so no policy may learn of it either: a rule scoped
  * to it must not fire (the reason would say the path is there), an ask
  * must not be raised for it (a request would name it to the host), and
- * the line runs on to the entry point, which answers ENOENT like any other
+ * the line runs on to the dispatcher, which answers ENOENT like any other
  * absent path. A path the reader could not read (`unread`, as `gate`
  * takes it) goes the same way, since the line may never name it.
  */
@@ -301,13 +301,13 @@ function seen(
 
 /**
  * The command plane's admission of one command: visibility, then the
- * policy chain, then the approval entry point. The one gate every command
+ * policy chain, then the approval ledger. The one gate every command
  * class passes through, in the tree (`runArgv`, once the words are
  * expanded) and for a line a runtime takes whole (`admitLine`, per
  * parsed command). A word the session's allow lists do not install is
  * bash's "command not found" before any admission hook, so an unlisted
  * tool never leaks a deny reason; a path the session cannot see is
- * dropped before any hook, so a rule never names it and the entry point
+ * dropped before any hook, so a rule never names it and the dispatcher
  * answers ENOENT; a Deny renders in the outcome table's voice; an Ask
  * is answered by the entry point from the session's grants or the host.
  * `agentId` is the agent the line is attributed to, for an approval

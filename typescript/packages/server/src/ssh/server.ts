@@ -82,8 +82,8 @@ interface KeyOption {
  * The public keys allowed to log in, read fresh for every attempt so a key
  * added or revoked takes effect on the next login. A line that cannot be
  * read is skipped with a warning. `mirage-profile` and `mirage-account`
- * are the OpenSSH-style key options this dispatcher reads; a line carrying any
- * other (`command=`, `from=`, ...) is skipped too, since the entry point does not
+ * are the OpenSSH-style key options this endpoint reads; a line carrying any
+ * other (`command=`, `from=`, ...) is skipped too, since the endpoint does not
  * honor it and so will not accept the key as if it were absent.
  */
 export async function readAuthorizedKeys(

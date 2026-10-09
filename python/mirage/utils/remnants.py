@@ -49,8 +49,8 @@ class RemnantChannel(Protocol):
     The channel carries every protection axis except visibility: a
     deletion must still answer for its path's mode and rules exactly as
     a first-class op would (the command plane binds its mode- and
-    rule-guarded slots, the dispatchers route through their own op
-    entry point), while the visibility filter stays off because the cascade
+    rule-guarded slots, the dispatcher routes through
+    ``Mount.call``), while the visibility filter stays off because the cascade
     exists to see and destroy what the session cannot. The cascade
     never sprinkles those checks itself; wiring a raw, unguarded
     channel here is the bug this contract exists to prevent.

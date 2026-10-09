@@ -140,7 +140,7 @@ const CONTENT = new Set([
 /** The predicates, which answer false where there is no filesystem. */
 const PROBES = new Set(['Path.exists', 'Path.is_file', 'Path.is_dir', 'Path.is_symlink'])
 
-/** The other calls this dispatcher serves, which refuse where there is none. */
+/** The other calls this adapter serves, which refuse where there is none. */
 const STRUCTURE = new Set(['Path.mkdir', 'Path.iterdir', 'Path.stat'])
 
 /**

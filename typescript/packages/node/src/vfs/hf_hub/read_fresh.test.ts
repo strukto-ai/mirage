@@ -91,7 +91,7 @@ describe('hf_hub under read: fresh', () => {
   })
 
   it('never serves other bytes as fresh after a revert through cp', async () => {
-    // The same revert through the bytes entry point: a cross-mount cp reads with
+    // The same revert through the bytes read: a cross-mount cp reads with
     // read, where cat reads with the stream.
     const fake = await hub({ 'a.txt': NEW })
     fake.listed.set('a.txt', OLD)
@@ -283,9 +283,9 @@ describe('hf_hub snapshot pins', () => {
 
 // Measured on the first green run, then pinned (test plan T31): each path ask
 // is one reconcile probe, and a warm read makes no download. cat's own stat
-// and the cache entry point reuse the routing probe's answer. Cross-mount cp skips
+// and the cache stage reuse the routing probe's answer. Cross-mount cp skips
 // routing's probe, so
-// only the cache entry point asks, and its stat re-checks the listing its path
+// only the cache stage asks, and its stat re-checks the listing its path
 // resolves through, which fresh does once per command: one head check
 // against the listing's version, where it was a whole tree walk (Task 1.3).
 const WARM: [string, number, number, number][] = [

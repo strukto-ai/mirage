@@ -527,7 +527,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('keeps the abort of one line out of another on the same session', async () => {
-    // The status dispatcher reads the signal of the line that produced the
+    // The status write reads the signal of the line that produced the
     // statement, so an aborted sibling cannot make this line throw or
     // stop early.
     const ws = await makeWs()
@@ -545,7 +545,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     // `rm l1 l2` on two links: the first unlink is held at the dispatcher
     // past the grace, so the caller is released. The held unlink then
     // completes and the handler resumes; the second operand must not
-    // reach the entry point. Python's cancelled task never gets there.
+    // reach the dispatcher. Python's cancelled task never gets there.
     const parser = await getTestParser()
     const ram = new RAMVFS()
     const seen: string[] = []

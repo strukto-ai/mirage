@@ -162,7 +162,7 @@ def _declared_marks(flag_chars: set[str], plus_chars: set[str]) -> AttrMarks:
     lands, in order, readonly last.
 
     The letters that shape a value (`-i -l -u`) are stored as
-    attributes and applied by the entry point on every *later* write, which is
+    attributes and applied by the session view on every *later* write, which is
     GNU's rule: `v=MiXeD; declare -l v` keeps `MiXeD`, and the next
     `v=ABC` stores `abc`. So this marks and never rewrites. `-l` and
     `-u` are exclusive: setting one clears the other, and a cluster

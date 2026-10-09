@@ -441,7 +441,7 @@ def test_hidden_refusal_answers_a_create_by_its_parent():
     )
 
 
-def test_the_dispatcher_keeps_any_bind_but_another_owners():
+def test_an_entry_point_keeps_any_bind_but_another_owners():
     # A kernel mount and a guest runtime bind without an owner, and
     # the entry point keeps those; only a binding another workspace made is
     # refused, since its session describes that workspace's view.

@@ -1460,7 +1460,7 @@ class Dispatcher:
         """Answer a node-table op in the dispatcher, gated like a backend.
 
         A symlink is namespace state with no backend behind it, so the
-        entry point owns every verb that names one. Admission still fires
+        dispatcher owns every verb that names one. Admission still fires
         exactly as for a backend write: the link's turf is the longest
         mount prefix above it (the same ownership rule ``_link_allowed``
         reads for), session grants and both gates run, and the write

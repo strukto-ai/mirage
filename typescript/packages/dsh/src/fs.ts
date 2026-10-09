@@ -209,7 +209,7 @@ export class MirageFileSystem extends FileSystem {
   // `ready` does not hydrate: a workspace freshly attached to a shared
   // store still holds a minted default session and an empty link table
   // until its first op loads both. This adapter reads the session and
-  // the links outside the entry point, so it hydrates before either is
+  // the links outside the dispatcher, so it hydrates before either is
   // consulted, or a persisted hide would be judged by the wrong session.
   private async files(signal?: AbortSignal, operation = 'ready'): Promise<Files> {
     if (this.fsOps === null) {
@@ -245,9 +245,9 @@ export class MirageFileSystem extends FileSystem {
 
   /**
    * Whether the session may be told a path exists. The link table is
-   * read here, outside the entry point, so it is read the way the entry point would:
+   * read here, outside the dispatcher, so it is read the way the dispatcher would:
    * a link the session cannot see is never followed (the typed path
-   * reaches the entry point and is refused as absent, not resolved to the
+   * reaches the dispatcher and is refused as absent, not resolved to the
    * visible target it points at), and never listed.
    */
   private visible(path: string): boolean {
@@ -444,8 +444,8 @@ export class MirageFileSystem extends FileSystem {
       normalized === '/'
         ? '/'
         : posix.join(this.follow(posix.dirname(normalized)), posix.basename(normalized))
-    // The leaf is read off the link table outside the entry point, so it is
-    // gated the way the entry point would gate it: a link the session cannot
+    // The leaf is read off the link table outside the dispatcher, so it is
+    // gated the way the dispatcher would gate it: a link the session cannot
     // see is not a link here, and the stat below reports it absent.
     const links = this.links
     if (links?.isLink(parentFollowed) === true && this.visible(parentFollowed)) {

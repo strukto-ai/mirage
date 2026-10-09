@@ -917,7 +917,7 @@ def seed_sys_path(paths):
 # Emscripten builds os without the extended-attribute family CPython has
 # on linux, so a guest asking a mounted path for its attributes got
 # AttributeError. The host
-# registers _mirage_xattr, which answers from the workspace entry point, and
+# registers _mirage_xattr, which answers from the dispatcher, and
 # each condition it reports is raised as the errno linux would raise.
 XATTR_ERRNO = {
     "NO_XATTR": errno.ENODATA,

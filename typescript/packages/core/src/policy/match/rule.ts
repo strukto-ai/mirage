@@ -290,14 +290,14 @@ export function matchOp(rule: CommandRule, scope: HiddenPaths | null, ctx: VfsCo
  * deny before ask at equal depth, and an ask satisfied by a grant the
  * line already holds. Reading every deny before any ask instead let a
  * broad deny on `/repo/*` overrule an approved ask on `/repo/outbox/*`,
- * so the carve-out the command entry point had just admitted the line under
+ * so the carve-out command admission had just admitted the line under
  * could not authorize the redirect it was written for: the write reached
- * this entry point and was refused there.
+ * the dispatcher and was refused there.
  *
  * What an ask means is the entry point's to say: inside a running line it
  * refuses like a deny, since the line was admitted without it, and
  * outside one (a file tool, the host's facade) it goes to the approval
- * entry point, keyed by rule and path. Mirrors Python's `op_ruling`.
+ * ledger, keyed by rule and path. Mirrors Python's `op_ruling`.
  */
 export function opRuling(
   rules: AdmissionRules | null,

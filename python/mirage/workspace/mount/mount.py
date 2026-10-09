@@ -1064,7 +1064,7 @@ class MountEntry:
         gzip's own GNU voice. A write command that reaches its service
         some other way (trello's id-addressed card writes, a custom
         backend's own verb) is refused here, before it runs, because no
-        entry point would see its write. strongest_mode_under, not
+        gate would see its write. strongest_mode_under, not
         effective_mode: a mount whose only writable region is a show
         entry still runs it. Only wrapper-owned responses (help, an
         injected version) bypass it. The trailing newline is

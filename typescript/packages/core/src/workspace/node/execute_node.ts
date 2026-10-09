@@ -214,7 +214,7 @@ async function evalCforExpr(
     error = err
     writes = err.writes
   }
-  // Through the entry point, so a preSession rule governs an arithmetic assignment
+  // Through the session view, so a preSession rule governs an arithmetic assignment
   // exactly as it governs `X=1` and a hidden name refuses at its own
   // write; in evaluation order, so a bare name and its element 0 land as
   // the expression wrote them.

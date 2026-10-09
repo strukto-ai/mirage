@@ -341,7 +341,7 @@ export type TargetStat = (virtual: string) => Promise<FileStat | null>
 // backend's to stat: the namespace answers for it through `targetStat`,
 // which follows a link and stats what it reaches, so a link to a
 // directory is kept and a link to a file or to nothing is dropped, bash's
-// own rule for `*/`. Without that entry point the owed name is kept, and without
+// own rule for `*/`. Without `targetStat` the owed name is kept, and without
 // a stat function every match is kept, since nothing can tell them apart.
 // Otherwise one stat per match, served from the index the readdir just
 // filled.

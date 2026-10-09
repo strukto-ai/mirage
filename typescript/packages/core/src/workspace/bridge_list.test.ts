@@ -29,7 +29,7 @@ function mkWorld(): { ws: Workspace; vfs: RAMVFS } {
   return { ws, vfs }
 }
 
-// The entry point a sandboxed runtime holds, over this workspace's own bridge
+// The file adapter a sandboxed runtime holds, over this workspace's own bridge
 // and the same two sources the workspace hands its runtimes: the mount
 // prefixes and the node table's link names.
 function filesOn(ws: Workspace): RuntimeFiles {
@@ -45,10 +45,10 @@ function filesOn(ws: Workspace): RuntimeFiles {
   )
 }
 
-// The runtime entry point's readdir is the sandboxed runtimes' directory read:
+// The file adapter's readdir is the sandboxed runtimes' directory read:
 // what it fails, a guest sees as the whole directory failing, so one
 // entry's stat never fails it; that entry's own stat still reports why.
-describe('runtime entry point readdir', () => {
+describe('file adapter readdir', () => {
   // A link row is stat'd without following, so a dangling target never
   // reaches the backend: the node table answers with the link's own row.
   it('lists a dangling link as its own row instead of failing the listing', async () => {

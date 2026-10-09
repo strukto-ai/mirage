@@ -171,7 +171,7 @@ export function workspaceBridge(
         return undefined
       }
       case 'stat':
-        // The mount's own row, nothing projected: the runtime entry point
+        // The mount's own row, nothing projected: the file adapter
         // builds the one VFSStat both languages read, so the two
         // tiers cannot drift into two translations of one fact.
         // `nofollow` is the only attrs field a stat carries, and it
@@ -220,8 +220,8 @@ export function workspaceBridge(
         return undefined
       }
       case 'readdir':
-        // The names as the entry point merged them, nothing resolved: the
-        // runtime entry point (`RuntimeFiles.readdir`) stats each entry and
+        // The names as the dispatcher merged them, nothing resolved: the
+        // file adapter (`RuntimeFiles.readdir`) stats each entry and
         // marks the links, so a row is built in one tier and in one
         // shape in both languages.
         return ((await dispatch('readdir', path)) as string[] | null) ?? []

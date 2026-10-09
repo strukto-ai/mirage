@@ -76,7 +76,7 @@ describe('RuntimeFiles transport', () => {
     ])
   })
 
-  // The projection is the dispatcher's, so preview1, monty and Emscripten read
+  // The projection is the file adapter's, so preview1, monty and Emscripten read
   // the same five facts instead of translating a FileStat three ways.
   it('projects one stat struct for every surface', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() =>
@@ -141,7 +141,7 @@ describe('RuntimeFiles transport', () => {
   })
 
   // A backend that slash-marks its directories has already said what the
-  // entry is, so the dispatcher does not pay a stat to hear it again.
+  // entry is, so the file adapter does not pay a stat to hear it again.
   it('takes a trailing slash as the answer and skips the stat', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>((op) => {
       if (op === 'readdir') return Promise.resolve(['/ram/sub/'])

@@ -197,7 +197,7 @@ describe('an array is exportable like anything else', () => {
 describe('a bare local declares without assigning', () => {
   // The same third state `export Z` has: declared, unset, so `${L-d}`
   // still expands to `d` and `declare -p` prints no `=`. Writing `''`
-  // here was the invented-empty-string bug the mark entry point exists to fix.
+  // here was the invented-empty-string bug the session view's mark exists to fix.
   const CASES: [string, string][] = [
     ['f() { local L; echo "[${L-UNSET}]"; }; f', '[UNSET]\n'],
     ['f() { local L; declare -p L; }; f', 'declare -- L\n'],

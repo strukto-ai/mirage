@@ -124,8 +124,8 @@ describe('MountCore', () => {
 
   it('refuses to remove a link on hidden turf for a scoped session', async () => {
     // The other half of the R8 hole, open until unlink stopped calling
-    // the namespace table directly: creation was routed through the op
-    // entry point, removal still wrote the table at a layer no session view
+    // the namespace table directly: creation was routed through the
+    // dispatcher, removal still wrote the table at a layer no session view
     // covers, so a scoped mount could delete a link on a mount its
     // profile hides. ENOENT rather than the create's EACCES is the
     // no-name-leak rule: only an op that spells out a name it is
@@ -763,7 +763,7 @@ describe('MountCore chunks', () => {
     await core.release(fd)
   })
 
-  it('tells a session the command rules the dispatcher skips', () => {
+  it('tells a session the command rules FUSE skips', () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {

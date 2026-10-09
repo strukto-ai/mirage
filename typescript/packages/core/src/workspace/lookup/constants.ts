@@ -319,7 +319,7 @@ export const SLASH_KEEPS_LAST: ReadonlySet<string> = new Set([
 // mkdir is naming something that must not exist yet -- resolving its
 // last component would make `mkdir -p dangle` create the link's missing
 // target where GNU answers "File exists". getfattr and setfattr read -h
-// off their own line and hand the entry point the link or its target.
+// off their own line and hand the dispatcher the link or its target.
 // A trailing slash still applies to most of them: these are
 // lstat-by-default, not slash-proof (`touch dlink/` succeeds against the
 // target directory, `touch flink/` is "Not a directory"), which is why

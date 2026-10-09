@@ -179,7 +179,7 @@ async def setattr_via(
 ) -> None:
     """Route one attribute write through the dispatcher.
 
-    The entry point applies what the backend can hold natively and stores the
+    The dispatcher applies what the backend can hold natively and stores the
     residual in the namespace overlay (dropping overlay fields the
     backend applied, so a stale overlay never shadows the fresh backend
     value); a mount with no setattr op overlays everything. Kept as a
@@ -213,7 +213,7 @@ async def apply_link_attrs(
 
     Dispatched with ``nofollow`` so the dispatcher writes the link entry's own
     attrs instead of the target's; a link has no backend inode, so the
-    entry point stores them in the overlay.
+    dispatcher stores them in the overlay.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
@@ -339,7 +339,7 @@ async def walk_stats(
 
     Each entry's stat is captured during the walk because chmod's
     symbolic clauses (``u+x``) build on the entry's own current mode.
-    Symlinks are skipped by name: the entry point's readdir reports them (they
+    Symlinks are skipped by name: the dispatcher's readdir reports them (they
     are namespace structure), GNU chmod -R changes neither a traversed
     link nor its referent, and the skip must come before the stat
     because stat follows a link and would descend through a directory

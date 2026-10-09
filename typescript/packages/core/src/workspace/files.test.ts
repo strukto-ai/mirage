@@ -203,7 +203,7 @@ describe('Files existence probes', () => {
   })
 })
 
-// `ws.vfs` is a dispatcher like the dispatcher: FUSE and programmatic
+// `ws.vfs` is an entry point like the dispatcher: FUSE and programmatic
 // access read through it, so policy hooks must fire here too.
 describe('Files policy entry point', () => {
   class SealReads implements Policy {
@@ -328,7 +328,7 @@ async function seed(ws: Workspace, path: string): Promise<void> {
 // The facade is not a second pipeline: it hands every op to the
 // dispatcher, so what the shell sees and what ws.vfs sees cannot drift,
 // and each gate fires exactly once per op.
-describe('Files is one dispatcher with the dispatcher', () => {
+describe('Files goes through the dispatcher', () => {
   class CountPre implements Policy {
     readonly seen: string[] = []
     preVfs(ctx: VfsContext): Action | null {
@@ -548,7 +548,7 @@ describe('Files is one dispatcher with the dispatcher', () => {
 })
 
 /**
- * A RAM store wearing the s3 name, so the accounting dispatcher reads the mount as
+ * A RAM store wearing the s3 name, so the accounting reads the mount as
  * network-backed rather than local. The mount serves RAM's commands under the
  * name it wears.
  */

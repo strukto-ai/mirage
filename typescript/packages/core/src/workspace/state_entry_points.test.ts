@@ -86,7 +86,7 @@ afterEach(async () => {
   for (const ws of open.splice(0)) await ws.close()
 })
 
-describe('name-plane writes go through the entry point', () => {
+describe('name-plane writes go through the dispatcher', () => {
   it('ln fires the op gates', async () => {
     const ws = await makeWs([new DenyOp('symlink')])
     const io = await ws.shell('ln -s x.txt /a/lk')
@@ -97,7 +97,7 @@ describe('name-plane writes go through the entry point', () => {
 
   it('ln leaves an op record', async () => {
     // The op ledger must not say a workspace with ln traffic did
-    // nothing: the entry point records the namespace write like any other op.
+    // nothing: the dispatcher records the namespace write like any other op.
     const ws = await makeWs()
     const io = await ws.shell('ln -s x.txt /a/lk')
     expect(io.exitCode).toBe(0)
@@ -152,7 +152,7 @@ describe('name-plane writes go through the entry point', () => {
 
   it('symlink and readlink answer on ws.vfs', async () => {
     // readlink is the read twin: guests and CLIs ask through the same
-    // entry point instead of a bespoke channel.
+    // dispatcher instead of a bespoke channel.
     const ws = await makeWs()
     await ws.vfs.symlink('/a/lk', 'x.txt')
     expect(await ws.vfs.readlink('/a/lk')).toBe('x.txt')
@@ -214,7 +214,7 @@ describe('name-plane writes go through the entry point', () => {
 
   it('chown -h on a link fires the op gates', async () => {
     // chown -h writes the link's own attrs; that overlay write used to
-    // bypass the entry point entirely, so no policy could bound it.
+    // bypass the dispatcher entirely, so no policy could bound it.
     const ws = await makeWs([new DenyOp('setattr')])
     const made = await ws.shell('ln -s x.txt /a/lk')
     expect(made.exitCode).toBe(0)
@@ -492,7 +492,7 @@ describe('the remaining session writers clear the same gate', () => {
 
   it('a readonly name refuses a declaration array store', async () => {
     // The staged-array store is the builtin's own; the shell's readonly
-    // rule is pre-checked there, before the entry point is asked.
+    // rule is pre-checked there, before the session view is asked.
     const ws = await makeWs()
     await ws.shell('readonly LOCKED')
     const io = await ws.shell('export LOCKED=(a)')
@@ -634,7 +634,7 @@ class IdentityRecorder implements Policy {
 }
 
 async function makeSealedWs(policies: Policy[]): Promise<Workspace> {
-  // Seeded through the entry point (not the raw store) so the index knows the
+  // Seeded through the dispatcher (not the raw store) so the index knows the
   // implicit /a/prod directory, then the policies join, mirroring the
   // python twin's setup order.
   const parser = await getTestParser()
@@ -815,7 +815,7 @@ describe('hidden vars across the shell tier', () => {
   it('assign-default of a hidden var is refused', async () => {
     // ${SLACK_TOKEN:=fake} observes the hidden name as unset, so
     // without a gate the write-back would overwrite the real value
-    // the host's wiring still reads; the entry point refuses like any denied
+    // the host's wiring still reads; the session view refuses like any denied
     // assignment.
     const ws = await makeHiddenVarsWs()
     const io = await ws.shell('echo "${SLACK_TOKEN:=fake}"', { sessionId: 'agent' })
@@ -847,7 +847,7 @@ describe('hidden vars across the shell tier', () => {
   ]) {
     it(`${line} never quotes the hidden value`, async () => {
       // A reference checks the value its name holds; a hidden one reads as
-      // unset, so the refusal is the entry point's and not a line quoting it.
+      // unset, so the refusal is the session view's and not a line quoting it.
       const ws = await makeHiddenVarsWs()
       const io = await ws.shell(line, { sessionId: 'agent' })
       expect(io.exitCode).not.toBe(0)
@@ -860,7 +860,7 @@ describe('hidden vars across the shell tier', () => {
   }
 
   it('declare -ni stops its value at a hidden write', async () => {
-    // `declare -ni r=M` evaluates M through the `-i` entry point, so a hidden name
+    // `declare -ni r=M` evaluates M through the `-i` coercion, so a hidden name
     // it assigns is refused there and nothing after it lands.
     const ws = await makeHiddenVarsWs()
     const io = await ws.shell("X=0; M='SLACK_TOKEN=5,X=7'; declare -ni r=M", {
@@ -966,7 +966,7 @@ describe('hidden vars across the shell tier', () => {
   it('bare declare -a of a hidden var is refused', async () => {
     // `declare -a NAME` at top level migrates an existing scalar into
     // element 0 with raw writes, which would move the hidden value
-    // into array storage; the entry point refuses instead.
+    // into array storage; the session view refuses instead.
     const ws = await makeHiddenVarsWs()
     const io = await ws.shell('declare -a SLACK_TOKEN', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
@@ -1441,7 +1441,7 @@ describe('command permissions end to end', () => {
   async function commandsWs(): Promise<Workspace> {
     const parser = await getTestParser()
     // The frozen subtree is seeded on the VFS: the pure path rule
-    // holds at every dispatcher, the host's `ws.vfs` included.
+    // holds at every entry point, the host's `ws.vfs` included.
     const repo = new RAMVFS()
     repo.store.dirs.add('/locked')
     repo.store.files.set('/locked/y', ENC.encode('y\n'))
@@ -1753,7 +1753,7 @@ describe('command permissions end to end', () => {
   it('a whole-line runtime is gated like the tree', async () => {
     // A runtime that captures the raw line runs it under the same
     // tiers: every parsed command clears visibility, the policy chain
-    // and the approval entry point before the runtime sees a byte, so a
+    // and the approval ledger before the runtime sees a byte, so a
     // captured line cannot run what the tree would refuse.
     const parser = await getTestParser()
     const box = new Box()
@@ -1938,7 +1938,7 @@ describe('command permissions end to end', () => {
   it('a hidden path reads as absent to every rule', async () => {
     // hide outranks every admission arm: a path the session cannot see
     // is dropped before any hook, so a deny never names it, an ask is
-    // never raised for it, and the entry point answers ENOENT as for any
+    // never raised for it, and the dispatcher answers ENOENT as for any
     // absent path. The same lines under a session that sees them meet
     // the rules as usual.
     const parser = await getTestParser()
@@ -2635,7 +2635,7 @@ describe('a dispatched read through a link meets the target rule', () => {
   })
 
   // A path a command names inside its own program (awk's getline, sed's r)
-  // reaches the dispatcher unjudged, and the entry point follows a link to its
+  // reaches the dispatcher unjudged, and the dispatcher follows a link to its
   // target. The rule on the target holds through the link exactly as it
   // holds on the target itself; a link to an allowed file reads.
   it('refuses the target as it refuses the target named', async () => {
@@ -2675,7 +2675,7 @@ describe('a dispatched read through a link meets the target rule', () => {
   })
 })
 
-describe('a dispatched op meets the rule on the path the entry point reaches', () => {
+describe('a dispatched op meets the rule on the path the dispatcher reaches', () => {
   // A host command that removes or moves a name through the dispatcher it
   // is handed, the way a custom command reaches a mount.
   const zap = new Command({
@@ -2708,7 +2708,7 @@ describe('a dispatched op meets the rule on the path the entry point reaches', (
     return [r.exitCode, stdoutStr(r), voicedStderr(r)]
   }
 
-  // The entry point walks every link above the final name before it acts, so
+  // The dispatcher walks every link above the final name before it acts, so
   // /data/alias/secret is /data/real/secret by the time anything is removed
   // or moved. The rule on the real path holds there for an op on the name
   // itself (unlink, rename) as for one that follows it.
@@ -2737,7 +2737,7 @@ describe('a dispatched op meets the rule on the path the entry point reaches', (
     }
   })
 
-  // The entry point judges the path the command handed it as well as the one its
+  // The dispatcher judges the path the command handed it as well as the one its
   // walk reaches, so a rule written through a link holds for the command's
   // own ops exactly as it holds for a named operand.
   it('binds a rule spelled through a linked parent', async () => {
@@ -2835,8 +2835,8 @@ describe('a walk the executor fans out meets the command rules', () => {
   })
 
   // The deletion is find's own write: an entry the rule names stays,
-  // reported with the rule's reason, as a paths rule's refusal at the op
-  // entry point already is.
+  // reported with the rule's reason, as a paths rule's refusal at the
+  // dispatcher already is.
   it('keeps an entry find -delete may not remove', async () => {
     const ws = await fanoutWs()
     expect(await line(ws, 'find /data/w -name a.txt -delete')).toEqual([

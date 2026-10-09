@@ -612,7 +612,7 @@ export async function handleCfor(
     }
   } catch (err) {
     // PolicyDenied is a header expression assigning a hidden name,
-    // refused by the same entry point as any denied assignment.
+    // refused by the same session view as any denied assignment.
     if (
       !(err instanceof ArithError) &&
       !(err instanceof ReadonlyError) &&

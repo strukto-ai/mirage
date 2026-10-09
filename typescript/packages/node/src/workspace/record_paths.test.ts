@@ -339,7 +339,7 @@ describe('every record resolves to the mount whose id it carries (node backends)
   })
 })
 
-// The command entry point wraps a lazily consumed stream so its deferred backend
+// The command executor wraps a lazily consumed stream so its deferred backend
 // read records under the mount that produced it (`wrapMountStreams`).
 describe('command streams carry the mount id', () => {
   it('ram cat', async () => {

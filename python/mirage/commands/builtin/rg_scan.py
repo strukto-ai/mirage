@@ -374,7 +374,7 @@ class _Walker:
                 resolved path and the walker's name for it: what a link
                 leading back into the walk is caught against.
             linked (bool): reached through a link, so read through the
-                entry point rather than the operand's backend.
+                dispatcher rather than the operand's backend.
         """
         if self.walk.max_depth is not None and depth >= self.walk.max_depth:
             return

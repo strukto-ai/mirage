@@ -179,7 +179,7 @@ def test_op_refusal_reads_depth_before_verb_and_honours_a_grant():
     inside = VfsContext(
         op="write", path=_path("/repo/outbox/a"), write=True, prefix="/repo/"
     )
-    # The deeper ask wins where both reach, exactly as the command entry point
+    # The deeper ask wins where both reach, exactly as command admission
     # ranks them, so a broad deny cannot overrule an approved carve-out.
     assert op_refusal(rules, inside, ()) == "outbox nod"
     assert op_refusal(rules, inside, (carve,)) is None

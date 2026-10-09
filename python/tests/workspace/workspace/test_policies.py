@@ -453,7 +453,7 @@ async def test_a_committed_write_is_recorded_when_bookkeeping_fails():
     # The backend applied the write, then a step after it (here an
     # invalid post_vfs return, but any foreign bookkeeping error looks
     # the same) blew up. The error must propagate AND the transfer must
-    # stay on the books: the entry point stamped the report at completion, so
+    # stay on the books: the dispatcher stamped the report at completion, so
     # the record does not depend on what kind of exception followed.
     ws = Workspace({"/data/": ColdRemote()}, mode=MountMode.WRITE)
     try:
@@ -515,7 +515,7 @@ async def test_pre_vfs_binds_dispatcher_and_command_tier_io():
         await ws.vfs.write("/data/prod/keep.txt", b"keep\n")
         ws.policies.add(SealedPaths())
 
-        # The entry points hold: the ops facade, and a dispatcher-routed
+        # The entry points hold: ``ws.vfs``, and a dispatcher-routed
         # redirect write.
         with pytest.raises(PermissionError):
             await ws.vfs.read("/data/secret.txt")
@@ -964,7 +964,7 @@ async def test_a_bare_name_under_deny_refuses_with_the_default_reason():
 
 
 # A per-command judge: deny cat under /data/sealed/ with a computed
-# reason, take shred to the approval entry point, stay silent otherwise. A
+# reason, take shred to the approval ledger, stay silent otherwise. A
 # policy defines the hook it answers at, and answers with return.
 JUDGE = """\
 def pre_command(ctx):
@@ -1311,7 +1311,7 @@ def pre_session(ctx):
 """
 
 # The content judge with an op hook beside it: its own reads have to
-# pass the entry point its pre_vfs guards.
+# pass the dispatcher its pre_vfs guards.
 READER_AND_GATE = (
     READER
     + """
@@ -1371,7 +1371,7 @@ async def test_a_profile_policy_judges_the_session_view():
 
 @pytest.mark.asyncio
 async def test_a_policys_own_read_passes_the_dispatcher_its_op_hook_guards():
-    # pre_command opens the operand through the workspace's entry point while
+    # pre_command opens the operand through the workspace's dispatcher while
     # pre_vfs stands at it: the read is the policy's own and is let
     # through rather than re-entering the evaluation waiting on it, so
     # the content verdict lands and the op hook still refuses a write.

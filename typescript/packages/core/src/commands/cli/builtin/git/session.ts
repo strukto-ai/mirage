@@ -28,7 +28,7 @@ import type { CommandFnResult } from '../../../config.ts'
 
 const ENC = new TextEncoder()
 
-// The ambiguity warnings each invocation collects, keyed by the entry points `verb`
+// The ambiguity warnings each invocation collects, keyed by the view `verb`
 // handed it, which are its own.
 const AMBIGUOUS = new WeakMap<CLIView, string[]>()
 // The repository each invocation opened, for the refusal a read-only mount
@@ -111,7 +111,7 @@ export function verb(fn: CLIVerbFn, refused: ReadOnlyRefusal | null = null): CLI
 export async function opened(fl: FlagView, view: CLIView, workTree = false): Promise<Repo> {
   const dispatch = view.dispatch
   const statPath = view.statPath
-  // The mount root comes from the name plane rather than a dispatcher of its own:
+  // The mount root comes from the name plane rather than a field of its own:
   // `ns.mounts.rootOf` is the same fact the command tier reads, and a second
   // field holding the same callable is a second thing to keep in step.
   const mounts = view.ns?.mounts

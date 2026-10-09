@@ -613,7 +613,7 @@ describe('a lookup the index is cleared under', () => {
     stubHead()
   })
 
-  it('retries at the read entry point', async () => {
+  it('retries at the read op', async () => {
     const accessor = new HfHubAccessor({ repoId: 'acme/widget' } as never)
     const walk = vi
       .spyOn(client, 'hubGetResponse')
@@ -683,7 +683,7 @@ describe('a lookup a reseed hides the clear from', () => {
     stubHead()
   })
 
-  it('retries at the read entry point', async () => {
+  it('retries at the read op', async () => {
     const accessor = new HfHubAccessor({ repoId: 'acme/widget' } as never)
     vi.spyOn(client, 'hubGetResponse').mockResolvedValue(
       page([{ type: 'file', oid: 'oid-a', size: 7, path: 'a.txt' }]),

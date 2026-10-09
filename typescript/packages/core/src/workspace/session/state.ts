@@ -323,7 +323,7 @@ export function elementIndex(
  * reference, so `resolve` hands the evaluator the same pair of
  * callbacks it is one of. It lives beside the other reader projections
  * because the session view needs it too: the `-i` coercion evaluates
- * `n=a[1]+1` at the write, and a resolver that imported the entry point would
+ * `n=a[1]+1` at the write, and a resolver that imported the session view would
  * close a cycle.
  */
 class SessionElements implements ElementOps {
@@ -435,13 +435,13 @@ async function landWrites(
  *
  * The subscript is arithmetic, so it may assign (`a[x=3]`) and seed
  * (`a[RANDOM=42]`), and bash binds those as it evaluates them. Each
- * lands through the entry point once the index is known, then the `RANDOM`
+ * lands through the session view once the index is known, then the `RANDOM`
  * reader replays the draws made after the seed. A subscript that fails
  * to evaluate lands what it assigned before failing and then throws, the
  * subscript text leading the message, since bash aborts the line on it
  * (`${a[1/0]}` is `1/0: division by 0`) rather than reading element 0.
  * `view` is the gated session view; null lands the writes ungated, outside a
- * workspace. Throws what the entry point throws too: a PolicyDenied, or an
+ * workspace. Throws what the session view throws too: a PolicyDenied, or an
  * ArithError from a `-i` name refusing the value; a readonly name ends the
  * shell wherever a subscript is (`${a[R=3]}`): ExitSignal.
  */
@@ -545,18 +545,18 @@ export function nextRandom(session: SessionState, stored: string | undefined): n
  * draw after seeding with 42). Here the assignment is still pending at
  * the session view, which lands it gated after evaluation, so the
  * evaluator tells the reader of each assignment as it is made (`wrote`),
- * the reader seeds a scratch generator the way the entry point will and draws
+ * the reader seeds a scratch generator the way the session view will and draws
  * from that, and `settle` replays the draws on the session once the
- * entry point has seeded it: the session ends where bash's does, seeded and
+ * session view has seeded it: the session ends where bash's does, seeded and
  * advanced by every read since the last assignment, and the write still
  * reaches the gate as the assignment it is. Each assignment restarts
- * the scratch generator and the count, since the entry point lands only the
- * last value written, and the draws are replayed only if the entry point did
+ * the scratch generator and the count, since the session view lands only the
+ * last value written, and the draws are replayed only if the session view did
  * land it: an assignment the caller never applied leaves the session as
  * it was.
  *
- * Lives beside the entry point rather than with the generator because the
- * entry point needs it too: `RANDOM=RANDOM` draws once while the seed is
+ * Lives beside the session view rather than with the generator because the
+ * session view needs it too: `RANDOM=RANDOM` draws once while the seed is
  * evaluated, then seeds with the draw, as bash does: it reads an
  * assigned seed as an arithmetic expression.
  */
@@ -600,7 +600,7 @@ export class RandomReader {
     this.draws = 0
   }
 
-  /** Replay the scratch draws on the session generator, once the entry point
+  /** Replay the scratch draws on the session generator, once the session view
    * has seeded it with the value the expression assigned. */
   settle(): void {
     if (this.seeded === null || this.session.randomSeed !== this.seeded) return
@@ -617,7 +617,7 @@ export class RandomReader {
  * Once bash turns `RANDOM` into an array it neither draws nor seeds,
  * so `RANDOM=(1 2)`, `declare -a RANDOM`, `RANDOM[1]=5` and
  * `RANDOM+=(3)` all leave an ordinary array that `$RANDOM` reads element
- * 0 of, for good, as `unset RANDOM` does. Every store dispatcher calls this,
+ * 0 of, for good, as `unset RANDOM` does. Every store entry point calls this,
  * gated or not, since a host seeding an array onto the name means the
  * same thing.
  */
@@ -690,7 +690,7 @@ function readonlyTarget(session: SessionState, name: string): string | null {
  * stores `0`), the arithmetic rule, not a refusal. `RANDOM` draws, as in
  * every other arithmetic context, so `n=RANDOM` and a `RANDOM=RANDOM`
  * seed both advance the generator. The assignments the expression makes
- * are kept for the entry point to land (`landCoercion`): bash binds `x` in
+ * are kept for the session view to land (`landCoercion`): bash binds `x` in
  * `n='x=5'` and in `RANDOM='x=5'`, before the error too if the expression
  * then fails. A malformed expression throws ArithError with the
  * offending text leading, the way every caller voices it; a write to a
@@ -739,7 +739,7 @@ class IntegerCoercion {
 }
 
 /**
- * Land the assignments a coercion made, each through the entry point, in the scope
+ * Land the assignments a coercion made, each through the session view, in the scope
  * it read, then settle its `RANDOM` draws. Inside a `declare -g` that is the
  * function's: `local G=3; declare -gi G='G=G+10'` leaves the local at 13 and
  * stores 13 globally, as bash's does (`stepBack`).

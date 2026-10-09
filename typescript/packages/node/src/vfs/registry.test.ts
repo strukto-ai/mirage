@@ -76,7 +76,7 @@ describe('node VFS registry', () => {
   })
 
   // Every normalizer is `parseConfigWithSchema` now, so a wrong-typed mount
-  // config is refused at the dispatcher the way pydantic refuses it on the python
+  // config is refused at the config loader the way pydantic refuses it on the python
   // side, and the refusal names the field and the code the way
   // `build_vfs` does -- never the value it refused.
   it('refuses a wrong-typed config for every backend, naming field and code', async () => {
@@ -203,7 +203,7 @@ describe('node VFS registry', () => {
 
   // The python wire spelling of every field reaches the VFS and the
   // credentials among them redact out of snapshot state.
-  it('keeps every declared field through the dispatcher and redacts the secrets', async () => {
+  it('keeps every declared field through the config loader and redacts the secrets', async () => {
     const ssh = await buildVfs('ssh', {
       host: 'h',
       username: 'u',

@@ -81,7 +81,7 @@ class FakeDispatch:
         if op == "readdir":
             if self.refuse_readdir:
                 raise PermissionError(errno.EACCES, "denied", virtual)
-            # Full virtual paths, the entry point's own shape.
+            # Full virtual paths, the file adapter's own shape.
             prefix = virtual.rstrip("/") + "/"
             names = set()
             for p in [*self.files, *self.devices]:
@@ -150,7 +150,7 @@ def test_monty_stat_answers_from_the_mounts_own_row():
     # Monty stats out of its in-memory tree, where a materialized file
     # is a MemoryFile with 0o644 and the moment it was fetched. So a
     # chmod the shell made was invisible and every mounted file read as
-    # modified just now; the entry point's row holds both facts.
+    # modified just now; the file adapter's row holds both facts.
     dispatch = FakeDispatch(
         {"/s3/a.txt": b"hello"},
         stat_mode=0o600,
@@ -210,7 +210,7 @@ def test_monty_reports_a_character_device_without_reading_it():
 def test_monty_predicates_answer_from_the_row_not_a_listing():
     # A backend may serve a stat for a path it refuses to list, and the
     # row is the better answer anyway: it says what the path IS, where
-    # a listing only says whether it opens. The entry point asks stat first
+    # a listing only says whether it opens. The file adapter asks stat first
     # and keeps the listing for the one path with no row of its own, a
     # directory a nested mount only implies. Pinned here because the
     # TypeScript twin asked the listing first and reported a served

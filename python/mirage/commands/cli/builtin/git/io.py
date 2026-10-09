@@ -341,7 +341,7 @@ async def take_lock(dispatch: DispatchFn, path: PathSpec) -> None:
     alone, so a write another session makes to it is never undone. A
     lock already there is another writer's, which git refuses and so
     does this, untouched. The look and the create are two ops, since the
-    entry point has no exclusive create.
+    dispatcher has no exclusive create.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.

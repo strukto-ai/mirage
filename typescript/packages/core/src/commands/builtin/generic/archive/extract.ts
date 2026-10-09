@@ -21,8 +21,8 @@ export type MkdirFn = (p: PathSpec, parents?: boolean) => Promise<void>
  * Where extraction lands: the explicit operand, else the cwd.
  *
  * The explicit operand is tar's last -C or unzip's -d, already validated
- * before extracting any members. TypeScript entry points use virtual paths;
- * Python accessor entry points use mount-relative paths.
+ * before extracting any members. TypeScript functions use virtual paths;
+ * Python accessor functions use mount-relative paths.
  */
 export function extractDest(explicit: PathSpec | string | null, cwd: string): string {
   const target = explicit ?? cwd

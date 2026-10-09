@@ -24,16 +24,16 @@ def extract_dest(
 ) -> str:
     """Where extraction lands: the explicit operand, else the cwd.
 
-    Relay entry points route by full virtual path, accessor entry points by
+    Relay functions route by full virtual path, accessor functions by
     mount-relative path, so the same operand renders differently per
-    entry point space. Outside a workspace the cwd arrives as a plain string
+    path space. Outside a workspace the cwd arrives as a plain string
     and the two spaces coincide.
 
     Args:
         explicit (PathSpec | str | None): tar's last -C or unzip's -d,
             when the line named one.
         cwd (PathSpec | str): the session working directory.
-        relay (bool): True when the entry points are dispatch-relayed.
+        relay (bool): True when the functions are dispatch-relayed.
     """
     target = explicit if explicit is not None else cwd
     if isinstance(target, PathSpec):

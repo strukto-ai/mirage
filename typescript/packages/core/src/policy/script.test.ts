@@ -78,9 +78,9 @@ function entry(
 }
 
 /**
- * A read-only entry point over a few files, answering ENOENT for the rest. An
+ * A read-only dispatcher over a few files, answering ENOENT for the rest. An
  * open lists the directory and stats the file before it reads, so the
- * entry point answers all three.
+ * dispatcher answers all three.
  */
 function bridgeOver(files: Record<string, string>): BridgeDispatchFn {
   return (op, path) => {
@@ -157,7 +157,7 @@ describe('scriptAction', () => {
     expect(scriptAction({ deny: 'sealed' })).toEqual({ kind: 'deny', reason: 'sealed' })
   })
 
-  it('takes an ask answer to the approval entry point', () => {
+  it('takes an ask answer to the approval ledger', () => {
     const action = scriptAction({ ask: 'sign-off' })
     expect(action).toEqual({ kind: 'ask', reason: 'sign-off' })
   })
@@ -400,7 +400,7 @@ describe('ScriptPolicy at the op and session views', () => {
 
 describe('wantsFor', () => {
   it('says which sessions a hook speaks for', async () => {
-    // The per-session refinement the secret fill asks: the entry point is
+    // The per-session refinement the secret fill asks: the hook is
     // defined for everyone, but speaks only for a session whose program
     // defines the hook.
     const policy = track(policyOf(entry()))
@@ -411,8 +411,8 @@ describe('wantsFor', () => {
     expect(await track(policyOf(null)).wantsFor('preSession', 's')).toBe(false)
   })
 
-  it('counts a program the entry point will refuse', async () => {
-    // No hook at all, or a probe that failed: the entry point refuses every
+  it('counts a program the dispatcher will refuse', async () => {
+    // No hook at all, or a probe that failed: the dispatcher refuses every
     // write for this program, which is speaking.
     expect(await track(policyOf(entry('null'))).wantsFor('preSession', 's')).toBe(true)
     expect(
@@ -425,7 +425,7 @@ describe('wantsFor', () => {
     // spelling, so what it found in one says nothing about the other.
     // `pre_command = 1` binds the python hook's name and no JavaScript
     // hook's, so the js profile fails closed at every entry point and the
-    // python one speaks at the command entry point alone.
+    // python one speaks at the command hook alone.
     const text = 'pre_command = 1'
     const scripts: Record<string, ProfileScript> = {
       j: { profile: 'j', script: new ScriptSource(text, 'js'), runtime: 'quickjs' },
@@ -451,7 +451,7 @@ describe('wantsFor', () => {
   })
 })
 
-// A program that reads at the command entry point and refuses at the dispatcher,
+// A program that reads at the command hook and refuses at the dispatcher,
 // so its own read is exactly what its op hook would deadlock on.
 const READER_AND_GATE_PY = `\
 def pre_command(ctx):
@@ -467,14 +467,14 @@ def pre_vfs(ctx):
 
 interface HeldDispatch {
   dispatch: BridgeDispatchFn
-  /** Settles when the engine's read of `/repo/a` reaches the entry point. */
+  /** Settles when the engine's read of `/repo/a` reaches the dispatcher. */
   arrived: Promise<void>
   /** Lets that read answer. */
   release: () => void
 }
 
 /**
- * An entry point over one file, `/repo/a`, whose read waits until the test
+ * A dispatcher over one file, `/repo/a`, whose read waits until the test
  * releases it: the window in which the policy's own read is in flight.
  */
 function heldDispatch(): HeldDispatch {

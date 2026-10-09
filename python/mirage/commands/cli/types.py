@@ -119,7 +119,7 @@ class CLIInvocation(Generic[ConfigT]):
         env (Mapping[str, str]): the session's environment variables,
             as one frozen process-view snapshot. A leaf that wants the
             live, gated handle reads ``view.session_view``.
-        view (CLIView | None): one dispatcher per state plane, None outside
+        view (CLIView | None): one entry point per state plane, None outside
             a workspace and for every CLI that reaches a service
             instead of a filesystem.
         shell (Callable[[str], Awaitable[IOResult]] | None): evaluate a

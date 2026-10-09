@@ -364,7 +364,7 @@ async def _declare_operand(
             # `${L-d}` still expands to `d`. A bare declaration of an
             # existing array re-scopes it, so nothing is written there.
             # Visible reads: a hidden name counts as unset, so the mark
-            # is attempted and the entry point refuses it.
+            # is attempted and the session view refuses it.
             await view.mark(key, None, True, not nameref)
         await stamp_marks(session, view, key, None, marks, not nameref)
         return None

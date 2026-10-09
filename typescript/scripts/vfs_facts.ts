@@ -544,7 +544,7 @@ export function registryClasses(registryFile: string): Map<string, string | null
 // the source rather than observed, for the same reason capabilities are:
 // most schemas are module-private, and constructing a VFS to reach one
 // is not inert. The walk follows exactly the forms the config modules use --
-// a dispatcher call in the exported function, `alias.normalize` off one of the
+// a config call in the exported function, `alias.normalize` off one of the
 // S3 factories, a re-exported normalizer -- and throws on any other, so a
 // new form fails the dump rather than emitting a row that reads as "no
 // divergence here".

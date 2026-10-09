@@ -132,7 +132,7 @@ export class MountRegistry {
     new MountRootPolicy(),
     new OutputCapPolicy((prefix, name) => this.limitOverride(prefix, name)),
   ])
-  // The approval entry point the executor takes an Ask to, hosted here for the
+  // The approval ledger the executor takes an Ask to, hosted here for the
   // same reason as the policies: the workspace replaces it with one
   // bound to its session manager and ask handler.
   decisions = new Decisions()

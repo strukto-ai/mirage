@@ -254,7 +254,7 @@ def dispatched_reader(
     dispatch: DispatchFn,
     stream: Callable[[PathSpec], AsyncIterator[bytes]],
 ) -> Callable[[PathSpec], AsyncIterator[bytes]]:
-    """Read a path through the workspace's entry point, on whatever mount holds
+    """Read a path through the workspace's dispatcher, on whatever mount holds
     it: a checksum list names files anywhere, not on the list's mount.
 
     A stdin name (``-``, ``/dev/stdin``) reads the command's input

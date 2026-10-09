@@ -119,7 +119,7 @@ export function pathFlagScopes(cmdName: string, argv: string[], cwd: string): Pa
   const parsed = parseCommand(spec, argv, cwd, cmdName)
   const kwargs = parseToKwargs(parsed)
   const flagPaths = [...parsed.pathFlagValues]
-  // A program file and an entry point option's file are read or written through the
+  // A program file and a dispatched option's file are read or written through the
   // dispatcher, not on the line's mount. A pair's name slots are words, never
   // resolved paths, so they match nothing here.
   for (const key of [FILE_KEYS[cmdName], ...(DISPATCH_FLAG_KEYS[cmdName] ?? [])]) {
@@ -191,7 +191,7 @@ export function optionLoopExits(
 }
 
 /**
- * The classified path words that route a line. Classification makes an entry point
+ * The classified path words that route a line. Classification makes a dispatched
  * option's file a path word like any other, so a command in DISPATCH_FLAG_KEYS
  * routes by its positional operands alone; every other command by all its
  * path words.

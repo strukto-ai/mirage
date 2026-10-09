@@ -44,7 +44,7 @@ SCRIPT = [
     "csplit -f /m/m/cs /m/m/k.txt 2",
 ]
 
-# Namespace ops record at the entry point with the virtual path already, so
+# Namespace ops record at the dispatcher with the virtual path already, so
 # they cannot tell the two behaviours apart; exempt by op name, not by source.
 EXEMPT_OPS = {
     "setattr",

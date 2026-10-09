@@ -245,7 +245,7 @@ describe('hidden vars in the session view', () => {
   it('setting a hidden var is refused and leaves it intact', async () => {
     // A write that landed would clobber the real value the host's
     // wiring still reads, and a write that silently vanished would be
-    // a swallow; the entry point refuses loudly instead, the vars twin of
+    // a swallow; the session view refuses loudly instead, the vars twin of
     // EACCES on a create into hidden path space.
     const [view, session] = makeHiddenView()
     await expect(view.set('SLACK_TOKEN', 'fake')).rejects.toBeInstanceOf(PolicyDenied)
@@ -333,7 +333,7 @@ describe('subscriptIndex', () => {
     expect(await subscriptIndex(s, 'RANDOM=42, RANDOM')).toBe(17772)
     const drawn = s.vars[RANDOM].value
     expect(nextRandom(s, typeof drawn === 'string' ? drawn : undefined)).toBe(26794)
-    // Through an entry point, a refusal is the gate's.
+    // Through the session view, a refusal is the gate's.
     const view = sessionView(s, new Policies([new DenySecrets()]))
     await expect(subscriptIndex(s, 'SECRET_N=1', view)).rejects.toBeInstanceOf(PolicyDenied)
     expect(s.env.SECRET_N).toBeUndefined()

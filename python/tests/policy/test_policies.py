@@ -285,7 +285,7 @@ async def test_post_vfs_gate_suppresses_the_result():
             b"a long secret payload",
         )
     # A post deny suppresses the result of an op that already ran; the
-    # entry point's OpReport, stamped before this gate fires, is what keeps
+    # dispatcher's OpReport, stamped before this gate fires, is what keeps
     # the accounting of the completed op.
     assert excinfo.value.errno == errno.EACCES
 

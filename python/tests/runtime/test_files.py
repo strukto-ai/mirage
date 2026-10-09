@@ -238,10 +238,10 @@ def test_a_refusal_is_not_read_as_an_absence():
 
 
 def test_readdir_lifts_names_into_entries():
-    # The TS bridge resolves path/size/isDir once at the dispatcher, off the
+    # The TS bridge resolves path/size/isDir once at the file adapter, off the
     # stat index the readdir just populated; python answered bare names
     # and every consumer re-parsed the trailing-slash convention, paying
-    # one guest stat per entry for a fact the dispatcher already had.
+    # one guest stat per entry for a fact the file adapter already had.
     vfs = ListingVFS(
         listing=["/data/sub/", "/data/a.txt", "/data/ghost.txt"],
         stats={
@@ -377,7 +377,7 @@ def test_readdir_marks_the_names_the_resolver_calls_links():
 
 
 def test_stat_projects_one_struct_for_every_surface():
-    # The projection is the dispatcher's, so preview1, monty and Emscripten
+    # The projection is the file adapter's, so preview1, monty and Emscripten
     # read the same five facts instead of translating a FileStat three
     # ways. mode carries the type bits, which is what a wire with no
     # mode field of its own reads the kind out of.

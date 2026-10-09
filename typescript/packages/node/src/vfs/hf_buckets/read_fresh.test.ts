@@ -215,9 +215,9 @@ describe('hf_buckets under read: fresh', () => {
 })
 
 // Measured on the first green run, then pinned (test plan T23): the routing
-// probe; the handler's own stat and the cache entry point reuse its answer.
-// Cross-mount cp skips routing's probe, so the cache entry point asks, and its stat
-// goes through its own entry point against a mount index nothing filled.
+// probe; the handler's own stat and the cache stage reuse its answer.
+// Cross-mount cp skips routing's probe, so the cache stage asks, and its stat
+// goes its own way against a mount index nothing filled.
 const WARM: [string, string, number][] = [
   ['', 'cat /m/a.txt', 1],
   ['ls /m', 'cat /m/a.txt', 1],

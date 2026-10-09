@@ -109,7 +109,7 @@ describe('PermissionsPolicy', () => {
 
   it('a deny rule speaks by scope and by where it was written', () => {
     const p = policy()
-    // Whole-command rule: reason only, the entry point renders `git: policy
+    // Whole-command rule: reason only, the command plane renders `git: policy
     // denied: ...` at 126. A mount section's rule applies when the line
     // works inside that mount (here by cwd).
     expect(

@@ -412,7 +412,7 @@ async function runPreparedLine(
   effectiveSession.aliasView = null
   try {
     // The line's signal, the caller's folded with the session's kill
-    // channel, rides the async context so the status entry point can refuse an
+    // channel, rides the async context so the status write can refuse an
     // orphan of this line and no other, and every status the line stamps,
     // a syntax error's or a deny's included, is the line's to put back.
     // Python sets the line writer at the same point.
@@ -774,7 +774,7 @@ async function runParsedLine(
   const cacheFacts = env.dispatcher.captureCacheFacts()
   const callAgentId = options.agentId ?? env.agentId ?? ''
   // An op a policy refuses inside a command prints the command's own GNU
-  // line, so the entry point notes the record here, for the line to carry on its
+  // line, so the dispatcher notes the record here, for the line to carry on its
   // result.
   const note = (refusal: Refusal): void => {
     nested.latest = refusal

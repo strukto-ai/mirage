@@ -212,7 +212,7 @@ export function besideLink(link: string, typed: string): PathSpec {
  * Write an in-place output, replacing a link standing at its name. gzip -f
  * unlinks whatever holds the name before it creates the file, so a link there
  * is removed, never written through; an output beside a link goes through the
- * entry point, since the link may sit on any mount. Mirrors Python's replace_output.
+ * dispatcher, since the link may sit on any mount. Mirrors Python's replace_output.
  */
 export async function replaceOutput(
   out: PathSpec,

@@ -33,7 +33,7 @@ import { encodeText } from '../../../../shell/bytes.ts'
 // path answers). All of them land on GNU readlink's silent exit 1, so
 // this matches python's `except OSError` rather than naming errnos one
 // at a time — a list would silently print a raw path the first time a
-// entry point answered with an errno nobody had added yet.
+// dispatcher answered with an errno nobody had added yet.
 function readlinkRefused(err: unknown): boolean {
   if (err instanceof PolicyDenied) return true
   return typeof (err as { code?: unknown }).code === 'string'

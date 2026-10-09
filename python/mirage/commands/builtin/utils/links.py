@@ -72,8 +72,8 @@ class LinkResolver:
     them.
 
     A link is invisible to every backend, so a command bound to one
-    mount needs the links to tell a name that stands on one, and the op
-    entry point to act where the link leads or where it stands: the target may
+    mount needs the links to tell a name that stands on one, and the
+    dispatcher to act where the link leads or where it stands: the target may
     live on any mount, and so may the link.
 
     Attributes:

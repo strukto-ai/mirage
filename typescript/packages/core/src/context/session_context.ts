@@ -143,7 +143,7 @@ export function getCurrentSessionFor(owner: SessionOwner): SessionState | null {
 /**
  * The bound session, unless another owner published it.
  *
- * A dispatcher keeps the session it is reached under, so it never widens
+ * An entry point keeps the session it is reached under, so it never widens
  * a caller's view: a command's runtime, a kernel mount and a guest
  * runtime all bind before they call. A binding that names an owner
  * other than `owner` is another workspace's, and its session describes
@@ -455,7 +455,7 @@ const walkProbeStorage = createAsyncContext<readonly [string, WalkProbe]>()
  * Bound by `Mount.runCommand` around the handler, beside the mount gate: the
  * command tier reaches its backend without passing the dispatcher,
  * so the walk guard on its I/O proves an operand's `.` and `..` with the
- * entry point's stat and link follow through this binding. Mirrors Python's
+ * dispatcher's stat and link follow through this binding. Mirrors Python's
  * set_walk_probe.
  */
 export function runWithWalkProbe<T>(
@@ -632,18 +632,18 @@ export function redirectRunnerFor(node: object): RedirectRunner | null {
 }
 
 /**
- * Whether a path is a redirect target the command entry point already judged
+ * Whether a path is a redirect target command admission already judged
  * for the statement writing it now.
  *
- * The dispatcher ask this, and unlike `redirectPathsFor` it takes no node,
+ * The dispatcher asks this, and unlike `redirectPathsFor` it takes no node,
  * because by the time the shell writes the file the node has returned
- * and an entry point sees only a path. The binding is what keeps that honest: it
+ * and the dispatcher sees only a path. The binding is what keeps that honest: it
  * exists only while one statement's targets are being written, and a
  * statement whose targets a rule refused never reaches the write at all.
  * So a bound target is one the line was admitted with, and re-deriving a
- * verdict for it from an entry point that knows neither the line nor the nod it
- * holds can only get it wrong. Every live binding counts, because a
- * target is only ever bound after its own line's entry point judged it: on the
+ * verdict for it from the dispatcher, which knows neither the line nor the nod it
+ * holds, can only get it wrong. Every live binding counts, because a
+ * target is only ever bound after its own line's admission judged it: on the
  * fallback storage a concurrent statement's frame must not shadow this
  * one's targets into a re-derived refusal.
  */

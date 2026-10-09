@@ -334,7 +334,7 @@ class CLIBlock(BaseModel):
         # config is opaque: nothing declares which key is a credential,
         # so the snapshot captures it verbatim, and a pointer resolved
         # into it would be written out as the value it fetched. The
-        # block refuses rather than the dump, so every entry point that reads
+        # block refuses rather than the dump, so every loader that reads
         # a config inherits the rule.
         if self.script is not None and config_holds_pointer(self.config):
             raise ValueError(
@@ -395,7 +395,7 @@ class MountBlock(BaseModel):
         # as 1, so a document TypeScript refuses outright would load
         # here and the two hosts would disagree about the same bytes --
         # `ttl: true` silently bounding the mount at one second. The
-        # snapshot dispatcher reads its bound through the same coercer.
+        # snapshot loader reads its bound through the same coercer.
         if v is None:
             return v
         return coerce_read_ttl(v)
@@ -413,7 +413,7 @@ class MountBlock(BaseModel):
         # Last, so the dependent-key rules name the missing key first,
         # as TypeScript's `validateReadBlock` does. `resolve_read_spec`
         # refuses this too, but only at `to_workspace_kwargs`, which is
-        # an entry point later than the one TypeScript refuses it at: the
+        # a step later than the one TypeScript refuses it at: the
         # shared `integ/fixtures/config/rejected.json` loads the config and
         # nothing more.
         if self.ttl is not None and self.ttl < 1:
@@ -826,7 +826,7 @@ class WorkspaceConfig(BaseModel):
             }
         if self.profile is not None:
             kwargs["profile"] = self.profile
-        # Passed through as-is: this entry point is sync, and env-plane
+        # Passed through as-is: this method is sync, and env-plane
         # resolution is async at command time, so no fetching here.
         if self.env is not None:
             kwargs["env"] = self.env

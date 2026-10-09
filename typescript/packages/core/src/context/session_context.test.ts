@@ -152,7 +152,7 @@ describe('a binding belongs to the workspace that published it', () => {
     })
   })
 
-  it("the dispatcher keeps any bind but another owner's", async () => {
+  it("an entry point keeps any bind but another owner's", async () => {
     // A kernel mount and a guest runtime bind without an owner, and
     // the entry point keeps those; only a binding another workspace made is
     // refused, since its session describes that workspace's view.

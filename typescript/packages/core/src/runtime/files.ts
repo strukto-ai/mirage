@@ -44,7 +44,7 @@ function isAbsent(err: unknown): boolean {
 }
 
 /**
- * Whether a listing row is one the dispatcher did not classify.
+ * Whether a listing row is one the file adapter did not classify.
  *
  * Its size-0 non-directory shape is a placeholder, not an answer: a
  * guest that needs the entry's kind, size or stamp must ask the mount
@@ -59,7 +59,7 @@ export function isUnclassified(entry: VFSEntry | VFSStat): boolean {
 /**
  * Translate one mirage stat row into the guest-facing struct.
  *
- * The projection lives at the dispatcher rather than in each surface so both
+ * The projection lives in the file adapter rather than in each surface so both
  * languages build one struct in one tier: preview1 reads the type bits
  * out of `mode` and drops the rest, monty fills a `StatResult`,
  * Emscripten fills an `FSAttr`. Mirrors python's `stat_row`.
@@ -121,7 +121,7 @@ export class RuntimeFiles {
   private readonly noAppend = new Set<string>()
 
   constructor(dispatch: BridgeDispatchFn, resolver: MountResolver = new PrefixResolver(() => [])) {
-    // One cap on every request the dispatcher sends, held for that request
+    // One cap on every request the file adapter sends, held for that request
     // alone, so the stats of listings that run together (a preload
     // walking a tree) share it with the walk's own reads.
     const limiter = new ConcurrencyLimiter(LISTING_ENTRY_CONCURRENCY)
@@ -261,7 +261,7 @@ export class RuntimeFiles {
    * shell, while a withheld surface's files (history, the program view)
    * stay unseen. A file's own row decides that, not its listing: the
    * history mount lists its one file as empty so a traversal never
-   * descends into it. 0 is the dispatcher's spelling of an unknown mtime.
+   * descends into it. 0 is the file adapter's spelling of an unknown mtime.
    */
   async viewStat(path: string): Promise<VFSStat | null> {
     const row = await this.statOrNull(path)
@@ -297,7 +297,7 @@ export class RuntimeFiles {
    * entry is classified by its own stat, which is RAM when the readdir
    * filled the index and a backend request when the mount keeps none.
    * At most `LISTING_ENTRY_CONCURRENCY` requests run at once across
-   * everything this dispatcher serves, so a large directory on an unindexed
+   * everything this adapter serves, so a large directory on an unindexed
    * mount does not put every entry's request on the wire together.
    *
    * An entry whose stat fails, for any reason, rides unclassified: a

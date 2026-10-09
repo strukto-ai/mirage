@@ -56,7 +56,7 @@ import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * Put a declaration's value-shaping marks on a name before its value
- * stores. The entry point coerces on write by reading the record's attributes, so
+ * stores. The session view coerces on write by reading the record's attributes, so
  * for the declaration's *own* value to coerce (`declare -i n=3+4` stores
  * `7`), the attribute has to be there first; a `+` letter comes off first
  * too, so `declare -i N=5; declare +i N+=x` stores `5x`. Gated like every
@@ -227,7 +227,7 @@ export async function stampMarks(
 /**
  * Take the mark off an unaimed `declare -n` reference a declared array kind
  * is about to land on, silently, as bash's `export -a ref=v` does (an
- * undeclared array warns at the entry point).
+ * undeclared array warns at the session view).
  */
 export async function dropReference(
   session: SessionState,
@@ -295,7 +295,7 @@ export function plusRefusal(
  * that re-aims a reference in between cannot carry a mark past the gate.
  *
  * The builtin owns the store; readonly is the shell's rule, checked per name
- * before the entry point, and the entry point's gate covers the policy half. Names are
+ * before the session view, and the session view's gate covers the policy half. Names are
  * processed in order, so an earlier operand stays stored when a later one
  * refuses, as bash does. A readonly refusal or kind conflict of an array
  * literal is a variable-assignment error in GNU, not a builtin failure: for
@@ -363,7 +363,7 @@ export async function storeStagedArrays(
     const checked = deref(session, name) || name
     // One try around the literal and the write: a subscript in the
     // literal may assign (`([x=2]=v)`), and that lands through the same
-    // entry point.
+    // session view.
     try {
       if (kind === VarKind.Assoc || Object.hasOwn(session.assocs, name)) {
         const { map, badWords } = buildAssocLiteral(session.assocs[name] ?? null, items, append)
@@ -865,7 +865,7 @@ export async function markVariables(
 /**
  * Assign and mark one `export` / `readonly` word. A value of the other array
  * kind is refused and the name is still marked, as bash does. The bare form
- * writes no value, so it marks through the plane's no-value entry point rather than
+ * writes no value, so it marks through the session view's no-value call rather than
  * inventing an empty string: on a new name that leaves it *unset* and
  * marked, bash's own third state (`export Z` prints `declare -x Z` and stays
  * out of `env`). Still gated, since marking is a session write: through

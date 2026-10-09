@@ -53,7 +53,7 @@ def test_every_context_field_is_spelled_as_command_opts_spells_it():
 def test_session_view_stays_on_both_sides_of_the_seam():
     # No opts reader wants session_view today, but CLIView.session_view
     # has production readers (git commit's author identity) and the
-    # entry points record is pinned to be a subset of CommandOpts — dropping
+    # CLIView record is pinned to be a subset of CommandOpts — dropping
     # the field here would break that containment, so it stays.
     names = {f.name for f in fields(ExecContext)}
     assert "session_view" in names

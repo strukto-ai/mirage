@@ -109,7 +109,7 @@ async def assign_element(
     """Assign one element (or a bare name resolved as element 0).
 
     The element mechanics are computed on a copy and the landing write
-    goes through the entry point as the whole variable the write produces, so
+    goes through the session view as the whole variable the write produces, so
     a refused write leaves nothing half-applied and a ``pre_session``
     rule sees ``m[k]=v`` as a write to ``m``. The subscript arrives
     already expanded: an associative name takes it as the key verbatim,
@@ -192,7 +192,7 @@ async def land_arith(
     reader: RandomReader,
 ) -> None:
     """Land an arithmetic command's assignments in the order the
-    expression made them, each through the entry point: a hidden name refuses
+    expression made them, each through the session view: a hidden name refuses
     and the ones after it never land, as a readonly name stopped the
     evaluation itself (``let 'X=5, R=3'`` leaves X at 5). The draws made
     after a seed that landed settle either way.

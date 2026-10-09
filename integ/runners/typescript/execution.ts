@@ -158,8 +158,8 @@ function checkField(st: HarnessStat, name: string): string {
  * Two forms. `stat` names a path and the FileStat fields to print. `read`
  * names a path and a byte window, and prints what that window returned: no
  * shell command asks for one, because commands read whole files, so the
- * ranged read op is only reachable through the same entry point FUSE and `ws.vfs`
- * use. `read` with `stream` reads the stored bytes as the entry point streams them
+ * ranged read op is only reachable through the dispatcher FUSE and `ws.vfs`
+ * use. `read` with `stream` reads the stored bytes as the dispatcher streams them
  * (no command does yet) and fails when they come back whole.
  */
 export async function statCheck(ws: ExecWorkspace, check: StatCheck): Promise<string> {

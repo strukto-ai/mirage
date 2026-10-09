@@ -21,11 +21,11 @@ import { PyodideRuntime } from './runtime.ts'
 
 const DEC = new TextDecoder()
 
-// The os.getxattr family a pyodide guest gets over the workspace entry point:
+// The os.getxattr family a pyodide guest gets over the dispatcher:
 // what the shell sets the guest reads, what the guest sets the shell
 // reads, and a missing attribute is linux's ENODATA.
 describe('pyodide extended attributes', { timeout: 120_000 }, () => {
-  it('are served by the workspace entry point through the worker', async () => {
+  it('are served by the dispatcher through the worker', async () => {
     const rt = new PyodideRuntime()
     const ws = new Workspace(
       { '/data': new RAMVFS() },
@@ -54,7 +54,7 @@ describe('pyodide extended attributes', { timeout: 120_000 }, () => {
     }
   })
 
-  it('answer ENOTSUP where no worker can wait on the entry point', async () => {
+  it('answer ENOTSUP where no worker can wait on the dispatcher', async () => {
     const rt = new PyodideRuntime()
     try {
       const out = await rt.eval(

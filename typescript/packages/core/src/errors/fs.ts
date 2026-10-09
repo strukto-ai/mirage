@@ -145,7 +145,7 @@ export function walkRefusal(path: {
 /** ELOOP: a link loop stands in the path's walk. A walk refusal, so final
  * for every layer that re-reads a miss, and a coded fs error, so a
  * per-operand catch words it where the namespace's own CycleError escaped
- * every one. The entry point throws it for a loop above any name it is handed.
+ * every one. The dispatcher throws it for a loop above any name it is handed.
  * Mirrors Python's eloop. */
 export function eloop(path: string | { virtual: string }): DotWalkError {
   return dotWalkError(path, 'ELOOP')
@@ -285,7 +285,7 @@ export function isNoMount(err: unknown): boolean {
 // than a walk's tolerance, because a permission or missing-capability
 // error is not absence and mapping it to one would report a path that
 // exists as missing. Mirrors python MISS_ERRORS, and lives here for the
-// same reason that tuple does: the entry point and the executor's probes both
+// same reason that tuple does: the dispatcher and the executor's probes both
 // read it and neither may import the other.
 export function isMissError(exc: unknown): boolean {
   const code = (exc as { code?: string }).code
@@ -387,7 +387,7 @@ export function isEisdir(err: unknown): boolean {
 }
 
 // Python's twin is `except FileExistsError`: the name is taken, which is
-// the entry point's answer to a create that will not overwrite (symlink(2)).
+// the dispatcher's answer to a create that will not overwrite (symlink(2)).
 export function isEexist(err: unknown): boolean {
   return hasCode(err, 'EEXIST')
 }

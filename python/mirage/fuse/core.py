@@ -103,12 +103,12 @@ class MountCore:
             else ()
         )
         if session is not None and skipped:
-            # The dispatcher sees ops, never a line, so the profile's
+            # This entry point sees ops, never a line, so the profile's
             # command-level rules have nothing here to judge.
             logger.warning(
-                "session %s: a dispatcher that sees only ops (a kernel mount, "
-                "SFTP, codex-exec's file calls) cannot apply %s; path "
-                "rules, hides and modes still hold",
+                "session %s: an entry point that sees only ops (a kernel "
+                "mount, SFTP, codex-exec's file calls) cannot apply %s; "
+                "path rules, hides and modes still hold",
                 session.session_id,
                 "; ".join(skipped),
             )
@@ -632,7 +632,7 @@ class MountCore:
         create: bool = False,
         replace: bool = False,
     ) -> None:
-        """Store an extended attribute through the workspace entry point.
+        """Store an extended attribute through the dispatcher.
 
         The dispatcher keeps it on the path's namespace node, so it outlives
         the mount, moves with a rename, and is the same attribute every
@@ -834,7 +834,7 @@ class MountCore:
         self._changed(path)
 
     def _changed(self, path: str, rehydrate: bool = True) -> None:
-        """The one dispatcher every mutation of a file's bytes goes through.
+        """The one function every mutation of a file's bytes goes through.
 
         Every cache the core keeps for a file is keyed by its identity
         (the mount path with namespace links followed), and this is the

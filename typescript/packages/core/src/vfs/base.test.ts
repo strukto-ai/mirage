@@ -488,7 +488,7 @@ describe('custom VFS capability fallbacks', () => {
 async function readCli(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
   const dispatch = inv.view?.dispatch
   const path = inv.paths[0]
-  if (dispatch === undefined || path === undefined) throw new Error('missing CLI path entry point')
+  if (dispatch === undefined || path === undefined) throw new Error('missing CLI dispatch')
   const [data, result] = await dispatch('read', path)
   if (!(data instanceof Uint8Array)) throw new Error('expected file bytes')
   return [data, result]

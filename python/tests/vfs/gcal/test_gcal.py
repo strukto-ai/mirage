@@ -42,7 +42,7 @@ WHOLE = compact_json_bytes(EVENTS[0])
 )
 async def test_the_dispatcher_reads_an_event_cold(kwargs, data):
     # gcal's read is the by-VFS op: an event resolves as ".json" at the
-    # entry point, so a read keyed to ".gcal.json" was never picked and a cold
+    # dispatcher, so a read keyed to ".gcal.json" was never picked and a cold
     # read raised ENOTSUP until a cat warmed the file cache.
     ws = Workspace({"/cal": GCalVFS(gcal_config())})
     assert await ws.vfs.read(EVENT, **kwargs) == data

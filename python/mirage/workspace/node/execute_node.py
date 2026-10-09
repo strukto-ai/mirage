@@ -187,7 +187,7 @@ async def _eval_cfor_expr(
         # bash bound the assignments made before the error; they land
         # before the error is reported.
         error, writes = exc, exc.writes
-    # Through the entry point, so a pre_session rule governs an arithmetic
+    # Through the session view, so a pre_session rule governs an arithmetic
     # assignment exactly as it governs `X=1` and a hidden name refuses
     # at its own write; in evaluation order, so a bare name and its
     # element 0 land as the expression wrote them.

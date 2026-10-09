@@ -96,10 +96,10 @@ class RuntimeFiles:
     and each call blocks its caller until the op is done. A guest's call
     arrives on a worker thread (wasm) or the binding's own thread
     (monty) and hops to the workspace loop running elsewhere; the hop
-    carries no contextvars, so a guest's entry point is built from a binding
+    carries no contextvars, so a guest's file adapter is built from a binding
     (``of``), whose dispatch replays the launch context (the session,
     the op recorder) around each op. A ``with ws:`` block calls from
-    the only thread there is, so its entry point drives the block's idle loop
+    the only thread there is, so its file adapter drives the block's idle loop
     in the caller's own context, a session bound inside the block
     included. Either way the op runs as a shell command's would, and an
     OSError leaves numbered as a syscall's (``numbered``).
@@ -368,7 +368,7 @@ class RuntimeFiles:
         mount keeps none. The whole listing is one hop to the loop,
         where the stats run together, at most
         ``LISTING_ENTRY_CONCURRENCY`` requests at once across everything
-        this dispatcher serves.
+        this adapter serves.
 
         An entry whose stat fails, for any reason, rides unclassified:
         a size-0 non-directory with no mode and no mtime, the row that

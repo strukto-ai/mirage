@@ -230,7 +230,7 @@ async def main() -> None:
         "reviewer",
         reviewer,
         "echo x > /repo/new.txt",
-        "the shell dispatcher reads the same cap",
+        "the shell entry point reads the same cap",
     )
     await line(
         "editor", editor, "echo x > /repo/new.txt", "and the same grant"

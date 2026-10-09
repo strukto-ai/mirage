@@ -30,7 +30,7 @@ export interface SyncVFS {
   readlink(path: string): string
   flush(mutations: MirageMutation[]): FlushFailure | undefined
   /**
-   * One extended-attribute op, answered by the workspace entry point before it
+   * One extended-attribute op, answered by the dispatcher before it
    * returns: the value for getxattr, the names for listxattr.
    */
   xattr(

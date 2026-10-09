@@ -145,7 +145,7 @@ async def test_the_allow_list_refuses_a_visible_head_it_does_not_cover():
 @pytest.mark.asyncio
 async def test_a_deny_rule_speaks_by_scope_and_by_where_it_was_written():
     policy = _policy()
-    # Whole-command rule: reason only, the entry point renders `git: policy
+    # Whole-command rule: reason only, the command plane renders `git: policy
     # denied: ...` at 126. A mount section's rule applies when the line
     # works inside that mount (here by cwd).
     assert await policy.pre_command(

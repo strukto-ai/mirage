@@ -81,7 +81,7 @@ export function arraySet(arr: ShellArray, idx: number, value: string): void {
 /**
  * A copy of `arr` with `value` assigned at `idx`.
  *
- * What a writer hands the session view: the entry point speaks in whole
+ * What a writer hands the session view: the session view speaks in whole
  * variables, so an element write states itself as the array the write
  * produces. Building it on a copy is what keeps a refusal from leaving
  * the element applied.

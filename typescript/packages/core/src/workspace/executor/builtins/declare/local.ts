@@ -286,7 +286,7 @@ async function declareOperand(
       // as `export Z` does: GNU prints `declare -- L` and `${L-d}` still
       // expands to `d`. A bare declaration of an existing array re-scopes
       // it, so nothing is written there. Visible reads: a hidden name
-      // counts as unset, so the mark is attempted and the entry point refuses it.
+      // counts as unset, so the mark is attempted and the session view refuses it.
       await view.mark(key, null, true, !nameref)
     }
     await stampMarks(session, view, key, null, marks, !nameref)

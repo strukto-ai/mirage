@@ -113,7 +113,7 @@ export interface SessionView {
   snapshot(): Record<string, string>
   // Write one variable through the session plane (readonly + preSession).
   // General over variable shapes: a string stores a scalar, a ShellArray
-  // stores a whole array, and the dispatcher keeps the two storages exclusive.
+  // stores a whole array, and the session view keeps the two storages exclusive.
   // Writers with richer mechanics (subscripts, appends, holes) compute
   // the resulting value on a copy and hand it here, so a denial never
   // leaves a half-applied write.

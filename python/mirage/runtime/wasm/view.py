@@ -129,12 +129,12 @@ class WasmView:
         return self._files
 
     def _files_for(self, path: str) -> RuntimeFiles:
-        """The entry point for a content call on `path`, inside the view only.
+        """The file adapter for a content call on `path`, inside the view only.
 
         Structure is open (a stat, a listing or a readlink answers for
         any path the workspace has), but content goes only through the
         runtime's view (``RuntimeFiles.serves``), the rule every guest
-        entry point keeps: a guest reads and writes nothing the view
+        file adapter keeps: a guest reads and writes nothing the view
         withholds, such as the shell's history.
 
         Args:
@@ -187,7 +187,7 @@ class WasmView:
         return self._core_stat(path, nofollow=True)
 
     def _core_stat(self, path: str, nofollow: bool = False) -> VFSStat:
-        """The entry point's own stat, or ENOENT when no workspace is attached.
+        """The adapter's own stat, or ENOENT when no workspace is attached.
 
         A path outside the view still answers as structure: a directory
         row when the workspace lists it (``RuntimeFiles.view_stat``).
@@ -352,7 +352,7 @@ class WasmView:
 
         Times are the only attributes preview1 can express: it has no
         chmod or chown call at all. A mount whose backend cannot hold a
-        stamp still answers, because the entry point overlays what the backend
+        stamp still answers, because the dispatcher overlays what the backend
         declines.
 
         Args:
@@ -385,7 +385,7 @@ class WasmView:
         The exception is an entry whose stat failed: it rides
         unclassified, so it is FT_UNKNOWN, and a guest that needs its
         kind stats it and meets the failure there rather than a guess.
-        A link is reported as one: preview1 has the filetype, the entry point
+        A link is reported as one: preview1 has the filetype, the file adapter
         marks the row, and a guest that reads ``d_type`` (CPython's
         ``scandir`` does) then answers ``is_symlink`` without a call of
         its own.
@@ -411,10 +411,10 @@ class WasmView:
     def _readdir_root(self) -> list[tuple[str, int]]:
         """Merge the build directory's root listing with the file API's.
 
-        The file API's readdir already carries mount structure (the entry point
+        The file API's readdir already carries mount structure (the dispatcher
         merges child mounts and links), so no prefix synthesis happens
         here; mount entries arrive kind-resolved by the file API's listing,
-        which the entry point also answers for structure-only directories.
+        which the dispatcher also answers for structure-only directories.
         """
         entries: dict[str, int] = {}
         if self._build is not None:

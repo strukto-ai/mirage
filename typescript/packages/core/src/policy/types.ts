@@ -404,7 +404,7 @@ export interface Abandoned {
 }
 
 /**
- * The session questions the approval entry point asks. The SessionManager
+ * The session questions the approval ledger asks. The SessionManager
  * satisfies it structurally, so the dispatcher reads and writes a session's
  * grants by id without this package importing the workspace, and always
  * on the registered session rather than the fork a line may be running
@@ -532,13 +532,13 @@ export interface CommandContext {
   walks?: boolean
 }
 
-/** Facts about one VFS op, as preVfs hooks see it. Fires at the op
- * entry point (the dispatcher every access routes through, FUSE included),
- * before any backend or cache I/O. `sessionId` is the session the entry point
+/** Facts about one VFS op, as preVfs hooks see it. Fires at the
+ * dispatcher (every access routes through it, FUSE included),
+ * before any backend or cache I/O. `sessionId` is the session the dispatcher
  * serves, set from the session it already resolves for hides and
  * modes; empty for the unbound host view. `issuer` is the token the op
  * arrived with, when its caller stamped one: a policy whose own engine
- * reads through the entry point stamps those reads, and recognizes its token
+ * reads through the dispatcher stamps those reads, and recognizes its token
  * here so the read an evaluation is waiting on is not judged by the
  * hook that is waiting. It travels with the op as an argument, never
  * through ambient context, so no concurrent op can be taken for it;
@@ -778,8 +778,8 @@ export interface VfsExplanation extends Explanation {
 export interface EntryGate {
   readonly scoped: boolean
   /**
-   * The ask rules this line runs under a grant for. Read by the op
-   * entry points, which see the same entries from below and would otherwise
+   * The ask rules this line runs under a grant for. Read by the
+   * dispatcher, which sees the same entries from below and would otherwise
    * re-derive a verdict that knows nothing of the nod the gate already
    * took.
    */

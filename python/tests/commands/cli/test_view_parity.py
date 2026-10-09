@@ -39,7 +39,7 @@ def test_every_entry_point_is_spelled_as_the_command_tier_spells_it():
 
 
 def test_every_entry_point_defaults_to_none():
-    # None outside a workspace is the whole opt-in: a verb that reads a
-    # entry point it was not given has to refuse on its own, and a dispatcher
+    # None outside a workspace is the whole opt-in: a verb that reads an
+    # entry point it was not given has to refuse on its own, and a field
     # that defaulted to something usable would take that decision away.
     assert all(f.default is None for f in fields(CLIView))

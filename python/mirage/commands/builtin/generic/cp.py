@@ -463,7 +463,7 @@ async def copy_tree_links(
     copied until the name is too long, which is where GNU stops.
 
     Args:
-        copies (TransferLinks): the namespace's links and entry point.
+        copies (TransferLinks): the namespace's links and the dispatcher.
         deref (CopyDeref): the line's link policy.
         src (PathSpec): the copied directory.
         target (PathSpec): where it was copied to.

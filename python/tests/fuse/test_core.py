@@ -660,7 +660,7 @@ async def test_removing_a_link_leaves_its_targets_handles_alone():
 
 
 @pytest.mark.asyncio
-async def test_a_session_is_told_the_command_rules_the_dispatcher_skips(
+async def test_a_session_is_told_the_command_rules_fuse_skips(
     caplog,
 ):
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)

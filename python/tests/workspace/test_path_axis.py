@@ -212,10 +212,10 @@ def test_the_dispatcher_does_not_adopt_another_workspaces_session():
 
 
 def test_the_dispatcher_does_not_follow_a_link_the_session_cannot_see():
-    # The facade follows links before the entry point so the record carries
+    # The facade follows links before the dispatcher so the record carries
     # the resolved path, and that follow used to run unbound: a link
-    # inside hidden space reached the entry point already resolved to its
-    # visible target, so the entry point's check of the typed path never saw
+    # inside hidden space reached the dispatcher already resolved to its
+    # visible target, so the dispatcher's check of the typed path never saw
     # the hide. The follow now runs as the session and only from a
     # path it can see, so the link reads as absent.
     ws = _hiding()
@@ -248,8 +248,8 @@ def test_a_write_below_the_mode_reads_read_only_file_system():
 def test_a_deeper_show_mode_refines_the_mount_cap():
     # mounts: {/repo: r} + show {"/repo/build": rw}: the deeper entry
     # wins below its anchor, the mount cap holds everywhere else, and
-    # the whole-mount write command gate lets the line reach the op
-    # entry point instead of refusing the command outright.
+    # the whole-mount write command gate lets the line reach the
+    # dispatcher instead of refusing the command outright.
     ws = _seeded()
     ws.create_session(
         "rev",
@@ -576,7 +576,7 @@ def test_a_read_only_hidden_remnant_keeps_the_refusal():
 
 
 def test_a_mounted_child_keeps_the_command_planes_refusal():
-    # Command-plane twin of the ops entry point's merged emptiness: the
+    # Command-plane twin of the dispatcher's merged emptiness: the
     # backend listing holds only hidden entries, but the namespace owes
     # the directory a visible mounted child no backend can list. The
     # stamped children join the guard's emptiness judgment, so the
@@ -606,7 +606,7 @@ def test_a_mounted_child_keeps_the_command_planes_refusal():
 def test_ops_rmdir_keeps_the_refusal_when_a_mounted_child_remains():
     # Ops-plane twin of the visible-child rule: the backend cannot see
     # a mount nested below the directory, so the remnant arm judges
-    # emptiness on the entry point's merged listing. The visible mounted child
+    # emptiness on the dispatcher's merged listing. The visible mounted child
     # keeps the not-empty refusal instead of the arm destroying the
     # hidden backend remnants and reporting a successful rmdir while
     # the mount remains.

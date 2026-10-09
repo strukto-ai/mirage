@@ -71,7 +71,7 @@ class DispatchFn(Protocol):
     on the consumer side, because runtimes receive it through a binding while
     the workspace provides it, and the runtime package imports no
     workspace module. ``report``, when a caller passes one, is stamped
-    by the entry point the moment the op completes, so an observer reads what
+    by the dispatcher the moment the op completes, so an observer reads what
     ran even when a later step throws the result away; runtimes never
     pass it."""
 
@@ -113,7 +113,7 @@ class VFSStat:
     """One path's metadata, in the shape every guest encoder needs
     (TS ``VFSStat``).
 
-    Built once at the entry point out of the mount's own ``FileStat``, so a
+    Built once at the file adapter out of the mount's own ``FileStat``, so a
     surface projects rather than translates: preview1 keeps the type
     bits and drops the rest, monty fills a ``StatResult``, Emscripten
     fills an ``FSAttr``.
@@ -160,16 +160,16 @@ class VFSStat:
 class VFSEntry:
     """One directory entry as the mounts report it (TS ``VFSEntry``).
 
-    Resolved once at the entry point by the entry's own stat, so no guest
-    pays one stat per entry for a fact the entry point already had. An entry
-    the entry point did not classify (a guest that asked for names only, or a
+    Resolved once at the file adapter by the entry's own stat, so no guest
+    pays one stat per entry for a fact the file adapter already had. An entry
+    the file adapter did not classify (a guest that asked for names only, or a
     stat that failed) rides as a size-0 non-directory with no mode or
     mtime: "not known", rather than a default a guest cannot tell from
     a real answer. A slash-marked directory carries neither either,
     which is the whole point of the mark.
 
     Args:
-        path (str): the entry's virtual path, in the entry point's own
+        path (str): the entry's virtual path, in the file adapter's own
             spelling (a backend that slash-marks directories keeps the
             trailing slash).
         size (int): rendered content bytes, 0 for directories and

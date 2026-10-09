@@ -209,7 +209,7 @@ async def _delete(
     errors: list[bytes],
     stat_path: StatPath | None,
 ) -> bool:
-    """Remove a matched entry through the shared operation entry point.
+    """Remove a matched entry through the dispatcher.
 
     The dispatcher owns admission, backend support, cache invalidation and
     namespace cleanup. A find action never resolves a shell command.
@@ -217,7 +217,7 @@ async def _delete(
     Args:
         ps (PathSpec): the selected row, with its display spelling.
         ns (NamespaceView | None): the namespace's link facts.
-        dispatch (DispatchFn | None): workspace operation entry point.
+        dispatch (DispatchFn | None): the workspace dispatcher.
         errors (list[bytes]): receives a failure in find's voice.
         stat_path (StatPath | None): distinguishes files from directories.
     """
@@ -523,7 +523,7 @@ async def _apply_find_actions(
         stat_path (StatPath | None): dispatcher stat, threaded with it
             and used to find a slash-carrying ``-exec`` head.
         dispatch (DispatchFn | None): removes matched rows through the
-            operation entry point, which owns admission and cleanup.
+            dispatcher, which owns admission and cleanup.
         identity (Identity | None): who the session is, for the owner
             and group columns of ``-ls``.
 

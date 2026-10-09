@@ -858,7 +858,7 @@ async function routeArgv(
     return await handleReadlink(namespace, dispatch, session, operands)
   }
 
-  // Extended attributes: the entry point's node table and the backend's own
+  // Extended attributes: the dispatcher's node table and the backend's own
   // facts; they read -h themselves.
   if (name === 'getfattr') {
     return await handleGetfattr(dispatch, session, operands)

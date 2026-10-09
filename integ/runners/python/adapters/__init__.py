@@ -3256,7 +3256,7 @@ async def open_target(
     # The target's profiles, and which one shapes a session that names
     # none. A profile is the whole permission document, so this is every
     # permission the target states; the models are the ones the YAML
-    # entry point validates with.
+    # loader validates with.
     profiles = scripted_profiles(target.get("profiles") or None)
     default_profile = target.get("profile")
     if read is not None:

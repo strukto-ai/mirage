@@ -107,7 +107,7 @@ export function guestError(code: GuestCode, path: string, target?: string): Erro
  *     source.
  */
 export function asGuestError(err: unknown, path: string, target?: string): unknown {
-  // A guest exception this entry point already built (a refusal before any
+  // A guest exception this adapter already built (a refusal before any
   // mount op) is CPython's shape already, and keeps its own condition. A
   // backend error that merely shares a CPython name is classified like
   // any other.

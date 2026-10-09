@@ -48,7 +48,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
     law lives: the allow list first (a line it does not cover is
     refused whole, though its head was visible), then the winning rule,
     refused whole or per operand by whether it names paths, or taken to
-    the approval entry point when it asks. ``pre_vfs`` walks the deny rules
+    the approval ledger when it asks. ``pre_vfs`` walks the deny rules
     that are pure paths, so FUSE, programmatic ops and the warm cache
     cannot bypass a path the profile protects. A path rule that asks is
     a question only where no line is running (a file tool, the host's
@@ -88,7 +88,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
             return None
         # The grants belong to the line, not the session: a once grant
         # is spent as the command is admitted, so by the time its own
-        # walk reaches this entry point the session holds nothing and only the
+        # walk reaches the dispatcher the session holds nothing and only the
         # bound gate still remembers the nod.
         gate = get_admission()
         granted = gate.granted if gate is not None else ()
@@ -104,7 +104,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
 
     async def wants_for(self, hook: str, session_id: str) -> bool:
         """Whether this session's rules speak at ``hook``: always at the
-        command entry point, and at the dispatcher only through a pure path
+        command admission, and at the dispatcher only through a pure path
         rule, the one kind an op can meet (``op_reach``).
 
         Args:

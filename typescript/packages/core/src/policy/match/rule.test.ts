@@ -119,7 +119,7 @@ describe('rules', () => {
       write: true,
       prefix: '/repo/',
     }
-    // The deeper ask wins where both reach, exactly as the command entry point
+    // The deeper ask wins where both reach, exactly as command admission
     // ranks them, so a broad deny cannot overrule an approved carve-out.
     expect(opRefusal(rules, inside, [])).toBe('outbox nod')
     expect(opRefusal(rules, inside, [carve])).toBeNull()

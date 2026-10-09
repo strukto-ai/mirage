@@ -51,7 +51,7 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
  *
  * Every assignment spelling (scalar, array literal, subscript, append)
  * computes its resulting value and stores through `view.set`, so the
- * gate and the storage invariant live in the entry point, not here. Denial
+ * gate and the storage invariant live in the session view, not here. Denial
  * mirrors the readonly case: a fatal variable-assignment error that
  * abandons the rest of the line.
  */

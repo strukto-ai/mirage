@@ -329,7 +329,7 @@ async def create_child_folder(
     "replace" is unreliable for folders on real Graph, so the create
     uses "fail" and reads its 409: a folder already holding the name is
     success when ``exist_ok`` (a level ``mkdir -p`` passes through) and
-    EEXIST otherwise, so a folder another client made after the entry points
+    EEXIST otherwise, so a folder another client made after the callers
     looked is still refused; a file holding it is EEXIST. Graph answers
     a create under a missing parent and under a file alike with 404, so
     the parent is looked up to tell ENOENT from ENOTDIR. Both lookups

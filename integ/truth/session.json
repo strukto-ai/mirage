@@ -32,7 +32,7 @@
     "reviewer  vfs.read  /repo/new.txt                      editor wrote",
     "                                                       one world: the reviewer reads what the editor wrote",
     "reviewer  shell     echo x > /repo/new.txt             [1] /repo/new.txt: Read-only file system",
-    "                                                       the shell dispatcher reads the same cap",
+    "                                                       the shell entry point reads the same cap",
     "editor    shell     echo x > /repo/new.txt             [0]",
     "                                                       and the same grant",
     "reviewer  session   ws.session('reviewer')             reviewer",

@@ -432,7 +432,7 @@ async def _make_dirs(
     stat: StatFn | None,
     made: set[str],
 ) -> None:
-    """Create the chain for one entry, per entry point space.
+    """Create the chain for one entry, per path space.
 
     With a stat function the shared single-level walk runs (dispatch mkdir
     is single-level on most backends); without one the accessor's own
@@ -558,7 +558,7 @@ async def unzip(
                 )
     archive_path = paths[0]
     if relay:
-        # Relay entry points address by full virtual path (flat_scopes'
+        # Relay functions address by full virtual path (flat_scopes'
         # convention), not by the mount-relative key the wrapper's
         # accessor stamped.
         archive_path = dataclasses.replace(
@@ -663,7 +663,7 @@ async def _run(
         archive_path (PathSpec): the archive operand.
         members (tuple[str, ...]): include patterns.
         excludes (tuple[str, ...]): ``-x`` patterns.
-        write_bytes (Callable): write entry point.
+        write_bytes (Callable): write function.
         mkdir_fn (Callable): mkdir function.
         stat (StatFn | None): stat function in the same path space, if any.
         args_l (bool): ``-l``.

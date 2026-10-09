@@ -86,7 +86,7 @@ async def _unset_element(
     after the extent is added is a bad-subscript error.
 
     The element mechanics are the builtin's own, but the landing write
-    goes through the entry point: a scalar's element 0 is the whole unset,
+    goes through the session view: a scalar's element 0 is the whole unset,
     and an array's hole punch is computed on a copy and stored with
     ``view.set``, so a denial leaves the array untouched. Validation
     errors write nothing and so never ask.

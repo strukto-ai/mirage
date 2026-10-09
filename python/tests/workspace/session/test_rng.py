@@ -369,7 +369,7 @@ async def test_arithmetic_random_reads_are_lazy(command, stdout):
         ('x=1; let "x=9, 1/0" 2>/dev/null; echo $? $x', "1 9\n"),
         ("x=1; for ((x=3, 1/0;;)); do :; done 2>/dev/null; echo $x", "3\n"),
         # A seed, a -i coercion and a numeric [[ ]] operand land the
-        # assignments they make, through the entry point.
+        # assignments they make, through the session view.
         ('x=1; RANDOM="x=5"; echo $x $RANDOM', "5 18498\n"),
         ('declare -i n; n="x=7"; echo $n $x', "7 7\n"),
         ('a=(1 2); declare -i n; n="a[1]=9"; echo $n ${a[1]}', "9 9\n"),
@@ -481,14 +481,14 @@ async def test_subscripts_and_offsets_land_their_assignments(command, stdout):
 def test_random_reader_draws_from_the_pending_seed_and_settles():
     # The reader is told of the assignment, draws from a scratch
     # generator seeded with it, and replays those draws on the session
-    # only once the entry point has landed the same seed.
+    # only once the session view has landed the same seed.
     session = SessionState(session_id="s")
     session.vars[RANDOM] = ShellVar("1")
     reader = random_reader(session)
     assert reader.read("X") is None
     reader.wrote("RANDOM", "42")
     assert [reader.read(RANDOM) for _ in range(2)] == ["17772", "26794"]
-    # The entry point never seeded 42: nothing to replay.
+    # The session view never seeded 42: nothing to replay.
     reader.settle()
     assert session._random_state is None
     session._random_state, session._random_seed = 42, "42"

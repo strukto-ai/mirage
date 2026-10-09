@@ -118,8 +118,8 @@ describe('github under read: fresh', () => {
 
   // Each cell is [dir listings, whole-tree walks, blob downloads] for one line
   // on a warm fresh mount: cat pays one probe, at routing, as hf's table
-  // does; its own stat and the cache entry point both reuse that answer. cp skips
-  // routing's probe, so the cache entry point asks, and cp's stat resolves through
+  // does; its own stat and the cache stage both reuse that answer. cp skips
+  // routing's probe, so the cache stage asks, and cp's stat resolves through
   // the listing, which fresh re-checks once per command: on github that is
   // one check of the head, which replaces the tree refetch (Task 1.3).
   const WARM: [string, [number, number, number]][] = [
@@ -241,10 +241,10 @@ describe('github under read: fresh', () => {
     }
   })
 
-  it('reads a revert through both entry points', async () => {
+  it('reads a revert through both reads', async () => {
     // Content-addressed shas make every stamp source agree once the index is
-    // refilled, so this guards that both the stream entry point (cat) and the bytes
-    // entry point (cp) stamp, rather than telling stamp sources apart.
+    // refilled, so this guards that both the stream read (cat) and the bytes
+    // read (cp) stamp, rather than telling stamp sources apart.
     const w = await ws(await vfsOf())
     try {
       for (const [step, data] of [OLD, NEW, OLD].entries()) {
@@ -401,7 +401,7 @@ describe('github cannot-see versus gone', () => {
     }
   })
 
-  it('never reads cannot-see as gone through the xattr entry point', async () => {
+  it('never reads cannot-see as gone through the xattr call', async () => {
     const w = await ws(await vfsOf())
     try {
       await clearedWithOverlay(w)
@@ -423,7 +423,7 @@ describe('github cannot-see versus gone', () => {
       expect(kept(w)).toBe(true)
       // The routing probe's listing of docs/ is cut short, so it defers to one
       // walk of the whole tree, which finds the file; cat's own stat and the
-      // cache entry point reuse its answer.
+      // cache stage reuse its answer.
       expect(gh.counts()).toEqual([1, 1, 0])
     } finally {
       await w.close()
@@ -444,7 +444,7 @@ describe('github cannot-see versus gone', () => {
       gh.log.length = 0
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       // One listing of docs/, by the routing probe; cat's own stat and the
-      // cache entry point reuse its answer, so the truncated tree is never walked
+      // cache stage reuse its answer, so the truncated tree is never walked
       // folder by folder, which would reach docs/ by its sha.
       expect(gh.counts()).toEqual([1, 0, 0])
       expect(gh.count('sha_dir')).toBe(0)

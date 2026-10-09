@@ -94,7 +94,7 @@ class ShellVar:
     (`arr = list(arr)` before an element write, and so on), precisely so
     a refused write leaves nothing half-applied. Making the record
     immutable turns that convention into something the type enforces:
-    the only way to change a variable is to hand the entry point a new record,
+    the only way to change a variable is to hand the session view a new record,
     so a policy gate cannot be walked around by reaching into storage.
 
     Args:
@@ -205,7 +205,7 @@ def with_attr(var: ShellVar, attr: VarAttr, on: bool = True) -> ShellVar:
 
 def appended(old: str, added: str, integer: bool) -> str:
     """The text a ``+=`` stores: the old text then the added one, or on
-    an integer the expression the entry point evaluates to their sum.
+    an integer the expression the session view evaluates to their sum.
 
     Each side is evaluated on its own and an empty side counts as 0, as
     bash does: with ``N='1?2:3'`` under ``-i``, ``N+=4`` stores 6, and

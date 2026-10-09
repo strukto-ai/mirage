@@ -87,7 +87,7 @@ export function weakerMode(a: MountMode, b: MountMode): MountMode {
 }
 
 /**
- * What the data entry point treats as nonexistent for one session.
+ * What the dispatcher treats as nonexistent for one session.
  *
  * A sibling of `SessionState.mountModes`: per-session narrowing that the
  * entry points enforce, null-on-the-session means unrestricted. Hiding is
@@ -861,7 +861,7 @@ export type StatFn<Args extends unknown[] = [path: PathSpec, index?: IndexCacheS
  * What proving a running command's `.` and `..` reads.
  *
  * The command tier reaches its backend past the dispatcher, so
- * `Mount.runCommand` binds the entry point's facts for it: `stat` is the entry point's
+ * `Mount.runCommand` binds the dispatcher's facts for it: `stat` is the dispatcher's
  * stat (throwing when nothing is there) and `follow` the namespace's link
  * resolution, null while it holds none. The kernel walk (`followPaths`)
  * rewrites an operand to its link's target before the handler runs;

@@ -24,7 +24,7 @@ import { SSHConfigError } from './errors.ts'
 const home = mkdtempSync(join(tmpdir(), 'mirage-ssh-config-'))
 
 describe('resolveSSHConfig', () => {
-  it('keeps the entry point shut without a port', () => {
+  it('keeps the endpoint shut without a port', () => {
     const shut = resolveSSHConfig({ env: {}, table: {}, home })
     expect(shut.port).toBeNull()
     expect(shut.hostKeyFile).toBe(join(home, 'ssh', 'host_ed25519_key'))

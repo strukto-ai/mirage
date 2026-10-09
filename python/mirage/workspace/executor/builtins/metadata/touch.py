@@ -202,7 +202,7 @@ async def handle_touch(
                 except OperationNotSupportedError:
                     # Stat-only backend (e.g. an API surface): creation is
                     # impossible, which GNU reports as EROFS. A read-only
-                    # mount has already refused at the entry point, as for any
+                    # mount has already refused at the dispatcher, as for any
                     # write, so this is the writable mount's answer.
                     errors.append(
                         f"touch: cannot touch '{target.raw_path}': "

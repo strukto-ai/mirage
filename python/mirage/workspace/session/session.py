@@ -297,7 +297,7 @@ class SessionState:
     # `${PIPESTATUS[@]}`: the exit status of every segment of the last
     # pipeline, where a simple command is a one-segment pipeline. Written
     # only through `record_status` (`executor/statement.py`), the one
-    # entry point `$?` goes through as well, so the two can never disagree.
+    # function `$?` goes through as well, so the two can never disagree.
     # Empty in a fresh shell, as bash's is: the first `${PIPESTATUS[*]}`
     # expands to nothing until a statement records one.
     pipe_status: tuple[int, ...] = ()

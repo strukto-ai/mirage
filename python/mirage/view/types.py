@@ -68,7 +68,7 @@ EnvGet = Callable[[str], "str | None"]
 EnvSnapshot = Callable[[], dict[str, str]]
 # Write one variable through the session plane (readonly + pre_session).
 # General over variable shapes: a string stores a scalar, a ShellArray
-# stores a whole array, and the dispatcher keeps the two storages exclusive.
+# stores a whole array, and the session view keeps the two storages exclusive.
 # Writers with richer mechanics (subscripts, appends, holes) compute the
 # resulting value on a copy and hand it here, so a denial never leaves a
 # half-applied write. A Protocol rather than a Callable alias so the
@@ -222,8 +222,8 @@ class NamespaceLinks(Protocol):
     modules).
 
     Read-only, and the TypeScript twin declares the same five members
-    in the same order. A link is created and removed through the op
-    entry point (``Files.symlink``, ``Files.unlink``), never here: the
+    in the same order. A link is created and removed through the
+    dispatcher (``Files.symlink``, ``Files.unlink``), never here: the
     dispatcher is the only layer that sees both planes, so it is where
     symlink(2)'s refusal to overwrite an occupied name is decided, and where
     session grants, admission policies and the op ledger fire. A mutator on

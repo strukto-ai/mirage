@@ -73,7 +73,7 @@ def call_over(cls: type[BaseVFS], name: str) -> Callable[..., Awaitable[Any]]:
     return call
 
 
-# Every op name the entry point dispatches to a mount.
+# Every op name the dispatcher sends to a mount.
 DISPATCH_OPS = (
     "read",
     "readdir",

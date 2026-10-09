@@ -229,7 +229,7 @@ describe('ln with a source it cannot read', () => {
 })
 
 describe('rm and unlink reach a link through the dispatcher', () => {
-  it('rm of a link goes through the entry point', async () => {
+  it('rm of a link goes through the dispatcher', async () => {
     // The strip used to write the node table directly, so a preVfs
     // policy protecting a link never fired for `rm` while it fired for
     // every other entry point (the FUSE unlink hole, one tier up). The mount is

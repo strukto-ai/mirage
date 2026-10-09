@@ -372,7 +372,7 @@ export function installQuickJsFs(
     const src = absolute(srcH)
     const dst = absolute(dstH)
     if (files?.serves(src) !== true || !files.serves(dst)) return ctx.newNumber(-ENOENT)
-    // The entry point refuses a pair on different mounts with EXDEV, which this
+    // The dispatcher refuses a pair on different mounts with EXDEV, which this
     // engine numbers -75, as the real engine does.
     try {
       await files.rename(src, dst)

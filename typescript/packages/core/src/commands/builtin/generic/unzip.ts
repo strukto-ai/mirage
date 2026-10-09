@@ -616,7 +616,7 @@ export async function unzipGeneric(
   }
   const operand = paths[0]
   if (operand === undefined) return [null, new IOResult()]
-  // Relay entry points address by full virtual path (flatten's convention),
+  // Relay functions address by full virtual path (flatten's convention),
   // not by the mount-relative key the wrapper's accessor stamped.
   const archivePath: PathSpec = relay
     ? new PathSpec({

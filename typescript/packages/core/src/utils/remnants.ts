@@ -47,7 +47,7 @@ export class VisibleRemnant extends Error {
  * deletion must still answer for its path's mode and rules exactly as
  * a first-class op would (the command plane binds its mode- and
  * rule-guarded slots, the dispatcher routes through its own fenced op
- * entry point), while the visibility filter stays off because the cascade
+ * call), while the visibility filter stays off because the cascade
  * exists to see and destroy what the session cannot. The cascade never
  * sprinkles those checks itself; wiring a raw, unguarded channel here
  * is the bug this contract exists to prevent.

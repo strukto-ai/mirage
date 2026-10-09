@@ -149,7 +149,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
           if (classify(err) !== null) throw err
           // An op that fails with no condition (an upstream 502 a REST
           // mount throws as it came) answers EIO, the kernel's word for a
-          // device that failed, as a guest's entry point does; the original
+          // device that failed, as a guest's file adapter does; the original
           // rides along as the cause.
           throw Object.assign(refusal('EIO', name, path), { cause: err })
         }

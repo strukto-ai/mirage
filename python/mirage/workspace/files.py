@@ -123,7 +123,7 @@ class Files:
     def _for_session(self, session_id: str) -> "Files":
         """The same facade run as another session.
 
-        The mechanism behind ``Session.vfs``, not a dispatcher of its
+        The mechanism behind ``Session.vfs``, not an entry point of its
         own: a host binds a session with ``ws.session(id)`` (creating
         it when the id is new) or ``Session(ws, id)`` (adopting
         one that exists), so there is one way to say it rather than

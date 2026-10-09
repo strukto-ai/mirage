@@ -83,7 +83,7 @@ export interface MountCoreOptions {
  * error codes with `classifyErrno`. Mirrors Python's `MountCore`.
  *
  * Every op goes through `ws.vfs`, which delegates to the dispatcher, so
- * a mount walks the same entry point as a shell line (mount modes, policies,
+ * a mount walks the same dispatcher as a shell line (mount modes, policies,
  * cache, invalidation) and every op it runs lands in `ws.records` for
  * `drainOps`. Reaching `ws.dispatch` from here instead would skip the
  * record; reaching a backend directly would skip the dispatcher.
@@ -121,10 +121,10 @@ export class MountCore {
     this.session = options.session ?? null
     const skipped = this.session === null ? [] : skippedAtDispatch(this.session.commands)
     if (this.session !== null && skipped.length > 0) {
-      // The dispatcher sees ops, never a line, so the profile's command-level
+      // This entry point sees ops, never a line, so the profile's command-level
       // rules have nothing here to judge.
       console.warn(
-        `session ${this.session.sessionId}: a dispatcher that sees only ops (a kernel mount, ` +
+        `session ${this.session.sessionId}: an entry point that sees only ops (a kernel mount, ` +
           `SFTP, codex-exec's file calls) cannot apply ${skipped.join('; ')}; path rules, ` +
           'hides and modes still hold',
       )
@@ -535,7 +535,7 @@ export class MountCore {
   }
 
   /**
-   * The one dispatcher every mutation of a file's bytes goes through. Every
+   * The one function every mutation of a file's bytes goes through. Every
    * cache the core keeps for a file is keyed by its identity (the mount
    * path with namespace links followed), and this is the only place they
    * are invalidated, so a new mutating op cannot forget one of them and a
@@ -689,7 +689,7 @@ export class MountCore {
   }
 
   /**
-   * Store an extended attribute through the workspace entry point, which keeps
+   * Store an extended attribute through the dispatcher, which keeps
    * it on the path's namespace node: it outlives the mount, moves with a
    * rename, and is the attribute every other surface (the shell's
    * getfattr, a guest's os.getxattr) reads. Tools that set xattrs as a

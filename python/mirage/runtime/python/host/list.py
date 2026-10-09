@@ -48,7 +48,7 @@ class MountDirEntry:
     is taken as proof and saves the round trip.
 
     Args:
-        router (StatRouter): the entry point to stat through.
+        router (StatRouter): the patched ``os`` to stat through.
         path (str): the entry's own virtual path.
         marked_dir (bool): the readdir listing slash-marked this entry.
     """

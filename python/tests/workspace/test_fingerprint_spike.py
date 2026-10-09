@@ -962,7 +962,7 @@ def test_one_line_serves_each_mount_under_its_own_policy(
     )
     assert (single_out, single_calls) == (b"v1\n", {}), (
         "a single-mount read of the bounded leg must not reconcile at "
-        "routing; v2 here means the routing dispatcher read another policy"
+        "routing; v2 here means the routing probe read another policy"
     )
 
 

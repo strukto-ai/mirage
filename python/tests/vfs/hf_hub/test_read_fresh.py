@@ -91,7 +91,7 @@ async def test_a_revert_never_serves_other_bytes_as_fresh():
 
 @pytest.mark.asyncio
 async def test_a_revert_through_cp_never_serves_other_bytes_as_fresh():
-    # The same revert through the bytes entry point: a cross-mount cp reads
+    # The same revert through the bytes read: a cross-mount cp reads
     # with read_bytes, where cat reads with the stream.
     with serve(_hub({"a.txt": NEW}, listed={"a.txt": OLD})) as hub:
         ws = _ws(_vfs(hub))
@@ -289,9 +289,9 @@ async def test_a_drift_check_on_a_loaded_mount_asks_one_path():
 
 # Measured on the first green run, then pinned (test plan T31): each path
 # ask is one reconcile probe, and a warm read makes no download. cat's own
-# stat and the cache entry point reuse the routing probe's answer. Cross-mount
+# stat and the cache stage reuse the routing probe's answer. Cross-mount
 # cp skips routing's
-# probe, so only the cache entry point asks, and its stat re-checks the listing
+# probe, so only the cache stage asks, and its stat re-checks the listing
 # its path resolves through, which fresh does once per command: one head check
 # against the listing's version, where it was a whole tree walk (Task 1.3).
 WARM = [

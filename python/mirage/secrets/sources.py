@@ -217,7 +217,7 @@ async def resolve_sources_for(
 ) -> dict[str, ResolvedSource] | None:
     """The declared instances, built only when one of `configs` names one.
 
-    Every entry point that builds a mount or a CLI from data comes through
+    Every loader that builds a mount or a CLI from data comes through
     here -- the YAML loader, a clone override, a load override -- because
     building a source reads its own bootstrap pointers, and a dotenv
     file is I/O. A config holding no pointer must leave that I/O where
@@ -232,7 +232,7 @@ async def resolve_sources_for(
             or raw; anything that is not a mapping is left for the
             constructor to refuse.
         configs (Iterable[Mapping[str, Any]]): every raw mount or CLI
-            config the entry point is about to resolve.
+            config the loader is about to resolve.
 
     Returns:
         dict[str, ResolvedSource] | None: the built instances, or None

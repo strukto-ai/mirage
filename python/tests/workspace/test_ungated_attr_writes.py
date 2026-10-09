@@ -53,7 +53,7 @@ ALLOWED = {
     ): "the shell's own bookkeeping for the two fixed names PWD and "
     "OLDPWD as part of a cd the router already authorized, not a "
     "name the agent chose; an agent-typed `PWD=x` is an ordinary "
-    "assignment and goes through the entry point",
+    "assignment and goes through the session view",
     (
         "mirage/workspace/session/state.py",
         "mark_var",

@@ -54,7 +54,7 @@ export type RuntimeReach = 'workspace' | 'process' | 'remote'
  * the consumer side, because runtimes receive it through a binding while the
  * workspace provides it, and the runtime package imports no workspace
  * module — the home of Python's DispatchFn protocol (runtime/types).
- * `report`, when a caller passes one, is stamped by the entry point the moment
+ * `report`, when a caller passes one, is stamped by the dispatcher the moment
  * the op completes, so an observer reads what ran even when a later
  * step throws the result away; runtimes and combiners never pass it.
  */

@@ -708,7 +708,7 @@ export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): 
  * the innermost binding, so a suspension answers null exactly as
  * bound. On the fallback storage a suspension yields to any
  * concurrently armed frame, because disarming another command's op
- * entry points is the worse failure: find's delegated `rm` then double-admits
+ * gates is the worse failure: find's delegated `rm` then double-admits
  * its removal (an over-count, failing closed) instead of a concurrent
  * command's ops running unguarded.
  */

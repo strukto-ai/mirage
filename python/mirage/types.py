@@ -240,13 +240,13 @@ class WalkProbe:
     """What proving a running command's ``.`` and ``..`` reads.
 
     The command tier reaches its backend past the dispatcher, so
-    ``Mount.run_command`` binds the entry point's facts for it. The kernel walk
+    ``Mount.run_command`` binds the dispatcher's facts for it. The kernel walk
     (``follow_paths``) rewrites an operand to its link's target before
     the handler runs; ``follow`` is how that operand is still known for
     the one its dotted spelling names.
 
     Args:
-        stat (StatFn): the entry point's stat, raising when nothing is there.
+        stat (StatFn): the dispatcher's stat, raising when nothing is there.
         follow (Callable[[str], str] | None): resolve a path through the
             namespace's links (open(2) semantics), None while it holds
             none.
@@ -500,7 +500,7 @@ def weaker_mode(a: MountMode, b: MountMode) -> MountMode:
 
 @dataclass(frozen=True, slots=True)
 class HiddenPaths:
-    """What the data entry point treats as nonexistent for one session.
+    """What the dispatcher treats as nonexistent for one session.
 
     A sibling of ``SessionState.mount_modes``: per-session narrowing that
     the entry points enforce, None-on-the-session means unrestricted. Hiding

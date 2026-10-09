@@ -60,7 +60,7 @@ def coerce_read_policy(value: "str | ReadPolicy | None") -> ReadPolicy:
 def coerce_read_ttl(value: JsonValue) -> int:
     """Coerce a declared bound to a whole number of seconds.
 
-    Every entry point that reads a bound off a document runs this, so one
+    Every loader that reads a bound off a document runs this, so one
     scalar is judged the same whether it came from YAML or from a
     snapshot's JSON.
 
@@ -166,7 +166,7 @@ def check_read_capability(
     # Coerced, not compared raw. `ReadPolicy` is a (str, Enum) and
     # `ReadSpec` coerces nothing, so an embedder's
     # `ReadSpec(policy="fresh")` would match neither `is` below and the
-    # whole verdict would silently no-op on the one dispatcher -- the
+    # whole verdict would silently no-op on the one path -- the
     # programmatic one -- that does not pass through `resolve_read_spec`.
     # Idempotent on a member, and it refuses a name that is not a policy
     # at all. `MountEntry` stores the coerced spec for the same reason.
@@ -178,7 +178,7 @@ def check_read_capability(
     policy = coerce_read_policy(spec.policy)
     # Before the policy dispatch, because a bound has to be usable
     # whatever the policy is. `resolve_read_spec` refuses a bad one at
-    # the YAML and snapshot entry points, but a `ReadSpec` handed straight to
+    # the YAML and snapshot loaders, but a `ReadSpec` handed straight to
     # `Workspace` or `add_mount` never passes through it, and a mount
     # taking ttl=0 accepts every write and keeps nothing: RAM marks the
     # entry expired as it is written and redis deletes the key outright,

@@ -120,7 +120,7 @@ export function statFields(st: VFSStat): GuestStat {
  * requires a native NamedTuple stat result to validate the directory.
  *
  * Args:
- *   bits: the loaded engine's entry point pieces.
+ *   bits: the loaded engine's pieces.
  *   st: the mount's row for the path.
  */
 export function statResult(bits: MontyFsBits, st: VFSStat): object {

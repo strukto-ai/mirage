@@ -226,10 +226,10 @@ describe('the path axis end to end', () => {
   })
 
   it('the dispatcher does not follow a link the session cannot see', async () => {
-    // The facade follows links before the entry point so the record carries
+    // The facade follows links before the dispatcher so the record carries
     // the resolved path, and that follow used to run unbound: a link
-    // inside hidden space reached the entry point already resolved to its
-    // visible target, so the entry point's check of the typed path never saw
+    // inside hidden space reached the dispatcher already resolved to its
+    // visible target, so the dispatcher's check of the typed path never saw
     // the hide. The follow now runs as the session and only from a
     // path it can see, so the link reads as absent.
     const ws = await hiding()
@@ -256,8 +256,8 @@ describe('the path axis end to end', () => {
   it('a deeper show mode refines the mount cap', async () => {
     // mounts: {/repo: r} + show {"/repo/build": rw}: the deeper entry
     // wins below its anchor, the mount cap holds everywhere else, and
-    // the whole-mount write command gate lets the line reach the op
-    // entry point instead of refusing the command outright.
+    // the whole-mount write command gate lets the line reach the
+    // dispatcher instead of refusing the command outright.
     const ws = await seeded()
     ws.createSession('rev', {
       profile: parseSessionProfile({
@@ -626,7 +626,7 @@ describe('ws.vfs against hides', () => {
 
   it('keeps the refusal when a visible mounted child remains', async () => {
     // The backend cannot see a mount nested below the directory, so
-    // the remnant arm judges emptiness on the entry point's merged listing:
+    // the remnant arm judges emptiness on the dispatcher's merged listing:
     // the visible mounted child keeps the not-empty refusal instead of
     // the arm destroying the hidden backend remnants and reporting a
     // successful rmdir while the mount remains.

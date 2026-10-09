@@ -582,7 +582,7 @@ def register_mcp_routes(
         jobs (JobTable): the daemon's job table.
 
     Returns:
-        McpEndpoint: the entry point, whose ``close`` the app's lifespan
+        McpEndpoint: the endpoint, whose ``close`` the app's lifespan
         awaits.
     """
     endpoint = McpEndpoint(registry, jobs)

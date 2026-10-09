@@ -284,9 +284,9 @@ describe('namespace orphan GC on remote delete', () => {
   })
 })
 
-describe('a guarded cp reads at the entry point', () => {
+describe('a guarded cp reads through the dispatcher', () => {
   it('copies what cat serves under bounded', async () => {
-    // The hide forces `cp` onto the primitive walk, which reads at the entry point
+    // The hide forces `cp` onto the primitive walk, which reads through the dispatcher
     // like every command, so a trusted entry is what both copy and print.
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true

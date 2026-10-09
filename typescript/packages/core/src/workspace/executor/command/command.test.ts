@@ -211,7 +211,7 @@ describe('the words a handler sees', () => {
   })
 })
 
-describe('entry point options route nothing', () => {
+describe('dispatched options route nothing', () => {
   // jq's --rawfile/--slurpfile are read and curl's -o/-D written through
   // the dispatcher, so a file on another mount, or a process substitution
   // under /dev, is no cross-mount line (DISPATCH_FLAG_KEYS). Positional operands

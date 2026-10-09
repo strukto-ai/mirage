@@ -308,7 +308,7 @@ describe('Mount.runCommand', () => {
       // A path-guarded command's writes go through the guarded op slots,
       // which refuse each one where it happens, so a read-only mount runs
       // it like a reader (`gzip -c`, `split -n 1/2`). A write command
-      // that reaches its service some other way has no entry point to refuse
+      // that reaches its service some other way has no gate to refuse
       // it, so the mount refuses it before it runs.
       const m = makeMount(mode)
       const calls: number[] = []

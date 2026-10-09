@@ -23,7 +23,7 @@ import { MAX_URANDOM_BYTES } from './constants.ts'
 
 const NOT_HANDLED = Symbol('NOT_HANDLED')
 
-// Stands in for the engine's MontyFileHandle: the entry point only needs a
+// Stands in for the engine's MontyFileHandle: the adapter only needs a
 // constructible class whose instances it can hand back from `open`.
 class FakeHandle {
   constructor(
@@ -64,7 +64,7 @@ function accessOn(
   )
 }
 
-// The entry point builds each row from a name plus one stat, so a double
+// The file adapter builds each row from a name plus one stat, so a double
 // standing in for the bridge answers both; a name it did not list stats
 // as a missing path.
 function listing(
@@ -85,7 +85,7 @@ function listing(
     }
     if (op === 'readdir') {
       // A real mount refuses to list a path it does not have, and the
-      // entry point asks with a trailing slash. Answering every path would
+      // file adapter asks with a trailing slash. Answering every path would
       // make any probe built on a listing read as "yes, a directory".
       const under = names.filter((n) => n.startsWith(path))
       if (under.length === 0 && !dirs.includes(path.replace(/\/$/, ''))) {
@@ -116,7 +116,7 @@ function refusing(): Mock<BridgeDispatchFn> {
 
 // A bridge with nothing behind it. A listing and a stat still have to
 // REFUSE rather than answer undefined: the real dispatcher returns a
-// row or rejects with a coded error, and an entry point that reads a broken
+// row or rejects with a coded error, and an adapter that reads a broken
 // answer as an empty directory would hide the break.
 const noop = vi.fn<BridgeDispatchFn>((op, path) =>
   op === 'readdir' || op === 'stat'
@@ -236,7 +236,7 @@ describe('MontyFs outside the view', () => {
     )
   })
 
-  it('lists the root through the entry point, so / shows the mounts', async () => {
+  it('lists the root through the dispatcher, so / shows the mounts', async () => {
     const access = accessOn(listing(['/ram'], ['/ram']))
     await expect(Promise.resolve(access.handle('Path.iterdir', ['/']))).resolves.toEqual(['/ram'])
   })
@@ -248,7 +248,7 @@ describe('MontyFs declining', () => {
   })
 
   it('a rename whose destination leaves the mount raises EXDEV', async () => {
-    // The entry point refuses a pair on different mounts (CrossMountError);
+    // The dispatcher refuses a pair on different mounts (CrossMountError);
     // half-applying the move would lose the file.
     await expect(
       Promise.resolve(accessOn(noop).handle('Path.rename', ['/ram/x', '/tmp/y'])),
@@ -339,7 +339,7 @@ describe('MontyFs stat', () => {
     // the row is the better answer anyway: it says what the path IS,
     // where a listing only says whether it opens. Asking the listing
     // first turned a served stat into a refusal for is_dir and into a
-    // miss for is_file, neither of which the python entry point reports.
+    // miss for is_file, neither of which the python adapter reports.
     const statOnly = vi.fn<BridgeDispatchFn>((op, path) => {
       if (op === 'stat' && (path === '/ram/d' || path === '/ram/d/f.txt')) {
         return Promise.resolve(

@@ -139,7 +139,7 @@ def path_flag_scopes(
     parsed = parse_command(spec, argv, cwd, cmd_name)
     kwargs = parse_to_kwargs(parsed)
     flag_paths = list(parsed.path_flag_values)
-    # A program file and an entry point option's file are read or written
+    # A program file and a dispatched option's file are read or written
     # through the dispatcher, not on the line's mount. A pair's name
     # slots are words, never resolved paths, so they match nothing here.
     for key in (
@@ -227,7 +227,7 @@ def routed_operands(
 ) -> list[PathSpec]:
     """The classified path words that route a line.
 
-    Classification makes an entry point option's file a path word like any
+    Classification makes a dispatched option's file a path word like any
     other, so a command in DISPATCH_FLAG_KEYS routes by its positional
     operands alone; every other command by all its path words.
 

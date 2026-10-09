@@ -2151,7 +2151,7 @@ class Workspace:
     async def dispatch(
         self, name: str, path: PathSpec, /, **kwargs: Any
     ) -> tuple[Any, IOResult]:
-        # The entry point owns pre-dispatch initialization (namespace load,
+        # The dispatcher owns pre-dispatch initialization (namespace load,
         # pending drift checks), so FUSE and `ws.vfs` get it too.
         # Runs as the default session unless one is bound, like ws.vfs.
         return await self._bind_session(

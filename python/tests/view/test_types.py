@@ -20,7 +20,7 @@ from mirage.view.types import NamespaceLinks
 from mirage.workspace import Workspace
 
 # The seam's members in declaration order. The TypeScript twin
-# (entry points/types.test.ts) pins this same list camelCased and in this same
+# (view/types.test.ts) pins this same list camelCased and in this same
 # order, so a member added, dropped or moved in one language fails the
 # other language's test instead of drifting quietly.
 MEMBERS = ("follow", "is_link", "readlink", "link_stat_at", "symlink_targets")

@@ -24,6 +24,6 @@ def child_paths(path: PurePosixPath, names: list[str]) -> list[PurePosixPath]:
 
     Args:
         path (PurePosixPath): the directory listed.
-        names (list[str]): the entries as the entry point returned them.
+        names (list[str]): the entries as the file adapter returned them.
     """
     return sorted({path / name.rstrip("/") for name in names})

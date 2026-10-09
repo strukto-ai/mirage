@@ -65,7 +65,7 @@ async def main():
 
         print("\n--- read-only mount ---")
         # The mount mode is the access control, so a write verb is
-        # refused at the entry point with the read-only errno rather than
+        # refused at the dispatcher with the read-only errno rather than
         # reaching the disk.
         try:
             os.remove("/data/example.json")

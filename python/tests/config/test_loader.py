@@ -1202,7 +1202,7 @@ def test_a_workspace_level_read_is_judged_at_every_mount_it_lands_on():
         Workspace(**cfg.to_workspace_kwargs())
 
 
-def test_the_two_dependent_read_keys_are_refused_at_the_dispatcher():
+def test_the_two_dependent_read_keys_are_refused_at_the_config_loader():
     """`bounded` and `ttl:` each imply the other.
 
     By the time a ReadSpec exists the bound has already defaulted, so
@@ -1216,7 +1216,7 @@ def test_the_two_dependent_read_keys_are_refused_at_the_dispatcher():
         load_config({"mounts": {"/a": {"vfs": "ram", "read": "bounded"}}})
 
 
-def test_a_bound_that_is_not_whole_seconds_is_refused_at_the_dispatcher():
+def test_a_bound_that_is_not_whole_seconds_is_refused_at_the_config_loader():
     """pydantic coerces where this key cannot afford it.
 
     `ttl: "30"` arrived as 30 and `ttl: true` as 1 -- a mount silently
@@ -1250,7 +1250,7 @@ def test_an_integral_float_bound_is_a_bound():
     assert isinstance(cfg.mounts["/a"].ttl, int)
 
 
-def test_an_unusable_bound_is_refused_at_the_config_entry_point_not_later():
+def test_an_unusable_bound_is_refused_at_the_config_loader_not_later():
     """The same entry point TypeScript refuses it at.
 
     `resolve_read_spec` catches this too, but only once
@@ -1277,7 +1277,7 @@ def test_a_missing_policy_is_named_before_an_unusable_bound():
         load_config({"mounts": {"/a": {"vfs": "ram", "ttl": 0}}})
 
 
-def test_a_junk_read_policy_is_refused_at_the_dispatcher():
+def test_a_junk_read_policy_is_refused_at_the_config_loader():
     with pytest.raises(ValueError, match="fresh, bounded, pinned"):
         load_config({"mounts": {"/a": {"vfs": "ram", "read": "banana"}}})
     with pytest.raises(ValueError, match="fresh, bounded, pinned"):

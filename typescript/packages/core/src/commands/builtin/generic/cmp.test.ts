@@ -160,7 +160,7 @@ describe('cmpGeneric with stdin', () => {
 // backslash and a single quote all reach stderr as themselves. Measured
 // against GNU diffutils' cmp under `LC_ALL=C` with a raw `bytes` argv:
 // `cmp -n 1é` reports `invalid --bytes value '1é'` and `cmp -n "1'"`
-// reports `'1''`, where the coreutils clauses next entry point would say
+// reports `'1''`, where the neighbouring coreutils clauses would say
 // `'1\303\251'` and `'1\''`. This asymmetry is deliberate; do not "fix" it
 // by routing this clause through quote(). Mirrors test_cmp.py.
 describe('parseCount leaves the value unescaped', () => {

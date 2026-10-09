@@ -525,7 +525,7 @@ async function stringChunks(
 /**
  * An arithmetic expansion's value. Reads resolve against the visible env,
  * so a hidden name counts as unset; the write-back goes through the session
- * plane's entry point, so a preSession rule governs `$((X=5))` exactly as it
+ * view, so a preSession rule governs `$((X=5))` exactly as it
  * governs `X=5`. bash bound the assignments made before an error, RANDOM's
  * seed included; they land before the line dies.
  */

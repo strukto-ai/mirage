@@ -73,7 +73,7 @@ async def premark(
     """Put a declaration's value-shaping marks on a name before its
     value stores.
 
-    The entry point coerces on write by reading the record's attributes, so
+    The session view coerces on write by reading the record's attributes, so
     for the declaration's *own* value to coerce (``declare -i n=3+4``
     stores ``7``), the attribute has to be there first; a ``+`` letter
     comes off first too, so ``declare -i N=5; declare +i N+=x`` stores
@@ -310,7 +310,7 @@ async def drop_reference(
 ) -> None:
     """Take the mark off an unaimed ``declare -n`` reference a declared
     array kind is about to land on, silently, as bash's
-    ``export -a ref=v`` does (an undeclared array warns at the entry point).
+    ``export -a ref=v`` does (an undeclared array warns at the session view).
 
     Args:
         session (SessionState): shell session state.
@@ -401,7 +401,7 @@ async def store_staged_arrays(
     between cannot carry a mark past the gate.
 
     The builtin owns the store; readonly is the shell's rule, checked
-    per name before the entry point, and the entry point's gate covers the
+    per name before the session view, and the session view's gate covers the
     policy half. Names are processed in order, so an earlier operand stays
     stored when a later one refuses, as bash does. A readonly refusal
     of an array literal is a variable-assignment error in GNU, not a
@@ -491,7 +491,7 @@ async def store_staged_arrays(
         checked = deref(session, name)
         # One try around the literal and the write: a subscript in the
         # literal may assign (`([x=2]=v)`), and that lands through the
-        # same entry point.
+        # same session view.
         try:
             if kind is VarKind.ASSOC or name in session.assocs:
                 built, bad_words = build_assoc_literal(
@@ -1079,7 +1079,7 @@ async def _mark_operand(
 
     A value of the other array kind is refused and the name is still
     marked, as bash does. The bare form writes no value, so it marks
-    through the plane's no-value entry point rather than inventing an empty
+    through the session view's no-value call rather than inventing an empty
     string: on a new name that leaves it *unset* and marked, bash's own
     third state (``export Z`` prints ``declare -x Z`` and stays out of
     ``env``). Still gated, since marking is a session write: through

@@ -136,8 +136,8 @@ export function changedAttrs(node: FSNode, attr: SetAttr): SetAttrFields | null 
  */
 /**
  * A name a repeat listing found, classified by its own stat as the
- * first listing's entry point classifies it, or left as the listing's row
- * when that stat fails, the way the entry point degrades one.
+ * first listing's file adapter classifies it, or left as the listing's row
+ * when that stat fails, the way the file adapter degrades one.
  */
 function ownRow(sync: SyncVFS, path: string, entry: VFSEntry): VFSEntry | VFSStat {
   if (entry.isDir) return entry
@@ -433,7 +433,7 @@ export class PyodideFs {
     if (target !== undefined) node.link = target
     else if (this.host.isFile(mode)) node.loaded = false
     // Emscripten's getdents looks up every name it lists, so a row the
-    // entry point could not classify still needs a node; it goes in as a
+    // file adapter could not classify still needs a node; it goes in as a
     // regular file and is asked about before its first stat.
     if (isUnclassified(stat)) node.unclassified = true
     return node

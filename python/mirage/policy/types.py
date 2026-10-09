@@ -984,7 +984,7 @@ class EntryGate(Protocol):
             yields to the guarded readdir walk while it is set, so each
             entry passes the gate.
         granted (tuple[CommandRule, ...]): the ask rules this line runs
-            under a grant for. Read by the dispatcher, which see the same
+            under a grant for. Read by the dispatcher, which sees the same
             entries from below and would otherwise re-derive a verdict
             that knows nothing of the nod the gate already took.
     """

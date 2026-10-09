@@ -136,7 +136,7 @@ async def follow_directory_links(
     9.7): ``ls dlink`` lists the directory, while ``ls flink`` and a
     dangling ``ls dang`` report the link itself, and so does a loop, whose
     stat fails where GNU then lstats it. Where a link leads takes a stat
-    through the entry point to know, since the target may live on any mount, so
+    through the dispatcher to know, since the target may live on any mount, so
     this runs after ``follow_paths`` has resolved every operand's prefix.
 
     Args:
@@ -215,7 +215,7 @@ async def strip_link_operands(
     GNU ``rm`` removes the link itself and never follows it; a dangling
     link removes fine. Remaining operands stay for backend dispatch.
 
-    The removal is a dispatch op, never a direct table write: the entry point
+    The removal is a dispatch op, never a direct table write: the dispatcher
     is where session grants, the turf's mode, admission policies and
     the op ledger fire, and writing the table from here let a session
     delete a link its grant reads and a policy protecting one never
@@ -351,7 +351,7 @@ async def prepare_mv(
 
     Args:
         namespace (Namespace): Namespace holding the link table.
-        dispatch (DispatchFn): Entry point used to probe the destination.
+        dispatch (DispatchFn): The dispatcher, used to probe the destination.
         items (list[str | PathSpec]): Classified command parts.
         args (tuple[str, ...]): Original arguments, including target flags.
         cwd (str): Working directory for parsing.

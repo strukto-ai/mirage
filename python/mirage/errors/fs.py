@@ -226,7 +226,7 @@ def eloop(path: str | PathSpec) -> DotWalkLoop:
 
     A walk refusal: final for every layer that re-reads a miss, and an
     OSError, so a per-operand catch words it where the namespace's own
-    ``CycleError`` escaped every one. The entry point raises it for a loop
+    ``CycleError`` escaped every one. The dispatcher raises it for a loop
     above any name it is handed.
 
     Args:

@@ -542,7 +542,7 @@ async def test_an_op_hook_it_defines_judges_the_op_with_its_facts():
     assert engine.seen == {
         "ctx": ops_script_context("release", _ops_ctx(), _mounts())
     }
-    # The command entry point, which the program leaves out, is silence.
+    # The command hook, which the program leaves out, is silence.
     assert await policy.pre_command(_ctx()) is None
 
 
@@ -604,7 +604,7 @@ async def test_the_probe_runs_once_per_program():
     await policy.pre_vfs(_ops_ctx())
     await policy.pre_vfs(_ops_ctx("read", write=False))
     await policy.pre_command(_ctx())
-    # The probe, then two op judgments; the command entry point was silence.
+    # The probe, then two op judgments; the command hook was silence.
     assert FakeEngine.built[0].evals == 3
 
 
@@ -654,7 +654,7 @@ async def test_the_policys_own_read_is_not_judged_by_its_op_hook():
 
 @pytest.mark.asyncio
 async def test_wants_for_says_which_sessions_a_hook_speaks_for():
-    # The per-session refinement the secret fill asks: the entry point is
+    # The per-session refinement the secret fill asks: the hook is
     # overridden for everyone, but speaks only for a session whose
     # program defines the hook.
     policy = _policy(None, hooks=("pre_command",))
@@ -672,7 +672,7 @@ async def test_wants_for_says_which_sessions_a_hook_speaks_for():
 
 @pytest.mark.asyncio
 async def test_wants_for_counts_a_program_the_dispatcher_will_refuse():
-    # No hook at all, or a probe that failed: the entry point refuses every
+    # No hook at all, or a probe that failed: the dispatcher refuses every
     # write for this program, which is speaking.
     assert await _policy(None, hooks=()).wants_for("pre_session", "s") is True
     broken = _policy(error=EvalError("boom"))

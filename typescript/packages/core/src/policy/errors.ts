@@ -28,7 +28,7 @@ export class PolicyError extends Error {
 }
 
 /**
- * A dry run reached the op gate: the entry point stops there, before any backend
+ * A dry run reached the op gate: the dispatcher stops there, before any backend
  * or cache is touched, with what the gate would answer noted for
  * `session.explain.vfs`. Mirrors the Python `Explained`.
  */
@@ -47,7 +47,7 @@ export class Explained extends Error {
  * special-case mount-mode refusals (the read-only wording) tell a
  * policy deny apart.
  *
- * The message says what the terminal would (`Permission denied` at an
+ * The message says what the terminal would (`Permission denied` at the
  * dispatcher, `<name>: permission denied` at the session view), and the
  * policy's own words ride `refusal`, never the message, so an entry point that
  * renders the error stays byte-identical to a plain EACCES and an entry point
@@ -56,7 +56,7 @@ export class Explained extends Error {
  * variable).
  *
  * It carries no accounting: a postVfs refusal suppresses the result,
- * not the effect, and the entry point reports the completed op through the
+ * not the effect, and the dispatcher reports the completed op through the
  * caller's `OpReport`, which covers this error and any foreign one the
  * same way.
  */

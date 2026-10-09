@@ -37,7 +37,7 @@ async def _metadata_tag(
 async def mkdir(
     accessor: DropboxAccessor, path: PathSpec, parents: bool = False
 ) -> None:
-    """Create a folder; the entry points have refused a taken name already.
+    """Create a folder; the callers have refused a taken name already.
 
     create_folder_v2 auto-creates missing parents, so ENOENT on a missing
     parent without -p lives here, and its path conflict answers a name

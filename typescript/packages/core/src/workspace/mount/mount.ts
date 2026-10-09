@@ -1043,7 +1043,7 @@ export class MountEntry {
   }
 
   /**
-   * Refuse a write command no entry point would see, on a read-only mount.
+   * Refuse a write command no gate would see, on a read-only mount.
    *
    * A command whose I/O runs under the path guards is refused where it
    * writes, because only the write knows whether a line writes: `gzip -c`,
@@ -1051,7 +1051,7 @@ export class MountEntry {
    * `gzip f` is refused at the write of `f.gz`, in gzip's own GNU voice. A
    * write command that reaches its service some other way (trello's
    * id-addressed card writes, a custom backend's own verb) is refused here,
-   * before it runs, because no entry point would see its write. strongestModeUnder,
+   * before it runs, because no gate would see its write. strongestModeUnder,
    * not effectiveMode: a mount whose only writable region is a show entry
    * still runs it. Only wrapper-owned responses (help, an injected version)
    * bypass it. The trailing newline is load-bearing: stderr accumulates

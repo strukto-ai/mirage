@@ -186,7 +186,7 @@ async function runExec(
   return io.exitCode === 0
 }
 
-/** Remove a matched entry through the operation entry point, which owns admission,
+/** Remove a matched entry through the dispatcher, which owns admission,
  * backend support, cache invalidation and namespace cleanup. */
 async function deleteRow(
   ps: PathSpec,

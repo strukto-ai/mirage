@@ -156,7 +156,7 @@ async def opened(
     discovery rules rather than restating them, and so the refusal a
     verb owes outside a workspace is written once.
 
-    The mount root comes from the name plane rather than a dispatcher of its
+    The mount root comes from the name plane rather than a field of its
     own: ``ns.mounts.root_of`` is the same fact the command tier reads,
     and a second field holding the same callable is a second thing to
     keep in step.
@@ -196,7 +196,7 @@ async def located(fl: FlagView, view: CLIView) -> RepoLocation:
 
     Args:
         fl (FlagView): repository-selection flags.
-        view (CLIView): namespace and dispatcher entry points.
+        view (CLIView): the namespace and the dispatcher.
     """
     dispatch = view.dispatch
     stat_path = view.stat_path

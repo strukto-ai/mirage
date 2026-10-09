@@ -43,7 +43,7 @@ export type ScriptHook = 'preCommand' | 'preVfs' | 'preSession'
 
 /**
  * The admission hooks a policy program may define, JavaScript spelling
- * to python spelling. The output entry points (postVfs, postExecute) stay
+ * to python spelling. The output hooks (postVfs, postExecute) stay
  * coded: they answer with a Limit over a live result.
  */
 export const HOOKS: Readonly<Record<ScriptHook, string>> = {
@@ -132,7 +132,7 @@ export function sessionScriptContext(
  * it, and can never override one that does), `'deny'` / `{deny: reason}`
  * refuses, and at `preCommand` and `preVfs` `'ask'` / `{ask: reason}`
  * takes the line (or an op no line is running behind) to the approval
- * entry point, since the session view cannot wait on a host (`VALIDITY`). The
+ * ledger, since the session view cannot wait on a host (`VALIDITY`). The
  * bare strings carry the document's default reasons, the same ones a rule
  * stating no reason gets.
  *

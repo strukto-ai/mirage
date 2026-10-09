@@ -302,7 +302,7 @@ describe('the gdrive read record', () => {
   })
 
   it('stamps the same token through the API stat function', async () => {
-    // stat has two entry points and the index arm is only one of them: a cold cache
+    // stat has two paths and the index arm is only one of them: a cold cache
     // that cannot list the parent falls to statFromApi, which reads its own
     // getFile. Fixing the index arm alone leaves this one on a timestamp.
     const index = new RAMIndexCacheStore()
@@ -325,7 +325,7 @@ describe('the gdrive read record', () => {
       },
     ])
     const [, records] = await runWithRecording(async () => read(makeAccessor(), specFor(), index))
-    // `undefined` index is statFromApi's own entry point, taken before any warm.
+    // `undefined` index is statFromApi's own path, taken before any warm.
     const apiStat = await stat(makeAccessor(), specFor(), undefined)
     expect(apiStat.fingerprint).toBe(DIGEST)
     expect(apiStat.fingerprint).toBe(records[0]?.fingerprint)

@@ -237,7 +237,7 @@ async def pre_vfs_gate(
         subtree (bool): the op mutates the path's descendants too.
         check_hidden (bool): False only for an entry point that has already
             answered the hides itself.
-        decisions (Decisions | None): the approval ledger, None at a
+        decisions (Decisions | None): the approval ledger, None at an
             entry point that cannot ask.
         final (bool): the op's last gate; False for a rename's source,
             whose destination is gated next.
@@ -320,7 +320,7 @@ async def _explained_op(
     Args:
         policies (Policies): the workspace's admission policies.
         ctx (VfsContext): the call the gate sees.
-        decisions (Decisions | None): the approval ledger, None at a
+        decisions (Decisions | None): the approval ledger, None at an
             entry point that cannot ask.
     """
     said = await policies.answers("pre_vfs", ctx)
@@ -408,7 +408,7 @@ async def pre_session_gate(
 
     Args:
         policies (Policies | None): the workspace's admission policies.
-        ctx (SessionContext): the mutation, built by the entry point so the
+        ctx (SessionContext): the mutation, built by the session view so the
             plane, verb, rendering and session identity are stated in
             exactly one place.
     """

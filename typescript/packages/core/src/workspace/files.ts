@@ -147,7 +147,7 @@ export class Files {
    * The same facade run as another session, over the same ledger, so
    * the workspace-wide account stays one list.
    *
-   * @internal The mechanism behind `Session.vfs`, not a dispatcher of
+   * @internal The mechanism behind `Session.vfs`, not an entry point of
    * its own: a host binds a session with `ws.session(id)` (creating it
    * when the id is new) or `new Session(ws, id)` (adopting one
    * that exists), so there is one way to say it rather than two.

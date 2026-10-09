@@ -82,7 +82,7 @@ export const HELP =
  * A delegation to the one element writer: a bare name assigns element 0
  * when the name already holds an array (indexed or associative),
  * nothing mutates unless the whole assignment succeeds, and the landing
- * write goes through the entry point as the whole variable, so a `preSession`
+ * write goes through the session view as the whole variable, so a `preSession`
  * rule refusing the name sees `printf -v 'AWS_KEY[0]'` as a write to
  * AWS_KEY. The refusal is thrown, not collapsed into a status, so the
  * rule's own words reach the user as they do from `export`. bash stores the

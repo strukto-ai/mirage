@@ -1526,7 +1526,7 @@ def with_dispatch_rule_guard(dispatch: DispatchFn) -> DispatchFn:
     """Return ``dispatch`` marking each op with the admitted command's
     gate as ``rule_gate``, which the dispatcher judges on the paths the op
     reaches: the command's dispatcher skips its guarded slots, and the
-    entry point cannot tell which command issued an op. A metadata op passes
+    dispatcher cannot tell which command issued an op. A metadata op passes
     unmarked, as ``with_command_guards`` lets ``stat`` pass.
 
     Args:

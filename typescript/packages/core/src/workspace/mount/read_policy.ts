@@ -109,7 +109,7 @@ export function checkReadCapability(
   const policy = coerceReadPolicy(spec.policy)
   // Before the policy dispatch, because a bound has to be usable whatever
   // the policy is. `resolveReadSpec` refuses a bad one at the YAML and
-  // snapshot entry points, but a `ReadSpec` handed straight to `Workspace` or
+  // snapshot loaders, but a `ReadSpec` handed straight to `Workspace` or
   // `addMount` never passes through it, and a mount taking ttl=0 accepts
   // every write and keeps nothing: RAM marks the entry expired as it is
   // written and redis deletes the key outright, so the mount silently

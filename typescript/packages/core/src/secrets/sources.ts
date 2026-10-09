@@ -142,7 +142,7 @@ function holdsPointer(value: unknown): boolean {
 /**
  * The declared instances, built only when one of `configs` names one.
  *
- * Every entry point that builds a mount or a CLI from data comes through here
+ * Every loader that builds a mount or a CLI from data comes through here
  * -- the config loader, a clone override, a load override -- because
  * building a source reads its own bootstrap pointers, and a dotenv file
  * is I/O. A config holding no pointer must leave that I/O deferred to
@@ -151,7 +151,7 @@ function holdsPointer(value: unknown): boolean {
  * created, or a clone from being made, that never needed it.
  *
  * `declared` is taken as it arrived: anything that is not a mapping is
- * left for the constructor to refuse with the wording every entry point
+ * left for the constructor to refuse with the wording every loader
  * shares. `undefined` still resolves a pointer at a builtin source,
  * which `fetchSecret` builds from ambient defaults.
  */

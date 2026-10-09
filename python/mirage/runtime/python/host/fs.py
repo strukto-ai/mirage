@@ -83,7 +83,7 @@ def host_files(
     A workspace op that fails with no errno (an upstream 502 a REST
     mount raises as it came) answers what ``classify`` names for it, and
     EIO when it names nothing, the kernel's word for a device that
-    failed: a guest's entry point answers the same, and a caller of ``os`` can
+    failed: a guest's file adapter answers the same, and a caller of ``os`` can
     only ``except OSError``. The original rides along as the cause.
 
     Args:
@@ -351,8 +351,8 @@ class HostFs:
     explicit chmod, where the guest asked for exactly that.
 
     Args:
-        files (Files): the workspace entry point.
-        loop (asyncio.AbstractEventLoop | None): the loop the entry point's
+        files (Files): the workspace's file API.
+        loop (asyncio.AbstractEventLoop | None): the loop the file API's
             coroutines run on; None gives each call a throwaway loop.
     """
 
@@ -1214,7 +1214,7 @@ def os_routing(
     of the module answering about paths it has never had.
 
     Args:
-        files (Files): the workspace entry point.
+        files (Files): the workspace's file API.
         loop (asyncio.AbstractEventLoop | None): shared event loop.
 
     Returns:

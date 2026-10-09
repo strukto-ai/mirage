@@ -205,7 +205,7 @@ async function pathStat(dispatch: DispatchFn, virtual: string): Promise<FileStat
 // dereferences a destination that is a link to a directory and links
 // inside that directory; -n keeps the link itself as the name. A real
 // directory is the directory either way.
-// Whether a path's own name is in its parent's listing: the entry point's proof
+// Whether a path's own name is in its parent's listing: the dispatcher's proof
 // of a directory, repeated here because a stat row settles nothing. An
 // API tree synthesizes its directories (a postgres schema lists tables/
 // and views/ for a schema nobody created, a grouping mount stats every
@@ -243,8 +243,8 @@ function followVisible(namespace: Namespace, virtual: string): string {
 // An operand as the path the kernel reaches, its final name kept. Command
 // dispatch walks the links above the name of every operand it classifies;
 // the relative words of ln, readlink and `[` arrive unclassified, so they are
-// walked here, and every namespace read sees the name the entry point will. A hidden
-// path stays as typed, and a loop is left for the entry point to report when the
+// walked here, and every namespace read sees the name the dispatcher will. A hidden
+// path stays as typed, and a loop is left for the dispatcher to report when the
 // link is made. Mirrors Python's operand_abs.
 export function operandAbs(namespace: Namespace, arg: string | PathSpec, cwd: string): string {
   const virtual = absPath(arg, cwd)
@@ -261,7 +261,7 @@ export function operandAbs(namespace: Namespace, arg: string | PathSpec, cwd: st
 // empty name resolves nowhere, and a link loop stops the walk in front of
 // the final name; `followLast` asks for that name too, for an operand that
 // has to be a directory. Null when the walk gets there, and for a hidden
-// path, which the entry point answers like any other absent one. ln's relative
+// path, which the dispatcher answers like any other absent one. ln's relative
 // words arrive unclassified, so the verdict cannot be read off a PathSpec.
 // Mirrors Python's _walk_verdict.
 function walkVerdict(
@@ -603,7 +603,7 @@ export async function makeLink(
     // made a link called `missing`. A directory there took the link
     // inside it in planLinks, so only a non-directory and the absent name
     // are settled here, and a plain file without a flag falls to the
-    // entry point's "File exists" below.
+    // dispatcher's "File exists" below.
     const linked = visibleLink(namespace, plan.linkAbs)
     const behind = linked
       ? await linkTargetStat(namespace, dispatch, plan.linkAbs, null)
@@ -634,7 +634,7 @@ export async function makeLink(
     errors.push(`ln: '${targetTyped}' and '${typed}' are the same file\n`)
     return
   }
-  // The entry point refuses an occupied name for a symlink; a byte copy would
+  // The dispatcher refuses an occupied name for a symlink; a byte copy would
   // overwrite one, and a backup has to see it first, so those two probe.
   // A backup moves a file aside, never a directory: GNU refuses the
   // directory (`ln -bT a d` is `cannot overwrite directory`) where it
@@ -670,7 +670,7 @@ export async function makeLink(
     }
   } else if (flags.force) {
     // GNU -f is "remove the destination, then link", which is why it
-    // replaces a regular file and not only a link. The entry point refuses an
+    // replaces a regular file and not only a link. The dispatcher refuses an
     // occupied name (symlink(2)'s EEXIST), so the removal is what makes
     // the flag work rather than a formality; a destination that is not
     // there is what -f is for, so its miss is the expected case and not
@@ -698,7 +698,7 @@ export async function makeLink(
     // A byte copy lands through the backend's write, which on a keyed
     // store makes the key whatever stands above it. ln is not mkdir -p, so
     // the parent chain of the name (absent by now) is judged first, as cp
-    // judges its destination's; the entry point judges a symlink's itself.
+    // judges its destination's; the dispatcher judges a symlink's itself.
     const why = await absentDestError(dispatchStat(dispatch), linkSpec)
     if (why !== null) {
       errors.push(refused(flags, typed, targetTyped, why))
@@ -714,14 +714,14 @@ export async function makeLink(
   } catch (err) {
     const code = (err as { code?: string }).code
     if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP') {
-      // The entry point refuses a name its parent cannot hold (symlink(2)'s
+      // The dispatcher refuses a name its parent cannot hold (symlink(2)'s
       // ENOENT, ENOTDIR and ELOOP), and a store's write refuses the same
       // way.
       errors.push(refused(flags, typed, targetTyped, code))
       return
     }
     if (isEexist(err)) {
-      // The entry point owns the existence rule (it is the only layer that can
+      // The dispatcher owns the existence rule (it is the only layer that can
       // see both the node table and the backend); ln owns the wording.
       errors.push(`ln: failed to create ${kind} '${typed}': File exists\n`)
       return
@@ -766,7 +766,7 @@ export async function makeLink(
 // occupant aside before the link is made; -f removes it. -d/-F only change
 // the wording of the refusal a directory source gets, since nobody is root
 // here. Every write is a dispatch op, so session grants and admission
-// policies fire at the entry point; this handler keeps the operand semantics and
+// policies fire at the dispatcher; this handler keeps the operand semantics and
 // renders refusals in ln's own words.
 export async function handleLn(
   namespace: Namespace,

@@ -50,7 +50,7 @@ import { VFS_CALLS, schemaOf, type VfsCall } from '../vfs_calls.ts'
 
 const READ_ONLY: ToolAnnotations = { readOnlyHint: true }
 
-/** The tools every dispatcher serves, in the order a client lists them. */
+/** The tools every entry point serves, in the order a client lists them. */
 export const TOOLS: readonly {
   name: string
   description: string

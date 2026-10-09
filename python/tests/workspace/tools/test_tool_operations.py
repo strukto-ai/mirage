@@ -519,6 +519,6 @@ async def test_a_path_ask_waits_on_the_host_outside_a_line():
     # The nod was for one op on that path, and it is spent.
     assert (await tools.write("/data/out/a.txt", "again")).is_error
     # A line holds no question for its ops: the redirect is the line's
-    # to ask about, at the command entry point.
+    # to ask about, at command admission.
     io = await ws.shell("echo hi > /data/out/b.txt", session_id="agent")
     assert io.exit_code != 0

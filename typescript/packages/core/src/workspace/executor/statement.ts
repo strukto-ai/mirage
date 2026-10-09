@@ -68,7 +68,7 @@ export function errexitActs(node: TSNodeLike, status: number, session: SessionSt
  * Record a finished statement's exit status: `$?` and `${PIPESTATUS[@]}`
  * together.
  *
- * The one entry point every status write goes through, so the two can never
+ * The one function every status write goes through, so the two can never
  * disagree. `handlePipe` parks its per-segment statuses on the session,
  * and the boundary that closes the pipeline claims them here; a boundary
  * with nothing parked stamps its own one-element status, which is what a
@@ -101,7 +101,7 @@ export function recordStatus(session: SessionState, code: number, transparent = 
  * An aborted invocation is the caller's outcome, not the shell's, so it
  * must leave `$?` where it was. But the abort lands on one await inside
  * the line, and every statement before that await has already stamped
- * through `recordStatus`. The status entry point refuses a statement that
+ * through `recordStatus`. The status write refuses a statement that
  * settles after the caller was released; this is for the ones that
  * landed before it, and only a copy taken before the line can undo them.
  *

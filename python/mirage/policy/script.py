@@ -49,7 +49,7 @@ from mirage.types import PathSpec
 logger = logging.getLogger(__name__)
 
 # The admission hooks a policy program may define, python spelling to
-# JavaScript spelling. The output entry points (post_vfs, post_execute) stay
+# JavaScript spelling. The output hooks (post_vfs, post_execute) stay
 # coded: they answer with a Limit over a live result.
 HOOKS: Mapping[str, str] = {
     "pre_command": "preCommand",
@@ -113,7 +113,7 @@ def ops_script_context(
 
     Args:
         profile (str): the profile the script speaks for.
-        ctx (VfsContext): the op about to run, as the entry point built it.
+        ctx (VfsContext): the op about to run, as the dispatcher built it.
         mounts (Sequence[str]): the workspace's mount prefixes.
     """
     return {
@@ -137,7 +137,7 @@ def session_script_context(
 
     Args:
         profile (str): the profile the script speaks for.
-        ctx (SessionContext): the write about to land, as the entry point
+        ctx (SessionContext): the write about to land, as the session view
             built it.
         mounts (Sequence[str]): the workspace's mount prefixes.
     """
@@ -250,7 +250,7 @@ def script_action(
     refuses it, and can never override one that does), ``'deny'`` /
     ``{'deny': reason}`` refuses, and at ``pre_command`` and ``pre_vfs``
     ``'ask'`` / ``{'ask': reason}`` takes the line (or an op no line is
-    running behind) to the approval entry point, since the session view cannot
+    running behind) to the approval ledger, since the session view cannot
     wait on a host (``VALIDITY``). The bare strings carry the document's
     default reasons, the same ones a rule stating no reason gets.
 

@@ -709,7 +709,7 @@ async def run_prepared_line(
             nested.latest = refusal
 
         # An op a policy refuses inside a command prints the command's
-        # own GNU line, so the entry point notes the record here, for the line
+        # own GNU line, so the dispatcher notes the record here, for the line
         # to carry on its result. Bound before placement, so an op a
         # policy script makes while the line is judged is inside the
         # line, never a question of its own.

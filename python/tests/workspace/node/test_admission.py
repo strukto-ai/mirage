@@ -521,7 +521,7 @@ async def test_a_hoisted_redirect_is_judged_with_its_command_on_the_run(text):
 async def test_a_hidden_path_is_no_path_to_any_policy():
     # A session that cannot see a path must not learn of it from a
     # rule: the gate drops the operand before any hook, the rule does
-    # not fire, and the line goes on to the entry point, which answers ENOENT.
+    # not fire, and the line goes on to the dispatcher, which answers ENOENT.
     ws = _ws()
     try:
         await ws.shell("mkdir -p /data/private && echo s > /data/secret")

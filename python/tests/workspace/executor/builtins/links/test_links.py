@@ -461,7 +461,7 @@ async def test_ln_refuses_a_slashed_link_name_that_is_not_there():
     # Pinned on coreutils 9.7: symlink(2) and link(2) answer `missing/`
     # with ENOENT and create nothing, the hard-link line naming its
     # source; a directory takes the link inside it as before, and a file
-    # behind the slash is still the entry point's "File exists".
+    # behind the slash is still the dispatcher's "File exists".
     ws = _ws()
     await ws.shell(
         "printf hi > /data/a.txt; printf y > /data/reg; mkdir -p /data/d"

@@ -86,7 +86,7 @@ async def lookup(
 
     Without an index the parent is read the way ``_readdir`` reads it with
     none, which answers from the truncated walk alone; TypeScript's twin
-    answers absent for an undefined index, which no entry point passes.
+    answers absent for an undefined index, which no caller passes.
 
     Args:
         accessor (GitHubAccessor): the mount's accessor.

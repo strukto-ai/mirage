@@ -570,7 +570,7 @@ async def _is_directory(
     link) is no backend's to stat: the namespace answers for it through
     ``target_stat``, which follows a link and stats what it reaches, so
     a link to a directory is kept and a link to a file or to nothing is
-    dropped, bash's own rule for ``*/``. Without that entry point the owed name
+    dropped, bash's own rule for ``*/``. Without ``target_stat`` the owed name
     is kept, and without a stat function every match is kept, since nothing
     can tell them apart. Otherwise one stat per match, served from the
     index the readdir just filled.

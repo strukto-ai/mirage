@@ -198,7 +198,7 @@ class SessionManager(SessionOwner):
         (SessionScriptsQuery).
 
         The default profile's for an id this manager does not know, the
-        same fallback ``commands_of`` makes and for the same reason: a
+        same fallback ``commands_of`` makes and for the same reason: an
         entry point that names no session is judged like a session that named
         no profile.
 

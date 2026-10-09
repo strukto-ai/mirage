@@ -6,7 +6,7 @@ import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // A per-command judge: deny cat under /data/sealed/ with a computed
-// reason, take shred to the approval entry point, stay silent otherwise. A
+// reason, take shred to the approval ledger, stay silent otherwise. A
 // policy defines the hook it answers at, and answers with return.
 const JUDGE = `\
 function preCommand(ctx) {
@@ -133,7 +133,7 @@ describe('profile policies', () => {
     }
   })
 
-  it('takes an ask it computed to the approval entry point', async () => {
+  it('takes an ask it computed to the approval ledger', async () => {
     const ws = await build(scripted())
     try {
       ws.createSession('s', { profile: 'release' })
@@ -341,7 +341,7 @@ describe('profile policies at the op and session views', () => {
   })
 
   it("a policy's own read passes the dispatcher its op hook guards", async () => {
-    // preCommand opens the operand through the workspace's entry point while
+    // preCommand opens the operand through the workspace's dispatcher while
     // preVfs stands at it: the read is the policy's own and is let
     // through rather than re-entering the evaluation waiting on it, so
     // the content verdict lands and the op hook still refuses a write.

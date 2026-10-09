@@ -900,7 +900,7 @@ REVIEWER_COMMANDS = {
 
 def _commands_ws() -> Workspace:
     # The frozen subtree is seeded on the VFS: the pure path rule
-    # holds at every dispatcher, the host's `ws.vfs` included.
+    # holds at every entry point, the host's `ws.vfs` included.
     repo = RAMVFS()
     repo._store.dirs.add("/locked")
     repo._store.files["/locked/y"] = b"y\n"
@@ -1306,7 +1306,7 @@ class _Box(Runtime, LineExecutorMixin):
 async def test_a_whole_line_runtime_is_gated_like_the_tree():
     # A runtime that captures the raw line runs it under the same
     # rules: every parsed command clears visibility, the policy chain
-    # and the approval entry point before the runtime sees a byte, so a
+    # and the approval ledger before the runtime sees a byte, so a
     # captured line cannot run what the tree would refuse.
     box = _Box()
     ws = Workspace(
@@ -1550,7 +1550,7 @@ VEILED_DOC = {
 async def test_a_hidden_path_reads_as_absent_to_every_rule():
     # hide outranks every rule: a path the session cannot see
     # is dropped before any hook, so a deny never names it, an ask is
-    # never raised for it, and the entry point answers ENOENT as for any
+    # never raised for it, and the dispatcher answers ENOENT as for any
     # absent path. The same lines under a session that sees them meet
     # the rules as usual.
     ws = Workspace(
@@ -2446,7 +2446,7 @@ LINKED_DOC = {
 @pytest.mark.asyncio
 async def test_a_dispatched_read_through_a_link_meets_the_target_rule():
     # A path a command names inside its own program (awk's getline, sed's
-    # r) reaches the dispatcher unjudged, and the entry point follows a link to
+    # r) reaches the dispatcher unjudged, and the dispatcher follows a link to
     # its target. The rule on the target holds through the link exactly
     # as it holds on the target itself; a link to an allowed file reads.
     ws = Workspace(
@@ -2508,7 +2508,7 @@ async def _zap(
 
 @pytest.mark.asyncio
 async def test_a_dispatched_op_meets_the_rule_through_a_linked_parent():
-    # The entry point walks every link above the final name before it acts, so
+    # The dispatcher walks every link above the final name before it acts, so
     # /data/alias/secret is /data/real/secret by the time anything is
     # removed or moved. The rule on the real path holds there for an op
     # on the name itself (unlink, rename) as for one that follows it.
@@ -2548,7 +2548,7 @@ async def test_a_dispatched_op_meets_the_rule_through_a_linked_parent():
 
 @pytest.mark.asyncio
 async def test_a_rule_spelled_through_a_linked_parent_binds_a_dispatched_op():
-    # The entry point judges the path the command handed it as well as the one
+    # The dispatcher judges the path the command handed it as well as the one
     # its walk reaches, so a rule written through a link holds for the
     # command's own ops exactly as it holds for a named operand.
     doc = {

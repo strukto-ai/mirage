@@ -413,12 +413,12 @@ async def _land_writes(
 
     Args:
         session (SessionState): the session the writes read.
-        store (EnvSet): the entry point each write goes through.
+        store (EnvSet): the session view each write goes through.
         writes (Sequence[ArithWrite]): the assignments, in order.
 
     Raises:
         ExitSignal: an assignment named a readonly variable.
-        PolicyDenied: the entry point refused an assignment.
+        PolicyDenied: the session view refused an assignment.
     """
     for write in writes:
         name = deref(session, write.name) or write.name
@@ -453,7 +453,7 @@ async def subscript_index(
 
     The subscript is arithmetic, so it may assign (``a[x=3]``) and seed
     (``a[RANDOM=42]``), and bash binds those as it evaluates them. Each
-    lands through the entry point once the index is known, then the ``RANDOM``
+    lands through the session view once the index is known, then the ``RANDOM``
     reader replays the draws made after the seed. A subscript that
     fails to evaluate lands what it assigned before failing and then
     raises, the subscript text leading the message, since bash aborts
@@ -467,7 +467,7 @@ async def subscript_index(
             through; None lands them ungated, outside a workspace.
 
     Raises:
-        PolicyDenied: the entry point refused an assignment.
+        PolicyDenied: the session view refused an assignment.
         ExitSignal: an assignment named a readonly variable, which ends
             the shell wherever a subscript is (``${a[R=3]}``).
         ArithError: the subscript does not evaluate, or an assigned name
@@ -514,7 +514,7 @@ class _SessionElements:
     callbacks it is one of. It lives beside the other reader
     projections because the session view needs it too: the ``-i``
     coercion evaluates ``n=a[1]+1`` at the write, and a resolver that
-    imported the entry point would close a cycle.
+    imported the session view would close a cycle.
     """
 
     __slots__ = ("_session", "_reader")
@@ -683,7 +683,7 @@ def note_random_kind(
     so ``RANDOM=(1 2)``, ``declare -a RANDOM``,
     ``RANDOM[1]=5`` and ``RANDOM+=(3)`` all leave an ordinary array that
     ``$RANDOM`` reads element 0 of, for good, as ``unset RANDOM`` does.
-    Every store dispatcher calls this, gated or not, since a host seeding an
+    Every store entry point calls this, gated or not, since a host seeding an
     array onto the name means the same thing.
 
     Args:
@@ -724,17 +724,17 @@ class RandomReader:
     still pending at the session view, which lands it gated after
     evaluation, so the evaluator tells the reader of each assignment as
     it is made (``wrote``), the reader seeds a scratch generator the way
-    the entry point will and draws from that, and ``settle`` replays the draws
-    on the session once the entry point has seeded it: the session ends where
+    the session view will and draws from that, and ``settle`` replays the draws
+    on the session once the session view has seeded it: the session ends where
     bash's does, seeded and advanced by every read since the last
     assignment, and the write still reaches the gate as the assignment
     it is. Each assignment restarts the scratch generator and the count,
-    since the entry point lands only the last value written, and the draws are
-    replayed only if the entry point did land it: an assignment the caller
+    since the session view lands only the last value written, and the draws are
+    replayed only if the session view did land it: an assignment the caller
     never applied leaves the session as it was.
 
-    Lives beside the entry point rather than with the generator because the
-    entry point needs it too: ``RANDOM=RANDOM`` draws once while the seed is
+    Lives beside the session view rather than with the generator because the
+    session view needs it too: ``RANDOM=RANDOM`` draws once while the seed is
     evaluated, then seeds with the draw, as bash does: it reads an
     assigned seed as an arithmetic expression.
 
@@ -791,7 +791,7 @@ class RandomReader:
 
     def settle(self) -> None:
         """Replay the scratch draws on the session generator, once the
-        entry point has seeded it with the value the expression assigned."""
+        session view has seeded it with the value the expression assigned."""
         if self.seeded is None or self.session._random_seed != self.seeded:
             return
         for _ in range(self.draws):
@@ -863,7 +863,7 @@ class _IntegerCoercion:
     is 0 (`n=abc` stores `0`), the arithmetic rule, not a refusal.
     ``RANDOM`` draws, as in every other arithmetic context, so `n=RANDOM`
     and a `RANDOM=RANDOM` seed both advance the generator. The
-    assignments the expression makes are kept for the entry point to land
+    assignments the expression makes are kept for the session view to land
     (``_land_coercion``): bash binds `x` in `n='x=5'` and in
     `RANDOM='x=5'`, before the error too if the expression then fails.
     A malformed expression raises ArithError with the offending text
@@ -914,7 +914,7 @@ class _IntegerCoercion:
 async def _land_coercion(
     session: SessionState, store: EnvSet, coercion: _IntegerCoercion
 ) -> None:
-    """Land the assignments a coercion made, each through the entry point, in
+    """Land the assignments a coercion made, each through the session view, in
     the scope it read, then settle its ``RANDOM`` draws.
 
     Inside a ``declare -g`` that is the function's: ``local G=3; declare
@@ -923,7 +923,7 @@ async def _land_coercion(
 
     Args:
         session (SessionState): the shell session.
-        store (EnvSet): the entry point each write goes through.
+        store (EnvSet): the session view each write goes through.
         coercion (_IntegerCoercion): the evaluation that made the writes.
     """
     reach_again = _step_back(session)

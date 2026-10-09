@@ -26,8 +26,8 @@ class FileHandle:
     """One open file: its stored bytes fetched as read, its writes kept.
 
     Nothing moves at open. A read fetches the chunk it lands in through
-    ``base`` (a ``ChunkedHandle`` over the entry point's ranged read), and what
-    the handle wrote is kept as byte ranges laid over those stored
+    ``base`` (a ``ChunkedHandle`` over the file adapter's ranged read), and
+    what the handle wrote is kept as byte ranges laid over those stored
     bytes. A close owes the mount only those ranges (``flush_plan``),
     so another writer's bytes between them survive, which a copy of the
     whole file taken at open and written back at close would undo. An
@@ -80,7 +80,7 @@ class FileHandle:
 
         Args:
             path (str): guest-absolute virtual path.
-            fetch (FileFetch | None): the entry point's
+            fetch (FileFetch | None): the file adapter's
                 read of ``(offset, size)``, a None size reading to the
                 end; None when the open created or emptied the file.
             size (int): the file's length as the open saw it.
@@ -305,7 +305,7 @@ class FileHandle:
         second flush then owes only what came after the first.
 
         Args:
-            fetch (FileFetch): the entry point's read
+            fetch (FileFetch): the file adapter's read
                 of the stored bytes, as ``opened`` takes it.
         """
         size = self.size

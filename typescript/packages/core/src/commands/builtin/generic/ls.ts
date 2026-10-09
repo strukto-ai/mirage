@@ -1279,7 +1279,7 @@ export async function lsGeneric(
           const target = posixNormpath(`${dirSpec.virtual}/${name}`)
           let row = new FileStat({ name, type: FileType.DIRECTORY })
           // Only the namespace can stat a parent outside this mount.
-          // Without that entry point, keep the synthetic directory row.
+          // Without `statPath`, keep the synthetic directory row.
           if (statNeeded(flags) && (opts.statPath !== undefined || underPath(target, prefix))) {
             try {
               const found =
