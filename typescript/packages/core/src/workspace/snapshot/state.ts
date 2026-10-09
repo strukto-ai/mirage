@@ -690,6 +690,9 @@ async function restoreSessions(
     setCwd(session, fields.cwd)
     session.vars = fields.vars
     session.functions = fields.functions
+    // A restored function runs as a parse of its own, as one loaded from
+    // storage does: the sites of what it replaced are gone.
+    session.functionSites.clear()
     session.readonlyFunctions = fields.readonlyFunctions
     session.exportedFunctions = fields.exportedFunctions
     session.mountModes = fields.mountModes

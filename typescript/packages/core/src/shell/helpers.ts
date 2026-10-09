@@ -27,6 +27,34 @@ export function getText(node: TSNodeLike): string {
 }
 
 /**
+ * Whether `after` stands on `before`'s line within `root`: no newline between
+ * them. The parse has joined continued lines and folded each heredoc body
+ * into its statement, so a newline between two statements is a line break.
+ * Mirrors Python's same_line.
+ */
+export function sameLine(root: TSNodeLike, before: TSNodeLike, after: TSNodeLike): boolean {
+  const base = root.startIndex ?? 0
+  const gap = root.text.slice((before.endIndex ?? base) - base, (after.startIndex ?? base) - base)
+  return !gap.includes('\n')
+}
+
+/**
+ * The row the shell began reading `node`'s command on. bash reads a whole
+ * line before running any of it, and a complete command spanning lines
+ * whole, with the rest of the line it ends on: a command after a `;`, or
+ * inside a group that spans rows, was read with the ones before it. Mirrors
+ * Python's read_row.
+ */
+export function readRow(node: TSNodeLike): number {
+  let top = node
+  while (top.parent?.parent != null) top = top.parent
+  const root = top.parent ?? top
+  for (let before = top.previousSibling; before != null && sameLine(root, before, top);)
+    [top, before] = [before, before.previousSibling]
+  return top.startPosition?.row ?? 0
+}
+
+/**
  * A node's children with the source text between them, the twin of
  * python's `source_parts`.
  *

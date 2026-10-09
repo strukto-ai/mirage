@@ -37,6 +37,7 @@ import {
   getProcessSubBody,
   getProcessSubDirection,
   getText,
+  readRow,
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
@@ -51,11 +52,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { runExternal } from '../executor/command/external.ts'
 import { handleCommand } from '../executor/command/command.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
-import {
-  type AliasMark,
-  aliasCommandText,
-  expandingAliases,
-} from '../executor/builtins/alias/index.ts'
+import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
 import { checkSyntax, syntaxErrorResult } from '../../shell/parse/index.ts'
 import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
@@ -175,17 +172,13 @@ export async function executeCommand(
   const headNode = nonPrefixParts[0]
   if (
     parser !== undefined &&
-    Object.keys(session.aliases).length > 0 &&
+    (Object.keys(session.aliasView ?? session.aliases).length > 0 || session.aliasMarks.size > 0) &&
     !isProgramInvocation(session) &&
     headNode?.type === NT.COMMAND_NAME &&
     headNode.namedChildren[0]?.type === NT.WORD
   ) {
     const head = getText(headNode)
-    const mark: AliasMark = [
-      session.parseCurrent,
-      session.parseRow + (node.startPosition?.row ?? 0),
-    ]
-    const rewrite = aliasCommandText(session, node, headNode, mark)
+    const rewrite = aliasCommandText(session, node, headNode, aliasMark(session, readRow(node)))
     if (rewrite !== null) {
       const [line, owners] = rewrite
       const names = new Set(owners.flatMap((names) => [...names]))
@@ -510,7 +503,7 @@ async function runCommandBody(
         runtimeBindings,
         routingDecision,
         signal,
-        node.startPosition?.row ?? 0,
+        readRow(node),
         agentId,
         redirectPathsFor(node),
         claimant,
@@ -583,9 +576,9 @@ async function runArgv(
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision,
   signal?: AbortSignal,
-  // The command's line within its parse, which only `alias` reads: a
-  // definition remembers where it was made so a use on the same line
-  // does not see it, as bash's line reader would not.
+  // The row the shell began reading the command on within its parse
+  // (`readRow`), which only `alias`, `unalias` and `shopt` read: the
+  // commands of one read keep the aliases it began with.
   row = 0,
   // The agent the line is attributed to, which an approval request names.
   agentId = '',

@@ -61,11 +61,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "shopt -s expand_aliases\nalias axb='echo hi'\naxb one two",
+      "command": "shopt -s expand_aliases\nalias axb='echo hi'\naxb one two; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nalias a=\"echo 2\"; a\nunalias a; a\n{ alias a=\"echo 3\"\na; }\na'; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nalias a=\"echo 2\"; eval \"alias a=\\\"echo 3\\\"; a\"; a; eval a\na'; bash -c 'alias a=\"echo 1\"\nshopt -s expand_aliases; eval \"shopt -u expand_aliases; shopt -s expand_aliases\"; a 2>/dev/null || echo none\na'",
       "expect": {
         "exit": 0,
-        "stdout": "hi one two\n",
-        "stderr": ""
+        "stdout": "hi one two\n1\n2\n3\n2\n1\n3\n3\nnone\n1\n",
+        "stderr": "a: command not found\n"
       }
     },
     {
@@ -231,7 +231,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( shopt -s expand_aliases; alias axd=echo; true | axd ok; echo rc=$? )",
+      "command": "bash -c 'shopt -s expand_aliases\nalias axd=echo; true | axd ok; echo rc=$?'",
       "expect": {
         "exit": 0,
         "stdout": "rc=127\n",
@@ -1086,6 +1086,278 @@
         "exit": 127,
         "stdout": "",
         "stderr": "a: command not found\n"
+      }
+    },
+    {
+      "id": "alias_function_keeps_its_definitions_aliases",
+      "seq": 940128,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nf() { a; }\nalias a=\"echo 2\"\nf\nunalias a; f\nshopt -u expand_aliases; f'; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nf() { a; }\nalias a=f\na'; bash -c 'shopt -s expand_aliases\nalias make=\"f() { make; }\"\nmake\nunalias make\nmake() { echo literal; }\nf'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n1\n1\nliteral\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_function_defined_on_the_alias_line_keeps_none",
+      "seq": 940129,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"; f() { a; }\nf 2>/dev/null; echo \"rc=$?\"'; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nalias a=\"echo 2\"; f() { a; }\nunalias a; g() { a; }\nf; g'",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=127\n1\n2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_function_off_at_definition_stays_off",
+      "seq": 940130,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'alias a=\"echo 1\"\nf() { a; }\nshopt -s expand_aliases\nf 2>/dev/null; echo \"rc=$?\"'; bash -c 'alias a=\"echo 1\"\nshopt -s expand_aliases; a; f() { a; }\nf\na' 2>/dev/null; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nshopt -u expand_aliases; a; f() { a; }\nf\na' 2>/dev/null",
+      "expect": {
+        "exit": 127,
+        "stdout": "rc=127\n1\n1\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_function_reads_substitutions_live",
+      "seq": 940131,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nf() { x=$(a); echo \"[$x]\"; eval a; }\nalias a=\"echo 2\"\nf'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2]\n2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_function_nested_definition_keeps_the_view",
+      "seq": 940132,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nf() { g() { a; }; }\nalias a=\"echo 2\"\nf; g'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_function_trailing_blank_chain",
+      "seq": 940133,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'shopt -s expand_aliases\nalias s=\"echo S \"\nalias w=\"W\"\nf() { s w; }\nalias s=\"echo T \"\nf'",
+      "expect": {
+        "exit": 0,
+        "stdout": "S W\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_function_lists_and_tests",
+      "seq": 940134,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nf() { a | cat; true && a; if a; then :; fi; }\nalias a=\"echo 2\"\nf'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_function_exported_copy_keeps_them",
+      "seq": 940135,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nf() { a; }\nexport -f f\nalias a=\"echo 2\"\nbash -c f'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
       }
     }
   ]

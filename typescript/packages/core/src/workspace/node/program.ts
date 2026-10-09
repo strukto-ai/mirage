@@ -21,7 +21,7 @@ import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import { getText } from '../../shell/helpers.ts'
+import { getText, sameLine } from '../../shell/helpers.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -376,18 +376,11 @@ async function runProgram(
  * is a line break. Mirrors Python's _next_line.
  */
 function nextLine(node: TSNodeLike, children: readonly TSNodeLike[], i: number): number {
-  const text = node.text
-  const base = node.startIndex ?? 0
-  let end = children[i]?.endIndex ?? base
-  let j = i + 1
-  for (; j < children.length; j++) {
-    const next = children[j]
-    if (next === undefined) continue
-    const start = next.startIndex ?? end
-    if (text.slice(end - base, start - base).includes('\n')) break
-    end = next.endIndex ?? start
+  for (let j = i + 1; ; j++) {
+    const before = children[j - 1]
+    const after = children[j]
+    if (before === undefined || after === undefined || !sameLine(node, before, after)) return j
   }
-  return j
 }
 
 /**

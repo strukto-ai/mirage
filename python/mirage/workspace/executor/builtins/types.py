@@ -50,9 +50,10 @@ class BuiltinCall:
             holds the positional parameters.
         cancel (asyncio.Event | None): set when the run is being
             cancelled; ``sleep`` watches it.
-        row (int): the command's line within its parse; only ``alias``
-            reads it, so a definition is invisible to a use on the same
-            line, as bash's line reader has it.
+        row (int): the row the shell began reading the command on within
+            its parse (``read_row``); ``alias``, ``unalias`` and ``shopt``
+            read it, so the commands of one read keep the aliases it began
+            with, as bash's reader has it.
         dispatch (DispatchFn): the op dispatcher door.
         registry (MountRegistry): the mount registry.
         namespace (Namespace): the name plane (links, node table).

@@ -59,6 +59,7 @@ from mirage.shell.helpers import (
     get_text,
     get_unset_args,
     get_while_parts,
+    read_row,
     take_continuation,
 )
 from mirage.shell.job_table import JobTable
@@ -71,6 +72,7 @@ from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins import handle_test, handle_unset
+from mirage.workspace.executor.builtins.alias import alias_mark, alias_view
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
 from mirage.workspace.executor.builtins.shared import is_valid_name
 from mirage.workspace.executor.control import (
@@ -1594,10 +1596,15 @@ async def _execute_node(
             )
         source = get_function_source(node)
         session.functions[name] = source
+        mark = (
+            session._parse_current,
+            session._parse_row + node.start_point[0],
+        )
         session._function_sites[name] = FunctionSite(
             source,
-            (session._parse_current, session._parse_row + node.start_point[0]),
+            mark,
             defined_at(node, handed),
+            alias_view(session, node, alias_mark(session, read_row(node))),
         )
         return (
             None,

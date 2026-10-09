@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-# The parse and row an alias definition or use sits on, so a definition
-# is invisible to a use on the same line, as bash's line reader has it.
+# A read: the parse and the row a command began on (``read_row``), so
+# the commands of one read keep the aliases it began with, as bash's
+# reader expands them before running any.
 AliasMark = tuple[int, int]

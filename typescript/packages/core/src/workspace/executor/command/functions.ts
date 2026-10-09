@@ -86,9 +86,14 @@ export async function executeShellFunction(
   session.localVars = savedLocals
   session.localFrames.push(savedLocals)
   // The body is parsed again from its source, so its rows restart at 0;
-  // it reads aliases at its definition, or as a parse of its own when it
-  // came from a stored session.
+  // it expands the aliases its definition saw, or reads them as a parse of
+  // its own when it came from a stored session. It was read apart from the
+  // alias that may have called it, whose guards do not reach it (`alias a=f`
+  // still lets `f`'s body run its own `a`).
   const outerParse: [number, number] = [session.parseCurrent, session.parseRow]
+  const outerView = session.aliasView
+  const outerExpansion = session.aliasExpansion
+  session.aliasExpansion = null
   let site = session.functionSites.get(cmdName)
   if (site !== undefined && site.source !== source) site = undefined
   if (site === undefined) {
@@ -97,6 +102,7 @@ export async function executeShellFunction(
   } else {
     ;[session.parseCurrent, session.parseRow] = site.mark
   }
+  session.aliasView = site?.aliases ?? null
   // Its commands stand under the definition's place, on a hand-off of
   // their own as every re-parse does, so two definitions of one text each
   // need a nod and a second call runs on the first's.
@@ -156,6 +162,8 @@ export async function executeShellFunction(
     throw err
   } finally {
     ;[session.parseCurrent, session.parseRow] = outerParse
+    session.aliasView = outerView
+    session.aliasExpansion = outerExpansion
     if (nested !== null && decisions !== null) decisions.handUp(session.sessionId, nested)
     scope.release()
     cs.pop()

@@ -474,6 +474,47 @@ describe('fillEnv through execute', () => {
     }
   })
 
+  it.each([
+    [['alias show=\'echo "a:$TOKEN"\'', 'f() { show; }', 'unalias show'], 'a:t0\n'],
+    [
+      [
+        "alias show='echo b'",
+        'f() { cat <(show); echo "$(show)"; }',
+        'alias show=\'echo "a:$TOKEN"\'',
+      ],
+      'a:t0\na:t0\n',
+    ],
+  ])("a function's alias fills on invocation (%j)", async (lines, out) => {
+    const { calls, fetch } = countingSource({ TOKEN: 't0' })
+    registerSecrets('fake-alias-saved', FakeConfig, fetch)
+    const ws = await makeWs({ TOKEN: { from: 'fake-alias-saved', ref: 'r' } })
+    try {
+      for (const line of ['shopt -s expand_aliases', ...lines])
+        expect((await ws.shell(line)).exitCode).toBe(0)
+      expect(stdoutStr(await ws.shell('f'))).toBe(out)
+      expect(calls).toEqual(['r'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    [['alias echo=\'printf "$TOKEN"\'', 'f() { :; }', 'unalias echo'], 'echo ok'],
+    [['alias a=\'echo "$TOKEN"\'', 'f() { echo "$(a)"; }', "alias a='echo ok'"], 'f'],
+  ])('a saved alias fetches nothing where it is not read (%j)', async (lines, line) => {
+    const { calls, fetch } = countingSource({ TOKEN: 't0' })
+    registerSecrets('fake-alias-unread', FakeConfig, fetch)
+    const ws = await makeWs({ TOKEN: { from: 'fake-alias-unread', ref: 'r' } })
+    try {
+      for (const setup of ['shopt -s expand_aliases', ...lines])
+        expect((await ws.shell(setup)).exitCode).toBe(0)
+      expect(stdoutStr(await ws.shell(line))).toBe('ok\n')
+      expect(calls).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('the alias rest word is not a managed read', async () => {
     const { calls, fetch } = countingSource({ token: 'v' })
     registerSecrets('fake-alias-rest', FakeConfig, fetch)

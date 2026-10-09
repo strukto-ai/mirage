@@ -40,6 +40,17 @@ async def _run(ws: Workspace, cmd: str) -> tuple[str, int]:
 
 
 @pytest.mark.asyncio
+async def test_a_function_keeps_the_aliases_its_definition_saw():
+    ws = _ws()
+    await _run(ws, "shopt -s expand_aliases; alias a='echo 1'")
+    await _run(ws, 'f() { a; }; g() { x=$(a); echo "[$x]"; }')
+    await _run(ws, "alias a='echo 2'")
+    assert await _run(ws, "f; g") == ("1\n[2]\n", 0)
+    assert await _run(ws, "unalias a; f") == ("1\n", 0)
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_no_expansion_without_shopt():
     ws = _ws()
     out, code = await _run(ws, "alias x='echo hi'\nx")
@@ -97,6 +108,9 @@ async def test_unalias():
     ws = _ws()
     out, code = await _run(ws, "alias x=1\nunalias x; alias x")
     assert code == 1
+    # What a read kept of the aliases it changed ends with the line.
+    session = ws.get_session(ws.default_session_id)
+    assert session._alias_marks == {}
     _, code = await _run(ws, "unalias nope")
     assert code == 1
     _, code = await _run(ws, "unalias")
@@ -205,19 +219,16 @@ async def test_a_call_with_its_own_env_or_cwd_reads_the_same_aliases(
 @pytest.mark.asyncio
 async def test_a_checked_out_function_does_not_read_the_replaced_site():
     # Checkout restores the table but not where the live definitions
-    # were made; a site recorded for another source is not the
-    # function's, so the restored body runs as a parse of its own.
+    # were made, so a restored body runs as a parse of its own and reads
+    # the aliases as they are, even after the same text was defined again.
     ws = _ws()
-    for line in (
-        "shopt -s expand_aliases",
-        "alias a='echo works'",
-        "f() { a; }",
-    ):
+    for line in ("shopt -s expand_aliases", "alias a='echo 1'", "f() { a; }"):
         await ws.shell(line)
     state = await to_state_dict(ws)
-    await ws.shell("alias a='echo works'; f() { :; }")
+    for line in ("alias a='echo 2'", "f() { a; }", "alias a='echo 3'"):
+        await ws.shell(line)
     await apply_state_dict(ws, state)
-    assert await _run(ws, "f") == ("works\n", 0)
+    assert await _run(ws, "f") == ("3\n", 0)
     await ws.close()
 
 

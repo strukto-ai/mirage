@@ -34,8 +34,12 @@ class FunctionSite:
             at, as an alias mark.
         origin (Occurrence | None): the definition's place on its line,
             which the body's approvals stand under; None outside a line.
+        aliases (Mapping[str, str] | None): the aliases the body runs,
+            as its definition saw them (``alias_view``); None to read
+            them as they are when it runs.
     """
 
     source: str
     mark: tuple[int, int]
     origin: Occurrence | None
+    aliases: Mapping[str, str] | None = None

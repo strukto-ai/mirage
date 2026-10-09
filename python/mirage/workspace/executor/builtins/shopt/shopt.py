@@ -21,6 +21,11 @@ from mirage.shell.constants import (
     SHOPT_DEFAULTS,
     SHOPT_UNSUPPORTED,
 )
+from mirage.workspace.executor.builtins.alias import (
+    AliasMark,
+    alias_mark,
+    note_expanding,
+)
 from mirage.workspace.executor.builtins.getopt import last_of, scan_options
 from mirage.workspace.executor.builtins.shared import fail
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
@@ -54,6 +59,7 @@ def _row(name: str, on: bool, reusable: bool, set_o: bool) -> str:
 async def handle_shopt(
     args: list[str],
     session: SessionState,
+    mark: AliasMark | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Set, unset, print or query the `shopt` options.
 
@@ -75,6 +81,8 @@ async def handle_shopt(
     Args:
         args (list[str]): the words after `shopt`.
         session (SessionState): shell session state.
+        mark (AliasMark | None): the read running it, whose commands keep
+            ``expand_aliases`` as that read began; None outside a read.
     """
     scan = scan_options(args, "pqosu")
     if scan.bad is not None:
@@ -126,6 +134,8 @@ async def handle_shopt(
             errors.append(f"mirage: shopt: {name}: not supported")
             status = 1
             continue
+        if name == "expand_aliases" and not set_o and mark is not None:
+            note_expanding(session, mark)
         store[name] = setting
     out = encode_text("\n".join(lines) + "\n") if lines else None
     err = encode_text("\n".join(errors) + "\n") if errors else None
@@ -142,4 +152,7 @@ async def shopt_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_shopt(list(call.argv.args), call.context.session)
+    session = call.context.session
+    return await handle_shopt(
+        list(call.argv.args), session, alias_mark(session, call.row)
+    )

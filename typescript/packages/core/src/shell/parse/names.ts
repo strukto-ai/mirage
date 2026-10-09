@@ -61,13 +61,17 @@ function collectNames(node: TSNodeLike, out: Set<string>): void {
  * A definition's body runs at invocation, not where it is defined, so
  * a read walk that descended into one would charge the defining line
  * for reads it never performs. The fill layer joins invoked bodies
- * back in through its own node set (`lineNodes`).
+ * back in through its own node set (`lineNodes`). `skip` names further
+ * node types whose subtrees the caller walks on its own.
  */
-export function* walkNamedOutsideDefs(node: TSNodeLike): Generator<TSNodeLike> {
-  if (node.type === 'function_definition') return
+export function* walkNamedOutsideDefs(
+  node: TSNodeLike,
+  skip: ReadonlySet<string> = new Set(),
+): Generator<TSNodeLike> {
+  if (node.type === 'function_definition' || skip.has(node.type)) return
   yield node
   for (const child of node.namedChildren) {
-    yield* walkNamedOutsideDefs(child)
+    yield* walkNamedOutsideDefs(child, skip)
   }
 }
 
@@ -100,11 +104,15 @@ export function referencedNames(node: TSNodeLike): ReadonlySet<string> {
  * `unset`) parse as their own node types whose head word is the first
  * anonymous token, so those are read directly. A function definition's
  * body is skipped: those commands run at invocation, where the fill
- * layer walks the stored body instead.
+ * layer walks the stored body instead, and so is any `skip` type the
+ * caller walks on its own.
  */
-export function commandWords(node: TSNodeLike): ReadonlySet<string> {
+export function commandWords(
+  node: TSNodeLike,
+  skip: ReadonlySet<string> = new Set(),
+): ReadonlySet<string> {
   const out = new Set<string>()
-  for (const current of walkNamedOutsideDefs(node)) {
+  for (const current of walkNamedOutsideDefs(node, skip)) {
     if (current.type === 'command_name') {
       if (current.text !== '') out.add(current.text)
     } else if (DECLARING_NODES.has(current.type)) {

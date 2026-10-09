@@ -12,20 +12,56 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.executor.builtins.alias.alias import (
-    alias_command_text,
-    alias_value,
-    expanding_aliases,
-    handle_alias,
-    handle_unalias,
-)
-from mirage.workspace.executor.builtins.alias.types import AliasMark
+import importlib
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mirage.workspace.executor.builtins.alias.alias import (
+        alias_command_text,
+        alias_mark,
+        alias_value,
+        alias_view,
+        expanding_aliases,
+        handle_alias,
+        handle_unalias,
+        note_expanding,
+    )
+    from mirage.workspace.executor.builtins.alias.types import AliasMark
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.workspace.executor.builtins.alias.alias": (
+        "alias_command_text",
+        "alias_mark",
+        "alias_value",
+        "alias_view",
+        "expanding_aliases",
+        "handle_alias",
+        "handle_unalias",
+        "note_expanding",
+    ),
+    "mirage.workspace.executor.builtins.alias.types": ("AliasMark",),
+}
+_MODULE_OF = {
+    name: module for module, names in _EXPORTS.items() for name in names
+}
 
 __all__ = [
     "AliasMark",
     "alias_command_text",
+    "alias_mark",
     "alias_value",
+    "alias_view",
     "expanding_aliases",
     "handle_alias",
     "handle_unalias",
+    "note_expanding",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    module = _MODULE_OF.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value

@@ -435,6 +435,74 @@ async def test_alias_body_fills_on_invocation():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lines, out",
+    [
+        (
+            (
+                "alias show='echo \"a:$TOKEN\"'",
+                "f() { show; }",
+                "unalias show",
+            ),
+            "a:t0\n",
+        ),
+        (
+            (
+                "alias show='echo b'",
+                'f() { cat <(show); echo "$(show)"; }',
+                "alias show='echo \"a:$TOKEN\"'",
+            ),
+            "a:t0\na:t0\n",
+        ),
+    ],
+)
+async def test_a_functions_alias_fills_on_invocation(lines, out):
+    calls, fetch = counting_source({"TOKEN": "t0"})
+    register_secrets("fake", FakeConfig, fetch)
+    ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
+    try:
+        for line in ("shopt -s expand_aliases", *lines):
+            assert (await ws.shell(line)).exit_code == 0
+        io = await ws.shell("f")
+        assert (await io.stdout_str()) == out
+        assert calls == ["r"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lines, line",
+    [
+        (
+            ("alias echo='printf \"$TOKEN\"'", "f() { :; }", "unalias echo"),
+            "echo ok",
+        ),
+        (
+            (
+                "alias a='echo \"$TOKEN\"'",
+                'f() { echo "$(a)"; }',
+                "alias a='echo ok'",
+            ),
+            "f",
+        ),
+    ],
+)
+async def test_a_saved_alias_fetches_nothing_where_it_is_not_read(lines, line):
+    calls, fetch = counting_source({"TOKEN": "t0"})
+    register_secrets("fake", FakeConfig, fetch)
+    ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
+    try:
+        for setup in ("shopt -s expand_aliases", *lines):
+            assert (await ws.shell(setup)).exit_code == 0
+        io = await ws.shell(line)
+        assert (await io.stdout_str()) == "ok\n"
+        assert calls == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_alias_rest_is_not_a_managed_read():
     calls, fetch = counting_source({"token": "v"})
     register_secrets("fake", FakeConfig, fetch)
