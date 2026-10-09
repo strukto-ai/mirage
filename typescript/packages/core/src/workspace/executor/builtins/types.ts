@@ -52,9 +52,10 @@ export type ExecuteStringFn = (
  * Every executor-run builtin takes exactly this and nothing else, so the
  * table maps a name to a function of one argument and the dispatcher does
  * one lookup instead of one arm per word. A builtin reads the fields it
- * needs and ignores the rest. `row` is the command's line within its
- * parse; only `alias` reads it, so a definition is invisible to a use on
- * the same line, as bash's line reader has it. `signal` fires when the run
+ * needs and ignores the rest. `row` is the row the shell began reading the
+ * command on within its parse (`readRow`); `alias`, `unalias` and `shopt`
+ * read it, so the commands of one read keep the aliases it began with, as
+ * bash's reader has it. `signal` fires when the run
  * is being cancelled; `sleep` watches it. `sink` is where a line the builtin
  * runs in place (`eval`, `source`, a nested shell) writes its statements as
  * they finish.

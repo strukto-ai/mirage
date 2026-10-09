@@ -234,6 +234,7 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
   ],
   ['mv', ['[no-]verbose', '[no-]dry-run', '[no-]force', '[no-]sparse']],
   ['remote', ['[no-]verbose']],
+  ['remote get-url', ['[no-]push', '[no-]all']],
   [
     'reset',
     [
@@ -466,6 +467,7 @@ export const GIT_SYNOPSES: ReadonlyMap<string, readonly string[]> = new Map([
   ['mv', ['git mv [<options>] <source>... <destination>']],
   ['reflog', ['git reflog [show] [<log-options>] [<ref>]']],
   ['remote', ['git remote [-v | --verbose]']],
+  ['remote get-url', ['git remote get-url [--push] [--all] <name>']],
   ['reset', ['git reset [-q] [<commit>]', 'git reset [-q] [<tree-ish>] [--] <pathspec>...']],
   ['restore', ['git restore [<options>] [--source=<branch>] <file>...']],
   ['rev-list', ['git rev-list [<options>] <commit>... [--] [<path>...]']],

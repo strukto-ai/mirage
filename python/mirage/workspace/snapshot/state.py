@@ -760,6 +760,9 @@ async def _restore_sessions(
         set_cwd(session, fields.cwd)
         session.vars = fields.vars
         session.functions = fields.functions
+        # A restored function runs as a parse of its own, as one loaded
+        # from storage does: the sites of what it replaced are gone.
+        session._function_sites.clear()
         session.readonly_functions = fields.readonly_functions
         session.exported_functions = fields.exported_functions
         session.mount_modes = fields.mount_modes

@@ -55,6 +55,43 @@ def get_text(node: TSNodeLike) -> str:
     return decode_text(node.text or b"")
 
 
+def same_line(root: TSNodeLike, before: TSNodeLike, after: TSNodeLike) -> bool:
+    """Whether ``after`` stands on ``before``'s line within ``root``: no
+    newline between them. The parse has joined continued lines and folded
+    each heredoc body into its statement, so a newline between two
+    statements is a line break.
+
+    Args:
+        root (TSNodeLike): the program both stand in.
+        before (TSNodeLike): the earlier node.
+        after (TSNodeLike): the later one.
+    """
+    text = root.text or b""
+    base = root.start_byte
+    return b"\n" not in text[before.end_byte - base : after.start_byte - base]
+
+
+def read_row(node: TSNodeLike) -> int:
+    """The row the shell began reading ``node``'s command on.
+
+    bash reads a whole line before running any of it, and a complete
+    command spanning lines whole, with the rest of the line it ends on:
+    a command after a `;`, or inside a group that spans rows, was read
+    with the ones before it.
+
+    Args:
+        node (TSNodeLike): a node of a parsed program.
+    """
+    top = node
+    while top.parent is not None and top.parent.parent is not None:
+        top = top.parent
+    root = top.parent if top.parent is not None else top
+    before = top.prev_sibling
+    while before is not None and same_line(root, before, top):
+        top, before = before, before.prev_sibling
+    return top.start_point[0]
+
+
 def source_parts(node: TSNodeLike) -> Iterator[str | TSNodeLike]:
     """A node's children with the source text between them.
 

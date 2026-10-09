@@ -25,7 +25,7 @@ import { concat } from '../../io/cachable_iterator.ts'
 import { Terminal } from '../../shell/console/index.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { inputSubstitutionRedirect } from '../../shell/helpers.ts'
-import { expandRedirects } from '../expand/redirects.ts'
+import { expandRedirect } from '../expand/redirects.ts'
 import { toScope } from '../executor/builtins/scope.ts'
 import { handleRedirect } from '../executor/redirect.ts'
 import { sessionView } from '../session/state.ts'
@@ -56,17 +56,19 @@ export async function runCommandTree(
   if (redirect === null) {
     result = await executeNode(deps, node, context, stdin, callStack)
   } else {
-    const [redirects] = await expandRedirects(
-      [redirect],
+    const expanded = await expandRedirect(
+      redirect,
       context,
       deps.executeFn,
       deps.registry,
       null,
       sessionView(session, deps.registry.policies, context.frame.diagnostics),
+      false,
+      deps.namespace,
     )
     // Bash's implicit read uses cat's policy identity without invoking
     // a shadowing function/alias or expanding the filename a second time.
-    const target = redirects[0]?.target
+    const target = expanded.target
     const paths =
       target instanceof PathSpec ? [target] : typeof target === 'string' ? [toScope(target)] : []
     const verdict = await admit(
@@ -104,7 +106,7 @@ export async function runCommandTree(
           (inner, current, input, stack) => executeNode(deps, inner, current, input, stack),
           deps.dispatch,
           null,
-          redirects,
+          [expanded],
           context,
           stdin,
           null,

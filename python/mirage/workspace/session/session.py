@@ -445,8 +445,10 @@ class SessionState:
     # (`alias x=..; x` on one line finds no `x`; the same two statements
     # on two lines do). mirage parses a whole program before running any
     # of it, so the rule is kept as a mark: each program loop entered
-    # gets a parse id, an alias remembers the (parse, row) it was
-    # defined at, and a use on that same parse and row does not expand.
+    # gets a parse id, a read is the (parse, row) a command began on
+    # (`read_row`), and an alias changed in a read keeps the value that
+    # read began with for the commands it read (`unalias x; x` still
+    # runs `x`).
     # `_alias_expansion` tracks the text each alias inserted, so a value whose
     # first word is the alias itself (`alias ls='ls -1'`) stops there.
     # `exec` redirect-only state: where the shell's own stdout, stderr
@@ -489,10 +491,20 @@ class SessionState:
     # terminal is writing to a stream it did not open.
     terminal: StreamOwner = field(default_factory=StreamOwner, repr=False)
     _line_open: bool = field(default=False, repr=False)
-    _alias_marks: dict[str, tuple[int, int]] = field(
+    # Per read that changed aliases, their values as it began (None: not
+    # defined), for the commands of that read; per read that ran `shopt`
+    # on `expand_aliases`, the option as it began. Released when the
+    # typed line ends.
+    _alias_marks: dict[tuple[int, int], dict[str, str | None]] = field(
+        default_factory=dict, repr=False
+    )
+    _expand_aliases_marks: dict[tuple[int, int], bool] = field(
         default_factory=dict, repr=False
     )
     _alias_expansion: AliasExpansion | None = field(default=None, repr=False)
+    # The aliases a running function's body expands, as its definition
+    # saw them (``FunctionSite.aliases``); None reads the live table.
+    _alias_view: dict[str, str] | None = field(default=None, repr=False)
     # Where each function was defined (``FunctionSite``), so its body
     # expands the aliases of that place and its approvals stand under
     # it; a function loaded from a stored session has none and runs as a
@@ -960,6 +972,7 @@ class SessionState:
             },
             aliases={},
             _alias_marks={},
+            _expand_aliases_marks={},
             shell_options={},
             shopts={},
             last_exit_code=0,

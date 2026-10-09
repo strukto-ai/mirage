@@ -217,6 +217,11 @@ async def test_a_failed_later_redirect_puts_every_earlier_one_back():
             "toerr\n",
         )
         assert await _file(ws, "/data/e") == missing
+        io = await ws.shell("exec > /data/expanded >$((1/0))")
+        assert io.exit_code == 1
+        io = await ws.shell("echo restored")
+        assert await io.stdout_str() == "restored\n"
+        assert await _file(ws, "/data/expanded") == ""
         io = await ws.shell(
             "exec > /data/g2; exec >> /data/g3 < /data/missing; echo where"
         )

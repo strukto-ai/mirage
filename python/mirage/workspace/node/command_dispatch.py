@@ -22,15 +22,18 @@ from typing import Any, TypeVar
 
 from mirage.commands.builtin.utils.limit import guard_io, run_with_timeout
 from mirage.context import (
-    RedirectOpener,
+    RedirectRunner,
     program_invocation,
-    redirect_opener_for,
     redirect_paths_for,
+    redirect_runner_for,
     reset_admission,
+    reset_redirect_paths,
     set_admission,
+    set_redirect_paths,
 )
+from mirage.context.session_context import RedirectResult, redirect_syntax_for
 from mirage.io import IOResult
-from mirage.io.types import materialize
+from mirage.io.types import ByteSource, materialize
 from mirage.policy import PolicyDenied, resolve_limit, resolve_producer
 from mirage.policy.policies import reset_op_policies, set_op_policies
 from mirage.policy.types import Claimant, HandOff, SessionContext
@@ -44,6 +47,7 @@ from mirage.shell.helpers import (
     get_process_sub_body,
     get_process_sub_direction,
     get_text,
+    read_row,
     split_env_prefix,
 )
 from mirage.shell.parse import check_syntax, syntax_error_result
@@ -80,6 +84,7 @@ from mirage.workspace.executor.builtins import (
 )
 from mirage.workspace.executor.builtins.alias import (
     alias_command_text,
+    alias_mark,
     expanding_aliases,
 )
 from mirage.workspace.executor.builtins.table import BUILTINS
@@ -160,14 +165,14 @@ async def execute_command(
     # expansion, textually, and reads the result as a fresh line: an
     # alias holding a pipe is a pipe. Only an unquoted plain word
     # qualifies (`\x` and `'x'` are never aliases), and `alias_value`
-    # applies the rest of bash's rules (expand_aliases, the same-line
-    # mark, the guards on inserted text). The rewritten line runs
-    # through the same executor with the same call stack, so `$1`
-    # inside a function still means the function's argument. A line run
-    # as a program (`exec`, `env`, `find -exec`) is an argv, which no
-    # alias rewrites.
+    # applies the rest of bash's rules (the aliases and expand_aliases as
+    # the command's read found them, the guards on inserted text). The
+    # rewritten line runs through the same executor with the same call
+    # stack, so `$1` inside a function still means the function's
+    # argument. A line run as a program (`exec`, `env`, `find -exec`) is
+    # an argv, which no alias rewrites.
     if (
-        session.aliases
+        (session.aliases or session._alias_view or session._alias_marks)
         and not program_invocation(session)
         and parts
         and parts[0].type == NT.COMMAND_NAME
@@ -176,11 +181,9 @@ async def execute_command(
     ):
         head_node = parts[0]
         head = get_text(head_node)
-        mark = (
-            session._parse_current,
-            session._parse_row + node.start_point[0],
+        rewrite = alias_command_text(
+            session, node, head_node, alias_mark(session, read_row(node))
         )
-        rewrite = alias_command_text(session, node, head_node, mark)
         if rewrite is not None:
             line, owners = rewrite
             offsets = tuple(
@@ -225,13 +228,21 @@ async def execute_command(
                     if handed is not None
                     else None
                 )
+
+                token = set_redirect_paths(
+                    ast.id, (), syntax=redirect_syntax_for(node.id)
+                )
                 try:
-                    if expansion is None:
-                        return await recurse(ast, context, stdin, call_stack)
                     return await recurse(
-                        ast, context, stdin, call_stack, handed=expansion
+                        ast,
+                        context,
+                        stdin,
+                        call_stack,
+                        handed=expansion,
+                        sink=sink,
                     )
                 finally:
+                    reset_redirect_paths(token)
                     session._alias_expansion = previous
                     if expansion is not None:
                         registry.decisions.hand_up(
@@ -464,7 +475,6 @@ async def _dispatch_command_body(
                 routing=routing_decision,
             ),
         )
-        seed_prefix(argv.name)
 
         # Limits resolve against the expanded name, so `$CMD`-style
         # invocations get their real command's policy.
@@ -497,10 +507,11 @@ async def _dispatch_command_body(
             job_table,
             cancel,
             routing_decision,
-            row=node.start_point[0],
+            row=read_row(node),
             agent_id=agent_id,
             redirects=redirect_paths_for(node.id),
-            opener=redirect_opener_for(node.id),
+            runner=redirect_runner_for(node.id),
+            seed_prefix=seed_prefix,
             claimant=claimant,
             sink=sink,
         )
@@ -569,20 +580,21 @@ async def _run_argv(
     row: int = 0,
     agent_id: str = "",
     redirects: tuple[PathSpec, ...] = (),
-    opener: RedirectOpener | None = None,
+    runner: RedirectRunner | None = None,
+    seed_prefix: Callable[[str], None] | None = None,
     claimant: Claimant | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler.
 
-    ``row`` is the command's line within its parse, which only ``alias``
-    reads: a definition remembers where it was made so a use on the
-    same line does not see it, as bash's line reader would not.
+    ``row`` is the row the shell began reading the command on within its
+    parse (``read_row``), which only ``alias``, ``unalias`` and ``shopt``
+    read: the commands of one read keep the aliases it began with.
     ``agent_id`` is the agent the line is attributed to, which an
     approval request names. ``redirects`` are the statement's expanded
     redirect targets, judged with the line because their I/O runs on
     the shell's own fds outside the admitted command's gate window, and
-    ``opener`` opens them once the line is admitted.
+    ``runner`` applies redirects after word expansion, gating each open.
     """
     session = context.session
     name = argv.name
@@ -618,104 +630,111 @@ async def _run_argv(
             argv, operands=tuple(boundary), args=tuple(expanded)
         )
 
-    # ── visibility and admission ────────────────
-    # The one chokepoint every command class passes through: shell
-    # builtins, namespace-routed commands (touch/chmod/ln -s), job
-    # builtins, shell functions, and mount commands all route below, so
-    # the gate must fire here, not in handle_command. Checked ahead of
-    # the BUILTINS table, which runs before lookup(); the enumerators
-    # read the same visibility filter through _layers. Refusals win
-    # over flag parsing, routing, and runtime placement.
     admitted: Admitted | None = None
-    if name:
-        verdict = await admit(
-            name,
-            list(argv.args),
-            list(argv.operands),
-            session,
-            registry,
-            namespace,
-            agent_id,
-            stdin,
-            redirects=redirects,
-            cancel=cancel,
-            claimant=claimant,
-        )
-        if isinstance(verdict, Refused):
-            cmd_str = " ".join([name, *argv.args])
-            return (
-                None,
-                IOResult(
-                    exit_code=verdict.exit_code,
-                    stderr=verdict.stderr,
-                    refusal=verdict.refusal,
-                ),
-                ExecutionNode(
-                    command=cmd_str,
-                    exit_code=verdict.exit_code,
-                    stderr=verdict.stderr,
-                    refused=True,
-                ),
-            )
-        admitted = verdict
-    # bash opens a command's write targets before it runs, so `cat f > f`
-    # reads an emptied file; here that waits for the admission above,
-    # because a command the gate refuses must leave its targets alone.
-    if opener is not None and not await opener(name, tuple(argv.args)):
-        return None, IOResult(exit_code=1), ExecutionNode(exit_code=1)
 
-    # ── run ────────────────────────────────────
-    # The admitted command's gate is bound for its run and reset after,
-    # so its own I/O can ask about the entries the gate did not see and
-    # a nested line binds its own (see ``Admitted``). The workspace's
-    # policies bind in the same window, whether or not a gate judged the
-    # line, so the command tier's policy guard can fire pre_vfs for the
-    # backend I/O a handler performs.
-    ptoken = set_op_policies(registry.policies)
-    try:
-        if admitted is None:
-            return await _route_argv(
-                recurse,
-                dispatch,
+    async def guard(
+        paths: tuple[PathSpec, ...], given: ByteSource | None
+    ) -> RedirectResult | None:
+        nonlocal admitted
+        if name:
+            verdict = await admit(
+                name,
+                list(argv.args),
+                list(argv.operands),
+                session,
                 registry,
                 namespace,
-                execute_fn,
-                argv,
-                context,
-                stdin,
-                call_stack,
-                job_table,
-                cancel,
-                routing_decision,
-                row,
                 agent_id,
-                claimant.line if claimant is not None else None,
-                sink,
+                given,
+                redirects=paths,
+                cancel=cancel,
+                claimant=claimant,
             )
-        token = set_admission(admitted)
+            if isinstance(verdict, Refused):
+                cmd_str = " ".join([name, *argv.args])
+                return (
+                    None,
+                    IOResult(
+                        exit_code=verdict.exit_code,
+                        stderr=verdict.stderr,
+                        refusal=verdict.refusal,
+                    ),
+                    ExecutionNode(
+                        command=cmd_str,
+                        exit_code=verdict.exit_code,
+                        stderr=verdict.stderr,
+                        refused=True,
+                    ),
+                )
+            admitted = verdict
+        return None
+
+    async def run_redirected(
+        given: ByteSource | None,
+        output: JobConsole | None,
+        paths: tuple[PathSpec, ...],
+    ) -> RedirectResult:
+        if seed_prefix is not None:
+            seed_prefix(name)
+        refusal = await guard(paths, given)
+        if refusal is not None:
+            return refusal
+        # ── run ────────────────────────────────────
+        # The admitted command's gate is bound for its run and reset after,
+        # so its own I/O can ask about the entries the gate did not see and
+        # a nested line binds its own (see ``Admitted``). The workspace's
+        # policies bind in the same window, whether or not a gate judged the
+        # line, so the command tier's policy guard can fire pre_vfs for the
+        # backend I/O a handler performs.
+        ptoken = set_op_policies(registry.policies)
         try:
-            return await _route_argv(
-                recurse,
-                dispatch,
-                registry,
-                namespace,
-                execute_fn,
-                argv,
-                context,
-                stdin,
-                call_stack,
-                job_table,
-                cancel,
-                routing_decision,
-                row,
-                agent_id,
-                claimant.line if claimant is not None else None,
-                sink,
-            )
+            if admitted is None:
+                return await _route_argv(
+                    recurse,
+                    dispatch,
+                    registry,
+                    namespace,
+                    execute_fn,
+                    argv,
+                    context,
+                    given,
+                    call_stack,
+                    job_table,
+                    cancel,
+                    routing_decision,
+                    row,
+                    agent_id,
+                    claimant.line if claimant is not None else None,
+                    output,
+                )
+            token = set_admission(admitted)
+            try:
+                return await _route_argv(
+                    recurse,
+                    dispatch,
+                    registry,
+                    namespace,
+                    execute_fn,
+                    argv,
+                    context,
+                    given,
+                    call_stack,
+                    job_table,
+                    cancel,
+                    routing_decision,
+                    row,
+                    agent_id,
+                    claimant.line if claimant is not None else None,
+                    output,
+                )
+            finally:
+                reset_admission(token)
         finally:
-            reset_admission(token)
-    finally:
-        reset_op_policies(ptoken)
+            reset_op_policies(ptoken)
+
+    if runner is not None:
+        return await runner(run_redirected, guard, name, tuple(argv.args))
+    return await run_redirected(stdin, sink, redirects)
 
 
 def unsaid(lines: list[str], said: bytes) -> list[str]:

@@ -37,6 +37,7 @@ from mirage.shell.parse import (
     parse,
     referenced_names,
 )
+from mirage.shell.parse.names import walk_named_outside_defs
 from mirage.shell.types import TSNodeLike
 from mirage.shell.variable import ManagedRef, VarAttr, with_value
 from mirage.utils.hidden import var_hidden
@@ -53,6 +54,11 @@ from mirage.workspace.session.state import deref
 # variable no read walk collects -- a synthetic *name* here would be a
 # real variable a workspace could manage, and every alias would read it.
 _ALIAS_REST = ' "$@"'
+
+# A substitution runs commands of its own, read when it runs: a prefix
+# assignment holding one runs code before the masks land, and one in a
+# stored body reads the aliases of that moment, not the body's saved ones.
+_SUBSTITUTIONS = frozenset({"command_substitution", "process_substitution"})
 
 
 def _defined_bodies(node: TSNodeLike) -> dict[str, list[TSNodeLike]]:
@@ -90,10 +96,13 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
     AND the line's own redefinition (``f; f() { :; }`` runs the stored
     body first, so neither may shadow the other), and a stored alias's
     expansion, parsed here because dispatch reparses it after this pass
-    has already run. Alias values join only under ``expand_aliases``,
-    the same gate ``alias_value`` applies at dispatch. Each name
-    resolves once, so mutual recursion terminates; over-selection only
-    ever over-fetches, under-selection is the bug.
+    has already run. The line, and a body it defines, read the live
+    aliases, only under ``expand_aliases`` (the gate ``alias_value``
+    applies at dispatch); a stored function's body reads the ones its
+    definition saved, except in a substitution, which is read when it
+    runs and so reads the live ones. Each name resolves once per alias
+    table, so mutual recursion terminates; over-selection only ever
+    over-fetches, under-selection is the bug.
 
     Args:
         node (TSNodeLike): the parsed line.
@@ -101,33 +110,54 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
             functions, aliases, shopts).
     """
     defined = _defined_bodies(node)
-    expand = session.shopts.get(
-        "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
+    live: Mapping[str, str] = (
+        session.aliases
+        if session.shopts.get(
+            "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
+        )
+        else {}
     )
     nodes: list[TSNodeLike] = [node]
-    seen: set[str] = set()
-    frontier: list[TSNodeLike] = [node]
+    seen: set[tuple[str, int]] = set()
+    frontier: list[tuple[TSNodeLike, Mapping[str, str]]] = [(node, live)]
     while frontier:
-        current = frontier.pop()
-        for word in command_words(current):
-            if word in seen:
+        current, aliases = frontier.pop()
+        nested = _SUBSTITUTIONS if aliases is not live else frozenset()
+        frontier.extend(
+            (child, live)
+            for outer in walk_named_outside_defs(current, nested)
+            for child in outer.named_children
+            if child.type in nested
+        )
+        for word in command_words(current, nested):
+            if (word, id(aliases)) in seen:
                 continue
-            seen.add(word)
+            seen.add((word, id(aliases)))
             stored = session.functions.get(word)
-            bodies = (
-                parse_function(stored, parse) if stored is not None else []
+            site = session._function_sites.get(word)
+            saved = (
+                site.aliases
+                if site is not None
+                and site.source == stored
+                and site.aliases is not None
+                else live
             )
-            bodies.extend(defined.get(word) or ())
-            if expand and word in session.aliases:
+            found = (
+                [(body, saved) for body in parse_function(stored, parse)]
+                if stored is not None
+                else []
+            )
+            found.extend((body, live) for body in defined.get(word) or ())
+            if word in aliases:
                 # An alias is a textual prefix: dispatch appends the
                 # invocation's rest to the value, so the value's
                 # trailing command is parsed with a dynamic rest-word.
                 # That keeps its argument list honest -- a CLI named in
                 # an alias reads as "verbs unknowable" (whole spec
                 # tree) rather than "no verb selected".
-                bodies.append(parse(session.aliases[word] + _ALIAS_REST))
-            nodes.extend(bodies)
-            frontier.extend(bodies)
+                found.append((parse(aliases[word] + _ALIAS_REST), aliases))
+            nodes.extend(body for body, _ in found)
+            frontier.extend(found)
     return nodes
 
 
@@ -213,14 +243,6 @@ def cli_env_names(
     return frozenset(out)
 
 
-# A prefix assignment's value may carry expansions (the walk reads
-# them), but a substitution runs commands of its own, which is exactly
-# the "nothing runs before the masks land" premise the prefix trades on.
-_MASK_VALUE_BLOCKERS = frozenset(
-    {"command_substitution", "process_substitution"}
-)
-
-
 def _replacement_blocked(part: TSNodeLike) -> bool:
     """Whether an assignment's subtree defeats the masking premise.
 
@@ -236,7 +258,7 @@ def _replacement_blocked(part: TSNodeLike) -> bool:
     stack = list(part.named_children)
     while stack:
         current = stack.pop()
-        if current.type in _MASK_VALUE_BLOCKERS:
+        if current.type in _SUBSTITUTIONS:
             return True
         stack.extend(current.named_children)
     return False

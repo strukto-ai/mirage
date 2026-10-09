@@ -17,9 +17,11 @@ import { sessionEntry, setSessionEntry } from '../session/session.ts'
 import { seedVar, setAttr } from '../session/state.ts'
 import { TempEnv, VarAttr } from '../../shell/variable.ts'
 import {
+  type RedirectRunner,
+  redirectRunnerFor,
+  redirectSyntaxFor,
+  runWithRedirectPaths,
   isProgramInvocation,
-  type RedirectOpener,
-  redirectOpenerFor,
   redirectPathsFor,
   runWithAdmission,
 } from '../../context/session_context.ts'
@@ -37,6 +39,7 @@ import {
   getProcessSubBody,
   getProcessSubDirection,
   getText,
+  readRow,
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
@@ -51,11 +54,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { runExternal } from '../executor/command/external.ts'
 import { handleCommand } from '../executor/command/command.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
-import {
-  type AliasMark,
-  aliasCommandText,
-  expandingAliases,
-} from '../executor/builtins/alias/index.ts'
+import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
 import { checkSyntax, syntaxErrorResult } from '../../shell/parse/index.ts'
 import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
@@ -175,17 +174,13 @@ export async function executeCommand(
   const headNode = nonPrefixParts[0]
   if (
     parser !== undefined &&
-    Object.keys(session.aliases).length > 0 &&
+    (Object.keys(session.aliasView ?? session.aliases).length > 0 || session.aliasMarks.size > 0) &&
     !isProgramInvocation(session) &&
     headNode?.type === NT.COMMAND_NAME &&
     headNode.namedChildren[0]?.type === NT.WORD
   ) {
     const head = getText(headNode)
-    const mark: AliasMark = [
-      session.parseCurrent,
-      session.parseRow + (node.startPosition?.row ?? 0),
-    ]
-    const rewrite = aliasCommandText(session, node, headNode, mark)
+    const rewrite = aliasCommandText(session, node, headNode, aliasMark(session, readRow(node)))
     if (rewrite !== null) {
       const [line, owners] = rewrite
       const names = new Set(owners.flatMap((names) => [...names]))
@@ -227,14 +222,16 @@ export async function executeCommand(
         // ran on the first's nod.
         const expansion = handed === undefined ? null : evaluatedFrom(node, handed)
         try {
-          // In the caller's frame, as Python's line root has one: the
-          // alias's text is the caller's own line.
-          return await recurse(
+          return await runWithRedirectPaths(
             ast,
-            context,
-            stdinIn,
-            callStack ?? new CallStack(),
-            expansion === null ? undefined : { handed: expansion },
+            [],
+            () =>
+              recurse(ast, context, stdinIn, callStack ?? new CallStack(), {
+                ...(expansion === null ? {} : { handed: expansion }),
+                ...(sink === undefined ? {} : { sink }),
+              }),
+            null,
+            redirectSyntaxFor(node),
           )
         } finally {
           session.aliasExpansion = previous
@@ -470,7 +467,6 @@ async function runCommandBody(
         routingDecision,
       ),
     )
-    seedPrefix?.(argv.name)
 
     // Limits resolve against the expanded name, so `$CMD`-style
     // invocations get their real command's policy.
@@ -510,13 +506,14 @@ async function runCommandBody(
         runtimeBindings,
         routingDecision,
         signal,
-        node.startPosition?.row ?? 0,
+        readRow(node),
         agentId,
         redirectPathsFor(node),
         claimant,
         sink,
-        redirectOpenerFor(node),
+        redirectRunnerFor(node),
         parser,
+        seedPrefix,
       ),
       timeout,
       argv.name !== '' ? argv.name : '?',
@@ -583,9 +580,9 @@ async function runArgv(
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision,
   signal?: AbortSignal,
-  // The command's line within its parse, which only `alias` reads: a
-  // definition remembers where it was made so a use on the same line
-  // does not see it, as bash's line reader would not.
+  // The row the shell began reading the command on within its parse
+  // (`readRow`), which only `alias`, `unalias` and `shopt` read: the
+  // commands of one read keep the aliases it began with.
   row = 0,
   // The agent the line is attributed to, which an approval request names.
   agentId = '',
@@ -596,9 +593,10 @@ async function runArgv(
   // The line's hand-off, which its gate claims on and runs on.
   claimant: Claimant | null = null,
   sink?: JobConsole,
-  // Opens the redirect targets once the line is admitted.
-  opener: RedirectOpener | null = null,
+  // Applies ordered redirects after command word expansion.
+  runner: RedirectRunner | null = null,
   parser?: ParseScope,
+  seedPrefix?: (name: string) => void,
 ): Promise<Result> {
   const session = context.session
   const name = argv.name
@@ -630,83 +628,86 @@ async function runArgv(
     argv = new Argv(argv.name, expandedWords, boundary, argv.prefix)
   }
 
-  // Visibility and admission. The one chokepoint every command class
-  // passes through: shell builtins, namespace-routed commands (touch/
-  // chmod/ln -s), job builtins, shell functions, and mount commands all
-  // route below, so the gate must fire here, not in handleCommand.
-  // Checked ahead of the BUILTINS table, which runs before lookup(); the
-  // enumerators read the same visibility filter through layers().
-  // Refusals win over flag parsing, routing, and runtime placement.
   let admitted: Admitted | null = null
-  if (name !== '') {
-    const verdict = await admit(
-      name,
-      [...argv.args],
-      [...argv.operands],
-      context.session,
-      registry,
-      namespace,
-      agentId,
-      stdin,
-      redirects,
-      signal,
-      claimant,
-    )
-    if (!(verdict instanceof Admitted)) {
-      return [
-        null,
-        new IOResult({
-          exitCode: verdict.exitCode,
-          stderr: verdict.stderr,
-          refusal: verdict.refusal,
-        }),
-        new ExecutionNode({
-          command: [name, ...argv.args].join(' '),
-          stderr: verdict.stderr,
-          exitCode: verdict.exitCode,
-          refused: true,
-        }),
-      ]
+  const guard = async (
+    paths: readonly PathSpec[],
+    given: ByteSource | null,
+  ): Promise<Result | null> => {
+    if (name !== '') {
+      const verdict = await admit(
+        name,
+        [...argv.args],
+        [...argv.operands],
+        context.session,
+        registry,
+        namespace,
+        agentId,
+        given,
+        paths,
+        signal,
+        claimant,
+      )
+      if (!(verdict instanceof Admitted)) {
+        return [
+          null,
+          new IOResult({
+            exitCode: verdict.exitCode,
+            stderr: verdict.stderr,
+            refusal: verdict.refusal,
+          }),
+          new ExecutionNode({
+            command: [name, ...argv.args].join(' '),
+            stderr: verdict.stderr,
+            exitCode: verdict.exitCode,
+            refused: true,
+          }),
+        ]
+      }
+      admitted = verdict
     }
-    admitted = verdict
+    return null
   }
-  // bash opens a command's write targets before it runs, so `cat f > f`
-  // reads an emptied file; here that waits for the admission above,
-  // because a command the gate refuses must leave its targets alone.
-  if (opener !== null && !(await opener(name, argv.args))) {
-    return [null, new IOResult({ exitCode: 1 }), new ExecutionNode({ exitCode: 1 })]
+  const runRedirected = async (
+    given: ByteSource | null,
+    output: JobConsole | undefined,
+    paths: readonly PathSpec[],
+  ): Promise<Result> => {
+    seedPrefix?.(name)
+    const refusal = await guard(paths, given)
+    if (refusal !== null) return refusal
+    // The admitted command's gate is bound for its run and handed back
+    // after, so its own I/O can ask about the entries the gate did not see
+    // and a nested line binds its own (see `Admitted`). The workspace's
+    // policies bind in the same window, whether or not a gate judged the
+    // line, so the command tier's policy guard can fire preVfs for the
+    // backend I/O a handler performs.
+    const route = () =>
+      routeArgv(
+        recurse,
+        dispatch,
+        registry,
+        namespace,
+        executeFn,
+        argv,
+        context,
+        given,
+        callStack,
+        jobTable,
+        runtimeBindings,
+        routingDecision,
+        signal,
+        row,
+        agentId,
+        claimant?.line ?? null,
+        output,
+        parser,
+      )
+    const gated = admitted
+    if (gated === null) return runWithOpPolicies(registry.policies, route)
+    return runWithOpPolicies(registry.policies, () => runWithAdmission(gated, route))
   }
-
-  // The admitted command's gate is bound for its run and handed back
-  // after, so its own I/O can ask about the entries the gate did not see
-  // and a nested line binds its own (see `Admitted`). The workspace's
-  // policies bind in the same window, whether or not a gate judged the
-  // line, so the command tier's policy guard can fire preVfs for the
-  // backend I/O a handler performs.
-  const route = () =>
-    routeArgv(
-      recurse,
-      dispatch,
-      registry,
-      namespace,
-      executeFn,
-      argv,
-      context,
-      stdin,
-      callStack,
-      jobTable,
-      runtimeBindings,
-      routingDecision,
-      signal,
-      row,
-      agentId,
-      claimant?.line ?? null,
-      sink,
-      parser,
-    )
-  const gated = admitted
-  if (gated === null) return runWithOpPolicies(registry.policies, route)
-  return runWithOpPolicies(registry.policies, () => runWithAdmission(gated, route))
+  if (runner !== null) return runner(runRedirected, guard, name, argv.args)
+  return runRedirected(stdin, sink, redirects)
 }
 
 // Drop the refusal lines the command tier already wrote.

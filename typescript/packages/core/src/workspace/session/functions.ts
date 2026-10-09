@@ -22,11 +22,14 @@ export function functionSources(value: unknown = {}): Record<string, string> {
  * definition stood. A site whose source no longer matches the table (a
  * checkout, a stored session) is not the function's. `mark` is the parse
  * and row the body reads aliases at; `origin` the definition's place on
- * its line, which the body's approvals stand under, null outside a line.
+ * its line, which the body's approvals stand under, null outside a line;
+ * `aliases` the aliases the body runs, as its definition saw them
+ * (`aliasView`), absent or null to read them as they are when it runs.
  * Mirrors Python's FunctionSite.
  */
 export interface FunctionSite {
   readonly source: string
   readonly mark: readonly [number, number]
   readonly origin: Occurrence | null
+  readonly aliases?: Readonly<Record<string, string>> | null
 }

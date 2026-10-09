@@ -49,14 +49,29 @@ from mirage.commands.cli.builtin.git.util import (
     check_switches,
     escaped,
     fatal,
+    multivar,
+    offending,
     option_operand,
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.refusal import HELP_SWITCH
+from mirage.commands.cli.constants import GIT_LONG_OPTIONS
+from mirage.commands.cli.refusal import (
+    HELP_SWITCH,
+    git_option_refusal,
+    git_usage,
+    leaf_refusal,
+)
 from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.parser import parse_command, parse_to_kwargs
+from mirage.commands.spec.types import (
+    CommandSpec,
+    FlagValue,
+    Operand,
+    Option,
+    UsageStyle,
+)
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
@@ -69,6 +84,18 @@ SHOW_TOPLEVEL = "--show-toplevel"
 GIT_DIR_OPTION = "--git-dir"
 MIN_ABBREV = 4
 HEX_LENGTH = 40
+GET_URL = CommandSpec(
+    options=(
+        Option(
+            long="--push", description="query push URLs rather than fetch URLs"
+        ),
+        Option(long="--all", description="return all URLs"),
+        Option(long="--no-push"),
+        Option(long="--no-all"),
+    ),
+    positional=(Operand(type="str", name="name", required=True),),
+    rest=Operand(type="str"),
+)
 
 
 async def repo_config(inv: CLIInvocation[None], fl: FlagView) -> ConfigFile:
@@ -87,6 +114,8 @@ async def remote(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
     try:
+        if inv.texts and inv.texts[0] == "get-url":
+            return await remote_get_url(inv)
         check_operands(inv, inv.texts)
         if inv.texts:
             raise UnknownSubcommandError(inv.texts[0], verb_usage(inv))
@@ -99,13 +128,113 @@ async def remote(
             if not fl.as_bool("verbose"):
                 lines.append(name)
                 continue
-            values = list(cfg.items(section))
-            urls = [v.decode() for k, v in values if k == b"url"]
-            push = [v.decode() for k, v in values if k == b"pushurl"] or urls
+            urls, push = remote_urls(cfg, name)
             if urls:
                 lines.append(f"{name}\t{urls[0]} (fetch)")
             lines.extend(f"{name}\t{url} (push)" for url in push)
         return ("".join(f"{line}\n" for line in lines).encode(), IOResult())
+    except GitError as exc:
+        return fatal(exc)
+
+
+def _rewrite_url(url: str, rules: list[tuple[str, str]]) -> str:
+    """Apply the longest matching URL prefix once, as Git does.
+
+    Args:
+        url (str): configured URL.
+        rules (list[tuple[str, str]]): prefix and replacement pairs in config order.
+    """
+    matches = [
+        (prefix, base) for prefix, base in rules if url.startswith(prefix)
+    ]
+    if not matches:
+        return url
+    prefix, base = max(matches, key=lambda rule: len(rule[0]))
+    return base + url[len(prefix) :]
+
+
+def remote_urls(cfg: ConfigFile, name: str) -> tuple[list[str], list[str]]:
+    """Fetch and push URLs, with Git's longest-prefix config rewrites.
+
+    Args:
+        cfg (ConfigFile): repository configuration.
+        name (str): remote subsection name.
+    """
+    section: tuple[bytes, ...] = (b"remote", name.encode())
+    urls = [value.decode() for value in multivar(cfg, section, b"url")]
+    push = [value.decode() for value in multivar(cfg, section, b"pushurl")]
+    if not urls and push:
+        urls = [name]
+    rules: list[tuple[str, str]] = []
+    push_rules: list[tuple[str, str]] = []
+    for section in cfg.sections():
+        if len(section) == 2 and section[0] == b"url":
+            base = section[1].decode()
+            rules.extend(
+                (value.decode(), base)
+                for value in multivar(cfg, section, b"insteadof")
+            )
+            push_rules.extend(
+                (value.decode(), base)
+                for value in multivar(cfg, section, b"pushinsteadof")
+            )
+    fetch = [_rewrite_url(url, rules) for url in urls]
+    if push:
+        push = [_rewrite_url(url, rules) for url in push]
+    else:
+        push = [
+            _rewrite_url(url, push_rules)
+            for url in urls
+            if any(url.startswith(prefix) for prefix, _ in push_rules)
+        ] or fetch
+    return fetch, push
+
+
+async def remote_get_url(
+    inv: CLIInvocation[None],
+) -> tuple[ByteSource | None, IOResult]:
+    """Read the get-url remainder through the shared option parser.
+
+    Args:
+        inv (CLIInvocation[None]): the remote invocation and its verbatim remainder.
+    """
+    try:
+        parsed = parse_command(
+            GET_URL,
+            list(inv.texts[1:]),
+            inv.cwd.virtual,
+            abbreviations=GIT_LONG_OPTIONS["remote get-url"],
+        )
+        if parsed.option_error_kinds:
+            stderr, code, stdout = leaf_refusal(
+                UsageStyle.GIT, b"", parsed, "remote get-url", GET_URL
+            )
+            return stdout, IOResult(exit_code=code, stderr=stderr)
+        names = tuple(word for word, _ in parsed.args)
+        bad = offending(names, escaped(inv.argv), frozenset())
+        if bad is not None:
+            raise UsageError(
+                *git_option_refusal(bad, "remote get-url", GET_URL)
+            )
+        if len(names) != 1:
+            raise UsageError("", git_usage("remote get-url", GET_URL))
+        fl = FlagView(parse_to_kwargs(parsed), GET_URL)
+        cfg = await repo_config(inv, FlagView(inv.flags))
+        name = names[0]
+        urls, push = remote_urls(cfg, name)
+        if not urls:
+            return None, IOResult(
+                exit_code=2,
+                stderr=f"error: No such remote '{name}'\n".encode(),
+            )
+        selected = (
+            push
+            if fl.typed_order("push", "no_push")[-1:] == ["push"]
+            else urls
+        )
+        if fl.typed_order("all", "no_all")[-1:] != ["all"]:
+            selected = selected[:1]
+        return "".join(f"{url}\n" for url in selected).encode(), IOResult()
     except GitError as exc:
         return fatal(exc)
 
@@ -473,6 +602,13 @@ async def rev_parse(
         if toplevel and _in_git_dir(start, location):
             raise NotAWorkTreeError()
         answers = await _place_answers(view.dispatch, location, start)
+        if fl.as_bool("is_shallow_repository"):
+            shallow = await read_optional(
+                view.dispatch, location.commondir.join("shallow")
+            )
+            answers["--is-shallow-repository"] = (
+                f"{str(shallow is not None).lower()}\n".encode()
+            )
         short = fl.raw("short")
         verify = fl.as_bool("verify") or short is not None
         width = (

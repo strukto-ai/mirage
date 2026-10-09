@@ -55,7 +55,7 @@ from mirage.shell.helpers import (
     split_env_prefix,
 )
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import RedirectKind
+from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec, Refusal
 from mirage.utils.hidden import is_glob, path_visible
 from mirage.utils.path import resolve_path
@@ -688,6 +688,7 @@ async def _admit_words(
     redirect_words: tuple[Word, ...] = (),
     cancel: asyncio.Event | None = None,
     claimant: Claimant | None = None,
+    stdin: ByteSource | None = None,
 ) -> Refused | None:
     """Admit one command of a whole line on the words the gate read,
     then whatever lines the command runs in turn.
@@ -707,6 +708,7 @@ async def _admit_words(
         cancel (asyncio.Event | None): the run's kill channel.
         claimant (Claimant | None): the command and its line, as
             ``admit`` takes it; the lines it runs stand under it.
+        stdin (ByteSource | None): the statement's effective input binding.
     """
     head = words[0]
     if head.text is None and has_rules(rules):
@@ -724,6 +726,7 @@ async def _admit_words(
         registry,
         namespace,
         agent_id,
+        stdin=stdin,
         redirects=redirects,
         cancel=cancel,
         claimant=claimant,
@@ -885,6 +888,7 @@ async def admit_line(
             agent_id,
             rules,
             redirect_words=statement_redirects(node, home),
+            stdin=statement_stdin(node),
             cancel=cancel,
             claimant=Claimant(handed, occurrence_in(node, frame))
             if handed is not None
@@ -893,6 +897,44 @@ async def admit_line(
         if refusal is not None:
             return refusal
     return None
+
+
+def statement_redirects_raw(node: Any) -> list[Redirect]:
+    """Find redirects bound to this command along the last-command chain.
+
+    Args:
+        node (Any): the command's tree-sitter node.
+    """
+    owner = node
+    parent = owner.parent
+    while parent is not None and parent.type in REDIRECT_CHAIN:
+        if (
+            not parent.named_children
+            or parent.named_children[-1].start_byte != owner.start_byte
+        ):
+            return []
+        owner = parent
+        parent = owner.parent
+    if (
+        parent is None
+        or parent.type != NT.REDIRECTED_STATEMENT
+        or not parent.named_children
+        or parent.named_children[0].start_byte != owner.start_byte
+    ):
+        return []
+    _, redirects = get_redirects(parent)
+    return redirects
+
+
+def statement_stdin(node: Any) -> bytes | None:
+    """Mark redirected input without opening or expanding its source.
+
+    Args:
+        node (Any): the command's tree-sitter node.
+    """
+    return (
+        b"" if any(r.fd == 0 for r in statement_redirects_raw(node)) else None
+    )
 
 
 def statement_redirects(node: Any, home: str | None) -> tuple[Word, ...]:
@@ -917,27 +959,9 @@ def statement_redirects(node: Any, home: str | None) -> tuple[Word, ...]:
         node (Any): the command's tree-sitter node.
         home (str | None): the home directory a leading ``~`` names.
     """
-    owner = node
-    parent = owner.parent
-    while parent is not None and parent.type in REDIRECT_CHAIN:
-        if (
-            not parent.named_children
-            or parent.named_children[-1].start_byte != owner.start_byte
-        ):
-            return ()
-        owner = parent
-        parent = owner.parent
-    if (
-        parent is None
-        or parent.type != NT.REDIRECTED_STATEMENT
-        or not parent.named_children
-        or parent.named_children[0].start_byte != owner.start_byte
-    ):
-        return ()
-    _, redirects = get_redirects(parent)
     return tuple(
         Word(str(r.target), literal_word(r.target_node, home))
-        for r in redirects
+        for r in statement_redirects_raw(node)
         if r.kind
         not in (
             RedirectKind.HEREDOC,

@@ -453,12 +453,19 @@ export class SessionState {
   // `shopt` options, kept apart from `set -o` ones (bash keeps two
   // vocabularies). Only names set away from their default are stored.
   shopts: Record<string, boolean> = {}
-  // `alias NAME=VALUE` definitions, plus the parse/row each was defined
-  // at and ownership of alias text, so a use on the defining
-  // line does not expand and a self-referential value stops.
+  // `alias NAME=VALUE` definitions. Per read (the parse and the row a
+  // command began on, joined) that changed aliases, their values as it
+  // began (null: not defined), so the commands of that read keep them; per
+  // read that ran `shopt` on `expand_aliases`, the option as it began
+  // (both released when the typed line ends); and ownership of alias text,
+  // so a self-referential value stops.
   aliases: Record<string, string> = {}
-  aliasMarks = new Map<string, [number, number]>()
+  aliasMarks = new Map<string, Map<string, string | null>>()
+  expandAliasesMarks = new Map<string, boolean>()
   aliasExpansion: AliasExpansion | null = null
+  // The aliases a running function's body expands, as its definition saw
+  // them (`FunctionSite.aliases`); null reads the live table.
+  aliasView: Readonly<Record<string, string>> | null = null
   parseSeq = 0
   parseCurrent = 0
   // The row the running parse starts on in the text that spelled it: 0
@@ -653,7 +660,9 @@ export class SessionState {
     forked.shopts = { ...this.shopts }
     forked.aliases = { ...this.aliases }
     forked.parseSeq = this.parseSeq
-    forked.aliasMarks = new Map(this.aliasMarks)
+    forked.aliasMarks = new Map([...this.aliasMarks].map(([read, began]) => [read, new Map(began)]))
+    forked.expandAliasesMarks = new Map(this.expandAliasesMarks)
+    forked.aliasView = this.aliasView
     forked.functionSites = new Map(this.functionSites)
     forked.umask = this.umask
     forked.descriptors = new Map(this.descriptors)
@@ -744,6 +753,7 @@ export class SessionState {
     )
     child.aliases = {}
     child.aliasMarks = new Map()
+    child.expandAliasesMarks = new Map()
     child.shopts = {}
     child.pipeStatus = []
     child.lastBgJobId = null

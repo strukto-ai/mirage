@@ -656,6 +656,10 @@ async def run_prepared_line(
     nested_start = len(outer) if outer is not None else 0
 
     session_token = set_current_evaluation(context, owner=ws.sessions)
+    # A line read now (`eval`, `source`, a trap action, `$( )`) expands
+    # the aliases as they are now, not those of the function running it.
+    outer_view = effective_session._alias_view
+    effective_session._alias_view = None
     # Taken before any statement stamps, so a cancelled line can put
     # `$?` back to what it found. Restored at the seam in
     # ``Workspace.shell``, after the last await of the line, so an
@@ -1038,6 +1042,12 @@ async def run_prepared_line(
         effective_session._alias_expansion = previous_alias_expansion
         parse_scope.release()
         scope.close()
+        effective_session._alias_view = outer_view
+        if is_line:
+            # Every read of the line has ended, so what a read kept of the
+            # aliases it changed goes with it.
+            effective_session._alias_marks.clear()
+            effective_session._expand_aliases_marks.clear()
         reset_current_session(session_token)
         # The marks were only for this line's apply_io, so they go however
         # the save ends, with any a background job added during it; the

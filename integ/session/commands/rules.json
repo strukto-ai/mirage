@@ -445,6 +445,94 @@
         "stdout": "",
         "stderr": "touch: cannot touch '/scratch/locked/new': Permission denied\n"
       }
+    },
+    {
+      "id": "cmd_alias_redirect_setup",
+      "seq": 13740108,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "redirects",
+      "command": "mkdir -p /scratch/redirect-private; echo KEEP > /scratch/redirect-output; echo x > /scratch/redirect-input; shopt -s expand_aliases; alias c='cat /scratch/redirect-private/k'; alias d='c'; alias p='echo okay | c'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "session_profiles": {
+        "redirects": {
+          "commands": {
+            "deny": [
+              {
+                "commands": {
+                  "cat": [
+                    "/scratch/redirect-private"
+                  ],
+                  "rg": [
+                    "/scratch/redirect-private"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "cmd_alias_redirect_waits_for_admission",
+      "seq": 13740109,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "redirects",
+      "command": "c > /scratch/redirect-output",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /scratch/redirect-private/k: Permission denied\n"
+      }
+    },
+    {
+      "id": "cmd_nested_alias_redirect_waits_for_admission",
+      "seq": 13740110,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "redirects",
+      "command": "d > /scratch/redirect-output",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /scratch/redirect-private/k: Permission denied\n"
+      }
+    },
+    {
+      "id": "cmd_pipeline_alias_redirect_waits_for_admission",
+      "seq": 13740111,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "redirects",
+      "command": "p > /scratch/redirect-output",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /scratch/redirect-private/k: Permission denied\n"
+      }
+    },
+    {
+      "id": "cmd_redirected_input_does_not_search_cwd",
+      "seq": 13740112,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "redirects",
+      "command": "cat /scratch/redirect-output; cd /scratch/redirect-private; ln -s /dev/null /scratch/redirect-device; rg x > /scratch/redirect-output < /scratch/redirect-device; cat /scratch/redirect-output; rg x > /scratch/redirect-output 3< /dev/null 0<&3; cat /scratch/redirect-output; rg x < /scratch/redirect-input; rg x > /scratch/redirect-search < /scratch/redirect-input; cat /scratch/redirect-search; cd /scratch; rm redirect-device redirect-output redirect-input redirect-search; rmdir redirect-private",
+      "expect": {
+        "exit": 0,
+        "stdout": "KEEP\nKEEP\nKEEP\nx\nx\n",
+        "stderr": "rg: /scratch/redirect-private: Permission denied\nrg: /scratch/redirect-private: Permission denied\n"
+      }
     }
   ]
 }

@@ -92,21 +92,39 @@ describe('alias', () => {
     }
   })
 
+  // A function expands the aliases its definition saw; `$( )` reads them as
+  // they are when it runs.
+  it('keeps the aliases a function definition saw', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    await ws.shell("shopt -s expand_aliases; alias a='echo 1'")
+    await ws.shell('f() { a; }; g() { x=$(a); echo "[$x]"; }')
+    await ws.shell("alias a='echo 2'")
+    let io = await ws.shell('f; g')
+    expect([stdoutStr(io), io.exitCode]).toEqual(['1\n[2]\n', 0])
+    io = await ws.shell('unalias a; f')
+    expect([stdoutStr(io), io.exitCode]).toEqual(['1\n', 0])
+    // What a read kept of the aliases it changed ends with the line.
+    expect(ws.getSession(ws.sessionManager.defaultId).aliasMarks.size).toBe(0)
+  })
+
   // Checkout restores the table but not where the live definitions were
-  // made; a site recorded for another source is not the function's, so
-  // the restored body runs as a parse of its own.
+  // made, so a restored body runs as a parse of its own and reads the
+  // aliases as they are, even after the same text was defined again.
   it('does not read the replaced site after a checkout', async () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       { mode: MountMode.WRITE, shellParser: await getTestParser() },
     )
-    for (const line of ['shopt -s expand_aliases', "alias a='echo works'", 'f() { a; }'])
+    for (const line of ['shopt -s expand_aliases', "alias a='echo 1'", 'f() { a; }'])
       await ws.shell(line)
     const state = await toStateDict(ws)
-    await ws.shell("alias a='echo works'; f() { :; }")
+    for (const line of ["alias a='echo 2'", 'f() { a; }', "alias a='echo 3'"]) await ws.shell(line)
     await applyStateDict(ws, state)
     const io = await ws.shell('f')
-    expect([stdoutStr(io), io.exitCode]).toEqual(['works\n', 0])
+    expect([stdoutStr(io), io.exitCode]).toEqual(['3\n', 0])
   })
 })
 

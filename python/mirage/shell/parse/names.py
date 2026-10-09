@@ -52,7 +52,9 @@ def _collect_names(node: TSNodeLike, out: set[str]) -> None:
         _collect_names(child, out)
 
 
-def walk_named_outside_defs(node: TSNodeLike) -> Iterator[TSNodeLike]:
+def walk_named_outside_defs(
+    node: TSNodeLike, skip: frozenset[str] = frozenset()
+) -> Iterator[TSNodeLike]:
     """Named nodes, skipping function_definition subtrees.
 
     A definition's body runs at invocation, not where it is defined,
@@ -62,12 +64,14 @@ def walk_named_outside_defs(node: TSNodeLike) -> Iterator[TSNodeLike]:
 
     Args:
         node (TSNodeLike): subtree root.
+        skip (frozenset[str]): further node types whose subtrees the
+            caller walks on their own.
     """
-    if node.type == "function_definition":
+    if node.type == "function_definition" or node.type in skip:
         return
     yield node
     for child in node.named_children:
-        yield from walk_named_outside_defs(child)
+        yield from walk_named_outside_defs(child, skip)
 
 
 def referenced_names(node: TSNodeLike) -> frozenset[str]:
@@ -92,7 +96,9 @@ def referenced_names(node: TSNodeLike) -> frozenset[str]:
     return frozenset(out)
 
 
-def command_words(node: TSNodeLike) -> frozenset[str]:
+def command_words(
+    node: TSNodeLike, skip: frozenset[str] = frozenset()
+) -> frozenset[str]:
     """The first word of every command a parsed program runs.
 
     What the whole-env scan and the CLI env-name lookup key on.
@@ -105,9 +111,11 @@ def command_words(node: TSNodeLike) -> frozenset[str]:
 
     Args:
         node (TSNodeLike): root node from parse().
+        skip (frozenset[str]): further node types whose subtrees the
+            caller walks on their own.
     """
     out: set[str] = set()
-    for n in walk_named_outside_defs(node):
+    for n in walk_named_outside_defs(node, skip):
         if n.type == "command_name":
             text = n.text
             if text:

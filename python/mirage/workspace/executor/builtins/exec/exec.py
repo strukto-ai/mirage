@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from itertools import groupby
 from operator import itemgetter
 from typing import Any
@@ -152,6 +152,7 @@ async def install_exec_redirects(
     session: SessionState,
     redirects: list[Redirect],
     stdin: ByteSource | None = None,
+    expand: Callable[[Redirect], Awaitable[Redirect]] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Point the shell's own streams at files for the rest of the shell.
 
@@ -170,15 +171,21 @@ async def install_exec_redirects(
     Args:
         dispatch (DispatchFn): op dispatcher.
         session (SessionState): shell session state.
-        redirects (list[Redirect]): the expanded redirects.
+        redirects (list[Redirect]): the redirects in source order.
         stdin (ByteSource | None): current input for duplication.
+        expand (Callable | None): expand each target immediately before opening.
     """
     bad_fd = unsupported_descriptor(redirects)
     if bad_fd is not None:
         return _exec_failure(bad_descriptor_line(bad_fd))
     saved = {name: getattr(session, name) for name in EXEC_STREAM_FIELDS}
     saved["descriptors"] = dict(session.descriptors)
-    err = await _install(dispatch, session, redirects, stdin)
+    try:
+        err = await _install(dispatch, session, redirects, stdin, expand)
+    except BaseException:
+        for name, value in saved.items():
+            setattr(session, name, value)
+        raise
     if err is None:
         return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
     return await _roll_back(dispatch, session, saved, err)
@@ -189,8 +196,11 @@ async def _install(
     session: SessionState,
     redirects: list[Redirect],
     stdin: ByteSource | None,
+    expand: Callable[[Redirect], Awaitable[Redirect]] | None,
 ) -> bytes | None:
     for redirect in redirects:
+        if expand is not None:
+            redirect = await expand(redirect)
         error = await _install_descriptor(dispatch, session, redirect, stdin)
         if error is not None:
             return error

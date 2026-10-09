@@ -22,11 +22,15 @@ from typing import Any, Callable
 from mirage.cache.index.scope import command_scope
 from mirage.context import (
     program_invocation,
+    redirect_paths_for,
     reset_current_session,
     reset_program_invocation,
+    reset_redirect_paths,
     set_current_evaluation,
     set_program_invocation,
+    set_redirect_paths,
 )
+from mirage.context.session_context import redirect_syntax_for
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
 from mirage.io.types import ByteSource
@@ -59,6 +63,7 @@ from mirage.shell.helpers import (
     get_text,
     get_unset_args,
     get_while_parts,
+    read_row,
     take_continuation,
 )
 from mirage.shell.job_table import JobTable
@@ -71,6 +76,7 @@ from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins import handle_test, handle_unset
+from mirage.workspace.executor.builtins.alias import alias_mark, alias_view
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
 from mirage.workspace.executor.builtins.shared import is_valid_name
 from mirage.workspace.executor.control import (
@@ -99,7 +105,7 @@ from mirage.workspace.executor.traps import end_shell
 from mirage.workspace.expand import (
     expand_and_classify,
     expand_node,
-    expand_redirects,
+    expand_redirect,
 )
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.expand.node import expand_arith
@@ -218,6 +224,7 @@ async def _recurse_reassociated(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     redirects: list[Any],
     processes: ProcessSupervisor | None,
     right: Any,
@@ -240,6 +247,7 @@ async def _recurse_reassociated(
         dispatch (DispatchFn): VFS op dispatcher.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
+        namespace (Namespace): namespace links for redirect pathname expansion.
         redirects (list): parsed redirects hoisted off the list.
         processes (ProcessSupervisor | None): where the stages run as
             managed processes.
@@ -250,7 +258,7 @@ async def _recurse_reassociated(
         call_stack (CallStack | None): shell call stack.
     """
     session = context.session
-    if node is not right:
+    if node.id != right.id:
         return await recurse(node, context, stdin, call_stack, sink=sink)
     # The session view, bound once for the line: every
     # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
@@ -263,6 +271,7 @@ async def _recurse_reassociated(
         dispatch,
         execute_fn,
         registry,
+        namespace,
         view,
         right,
         redirects,
@@ -270,6 +279,7 @@ async def _recurse_reassociated(
         context,
         stdin,
         call_stack,
+        sink=sink,
     )
 
 
@@ -278,6 +288,7 @@ async def _recurse_lifted(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     stages: PipelineStages,
     processes: ProcessSupervisor | None,
     right: Any,
@@ -296,6 +307,7 @@ async def _recurse_lifted(
         dispatch (DispatchFn): VFS op dispatcher.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
+        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline, its lead already taken.
         processes (ProcessSupervisor | None): where the stages run as
             managed processes.
@@ -312,6 +324,7 @@ async def _recurse_lifted(
         dispatch,
         execute_fn,
         registry,
+        namespace,
         stages,
         context,
         stdin,
@@ -325,6 +338,7 @@ async def _recurse_stage(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     stages: PipelineStages,
     targets: list[Any],
     processes: ProcessSupervisor | None,
@@ -347,6 +361,7 @@ async def _recurse_stage(
         dispatch (DispatchFn): VFS op dispatcher.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
+        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline being run.
         targets (list[Any]): the stages a ``|&`` follows.
         processes (ProcessSupervisor | None): where the stages run as
@@ -374,6 +389,7 @@ async def _recurse_stage(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             view,
             node,
             bound,
@@ -387,6 +403,7 @@ async def _recurse_stage(
         dispatch,
         execute_fn,
         registry,
+        namespace,
         targets,
         node,
         context,
@@ -401,6 +418,7 @@ async def _run_pipeline(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     stages: PipelineStages,
     context: EvaluationContext,
     stdin: Any,
@@ -419,6 +437,7 @@ async def _run_pipeline(
         dispatch (DispatchFn): VFS op dispatcher.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
+        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline's stages.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
@@ -435,6 +454,7 @@ async def _run_pipeline(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             replace(stages, lead=None),
             processes,
             right,
@@ -462,6 +482,7 @@ async def _run_pipeline(
         dispatch,
         execute_fn,
         registry,
+        namespace,
         stages,
         targets,
         processes,
@@ -496,6 +517,7 @@ async def _recurse_pipe_stderr(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     targets: list[Any],
     node: Any,
     context: EvaluationContext,
@@ -517,19 +539,21 @@ async def _recurse_pipe_stderr(
     redirects.append(
         Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
     )
-    expanded, pipe_node = await expand_redirects(
-        redirects, context, execute_fn, registry, call_stack, view=view
+    return await _run_redirected(
+        recurse,
+        dispatch,
+        execute_fn,
+        registry,
+        namespace,
+        view,
+        command,
+        redirects,
+        None,
+        context,
+        stdin,
+        call_stack,
+        sink=sink,
     )
-    stdout, io, exec_node = await handle_redirect(
-        recurse, dispatch, command, expanded, context, stdin, call_stack
-    )
-    if pipe_node is not None and stdout is not None:
-        stdout, io2, exec_node2 = await recurse(
-            pipe_node, context, stdout, call_stack
-        )
-        io = await io.merge(io2)
-        exec_node = exec_node2
-    return stdout, io, exec_node
 
 
 async def _negated(
@@ -576,6 +600,7 @@ async def _run_redirected(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     view: SessionView | None,
     command: Any,
     redirects: list[Redirect],
@@ -600,6 +625,7 @@ async def _run_redirected(
         dispatch (DispatchFn): VFS op dispatcher.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
+        namespace (Namespace): namespace links for redirect pathname expansion.
         view (SessionView | None): the gated session view.
         command (Any): the redirected command node, None for a bare
             redirect.
@@ -613,6 +639,23 @@ async def _run_redirected(
             routes as it goes, None to return it.
     """
     session = context.session
+    if command is not None and command.type == NT.REDIRECTED_STATEMENT:
+        inner, own = get_redirects(command)
+        return await _run_redirected(
+            recurse,
+            dispatch,
+            execute_fn,
+            registry,
+            namespace,
+            view,
+            inner,
+            [*own, *redirects],
+            processes,
+            context,
+            stdin,
+            call_stack,
+            sink=sink,
+        )
     if command is not None and command.type == NT.FUNCTION_DEFINITION:
         # The redirects belong to the function, applied at each call
         # (get_function_body), not to the definition.
@@ -633,6 +676,7 @@ async def _run_redirected(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             redirects,
             processes,
             right,
@@ -653,6 +697,7 @@ async def _run_redirected(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             get_pipeline_stages(command, redirects),
             context,
             stdin,
@@ -670,6 +715,7 @@ async def _run_redirected(
                 dispatch,
                 execute_fn,
                 registry,
+                namespace,
                 view,
                 inner,
                 redirects,
@@ -680,14 +726,18 @@ async def _run_redirected(
                 sink=sink,
             )
         return await _negated(stdout, io, exec_node, context, inner)
-    expanded_redirects, pipe_node = await expand_redirects(
-        redirects,
-        context,
-        execute_fn,
-        registry,
-        call_stack,
+    pipe_node = next(
+        (r.pipeline for r in redirects if r.pipeline is not None), None
+    )
+    expand = partial(
+        expand_redirect,
+        context=context,
+        execute_fn=execute_fn,
+        registry=registry,
+        call_stack=call_stack,
         view=view,
         forked=_forks(command, context),
+        links=namespace,
     )
     # `exec > file` with no command installs the redirects on the
     # shell for every later statement, rather than applying them to
@@ -695,7 +745,7 @@ async def _run_redirected(
     # through to the ordinary path, which refuses the command form.
     if _is_bare_exec(command):
         return await install_exec_redirects(
-            dispatch, session, expanded_redirects, stdin
+            dispatch, session, redirects, stdin, expand=expand
         )
     # A heredoc's operator line reads the routed stdout, so then it is
     # returned rather than written. A simple command expands its words
@@ -710,16 +760,55 @@ async def _run_redirected(
     if simple:
         context.frame.diagnostics = []
     try:
-        stdout, io, exec_node = await handle_redirect(
-            partial(recurse, own_diagnostics=False) if simple else recurse,
-            dispatch,
-            command,
-            expanded_redirects,
-            context,
-            stdin,
-            call_stack,
-            sink=sink if pipe_node is None else None,
-        )
+        if command is not None and command.type == NT.COMMAND:
+
+            async def under_redirects(run, guard, name, args):
+                async def prepared(node, current, given, stack, *, sink=None):
+                    return await run(
+                        given, sink, redirect_paths_for(command.id)
+                    )
+
+                return await handle_redirect(
+                    prepared,
+                    dispatch,
+                    command,
+                    redirects,
+                    context,
+                    stdin,
+                    call_stack,
+                    sink=sink if pipe_node is None else None,
+                    expand=expand,
+                    guard=guard,
+                    name=name,
+                    args=args,
+                )
+
+            token = set_redirect_paths(
+                command.id, (), under_redirects, tuple(redirects)
+            )
+            try:
+                stdout, io, exec_node = await recurse(
+                    command,
+                    context,
+                    stdin,
+                    call_stack,
+                    sink=sink if pipe_node is None else None,
+                    own_diagnostics=False,
+                )
+            finally:
+                reset_redirect_paths(token)
+        else:
+            stdout, io, exec_node = await handle_redirect(
+                partial(recurse, own_diagnostics=False) if simple else recurse,
+                dispatch,
+                command,
+                redirects,
+                context,
+                stdin,
+                call_stack,
+                sink=sink if pipe_node is None else None,
+                expand=expand,
+            )
         if simple and context.frame.diagnostics:
             err = _diagnostic_stderr(command, context)
             io.stderr = err + await io.materialize_stderr()
@@ -1172,10 +1261,45 @@ async def _execute_node(
 
     # ── program (root / semicolons) ─────────────
     if kind == NodeKind.PROGRAM:
+        pending = redirect_syntax_for(node.id)
+        program_recurse = recurse
+        if pending:
+            statements = [
+                child
+                for child in node.named_children
+                if child.type != NT.COMMENT
+            ]
+            if not statements:
+                return await _run_redirected(
+                    recurse,
+                    dispatch,
+                    execute_fn,
+                    registry,
+                    namespace,
+                    view,
+                    None,
+                    list(pending),
+                    job_table.processes if job_table is not None else None,
+                    context,
+                    stdin,
+                    cs,
+                    sink=sink,
+                )
+            program_recurse = partial(
+                _recurse_reassociated,
+                recurse,
+                dispatch,
+                execute_fn,
+                registry,
+                namespace,
+                list(pending),
+                job_table.processes if job_table is not None else None,
+                statements[-1],
+            )
         # A root run in a caller's frame is the caller's own line (eval,
         # an alias); one given none is a shell of its own.
         return await execute_program(
-            recurse,
+            program_recurse,
             node,
             context,
             stdin,
@@ -1223,6 +1347,7 @@ async def _execute_node(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             get_pipeline_stages(node),
             context,
             stdin,
@@ -1251,6 +1376,7 @@ async def _execute_node(
             dispatch,
             execute_fn,
             registry,
+            namespace,
             view,
             command,
             redirects,
@@ -1594,10 +1720,15 @@ async def _execute_node(
             )
         source = get_function_source(node)
         session.functions[name] = source
+        mark = (
+            session._parse_current,
+            session._parse_row + node.start_point[0],
+        )
         session._function_sites[name] = FunctionSite(
             source,
-            (session._parse_current, session._parse_row + node.start_point[0]),
+            mark,
             defined_at(node, handed),
+            alias_view(session, node, alias_mark(session, read_row(node))),
         )
         return (
             None,

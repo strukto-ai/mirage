@@ -406,6 +406,10 @@ async function runPreparedLine(
     parent?.session === effectiveSession
       ? parent
       : new EvaluationContext(effectiveSession, parent?.frame.fork(), parent)
+  // A line read now (`eval`, `source`, a trap action, `$( )`) expands the
+  // aliases as they are now, not those of the function running it.
+  const outerView = effectiveSession.aliasView
+  effectiveSession.aliasView = null
   try {
     // The line's signal, the caller's folded with the session's kill
     // channel, rides the async context so the status entry point can refuse an
@@ -727,6 +731,13 @@ async function runPreparedLine(
       },
     )
   } finally {
+    effectiveSession.aliasView = outerView
+    if (options.record !== false) {
+      // Every read of the line has ended, so what a read kept of the
+      // aliases it changed goes with it.
+      effectiveSession.aliasMarks.clear()
+      effectiveSession.expandAliasesMarks.clear()
+    }
     // Durable session fields (cwd, env, grants) flush at the end of
     // every execute, success or failure, mirroring Python's finally. It
     // joins under the grace like the tree: a stalled store finishes in

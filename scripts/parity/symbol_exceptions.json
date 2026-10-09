@@ -1,6 +1,11 @@
 {
  "baseline": 3979,
  "modules": {
+  "workspace/executor/redirect": {
+   "typescript_only": {
+    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes."
+   }
+  },
   "commands/builtin/generic/iconv_multibyte": {
    "typescript_only": {
     "logger": "An opt-in diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes."

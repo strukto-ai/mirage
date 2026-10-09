@@ -49,6 +49,7 @@ import {
   getNegatedCommand,
   getPipelineStages,
   getRedirects,
+  readRow,
   takeContinuation,
   getText,
   getParts,
@@ -59,7 +60,13 @@ import type { JobTable } from '../../shell/job_table/index.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
-import { expandRedirects } from '../expand/redirects.ts'
+import {
+  runWithRedirectPaths,
+  redirectPathsFor,
+  redirectSyntaxFor,
+  type RedirectRunner,
+} from '../../context/session_context.ts'
+import { expandRedirect } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
 import type { ArithWrite } from '../../shell/types.ts'
@@ -80,6 +87,7 @@ import {
 } from '../executor/control.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { handleTest, handleUnset } from '../executor/builtins/index.ts'
+import { aliasMark, aliasView } from '../executor/builtins/alias/index.ts'
 import { isValidName } from '../executor/builtins/shared.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
@@ -232,6 +240,7 @@ async function recurseReassociated(
   dispatch: DispatchFn,
   executeFn: ExecuteFn,
   registry: MountRegistry,
+  namespace: Namespace,
   redirects: readonly Redirect[],
   right: TSNodeLike,
   signal: AbortSignal | undefined,
@@ -242,17 +251,18 @@ async function recurseReassociated(
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
 ): Promise<Result> {
-  if (node !== right) return recurse(node, context, stdin, callStack, opts)
+  if (node.id !== right.id) return recurse(node, context, stdin, callStack, opts)
   return runRedirected(
     recurse,
     dispatch,
     executeFn,
     registry,
+    namespace,
     right,
     [...redirects],
     signal,
     processes,
-    undefined,
+    opts?.sink,
     context,
     stdin,
     callStack,
@@ -269,6 +279,7 @@ async function recurseLifted(
   dispatch: DispatchFn,
   executeFn: ExecuteFn,
   registry: MountRegistry,
+  namespace: Namespace,
   stages: PipelineStages,
   right: TSNodeLike,
   signal: AbortSignal | undefined,
@@ -285,6 +296,7 @@ async function recurseLifted(
     dispatch,
     executeFn,
     registry,
+    namespace,
     stages,
     context,
     stdin,
@@ -306,6 +318,7 @@ async function recurseStage(
   dispatch: DispatchFn,
   executeFn: ExecuteFn,
   registry: MountRegistry,
+  namespace: Namespace,
   stages: PipelineStages,
   targets: readonly TSNodeLike[],
   signal: AbortSignal | undefined,
@@ -324,6 +337,7 @@ async function recurseStage(
       dispatch,
       executeFn,
       registry,
+      namespace,
       targets,
       node,
       context,
@@ -341,6 +355,7 @@ async function recurseStage(
     dispatch,
     executeFn,
     registry,
+    namespace,
     node,
     bound,
     signal,
@@ -364,6 +379,7 @@ async function runPipeline(
   dispatch: DispatchFn,
   executeFn: ExecuteFn,
   registry: MountRegistry,
+  namespace: Namespace,
   stages: PipelineStages,
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -380,6 +396,7 @@ async function runPipeline(
       dispatch,
       executeFn,
       registry,
+      namespace,
       { ...stages, lead: null },
       right,
       signal,
@@ -394,6 +411,7 @@ async function runPipeline(
     dispatch,
     executeFn,
     registry,
+    namespace,
     stages,
     targets,
     signal,
@@ -478,6 +496,7 @@ async function runRedirected(
   dispatch: DispatchFn,
   executeFn: ExecuteFn,
   registry: MountRegistry,
+  namespace: Namespace,
   command: TSNodeLike | null,
   redirects: Redirect[],
   signal: AbortSignal | undefined,
@@ -488,6 +507,24 @@ async function runRedirected(
   callStack: CallStack | null,
 ): Promise<Result> {
   const session = context.session
+  if (command !== null && command.type === NT.REDIRECTED_STATEMENT) {
+    const [inner, own] = getRedirects(command)
+    return runRedirected(
+      recurse,
+      dispatch,
+      executeFn,
+      registry,
+      namespace,
+      inner,
+      [...own, ...redirects],
+      signal,
+      processes,
+      sink,
+      context,
+      stdin,
+      callStack,
+    )
+  }
   if (command !== null && command.type === NT.FUNCTION_DEFINITION) {
     // The redirects belong to the function, applied at each call
     // (getFunctionBody), not to the definition.
@@ -509,6 +546,7 @@ async function runRedirected(
       dispatch,
       executeFn,
       registry,
+      namespace,
       redirects,
       right,
       signal,
@@ -522,6 +560,7 @@ async function runRedirected(
       dispatch,
       executeFn,
       registry,
+      namespace,
       getPipelineStages(command, redirects),
       context,
       stdin,
@@ -541,6 +580,7 @@ async function runRedirected(
         dispatch,
         executeFn,
         registry,
+        namespace,
         inner,
         redirects,
         signal,
@@ -553,21 +593,25 @@ async function runRedirected(
     )
     return negated(stdout, io, execNode, context, inner)
   }
-  const [expandedRedirects, pipeNode] = await expandRedirects(
-    redirects,
-    context,
-    executeFn,
-    registry,
-    callStack,
-    sessionView(session, registry.policies, context.frame.diagnostics),
-    forks(command, context),
-  )
+  const pipeNode =
+    (redirects.find((r) => r.pipeline != null)?.pipeline as TSNodeLike | null) ?? null
+  const expand = (redirect: Redirect) =>
+    expandRedirect(
+      redirect,
+      context,
+      executeFn,
+      registry,
+      callStack,
+      sessionView(session, registry.policies, context.frame.diagnostics),
+      forks(command, context),
+      namespace,
+    )
   // `exec > file` with no command installs the redirects on the shell
   // for every later statement, rather than applying them to one
   // command. `exec cmd > file` still has a command and falls through
   // to the ordinary path, which refuses the command form.
   if (isBareExec(command)) {
-    return await installExecRedirects(dispatch, session, expandedRedirects, stdin)
+    return await installExecRedirects(dispatch, session, redirects, stdin, expand)
   }
   // A heredoc's operator line reads the routed stdout, so then it is
   // returned rather than written. A simple command expands its words
@@ -584,19 +628,51 @@ async function runRedirected(
   let io: IOResult
   let execNode: ExecutionNode
   try {
-    ;[stdout, io, execNode] = await handleRedirect(
-      simple
-        ? (n, s, i, cs, opts) => recurse(n, s, i, cs, { ...opts, ownDiagnostics: false })
-        : recurse,
-      dispatch,
-      command,
-      expandedRedirects,
-      context,
-      stdin,
-      callStack,
-      false,
-      pipeNode === null ? sink : undefined,
-    )
+    if (command !== null && command.type === NT.COMMAND) {
+      const underRedirects: RedirectRunner = (run, guard, name, args) =>
+        handleRedirect(
+          (_node, _current, given, _stack, options) =>
+            run(given, options?.sink, redirectPathsFor(command)),
+          dispatch,
+          command,
+          redirects,
+          context,
+          stdin,
+          callStack,
+          false,
+          pipeNode === null ? sink : undefined,
+          expand,
+          guard,
+          name,
+          args,
+        )
+      ;[stdout, io, execNode] = await runWithRedirectPaths(
+        command,
+        [],
+        () =>
+          recurse(command, context, stdin, callStack, {
+            ...(pipeNode === null && sink ? { sink } : {}),
+            ownDiagnostics: false,
+          }),
+        underRedirects,
+        redirects,
+      )
+    } else {
+      ;[stdout, io, execNode] = await handleRedirect(
+        simple
+          ? (n, s, i, cs, opts) => recurse(n, s, i, cs, { ...opts, ownDiagnostics: false })
+          : recurse,
+        dispatch,
+        command,
+        redirects,
+        context,
+        stdin,
+        callStack,
+        false,
+        pipeNode === null ? sink : undefined,
+        expand,
+      )
+    }
     if (simple && context.frame.diagnostics.length > 0) {
       const err = diagnosticStderr(command, context)
       io.stderr = concat([err, await io.materializeStderr()])
@@ -675,6 +751,7 @@ async function recursePipeStderr(
   dispatch: DispatchFn,
   executeFn: ExecuteFn,
   registry: MountRegistry,
+  namespace: Namespace,
   targets: readonly TSNodeLike[],
   node: TSNodeLike,
   context: EvaluationContext,
@@ -682,36 +759,26 @@ async function recursePipeStderr(
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
 ): Promise<Result> {
-  const session = context.session
   if (!targets.includes(node) || nodeKind(node) !== NodeKind.REDIRECT) {
     return recurse(node, context, stdin, callStack, opts)
   }
   const [command, redirects] = getRedirects(node)
   redirects.push(new Redirect({ fd: 2, target: 1, kind: RedirectKind.STDERR_TO_STDOUT }))
-  const [expanded, pipeNode] = await expandRedirects(
-    redirects,
-    context,
-    executeFn,
-    registry,
-    callStack,
-    sessionView(session, registry.policies, context.frame.diagnostics),
-  )
-  let [stdout, io, execNode] = await handleRedirect(
+  return runRedirected(
     recurse,
     dispatch,
+    executeFn,
+    registry,
+    namespace,
     command,
-    expanded,
+    redirects,
+    undefined,
+    undefined,
+    opts?.sink,
     context,
     stdin,
     callStack,
   )
-  if (pipeNode !== null && stdout !== null) {
-    const [stdout2, io2, execNode2] = await recurse(pipeNode, context, stdout, callStack)
-    stdout = stdout2
-    io = await io.merge(io2)
-    execNode = execNode2
-  }
-  return [stdout, io, execNode]
 }
 
 export interface ExecuteNodeDeps {
@@ -1051,8 +1118,48 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.PROGRAM) {
+    const pending = redirectSyntaxFor(node)
+    const statements = node.namedChildren.filter((child) => child.type !== NT.COMMENT)
+    const last = statements.at(-1)
+    if (pending.length > 0 && last === undefined) {
+      return runRedirected(
+        recurse,
+        dispatch,
+        executeFn,
+        registry,
+        deps.namespace,
+        null,
+        [...pending],
+        deps.signal,
+        jobTable.processes,
+        sink,
+        context,
+        stdin,
+        callStack,
+      )
+    }
+    const programRecurse: Recurse =
+      pending.length > 0 && last !== undefined
+        ? (child, current, given, stack, options) =>
+            recurseReassociated(
+              recurse,
+              dispatch,
+              executeFn,
+              registry,
+              deps.namespace,
+              pending,
+              last,
+              deps.signal,
+              jobTable.processes,
+              child,
+              current,
+              given,
+              stack,
+              options,
+            )
+        : recurse
     return executeProgram(
-      recurse,
+      programRecurse,
       node,
       context,
       stdin,
@@ -1103,6 +1210,7 @@ async function executeNodeBody(
       dispatch,
       executeFn,
       registry,
+      deps.namespace,
       getPipelineStages(node),
       context,
       stdin,
@@ -1130,6 +1238,7 @@ async function executeNodeBody(
       dispatch,
       executeFn,
       registry,
+      deps.namespace,
       command,
       redirects,
       deps.signal,
@@ -1531,10 +1640,15 @@ async function executeNodeBody(
     }
     const source = getFunctionSource(node)
     session.functions[name] = source
+    const mark: [number, number] = [
+      session.parseCurrent,
+      session.parseRow + (node.startPosition?.row ?? 0),
+    ]
     session.functionSites.set(name, {
       source,
-      mark: [session.parseCurrent, session.parseRow + (node.startPosition?.row ?? 0)],
+      mark,
       origin: definedAt(node, deps.handed ?? null),
+      aliases: aliasView(session, node, aliasMark(session, readRow(node))),
     })
     return [null, new IOResult(), new ExecutionNode({ command: `function ${name}`, exitCode: 0 })]
   }

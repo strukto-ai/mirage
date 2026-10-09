@@ -12,9 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
+import logging
+from unittest.mock import AsyncMock
+
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.types import PathSpec
 
 
 async def _workspace() -> Workspace:
@@ -263,11 +268,51 @@ async def test_fd_table_stdout_dup_then_stderr_file():
 
 
 @pytest.mark.asyncio
-async def test_multiple_stdout_redirects_truncate_all_write_last():
-    ws = await _workspace()
-    await ws.shell("echo body > /data/m1 > /data/m2")
+async def test_multiple_stdout_redirects_truncate_all_write_last(monkeypatch):
+    vfs = RAMVFS()
+    ws = Workspace({"data": vfs}, mode=MountMode.WRITE)
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            vfs, "read", AsyncMock(side_effect=PermissionError("read refused"))
+        )
+        patched.setattr(
+            vfs,
+            "pwrite",
+            AsyncMock(side_effect=PermissionError("pwrite needs read")),
+        )
+        io = await ws.shell("echo body > /data/m1 > /data/m2")
+        assert io.exit_code == 0
+        vfs.read.assert_not_awaited()
+        vfs.pwrite.assert_not_awaited()
     assert await _out(ws, "cat /data/m1") == ""
     assert await _out(ws, "cat /data/m2") == "body\n"
+    io = await ws.shell(
+        'printf x > /data/m1 2> "$(printf tail > /data/m1; echo /data/m2)"'
+    )
+    assert io.exit_code == 0
+    assert await _out(ws, "cat /data/m1") == "xail"
+    await ws.shell("ln -s /data/m1 /data/alias; ln -s /data /data/parent")
+    for path in ("/data/m1", "/data/alias", "/data/parent/m1"):
+        for redirects in (f"2>/data/m1 >{path}", f">{path} 2>/data/m1"):
+            io = await ws.shell(f"printf '%d\\n' abc {redirects}")
+            assert io.exit_code == 1
+            assert "abc" in await _out(ws, "cat /data/m1")
+            with monkeypatch.context() as patched:
+                pwrite = AsyncMock(wraps=vfs.pwrite)
+                patched.setattr(vfs, "pwrite", pwrite)
+                io = await ws.shell(
+                    "{ printf ab >&2; printf cd >&2; printf ef >&2;"
+                    " printf X; printf Y; printf G >&2; printf H >&2;"
+                    f" printf Z; }} {redirects}"
+                )
+                assert io.exit_code == 0
+                assert [call.args[1:3] for call in pwrite.await_args_list] == [
+                    (b"abcdef", 0),
+                    (b"XY", 0),
+                    (b"GH", 6),
+                    (b"Z", 2),
+                ]
+            assert await _out(ws, "cat /data/m1") == "XYZdefGH"
 
 
 @pytest.mark.asyncio
@@ -436,7 +481,7 @@ async def test_write_target_unwritable_is_shell_attributed():
 
 
 @pytest.mark.asyncio
-async def test_write_target_unwritable_keeps_rest_of_line():
+async def test_write_target_unwritable_keeps_rest_of_line(monkeypatch, caplog):
     # Regression: the write raised with no handler, so the whole line
     # died; GNU prints the error and runs `echo next`.
     ws = await _workspace()
@@ -444,6 +489,84 @@ async def test_write_target_unwritable_keeps_rest_of_line():
     assert io.exit_code == 0
     assert (io.stdout or b"") == b"next\n"
     assert (io.stderr or b"") == b"/nodir/f: No such file or directory\n"
+    await ws.close()
+    vfs = RAMVFS()
+    ws = Workspace({"data": vfs}, mode=MountMode.WRITE)
+    original_write = vfs.write
+    original_pwrite = vfs.pwrite
+    caplog.set_level(
+        logging.DEBUG, logger="mirage.workspace.executor.redirect"
+    )
+    try:
+        for error, reason in (
+            (PermissionError("write refused"), "Permission denied"),
+            (
+                OSError(errno.ENOSPC, "No space left on device"),
+                "No space left on device",
+            ),
+        ):
+            failing = {"/data/out", "/data/err"}
+
+            async def write(path: PathSpec, data: bytes) -> None:
+                if data and path.virtual in failing:
+                    raise error
+                await original_write(path, data)
+
+            async def pwrite(
+                path: PathSpec, data: bytes, offset: int, **kwargs
+            ) -> None:
+                if data and path.virtual in failing:
+                    raise error
+                await original_pwrite(path, data, offset, **kwargs)
+
+            with monkeypatch.context() as patched:
+                patched.setattr(vfs, "write", write)
+                patched.setattr(vfs, "pwrite", pwrite)
+                for redirects in (
+                    "> /data/out 2>&1",
+                    "> /data/out 2> /data/err",
+                ):
+                    io = await ws.shell(
+                        f"echo hi {redirects}; echo rc=$?; echo next"
+                    )
+                    assert (
+                        io.exit_code,
+                        await io.stdout_str(),
+                        await io.stderr_str(),
+                    ) == (0, "rc=1\nnext\n", "")
+                assert "redirect error reporting failed" in caplog.text
+                caplog.clear()
+                io = await ws.shell("echo hi > /data/out; echo next")
+                assert (
+                    io.exit_code,
+                    await io.stdout_str(),
+                    await io.stderr_str(),
+                ) == (0, "next\n", f"/data/out: {reason}\n")
+                failing = {"/data/err"}
+                for redirects in (
+                    "> /data/out 2> /data/err",
+                    "2> /data/err > /data/out",
+                ):
+                    io = await ws.shell(
+                        f"printf '%d\\n' abc {redirects}; echo rc=$?"
+                    )
+                    assert (
+                        io.exit_code,
+                        await io.stdout_str(),
+                        await io.stderr_str(),
+                    ) == (0, "rc=1\n", "")
+                    assert await _out(ws, "cat /data/out") == "0\n"
+                io = await ws.shell(
+                    "printf '%d\\n' abc 2> /data/err; echo rc=$?"
+                )
+                assert (
+                    io.exit_code,
+                    await io.stdout_str(),
+                    await io.stderr_str(),
+                ) == (0, "0\nrc=1\n", "")
+
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -477,14 +600,15 @@ async def test_write_target_unwritable_stops_at_first_failure():
 
 
 @pytest.mark.asyncio
-async def test_write_target_unwritable_keeps_earlier_target():
+@pytest.mark.parametrize("redirect", [">", "2>", "3>"])
+async def test_write_target_unwritable_keeps_earlier_target(redirect):
     # The mirror case: GNU already opened (and truncated) the earlier
     # target before the failing one, so it survives as an empty file.
     #   $ echo y > /data/out2 > /nodir/g
     #   bash: line 1: /nodir/g: No such file or directory   # rc=1
     #   $ ls -l /data/out2 -> 0 bytes
     ws = await _workspace()
-    io = await ws.shell("echo y > /data/out2 > /nodir/g")
+    io = await ws.shell(f"echo y > /data/out2 {redirect} /nodir/g")
     assert io.exit_code == 1
     assert (io.stderr or b"") == b"/nodir/g: No such file or directory\n"
     assert (await ws.shell("test -e /data/out2")).exit_code == 0

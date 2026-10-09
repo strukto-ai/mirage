@@ -45,7 +45,10 @@ describe('handleRedirect > / >>', () => {
   it('> writes stdout to a file (dispatch write)', async () => {
     const writes: { path: string; data: Uint8Array }[] = []
     const dispatch = vi.fn<DispatchFn>((op, path, args) => {
-      if (op === 'write') {
+      if (
+        (op === 'write' || op === 'pwrite') &&
+        (args?.[0] as Uint8Array | undefined)?.byteLength
+      ) {
         writes.push({ path: path.virtual, data: args?.[0] as Uint8Array })
       }
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
@@ -73,7 +76,8 @@ describe('handleRedirect > / >>', () => {
     const dispatch = vi.fn<DispatchFn>((op, path, args) => {
       if (op === 'read')
         return Promise.resolve<[unknown, IOResult]>([encode('pre-'), new IOResult()])
-      if (op === 'append') writes.push({ path: path.virtual, data: args?.[0] as Uint8Array })
+      if (op === 'append' && (args?.[0] as Uint8Array | undefined)?.byteLength)
+        writes.push({ path: path.virtual, data: args?.[0] as Uint8Array })
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const execute: ExecuteNodeFn = () =>
@@ -89,7 +93,7 @@ describe('handleRedirect > / >>', () => {
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(decode(writes[0]?.data ?? null)).toBe('new')
-    expect(dispatch.mock.calls.map(([op]) => op)).toEqual(['append'])
+    expect(dispatch.mock.calls.map(([op]) => op)).toEqual(['append', 'append'])
   })
 })
 
@@ -194,7 +198,8 @@ describe('handleRedirect 2>&1', () => {
     // `cmd > f 2>&1` — fd2 follows fd1 into the file.
     const writes: { data: Uint8Array }[] = []
     const dispatch = vi.fn<DispatchFn>((op, _p, args) => {
-      if (op === 'write') writes.push({ data: args?.[0] as Uint8Array })
+      if ((op === 'write' || op === 'pwrite') && (args?.[0] as Uint8Array | undefined)?.byteLength)
+        writes.push({ data: args?.[0] as Uint8Array })
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const execute: ExecuteNodeFn = () =>
@@ -222,7 +227,8 @@ describe('handleRedirect 2>&1', () => {
     // fd1 moved to the file; only stdout lands in the file.
     const writes: { data: Uint8Array }[] = []
     const dispatch = vi.fn<DispatchFn>((op, _p, args) => {
-      if (op === 'write') writes.push({ data: args?.[0] as Uint8Array })
+      if ((op === 'write' || op === 'pwrite') && (args?.[0] as Uint8Array | undefined)?.byteLength)
+        writes.push({ data: args?.[0] as Uint8Array })
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const execute: ExecuteNodeFn = () =>
@@ -251,7 +257,8 @@ describe('handleRedirect &> (both to file)', () => {
   it('writes stdout+stderr combined to the target', async () => {
     const writes: { data: Uint8Array; path: string }[] = []
     const dispatch = vi.fn<DispatchFn>((op, p, args) => {
-      if (op === 'write') writes.push({ path: p.virtual, data: args?.[0] as Uint8Array })
+      if ((op === 'write' || op === 'pwrite') && (args?.[0] as Uint8Array | undefined)?.byteLength)
+        writes.push({ path: p.virtual, data: args?.[0] as Uint8Array })
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const execute: ExecuteNodeFn = () =>
@@ -273,7 +280,8 @@ describe('handleRedirect accepts PathSpec targets', () => {
   it('pre-resolved PathSpec target passes through ensureScope', async () => {
     const writes: { data: Uint8Array }[] = []
     const dispatch = vi.fn<DispatchFn>((op, _p, args) => {
-      if (op === 'write') writes.push({ data: args?.[0] as Uint8Array })
+      if ((op === 'write' || op === 'pwrite') && (args?.[0] as Uint8Array | undefined)?.byteLength)
+        writes.push({ data: args?.[0] as Uint8Array })
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const execute: ExecuteNodeFn = () =>
@@ -360,11 +368,48 @@ describe('fd-table routing end-to-end', () => {
   })
 
   it('multiple stdout redirects truncate all, write last', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws, data } = await makeIntegrationWS()
     try {
-      await ws.shell('echo body > /data/m1 > /data/m2')
+      const read = vi.spyOn(data, 'read').mockRejectedValue(new Error('read refused'))
+      const pwrite = vi.spyOn(data, 'pwrite').mockRejectedValue(new Error('pwrite needs read'))
+      expect(await runExit(ws, 'echo body > /data/m1 > /data/m2')).toBe(0)
+      expect(read).not.toHaveBeenCalled()
+      expect(pwrite).not.toHaveBeenCalled()
+      read.mockRestore()
+      pwrite.mockRestore()
       expect(await run(ws, 'cat /data/m1')).toBe('')
       expect(await run(ws, 'cat /data/m2')).toBe('body\n')
+      expect(
+        await runExit(ws, 'printf x > /data/m1 2> "$(printf tail > /data/m1; echo /data/m2)"'),
+      ).toBe(0)
+      expect(await run(ws, 'cat /data/m1')).toBe('xail')
+      await ws.shell('ln -s /data/m1 /data/alias; ln -s /data /data/parent')
+      for (const path of ['/data/m1', '/data/alias', '/data/parent/m1']) {
+        for (const redirects of [`2>/data/m1 >${path}`, `>${path} 2>/data/m1`]) {
+          expect(await runExit(ws, `printf '%d\\n' abc ${redirects}`)).toBe(1)
+          expect(await run(ws, 'cat /data/m1')).toContain('abc')
+          const writes = vi.spyOn(data, 'pwrite')
+          try {
+            expect(
+              await runExit(
+                ws,
+                '{ printf ab >&2; printf cd >&2; printf ef >&2;' +
+                  ' printf X; printf Y; printf G >&2; printf H >&2;' +
+                  ` printf Z; } ${redirects}`,
+              ),
+            ).toBe(0)
+            expect(writes.mock.calls.map(([, bytes, offset]) => [decode(bytes), offset])).toEqual([
+              ['abcdef', 0],
+              ['XY', 0],
+              ['GH', 6],
+              ['Z', 2],
+            ])
+          } finally {
+            writes.mockRestore()
+          }
+          expect(await run(ws, 'cat /data/m1')).toBe('XYZdefGH')
+        }
+      }
     } finally {
       await ws.close()
     }
@@ -599,12 +644,71 @@ describe('handleRedirect unwritable > target', () => {
   })
 
   it('keeps the rest of the line running', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws, data } = await makeIntegrationWS()
     try {
       const [exit, out, err] = await runResult(ws, 'echo x > /nodir/f; echo next')
       expect(exit).toBe(0)
       expect(out).toBe('next\n')
       expect(err).toBe('/nodir/f: No such file or directory\n')
+      const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      const originalWrite = data.write.bind(data)
+      const originalPwrite = data.pwrite.bind(data)
+      try {
+        for (const [code, reason] of [
+          ['EACCES', 'Permission denied'],
+          ['ENOSPC', 'No space left on device'],
+        ] as const) {
+          const error = Object.assign(new Error(reason), { code })
+          let failing = new Set(['/data/out', '/data/err'])
+          const write = vi.spyOn(data, 'write').mockImplementation(async (path, bytes) => {
+            if (bytes.byteLength > 0 && failing.has(path.virtual)) throw error
+            await originalWrite(path, bytes)
+          })
+          const pwrite = vi
+            .spyOn(data, 'pwrite')
+            .mockImplementation(async (path, bytes, offset) => {
+              if (bytes.byteLength > 0 && failing.has(path.virtual)) throw error
+              await originalPwrite(path, bytes, offset)
+            })
+          try {
+            for (const redirects of ['> /data/out 2>&1', '> /data/out 2> /data/err']) {
+              expect(await runResult(ws, `echo hi ${redirects}; echo rc=$?; echo next`)).toEqual([
+                0,
+                'rc=1\nnext\n',
+                '',
+              ])
+            }
+            expect(diagnostic).toHaveBeenCalledWith(
+              expect.stringContaining('redirect error reporting failed'),
+            )
+            diagnostic.mockClear()
+            expect(await runResult(ws, 'echo hi > /data/out; echo next')).toEqual([
+              0,
+              'next\n',
+              `/data/out: ${reason}\n`,
+            ])
+            failing = new Set(['/data/err'])
+            for (const redirects of ['> /data/out 2> /data/err', '2> /data/err > /data/out']) {
+              expect(await runResult(ws, `printf '%d\\n' abc ${redirects}; echo rc=$?`)).toEqual([
+                0,
+                'rc=1\n',
+                '',
+              ])
+              expect(await run(ws, 'cat /data/out')).toBe('0\n')
+            }
+            expect(await runResult(ws, "printf '%d\\n' abc 2> /data/err; echo rc=$?")).toEqual([
+              0,
+              '0\nrc=1\n',
+              '',
+            ])
+          } finally {
+            write.mockRestore()
+            pwrite.mockRestore()
+          }
+        }
+      } finally {
+        diagnostic.mockRestore()
+      }
     } finally {
       await ws.close()
     }
@@ -652,12 +756,12 @@ describe('handleRedirect unwritable > target', () => {
     }
   })
 
-  it('keeps a target opened before the failing one', async () => {
+  it.each(['>', '2>', '3>'])('keeps a target opened before the failing %s', async (redirect) => {
     // GNU: `echo y > /data/out2 > /nodir/g` already truncated
     // /data/out2, so it survives as an empty file.
     const { ws } = await makeIntegrationWS()
     try {
-      const [exit, , err] = await runResult(ws, 'echo y > /data/out2 > /nodir/g')
+      const [exit, , err] = await runResult(ws, `echo y > /data/out2 ${redirect} /nodir/g`)
       expect(exit).toBe(1)
       expect(err).toBe('/nodir/g: No such file or directory\n')
       expect(await runExit(ws, 'test -e /data/out2')).toBe(0)
