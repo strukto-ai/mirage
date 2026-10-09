@@ -19,6 +19,7 @@ from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import (
     conditioned,
     evict_after,
+    evict_keeping_version,
     held_versions,
     invalidate_after_unlink,
     invalidate_subtree,
@@ -37,9 +38,15 @@ from mirage.core.box.fingerprint import live_of
 from mirage.core.box.resolve import path_parts, resolve_item
 from mirage.core.box.unlink import delete_resolved
 from mirage.errors.fs import enoent, enotdir, enotempty
-from mirage.observe.context import lift_lost, lost_count, record, start_op
+from mirage.observe.context import (
+    OpTimer,
+    lift_lost,
+    lost_count,
+    record,
+    start_op,
+)
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import child_spec
+from mirage.utils.key_prefix import child_spec, outermost
 
 logger = logging.getLogger(__name__)
 
@@ -96,15 +103,34 @@ async def _delete_link(
         logger.debug("%s already gone: %s", path.virtual, exc)
 
 
+async def _removed(path: PathSpec, op: str, upto: int, timer: OpTimer) -> None:
+    """Record a path the walk removed, the moment its delete landed.
+
+    Recorded now, the retract stays older than a read another stage of
+    the line makes of a file recreated there while the walk goes on.
+
+    Args:
+        path (PathSpec): the file or folder removed.
+        op (str): ``unlink`` for a file, ``rm_r`` for a folder.
+        upto (int): :func:`lost_count` when its delete began.
+        timer (OpTimer): its delete's timer.
+    """
+    record(op, path.virtual, "box", 0, timer)
+    lift_lost(path, upto, subtree=op == "rm_r")
+    await invalidate_after_unlink(path)
+
+
 async def _delete_tree(
     accessor: BoxAccessor,
     folder: dict[str, Any],
     path: PathSpec,
     lost: list[tuple[PathSpec, str | None]],
+    swept: list[PathSpec],
 ) -> bool:
     """Delete a folder file by file, each held to the version read or listed.
 
-    A file that changed stays, with the folders above it.
+    A file that changed stays, with the folders above it. Each file and
+    folder is recorded as its delete lands.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -112,6 +138,9 @@ async def _delete_tree(
         path (PathSpec): the folder's path.
         lost (list[tuple[PathSpec, str | None]]): receives each file that
             changed, with the version it was measured on.
+        swept (list[PathSpec]): receives each folder a delete went out
+            for, landed or not, for one subtree eviction when the walk
+            ends.
 
     Returns:
         bool: whether the folder itself was deleted.
@@ -123,7 +152,7 @@ async def _delete_tree(
     emptied = True
     for kid, spec, version in zip(kids, specs, held):
         if kid.get("type") == "folder":
-            emptied &= await _delete_tree(accessor, kid, spec, lost)
+            emptied &= await _delete_tree(accessor, kid, spec, lost, swept)
             continue
         if kid.get("type") == "web_link":
             await _delete_link(tm, kid["id"], spec)
@@ -134,19 +163,30 @@ async def _delete_tree(
             lost.append((spec, want))
             emptied = False
             continue
+        upto = lost_count()
+        timer = start_op()
         try:
             await delete_file(tm, kid["id"], live.native if want else None)
         except BoxApiError as exc:
-            if exc.status == GONE_STATUS:
-                logger.debug("%s already gone: %s", spec.virtual, exc)
+            if exc.status != GONE_STATUS:
+                if exc.status != LOST_STATUS:
+                    await evict_keeping_version(spec)
+                    raise
+                lost.append((spec, want))
+                emptied = False
                 continue
-            if exc.status != LOST_STATUS:
-                raise
-            lost.append((spec, want))
-            emptied = False
+            logger.debug("%s already gone: %s", spec.virtual, exc)
+        except BaseException:
+            await evict_keeping_version(spec)
+            raise
+        await _removed(spec, "unlink", upto, timer)
     if not emptied:
         return False
+    upto = lost_count()
+    timer = start_op()
+    swept.append(path)
     await delete_empty_folder(tm, folder["id"], path)
+    await _removed(path, "rm_r", upto, timer)
     return True
 
 
@@ -154,7 +194,9 @@ async def _remove(
     accessor: BoxAccessor,
     path: PathSpec,
     item: dict[str, Any],
+    walked: bool,
     lost: list[tuple[PathSpec, str | None]],
+    swept: list[PathSpec],
 ) -> bool:
     """Delete ``item``: a file alone, a folder walked or whole.
 
@@ -162,16 +204,19 @@ async def _remove(
         accessor (BoxAccessor): Box accessor.
         path (PathSpec): the operand.
         item (dict[str, Any]): the operand as its lookup found it.
+        walked (bool): a conditional mount walks a folder file by file.
         lost (list[tuple[PathSpec, str | None]]): receives each file a
             walk left because it changed.
+        swept (list[PathSpec]): receives each folder the walk sent a
+            delete for.
 
     Returns:
         bool: True, so the settle step can tell a finished op.
     """
     if item.get("type") != "folder":
         await delete_resolved(accessor, path, item)
-    elif conditioned(path, "delete"):
-        await _delete_tree(accessor, item, path, lost)
+    elif walked:
+        await _delete_tree(accessor, item, path, lost, swept)
     else:
         await delete_folder(accessor.token_manager, item["id"], recursive=True)
     return True
@@ -179,6 +224,12 @@ async def _remove(
 
 async def rm_r(accessor: BoxAccessor, path: PathSpec) -> None:
     """Remove a file or folder; a conditional mount walks it file by file.
+
+    A walk records each file and folder (the operand among them) as its
+    delete lands, never the operand's subtree up front or at the end, so
+    a file it never reached keeps its version, and a read another stage
+    makes after a removal outranks it.
+    Anything else is recorded once, for the operand's whole subtree.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -190,16 +241,24 @@ async def rm_r(accessor: BoxAccessor, path: PathSpec) -> None:
     item = await resolve_item(accessor, parts)
     if item is None:
         raise enoent(path.virtual)
+    walked = item.get("type") == "folder" and conditioned(path, "delete")
     upto = lost_count()
     timer = start_op()
     lost: list[tuple[PathSpec, str | None]] = []
+    swept: list[PathSpec] = []
 
     async def settle(done: bool | None) -> None:
-        record("rm_r", path.virtual, "box", 0, timer)
-        await invalidate_subtree(path)
+        if not walked:
+            record("rm_r", path.virtual, "box", 0, timer)
+            await invalidate_subtree(path)
+        for folder in outermost(swept):
+            await invalidate_subtree(folder)
         refusal = await keep_refused(lost)
         if done and refusal is not None:
             raise refusal
 
-    await evict_after(_remove(accessor, path, item, lost), settle)
-    lift_lost(path, upto, subtree=True)
+    await evict_after(
+        _remove(accessor, path, item, walked, lost, swept), settle
+    )
+    if not walked:
+        lift_lost(path, upto, subtree=True)

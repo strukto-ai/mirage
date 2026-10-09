@@ -16,14 +16,15 @@ import type { BoxAccessor } from '../../accessor/box.ts'
 import {
   conditioned,
   evictAfter,
+  evictKeepingVersion,
   heldVersions,
   invalidateAfterUnlink,
   invalidateSubtree,
   keepRefused,
 } from '../../cache/context.ts'
-import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
+import { liftLost, lostCount, record, startOp, type OpTimer } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { childSpec } from '../../utils/key_prefix.ts'
+import { childSpec, outermost } from '../../utils/key_prefix.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { BoxApiError, type BoxTokenManager } from './client.ts'
 import { type BoxItem, deleteFile, deleteFolder, deleteWebLink, listFolderItems } from './api.ts'
@@ -68,15 +69,32 @@ async function deleteLink(tm: BoxTokenManager, linkId: string, path: PathSpec): 
 }
 
 /**
+ * Record a path the walk removed, the moment its delete landed. Recorded now,
+ * the retract stays older than a read another stage of the line makes of a
+ * file recreated there while the walk goes on. Mirrors Python's `_removed`.
+ */
+async function removed(
+  path: PathSpec,
+  op: 'unlink' | 'rm_r',
+  upto: number,
+  timer: OpTimer,
+): Promise<void> {
+  record(op, path.virtual, 'box', 0, timer)
+  liftLost(path, upto, op === 'rm_r')
+  await invalidateAfterUnlink(path)
+}
+
+/**
  * Delete a folder file by file, each held to the version read or listed. A file
- * that changed stays, with the folders above it. Returns whether the folder
- * itself was deleted.
+ * that changed stays, with the folders above it. Each file and folder is
+ * recorded as its delete lands. Returns whether the folder itself was deleted.
  */
 async function deleteTree(
   accessor: BoxAccessor,
   folder: BoxItem,
   path: PathSpec,
   lost: [PathSpec, string | null][],
+  swept: PathSpec[],
 ): Promise<boolean> {
   const tm = accessor.tokenManager
   const kids = await listFolderItems(tm, folder.id)
@@ -85,7 +103,7 @@ async function deleteTree(
   let emptied = true
   for (const [i, [kid, spec]] of walk.entries()) {
     if (kid.type === 'folder') {
-      emptied = (await deleteTree(accessor, kid, spec, lost)) && emptied
+      emptied = (await deleteTree(accessor, kid, spec, lost, swept)) && emptied
       continue
     }
     if (kid.type === 'web_link') {
@@ -99,21 +117,34 @@ async function deleteTree(
       emptied = false
       continue
     }
+    const upto = lostCount()
+    const timer = startOp()
     try {
       await deleteFile(tm, kid.id, want !== null ? live.native : null)
     } catch (err) {
-      if (!(err instanceof BoxApiError)) throw err
-      if (err.status === GONE_STATUS) {
-        console.debug(`${spec.virtual} already gone: ${String(err)}`)
+      if (!(err instanceof BoxApiError)) {
+        await evictKeepingVersion(spec)
+        throw err
+      }
+      if (err.status !== GONE_STATUS) {
+        if (err.status !== LOST_STATUS) {
+          await evictKeepingVersion(spec)
+          throw err
+        }
+        lost.push([spec, want])
+        emptied = false
         continue
       }
-      if (err.status !== LOST_STATUS) throw err
-      lost.push([spec, want])
-      emptied = false
+      console.debug(`${spec.virtual} already gone: ${String(err)}`)
     }
+    await removed(spec, 'unlink', upto, timer)
   }
   if (!emptied) return false
+  const upto = lostCount()
+  const timer = startOp()
+  swept.push(path)
   await deleteEmptyFolder(tm, folder.id, path)
+  await removed(path, 'rm_r', upto, timer)
   return true
 }
 
@@ -122,34 +153,44 @@ async function remove(
   accessor: BoxAccessor,
   path: PathSpec,
   item: BoxItem,
+  walked: boolean,
   lost: [PathSpec, string | null][],
+  swept: PathSpec[],
 ): Promise<boolean> {
   if (item.type !== 'folder') await deleteResolved(accessor, path, item)
-  else if (conditioned(path, 'delete')) await deleteTree(accessor, item, path, lost)
+  else if (walked) await deleteTree(accessor, item, path, lost, swept)
   else await deleteFolder(accessor.tokenManager, item.id, true)
   return true
 }
 
 /**
- * Remove a file or folder; a conditional mount walks it file by file. Mirrors
- * Python's `rm_r`.
+ * Remove a file or folder; a conditional mount walks it file by file. A walk
+ * records each file and folder (the operand among them) as its delete lands,
+ * never the operand's subtree up front or at the end, so a file it never reached
+ * keeps its version, and a read another stage makes after a removal outranks it. Anything else is recorded once, for
+ * the operand's whole subtree. Mirrors Python's `rm_r`.
  */
 export async function rmR(accessor: BoxAccessor, path: PathSpec): Promise<void> {
   const parts = pathParts(path)
   if (parts.length === 0) return
   const item = await resolveItem(accessor, parts)
   if (item === null) throw enoent(path.virtual)
+  const walked = item.type === 'folder' && conditioned(path, 'delete')
   const upto = lostCount()
   const timer = startOp()
   const lost: [PathSpec, string | null][] = []
+  const swept: PathSpec[] = []
   await evictAfter(
-    () => remove(accessor, path, item, lost),
+    () => remove(accessor, path, item, walked, lost, swept),
     async (done) => {
-      record('rm_r', path.virtual, 'box', 0, timer)
-      await invalidateSubtree(path)
+      if (!walked) {
+        record('rm_r', path.virtual, 'box', 0, timer)
+        await invalidateSubtree(path)
+      }
+      for (const folder of outermost(swept)) await invalidateSubtree(folder)
       const refusal = await keepRefused(lost)
       if (done === true && refusal !== null) throw refusal
     },
   )
-  liftLost(path, upto, true)
+  if (!walked) liftLost(path, upto, true)
 }

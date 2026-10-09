@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { lstripSlash, rstripSlash, stripSlash } from '../utils/slash.ts'
+import { compareCodePoints } from './sort.ts'
 import { PathSpec } from '../types.ts'
 
 /**
@@ -85,6 +86,23 @@ export function underPath(candidate: string, root: string): boolean {
   const base = rstripSlash(root)
   if (base === '') return true
   return rstripSlash(candidate) === base || candidate.startsWith(`${base}/`)
+}
+
+/**
+ * The paths no other path of the list sits below, in their order. Mirrors
+ * Python's `outermost`.
+ *
+ * Example:
+ *   outermost(['/d/s', '/d', '/e'])  -> ['/d', '/e']
+ */
+export function outermost(paths: PathSpec[]): PathSpec[] {
+  const roots: string[] = []
+  for (const key of paths.map((p) => `${rstripSlash(p.virtual)}/`).sort(compareCodePoints)) {
+    const last = roots[roots.length - 1]
+    if (last === undefined || !key.startsWith(last)) roots.push(key)
+  }
+  const kept = new Set(roots)
+  return paths.filter((p) => kept.has(`${rstripSlash(p.virtual)}/`))
 }
 
 /**

@@ -59,6 +59,8 @@ vi.mock('../../cache/context.ts', async () => {
     invalidateSubtree: vi.fn(() => Promise.resolve()),
     invalidateAfterMove: vi.fn(() => Promise.resolve()),
     writesConditioned: vi.fn(actual.writesConditioned),
+    conditioned: vi.fn(actual.conditioned),
+    heldVersions: vi.fn(actual.heldVersions),
   }
 })
 
@@ -68,6 +70,8 @@ import {
   invalidateAfterWrite,
   invalidateSubtree,
   writesConditioned,
+  conditioned,
+  heldVersions,
 } from '../../cache/context.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
@@ -333,6 +337,49 @@ describe('box write ops', () => {
     )
     expect(vi.mocked(api.copyFolder)).toHaveBeenCalledWith(STUB_TM, '300', '100', 'new')
     expect(records.map((r) => [r.op, r.path])).toEqual([['copy_prefix', '/data/new']])
+  })
+
+  it('a walk records each removal before the next', async () => {
+    const tree: Record<string, ApiModule.BoxItem[]> = {
+      '0': [{ type: 'folder', id: '100', name: 'data' }],
+      '100': [{ type: 'folder', id: '300', name: 'sub' }],
+      '300': [
+        { type: 'file', id: '301', name: 'a', sha1: 's', etag: '1' } as ApiModule.BoxItem,
+        { type: 'file', id: '302', name: 'b', sha1: 't', etag: '1' } as ApiModule.BoxItem,
+      ],
+    }
+    vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
+      Promise.resolve(tree[folderId] ?? []),
+    )
+    vi.mocked(api.deleteFile).mockImplementation(() => {
+      H.order.push('deleteFile')
+      return Promise.resolve()
+    })
+    vi.mocked(api.deleteFolder).mockImplementation(() => {
+      H.order.push('deleteFolder')
+      return Promise.resolve()
+    })
+    const realConditioned = vi.mocked(conditioned).getMockImplementation()
+    const realHeld = vi.mocked(heldVersions).getMockImplementation()
+    vi.mocked(conditioned).mockReturnValue(true)
+    vi.mocked(heldVersions).mockResolvedValue([null, null])
+    H.order = []
+    try {
+      await runWithRecording(() => rmR(makeAccessor(), spec('/data/sub')))
+      expect(H.order).toEqual([
+        'deleteFile',
+        'record',
+        'deleteFile',
+        'record',
+        'deleteFolder',
+        'record',
+      ])
+    } finally {
+      vi.mocked(api.deleteFile).mockReset()
+      vi.mocked(api.deleteFolder).mockReset()
+      vi.mocked(conditioned).mockImplementation(realConditioned ?? (() => false))
+      vi.mocked(heldVersions).mockImplementation(realHeld ?? (() => Promise.resolve([])))
+    }
   })
 
   it('a replaced file is recorded only once its copy lands', async () => {

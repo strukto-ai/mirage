@@ -132,6 +132,24 @@ def under_path(candidate: str, root: str) -> bool:
     return stem == base or candidate.startswith(base + "/")
 
 
+def outermost(paths: list[PathSpec]) -> list[PathSpec]:
+    """The paths no other path of the list sits below, in their order.
+
+    Args:
+        paths (list[PathSpec]): the paths.
+
+    Example::
+
+        outermost(["/d/s", "/d", "/e"])  -> ["/d", "/e"]
+    """
+    roots: list[str] = []
+    for virtual in sorted(p.virtual.rstrip("/") + "/" for p in paths):
+        if not roots or not virtual.startswith(roots[-1]):
+            roots.append(virtual)
+    kept = set(roots)
+    return [path for path in paths if path.virtual.rstrip("/") + "/" in kept]
+
+
 def mount_key(virtual: str, prefix: str) -> str:
     """Backend key for a virtual path under a mount prefix.
 

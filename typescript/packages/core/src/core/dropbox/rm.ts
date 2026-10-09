@@ -16,15 +16,17 @@ import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import {
   conditioned,
   evictAfter,
+  evictKeepingVersion,
   heldVersions,
+  invalidateAfterUnlink,
   invalidateAncestors,
   invalidateSubtree,
   keepRefused,
 } from '../../cache/context.ts'
-import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
+import { liftLost, lostCount, record, startOp, type OpTimer } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotempty } from '../../errors/fs.ts'
-import { childSpec } from '../../utils/key_prefix.ts'
+import { childSpec, outermost } from '../../utils/key_prefix.ts'
 import { DropboxApiError } from './client.ts'
 import { deletePath, listFolder, lookup, type DropboxEntry } from './api.ts'
 import { GONE_SUMMARIES, LOST_SUMMARIES } from './constants.ts'
@@ -33,14 +35,32 @@ import { dropboxPathOf } from './paths.ts'
 import { deleteResolved } from './unlink.ts'
 
 /**
+ * Record a path the walk removed, the moment its delete landed. Recorded now,
+ * the retract stays older than a read another stage of the line makes of a
+ * file recreated there while the walk goes on. Mirrors Python's `_removed`.
+ */
+async function removed(
+  path: PathSpec,
+  op: 'unlink' | 'rm_r',
+  upto: number,
+  timer: OpTimer,
+): Promise<void> {
+  record(op, path.virtual, 'dropbox', 0, timer)
+  liftLost(path, upto, op === 'rm_r')
+  await invalidateAfterUnlink(path)
+}
+
+/**
  * Delete a folder file by file, each held to the version read or listed. A file
  * that changed stays, with the folders above it; a folder goes once a listing
- * shows it empty. Returns whether the folder itself was deleted.
+ * shows it empty. Each file and folder is recorded as its delete lands. Returns
+ * whether the folder itself was deleted.
  */
 async function deleteTree(
   accessor: DropboxAccessor,
   path: PathSpec,
   lost: [PathSpec, string | null][],
+  swept: PathSpec[],
 ): Promise<boolean> {
   const tm = accessor.tokenManager
   const apiPath = dropboxPathOf(accessor, path)
@@ -50,7 +70,7 @@ async function deleteTree(
   let emptied = true
   for (const [i, [entry, spec]] of walk.entries()) {
     if (entry['.tag'] === 'folder') {
-      emptied = (await deleteTree(accessor, spec, lost)) && emptied
+      emptied = (await deleteTree(accessor, spec, lost, swept)) && emptied
       continue
     }
     const live = liveOf(entry)
@@ -60,22 +80,35 @@ async function deleteTree(
       emptied = false
       continue
     }
+    const upto = lostCount()
+    const timer = startOp()
     try {
       await deletePath(tm, dropboxPathOf(accessor, spec), want !== null ? live.native : null)
     } catch (err) {
-      if (!(err instanceof DropboxApiError)) throw err
-      if (GONE_SUMMARIES.some((s) => err.summary.startsWith(s))) {
-        console.debug(`${spec.virtual} already gone: ${String(err)}`)
+      if (!(err instanceof DropboxApiError)) {
+        await evictKeepingVersion(spec)
+        throw err
+      }
+      if (!GONE_SUMMARIES.some((s) => err.summary.startsWith(s))) {
+        if (!LOST_SUMMARIES.some((s) => err.summary.startsWith(s))) {
+          await evictKeepingVersion(spec)
+          throw err
+        }
+        lost.push([spec, want])
+        emptied = false
         continue
       }
-      if (!LOST_SUMMARIES.some((s) => err.summary.startsWith(s))) throw err
-      lost.push([spec, want])
-      emptied = false
+      console.debug(`${spec.virtual} already gone: ${String(err)}`)
     }
+    await removed(spec, 'unlink', upto, timer)
   }
   if (!emptied) return false
   if ((await listFolder(tm, apiPath, { limit: 1 })).length > 0) throw enotempty(path)
+  const upto = lostCount()
+  const timer = startOp()
+  swept.push(path)
   await deletePath(tm, apiPath)
+  await removed(path, 'rm_r', upto, timer)
   return true
 }
 
@@ -85,15 +118,19 @@ async function remove(
   path: PathSpec,
   entry: DropboxEntry,
   lost: [PathSpec, string | null][],
+  swept: PathSpec[],
 ): Promise<boolean> {
-  if (entry['.tag'] === 'folder') await deleteTree(accessor, path, lost)
+  if (entry['.tag'] === 'folder') await deleteTree(accessor, path, lost, swept)
   else await deleteResolved(accessor, path, entry)
   return true
 }
 
 /**
- * Remove a file or folder; a conditional mount walks it file by file. Mirrors
- * Python's `rm_r`.
+ * Remove a file or folder; a conditional mount walks it file by file. A walk
+ * records each file and folder (the operand among them) as its delete lands,
+ * never the operand's subtree up front or at the end, so a file it never reached
+ * keeps its version, and a read another stage makes after a removal outranks it. Anything else is recorded once, for
+ * the operand's whole subtree. Mirrors Python's `rm_r`.
  */
 export async function rmR(accessor: DropboxAccessor, path: PathSpec): Promise<void> {
   const apiPath = dropboxPathOf(accessor, path)
@@ -113,16 +150,21 @@ export async function rmR(accessor: DropboxAccessor, path: PathSpec): Promise<vo
   const entry = await lookup(accessor.tokenManager, apiPath)
   if (entry === null) throw enoent(path.virtual)
   const upto = lostCount()
+  const walked = entry['.tag'] === 'folder'
   const lost: [PathSpec, string | null][] = []
+  const swept: PathSpec[] = []
   await evictAfter(
-    () => remove(accessor, path, entry, lost),
+    () => remove(accessor, path, entry, lost, swept),
     async (done) => {
-      record('rm_r', path.virtual, 'dropbox', 0, timer)
-      await invalidateSubtree(path)
+      if (!walked) {
+        record('rm_r', path.virtual, 'dropbox', 0, timer)
+        await invalidateSubtree(path)
+      }
+      for (const folder of outermost(swept)) await invalidateSubtree(folder)
       await invalidateAncestors(path)
       const refusal = await keepRefused(lost)
       if (done === true && refusal !== null) throw refusal
     },
   )
-  liftLost(path, upto, true)
+  if (!walked) liftLost(path, upto, true)
 }

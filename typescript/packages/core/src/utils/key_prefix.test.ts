@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../types.ts'
-import { childSpec, normalize } from './key_prefix.ts'
+import { childSpec, normalize, outermost } from './key_prefix.ts'
 
 // The one key-prefix rule, mirrored by python/tests/utils/test_key_prefix.py.
 // A root-spelled prefix is no prefix: '/' used to normalize to '/', and every
@@ -43,5 +43,12 @@ describe('childSpec', () => {
     expect(child.vfsPath).toBe('d/x')
     const root = new PathSpec({ virtual: '/m', directory: '/', vfsPath: '' })
     expect(childSpec(root, 'x').vfsPath).toBe('x')
+  })
+})
+
+describe('outermost', () => {
+  it('keeps the paths no other sits below', () => {
+    const paths = ['/d/s', '/d', '/e', '/dx', '/d-x', '/d-x/y'].map((p) => PathSpec.fromStrPath(p))
+    expect(outermost(paths).map((p) => p.virtual)).toEqual(['/d', '/e', '/dx', '/d-x'])
   })
 })

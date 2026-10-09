@@ -339,6 +339,67 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
     expect(drive.text(key)).toBe('new\n')
   })
 
+  it.each([
+    ['line', false],
+    ['next line', true],
+  ])('rm -r that failed keeps the versions it never reached: %s', async (_id, nextLine) => {
+    const r = drive.root
+    drive.hook('delete', () => {
+      drive.put('d/b', 'theirs\n')
+      fail()
+    })
+    const ws = await workspace()
+    const read = `cat ${r}/d/a ${r}/d/b > /dev/null`
+    let line = `${read}; rm -r ${r}/d; echo mine > ${r}/d/b`
+    if (nextLine) {
+      await run(ws, read)
+      line = `rm -r ${r}/d; echo mine > ${r}/d/b`
+    }
+    const [code, , err] = await run(ws, line)
+    expect(code).toBe(1)
+    expect(err.endsWith(`${r}/d/b: ${STALE}\n`)).toBe(true)
+    expect(drive.text('d/b')).toBe('theirs\n')
+  })
+
+  it('rm -r serves nothing from a folder already removed', async () => {
+    drive.put('d/s/t/x', 'x\n')
+    const ws = await workspace()
+    const r = drive.root
+    await run(ws, `ls ${r}/d/s/t; cat ${r}/d/s/t/x`)
+    drive.drop('d/s/t')
+    expect((await run(ws, `rm -r ${r}/d`))[0]).toBe(0)
+    expect((await run(ws, `ls ${r}/d/s/t`))[0]).not.toBe(0)
+    expect((await run(ws, `cat ${r}/d/s/t/x`))[0]).not.toBe(0)
+  })
+
+  it('rm -r whose folder delete failed serves no stale listing', async () => {
+    for (const key of ['d/a', 'd/b']) drive.drop(key)
+    drive.put('d/s/e/f', 'f\n')
+    const ws = await workspace()
+    const r = drive.root
+    expect(await run(ws, `ls ${r}/d/s`)).toEqual([0, 'e\n', ''])
+    drive.hook('delete', () => {
+      drive.hook('delete', () => {
+        drive.drop('d/s/e')
+        fail()
+      })
+    })
+    expect((await run(ws, `rm -r ${r}/d`))[0]).toBe(1)
+    expect(await run(ws, `ls ${r}/d/s`)).toEqual([0, '', ''])
+  })
+
+  it('rm -r whose delete landed but failed serves no stale bytes', async () => {
+    const ws = await workspace()
+    const r = drive.root
+    await run(ws, `ls ${r}/d; cat ${r}/d/a`)
+    drive.hook('delete', () => {
+      drive.drop('d/a')
+      fail()
+    })
+    expect((await run(ws, `rm -r ${r}/d`))[0]).toBe(1)
+    expect((await run(ws, `cat ${r}/d/a`))[0]).not.toBe(0)
+  })
+
   it('a copy onto a refused file lifts its refusal', async () => {
     const r = drive.root
     drive.hook('upload', () => {

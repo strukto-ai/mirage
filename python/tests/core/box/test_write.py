@@ -275,6 +275,65 @@ async def test_rm_r_recursive_on_folder(root_accessor):
 
 
 @pytest.mark.asyncio
+async def test_a_walk_records_each_removal_before_the_next(root_accessor):
+    tree = {
+        **_TREE,
+        "300": [
+            {
+                "id": "301",
+                "name": "a",
+                "type": "file",
+                "sha1": "s",
+                "etag": "1",
+            },
+            {
+                "id": "302",
+                "name": "b",
+                "type": "file",
+                "sha1": "t",
+                "etag": "1",
+            },
+        ],
+    }
+
+    async def listing(_tm, folder_id, limit=1000):
+        return tree.get(folder_id, [])
+
+    scope = RecordingScope()
+    seen: list[list[tuple[str, str]]] = []
+
+    async def deleted(*_args, **_kwargs):
+        seen.append([(r.op, r.path) for r in scope.records])
+
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=listing),
+            patch("mirage.core.box.rmdir.list_folder_items", new=listing),
+            patch("mirage.core.box.rmdir.conditioned", return_value=True),
+            patch(
+                "mirage.core.box.rmdir.held_versions",
+                new=AsyncMock(return_value=[None, None]),
+            ),
+            patch("mirage.core.box.rmdir.delete_file", new=deleted),
+            patch("mirage.core.box.rmdir.delete_folder", new=deleted),
+            patch(
+                "mirage.core.box.rmdir.invalidate_after_unlink",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await rm_r(root_accessor, _spec("/data/sub"))
+    finally:
+        scope.close()
+    a, b = ("unlink", "/data/sub/a"), ("unlink", "/data/sub/b")
+    assert seen == [[], [a], [a, b]]
+    assert [(r.op, r.path) for r in scope.records] == [
+        a,
+        b,
+        ("rm_r", "/data/sub"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_rename_moves_file(root_accessor):
     with (
         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),

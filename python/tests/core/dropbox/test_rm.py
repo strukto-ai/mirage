@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.rm import rm_r
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.vfs.dropbox.config import DropboxConfig
 
@@ -51,3 +52,49 @@ async def test_rm_r_missing_raises_enoent():
     ):
         with pytest.raises(FileNotFoundError):
             await rm_r(make_accessor(), PathSpec.from_str_path("/ghost"))
+
+
+@pytest.mark.asyncio
+async def test_a_walk_records_each_removal_before_the_next():
+    entries = [
+        {".tag": "file", "name": "a", "content_hash": "s", "rev": "1"},
+        {".tag": "file", "name": "b", "content_hash": "t", "rev": "1"},
+    ]
+
+    async def listing(_tm, _path, limit=None):
+        return [] if limit else entries
+
+    scope = RecordingScope()
+    seen: list[list[tuple[str, str]]] = []
+
+    async def deleted(*_args, **_kwargs):
+        seen.append([(r.op, r.path) for r in scope.records])
+
+    try:
+        with (
+            patch(
+                "mirage.core.dropbox.rm.lookup",
+                new=AsyncMock(return_value={".tag": "folder", "name": "d"}),
+            ),
+            patch("mirage.core.dropbox.rm.list_folder", new=listing),
+            patch("mirage.core.dropbox.rm.conditioned", return_value=True),
+            patch(
+                "mirage.core.dropbox.rm.held_versions",
+                new=AsyncMock(return_value=[None, None]),
+            ),
+            patch("mirage.core.dropbox.rm.delete_path", new=deleted),
+            patch(
+                "mirage.core.dropbox.rm.invalidate_after_unlink",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "mirage.core.dropbox.rm.invalidate_ancestors",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await rm_r(make_accessor(), PathSpec.from_str_path("/d"))
+    finally:
+        scope.close()
+    a, b = ("unlink", "/d/a"), ("unlink", "/d/b")
+    assert seen == [[], [a], [a, b]]
+    assert [(r.op, r.path) for r in scope.records] == [a, b, ("rm_r", "/d")]

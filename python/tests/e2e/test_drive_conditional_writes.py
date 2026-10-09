@@ -252,6 +252,82 @@ async def test_rm_r_stopped_partway_keeps_the_changed_files_version(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("next_line", [False, True], ids=["line", "next line"])
+async def test_rm_r_that_failed_keeps_the_versions_it_never_reached(
+    drive, workspace, next_line
+):
+    def theirs_then_fail() -> None:
+        drive.put("d/b", b"theirs\n")
+        _fail()
+
+    drive.fake.hooks["delete"] = theirs_then_fail
+    ws = workspace()
+    r = drive.root
+    read = f"cat {r}/d/a {r}/d/b > /dev/null"
+    if next_line:
+        await _run(ws, read)
+        line = f"rm -r {r}/d; echo mine > {r}/d/b"
+    else:
+        line = f"{read}; rm -r {r}/d; echo mine > {r}/d/b"
+    code, _, err = await _run(ws, line)
+    assert code == 1
+    assert err.endswith(f"{r}/d/b: {STALE}\n")
+    assert drive.fake.read("d/b") == b"theirs\n"
+
+
+@pytest.mark.asyncio
+async def test_rm_r_serves_nothing_from_a_folder_already_removed(
+    drive, workspace
+):
+    drive.put("d/s/t/x", b"x\n")
+    ws = workspace()
+    r = drive.root
+    await _run(ws, f"ls {r}/d/s/t; cat {r}/d/s/t/x")
+    drive.drop("d/s/t")
+    assert (await _run(ws, f"rm -r {r}/d"))[0] == 0
+    assert (await _run(ws, f"ls {r}/d/s/t"))[0] != 0
+    assert (await _run(ws, f"cat {r}/d/s/t/x"))[0] != 0
+
+
+@pytest.mark.asyncio
+async def test_rm_r_whose_folder_delete_failed_serves_no_stale_listing(
+    drive, workspace
+):
+    for key in ("d/a", "d/b"):
+        drive.drop(key)
+    drive.put("d/s/e/f", b"f\n")
+    ws = workspace()
+    r = drive.root
+    assert await _run(ws, f"ls {r}/d/s") == (0, "e\n", "")
+
+    def gone_then_fail() -> None:
+        drive.drop("d/s/e")
+        _fail()
+
+    drive.fake.hooks["delete"] = lambda: drive.fake.hooks.__setitem__(
+        "delete", gone_then_fail
+    )
+    assert (await _run(ws, f"rm -r {r}/d"))[0] == 1
+    assert await _run(ws, f"ls {r}/d/s") == (0, "", "")
+
+
+@pytest.mark.asyncio
+async def test_rm_r_whose_delete_landed_but_failed_serves_no_stale_bytes(
+    drive, workspace
+):
+    def gone_then_fail() -> None:
+        drive.drop("d/a")
+        _fail()
+
+    ws = workspace()
+    r = drive.root
+    await _run(ws, f"ls {r}/d; cat {r}/d/a")
+    drive.fake.hooks["delete"] = gone_then_fail
+    assert (await _run(ws, f"rm -r {r}/d"))[0] == 1
+    assert (await _run(ws, f"cat {r}/d/a"))[0] != 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("verb", ["cp", "mv"])
 async def test_a_destination_changed_during_its_clear_is_refused(
     drive, workspace, verb

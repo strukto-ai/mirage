@@ -19,6 +19,7 @@ from mirage.utils.key_prefix import (
     child_spec,
     mount_key,
     normalize,
+    outermost,
     rekey,
     strip_mount,
     under_path,
@@ -151,3 +152,11 @@ def test_child_spec_appends_to_the_vfs_key():
     assert child.vfs_path == "d/x"
     root = PathSpec(virtual="/m", directory="/", vfs_path="")
     assert child_spec(root, "x").vfs_path == "x"
+
+
+def test_outermost_keeps_the_paths_no_other_sits_below():
+    paths = [
+        PathSpec.from_str_path(p)
+        for p in ("/d/s", "/d", "/e", "/dx", "/d-x", "/d-x/y")
+    ]
+    assert [p.virtual for p in outermost(paths)] == ["/d", "/e", "/dx", "/d-x"]
