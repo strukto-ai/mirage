@@ -155,6 +155,8 @@ def _supplied_option(
     if token.startswith("--"):
         spelling, eq, _ = token.partition("=")
         arity = cs.nargs_by_dest.get(cs.dest_of(spelling))
+        if arity == 1 and eq:
+            return spelling, 1
         if arity is not None:
             return (
                 (spelling, arity + 1)
@@ -310,7 +312,7 @@ def node_help(
             canonical name, None to list every child. Help, man and
             generated skills use the reading session's visibility.
     """
-    if style is UsageStyle.ARGPARSE:
+    if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA):
         return argparse_help(
             name, listed_node(node, style), _rows(node, visible)
         )
@@ -363,7 +365,7 @@ def listed_node(
         return node
     names = (
         ("-h", "--help")
-        if style is UsageStyle.ARGPARSE
+        if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA)
         and not any("-h" in arg.names for arg in node.arguments)
         else ("--help",)
     )
@@ -803,7 +805,7 @@ def walk(
                 not options_ended
                 and token == "-h"
                 and node.add_help
-                and style is UsageStyle.ARGPARSE
+                and style in (UsageStyle.ARGPARSE, UsageStyle.COBRA)
                 and "-h" not in cs.dest
             ):
                 return WalkResult(
@@ -873,7 +875,9 @@ def walk(
                     _record_bool(flags, cs, spelling)
                 elif spelling in cs.long_value_spellings:
                     arity = cs.nargs_by_dest.get(cs.dest_of(spelling))
-                    if arity is not None:
+                    if arity == 1 and eq:
+                        _record_values(flags, cs, spelling, [attached])
+                    elif arity is not None:
                         if eq or i + arity >= len(argv):
                             return _usage_error(
                                 name,

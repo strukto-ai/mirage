@@ -1660,6 +1660,34 @@ describe('required operands and typed dests', () => {
     const spec = new CommandSpec({ arguments: [new Argument('PAGE_ID')] })
     expect(parseCommand(spec, [], '/').missingRequiredOperands).toEqual(['PAGE_ID'])
     expect(parseCommand(spec, ['abc'], '/').missingRequiredOperands).toEqual([])
+    for (const { nargs, words, prefix, paths } of [
+      { nargs: null, words: ['report.txt'], prefix: [], paths: ['/work/report.txt'] },
+      {
+        nargs: null,
+        words: ['prefix', 'report.txt'],
+        prefix: ['prefix'],
+        paths: ['/work/report.txt'],
+      },
+      { nargs: 2, words: ['a', 'b'], prefix: [], paths: ['/work/a', '/work/b'] },
+      { nargs: '+' as const, words: ['a'], prefix: [], paths: ['/work/a'] },
+      { nargs: '+' as const, words: ['prefix', 'a'], prefix: ['prefix'], paths: ['/work/a'] },
+    ]) {
+      const optional = new CommandSpec({
+        arguments: [
+          new Argument('prefix', { nargs: '?', choices: ['prefix'] }),
+          new Argument('FILE', { type: 'path', nargs }),
+        ],
+      })
+      const parsed = parseCommand(optional, words, '/work')
+      expect(parsed.missingRequiredOperands).toEqual([])
+      expect(parsed.texts()).toEqual(prefix)
+      expect(parsed.paths()).toEqual(paths)
+      expect(parsed.optionErrorKinds).toEqual([])
+      expect(parsed.wordKinds).toEqual([...prefix.map(() => 'str'), ...paths.map(() => 'path')])
+      expect(parseCommand(optional, [], '/work').missingRequiredOperands).toEqual(
+        Array<string>(typeof nargs === 'number' ? nargs : 1).fill('FILE'),
+      )
+    }
   })
 
   it('lets a flag that supplies a slot satisfy required', () => {
@@ -1670,6 +1698,17 @@ describe('required operands and typed dests', () => {
     })
     expect(parseCommand(spec, [], '/').missingRequiredOperands).toEqual(['PATTERN'])
     expect(parseCommand(spec, ['-e', 'x'], '/').missingRequiredOperands).toEqual([])
+    const withFile = new CommandSpec({
+      arguments: [
+        ...spec.arguments,
+        new Argument('prefix', { nargs: '?' }),
+        new Argument('FILE', { type: 'path' }),
+      ],
+    })
+    const supplied = parseCommand(withFile, ['-e', 'x', 'file.txt'], '/work')
+    expect(supplied.missingRequiredOperands).toEqual([])
+    expect(supplied.paths()).toEqual(['/work/file.txt'])
+    expect(supplied.texts()).toEqual([])
   })
 
   it('excludes defaults from typed dests and keeps scan order', () => {
@@ -1702,6 +1741,15 @@ describe('operandBase (tar -C)', () => {
     ])
     expect(parsed.flags['--file']).toBe('/home/out.tgz')
     expect(parsed.flags['--directory']).toEqual(['/work/check'])
+    for (const nargs of [1, 2, 3]) {
+      const invalid = new CommandSpec({
+        arguments: [new Argument('-C', { type: 'path', nargs })],
+        operandBase: '-C',
+      })
+      expect(() =>
+        parseCommand(invalid, ['-C', ...Array<string>(nargs).fill('directory')], '/'),
+      ).toThrow(/single-token path option/)
+    }
   })
 
   it('is cumulative like a real chdir', () => {
@@ -2091,21 +2139,27 @@ it.each([
   expect(parsed.optionErrorKinds).toEqual([])
 })
 
-it.each(['-p', '--point', '-vp', '-vp4'])(
-  'stores the last fixed-width occurrence with %s',
-  (spelling) => {
-    const spec = new CommandSpec({
-      arguments: [
-        new Argument(['-p', '--point'], { nargs: 3 }),
-        new Argument('-v', { action: 'store_true' }),
-      ],
-    })
-    const values = spelling.endsWith('4') ? ['5', '6'] : ['4', '5', '6']
-    const parsed = parseCommand(spec, ['--point', '1', '2', '3', spelling, ...values], '/')
-    expect(parsed.flags['--point']).toEqual(['4', '5', '6'])
-    expect(parsed.flags['-v'] ?? false).toBe(spelling.startsWith('-v'))
-  },
-)
+it.each([
+  { nargs: 3, words: ['-p', '4', '5', '6'], expected: ['4', '5', '6'] },
+  { nargs: 3, words: ['--point', '4', '5', '6'], expected: ['4', '5', '6'] },
+  { nargs: 3, words: ['-vp', '4', '5', '6'], expected: ['4', '5', '6'] },
+  { nargs: 3, words: ['-vp4', '5', '6'], expected: ['4', '5', '6'] },
+  { nargs: 1, words: ['--point=4'], expected: ['4'] },
+  { nargs: 1, words: ['--po=4'], expected: ['4'] },
+  { nargs: 1, words: ['--point='], expected: [''] },
+  { nargs: 1, words: ['--point', '4'], expected: ['4'] },
+])('stores the last fixed-width occurrence with $words', ({ nargs, words, expected }) => {
+  const spec = new CommandSpec({
+    arguments: [
+      new Argument(['-p', '--point'], { nargs }),
+      new Argument('-v', { action: 'store_true' }),
+    ],
+  })
+  const parsed = parseCommand(spec, ['--point', ...Array<string>(nargs).fill('1'), ...words], '/')
+  expect(parsed.flags['--point']).toEqual(expected)
+  expect(parsed.flags['-v'] ?? false).toBe(words[0]?.startsWith('-v'))
+  expect(parsed.optionErrorKinds).toEqual([])
+})
 
 it('stores and extends fixed-width values with per-word path classification', () => {
   const spec = new CommandSpec({
@@ -2114,6 +2168,14 @@ it('stores and extends fixed-width values with per-word path classification', ()
   const parsed = parseCommand(spec, ['--files', 'a', 'b', '--files', 'c', 'd'], '/work')
   expect(parsed.flags['--files']).toEqual(['/work/a', '/work/b', '/work/c', '/work/d'])
   expect(parsed.pathFlagValues).toEqual(parsed.flags['--files'])
+  const single = new CommandSpec({
+    arguments: [new Argument('--files', { nargs: 1, action: 'extend', type: 'path' })],
+  })
+  const attached = parseCommand(single, ['--files=a', '--files=b'], '/work')
+  expect(attached.flags).toEqual({ '--files': ['/work/a', '/work/b'] })
+  expect(attached.pathFlagValues).toEqual(['/work/a', '/work/b'])
+  expect(attached.wordKinds).toEqual(['str', 'str'])
+  expect(attached.optionErrorKinds).toEqual([])
 })
 
 it.each([

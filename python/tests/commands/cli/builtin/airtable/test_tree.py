@@ -16,9 +16,8 @@ import pytest
 
 from mirage.commands.cli.builtin.airtable import AIRTABLE
 from mirage.commands.cli.specs import cli_spec_for
-from mirage.commands.cli.types import CLI
 from mirage.commands.spec.compile import compile_spec
-from mirage.commands.spec.types import UsageStyle
+from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.core.airtable.config import AirtableConfig
 from tests.fixtures.airtable_api import FEATURES, OPS, ROADMAP, TOKEN
 
@@ -37,7 +36,7 @@ WRITES = {
 }
 
 
-def leaf(*path: str) -> CLI:
+def leaf(*path: str) -> CommandSpec:
     node = AIRTABLE.spec
     for name in path:
         node = next(c for c in node.subcommands if c.name == name)

@@ -164,8 +164,9 @@ bookkeeping and `seed_var` are exempt.
 `commands/spec/`: one `Argument` for options and positionals and one
 `CommandSpec` for flat commands and subcommand trees. `parse_command`,
 `compile_spec`, `FlagView`, help, usage and GNU option prefixes.
-`UsageStyle` (`ARGPARSE`, `GIT`, `CLAP`) on the root spec sets help layout,
-refusal wording and exit code. `operand_base` (tar `-C`) is resolved by the
+`UsageStyle` (`ARGPARSE`, `GIT`, `CLAP`, `COBRA`) on the root spec sets help layout,
+refusal wording and exit code; `COBRA` leaves missing positionals to handlers.
+`operand_base` (tar `-C`) is resolved by the
 parser, before classification.
 
 ### CLI

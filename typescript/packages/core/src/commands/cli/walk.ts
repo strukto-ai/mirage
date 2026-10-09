@@ -99,6 +99,7 @@ function suppliedOption(
     const eq = token.indexOf('=')
     const spelling = eq === -1 ? token : token.slice(0, eq)
     const width = cs.nargsByDest.get(cs.destOf(spelling))
+    if (width === 1 && eq !== -1) return [spelling, 1]
     if (width !== undefined)
       return eq === -1 && following.length >= width ? [spelling, width + 1] : null
     if (cs.longOptionalSpellings.has(spelling)) {
@@ -268,7 +269,7 @@ export function nodeHelp(
   style: UsageStyle = UsageStyle.ARGPARSE,
   visible?: (verb: string) => boolean,
 ): string {
-  if (style === UsageStyle.ARGPARSE)
+  if (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA)
     return argparseHelp(name, listedNode(node, style), rowsOf(node, visible))
   return renderHelp(name, listedNode(node, style), rowsOf(node, visible), style)
 }
@@ -297,7 +298,7 @@ export function listedNode(
   if (!node.addHelp || node.arguments.some((argument) => argument.names.includes('--help')))
     return node
   const names =
-    style === UsageStyle.ARGPARSE &&
+    (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA) &&
     !node.arguments.some((argument) => argument.names.includes('-h'))
       ? ['-h', '--help']
       : ['--help']
@@ -673,7 +674,7 @@ export function walk(
         !optionsEnded &&
         node.addHelp &&
         token === '-h' &&
-        style === UsageStyle.ARGPARSE &&
+        (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA) &&
         !cs.dest.has('-h')
       ) {
         return new WalkResult({
@@ -728,7 +729,9 @@ export function walk(
         } else if (cs.longValueSpellings.has(spelling)) {
           const next = argv[i + 1]
           const width = cs.nargsByDest.get(cs.destOf(spelling))
-          if (width !== undefined) {
+          if (width === 1 && attached !== null) {
+            recordValues(flags, cs, spelling, [attached])
+          } else if (width !== undefined) {
             if (attached !== null)
               return usageError(name, node, `unknown option: ${token}`, style, token)
             if (argv.length - i - 1 < width)
@@ -780,6 +783,7 @@ export function walk(
           const spelling = `-${token.charAt(j)}`
           if (
             cs.detachedOptionalSpellings.has(spelling) ||
+            (cs.attachSpellings.includes(spelling) && j + 1 < token.length) ||
             (!cs.boolSpellings.has(spelling) && cs.dest.has(spelling))
           ) {
             const matched = matchShort(

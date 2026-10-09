@@ -15,7 +15,6 @@
 import importlib
 from typing import TYPE_CHECKING, Any
 
-from mirage.commands.spec.types import CommandSpec
 from mirage.version import __version__ as __version__
 
 # The authoring surface: what a host reaches for to bring its own

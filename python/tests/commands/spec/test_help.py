@@ -12,7 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.help import option_metavar, render_help
+from mirage.commands.spec.builtin_specs import SPECS
+from mirage.commands.spec.help import (
+    argparse_help,
+    option_metavar,
+    render_help,
+)
 from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 
 
@@ -21,6 +26,15 @@ def test_renders_name_description_usage_and_flags():
         description="Send a thing.",
         arguments=(
             Argument("--to", nargs=3, help="Recipient"),
+            Argument("--files", type="path", nargs=2, action="extend"),
+            Argument(
+                "--inputs",
+                type="path",
+                nargs=2,
+                action="extend",
+                metavar="FILE",
+            ),
+            Argument("--labels", nargs=2, action="extend"),
             Argument(
                 "-h",
                 "--help",
@@ -36,6 +50,23 @@ def test_renders_name_description_usage_and_flags():
     assert "--to <text> <text> <text>" in out
     assert "Recipient" in out
     assert "-h, --help, --usage" in out
+    argparse = argparse_help("gws thing send", spec)
+    for flag, generic, named in (
+        ("--files", "<path> <path>", "FILES FILES"),
+        ("--inputs", "<FILE> <FILE>", "FILE FILE"),
+        ("--labels", "<text> <text>", "LABELS LABELS"),
+    ):
+        assert f"{flag} {generic}" in out
+        assert f"{flag} {named}" in argparse
+    jq = SPECS["jq"]
+    for flag, value in (
+        ("--arg", "text"),
+        ("--argjson", "text"),
+        ("--rawfile", "path"),
+        ("--slurpfile", "path"),
+    ):
+        assert f"{flag} <name> <{value}>" in render_help("jq", jq)
+        assert f"{flag} NAME {flag[2:].upper()}" in argparse_help("jq", jq)
 
 
 def test_falls_back_to_bare_name_without_description():

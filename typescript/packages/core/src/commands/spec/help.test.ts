@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
+import { specOf } from './builtins.ts'
 import { argparseHelp, optionMetavar, renderHelp } from './help.ts'
 import { CommandSpec, Argument, UsageStyle } from './types.ts'
 
@@ -21,6 +22,9 @@ describe('renderHelp', () => {
       description: 'Send a thing.',
       arguments: [
         new Argument('--to', { nargs: 3, help: 'Recipient' }),
+        new Argument('--files', { type: 'path', nargs: 2, action: 'extend' }),
+        new Argument('--inputs', { type: 'path', nargs: 2, action: 'extend', metavar: 'FILE' }),
+        new Argument('--labels', { nargs: 2, action: 'extend' }),
         new Argument(['-h', '--help', '--usage'], { action: 'store_true', help: 'Show help' }),
         new Argument('--color', { nargs: '?' }),
         new Argument('--backup', { nargs: '?', attachedOnly: true }),
@@ -36,6 +40,24 @@ describe('renderHelp', () => {
     expect(help).toContain('--to TO TO TO')
     expect(help).toContain('--color [COLOR]')
     expect(help).toContain('--backup[=BACKUP]')
+    for (const [flag, generic, named] of [
+      ['--files', '<path> <path>', 'FILES FILES'],
+      ['--inputs', '<FILE> <FILE>', 'FILE FILE'],
+      ['--labels', '<text> <text>', 'LABELS LABELS'],
+    ] as const) {
+      expect(out).toContain(`${flag} ${generic}`)
+      expect(help).toContain(`${flag} ${named}`)
+    }
+    const jq = specOf('jq')
+    for (const [flag, value] of [
+      ['--arg', 'text'],
+      ['--argjson', 'text'],
+      ['--rawfile', 'path'],
+      ['--slurpfile', 'path'],
+    ] as const) {
+      expect(renderHelp('jq', jq)).toContain(`${flag} <name> <${value}>`)
+      expect(argparseHelp('jq', jq)).toContain(`${flag} NAME ${flag.slice(2).toUpperCase()}`)
+    }
   })
 
   it('falls back to bare name when description is null', () => {

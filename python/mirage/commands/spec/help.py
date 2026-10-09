@@ -64,9 +64,9 @@ def operand_slot(operand: Argument, ellipsis: bool = False) -> str:
 def _value_label(opt: Argument) -> str:
     if opt.action in ("store_true", "count"):
         return ""
-    # A pair option takes two tokens, and the first one names the value.
-    value = "<path>" if opt.type == "path" else "<text>"
-    if opt.nargs == 2 and opt.action == "extend":
+    kind = "path" if opt.type == "path" else "text"
+    value = f"<{opt.metavar if opt.metavar is not None else kind}>"
+    if opt.value_types:
         return f" <name> {value}"
     if isinstance(opt.nargs, int):
         return f" {value}" * opt.nargs
@@ -279,7 +279,7 @@ def argparse_help(
             else option_metavar(opt)
         )
         suffix = "" if opt.action in ("store_true", "count") else " " + value
-        if opt.nargs == 2 and opt.action == "extend":
+        if opt.value_types:
             suffix = " NAME " + value
         elif isinstance(opt.nargs, int):
             suffix = (" " + value) * opt.nargs

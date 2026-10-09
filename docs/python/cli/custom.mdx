@@ -238,7 +238,7 @@ and [`CommandSpec` and `Argument`](https://github.com/strukto-ai/mirage/blob/mai
 | `subcommands` | Child nodes for a group. |
 | `arguments` | Options and positional arguments; group options are inherited by leaves. |
 | `description`, `epilog` | Help text and trailing help text. |
-| `usage_style` | Root help and refusal dialect: argparse, Git or clap. |
+| `usage_style` | Root help and refusal dialect: argparse, Git, clap or Cobra. Cobra keeps standard help and option errors; handlers own missing positional refusals. |
 | `allow_abbrev` | Whether unique long-option prefixes are accepted. |
 
 ### `Argument`

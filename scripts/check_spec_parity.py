@@ -34,6 +34,7 @@ EXCEPTIONS = ROOT / "scripts" / "parity" / "parity_exceptions.json"
 
 BY_VFS = "_meta.by_vfs"
 BY_VFS_KEYS = "_meta.by_vfs.keys"
+NODE_ONLY_CLIS = {"hf", "himalaya"}
 
 
 def spec_fields(py: dict[str, Any], ts: dict[str, Any]) -> list[str]:
@@ -135,9 +136,14 @@ def check_cli_specs(trees: dict[str, dict[str, Any]]) -> list[str]:
             f"CLI inventory: python-only={sorted(set(py) - ts_names)}, "
             f"typescript-only={sorted(ts_names - set(py))}"
         )
-    browser_only = set(variants["browser"]) - ts_names
-    if browser_only:
-        failures.append(f"CLI inventory: browser-only={sorted(browser_only)}")
+    browser_names = set(variants["browser"])
+    expected_browser = ts_names - NODE_ONLY_CLIS
+    if browser_names != expected_browser:
+        failures.append(
+            "CLI inventory: "
+            f"browser-missing={sorted(expected_browser - browser_names)}, "
+            f"browser-only={sorted(browser_names - expected_browser)}"
+        )
     for host, programs in variants.items():
         for name in sorted(py.keys() & programs.keys()):
             failures.extend(

@@ -30,7 +30,7 @@ from mirage.commands.cli.builtin.gh.types import RepoEditField
 from mirage.commands.cli.builtin.gh.version import version
 from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
 from mirage.commands.cli.walk import find_child, node_help
-from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.core.github.config import GhConfig
 from mirage.io.types import IOResult
 
@@ -658,6 +658,7 @@ GH = CLI(
     spec=CommandSpec(
         name="gh",
         description="GitHub CLI",
+        usage_style=UsageStyle.COBRA,
         subcommands=(
             CommandSpec(
                 name="auth",

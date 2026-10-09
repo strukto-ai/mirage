@@ -1581,6 +1581,33 @@ def test_required_operand_is_reported_not_raised():
     filled = parse_command(spec, ["abc"], "/")
     assert filled.missing_required_operands == []
 
+    for nargs, words, prefix, paths in (
+        (None, ["report.txt"], [], ["/work/report.txt"]),
+        (None, ["prefix", "report.txt"], ["prefix"], ["/work/report.txt"]),
+        (2, ["a", "b"], [], ["/work/a", "/work/b"]),
+        ("+", ["a"], [], ["/work/a"]),
+        ("+", ["prefix", "a"], ["prefix"], ["/work/a"]),
+    ):
+        optional = CommandSpec(
+            arguments=(
+                Argument("prefix", nargs="?", choices=("prefix",)),
+                Argument("FILE", type="path", nargs=nargs),
+            )
+        )
+        parsed = parse_command(optional, words, "/work")
+        assert parsed.missing_required_operands == []
+        assert parsed.texts() == prefix
+        assert parsed.paths() == paths
+        assert parsed.option_error_kinds == []
+        assert parsed.word_kinds == ["str"] * len(prefix) + ["path"] * len(
+            paths
+        )
+        assert parse_command(
+            optional, [], "/work"
+        ).missing_required_operands == ["FILE"] * (
+            nargs if isinstance(nargs, int) else 1
+        )
+
 
 def test_a_flag_that_supplies_a_slot_satisfies_required():
     # provided_by is the declarative form of grep's `if (!pattern_given)`:
@@ -1596,6 +1623,17 @@ def test_a_flag_that_supplies_a_slot_satisfies_required():
     ]
     supplied = parse_command(spec, ["-e", "x"], "/")
     assert supplied.missing_required_operands == []
+    with_file = CommandSpec(
+        arguments=(
+            *spec.arguments,
+            Argument("prefix", nargs="?"),
+            Argument("FILE", type="path"),
+        )
+    )
+    supplied = parse_command(with_file, ["-e", "x", "file.txt"], "/work")
+    assert supplied.missing_required_operands == []
+    assert supplied.paths() == ["/work/file.txt"]
+    assert supplied.texts() == []
 
 
 def test_typed_dests_exclude_defaults_and_keep_scan_order():
@@ -1624,6 +1662,13 @@ def test_operand_base_rebases_the_operands_typed_after_it():
     assert parsed.paths() == ["/work/check/my_paper"]
     assert parsed.flags["--file"] == "/home/out.tgz"
     assert parsed.flags["--directory"] == ["/work/check"]
+    for nargs in (1, 2, 3):
+        invalid = CommandSpec(
+            arguments=(Argument("-C", type="path", nargs=nargs),),
+            operand_base="-C",
+        )
+        with pytest.raises(ValueError, match="single-token path option"):
+            parse_command(invalid, ["-C", *(["directory"] * nargs)], "/")
 
 
 def test_operand_base_is_cumulative_like_a_real_chdir():
@@ -1951,20 +1996,30 @@ def test_seq_options_end_at_its_first_operand(argv, texts):
     assert parsed.option_error_kinds == []
 
 
-@pytest.mark.parametrize("spelling", ["-p", "--point", "-vp", "-vp4"])
-def test_fixed_nargs_store_replaces_the_previous_list(spelling):
+@pytest.mark.parametrize(
+    "nargs, words, expected",
+    [
+        (3, ["-p", "4", "5", "6"], ["4", "5", "6"]),
+        (3, ["--point", "4", "5", "6"], ["4", "5", "6"]),
+        (3, ["-vp", "4", "5", "6"], ["4", "5", "6"]),
+        (3, ["-vp4", "5", "6"], ["4", "5", "6"]),
+        (1, ["--point=4"], ["4"]),
+        (1, ["--po=4"], ["4"]),
+        (1, ["--point="], [""]),
+        (1, ["--point", "4"], ["4"]),
+    ],
+)
+def test_fixed_nargs_store_replaces_the_previous_list(nargs, words, expected):
     spec = CommandSpec(
         arguments=(
-            Argument("-p", "--point", nargs=3),
+            Argument("-p", "--point", nargs=nargs),
             Argument("-v", action="store_true"),
         )
     )
-    values = ["5", "6"] if spelling.endswith("4") else ["4", "5", "6"]
-    parsed = parse_command(
-        spec, ["--point", "1", "2", "3", spelling, *values], "/"
-    )
-    assert parsed.flags["--point"] == ["4", "5", "6"]
-    assert parsed.flags.get("-v", False) == spelling.startswith("-v")
+    parsed = parse_command(spec, ["--point", *(["1"] * nargs), *words], "/")
+    assert parsed.flags["--point"] == expected
+    assert parsed.flags.get("-v", False) == words[0].startswith("-v")
+    assert parsed.option_error_kinds == []
 
 
 def test_fixed_nargs_extend_and_path_classification():
@@ -1983,6 +2038,14 @@ def test_fixed_nargs_extend_and_path_classification():
         "/work/c",
         "/work/d",
     ]
+    single = CommandSpec(
+        arguments=(Argument("--files", nargs=1, action="extend", type="path"),)
+    )
+    attached = parse_command(single, ["--files=a", "--files=b"], "/work")
+    assert attached.flags == {"--files": ["/work/a", "/work/b"]}
+    assert attached.path_flag_values == ["/work/a", "/work/b"]
+    assert attached.word_kinds == ["str", "str"]
+    assert attached.option_error_kinds == []
 
 
 @pytest.mark.parametrize(

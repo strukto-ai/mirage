@@ -784,8 +784,7 @@ export function parseCommand(
       }
       const etok = eqPos === -1 ? spelling : spelling + tok.slice(eqPos)
       const dest = cs.destOf(spelling)
-      const width = cs.nargsByDest.get(dest) ?? 1
-      const isPair = cs.nargsByDest.has(dest)
+      const width = cs.nargsByDest.get(dest)
       if (cs.longBoolSpellings.has(etok)) {
         const next = scanArgv[i + 1]
         if (
@@ -800,22 +799,28 @@ export function parseCommand(
           setBoolFlag(flags, cs, etok)
           i += 1
         }
-      } else if (isPair && eqPos === -1 && i + width < scanArgv.length) {
+      } else if (width === 1 && eqPos !== -1) {
+        i += recordValues(spelling, width, tok.slice(eqPos + 1))
+      } else if (width !== undefined && eqPos === -1 && i + width < scanArgv.length) {
         i += recordValues(spelling, width)
-      } else if (!isPair && cs.longValueSpellings.has(etok) && i + 1 < scanArgv.length) {
+      } else if (
+        width === undefined &&
+        cs.longValueSpellings.has(etok) &&
+        i + 1 < scanArgv.length
+      ) {
         setValueFlag(flags, refusals, cs, argmatchDestSet, etok, scanArgv[i + 1] ?? '')
         wordKinds[scanOrigins[i + 1] ?? -1] = cs.kindOf.get(etok) ?? null
         if (cs.destOf(etok) === cs.baseDest) wordBases[scanOrigins[i + 1] ?? -1] = base
         base = rebase(flags, cs, etok, scanArgv[i + 1] ?? '', base)
         i += 2
-      } else if (isPair) {
+      } else if (width !== undefined) {
         if (eqPos === -1) {
           if (!refusedOnTape(spelling)) {
             needsValueOptions.push(spelling)
             optionErrorKinds.push('needs_value')
           }
         } else if (!refusedOnTape(tok)) {
-          // A two-token option has no `=` form (jq refuses `--arg=name`
+          // Multi-value options have no `=` form (jq refuses `--arg=name`
           // as an unknown option).
           invalidOptions.push(tok)
           optionErrorKinds.push('invalid')
@@ -1116,9 +1121,19 @@ export function parseCommand(
 
   const missingRequiredOptions = cs.requiredDests.filter((destName) => !(destName in flags))
 
-  const supplying = cs.positional.filter(
+  const slots = cs.positional.filter(
     (op) => !op.providedBy.some((name) => cs.destOf(name) in flags),
   )
+  let required =
+    slots.filter(positionalRequired).length +
+    Number(cs.rest !== null && positionalRequired(cs.rest))
+  // An optional slot can consume only words not needed by required slots.
+  const supplying: Argument[] = []
+  for (const op of slots) {
+    if (positionalRequired(op)) required -= 1
+    else if (rawArgs.length - supplying.length <= required) continue
+    supplying.push(op)
+  }
   const positional: ValueType[] = supplying.map((op) => op.type)
 
   // A required slot the line left empty. Counted against the surviving slots

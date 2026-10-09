@@ -357,12 +357,14 @@ SPECS: dict[str, CommandSpec] = {
                 "--arg",
                 action="extend",
                 nargs=2,
+                value_types=("str", "str"),
                 help="Set $name to a string value",
             ),
             Argument(
                 "--argjson",
                 action="extend",
                 nargs=2,
+                value_types=("str", "str"),
                 help="Set $name to a JSON value",
             ),
             Argument(

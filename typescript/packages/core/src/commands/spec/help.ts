@@ -48,9 +48,8 @@ export function operandSlot(operand: Argument, ellipsis = false): string {
 
 function valueLabel(opt: Argument): string {
   if (opt.action === 'store_true' || opt.action === 'count') return ''
-  // A pair option takes two tokens, and the first one names the value.
-  const value = opt.type === 'path' ? '<path>' : '<text>'
-  if (opt.nargs === 2 && opt.action === 'extend') return ` <name> ${value}`
+  const value = `<${opt.metavar ?? (opt.type === 'path' ? 'path' : 'text')}>`
+  if (opt.valueTypes.length > 0) return ` <name> ${value}`
   return ` ${value}`.repeat(typeof opt.nargs === 'number' ? opt.nargs : 1)
 }
 
@@ -205,7 +204,7 @@ export function argparseHelp(
     const value =
       opt.metavar ?? (opt.choices.length > 0 ? `{${opt.choices.join(',')}}` : optionMetavar(opt))
     let suffix = opt.action === 'store_true' || opt.action === 'count' ? '' : ` ${value}`
-    if (opt.nargs === 2 && opt.action === 'extend') suffix = ` NAME ${value}`
+    if (opt.valueTypes.length > 0) suffix = ` NAME ${value}`
     else if (typeof opt.nargs === 'number') suffix = ` ${value}`.repeat(opt.nargs)
     if (opt.nargs === '?') suffix = opt.attachedOnly ? `[=${value}]` : ` [${value}]`
     const flags = opt.names.map((flag) => `${flag}${suffix}`).join(', ')

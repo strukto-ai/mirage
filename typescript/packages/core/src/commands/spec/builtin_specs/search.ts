@@ -127,8 +127,18 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'Read and write RS-delimited JSON text sequences',
       }),
-      new Argument('--arg', { action: 'extend', nargs: 2, help: 'Set $name to a string value' }),
-      new Argument('--argjson', { action: 'extend', nargs: 2, help: 'Set $name to a JSON value' }),
+      new Argument('--arg', {
+        action: 'extend',
+        nargs: 2,
+        valueTypes: ['str', 'str'],
+        help: 'Set $name to a string value',
+      }),
+      new Argument('--argjson', {
+        action: 'extend',
+        nargs: 2,
+        valueTypes: ['str', 'str'],
+        help: 'Set $name to a JSON value',
+      }),
       new Argument('--rawfile', {
         action: 'extend',
         nargs: 2,

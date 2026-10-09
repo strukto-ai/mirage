@@ -88,6 +88,31 @@ describe('handleCli', () => {
     // $PWD is exported, so a CLI subprocess inherits it as bash's would.
     expect(inv?.env).toEqual({ EDITOR: 'vi', PWD: '/' })
     expect(node.command).toBe('prog -vv message send -t #eng hello world')
+    const pathsInstall: CLIInstall = {
+      name: 'paths',
+      config: { token: 'tok' },
+      cli: new CLI({
+        spec: new CommandSpec({
+          name: 'paths',
+          arguments: [
+            new Argument('prefix', { nargs: '?' }),
+            new Argument('FILE', { type: 'path' }),
+          ],
+        }),
+        handlers: { '': new CLIHandler({ fn: send }) },
+      }),
+    }
+    for (const words of [['report.txt'], ['prefix', 'report.txt']]) {
+      const [, result] = await handleCli(
+        pathsInstall,
+        ['paths', ...words],
+        new SessionState({ sessionId: 'paths', cwd: '/work' }),
+      )
+      expect(result.exitCode).toBe(0)
+      const received = calls.pop()
+      expect(received?.texts).toEqual(words.slice(0, -1))
+      expect(received?.paths.map((path) => path.virtual)).toEqual(['/work/report.txt'])
+    }
   })
 
   it('refuses an unknown verb with git wording, exit 1', async () => {
@@ -953,11 +978,12 @@ it.each([
   ['?', UsageStyle.ARGPARSE, 0],
   ['*', UsageStyle.ARGPARSE, 0],
   [null, UsageStyle.GIT, 7],
+  [null, UsageStyle.COBRA, 1],
 ] as const)('handles missing positional arity %j in %s', async (nargs, usageStyle, expected) => {
-  const fn = vi.fn((): [null, IOResult] => [
-    null,
-    new IOResult({ exitCode: usageStyle === UsageStyle.GIT ? 7 : 0 }),
-  ])
+  const fn = vi.fn((): [null, IOResult] => {
+    if (usageStyle === UsageStyle.COBRA) throw new Error('handler requires ID')
+    return [null, new IOResult({ exitCode: usageStyle === UsageStyle.GIT ? 7 : 0 })]
+  })
   const cli = new CLI({
     spec: new CommandSpec({
       name: 'tool',
@@ -970,6 +996,13 @@ it.each([
   const session = new SessionState({ sessionId: 'arity' })
   const [stdout, io] = await handleCli(install, ['renamed', 'run'], session)
   expect(io.exitCode).toBe(expected)
+  if (usageStyle === UsageStyle.COBRA) {
+    expect(stdout).toBeNull()
+    expect(dec.decode(await materialize(io.stderr))).toBe('renamed run: handler requires ID\n')
+    const [help, helped] = await handleCli(install, ['renamed', 'run', '-h'], session)
+    expect(helped.exitCode).toBe(0)
+    expect(dec.decode(await materialize(help))).toMatch(/^usage: renamed run \[-h\] ID\n/)
+  }
   if (expected !== 2) expect(fn).toHaveBeenCalledOnce()
   else {
     expect(stdout).toBeNull()

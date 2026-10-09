@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.walk import node_help
+from mirage.commands.cli.walk import node_help, owns_argv
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.context import effective_path_mode
 from mirage.types import MountMode
@@ -118,11 +118,6 @@ def cli_pages(
         + 1,
     )
     pages = [f"## `{name}`\n\n{fence}text\n{help_text}\n{fence}"]
-    if not node.add_help:
-        pages.append(
-            "This program parses its own arguments; "
-            "only its registered description is available here."
-        )
     for child in node.subcommands:
         pages.extend(
             cli_pages(head, child, session, style, (*path, child.name))
@@ -148,14 +143,18 @@ def skill_md(registry: MountRegistry, session: SessionState) -> str:
     ]
     for head, install in sorted(registry.clis.items().items()):
         if command_visible(head, session):
-            parts.extend(
-                cli_pages(
-                    head,
-                    install.cli.spec,
-                    session,
-                    install.cli.spec.usage_style,
-                )
+            pages = cli_pages(
+                head,
+                install.cli.spec,
+                session,
+                install.cli.spec.usage_style,
             )
+            parts.extend(pages)
+            if pages and owns_argv(install.cli):
+                parts.append(
+                    "This program parses its own arguments; "
+                    "only its registered description is available here."
+                )
     if len(parts) == 3:
         parts.append("No registered CLIs are visible in this session.")
     return "\n\n".join(parts) + "\n"

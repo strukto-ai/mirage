@@ -67,6 +67,10 @@ export type ValueType = 'bool' | 'str' | 'int' | 'float' | 'path'
  * leaving each leaf to word its own complaint. Those are one decision (whose
  * voice this is), so they read off this knob rather than a second one.
  *
+ * COBRA keeps standard help and option errors, while handlers own missing
+ * positional refusals for programs such as gh. It does not reproduce Cobra's
+ * full help formatting.
+ *
  * It lives in the spec layer, not beside the CLI tree, because the help
  * renderer is the spec's and cannot import upward to reach it.
  */
@@ -74,6 +78,7 @@ export enum UsageStyle {
   ARGPARSE = 'argparse',
   GIT = 'git',
   CLAP = 'clap',
+  COBRA = 'cobra',
 }
 
 export type ArgumentAction = 'store' | 'store_true' | 'count' | 'append' | 'extend'
@@ -97,7 +102,10 @@ export interface ArgumentInit {
   valueTypes?: readonly ValueType[]
 }
 
-/** An option spelling or positional destination, using argparse actions and arity. */
+/**
+ * An option spelling or positional destination, using argparse actions and arity.
+ * `valueTypes` describes named value pairs such as jq's name/value and name/file.
+ */
 export class Argument {
   readonly names: readonly string[]
   readonly type: ValueType

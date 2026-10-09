@@ -100,9 +100,16 @@ describe('walk', () => {
     expect(text(result.output)).toContain('commands:')
   })
 
-  it('prints the same usage for --help with exit 0', () => {
-    const bare = walk('gws', tree(), [])
-    const helped = walk('gws', tree(), ['--help'])
+  it.each([
+    [UsageStyle.ARGPARSE, '--help'],
+    [UsageStyle.ARGPARSE, '-h'],
+    [UsageStyle.COBRA, '--help'],
+    [UsageStyle.COBRA, '-h'],
+  ] as const)('prints the same usage for %s %s with exit 0', (usageStyle, flag) => {
+    // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
+    const spec = new CommandSpec({ ...tree(), usageStyle })
+    const bare = walk('gws', spec, [])
+    const helped = walk('gws', spec, [flag])
     expect(helped.exitCode).toBe(0)
     expect(helped.stream).toBe('stdout')
     expect(text(helped.output)).toBe(text(bare.output))
@@ -692,9 +699,10 @@ const ARITY_TREE = new CommandSpec({
   arguments: [
     new Argument(['-p', '--pair'], { nargs: 2, env: 'PAIR' }),
     new Argument('-v', { action: 'count' }),
+    new Argument('--output', { nargs: 1, type: 'path', env: 'OUTPUT' }),
     new Argument('-q', { action: 'store_true' }),
     new Argument(['-c', '--color'], { nargs: '?', env: 'COLOR' }),
-    new Argument('--gnu', { nargs: '?', attachedOnly: true }),
+    new Argument(['-g', '--gnu'], { nargs: '?', attachedOnly: true }),
     new Argument('--file', {
       nargs: 2,
       action: 'extend',
@@ -749,6 +757,16 @@ it('stores or extends fixed-width group values and resolves mixed path values', 
     'second',
     PathSpec.fromStrPath('b.txt', undefined, '/work'),
   ])
+  for (const [word, path] of [
+    ['--output=x', '/work/x'],
+    ['--out=x', '/work/x'],
+    ['--output=', '/work'],
+  ]) {
+    const attached = walk('tool', ARITY_TREE, [word ?? '', 'run'], '/work')
+    expect(attached.leaf?.name).toBe('run')
+    expect(attached.groupFlags['--output']).toMatchObject([{ virtual: path }])
+    expect(attached.argv).toEqual([])
+  }
 })
 
 it.each([
@@ -767,6 +785,14 @@ it.each([
 
 it('retains attached-only group values and refuses incomplete fixed widths', () => {
   expect(walk('tool', ARITY_TREE, ['--gnu', 'run']).groupFlags['--gnu']).toBe(true)
+  for (const [word, value] of [
+    ['-vgauto', 'auto'],
+    ['-vg', true],
+  ] as const) {
+    const result = walk('tool', ARITY_TREE, [word, 'run'])
+    expect(result.leaf?.name).toBe('run')
+    expect(result.groupFlags).toEqual({ '-v': 1, '--gnu': value })
+  }
   for (const argv of [['--pair', 'a'], ['-pa'], ['--pair=a', 'b', 'run']]) {
     const result = walk('tool', ARITY_TREE, argv)
     expect(result.leaf).toBeNull()
@@ -781,6 +807,9 @@ it('tracks supplied environment values across group argument widths', () => {
   ])
     expect(suppliedEnvNames(ARITY_TREE, argv)).toEqual(new Set(['PAIR', 'COLOR', 'TOKEN']))
   expect(suppliedEnvNames(ARITY_TREE, ['--pair', 'a'])).toEqual(new Set())
+  expect(suppliedEnvNames(ARITY_TREE, ['--output=x', 'run', '--token', 'secret'])).toEqual(
+    new Set(['OUTPUT', 'TOKEN']),
+  )
 })
 
 it('honors addHelp and allowAbbrev on groups', () => {

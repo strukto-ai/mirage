@@ -108,11 +108,11 @@ def argument_shapes(
                 raise ValueError(
                     "multi-value options use action='extend' or 'store'"
                 )
-            if argument.value_types and argument.value_types != (
-                "str",
-                "path",
+            if argument.value_types and argument.value_types not in (
+                ("str", "str"),
+                ("str", "path"),
             ):
-                raise ValueError("value_types supports the text/path pair")
+                raise ValueError("value_types supports named text/path pairs")
             if argument.value_types and argument.nargs != 2:
                 raise ValueError("value_types requires nargs=2")
             if argument.attached_only and argument.nargs != "?":
@@ -454,7 +454,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     kind_by_dest: dict[str, ValueType] = {}
     dest: dict[str, str] = {}
     multiple_dests: set[str] = set()
-    pair_dests: set[str] = set()
+    nargs_by_dest: dict[str, int] = {}
     count_dests: set[str] = set()
     choices_by_dest: dict[str, tuple[str, ...]] = {}
     required_dests: list[str] = []
@@ -505,8 +505,8 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
             kind_by_dest[canonical] = opt.type
         if opt.action in ("append", "extend"):
             multiple_dests.add(canonical)
-        if opt.nargs == 2:
-            pair_dests.add(canonical)
+        if isinstance(opt.nargs, int):
+            nargs_by_dest[canonical] = opt.nargs
         if opt.action == "count":
             count_dests.add(canonical)
         if opt.choices:
@@ -560,7 +560,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
             raise ValueError(
                 f"operand_base {spec.operand_base!r} is not a declared option"
             )
-        if kind_by_dest.get(base_dest) != "path" or base_dest in pair_dests:
+        if kind_by_dest.get(base_dest) != "path" or base_dest in nargs_by_dest:
             raise ValueError(
                 f"operand_base {spec.operand_base!r} must be a "
                 "single-token path option"
@@ -575,11 +575,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         options=options,
         positional=positional,
         rest=rest,
-        nargs_by_dest={
-            argument_dest(opt): opt.nargs
-            for opt in options
-            if isinstance(opt.nargs, int)
-        },
+        nargs_by_dest=nargs_by_dest,
         value_types_by_dest={
             argument_dest(opt): opt.value_types
             for opt in options

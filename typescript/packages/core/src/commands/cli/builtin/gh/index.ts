@@ -24,7 +24,7 @@ import { findChild, nodeHelp } from '../../walk.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { Argument } from '../../../spec/types.ts'
+import { Argument, UsageStyle } from '../../../spec/types.ts'
 import { api } from './api.ts'
 import { status as authStatus, token as authToken } from './auth.ts'
 import { version } from './version.ts'
@@ -541,6 +541,7 @@ export const GH = new CLI({
   spec: new CommandSpec({
     name: 'gh',
     description: 'GitHub CLI',
+    usageStyle: UsageStyle.COBRA,
     subcommands: [
       new CommandSpec({
         name: 'auth',

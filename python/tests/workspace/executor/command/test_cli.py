@@ -139,6 +139,33 @@ async def test_leaf_runs_with_config_group_flags_and_texts():
     assert inv.env == {"EDITOR": "vi", "PWD": "/"}
     assert node.command == "prog -vv message send -t #eng hello world"
 
+    paths_install = CLIInstall(
+        name="paths",
+        config=TokenConfig(token="tok"),
+        cli=CLI(
+            CommandSpec(
+                name="paths",
+                arguments=(
+                    Argument("prefix", nargs="?"),
+                    Argument("FILE", type="path"),
+                ),
+            ),
+            handlers={"": CLIHandler(send)},
+        ),
+    )
+    for words in (["report.txt"], ["prefix", "report.txt"]):
+        _, result, _ = await handle_cli(
+            paths_install,
+            ["paths", *words],
+            SessionState("paths", cwd="/work"),
+        )
+        assert result.exit_code == 0
+        received = CALLS.pop()
+        assert received.texts == tuple(words[:-1])
+        assert [path.virtual for path in received.paths] == [
+            "/work/report.txt"
+        ]
+
 
 @pytest.mark.asyncio
 async def test_a_sync_leaf_runs_like_an_async_one():
@@ -1164,25 +1191,51 @@ async def test_invocation_shell_is_revoked_after_cancellation():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("nargs", "usage"),
-    [(None, "ID"), ("+", "ID ..."), (2, "ID ID"), ("?", None)],
+    ("nargs", "usage", "style"),
+    [
+        (None, "ID", UsageStyle.ARGPARSE),
+        ("+", "ID ...", UsageStyle.ARGPARSE),
+        (2, "ID ID", UsageStyle.ARGPARSE),
+        ("?", None, UsageStyle.ARGPARSE),
+        (None, "ID", UsageStyle.COBRA),
+    ],
 )
 async def test_argparse_required_positionals_refuse_before_the_handler(
-    nargs, usage
+    nargs, usage, style
 ):
     calls = []
 
     async def handler(inv):
         calls.append(inv.texts)
+        if style is UsageStyle.COBRA:
+            raise ValueError("handler requires ID")
         return b"called", IOResult()
 
     cli = CLI(
-        CommandSpec(name="tool", arguments=(Argument("ID", nargs=nargs),)),
+        CommandSpec(
+            name="tool",
+            usage_style=style,
+            arguments=(Argument("ID", nargs=nargs),),
+        ),
         handlers={"": CLIHandler(handler)},
     )
-    install = CLIInstall(name="tool", cli=cli)
-    stdout, io, _ = await handle_cli(install, ["tool"], SessionState("t"))
-    if usage is None:
+    install = CLIInstall(name="renamed", cli=cli)
+    stdout, io, _ = await handle_cli(install, ["renamed"], SessionState("t"))
+    if style is UsageStyle.COBRA:
+        assert stdout is None
+        assert io.exit_code == 1
+        assert (
+            await materialize(io.stderr) == b"renamed: handler requires ID\n"
+        )
+        stdout, io, _ = await handle_cli(
+            install, ["renamed", "-h"], SessionState("t")
+        )
+        assert io.exit_code == 0
+        assert (await materialize(stdout)).startswith(
+            b"usage: renamed [-h] ID\n"
+        )
+        assert calls == [()]
+    elif usage is None:
         assert io.exit_code == 0
         assert await materialize(stdout) == b"called"
         assert calls == [()]
@@ -1192,13 +1245,13 @@ async def test_argparse_required_positionals_refuse_before_the_handler(
         assert (
             await materialize(io.stderr)
             == (
-                f"usage: tool [-h] {usage}\n"
-                "tool: error: the following arguments are required: ID\n"
+                f"usage: renamed [-h] {usage}\n"
+                "renamed: error: the following arguments are required: ID\n"
             ).encode()
         )
         assert calls == []
         stdout, io, _ = await handle_cli(
-            install, ["tool", "--help"], SessionState("t")
+            install, ["renamed", "--help"], SessionState("t")
         )
         assert io.exit_code == 0
         assert b"ID" in await materialize(stdout)

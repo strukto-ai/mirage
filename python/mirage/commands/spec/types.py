@@ -43,6 +43,10 @@ class UsageStyle(Enum):
     complaint. Those are one decision (whose voice this is), so they
     read off this knob rather than a second one.
 
+    COBRA keeps standard help and option errors, while handlers own
+    missing positional refusals for programs such as gh. It does not
+    reproduce Cobra's full help formatting.
+
     It lives in the spec layer, not beside the CLI tree, because the
     help renderer is the spec's and cannot import upward to reach it.
     """
@@ -50,6 +54,7 @@ class UsageStyle(Enum):
     ARGPARSE = "argparse"
     GIT = "git"
     CLAP = "clap"
+    COBRA = "cobra"
 
 
 class CommandName(StrEnum):
@@ -111,7 +116,7 @@ class Argument:
     ``action`` controls storage and ``nargs`` controls token consumption.
     ``path`` values enter Mirage's virtual path resolution pipeline.
     ``attached_only`` preserves GNU optional values, and ``value_types``
-    describes heterogeneous values such as jq's name/file pair.
+    describes named value pairs such as jq's name/value and name/file.
     """
 
     names: tuple[str, ...]

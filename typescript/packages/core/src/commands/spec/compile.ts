@@ -67,8 +67,11 @@ function argumentShapes(spec: CommandSpec): {
     ) {
       throw new Error('store_true and count do not take a type or nargs')
     }
-    if (arg.valueTypes.length > 0 && (arg.nargs !== 2 || arg.valueTypes.join(',') !== 'str,path')) {
-      throw new Error('valueTypes supports the text/path pair with nargs=2')
+    if (
+      arg.valueTypes.length > 0 &&
+      (arg.nargs !== 2 || !['str,str', 'str,path'].includes(arg.valueTypes.join(',')))
+    ) {
+      throw new Error('valueTypes supports named text/path pairs with nargs=2')
     }
 
     if (optional) {

@@ -109,9 +109,12 @@ def test_bare_root_prints_usage_to_stdout_exit_1():
     assert b"commands:" in result.output
 
 
-def test_help_prints_the_same_usage_exit_0():
-    bare = walk("gws", _tree(), [])
-    helped = walk("gws", _tree(), ["--help"])
+@pytest.mark.parametrize("style", [UsageStyle.ARGPARSE, UsageStyle.COBRA])
+@pytest.mark.parametrize("switch", ["--help", "-h"])
+def test_help_prints_the_same_usage_exit_0(style, switch):
+    tree = replace(_tree(), usage_style=style)
+    bare = walk("gws", tree, [])
+    helped = walk("gws", tree, [switch])
     assert helped.exit_code == 0
     assert helped.stream == "stdout"
     assert helped.output == bare.output
@@ -681,9 +684,10 @@ ARITY_TREE = CommandSpec(
     name="tool",
     arguments=(
         Argument("-v", action="store_true"),
+        Argument("--output", nargs=1, type="path", env="OUTPUT"),
         Argument("-p", "--point", nargs=2, env="POINT"),
         Argument("-c", "--color", nargs="?"),
-        Argument("--gnu", nargs="?", attached_only=True),
+        Argument("-g", "--gnu", nargs="?", attached_only=True),
         Argument(
             "--rawfile",
             nargs=2,
@@ -727,6 +731,18 @@ def test_group_fixed_nargs_store_replaces_and_extend_accumulates():
     refused = walk("tool", ARITY_TREE, ["--point", "1"])
     assert refused.exit_code != 0
     assert b"requires a value" in refused.output
+    for word, path in (
+        ("--output=x", "/work/x"),
+        ("--out=x", "/work/x"),
+        ("--output=", "/work"),
+    ):
+        attached = walk("tool", ARITY_TREE, [word, "run"], cwd="/work")
+        assert attached.path == ("run",)
+        assert [
+            value.virtual for value in attached.group_flags["--output"]
+        ] == [path]
+        assert attached.argv == ()
+    assert walk("tool", ARITY_TREE, ["--point=1", "2", "run"]).exit_code != 0
 
 
 @pytest.mark.parametrize(
@@ -737,6 +753,8 @@ def test_group_fixed_nargs_store_replaces_and_extend_accumulates():
         (["-vc", "auto"], {"-v": True, "--color": "auto"}),
         (["-vc", "--"], {"-v": True, "--color": True}),
         (["--gnu"], {"--gnu": True}),
+        (["-vgauto"], {"-v": True, "--gnu": "auto"}),
+        (["-vg"], {"-v": True, "--gnu": True}),
     ],
 )
 def test_group_optional_values_consume_detached_values(words, flags):
@@ -749,6 +767,9 @@ def test_supplied_environment_scan_skips_the_complete_group_argument():
     assert supplied_env_names(
         ARITY_TREE, ["--point", "x", "y", "run", "--token", "secret"]
     ) == frozenset({"POINT", "TOKEN"})
+    assert supplied_env_names(
+        ARITY_TREE, ["--output=x", "run", "--token", "secret"]
+    ) == frozenset({"OUTPUT", "TOKEN"})
 
 
 def test_group_help_and_abbreviation_settings_apply_to_the_whole_node():

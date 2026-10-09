@@ -283,7 +283,7 @@ describe('background job kill', () => {
       ws.registerCli(
         name,
         new CLI({
-          spec: new CommandSpec({}),
+          spec: new CommandSpec({ name }),
           handlers: {
             '': new CLIHandler({
               fn: () => {

@@ -821,7 +821,6 @@ def parse_command(
                     continue
             etok = spelling if eq == -1 else spelling + tok[eq:]
             arity = cs.nargs_by_dest.get(cs.dest_of(spelling))
-            is_pair = arity is not None
             if etok in cs.long_bool_spellings:
                 if (
                     etok in cs.detached_optional_spellings
@@ -845,10 +844,12 @@ def parse_command(
                 else:
                     _set_bool_flag(flags, cs, etok)
                     i += 1
+            elif arity == 1 and eq != -1:
+                i += record_values(spelling, arity, tok[eq + 1 :])
             elif arity is not None and eq == -1 and i + arity < len(scan_argv):
                 i += record_values(spelling, arity)
             elif (
-                not is_pair
+                arity is None
                 and etok in cs.long_value_spellings
                 and i + 1 < len(scan_argv)
             ):
@@ -860,13 +861,13 @@ def parse_command(
                     word_bases[scan_origins[i + 1]] = base
                 base = _rebase(flags, cs, etok, scan_argv[i + 1], base)
                 i += 2
-            elif is_pair:
+            elif arity is not None:
                 if eq == -1:
                     if not refused_on_tape(spelling):
                         needs_value_options.append(spelling)
                         option_error_kinds.append("needs_value")
                 elif not refused_on_tape(tok):
-                    # A two-token option has no `=` form (jq refuses
+                    # Multi-value options have no `=` form (jq refuses
                     # `--arg=name` as an unknown option).
                     invalid_options.append(tok)
                     option_error_kinds.append("invalid")
@@ -1216,11 +1217,22 @@ def parse_command(
     # A required slot the line left empty. Counted against the surviving
     # slots rather than the declared ones, so a flag standing in for a
     # slot (provided_by) satisfies it the same way a word would.
-    supplying = [
+    slots = [
         op
         for op in cs.positional
         if not any(cs.dest_of(name) in flags for name in op.provided_by)
     ]
+    required = sum(positional_required(op) for op in slots) + (
+        cs.rest is not None and positional_required(cs.rest)
+    )
+    # An optional slot can consume only words not needed by required slots.
+    supplying: list[Argument] = []
+    for op in slots:
+        if positional_required(op):
+            required -= 1
+        elif len(raw_args) - len(supplying) <= required:
+            continue
+        supplying.append(op)
     positional = tuple(op.type for op in supplying)
     missing_required_operands = [
         positional_name(op) or ARG_PLACEHOLDER
@@ -1301,13 +1313,19 @@ def parse_command(
         value = flags[flag_name]
         raw_path_flags[flag_kwarg_name(flag_name)] = value
         if isinstance(value, list) and flag_name in cs.value_types_by_dest:
-            # Only the odd slots are the paths: the even ones name them.
+            kinds = cs.value_types_by_dest[flag_name]
             paired = [
-                resolve_path(part, cwd) if index % 2 else part
+                resolve_path(part, cwd)
+                if kinds[index % len(kinds)] == "path"
+                else part
                 for index, part in enumerate(value)
             ]
             flags[flag_name] = paired
-            path_flag_values.extend(paired[1::2])
+            path_flag_values.extend(
+                part
+                for index, part in enumerate(paired)
+                if kinds[index % len(kinds)] == "path"
+            )
         elif isinstance(value, list):
             resolved_list = [
                 "-"
