@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.discord.read import read as _read
 from mirage.core.discord.read import read_range as _read_range
+from mirage.core.discord.read import read_stream as _read_stream
 from mirage.core.discord.readdir import readdir as _readdir
 from mirage.core.discord.stat import stat as _stat
 from mirage.core.time_range import TimeRange
@@ -64,6 +66,11 @@ class DiscordVFS(BaseVFS):
         if not offset and size is None:
             return await _read(self.accessor, path, index)
         return await _read_range(self.accessor, path, index, offset, size)
+
+    def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path, index)
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

@@ -43,7 +43,7 @@ import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../view/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { SessionState } from '../session/session.ts'
-import { assignElement } from '../session/elements.ts'
+import { assignElement, landedArith } from '../session/elements.ts'
 import {
   ensureVarVisible,
   visibleArrays,
@@ -52,8 +52,6 @@ import {
   deref,
   namerefTarget,
   positionalParams,
-  randomReader,
-  sessionArith,
   subscriptIndex,
 } from '../session/state.ts'
 import { homeDir } from '../session/shell_dirs.ts'
@@ -745,21 +743,16 @@ class ArithOperand {
   ) {}
 
   async value(text: string): Promise<number> {
-    const reader = randomReader(this.session)
-    let result
+    const nounset = this.session.shellOptions.nounset === true
     try {
-      result = sessionArith(this.session, text, reader, this.session.shellOptions.nounset === true)
+      return Number(
+        await landedArith(this.session, this.view ?? null, text, landArithWrites, nounset),
+      )
     } catch (err) {
-      if (err instanceof ReadonlyError) {
-        await landArithWrites(this.session, this.view, err.writes, reader)
-        throw err.signal()
-      }
-      if (!(err instanceof ArithError)) throw err
-      await landArithWrites(this.session, this.view, err.writes, reader)
-      throw err.signal(this.ref)
+      if (err instanceof ReadonlyError) throw err.signal()
+      if (err instanceof ArithError) throw err.signal(this.ref)
+      throw err
     }
-    await landArithWrites(this.session, this.view, result.writes, reader)
-    return Number(result.value)
   }
 }
 
@@ -966,13 +959,13 @@ async function expansionIndex(
  */
 export async function landArithWrites(
   session: SessionState,
-  view: SessionView | undefined,
+  view: SessionView | null,
   writes: readonly ArithWrite[],
   reader: RandomReader,
 ): Promise<void> {
   try {
     for (const write of writes) {
-      await expansionWrite(session, view, write.name, write.key, write.value)
+      await expansionWrite(session, view ?? undefined, write.name, write.key, write.value)
     }
   } finally {
     reader.settle()

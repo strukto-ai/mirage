@@ -16,7 +16,7 @@ import { EvaluationContext } from '../../evaluation.ts'
 import { describe, expect, it } from 'vitest'
 import { command } from '../../../commands/config.ts'
 import { CommandSpec, type FlagValue, Operand, Option } from '../../../commands/spec/types.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { JobTable } from '../../../shell/job_table/index.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
@@ -92,7 +92,7 @@ describe('handleCommand — dispatches to mount that has the command', () => {
     )
     expect(io.exitCode).toBe(0)
     expect(exec.exitCode).toBe(0)
-    expect(decode(stdout as Uint8Array)).toBe('hello')
+    expect(decode(await materialize(stdout))).toBe('hello')
   })
 
   it('parses flags through the spec and forwards them', async () => {

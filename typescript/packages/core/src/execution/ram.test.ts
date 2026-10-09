@@ -80,3 +80,36 @@ it('expires completed records while retaining active records and workspace scope
   await store.close()
   await stopped
 })
+
+it('retains terminal creates by completion time even when inserted out of order', async () => {
+  const store = new RAMExecutionStore(2, 10)
+  const active = record('active')
+  await store.create(active)
+  const now = Date.now()
+  for (const [id, finishedAt] of [
+    ['newest', now / 1000 + 2],
+    ['oldest', now / 1000],
+    ['middle', now / 1000 + 1],
+  ] as const) {
+    await store.create({ ...active, id, status: ExecutionStatus.DONE, finishedAt })
+  }
+  expect(await store.get('oldest')).toBeNull()
+  expect((await store.list()).map((entry) => entry.id).sort()).toEqual([
+    'active',
+    'middle',
+    'newest',
+  ])
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 11_500)
+  try {
+    expect((await store.list()).map((entry) => entry.id).sort()).toEqual(['active', 'newest'])
+    await store.create({
+      ...active,
+      id: 'expired',
+      status: ExecutionStatus.DONE,
+      finishedAt: now / 1000,
+    })
+    expect(await store.get('expired')).toBeNull()
+  } finally {
+    clock.mockRestore()
+  }
+})

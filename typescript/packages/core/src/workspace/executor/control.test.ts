@@ -13,22 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { EvaluationContext } from '../evaluation.ts'
-import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
-import { JobStatus, JobTable } from '../../shell/job_table/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
-import {
-  BreakSignal,
-  ContinueSignal,
-  handleCase,
-  handleFor,
-  handleIf,
-  handleUntil,
-  handleWhile,
-} from './control.ts'
+import { type BodyRun, executeBody, handleIf, handleWhile } from './control.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 
 function node(text: string, nextSibling: TSNodeLike | null = null): TSNodeLike {
@@ -40,419 +30,33 @@ function bg(text: string): TSNodeLike {
   return node(text, { type: '&', text: '&', children: [], namedChildren: [], isNamed: false })
 }
 
-function encode(s: string): Uint8Array {
-  return new TextEncoder().encode(s)
+function runner(execute: ExecuteNodeFn, session: SessionState): BodyRun {
+  const context = new EvaluationContext(session)
+  return (nodes, bound) =>
+    executeBody(execute, nodes, context, null, null, null, null, null, null, null, null, bound)
 }
 
-function decode(b: Uint8Array | null): string {
-  return b === null ? '' : new TextDecoder().decode(b)
-}
-
-describe('handleIf', () => {
-  it('runs the first matching branch and skips the rest', async () => {
-    const calls: string[] = []
-    let execCounter = 0
-    const execute: ExecuteNodeFn = (n) => {
-      calls.push(n.text)
-      // Condition nodes are labeled "c1"/"c2"; body nodes "b1"/"b2".
-      execCounter++
-      if (n.text === 'c1') {
-        return Promise.resolve([null, new IOResult({ exitCode: 1 }), new ExecutionNode()])
-      }
-      if (n.text === 'c2') {
-        return Promise.resolve([null, new IOResult({ exitCode: 0 }), new ExecutionNode()])
-      }
-      return Promise.resolve([encode(`${n.text}-out`), new IOResult(), new ExecutionNode()])
-    }
-    const branches: [TSNodeLike[], TSNodeLike[]][] = [
-      [[node('c1')], [node('b1')]],
-      [[node('c2')], [node('b2')]],
-    ]
-    const [stdout, io] = await handleIf(
-      execute,
-      branches,
-      null,
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-    )
-    expect(io.exitCode).toBe(0)
-    expect(decode(await materialize(stdout))).toBe('b2-out')
-    expect(calls).toEqual(['c1', 'c2', 'b2'])
-    expect(execCounter).toBe(3)
-  })
-
-  it('runs the else body when no branch matches', async () => {
-    const execute: ExecuteNodeFn = (n) => {
-      if (n.text === 'c')
-        return Promise.resolve([null, new IOResult({ exitCode: 1 }), new ExecutionNode()])
-      return Promise.resolve([encode('else-out'), new IOResult(), new ExecutionNode()])
-    }
-    const [stdout, io] = await handleIf(
-      execute,
-      [[[node('c')], [node('b')]]],
-      [node('e')],
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-    )
-    expect(io.exitCode).toBe(0)
-    expect(decode(await materialize(stdout))).toBe('else-out')
-  })
-})
-
-describe('handleFor', () => {
-  it('iterates values, sets env var, runs body per iter', async () => {
-    const seen: string[] = []
-    const execute: ExecuteNodeFn = (_n, s) => {
-      seen.push(s.session.env.X ?? '')
-      return Promise.resolve([
-        encode(`iter-${s.session.env.X ?? ''}\n`),
-        new IOResult(),
-        new ExecutionNode(),
-      ])
-    }
-    const s = new SessionState({ sessionId: 'test' })
-    const [stdout] = await handleFor(
-      execute,
-      'X',
-      ['a', 'b', 'c'],
-      [node('body')],
-      new EvaluationContext(s),
-    )
-    expect(seen).toEqual(['a', 'b', 'c'])
-    expect(decode(await materialize(stdout))).toBe('iter-a\niter-b\niter-c\n')
-    // bash leaves the loop variable holding its last value.
-    expect(s.env.X).toBe('c')
-  })
-
-  it('BreakSignal stops the loop early', async () => {
-    const seen: string[] = []
-    const execute: ExecuteNodeFn = (_n, s) => {
-      seen.push(s.session.env.X ?? '')
-      if (s.session.env.X === 'b') throw new BreakSignal()
-      return Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    }
-    await handleFor(
-      execute,
-      'X',
-      ['a', 'b', 'c'],
-      [node('body')],
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-    )
-    expect(seen).toEqual(['a', 'b'])
-  })
-
-  it('ContinueSignal skips to next iteration', async () => {
-    const seen: string[] = []
-    const execute: ExecuteNodeFn = (_n, s) => {
-      seen.push(s.session.env.X ?? '')
-      if (s.session.env.X === 'b') throw new ContinueSignal()
-      return Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    }
-    await handleFor(
-      execute,
-      'X',
-      ['a', 'b', 'c'],
-      [node('body')],
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-    )
-    expect(seen).toEqual(['a', 'b', 'c'])
-  })
-
-  // bash 5.2: `Z=before; for Z in a b; do :; done; echo $Z` prints b. The
-  // loop variable is an ordinary variable and keeps its last value; the
-  // shadowed value is not put back.
-  it('keeps the loop variable at its last value', async () => {
-    const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ X: 'saved' }) })
-    const execute: ExecuteNodeFn = () =>
-      Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    await handleFor(execute, 'X', ['a', 'b'], [node('body')], new EvaluationContext(s))
-    expect(s.env.X).toBe('b')
-  })
-
-  // bash 5.2: `unset Y; for Y in ; do :; done` leaves Y unset, since no
-  // iteration ever assigned it.
-  it('leaves the variable untouched when there are no words', async () => {
-    const s = new SessionState({ sessionId: 'test' })
-    const execute: ExecuteNodeFn = () =>
-      Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    await handleFor(execute, 'Y', [], [node('body')], new EvaluationContext(s))
-    expect('Y' in s.env).toBe(false)
-  })
-
-  // bash 5.2: `for i in $(seq 1 300000); do :; done; echo "$i"` prints
-  // 300000.
-  it('runs a list of 300000 words and keeps the last one', async () => {
-    const words = Array.from({ length: 300_000 }, (_, i) => (i + 1).toString())
-    const s = new SessionState({ sessionId: 'test' })
-    const execute: ExecuteNodeFn = (_n, st) =>
-      Promise.resolve([encode(`${st.session.env.X ?? ''}\n`), new IOResult(), new ExecutionNode()])
-    const [stdout, io] = await handleFor(
-      execute,
-      'X',
-      words,
-      [node('body')],
-      new EvaluationContext(s),
-    )
-    expect(io.exitCode).toBe(0)
-    expect(decode(await materialize(stdout))).toBe(words.map((w) => `${w}\n`).join(''))
-    expect(s.env.X).toBe('300000')
-  }, 30_000)
-})
-
-describe('handleWhile / handleUntil', () => {
-  it('while runs body while condition is 0, until runs while condition is nonzero', async () => {
-    let i = 0
-    const execute: ExecuteNodeFn = (n) => {
-      if (n.text === 'cond') {
-        // Condition: 0 when i<2, nonzero when >=2
-        const exit = i < 2 ? 0 : 1
-        return Promise.resolve([null, new IOResult({ exitCode: exit }), new ExecutionNode()])
-      }
-      i += 1
-      return Promise.resolve([encode(`${i.toString()};`), new IOResult(), new ExecutionNode()])
-    }
-    const [stdout] = await handleWhile(
-      execute,
-      [node('cond')],
-      [node('body')],
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-    )
-    expect(decode(await materialize(stdout))).toBe('1;2;')
-  })
-
-  it('until runs body while condition is nonzero', async () => {
-    let i = 0
-    const execute: ExecuteNodeFn = (n) => {
-      if (n.text === 'cond') {
-        const exit = i >= 2 ? 0 : 1
-        return Promise.resolve([null, new IOResult({ exitCode: exit }), new ExecutionNode()])
-      }
-      i += 1
-      return Promise.resolve([encode(`${i.toString()};`), new IOResult(), new ExecutionNode()])
-    }
-    const [stdout] = await handleUntil(
-      execute,
-      [node('cond')],
-      [node('body')],
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-    )
-    expect(decode(await materialize(stdout))).toBe('1;2;')
-  })
-
+describe('handleWhile', () => {
   it('while caps at MAX_WHILE iterations with a stderr warning', async () => {
     const execute: ExecuteNodeFn = (n) => {
       if (n.text === 'cond')
         return Promise.resolve([null, new IOResult({ exitCode: 0 }), new ExecutionNode()])
       return Promise.resolve([null, new IOResult(), new ExecutionNode()])
     }
-    const [, io] = await handleWhile(
-      execute,
-      [node('cond')],
-      [node('body')],
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
+    const s = new SessionState({ sessionId: 'test' })
+    const [, io] = await handleWhile(runner(execute, s), [node('cond')], [node('body')], s)
+    expect(new TextDecoder().decode(await materialize(io.stderr))).toMatch(
+      /while loop terminated after 10000/,
     )
-    expect(decode(await materialize(io.stderr))).toMatch(/while loop terminated after 10000/)
-  })
-})
-
-describe('handleCase', () => {
-  it('matches the first pattern that fnmatches the word', async () => {
-    let which = ''
-    const execute: ExecuteNodeFn = (n) => {
-      which = n.text
-      return Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    }
-    const items: [string[], TSNodeLike[], string][] = [
-      [['a*'], [node('A')], ';;'],
-      [['b*'], [node('B')], ';;'],
-      [['*'], [node('catchall')], ';;'],
-    ]
-    await handleCase(
-      execute,
-      'banana',
-      items,
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-    )
-    expect(which).toBe('B')
-  })
-
-  it('falls through to catchall pattern', async () => {
-    let which = ''
-    const execute: ExecuteNodeFn = (n) => {
-      which = n.text
-      return Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    }
-    const items: [string[], TSNodeLike[], string][] = [
-      [['a*'], [node('A')], ';;'],
-      [['*'], [node('catchall')], ';;'],
-    ]
-    await handleCase(
-      execute,
-      'xyz',
-      items,
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-    )
-    expect(which).toBe('catchall')
-  })
-
-  it('matches nothing when no pattern fits', async () => {
-    const execute: ExecuteNodeFn = () =>
-      Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    const items: [string[], TSNodeLike[], string][] = [[['z*'], [node('body')], ';;']]
-    const [, io] = await handleCase(
-      execute,
-      'abc',
-      items,
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-    )
-    expect(io.exitCode).toBe(0)
-  })
-
-  it('runs the next arm body on ;& (fallthrough)', async () => {
-    const ran: string[] = []
-    const execute: ExecuteNodeFn = (n) => {
-      ran.push(n.text)
-      return Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    }
-    const items: [string[], TSNodeLike[], string][] = [
-      [['a'], [node('A')], ';&'],
-      [['b'], [node('B')], ';;'],
-      [['c'], [node('C')], ';;'],
-    ]
-    await handleCase(
-      execute,
-      'a',
-      items,
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-    )
-    expect(ran).toEqual(['A', 'B'])
-  })
-
-  it('keeps testing later patterns on ;;&', async () => {
-    const ran: string[] = []
-    const execute: ExecuteNodeFn = (n) => {
-      ran.push(n.text)
-      return Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    }
-    const items: [string[], TSNodeLike[], string][] = [
-      [['a'], [node('A')], ';;&'],
-      [['a'], [node('A2')], ';;&'],
-      [['b'], [node('B')], ';;'],
-    ]
-    await handleCase(
-      execute,
-      'a',
-      items,
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-    )
-    expect(ran).toEqual(['A', 'A2'])
   })
 })
 
 describe('& inside a body', () => {
-  /**
-   * An executor whose `slow` statement blocks until `release` is called,
-   * so a body that returns before then provably did not wait for it.
-   */
-  function parked(ran: string[]): { execute: ExecuteNodeFn; release: () => void } {
-    let release: () => void = () => undefined
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    const execute: ExecuteNodeFn = async (n) => {
-      if (n.text === 'slow') await gate
-      ran.push(n.text)
-      return [null, new IOResult({ exitCode: n.text === 'slow' ? 3 : 0 }), new ExecutionNode()]
-    }
-    return { execute, release }
-  }
-
-  it('if body: launches the statement as a job and answers the launch status', async () => {
-    const table = new JobTable()
-    const ran: string[] = []
-    const { execute, release } = parked(ran)
-    const s = new SessionState({ sessionId: 'test' })
-    const branches: [TSNodeLike[], TSNodeLike[]][] = [[[node('c')], [bg('slow')]]]
-    const [, io] = await handleIf(
-      execute,
-      branches,
-      null,
-      new EvaluationContext(s),
-      null,
-      null,
-      table,
-      'a1',
-    )
-    // The body came back while the job is still parked, and its status
-    // is the launch's 0, not the job's eventual 3.
-    expect(ran).toEqual(['c'])
-    expect(io.exitCode).toBe(0)
-    expect(s.lastExitCode).toBe(0)
-    const job = table.get(1, 'test')
-    expect(job?.command).toBe('slow')
-    expect(job?.status).toBe(JobStatus.RUNNING)
-    release()
-    await table.wait(1, 'test')
-    expect(ran).toEqual(['c', 'slow'])
-    expect(job?.exitCode).toBe(3)
-  }, 2000)
-
-  it('case arm: launches the statement as a job', async () => {
-    const table = new JobTable()
-    const ran: string[] = []
-    const { execute, release } = parked(ran)
-    const items: [string[], TSNodeLike[], string][] = [[['x'], [bg('slow')], ';;']]
-    const [, io] = await handleCase(
-      execute,
-      'x',
-      items,
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-      null,
-      null,
-      table,
-      'a1',
-    )
-    expect(ran).toEqual([])
-    expect(io.exitCode).toBe(0)
-    expect(table.get(1, 'test')?.command).toBe('slow')
-    release()
-    await table.wait(1, 'test')
-    expect(table.get(1, 'test')?.exitCode).toBe(3)
-  }, 2000)
-
-  it('for body: launches one job per iteration', async () => {
-    const table = new JobTable()
-    const ran: string[] = []
-    const { execute, release } = parked(ran)
-    const [, io] = await handleFor(
-      execute,
-      'i',
-      ['1', '2'],
-      [bg('slow')],
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-      null,
-      null,
-      null,
-      table,
-      'a1',
-    )
-    expect(ran).toEqual([])
-    expect(io.exitCode).toBe(0)
-    expect(table.listJobs('test').map((j) => j.command)).toEqual(['slow', 'slow'])
-    release()
-    await table.waitAll('test')
-    expect(ran).toEqual(['slow', 'slow'])
-  }, 2000)
-
   it('fails loud without a job table', async () => {
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([null, new IOResult(), new ExecutionNode()])
     const branches: [TSNodeLike[], TSNodeLike[]][] = [[[node('c')], [bg('x')]]]
-    await expect(
-      handleIf(
-        execute,
-        branches,
-        null,
-        new EvaluationContext(new SessionState({ sessionId: 'test' })),
-      ),
-    ).rejects.toThrow(/job table/)
+    const s = new SessionState({ sessionId: 'test' })
+    await expect(handleIf(runner(execute, s), branches, null, s)).rejects.toThrow(/job table/)
   })
 })

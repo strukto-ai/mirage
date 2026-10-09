@@ -264,7 +264,9 @@ class IMAPClient:
         """Send one command and read its answer.
 
         A literal goes last, after the server's continuation, as a
-        synchronising literal does.
+        synchronising literal does; a refusal before the continuation
+        is the answer and the literal is never sent. Lines are read
+        until the command's tagged status.
 
         Args:
             verb (str): the command.
@@ -281,55 +283,22 @@ class IMAPClient:
                 if literal is not None:
                     self._writer.write(line + b" {%d}\r\n" % len(literal))
                     await self._writer.drain()
-                    refused = await self._await_continuation(tag, name, lines)
-                    if refused is not None:
-                        return refused
+                    while not (raw := await self._readline()).startswith(b"+"):
+                        refused = await self._take(raw, tag, name, lines)
+                        if refused is not None:
+                            return refused
                     self._writer.write(literal + b"\r\n")
                 else:
                     self._writer.write(line + b"\r\n")
                 await self._writer.drain()
-                return await self._read_answer(tag, name, lines)
+                while True:
+                    raw = await self._readline()
+                    done = await self._take(raw, tag, name, lines)
+                    if done is not None:
+                        return done
             except BaseException:
                 self._writer.close()
                 raise
-
-    async def _await_continuation(
-        self, tag: str, name: str, lines: _Lines
-    ) -> IMAPResponse | None:
-        """Read until the server asks for the literal, or refuses the
-        command before it.
-
-        Args:
-            tag (str): the command's tag.
-            name (str): the name its untagged answers carry.
-            lines (list[bytes | bytearray]): the answer so far.
-
-        Returns:
-            IMAPResponse | None: the refusal, or None once the server is
-            ready for the literal.
-        """
-        while True:
-            raw = await self._readline()
-            if raw.startswith(b"+"):
-                return None
-            done = await self._take(raw, tag, name, lines)
-            if done is not None:
-                return done
-
-    async def _read_answer(
-        self, tag: str, name: str, lines: _Lines
-    ) -> IMAPResponse:
-        """Read lines until the command's tagged status.
-
-        Args:
-            tag (str): the command's tag.
-            name (str): the name its untagged answers carry.
-            lines (list[bytes | bytearray]): the answer so far.
-        """
-        while True:
-            done = await self._take(await self._readline(), tag, name, lines)
-            if done is not None:
-                return done
 
     async def _take(
         self,

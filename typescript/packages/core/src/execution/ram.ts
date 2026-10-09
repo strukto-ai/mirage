@@ -20,7 +20,10 @@ export class RAMExecutionStore extends ExecutionStore {
   private prune(): void {
     if (this.closed) throw new Error('execution store is closed')
     const cutoff = Date.now() / 1000 - this.retentionSeconds
-    for (const [id, record] of this.completed) {
+    const completed = [...this.completed].sort(
+      (a, b) => (a[1].finishedAt ?? 0) - (b[1].finishedAt ?? 0),
+    )
+    for (const [id, record] of completed) {
       if (
         this.completed.size <= this.maxCompleted &&
         record.finishedAt !== null &&
@@ -39,7 +42,10 @@ export class RAMExecutionStore extends ExecutionStore {
   create(record: ExecutionRecord): Promise<boolean> {
     this.prune()
     if (this.records.has(record.id)) return Promise.resolve(false)
-    this.records.set(record.id, structuredClone(record))
+    const snapshot = structuredClone(record)
+    this.records.set(record.id, snapshot)
+    if (record.finishedAt !== null) this.completed.set(record.id, snapshot)
+    this.prune()
     this.notify()
     return Promise.resolve(true)
   }

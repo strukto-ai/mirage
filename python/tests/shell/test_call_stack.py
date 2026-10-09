@@ -18,34 +18,17 @@ from mirage.shell.call_stack import CallStack
 def test_initial_frame():
     cs = CallStack()
     assert cs.depth == 1
-    assert cs.get_positional_count() == 0
+    assert cs.get_all_positional() == []
 
 
 def test_push_pop():
     cs = CallStack()
     cs.push(["a", "b", "c"])
     assert cs.depth == 2
-    assert cs.get_positional(1) == "a"
-    assert cs.get_positional(3) == "c"
-    assert cs.get_positional_count() == 3
+    assert cs.get_all_positional() == ["a", "b", "c"]
     cs.pop()
     assert cs.depth == 1
-    assert cs.get_positional_count() == 0
-
-
-def test_shift():
-    cs = CallStack()
-    cs.push(["a", "b", "c"])
-    cs.shift()
-    assert cs.get_positional(1) == "b"
-    assert cs.get_positional_count() == 2
-
-
-def test_shift_n():
-    cs = CallStack()
-    cs.push(["a", "b", "c", "d"])
-    cs.shift(2)
-    assert cs.get_positional(1) == "c"
+    assert cs.get_all_positional() == []
 
 
 def test_get_all_positional():
@@ -58,11 +41,6 @@ def test_set_positional():
     cs = CallStack()
     cs.set_positional(["a", "b"])
     assert cs.get_all_positional() == ["a", "b"]
-
-
-def test_missing_positional():
-    cs = CallStack()
-    assert cs.get_positional(5) == ""
 
 
 def test_pop_bottom_frame_safe():

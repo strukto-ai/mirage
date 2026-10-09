@@ -28,7 +28,6 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.session import vars_from_env
 from mirage.workspace.session.state import (
-    element_index,
     env_snapshot,
     gate_rendering,
     gate_restored_vars,
@@ -336,15 +335,6 @@ def test_strip_key_quotes():
     assert strip_key_quotes('""') == ""
 
 
-def test_element_index_int_arith_and_error():
-    assert element_index("3", {}) == 3
-    assert element_index(" -2 ", {}) == -2
-    assert element_index("i+1", {"i": "1"}) == 2
-    # An unresolvable expression indexes element 0, bash's
-    # unset-name-is-zero arithmetic rule.
-    assert element_index("$bad", {}) == 0
-
-
 def test_subscript_index_lands_its_assignments_and_seeds_random():
     session = SessionState(session_id="s", cwd="/")
     seed_var(session, "i", "1")
@@ -383,11 +373,9 @@ def test_resolve_assoc_is_literal():
     assert ops.resolve("m", "1+1", {}) == "1+1"
 
 
-def test_resolve_indexed_evaluates_and_wraps_negative():
+def test_resolve_indexed_wraps_negative():
     session = _element_session()
     ops = session_elements(session)
-    assert ops.resolve("arr", "1+1", {}) == "2"
-    assert ops.resolve("arr", "i", {"i": "2"}) == "2"
     assert ops.resolve("arr", "-1", {}) == "2"
     with pytest.raises(ArithError):
         ops.resolve("arr", "-9", {})

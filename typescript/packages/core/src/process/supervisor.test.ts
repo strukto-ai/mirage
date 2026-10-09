@@ -1,6 +1,8 @@
 import { expect, it } from 'vitest'
 import { PathSpec } from '../types.ts'
 import { ProcessSupervisor } from './supervisor.ts'
+import { currentExecutionId } from '../execution/context.ts'
+import type { ProcessHandle } from './handle.ts'
 
 function gate() {
   let release: () => void = () => undefined
@@ -14,6 +16,90 @@ function gate() {
     },
   }
 }
+
+it('isolates execution context between concurrent runners', async () => {
+  const supervisor = new ProcessSupervisor()
+  const release = gate()
+  const seen: (string | null)[][] = []
+  const handles = ['first', 'second'].map((executionId) =>
+    supervisor.start({
+      sessionId: 'same',
+      command: 'probe',
+      cwd: PathSpec.fromStrPath('/'),
+      executionId,
+      cancel: () => undefined,
+      run: async () => {
+        const before = currentExecutionId()
+        await release.promise
+        seen.push([before, currentExecutionId()])
+        return 0
+      },
+    }),
+  )
+  await Promise.resolve()
+  release.release()
+  await Promise.all(handles.map((handle) => handle.join()))
+  expect(seen.sort()).toEqual([
+    ['first', 'first'],
+    ['second', 'second'],
+  ])
+  expect(currentExecutionId()).toBeNull()
+})
+
+it('does not give execution ancestry cancellation ownership', async () => {
+  const supervisor = new ProcessSupervisor()
+  const started = gate(),
+    release = gate()
+  const abort = new AbortController()
+  const children: ProcessHandle[] = []
+  const root = supervisor.start({
+    sessionId: 'a',
+    command: 'parent',
+    cwd: PathSpec.fromStrPath('/'),
+    executionId: 'request',
+    cancel: () => {
+      abort.abort()
+    },
+    run: async () => {
+      children.push(
+        supervisor.start({
+          sessionId: 'a',
+          command: 'detached',
+          cwd: PathSpec.fromStrPath('/'),
+          cancel: () => undefined,
+          run: async () => {
+            await release.promise
+            return 0
+          },
+        }),
+      )
+      started.release()
+      await new Promise<void>((_resolve, reject) => {
+        abort.signal.addEventListener(
+          'abort',
+          () => {
+            reject(new DOMException('aborted', 'AbortError'))
+          },
+          { once: true },
+        )
+      })
+      return 0
+    },
+  })
+  await started.promise
+  const child = children[0]
+  if (child === undefined) throw new Error('child was not started')
+  expect(child.info).toMatchObject({
+    parentExecutionId: 'request',
+    rootExecutionId: 'request',
+    parentPid: null,
+  })
+  root.terminate()
+  await root.join()
+  expect(child.info.state).toBe('running')
+  release.release()
+  await child.join()
+})
 
 it('does not claim exit before finally completes', async () => {
   const supervisor = new ProcessSupervisor()

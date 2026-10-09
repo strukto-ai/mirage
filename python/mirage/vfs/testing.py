@@ -2,6 +2,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
+from mirage.io.stream import close_quietly
 from mirage.types import FileType, PathSpec
 from mirage.utils.filetype import get_extension
 from mirage.vfs.base import BaseVFS
@@ -9,12 +10,13 @@ from mirage.vfs.base import BaseVFS
 
 @dataclass(frozen=True, slots=True)
 class ReadFixture:
-    """A small known file, its parent directory, and an absent sibling."""
+    """A known file, its parent and absent sibling, and an optional chunk bound."""
 
     file: PathSpec
     directory: PathSpec
     missing: PathSpec
     content: bytes
+    max_chunk_size: int | None = None
 
 
 def _renderer(
@@ -100,9 +102,18 @@ async def check_read_contract(
         else data
     )
     if vfs.supports("read_stream"):
-        streamed = b"".join(
-            [part async for part in vfs.read_stream(fixture.file, store)]
-        )
+        parts: list[bytes] = []
+        source = vfs.read_stream(fixture.file, store)
+        try:
+            async for part in source:
+                assert (
+                    fixture.max_chunk_size is None
+                    or len(part) <= fixture.max_chunk_size
+                ), "read_stream exceeded max_chunk_size"
+                parts.append(part)
+        finally:
+            await close_quietly(source)
+        streamed = b"".join(parts)
         assert streamed == stored, "read_stream differs from read"
     if render is not None:
         await _check_windows(render, fixture.file, store, data)

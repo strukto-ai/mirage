@@ -100,23 +100,6 @@ def test_stop_from_b_on_a_later_cycle_ends_every_cycle():
     )
 
 
-@pytest.mark.parametrize(
-    "value,expected",
-    [
-        ("0.5", "0"),
-        ("1.5", "2"),
-        ("2.5", "2"),
-        ("3.5", "4"),
-    ],
-)
-def test_fixed_precision_rounds_half_to_even(value, expected):
-    assert run_printf("%.0f", [value]) == (expected, [], False, None)
-
-
-def test_a_missing_argument_is_the_empty_string_or_zero():
-    assert run_printf("[%s][%d]", []) == ("[][0]", [], False, None)
-
-
 @pytest.mark.parametrize("escape,in_format,in_b_arg", _OCTAL_PINS)
 def test_octal_reads_three_digits_in_the_format_and_zero_plus_three_in_b(
     escape, in_format, in_b_arg

@@ -13,10 +13,43 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ByteWindow, rangeHeader, windowOf } from '../../utils/ranges.ts'
+import { chunks } from '../../io/cooperative.ts'
 
 // How a >= 400 API response and its body text become the backend's own
 // error; the engine here calls it, each backend supplies one.
 export type ErrorOf = (response: Response, body: string) => Error
+
+/** Pull a GET response in bounded chunks, cancelling its body on early exit. */
+export async function* apiStream(
+  url: string,
+  options: Pick<ApiRequestOptions, 'errorOf' | 'headers' | 'fetchFn'> & { signal?: AbortSignal },
+): AsyncGenerator<Uint8Array, void> {
+  const response = await (options.fetchFn ?? fetch)(url, {
+    method: 'GET',
+    ...(options.headers === undefined ? {} : { headers: options.headers }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  })
+  if (response.status >= 400) throw options.errorOf(response, await response.text())
+  if (response.body === null) return
+  const reader = response.body.getReader()
+  let finished = false
+  try {
+    for (;;) {
+      const result = await reader.read()
+      if (result.done) {
+        finished = true
+        return
+      }
+      yield* chunks(result.value, options.signal)
+    }
+  } finally {
+    try {
+      if (!finished) await reader.cancel()
+    } finally {
+      reader.releaseLock()
+    }
+  }
+}
 
 export interface RetryPolicy {
   /** Response statuses worth retrying. */

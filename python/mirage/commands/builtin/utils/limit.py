@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator
 
 from mirage.commands.errors import LimitExceededError
 from mirage.errors.types import CommandTimeoutError
+from mirage.io.stdio import OutputStream
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import Limit, OnExceed
@@ -102,7 +103,10 @@ def maybe_with_timeout(
         return stream
     if limit.timeout_seconds <= 0:
         return stream
-    return with_timeout(stream, limit.timeout_seconds, command)
+    return OutputStream(
+        with_timeout(stream, limit.timeout_seconds, command),
+        lambda: close_quietly(stream),
+    )
 
 
 async def run_with_timeout(coro, seconds: float | None, name: str):

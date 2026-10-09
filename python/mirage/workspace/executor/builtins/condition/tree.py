@@ -147,21 +147,15 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
                         raise CondError(f"{ctx.name}: {write.name}: {status}")
             finally:
                 reader.settle()
-            if isinstance(error, ReadonlyError):
-                # bash: `R: readonly variable`, status 1, and the line
-                # goes on; in a subscript it ends the shell.
-                if error.in_subscript:
-                    raise error.signal()
-                raise CondError(f"bash: {error}", exit_code=1, fatal=False)
             if error is not None:
-                # bash: `[[: 1/0: division by 0`, status 1, and the line
-                # goes on; one in a subscript discards it.
+                # bash: `[[: 1/0: division by 0` or `R: readonly variable`,
+                # status 1, and the line goes on; in a subscript it ends
+                # the shell.
                 if error.in_subscript:
                     raise error.signal()
+                lead = f"{ctx.name}: " if isinstance(error, ArithError) else ""
                 raise CondError(
-                    f"bash: {ctx.name}: {error}",
-                    exit_code=1,
-                    fatal=False,
+                    f"bash: {lead}{error}", exit_code=1, fatal=False
                 )
             values.append(value)
         return compare(values[0], values[1])

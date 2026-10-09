@@ -1,6 +1,7 @@
 from mirage.shell.bytes import decode_text
 from mirage.shell.parameter import bad_substitution
 from mirage.shell.parse.heredoc.line import construct_end
+from mirage.shell.parse.names import walk_tree
 from mirage.shell.types import TSNodeLike
 
 
@@ -25,10 +26,7 @@ def expansion_source(data: bytes, root: TSNodeLike) -> bytes:
     if b"${" not in data:
         return data
     opens: list[tuple[TSNodeLike, list[TSNodeLike]]] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        stack.extend(node.children)
+    for node in walk_tree(root):
         children = node.children
         opens.extend(
             (child, list(children[index + 1 :]))

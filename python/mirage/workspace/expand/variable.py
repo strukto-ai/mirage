@@ -62,15 +62,13 @@ from mirage.workspace.session import (
     visible_arrays,
     visible_env,
 )
-from mirage.workspace.session.elements import assign_element
+from mirage.workspace.session.elements import assign_element, landed_arith
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import (
     RandomReader,
     nameref_target,
     next_random,
     positional_params,
-    random_reader,
-    session_arith,
     subscript_index,
     visible_assocs,
 )
@@ -977,26 +975,15 @@ class _ArithOperand:
         Args:
             text (str): the expanded arithmetic expression.
         """
-        reader = random_reader(self.session)
+        nounset = bool(self.session.shell_options.get("nounset"))
         try:
-            result = session_arith(
-                self.session,
-                text,
-                reader,
-                nounset=bool(self.session.shell_options.get("nounset")),
+            return await landed_arith(
+                self.session, self.view, text, land_arith_writes, nounset
             )
         except ReadonlyError as exc:
-            await land_arith_writes(
-                self.session, self.view, exc.writes, reader
-            )
             raise exc.signal() from exc
         except ArithError as exc:
-            await land_arith_writes(
-                self.session, self.view, exc.writes, reader
-            )
             raise exc.signal(self.ref) from exc
-        await land_arith_writes(self.session, self.view, result.writes, reader)
-        return result.value
 
 
 async def _slice_bounds(

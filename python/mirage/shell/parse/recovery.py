@@ -20,6 +20,7 @@ from mirage.shell.parse.engine import TS_PARSER
 from mirage.shell.parse.expansion import expansion_source
 from mirage.shell.parse.heredoc import protected_source
 from mirage.shell.parse.heredoc.reader import delimiter_end
+from mirage.shell.parse.names import walk_tree
 from mirage.shell.parse.source import SourceNode
 from mirage.shell.parse.syntax import pattern_source
 from mirage.shell.types import TSNodeLike
@@ -341,9 +342,7 @@ def _orphaned_dollar_offsets(root: TSNodeLike, data: bytes) -> list[int]:
         data (bytes): the source the tree was parsed from.
     """
     offsets: list[int] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
+    for node in walk_tree(root):
         for child in node.children:
             if (
                 not child.is_named
@@ -354,7 +353,6 @@ def _orphaned_dollar_offsets(root: TSNodeLike, data: bytes) -> list[int]:
                 is not None
             ):
                 offsets.append(child.start_byte)
-            stack.append(child)
     return offsets
 
 
@@ -426,16 +424,13 @@ def repair_redirect_dashes(
         tuple[TSNodeLike, bytes]: the tree and source to run.
     """
     offsets: list[int] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
+    for node in walk_tree(root):
         end = node.start_byte
         for child in node.children:
             gap = data[end : child.start_byte]
             if child.type == "file_redirect" and gap.strip() == b"-":
                 offsets.append(end + gap.index(b"-"))
             end = child.end_byte
-            stack.append(child)
     if not offsets:
         return root, data
     repaired = data
@@ -460,10 +455,7 @@ def _header_inserts(root: TSNodeLike, data: bytes) -> list[tuple[int, bytes]]:
         list[tuple[int, bytes]]: each insertion's offset and text.
     """
     heads: list[int] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        stack.extend(node.children)
+    for node in walk_tree(root):
         if node.type in ("for_statement", "ERROR"):
             heads.extend(
                 kid.end_byte
@@ -517,13 +509,11 @@ def _errors(root: TSNodeLike) -> set[tuple[int, int]]:
     Args:
         root (TSNodeLike): the tree.
     """
-    stack, spans = [root], set()
-    while stack:
-        node = stack.pop()
-        stack.extend(node.children)
-        if node.type == "ERROR" or node.is_missing:
-            spans.add((node.start_byte, node.end_byte))
-    return spans
+    return {
+        (node.start_byte, node.end_byte)
+        for node in walk_tree(root)
+        if node.type == "ERROR" or node.is_missing
+    }
 
 
 def statement_boundaries(data: bytes) -> bytes:
@@ -547,10 +537,7 @@ def statement_boundaries(data: bytes) -> bytes:
         return data
     root = TS_PARSER.parse(data).root_node
     offsets: set[int] = set()
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        stack.extend(node.children)
+    for node in walk_tree(root):
         if node.type not in constants.STATEMENT_NODES:
             continue
         for left, right in zip(node.children, node.children[1:]):

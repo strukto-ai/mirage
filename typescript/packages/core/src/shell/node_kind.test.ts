@@ -41,6 +41,7 @@ const SNIPPETS: Record<NodeKind, string> = {
   [NodeKind.REDIRECT]: 'cat /data/a.txt > /data/b.txt',
   [NodeKind.SUBSHELL]: '(true)',
   [NodeKind.COMPOUND]: '{ true; }',
+  [NodeKind.ARITH]: '(( 1 ))',
   [NodeKind.IF]: 'if true; then false; fi',
   [NodeKind.FOR]: 'for i in 1 2; do true; done',
   [NodeKind.SELECT]: 'select x in a b; do true; done',
@@ -78,11 +79,4 @@ describe('nodeKind', () => {
       expect(nodeKind(node)).toBe(kind)
     })
   }
-
-  it('disambiguates select/for and until/while', () => {
-    expect(nodeKind(firstStatement('select x in a; do true; done'))).toBe(NodeKind.SELECT)
-    expect(nodeKind(firstStatement('for i in a; do true; done'))).toBe(NodeKind.FOR)
-    expect(nodeKind(firstStatement('until false; do true; done'))).toBe(NodeKind.UNTIL)
-    expect(nodeKind(firstStatement('while true; do false; done'))).toBe(NodeKind.WHILE)
-  })
 })

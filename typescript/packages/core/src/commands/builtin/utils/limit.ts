@@ -14,6 +14,7 @@
 
 import { concat } from '../../../io/cachable_iterator.ts'
 import { chunks } from '../../../io/cooperative.ts'
+import { OutputStream } from '../../../io/stdio.ts'
 import { closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type Limit, OnExceed } from '../../../types.ts'
@@ -165,7 +166,7 @@ export function maybeWithTimeout(
   if (stream === null || stream instanceof Uint8Array) return stream
   const timeout = limit?.timeoutSeconds ?? null
   if (timeout === null || timeout <= 0) return stream
-  return withTimeout(stream, timeout, command)
+  return new OutputStream(withTimeout(stream, timeout, command), () => closeQuietly(stream))
 }
 
 export async function runWithTimeout<T>(

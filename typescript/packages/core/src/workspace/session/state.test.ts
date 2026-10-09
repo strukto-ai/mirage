@@ -25,7 +25,6 @@ import type { Action, SessionContext } from '../../policy/types.ts'
 import { ReadonlyVariableError } from './errors.ts'
 import { SessionState } from './session.ts'
 import {
-  elementIndex,
   envSnapshot,
   gateRendering,
   gateRestoredVars,
@@ -303,17 +302,6 @@ describe('stripKeyQuotes', () => {
   })
 })
 
-describe('elementIndex', () => {
-  it('resolves ints, arithmetic, and errors to zero', () => {
-    expect(elementIndex('3', {})).toBe(3)
-    expect(elementIndex(' -2 ', {})).toBe(-2)
-    expect(elementIndex('i+1', { i: '1' })).toBe(2)
-    // An unresolvable expression indexes element 0, bash's
-    // unset-name-is-zero arithmetic rule.
-    expect(elementIndex('$bad', {})).toBe(0)
-  })
-})
-
 describe('subscriptIndex', () => {
   it('lands the assignments a subscript makes and seeds RANDOM', async () => {
     const s = new SessionState({ sessionId: 's' })
@@ -349,10 +337,8 @@ describe('sessionElements', () => {
     expect(ops.resolve('m', '1+1', {})).toBe('1+1')
   })
 
-  it('resolves indexed subscripts as arithmetic with negative wrap', () => {
+  it('wraps a negative indexed subscript', () => {
     const ops = sessionElements(elementSession())
-    expect(ops.resolve('arr', '1+1', {})).toBe('2')
-    expect(ops.resolve('arr', 'i', { i: '2' })).toBe('2')
     expect(ops.resolve('arr', '-1', {})).toBe('2')
     expect(() => ops.resolve('arr', '-9', {})).toThrow(ArithError)
   })

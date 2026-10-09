@@ -53,7 +53,7 @@ import {
   openSession,
   type ChannelRequest,
 } from './session.ts'
-import { ChannelInput, ChannelOutput, Mark } from './stream.ts'
+import { ChannelInput, ChannelOutput, Mark, deliver } from './stream.ts'
 
 type Message = Record<string, JsonValue>
 type Handler = (params: Message) => Promise<JsonValue>
@@ -676,17 +676,20 @@ class CodexChannel {
   ): Promise<void> {
     let code: number
     try {
-      const result = await this.entry.runner.ws.shell(line, {
+      const execution = await this.entry.runner.ws.shell(line, {
         sessionId: this.sessionId,
         stdin: proc.stdin ?? new Uint8Array(0),
         agentId: CODEX_AGENT_ID,
         signal: controller.signal,
         cwd,
         ...(Object.keys(env).length > 0 ? { env } : {}),
+        stream: true,
       })
-      await this.emit(proc, result.stdout, false)
-      await this.emit(proc, result.stderr, true)
-      code = result.exitCode
+      try {
+        code = (await deliver(execution, (data, stderr) => this.emit(proc, data, stderr))).exitCode
+      } finally {
+        await execution.close()
+      }
     } catch (err) {
       if (controller.signal.aborted) {
         code = CODEX_INTERRUPTED

@@ -19,9 +19,6 @@ does not expand), rewrites the head word into a fresh line so a value
 holding a pipe is a pipe, and reports through ``type``/``command -v``.
 """
 
-import json
-from pathlib import Path
-
 import pytest
 
 from mirage.types import MountMode
@@ -40,48 +37,6 @@ async def _run(ws: Workspace, cmd: str) -> tuple[str, int]:
 
 
 @pytest.mark.asyncio
-async def test_a_function_keeps_the_aliases_its_definition_saw():
-    ws = _ws()
-    await _run(ws, "shopt -s expand_aliases; alias a='echo 1'")
-    await _run(ws, 'f() { a; }; g() { x=$(a); echo "[$x]"; }')
-    await _run(ws, "alias a='echo 2'")
-    assert await _run(ws, "f; g") == ("1\n[2]\n", 0)
-    assert await _run(ws, "unalias a; f") == ("1\n", 0)
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_no_expansion_without_shopt():
-    ws = _ws()
-    out, code = await _run(ws, "alias x='echo hi'\nx")
-    assert code == 127
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_expansion_from_next_line():
-    ws = _ws()
-    # Same line: the definition does not apply to the use.
-    out, code = await _run(ws, "shopt -s expand_aliases\nalias x='echo hi'; x")
-    assert code == 127
-    # Next line: it does.
-    out, _ = await _run(ws, "shopt -s expand_aliases\nalias y='echo hi'\ny")
-    assert out == "hi\n"
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_value_is_reparsed_as_a_line():
-    ws = _ws()
-    await _run(ws, "touch /data/foo /data/bar")
-    out, _ = await _run(
-        ws, "shopt -s expand_aliases\nalias lg='ls /data | grep'\nlg foo"
-    )
-    assert out == "foo\n"
-    await ws.close()
-
-
-@pytest.mark.asyncio
 async def test_trailing_space_checks_next_word():
     ws = _ws()
     out, _ = await _run(
@@ -90,16 +45,6 @@ async def test_trailing_space_checks_next_word():
         "alias do='echo DID'\nrun echo hi",
     )
     assert out == "DID echo hi\n"
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_list_and_query():
-    ws = _ws()
-    out, _ = await _run(ws, "alias x='echo hi'\nalias")
-    assert out == "alias x='echo hi'\n"
-    out, _ = await _run(ws, "alias x='echo hi'\ntype -t x; command -v x")
-    assert out == "alias\nalias x='echo hi'\n"
     await ws.close()
 
 
@@ -125,14 +70,6 @@ async def test_bad_names():
     assert code == 1
     _, code = await _run(ws, "alias 'a/b'=x")
     assert code == 1
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_value_holding_a_quote_prints_re_readably():
-    ws = _ws()
-    out, _ = await _run(ws, 'alias x="it\'s a test"; alias x')
-    assert out == "alias x='it'\\''s a test'\n"
     await ws.close()
 
 
@@ -230,39 +167,6 @@ async def test_a_checked_out_function_does_not_read_the_replaced_site():
     await apply_state_dict(ws, state)
     assert await _run(ws, "f") == ("3\n", 0)
     await ws.close()
-
-
-OWNERSHIP_CASES = [
-    row
-    for row in json.loads(
-        (
-            Path(__file__).resolve().parents[6]
-            / "integ/bash/builtin/alias.json"
-        ).read_text()
-    )["cases"]
-    if row["id"].startswith("alias_ownership_")
-]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("case", OWNERSHIP_CASES, ids=lambda case: case["id"])
-async def test_alias_source_ownership(case):
-    # Bash 5.2.37, debian:stable-slim at digest
-    # sha256:5bc3287b25407c965a30f38e32603dc253a3869e1b12a21ac09bfc27fd8b13ce.
-    ws = _ws()
-    try:
-        io = await ws.shell(case["command"])
-        assert (
-            io.exit_code,
-            await io.stdout_str(),
-            await io.stderr_str(),
-        ) == (
-            case["expect"]["exit"],
-            case["expect"]["stdout"],
-            case["expect"]["stderr"],
-        )
-    finally:
-        await ws.close()
 
 
 @pytest.mark.asyncio

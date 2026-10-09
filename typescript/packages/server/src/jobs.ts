@@ -148,7 +148,10 @@ export class JobTable {
     let error: string | null = null
     try {
       control.controller.signal.throwIfAborted()
-      result = await factory(control.controller.signal, new ExecutionScope(() => this.started(id)))
+      result = await factory(
+        control.controller.signal,
+        new ExecutionScope(() => this.started(id), id),
+      )
     } catch (err) {
       // The job's own cancel aborts its controller; the workspace's (a
       // session or workspace cancel) rejects the line with the abort error.
@@ -207,8 +210,12 @@ export class JobTable {
     return record
   }
 
+  /** Stop locally owned work, then record the intent, so a stalled store cannot keep it running. */
   async cancel(id: string): Promise<boolean> {
-    const [, accepted] = await this.change(id, (r) =>
+    const control = this.live.get(id)
+    const stopped = control !== undefined && !control.controller.signal.aborted
+    control?.controller.abort()
+    const [record, accepted] = await this.change(id, (r) =>
       r.cancelRequested
         ? null
         : {
@@ -217,8 +224,12 @@ export class JobTable {
             status: JobStatus.STOPPING,
           },
     )
-    if (accepted) this.live.get(id)?.controller.abort()
-    return accepted
+    return accepted || (stopped && record.status === JobStatus.CANCELED)
+  }
+
+  /** Join locally owned cleanup independently of record-store health. */
+  async drain(id: string): Promise<void> {
+    await this.live.get(id)?.completion
   }
 
   close(): Promise<void> {

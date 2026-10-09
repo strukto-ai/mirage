@@ -38,16 +38,18 @@ from mirage import __version__
 from mirage.server.inflight import InFlight, rpc_messages
 from mirage.server.io_serde import io_result_to_dict
 from mirage.server.jobs import JobStatus, JobTable
+from mirage.server.mcp.progress import (
+    McpToolOperations,
+    OutputProgress,
+    collect_execution,
+)
 from mirage.server.mcp.server import MirageMcpServer
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.types import JsonValue
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.tools.io_text import io_to_str
-from mirage.workspace.tools.tool_operations import (
-    MirageToolOperations,
-    ToolResult,
-)
+from mirage.workspace.tools.tool_operations import ToolResult
 from mirage.workspace.workspace import Session
 
 MCP_PATH = "/v1/workspaces/{workspace_id}/mcp"
@@ -56,7 +58,7 @@ CALLS = {"tools": False, "all": True}
 T = TypeVar("T")
 
 
-class DaemonToolOperations(MirageToolOperations):
+class DaemonToolOperations(McpToolOperations):
     """The tool table as the daemon serves it: through its own API.
 
     ``shell`` is a job, submitted to the daemon's job table the way
@@ -77,16 +79,19 @@ class DaemonToolOperations(MirageToolOperations):
     def __init__(
         self, entry: WorkspaceEntry, jobs: JobTable, session_id: str
     ) -> None:
-        super().__init__(Session(entry.runner.ws, session_id))
+        super().__init__(entry.runner.ws, session_id)
         self._entry = entry
         self._jobs = jobs
         self._session_id = session_id
 
-    async def shell(self, command: str) -> ToolResult:
+    async def shell(
+        self, command: str, progress: OutputProgress | None = None
+    ) -> ToolResult:
         """Run a command line as a job of the daemon.
 
         Args:
             command (str): The command line to run.
+            progress (OutputProgress | None): Request-local output previews.
 
         Returns:
             ToolResult: The command's rendered output, or the job's failure.
@@ -95,9 +100,13 @@ class DaemonToolOperations(MirageToolOperations):
         answers: list[ToolResult] = []
 
         async def run_line(scope: ExecutionScope) -> JsonValue:
-            io = await runner.ws.shell(
-                command, session_id=self._session_id, execution_scope=scope
+            execution = await runner.ws.shell(
+                command,
+                session_id=self._session_id,
+                execution_scope=scope,
+                stream=True,
             )
+            io = await collect_execution(execution, progress)
             payload = await io_result_to_dict(io)
             answers.append(ToolResult(io_to_str(io), io.exit_code != 0))
             return payload
@@ -116,6 +125,7 @@ class DaemonToolOperations(MirageToolOperations):
         except asyncio.CancelledError:
             with anyio.CancelScope(shield=True):
                 await self._jobs.cancel(job.id)
+                await self._jobs.drain(job.id)
             raise
         if job.status == JobStatus.CANCELED:
             return ToolResult("job canceled", True)

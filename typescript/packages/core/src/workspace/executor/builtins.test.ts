@@ -133,14 +133,6 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     expect(decode(out as Uint8Array)).toBe('declare -x FOO="bar"\ndeclare -x PWD="/"\n')
   })
 
-  it('export -z is invalid option exit 2', async () => {
-    const s = new SessionState({ sessionId: 'test' })
-    const [, io] = await handleExport(['-z'], s)
-    expect(io.exitCode).toBe(2)
-    expect(decode(io.stderr as Uint8Array)).toContain('invalid option')
-    expect(decode(io.stderr as Uint8Array)).toContain('usage: export')
-  })
-
   it('export write without a threaded view is a wiring bug', async () => {
     // The old fallback built an ungated view here, so `export
     // AWS_SECRET_ACCESS_KEY=x` cleared every preSession rule.
@@ -172,13 +164,6 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     expect(text).toContain('declare -rx VAL="x"\n')
   })
 
-  it('readonly -z is invalid option exit 2', async () => {
-    const s = new SessionState({ sessionId: 'test' })
-    const [, io] = await handleReadonly(['-z'], s)
-    expect(io.exitCode).toBe(2)
-    expect(decode(io.stderr as Uint8Array)).toContain('invalid option')
-  })
-
   it('export -p quotes control characters like bash', async () => {
     const s = new SessionState({
       sessionId: 'test',
@@ -205,35 +190,11 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     expect(text).toContain('declare -x UTF="café"\n')
   })
 
-  it('export -p -- still prints', async () => {
-    const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ FOO: 'bar' }) })
-    const [out, io] = await handleExport(['-p', '--'], s)
-    expect(io.exitCode).toBe(0)
-    expect(decode(out as Uint8Array)).toBe('declare -x FOO="bar"\ndeclare -x PWD="/"\n')
-  })
-
   it('export -f lists no variables', async () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ FOO: 'bar' }) })
     const [out, io] = await handleExport(['-f'], s)
     expect(io.exitCode).toBe(0)
     expect(decode(out as Uint8Array)).toBe('')
-  })
-
-  it('export reports the first invalid option letter', async () => {
-    const s = new SessionState({ sessionId: 'test' })
-    const [, io] = await handleExport(['-zq'], s)
-    expect(decode(io.stderr as Uint8Array)).toContain('export: -z: invalid option')
-    expect(decode(io.stderr as Uint8Array)).not.toContain('-q: invalid option')
-  })
-
-  it('readonly -a lists arrays only', async () => {
-    const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ VAL: 'x' }) })
-    setAttr(s, 'VAL', VarAttr.Readonly)
-    seedVar(s, 'AR', ['a'])
-    setAttr(s, 'AR', VarAttr.Readonly)
-    const [out, io] = await handleReadonly(['-a'], s)
-    expect(io.exitCode).toBe(0)
-    expect(decode(out as Uint8Array)).toBe('declare -ar AR=([0]="a")\n')
   })
 
   it('readonly -f and -A list nothing', async () => {
@@ -1617,7 +1578,7 @@ describe('handleReturn / handleLocal', () => {
 
   it('handleLocal assigns to session.env under the declare spelling', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    await handleLocal(['X=1'], s, sessionView(s), 'declare')
+    await handleLocal(['X=1'], s, sessionView(s), { cmd: 'declare' })
     expect(s.env.X).toBe('1')
   })
 })

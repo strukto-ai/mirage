@@ -18,10 +18,7 @@ import {
   type McpHttpHandler,
 } from '@modelcontextprotocol/server'
 import { ioToStr } from '@struktoai/mirage-core/workspace/tools/io_text'
-import {
-  MirageToolOperations,
-  type ToolResult,
-} from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import { type ToolResult } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
@@ -30,6 +27,7 @@ import { InFlight, rpcMessages } from '../inflight.ts'
 import { ioResultToDict } from '../io_serde.ts'
 import { JobStatus, type JobTable } from '../jobs.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
+import { McpToolOperations, collectExecution, type OutputProgress } from './progress.ts'
 import { createMirageMcpServer } from './server.ts'
 
 const MCP_PATH = '/v1/workspaces/:workspaceId/mcp'
@@ -44,13 +42,13 @@ const CALLS: Readonly<Record<string, boolean>> = { tools: false, all: true }
  * run through the session's own table (`session.tools`), so a read
  * through any entry point guards a write through another.
  */
-export class DaemonToolOperations extends MirageToolOperations {
+export class DaemonToolOperations extends McpToolOperations {
   constructor(
     private readonly entry: WorkspaceEntry,
     private readonly jobs: JobTable,
     private readonly sessionId: string,
   ) {
-    super(new Session(entry.runner.ws, sessionId))
+    super(entry.runner.ws, sessionId)
   }
 
   override async call(
@@ -62,14 +60,24 @@ export class DaemonToolOperations extends MirageToolOperations {
     return new Session(this.entry.runner.ws, this.sessionId).tools.call(name, args, signal)
   }
 
-  override async shell(command: string, signal?: AbortSignal): Promise<ToolResult> {
+  override async shell(
+    command: string,
+    signal?: AbortSignal,
+    progress?: OutputProgress,
+  ): Promise<ToolResult> {
     const ws = this.entry.runner.ws
     let answer: ToolResult | undefined
     let job = await this.jobs.submit(
       this.entry.id,
       command,
       async (signal, executionScope) => {
-        const io = await ws.shell(command, { sessionId: this.sessionId, executionScope, signal })
+        const execution = await ws.shell(command, {
+          sessionId: this.sessionId,
+          executionScope,
+          signal,
+          stream: true,
+        })
+        const io = await collectExecution(execution, progress)
         const payload = ioResultToDict(io)
         answer = { content: [{ type: 'text', text: ioToStr(io) }] }
         if (io.exitCode !== 0) answer.isError = true
@@ -85,6 +93,7 @@ export class DaemonToolOperations extends MirageToolOperations {
       job = await this.jobs.wait(jobId)
     } finally {
       signal?.removeEventListener('abort', cancel)
+      if (signal?.aborted === true) await this.jobs.drain(jobId)
     }
     if (job.status === JobStatus.CANCELED) {
       return { content: [{ type: 'text', text: 'job canceled' }], isError: true }

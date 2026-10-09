@@ -18,6 +18,7 @@ import * as constants from './constants.ts'
 import { expansionSource } from './expansion.ts'
 import { protectedSource } from './heredoc/index.ts'
 import { delimiterEnd } from './heredoc/reader.ts'
+import { walkTree } from './names.ts'
 import { SourceNode } from './source.ts'
 import { patternSource } from './syntax.ts'
 import type { ShellNode } from '../types.ts'
@@ -289,10 +290,7 @@ export function failedArithOpeners(root: ShellNode): number[] {
  */
 function orphanedDollarOffsets(root: ShellNode, text: string): number[] {
   const offsets: number[] = []
-  const stack: ShellNode[] = [root]
-  for (;;) {
-    const node = stack.pop()
-    if (node === undefined) break
+  for (const node of walkTree(root)) {
     for (const child of node.children) {
       if (
         !child.isNamed &&
@@ -303,7 +301,6 @@ function orphanedDollarOffsets(root: ShellNode, text: string): number[] {
       ) {
         offsets.push(child.startIndex)
       }
-      stack.push(child)
     }
   }
   return offsets
@@ -363,10 +360,7 @@ export function repairRedirectDashes(
   text: string,
 ): [ShellNode, string] {
   const offsets: number[] = []
-  const stack = [root]
-  while (stack.length > 0) {
-    const node = stack.pop()
-    if (node === undefined) break
+  for (const node of walkTree(root)) {
     let end = node.startIndex
     for (const child of node.children) {
       const gap = text.slice(end, child.startIndex)
@@ -374,7 +368,6 @@ export function repairRedirectDashes(
         offsets.push(end + gap.indexOf('-'))
       }
       end = child.endIndex
-      stack.push(child)
     }
   }
   if (offsets.length === 0) return [root, text]
@@ -394,9 +387,7 @@ export function repairRedirectDashes(
  */
 function headerInserts(root: ShellNode, text: string): [number, string][] {
   const heads: number[] = []
-  const stack = [root]
-  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
-    stack.push(...node.children)
+  for (const node of walkTree(root)) {
     if (node.type !== 'for_statement' && node.type !== 'ERROR') continue
     for (const kid of node.children) {
       if (kid.type === 'for' || kid.type === 'select') heads.push(kid.endIndex)
@@ -443,9 +434,7 @@ export function repairForHeaders(
 /** The spans of a tree's error and missing nodes. Mirrors Python's _errors. */
 function errors(root: ShellNode): Set<string> {
   const spans = new Set<string>()
-  const stack = [root]
-  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
-    stack.push(...node.children)
+  for (const node of walkTree(root)) {
     if (node.type === 'ERROR' || node.isMissing)
       spans.add(`${String(node.startIndex)}:${String(node.endIndex)}`)
   }
@@ -467,11 +456,7 @@ export function statementBoundaries(parser: NativeParser, text: string): string 
   const root = parser.parse(text)?.rootNode
   if (root === undefined) return text
   const offsets = new Set<number>()
-  const stack = [root]
-  while (stack.length > 0) {
-    const node = stack.pop()
-    if (node === undefined) break
-    stack.push(...node.children)
+  for (const node of walkTree(root)) {
     if (!constants.STATEMENT_NODES.has(node.type)) continue
     const children = node.children
     for (let i = 1; i < children.length; i += 1) {

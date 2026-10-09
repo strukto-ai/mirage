@@ -31,9 +31,12 @@ def quote_string(value: str) -> str:
     """Spell a value as an RFC 3501 quoted string.
 
     The two quoted-specials, ``"`` and ``\\``, are escaped with a
-    backslash and nothing else is touched. A CR or LF has no spelling
-    inside a quoted string, so a value holding one is refused here
-    rather than sent, where it would end the command line early.
+    backslash and nothing else is touched. A mailbox is always sent
+    quoted, since the client joins arguments with spaces as given and a
+    name holding one (``Sent Items``, ``[Gmail]/Sent Mail``) would
+    arrive as two words. A CR or LF has no spelling inside a quoted
+    string, so a value holding one is refused here rather than sent,
+    where it would end the command line early.
 
     Args:
         value (str): the text as the caller means it.
@@ -48,25 +51,6 @@ def quote_string(value: str) -> str:
         raise ValueError("an IMAP quoted string cannot hold a line break")
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
-
-
-def quote_mailbox(folder: str) -> str:
-    """Spell a mailbox name as an IMAP quoted string.
-
-    The IMAP client joins a command's arguments with spaces exactly as
-    given, so a bare mailbox name containing one arrives as two
-    arguments and the server reads only the first word. That is not
-    exotic: the sent mailbox is ``Sent Items`` on Exchange and
-    ``[Gmail]/Sent Mail`` on Gmail.
-
-    Args:
-        folder (str): the mailbox name as the server listed it.
-
-    Returns:
-        str: the name wrapped in quotes, with quotes and backslashes
-            escaped per RFC 3501's quoted-string rules.
-    """
-    return quote_string(folder)
 
 
 def read_quoted(text: str) -> tuple[str, str]:
@@ -96,7 +80,7 @@ def read_quoted(text: str) -> tuple[str, str]:
 
 
 def parse_folder_line(
-    line: str | bytes | bytearray,
+    line: bytes | bytearray,
 ) -> tuple[str, tuple[str, ...]] | None:
     """Read one LIST response line as a name and its attributes.
 
@@ -107,16 +91,14 @@ def parse_folder_line(
     atom form, so the three tokens are walked in order instead.
 
     Args:
-        line (str | bytes | bytearray): one line of the LIST response.
+        line (bytes | bytearray): one line of the LIST response.
 
     Returns:
         tuple[str, tuple[str, ...]] | None: the mailbox name and its
             attributes, or None for a line that is not a mailbox (the
             trailing "LIST completed" among them).
     """
-    if isinstance(line, (bytes, bytearray)):
-        line = bytes(line).decode(errors="replace")
-    text = line.strip()
+    text = bytes(line).decode(errors="replace").strip()
     # An untagged LIST line always opens with its attribute list, which
     # is what tells it apart from the completion line.
     if not text.startswith("("):
@@ -164,7 +146,7 @@ async def select_folder(imap: IMAPClient, folder: str) -> None:
     Raises:
         FileNotFoundError: the server refused the mailbox.
     """
-    response = await imap.select(quote_mailbox(folder))
+    response = await imap.select(quote_string(folder))
     if response.result != "OK":
         raise FileNotFoundError(f"no such mailbox {folder!r}")
 

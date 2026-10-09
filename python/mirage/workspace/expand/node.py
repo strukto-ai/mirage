@@ -50,9 +50,9 @@ from mirage.workspace.expand.variable import (
     land_arith_writes,
     parameter_chunks,
 )
+from mirage.workspace.session.elements import landed_arith
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.shell_dirs import home_dir
-from mirage.workspace.session.state import random_reader, session_arith
 
 
 def _folded_whitespace(node: TSNodeLike) -> str:
@@ -230,21 +230,10 @@ async def _arith_text(
                     child, context, execute_fn, call_stack, view
                 )
             )
-        elif child.type in ARITH_OPERATORS:
-            parts.append(get_text(child))
-        elif child.type == NT.NUMBER:
-            parts.append(get_text(child))
-        elif child.type in (
-            NT.SIMPLE_EXPANSION,
-            NT.EXPANSION,
-            NT.COMMAND_SUBSTITUTION,
+        elif child.type in ARITH_OPERATORS or child.type in (
+            NT.NUMBER,
+            NT.VARIABLE_NAME,
         ):
-            parts.append(
-                await expand_node(
-                    child, context, execute_fn, call_stack, view=view
-                )
-            )
-        elif child.type == NT.VARIABLE_NAME:
             parts.append(get_text(child))
         else:
             parts.append(
@@ -314,30 +303,19 @@ async def _arith_subscript(
 async def _arith_value(
     session: SessionState, view: SessionView | None, expr: str
 ) -> str:
-    """An arithmetic expansion's value.
-
-    Reads resolve against the visible env, so a hidden name counts as
-    unset; the write-back goes through the session view, so a
-    ``pre_session`` rule governs ``$((X=5))`` exactly as it governs
-    ``X=5``. bash bound the assignments made before an error, RANDOM's
-    seed included; they land before the line dies.
+    """An arithmetic expansion's value. The write-back goes through the
+    session view, so a ``pre_session`` rule governs ``$((X=5))`` exactly
+    as it governs ``X=5``; an error unwinds as its ``signal``.
 
     Args:
         session (SessionState): the session the expression reads.
         view (SessionView | None): the gated session view.
         expr (str): the expanded expression.
     """
-    reader = random_reader(session)
     try:
-        result = session_arith(session, expr, reader)
-    except ArithError as exc:
-        await land_arith_writes(session, view, exc.writes, reader)
+        return str(await landed_arith(session, view, expr, land_arith_writes))
+    except (ArithError, ReadonlyError) as exc:
         raise exc.signal() from exc
-    except ReadonlyError as exc:
-        await land_arith_writes(session, view, exc.writes, reader)
-        raise exc.signal() from exc
-    await land_arith_writes(session, view, result.writes, reader)
-    return str(result.value)
 
 
 async def expand_node(

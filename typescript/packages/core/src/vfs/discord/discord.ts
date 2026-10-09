@@ -14,7 +14,11 @@
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { read as discordRead, readRange as discordReadRange } from '../../core/discord/read.ts'
+import {
+  read as discordRead,
+  readRange as discordReadRange,
+  readStream as discordReadStream,
+} from '../../core/discord/read.ts'
 import { readdir as discordReaddir } from '../../core/discord/readdir.ts'
 import { stat as discordStat } from '../../core/discord/stat.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
@@ -44,6 +48,14 @@ export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
       index,
       size === null ? { offset } : { offset, size },
     )
+  }
+
+  override readStream(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    signal?: AbortSignal,
+  ): AsyncIterable<Uint8Array> {
+    return discordReadStream(this.accessor, path, index, signal)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {

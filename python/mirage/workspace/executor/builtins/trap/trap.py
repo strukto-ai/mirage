@@ -64,40 +64,6 @@ def listing(action: str, event: TrapEvent) -> str:
     return f"trap -- '{quoted}' {event.value}\n"
 
 
-def _trap_action(session: SessionState, event: TrapEvent) -> str | None:
-    """The action registered for one of the events mirage runs.
-
-    Args:
-        session (SessionState): the shell whose action this is.
-        event (TrapEvent): EXIT, ERR or RETURN.
-    """
-    if event is TrapEvent.EXIT:
-        return session.exit_trap
-    if event is TrapEvent.ERR:
-        return session.err_trap
-    return session.return_trap
-
-
-def _set_trap(session: SessionState, event: TrapEvent, action: str) -> None:
-    """Set (or with ``-`` reset) one event's action in this scope.
-
-    Args:
-        session (SessionState): the shell whose action this is.
-        event (TrapEvent): EXIT, ERR or RETURN.
-        action (str): the action, ``-`` to reset it.
-    """
-    value = None if action == "-" else action
-    if event is TrapEvent.EXIT:
-        session.exit_trap = value
-        session.exit_trap_inherited = False
-    elif event is TrapEvent.ERR:
-        session.err_trap = value
-        session.err_trap_hidden = False
-    else:
-        session.return_trap = value
-        session.return_trap_hidden = False
-
-
 async def handle_trap(args: list[str], session: SessionState) -> Result:
     """Register, reset or list the shell's ``EXIT``, ``ERR`` and
     ``RETURN`` actions.
@@ -149,7 +115,7 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
                     )
                 )
             elif event is not TrapEvent.OTHER:
-                action = _trap_action(session, event)
+                action = getattr(session, RUN_EVENTS[event][0])
                 if action is not None:
                     out.append(listing(action, event))
         return result(
@@ -175,7 +141,9 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
                 )
             )
         elif event is not TrapEvent.OTHER:
-            _set_trap(session, event, action)
+            field, scoped = RUN_EVENTS[event]
+            setattr(session, field, None if action == "-" else action)
+            setattr(session, scoped, False)
         elif action != "-":
             errors.append(f"mirage: trap: {spec}: not supported\n")
     return result(

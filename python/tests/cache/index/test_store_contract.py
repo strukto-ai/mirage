@@ -167,6 +167,7 @@ async def test_a_listing_expires_after_the_ttl(store_factory):
     # store; every other test lists under an hour's ttl, so a stalled
     # runner cannot expire a listing between two of its awaits.
     store = store_factory(ttl=1)
+    assert store.ttl == 1
     await store.set_dir("/dir", [("a", entry())])
     got = (await store.get("/dir/a")).entry
     await asyncio.sleep(1.1)
@@ -175,11 +176,6 @@ async def test_a_listing_expires_after_the_ttl(store_factory):
     await store.invalidate_dir("/dir")
     assert (await store.list_dir("/dir")).status == LookupStatus.NOT_FOUND
     assert (await store.get("/dir/a")).status == LookupStatus.NOT_FOUND
-
-
-@pytest.mark.asyncio
-async def test_ttl_is_the_configured_listing_lifetime(store_factory):
-    assert store_factory(ttl=7).ttl == 7
 
 
 def folder(name):

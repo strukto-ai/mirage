@@ -14,20 +14,23 @@
 
 import { storedFunctionText } from '../../../../shell/printer.ts'
 import type { ParseScope } from '../../../../shell/parse/scope.ts'
-import { IOResult } from '../../../../io/types.ts'
 import { ArithError, DiscardSignal } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import {
-  arrayGet,
   arraySet,
   buildAssocLiteral,
   buildIndexedLiteral,
   type ShellArray,
 } from '../../../../shell/array.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
-import { sessionEntry, setSessionEntry } from '../../../session/session.ts'
-import type { ShellValue, ShellVar } from '../../../../shell/variable.ts'
-import { attrLetters, VarAttr, VarKind } from '../../../../shell/variable.ts'
+import { type SessionState, sessionEntry, setSessionEntry } from '../../../session/session.ts'
+import {
+  attrLetters,
+  type ShellValue,
+  type ShellVar,
+  VarAttr,
+  VarKind,
+} from '../../../../shell/variable.ts'
 import {
   appended,
   conversionScalar,
@@ -38,16 +41,18 @@ import {
   shadowLocal,
   subscriptIndex,
 } from '../../../session/state.ts'
-import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import { ExecutionNode } from '../../../types.ts'
-import { isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
+import { fail, isValidName, ok, readonlyLine, refusal, requireView, result } from '../shared.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import {
   ANSI_C_ESCAPES,
   BARE_KEY_RE,
   CONTROL_RE,
+  EXPORT_FLAGS,
+  EXPORT_USAGE,
   LISTED_ATTRIBUTES,
+  READONLY_FLAGS,
+  READONLY_USAGE,
   SUBSCRIPT_RE,
   VISIBLE_SCOPE_BUILTINS,
 } from './constants.ts'
@@ -136,24 +141,13 @@ export function kindConflict(held: ShellValue | null, kind: VarKind | null): str
 }
 
 /**
- * What a declaration's `NAME+=value` extends: a scalar's text, element 0
- * of an array, key `"0"` of a map (`S=x; declare -a S+=y` gives
- * `([0]="xy")`), '' when unset.
- */
-export function heldSlot(held: ShellValue | null): string {
-  if (typeof held === 'string') return held
-  if (Array.isArray(held)) return arrayGet(held, 0)
-  return held?.['0'] ?? ''
-}
-
-/**
  * What a declaration's `NAME=value` stores, and the elements it assigns
  * (`coerceValue`). An array keeps its kind and takes the value at element 0
  * (key `"0"` in a map), as a plain `NAME=value` does, leaving the other
  * elements as stored; otherwise `-A` makes the map `([0]=value)` and `-a`
  * the one-element array, a held scalar converting to that element first,
  * and with neither the value stays a scalar. A `NAME+=value` arrives here
- * already joined onto `heldSlot`.
+ * as `appended` hands it.
  */
 export function scalarValue(
   held: ShellValue | null,
@@ -450,7 +444,7 @@ export function splitDeclFlags(
       i += 1
       break
     }
-    if (tok.startsWith('-') && tok.length > 1 && tok !== '-') {
+    if (tok.startsWith('-') && tok.length > 1) {
       const body = tok.slice(1)
       for (const ch of body) {
         if (!allowed.has(ch)) return { flags, names: args.slice(i), bad: ch }
@@ -541,20 +535,10 @@ export function declarationResult(
   failed: boolean = errors.length > 0,
 ): Result {
   const lines = [...warnings, ...errors.filter((line) => line !== '')]
-  const code = failed ? 1 : 0
-  if (lines.length === 0) {
-    return [
-      null,
-      new IOResult({ exitCode: code }),
-      new ExecutionNode({ command: cmd, exitCode: code }),
-    ]
-  }
-  const err = encodeText(`${lines.join('\n')}\n`)
-  return [
-    null,
-    new IOResult({ exitCode: code, stderr: err }),
-    new ExecutionNode({ command: cmd, exitCode: code, stderr: err }),
-  ]
+  return result(cmd, {
+    exitCode: failed ? 1 : 0,
+    stderr: lines.map((line) => `${line}\n`).join(''),
+  })
 }
 
 /**
@@ -590,14 +574,6 @@ export function declareLine(session: SessionState, name: string): string | null 
   return `${head} ${name}=${bashDeclareQuote(v.value)}`
 }
 
-/**
- * Run `declare -p`: render declarations for names, or for all.
- *
- * With names, they print in the order given and a name that does not
- * exist is reported on stderr without stopping the rest, exiting 1 at the
- * end -- GNU prints the names it knows and refuses only the ones it does
- * not. Bare `declare -p` lists every visible name sorted.
- */
 /**
  * Whether a no-name `declare` listing's letters keep `name`: `-a` / `-A`
  * narrow it to that array kind (`kindListed`), and any of `-i -l -n -r -t
@@ -637,28 +613,11 @@ export function handleDeclarePrint(
     if (line === null) errors.push(`bash: declare: ${name}: not found`)
     else lines.push(line)
   }
-  const out = lines.length > 0 ? encodeText(`${lines.join('\n')}\n`) : new Uint8Array()
-  const err = errors.length > 0 ? encodeText(`${errors.join('\n')}\n`) : undefined
-  const code = errors.length > 0 ? 1 : 0
-  return [
-    out,
-    new IOResult({ exitCode: code, ...(err !== undefined ? { stderr: err } : {}) }),
-    new ExecutionNode({
-      command: 'declare',
-      exitCode: code,
-      ...(err !== undefined ? { stderr: err } : {}),
-    }),
-  ]
-}
-
-/** The `unset` refusal for a function `readonly -f` froze. */
-export function readonlyFunctionUnset(name: string): Result {
-  const err = encodeText(`bash: unset: ${name}: cannot unset: readonly function\n`)
-  return [
-    null,
-    new IOResult({ exitCode: 1, stderr: err }),
-    new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
-  ]
+  return result('declare', {
+    out: encodeText(lines.map((line) => `${line}\n`).join('')),
+    exitCode: errors.length > 0 ? 1 : 0,
+    stderr: errors.map((error) => `${error}\n`).join(''),
+  })
 }
 
 /**
@@ -724,7 +683,6 @@ export function handleDeclareFunctions(
   const wanted = ['r', 'x'].filter((c) => flags.has(c))
   let present = names.filter((name) => name in session.functions)
   const missing = names.filter((name) => !(name in session.functions))
-  const code = missing.length > 0 ? 1 : 0
   if (names.length > 0 && !printing && (wanted.length > 0 || plus.has('r') || plus.has('x'))) {
     const frozen = present.filter((name) => plus.has('r') && session.readonlyFunctions.has(name))
     for (const name of present) {
@@ -733,15 +691,10 @@ export function handleDeclareFunctions(
       if (plus.has('x')) session.exportedFunctions.delete(name)
       else if (flags.has('x')) session.exportedFunctions.add(name)
     }
-    const status = missing.length > 0 || frozen.length > 0 ? 1 : 0
-    const err = encodeText(
-      frozen.map((name) => `bash: ${cmd}: ${name}: readonly function\n`).join(''),
-    )
-    return [
-      null,
-      new IOResult({ exitCode: status, stderr: err.byteLength > 0 ? err : null }),
-      new ExecutionNode({ command: cmd, exitCode: status, stderr: err }),
-    ]
+    return result(cmd, {
+      exitCode: missing.length > 0 || frozen.length > 0 ? 1 : 0,
+      stderr: frozen.map((name) => `bash: ${cmd}: ${name}: readonly function\n`).join(''),
+    })
   }
   if (names.length === 0) {
     present = Object.keys(session.functions)
@@ -758,15 +711,57 @@ export function handleDeclareFunctions(
     printing || names.length === 0,
     parser,
   )
-  const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
-  const err = printing
-    ? encodeText(missing.map((name) => `bash: ${cmd}: ${name}: not found\n`).join(''))
-    : new Uint8Array()
-  return [
-    out,
-    new IOResult({ exitCode: code, stderr: err.byteLength > 0 ? err : null }),
-    new ExecutionNode({ command: cmd, exitCode: code, stderr: err }),
-  ]
+  return result(cmd, {
+    out: encodeText(lines.map((line) => `${line}\n`).join('')),
+    exitCode: missing.length > 0 ? 1 : 0,
+    stderr: printing ? missing.map((name) => `bash: ${cmd}: ${name}: not found\n`).join('') : '',
+  })
+}
+
+/**
+ * Run `export` or `readonly`: mark names, or print them. An invalid option
+ * letter fails with status 2 and the GNU usage line. `-f` marks functions
+ * instead (`markFunctions`). With no names, every name carrying the
+ * keyword's mark prints as `declare -p` prints it, the whole cluster
+ * (`declare -rx R="1"`), a reference as itself rather than its target; `-a`
+ * / `-A` narrow the listing to that array kind (`kindListed`). Otherwise
+ * each operand is assigned and marked through the gated view
+ * (`markVariables`); `-a` / `-A` shape only an assigned value, and
+ * `export -n` takes the mark off.
+ */
+export async function markNames(
+  assignments: readonly DeclarationOperand[],
+  session: SessionState,
+  state: SessionView | null,
+  attr: VarAttr,
+  parser?: ParseScope,
+): Promise<Result> {
+  const exporting = attr === VarAttr.Export
+  const cmd = exporting ? 'export' : 'readonly'
+  const { flags, names, bad } = splitDeclFlags(
+    assignments,
+    exporting ? EXPORT_FLAGS : READONLY_FLAGS,
+  )
+  if (bad !== null) {
+    const usage = exporting ? EXPORT_USAGE : READONLY_USAGE
+    return fail(cmd, `bash: ${cmd}: -${bad}: invalid option\n${usage}`, 2)
+  }
+  const on = !flags.has('n')
+  const kind = declaredKind(flags)
+  if (flags.has('f')) {
+    const marked = exporting ? session.exportedFunctions : session.readonlyFunctions
+    return markFunctions(cmd, session, marked, names, on, state, parser, kind)
+  }
+  if (names.length === 0) {
+    const lines = Object.entries(session.vars)
+      .filter(([name, v]) => v.attrs.has(attr) && kindListed(session, name, flags))
+      .map(([name]) => name)
+      .sort(compareCodePoints)
+      .map((name) => declareLine(session, name))
+      .filter((line) => line !== null)
+    return ok(cmd, encodeText(lines.map((line) => `${line}\n`).join('')))
+  }
+  return markVariables(cmd, session, requireView(state), names, attr, on, kind)
 }
 
 /**
@@ -809,8 +804,7 @@ export async function markFunctions(
   if (names.length === 0) {
     const listed = [...marked].filter((name) => name in session.functions).sort(compareCodePoints)
     const lines = functionLines(session, listed, true, true, parser)
-    const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
-    return [out, new IOResult(), new ExecutionNode({ command: cmd, exitCode: 0 })]
+    return ok(cmd, encodeText(lines.map((line) => `${line}\n`).join('')))
   }
   for (const name of names) {
     if (!(name in session.functions)) errors.push(`bash: ${cmd}: ${name}: not a function`)
@@ -923,7 +917,7 @@ async function markOperand(
   if (val !== null && conflict === null) {
     const checked = deref(session, key) || key
     const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
-    const [slot, added] = append ? appended(heldSlot(held), val, integer) : [val, null]
+    const [slot, added] = append ? appended(held, val, integer) : [val, null]
     const [value, assigned] = scalarValue(held, slot, kind)
     if (kind !== null) await dropReference(session, view, key)
     await view.set(key, value, true, assigned, added)

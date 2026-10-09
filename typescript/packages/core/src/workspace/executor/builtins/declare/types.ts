@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { VarAttr } from '../../../../shell/variable.ts'
+import type { VarAttr, VarKind } from '../../../../shell/variable.ts'
 
 /**
  * A staged array literal, `NAME=(...)` or `NAME+=(...)`: the name, whether
@@ -36,3 +36,30 @@ export type DeclarationOperand = string | StagedArray
  * whether it goes on (`-x`) or off (`+x`).
  */
 export type AttrMarks = readonly (readonly [VarAttr, boolean])[]
+
+/**
+ * How a `local`, `declare` or `typeset` runs its operands. `cmd` is the
+ * spelling that reached here: `declare` and `typeset` route through
+ * `handleLocal` and must say their own name, not `local`. `kind` is the kind
+ * `-a` / `-A` declared, so staged literals build that kind of array.
+ * `shaping` holds the value-shaping marks (`-i -l -u`, `+i +l +u`), put on or
+ * taken off each name *before* its value stores so the declaration's own
+ * value coerces exactly as a later write would (`declare +i N+=x` over an
+ * integer 5 stores `5x`); `marks` the attribute letters put on or taken off
+ * each operand once it lands, readonly last; `plus` the `+` letters, for the
+ * two that cannot be taken off (`plusRefusal`). `nameref` (`-n`) stores a
+ * value on the reference's own record, which also takes the marks; under
+ * `globalScope` (`-g`) a name the function shadows has its *global* record
+ * read, written and marked (`reachGlobal`); `inherit` (`-I`) starts a new
+ * local from the value it shadows (`startLocal`).
+ */
+export interface Declaration {
+  cmd: string
+  kind: VarKind | null
+  shaping: AttrMarks
+  marks: AttrMarks
+  plus: string
+  nameref: boolean
+  globalScope: boolean
+  inherit: boolean
+}

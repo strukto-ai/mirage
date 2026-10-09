@@ -1,6 +1,25 @@
 {
- "baseline": 3957,
+ "baseline": 3948,
  "modules": {
+  "execution/context": {
+   "typescript_only": {
+    "captureExecutionContext": "Deferred TypeScript callbacks restore the execution async-local store explicitly; Python contextvars travel with the copied context."
+   }
+  },
+  "workspace/abort": {
+   "typescript_only": {
+    "lineSignal": "TypeScript must pass a line's AbortSignal into fetch to interrupt an outstanding response body read; Python task cancellation interrupts the awaited HTTP read directly."
+   }
+  },
+  "cli/stream": {
+   "python_only": {
+    "_ready": "Python waits for native file-descriptor readiness to stream stdin and stdout without blocking its event loop; Node's stdio streams provide readiness and backpressure directly.",
+    "_stdin_chunks": "Python wraps nonblocking stdin file-descriptor reads as an async iterator; Node's process.stdin already is an async iterable."
+   },
+   "typescript_only": {
+    "Completion": "TypeScript declares the streamed terminal record's parsed JSON shape as an interface; Python reads the same validated record as a dict."
+   }
+  },
   "workspace/executor/redirect": {
    "typescript_only": {
     "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes."

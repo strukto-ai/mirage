@@ -79,7 +79,11 @@ from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins import handle_test, handle_unset
 from mirage.workspace.executor.builtins.alias import alias_mark, alias_view
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
-from mirage.workspace.executor.builtins.shared import is_valid_name
+from mirage.workspace.executor.builtins.shared import (
+    fail,
+    is_valid_name,
+    result,
+)
 from mirage.workspace.executor.control import (
     execute_body,
     handle_case,
@@ -87,7 +91,6 @@ from mirage.workspace.executor.control import (
     handle_for,
     handle_if,
     handle_select,
-    handle_until,
     handle_while,
 )
 from mirage.workspace.executor.jobs import drained
@@ -124,13 +127,9 @@ from mirage.workspace.node.test_expr import (
     expand_test_expr,
 )
 from mirage.workspace.node.timing import timing_report
-from mirage.workspace.session.elements import land_arith
+from mirage.workspace.session.elements import landed_arith
 from mirage.workspace.session.functions import FunctionSite
-from mirage.workspace.session.state import (
-    random_reader,
-    session_arith,
-    session_view,
-)
+from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 
@@ -165,32 +164,15 @@ async def _eval_cfor_expr(
         ExitSignal: that assignment was inside a subscript.
         PolicyDenied: a pre_session rule refused one of the writes.
     """
-    session = context.session
     if not exprs:
         return default
     text = await _slot_text(exprs, context, execute_fn, call_stack, view)
-    reader = random_reader(session)
-    error: ArithError | ReadonlyError | None = None
-    value = 0
     try:
-        result = session_arith(session, text, reader)
-        writes, value = result.writes, result.value
-    except (ArithError, ReadonlyError) as exc:
-        # bash bound the assignments made before the error; they land
-        # before the error is reported.
-        error, writes = exc, exc.writes
-    # Through the session view, so a pre_session rule governs an arithmetic
-    # assignment exactly as it governs `X=1` and a hidden name refuses
-    # at its own write; in evaluation order, so a bare name and its
-    # element 0 land as the expression wrote them.
-    await land_arith(session, view, writes, reader)
-    if isinstance(error, ReadonlyError):
-        if error.in_subscript:
-            raise error.signal()
-        raise error
-    if error is not None:
-        raise error
-    return int(value)
+        return await landed_arith(context.session, view, text)
+    except ReadonlyError as exc:
+        if exc.in_subscript:
+            raise exc.signal() from exc
+        raise
 
 
 async def _slot_text(
@@ -296,9 +278,6 @@ async def _recurse_reassociated(
     session = context.session
     if node.id != right.id:
         return await recurse(node, context, stdin, call_stack, sink=sink)
-    # The session view, bound once for the line: every
-    # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
-    # so a pre_session rule governs those exactly as it governs `X=d`.
     view = session_view(
         session, registry.policies, diagnostics=context.frame.diagnostics
     )
@@ -366,6 +345,7 @@ async def _recurse_lifted(
         stdin,
         call_stack,
         processes,
+        sink,
     )
 
 
@@ -460,6 +440,7 @@ async def _run_pipeline(
     stdin: Any,
     call_stack: CallStack | None,
     processes: ProcessSupervisor | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Run a pipeline as bash reads it (``get_pipeline_stages``).
 
@@ -480,6 +461,7 @@ async def _run_pipeline(
         call_stack (CallStack | None): shell call stack.
         processes (ProcessSupervisor | None): where the stages run as
             managed processes.
+        sink (JobConsole | None): where the output goes as it arrives.
     """
     session = context.session
     if stages.lead is not None:
@@ -533,6 +515,8 @@ async def _run_pipeline(
             call_stack,
             processes,
             execute_fn,
+            registry.io.buffer_bytes,
+            sink,
         )
     if stages.negated:
         io = IOResult(
@@ -562,9 +546,6 @@ async def _recurse_pipe_stderr(
     *,
     sink: JobConsole | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
-    # The session view, bound once for the line: every
-    # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
-    # so a pre_session rule governs those exactly as it governs `X=d`.
     session = context.session
     view = session_view(
         session, registry.policies, diagnostics=context.frame.diagnostics
@@ -775,10 +756,6 @@ async def _run_redirected(
         forked=_forks(command, context),
         links=namespace,
     )
-    # `exec > file` with no command installs the redirects on the
-    # shell for every later statement, rather than applying them to
-    # one command. `exec cmd > file` still has a command and falls
-    # through to the ordinary path, which refuses the command form.
     if _is_bare_exec(command):
         return await install_exec_redirects(
             dispatch, session, redirects, stdin, expand=expand
@@ -963,11 +940,9 @@ async def _recurse_continuation(
 
 
 def _is_bare_exec(command: Any) -> bool:
-    """Whether a redirected statement's command is a bare `exec`.
-
-    A bare `exec` carries a command name and no arguments, so its
-    redirects are the shell's own rather than one command's. `exec cmd`
-    is not bare and falls through to the command path, which refuses it.
+    """Whether a redirected statement's command is a bare `exec`, which
+    installs its redirects on the shell for every later statement;
+    `exec cmd` is a command.
 
     Args:
         command (Any): the tree-sitter command node under the redirect,
@@ -1172,6 +1147,10 @@ async def _execute_node(
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Walk tree-sitter AST and dispatch each node.
 
+    ``set -n`` stops every node at any depth, as GNU answers ``if true;
+    then set -n; echo BAD; fi`` with nothing; the program loop's own stop
+    is what silences ``set -v`` for the lines it never reads.
+
     Args:
         dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).
         registry (MountRegistry): mount registry for path resolution.
@@ -1183,12 +1162,15 @@ async def _execute_node(
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack): shell call stack.
-        cancel (asyncio.Event | None): event used to abort mid-flight.
+        cancel (asyncio.Event | None): event used to abort mid-flight,
+            bound into ``execute_fn`` with ``handed``, so a ``$(...)`` in
+            a background job never dies of the caller's abort.
         handed (HandOff | None): the hand-off this subtree runs on,
             carried to every command's gate so it runs on the grants
             claimed for this line and never another's, and bound into
             ``execute_fn`` so every line the subtree evaluates stands
-            under it too.
+            under it too, a line a background job evaluates after the
+            typed line ended included.
         sink (JobConsole | None): console to write this node's output to
             as it is produced. When set, the node emits and returns no
             stdout; when None it returns stdout as a value, which is
@@ -1205,35 +1187,10 @@ async def _execute_node(
     view = session_view(
         session, registry.policies, diagnostics=context.frame.diagnostics
     )
-    # `set -n` reads without executing, and it stops *everything* after
-    # it, at every depth: GNU answers `if true; then set -n; echo BAD;
-    # fi` and `f(){ set -n; echo BAD; }; f` with nothing at all. Stated
-    # here, at the one entry point every node goes through, rather than in each
-    # statement runner -- the program loop, the subshell body, a group,
-    # a function body and every loop body are five places for one rule to
-    # drift, and it did: the check lived in the program loop alone, so
-    # `set -n` worked flat and did nothing one construct deep. The
-    # program loop keeps its own `break` as the reader-level stop, which
-    # is also what silences `set -v` for the lines it never reads.
     if session.shell_options.get("noexec"):
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
     cs = call_stack if call_stack is not None else CallStack()
     session.errexit_immune = False
-
-    # The hand-off this subtree runs on is the one its nested
-    # evaluations run under. Everything a command hands a line to
-    # (eval, source, xargs, command, a substitution, a herestring, a
-    # redirect target) re-enters through execute_fn, so the hand-off is
-    # bound into it here, at the one entry point every node goes through,
-    # rather than where the line made it: a background job's subtree
-    # runs on a hand-off of the job's own, and a line it evaluates
-    # after the typed line has ended has to stand under that one.
-    # Under the line's, the inner gate could not see the grant the job
-    # holds and asked again, and what it claimed went back to a
-    # hand-off nothing revokes any more. The event is rebound for the
-    # same reason: a background job runs without the caller's, and so
-    # must the lines it evaluates, or a `$(...)` inside the job would
-    # die of an abort that was never the job's.
     execute_fn = partial(
         execute_fn,
         handed=handed,
@@ -1266,16 +1223,18 @@ async def _execute_node(
     # A sink turns this walk from "return your output" into "write your
     # output". Sequencing constructs pass it to their children so each
     # statement lands as it finishes, and so do a command (a function
-    # body, a nested shell) and a redirect (what it routes), draining
-    # whatever they return after; everything else runs unchanged and has
-    # its result drained here. Only these kinds inherit a sink, so
-    # capture sites keep receiving their output as a value.
+    # body, a nested shell), a pipeline (its last stage) and a redirect
+    # (what it routes), draining whatever they return after; everything
+    # else runs unchanged and has its result drained here. Only these
+    # kinds inherit a sink, so capture sites keep receiving their output
+    # as a value.
     if (
         sink is not None
         and kind not in STREAMING_KINDS
         and kind
         not in (
             NodeKind.COMMAND,
+            NodeKind.PIPELINE,
             NodeKind.REDIRECT,
             NodeKind.VAR_ASSIGN,
             NodeKind.VAR_ASSIGNS,
@@ -1306,7 +1265,6 @@ async def _execute_node(
     if kind == NodeKind.COMMENT:
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
 
-    # ── program (root / semicolons) ─────────────
     if kind == NodeKind.PROGRAM:
         pending = redirect_syntax_for(node.id)
         program_recurse = recurse
@@ -1361,10 +1319,9 @@ async def _execute_node(
             execute_fn=execute_fn,
         )
 
-    # ── command ─────────────────────────────────
     if kind == NodeKind.COMMAND:
         async with command_scope():
-            result = await execute_command(
+            ran = await execute_command(
                 recurse,
                 dispatch,
                 registry,
@@ -1381,15 +1338,14 @@ async def _execute_node(
                 handed=handed,
                 sink=sink,
             )
-        return result if sink is None else await drained(sink, *result)
+        return ran if sink is None else await drained(sink, *ran)
 
-    # ── pipeline ────────────────────────────────
     if kind == NodeKind.PIPELINE:
         # `! a | b` parses as pipeline(negated_command(a), b), and a
         # redirect followed by `|` closes over everything to its left, so
         # the stages are read the way bash reads them rather than as the
         # parse nested them (see get_pipeline_stages).
-        return await _run_pipeline(
+        ran = await _run_pipeline(
             recurse,
             dispatch,
             execute_fn,
@@ -1400,16 +1356,16 @@ async def _execute_node(
             stdin,
             cs,
             job_table.processes if job_table is not None else None,
+            sink,
         )
+        return ran if sink is None else await drained(sink, *ran)
 
-    # ── list (&&, ||) ───────────────────────────
     if kind == NodeKind.LIST:
         left, op, right = get_list_parts(node)
         return await handle_connection(
             stream, left, op, right, context, stdin, cs, execute_fn
         )
 
-    # ── redirected statement ────────────────────
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
         # The `&&`/`||` steps a heredoc's operator line carried
@@ -1431,9 +1387,9 @@ async def _execute_node(
             sink=sink,
         )
         if not continuation:
-            result = await run_left(context, stdin, cs)
+            ran = await run_left(context, stdin, cs)
         else:
-            result = await _run_continuation(
+            ran = await _run_continuation(
                 recurse,
                 run_left,
                 node,
@@ -1443,9 +1399,8 @@ async def _execute_node(
                 cs,
                 execute_fn,
             )
-        return result if sink is None else await drained(sink, *result)
+        return ran if sink is None else await drained(sink, *ran)
 
-    # ── subshell ────────────────────────────────
     if kind == NodeKind.SUBSHELL:
         # A subshell is its own shell: background jobs started inside
         # live in a private job table (`$!`/`wait`/`kill` in the body
@@ -1510,96 +1465,41 @@ async def _execute_node(
         await process.task
         return results[0]
 
-    # ── arithmetic command ((( ... ))) ──────────
-    if (
-        kind == NodeKind.COMPOUND
-        and node.children
-        and node.children[0].type == NT.ARITH_OPEN
-    ):
+    if kind == NodeKind.ARITH:
         text = get_text(node)
         expr = await expand_arith(node, context, execute_fn, cs, view=view)
-        reader = random_reader(session)
-        error: ArithError | ReadonlyError | None = None
-        value = 0
         try:
-            # Reads resolve against the visible env so a hidden name
-            # counts as unset; a hidden write refuses at its own write
-            # below, in this command's own voice like the readonly one.
-            arith = session_arith(session, expr, reader)
-            writes, value = arith.writes, arith.value
-        except (ArithError, ReadonlyError) as exc:
-            # bash bound the assignments made before the error; they
-            # land before the error is reported.
-            error, writes = exc, exc.writes
-        try:
-            await land_arith(session, view, writes, reader)
+            value = await landed_arith(session, view, expr)
         except PolicyDenied as exc:
-            err = encode_text(f"bash: {exc.strerror}\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command=text, exit_code=1, stderr=err),
-            )
-        if isinstance(error, ReadonlyError):
-            if error.in_subscript:
-                raise error.signal()
-            err = encode_text(f"bash: {error}\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command=text, exit_code=1, stderr=err),
-            )
-        if error is not None:
-            if error.in_subscript:
-                raise error.signal()
-            err = encode_text(f"bash: ((: {error}\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command=text, exit_code=1, stderr=err),
-            )
-        code = 0 if value != 0 else 1
-        return (
-            None,
-            IOResult(exit_code=code),
-            ExecutionNode(command=text, exit_code=code),
-        )
+            return fail(text, f"bash: {exc.strerror}\n")
+        except (ArithError, ReadonlyError) as exc:
+            if exc.in_subscript:
+                raise exc.signal() from exc
+            voice = "((: " if isinstance(exc, ArithError) else ""
+            return fail(text, f"bash: {voice}{exc}\n")
+        return result(text, exit_code=0 if value != 0 else 1)
 
-    # ── compound statement ({ ... }) ───────────
+    run_body = partial(
+        execute_body,
+        stream,
+        context=context,
+        stdin=stdin,
+        call_stack=cs,
+        job_table=job_table,
+        agent_id=agent_id,
+        handed=handed,
+        decisions=registry.decisions,
+        execute_fn=execute_fn,
+        sink=sink,
+    )
+
     if kind == NodeKind.COMPOUND:
-        return await execute_body(
-            stream,
-            node.named_children,
-            context,
-            stdin,
-            cs,
-            job_table,
-            agent_id,
-            handed,
-            registry.decisions,
-            execute_fn,
-            sink,
-        )
+        return await run_body(node.named_children)
 
-    # ── if ──────────────────────────────────────
     if kind == NodeKind.IF:
         branches, else_body = get_if_branches(node)
-        return await handle_if(
-            stream,
-            branches,
-            else_body,
-            context,
-            stdin,
-            cs,
-            job_table=job_table,
-            agent_id=agent_id,
-            handed=handed,
-            decisions=registry.decisions,
-            execute_fn=execute_fn,
-            sink=sink,
-        )
+        return await handle_if(run_body, branches, else_body, session)
 
-    # ── C-style for (for ((init;cond;update))) ──
     if kind == NodeKind.CFOR:
         exprs, body = get_cfor_parts(node)
         eval_expr = partial(
@@ -1610,32 +1510,12 @@ async def _execute_node(
             view=view,
         )
         with cs.loop():
-            return await handle_cfor(
-                stream,
-                exprs,
-                body,
-                eval_expr,
-                context,
-                stdin,
-                cs,
-                job_table=job_table,
-                agent_id=agent_id,
-                handed=handed,
-                decisions=registry.decisions,
-                execute_fn=execute_fn,
-                sink=sink,
-            )
+            return await handle_cfor(run_body, exprs, body, eval_expr, session)
 
-    # ── for / select ────────────────────────────
     if kind in (NodeKind.FOR, NodeKind.SELECT):
         var, values, body = get_for_parts(node)
         if not is_valid_name(var):
-            err = encode_text(f"bash: `{var}': not a valid identifier\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command=kind.value, exit_code=1, stderr=err),
-            )
+            return fail(kind.value, f"bash: `{var}': not a valid identifier\n")
         async with command_scope():
             classified = await expand_and_classify(
                 values,
@@ -1655,78 +1535,30 @@ async def _execute_node(
                 links=namespace,
                 options=glob_options(session),
             )
-        if kind == NodeKind.SELECT:
-            with cs.loop():
+        policies = namespace.registry.policies
+        with cs.loop():
+            if kind == NodeKind.SELECT:
                 return await handle_select(
-                    stream,
+                    run_body,
                     var,
                     classified,
                     body,
                     context,
                     stdin,
-                    cs,
-                    policies=namespace.registry.policies,
-                    job_table=job_table,
-                    agent_id=agent_id,
-                    handed=handed,
-                    decisions=registry.decisions,
-                    execute_fn=execute_fn,
+                    policies=policies,
                     sink=sink,
                 )
-        with cs.loop():
             return await handle_for(
-                stream,
-                var,
-                classified,
-                body,
-                context,
-                stdin,
-                cs,
-                policies=namespace.registry.policies,
-                job_table=job_table,
-                agent_id=agent_id,
-                handed=handed,
-                decisions=registry.decisions,
-                execute_fn=execute_fn,
-                sink=sink,
+                run_body, var, classified, body, context, policies=policies
             )
 
-    # ── while / until ───────────────────────────
     if kind in (NodeKind.WHILE, NodeKind.UNTIL):
         test, body = get_while_parts(node)
-        if kind == NodeKind.UNTIL:
-            with cs.loop():
-                return await handle_until(
-                    stream,
-                    test,
-                    body,
-                    context,
-                    stdin,
-                    cs,
-                    job_table=job_table,
-                    agent_id=agent_id,
-                    handed=handed,
-                    decisions=registry.decisions,
-                    execute_fn=execute_fn,
-                    sink=sink,
-                )
         with cs.loop():
             return await handle_while(
-                stream,
-                test,
-                body,
-                context,
-                stdin,
-                cs,
-                job_table=job_table,
-                agent_id=agent_id,
-                handed=handed,
-                decisions=registry.decisions,
-                execute_fn=execute_fn,
-                sink=sink,
+                run_body, test, body, session, until=kind == NodeKind.UNTIL
             )
 
-    # ── case ────────────────────────────────────
     if kind == NodeKind.CASE:
         word_node = get_case_word(node)
         word = await expand_node(word_node, context, execute_fn, cs, view=view)
@@ -1737,62 +1569,33 @@ async def _execute_node(
                 for p in pattern_nodes
             ]
             case_items.append((patterns, body, terminator))
-        return await handle_case(
-            stream,
-            word,
-            case_items,
-            context,
-            stdin,
-            cs,
-            job_table=job_table,
-            agent_id=agent_id,
-            handed=handed,
-            decisions=registry.decisions,
-            execute_fn=execute_fn,
-            sink=sink,
-        )
+        return await handle_case(run_body, word, case_items, session)
 
-    # ── function definition ─────────────────────
     if kind == NodeKind.FUNCTION_DEF:
         name = get_function_name(node)
         if name in session.readonly_functions:
             # `readonly -f f` froze the body: either definition syntax
             # refuses with `f: readonly function`, exit 1, and the old
             # body stays, pinned on 5.2.37.
-            err = encode_text(f"bash: {name}: readonly function\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(
-                    command=f"function {name}", exit_code=1, stderr=err
-                ),
+            return fail(
+                f"function {name}", f"bash: {name}: readonly function\n"
             )
         source = get_function_source(node)
         session.functions[name] = source
-        mark = (
-            session._parse_current,
-            session._parse_row + node.start_point[0],
-        )
         session._function_sites[name] = FunctionSite(
             source,
-            mark,
+            alias_mark(session, node.start_point[0]),
             defined_at(node, handed),
             alias_view(session, node, alias_mark(session, read_row(node))),
         )
-        return (
-            None,
-            IOResult(),
-            ExecutionNode(command=f"function {name}", exit_code=0),
-        )
+        return result(f"function {name}")
 
-    # ── declaration (export/local/declare/readonly) ──
     if kind == NodeKind.DECLARATION:
         async with command_scope():
             return await execute_declaration(
                 node, context, execute_fn, registry, namespace, cs, view
             )
 
-    # ── unset ───────────────────────────────────
     if kind == NodeKind.UNSET:
         args = get_unset_args(node)
         return await handle_unset(
@@ -1805,7 +1608,6 @@ async def _execute_node(
             ),
         )
 
-    # ── test ([ ] or [[ ]]) ─────────────────────
     if kind == NodeKind.TEST:
         opener = node.children[0].type if node.children else "["
         if opener == "[[":
@@ -1822,20 +1624,17 @@ async def _execute_node(
             dispatch, namespace, test_argv, session, name="[", view=view
         )
 
-    # ── negated command ─────────────────────────
     if kind == NodeKind.NEGATED:
         inner = get_negated_command(node)
         with ignoring_errexit(session):
             stdout, io, exec_node = await stream(inner, context, stdin, cs)
         return await _negated(stdout, io, exec_node, context, inner)
 
-    # ── variable assignment at top level ────────
     if kind == NodeKind.VAR_ASSIGN:
         return await execute_assignment(
             node, context, execute_fn, registry, namespace, cs
         )
 
-    # ── assignment-only statement (a=1 b=2) ─────
     if kind == NodeKind.VAR_ASSIGNS:
         sub_seq = context.frame.cmdsub_seq
         merged_io = IOResult()
@@ -1857,12 +1656,9 @@ async def _execute_node(
         )
 
     # Constructs the parser accepts but the executor cannot honor
-    # (tree-sitter ERROR nodes, future grammar additions). Mirrors the
-    # unsupported-builtin diagnostic so agents see a capability gap,
-    # not a crash.
-    err = encode_text(f"mirage: unsupported shell construct: {node.type}\n")
-    return (
-        None,
-        IOResult(exit_code=2, stderr=err),
-        ExecutionNode(command=get_text(node), exit_code=2, stderr=err),
+    # (tree-sitter ERROR nodes, future grammar additions).
+    return fail(
+        get_text(node),
+        f"mirage: unsupported shell construct: {node.type}\n",
+        2,
     )

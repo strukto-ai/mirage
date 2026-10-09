@@ -33,10 +33,6 @@ from mirage.shell.types import NodeType as NT
 def test_parse_returns_node():
     root = parse("echo hello")
     assert isinstance(root, tree_sitter.Node)
-
-
-def test_parse_root_is_program():
-    root = parse("echo hello")
     assert root.type == "program"
 
 
@@ -122,11 +118,6 @@ def test_redirect_on_simple_command_not_list():
     assert len(redirects) == 1
 
 
-def test_subshell():
-    node = parse("(grep p file | sort)").named_children[0]
-    assert node.type == NT.SUBSHELL
-
-
 def test_if_simple():
     node = parse("if true; then echo yes; fi").named_children[0]
     assert node.type == NT.IF_STATEMENT
@@ -180,34 +171,27 @@ def test_select():
     assert [get_text(v) for v in values] == ["a", "b", "c"]
 
 
-def test_case():
-    node = parse("case $x in a) echo A;; b) echo B;; esac").named_children[0]
-    assert node.type == NT.CASE_STATEMENT
-
-
-def test_function():
-    node = parse("foo() { echo hello; }").named_children[0]
-    assert node.type == NT.FUNCTION_DEFINITION
-
-
-def test_export():
-    node = parse("export FOO=bar").named_children[0]
-    assert node.type == NT.DECLARATION_COMMAND
-
-
-def test_unset():
-    node = parse("unset FOO").named_children[0]
-    assert node.type == NT.UNSET_COMMAND
-
-
-def test_test_bracket():
-    node = parse("[ -f /file ]").named_children[0]
-    assert node.type == NT.TEST_COMMAND
-
-
-def test_test_double_bracket():
-    node = parse("[[ -f /file ]]").named_children[0]
-    assert node.type == NT.TEST_COMMAND
+@pytest.mark.parametrize(
+    ("line", "kind"),
+    [
+        ("(grep p file | sort)", NT.SUBSHELL),
+        ("case $x in a) echo A;; b) echo B;; esac", NT.CASE_STATEMENT),
+        ("foo() { echo hello; }", NT.FUNCTION_DEFINITION),
+        ("export FOO=bar", NT.DECLARATION_COMMAND),
+        ("unset FOO", NT.UNSET_COMMAND),
+        ("[ -f /file ]", NT.TEST_COMMAND),
+        ("[[ -f /file ]]", NT.TEST_COMMAND),
+        (
+            "for f in $(ls /data/); do cat $f | grep error > /out/$f; done",
+            NT.FOR_STATEMENT,
+        ),
+        ("cmd1 && cmd2 || cmd3", NT.LIST),
+        ("cat <<EOF\nhello\nEOF", NT.REDIRECTED_STATEMENT),
+        ("! echo hello", NT.NEGATED_COMMAND),
+    ],
+)
+def test_statement_kind(line, kind):
+    assert parse(line).named_children[0].type == kind
 
 
 def test_background():
@@ -236,33 +220,11 @@ def test_preserves_quotes():
     assert NT.RAW_STRING in types
 
 
-def test_complex_command():
-    root = parse(
-        "for f in $(ls /data/); do cat $f | grep error > /out/$f; done"
-    )
-    assert root.named_children[0].type == NT.FOR_STATEMENT
-
-
-def test_chained_and_or():
-    node = parse("cmd1 && cmd2 || cmd3").named_children[0]
-    assert node.type == NT.LIST
-
-
-def test_heredoc():
-    node = parse("cat <<EOF\nhello\nEOF").named_children[0]
-    assert node.type == NT.REDIRECTED_STATEMENT
-
-
 def test_process_substitution():
     cmd = parse("diff <(sort a) <(sort b)").named_children[0]
     parts = get_parts(cmd)
     ps = [p for p in parts if p.type == NT.PROCESS_SUBSTITUTION]
     assert len(ps) == 2
-
-
-def test_negated_command():
-    node = parse("! echo hello").named_children[0]
-    assert node.type == NT.NEGATED_COMMAND
 
 
 @pytest.mark.parametrize(

@@ -14,8 +14,6 @@
 
 from collections.abc import Iterable
 
-from mirage.io import IOResult
-from mirage.io.types import ByteSource
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.helpers import get_text
@@ -29,17 +27,21 @@ from mirage.workspace.executor.builtins.alias.constants import (
 )
 from mirage.workspace.executor.builtins.alias.types import AliasMark
 from mirage.workspace.executor.builtins.getopt import scan_options
-from mirage.workspace.executor.builtins.shared import fail
+from mirage.workspace.executor.builtins.shared import (
+    fail,
+    finish,
+    ok,
+    result,
+)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
-from mirage.workspace.types import ExecutionNode
 
 
 async def handle_alias(
     args: list[str],
     session: SessionState,
     mark: AliasMark,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """Define or print aliases.
 
     `alias` alone (or `-p`) prints every definition as a re-readable
@@ -91,13 +93,11 @@ async def handle_alias(
             lines.append(f"alias {name}={single_quote(session.aliases[name])}")
         else:
             errors.append(f"bash: alias: {name}: not found")
-    out = encode_text("\n".join(lines) + "\n") if lines else None
-    err = encode_text("\n".join(errors) + "\n") if errors else None
-    code = 1 if errors else 0
-    return (
-        out,
-        IOResult(exit_code=code, stderr=err),
-        ExecutionNode(command="alias", exit_code=code, stderr=err or b""),
+    return result(
+        "alias",
+        encode_text("".join(f"{line}\n" for line in lines)) if lines else None,
+        1 if errors else 0,
+        "".join(f"{error}\n" for error in errors),
     )
 
 
@@ -105,7 +105,7 @@ async def handle_unalias(
     args: list[str],
     session: SessionState,
     mark: AliasMark,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """Remove aliases: the named ones, or all of them under `-a`.
 
     A name that is not an alias is `not found`, exit 1, and the others
@@ -129,7 +129,7 @@ async def handle_unalias(
         for name in session.aliases:
             _changing(session, name, mark)
         session.aliases.clear()
-        return None, IOResult(), ExecutionNode(command="unalias", exit_code=0)
+        return ok("unalias")
     if not operands:
         return fail("unalias", f"{UNALIAS_USAGE}\n", 2)
     errors: list[str] = []
@@ -138,14 +138,8 @@ async def handle_unalias(
             _changing(session, name, mark)
             del session.aliases[name]
         else:
-            errors.append(f"bash: unalias: {name}: not found")
-    err = encode_text("\n".join(errors) + "\n") if errors else None
-    code = 1 if errors else 0
-    return (
-        None,
-        IOResult(exit_code=code, stderr=err or b""),
-        ExecutionNode(command="unalias", exit_code=code, stderr=err or b""),
-    )
+            errors.append(f"bash: unalias: {name}: not found\n")
+    return finish("unalias", errors)
 
 
 def _changing(session: SessionState, name: str, mark: AliasMark) -> None:

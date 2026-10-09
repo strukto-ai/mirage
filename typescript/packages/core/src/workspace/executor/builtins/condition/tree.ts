@@ -123,17 +123,12 @@ async function evalCondBinary(
       } finally {
         reader.settle()
       }
-      // bash: `R: readonly variable`, status 1, and the line goes on; in
-      // a subscript it ends the shell.
-      if (error instanceof ReadonlyError) {
-        if (error.inSubscript) throw error.signal()
-        throw new CondError(`bash: ${error.message}`, 1, false)
-      }
-      // bash: `[[: 1/0: division by 0`, status 1, and the line goes on;
-      // one in a subscript discards it.
+      // bash: `[[: 1/0: division by 0` or `R: readonly variable`, status 1,
+      // and the line goes on; in a subscript it ends the shell.
       if (error !== null) {
         if (error.inSubscript) throw error.signal()
-        throw new CondError(`bash: ${ctx.name}: ${error.message}`, 1, false)
+        const lead = error instanceof ArithError ? `${ctx.name}: ` : ''
+        throw new CondError(`bash: ${lead}${error.message}`, 1, false)
       }
       values.push(value)
     }

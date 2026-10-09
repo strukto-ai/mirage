@@ -39,12 +39,19 @@ function collectNames(node: TSNodeLike, out: Set<string>): void {
   }
   const field = constants.TARGET_NAME_FIELDS[node.type]
   let target = field !== undefined ? (node.childForFieldName?.(field) ?? null) : null
-  // `+=` reads the target before writing it (`TOKEN+=x` starts from
-  // the existing value), so an append's name is a read here too.
   if (target !== null && node.children.some((c) => c.type === '+=')) target = null
   for (const child of node.children) {
     if (target !== null && sameNode(child, target)) continue
     collectNames(child, out)
+  }
+}
+
+/** Every node under `root`, `root` included, depth first. */
+export function* walkTree<T extends { readonly children: readonly T[] }>(root: T): Generator<T> {
+  const stack = [root]
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    yield node
+    stack.push(...node.children)
   }
 }
 

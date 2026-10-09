@@ -195,6 +195,7 @@ export class JobTable {
         jobConsole = this.consoleFactory(jobId)
         this.consoleOwner.factoryConsoles.push(jobConsole)
       }
+      jobConsole.bindExecution(process.info.executionId)
       job = new Job({
         id: jobId,
         command: init.command,

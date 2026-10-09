@@ -13,22 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FUNCNAME } from '../../../../shell/constants.ts'
-import { IOResult } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { arrayExtent, arrayUnset } from '../../../../shell/array.ts'
-import { sessionEntry } from '../../../session/session.ts'
-import { deref } from '../../../session/state.ts'
-import type { SessionState } from '../../../session/session.ts'
-import { envGet, subscriptIndex, visibleArrays, visibleAssocs } from '../../../session/state.ts'
+import { type SessionState, sessionEntry } from '../../../session/session.ts'
+import {
+  deref,
+  envGet,
+  sessionView,
+  subscriptIndex,
+  visibleArrays,
+  visibleAssocs,
+} from '../../../session/state.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import { ExecutionNode } from '../../../types.ts'
-import { refusal, requireView } from '../shared.ts'
-import { readonlyFunctionUnset } from '../declare/declare.ts'
+import { fail, ok, refusal, requireView } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
-import { sessionView } from '../../../session/state.ts'
 import { TARGET_RE } from '../constants.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * Clear the getopts residue after a whole-variable unset.
@@ -40,6 +40,23 @@ import { encodeText } from '../../../../shell/bytes.ts'
 function unsetVariable(session: SessionState, name: string): void {
   if (name === 'OPTIND') session.getoptsOptind = null
   if (name === FUNCNAME) session.functionNames = null
+}
+
+/**
+ * `subscriptIndex` whose failure ends the line, in bash's words: `unset
+ * 'a[1/0]'` aborts with `1/0: division by 0`.
+ */
+async function fatalIndex(
+  session: SessionState,
+  subscript: string,
+  view: SessionView,
+): Promise<number> {
+  try {
+    return await subscriptIndex(session, subscript, view)
+  } catch (err) {
+    if (err instanceof ArithError) throw err.signal('', true)
+    throw err
+  }
 }
 
 /**
@@ -60,23 +77,6 @@ function unsetVariable(session: SessionState, name: string): void {
  * is exactly the gate, and for a scalar's element 0 it is the whole
  * unset itself. Validation errors write nothing and so never ask.
  */
-/**
- * `subscriptIndex` whose failure ends the line, in bash's words: `unset
- * 'a[1/0]'` aborts with `1/0: division by 0`.
- */
-async function fatalIndex(
-  session: SessionState,
-  subscript: string,
-  view: SessionView,
-): Promise<number> {
-  try {
-    return await subscriptIndex(session, subscript, view)
-  } catch (err) {
-    if (err instanceof ArithError) throw err.signal('', true)
-    throw err
-  }
-}
-
 async function unsetElement(
   session: SessionState,
   view: SessionView,
@@ -123,9 +123,8 @@ async function unsetElement(
  * `-v` targets a variable only, `-f` a function only, and a bare name a
  * variable if one exists or else a function. A `name[idx]` operand clears
  * one element; the readonly guard resolves it to the base name first,
- * since that is what `readonly` records. `-n` (unset a nameref itself)
- * has no referent here — mirage has no nameref attribute — so it matches
- * bash on a non-nameref name and leaves it untouched.
+ * since that is what `readonly` records. `-n` unsets a name reference
+ * itself, where a bare name unsets what the reference points at.
  */
 export async function handleUnset(
   args: string[],
@@ -147,12 +146,7 @@ export async function handleUnset(
       i += 1
       continue
     }
-    const err = encodeText(`bash: unset: ${tok}: invalid option\n`)
-    return [
-      null,
-      new IOResult({ exitCode: 2, stderr: err }),
-      new ExecutionNode({ command: 'unset', exitCode: 2, stderr: err }),
-    ]
+    return fail('unset', `bash: unset: ${tok}: invalid option\n`, 2)
   }
   for (const name of args.slice(i)) {
     if (mode === 'n') {
@@ -161,12 +155,7 @@ export async function handleUnset(
       // frozen reference refuses, writable target or not.
       const view = requireView(state)
       if (view.isReadonly(name, false)) {
-        const err = encodeText(`bash: unset: ${name}: cannot unset: readonly variable\n`)
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: err }),
-          new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
-        ]
+        return fail('unset', `bash: unset: ${name}: cannot unset: readonly variable\n`)
       }
       try {
         await view.unset(name, false)
@@ -177,7 +166,9 @@ export async function handleUnset(
       continue
     }
     if (mode === 'f') {
-      if (session.readonlyFunctions.has(name)) return readonlyFunctionUnset(name)
+      if (session.readonlyFunctions.has(name)) {
+        return fail('unset', `bash: unset: ${name}: cannot unset: readonly function\n`)
+      }
       session.removeFunction(name)
       continue
     }
@@ -189,12 +180,7 @@ export async function handleUnset(
     // base, not the element, in the error).
     const base = match?.[1] ?? name
     if (session.readonlyVars.has(base)) {
-      const err = encodeText(`bash: unset: ${base}: cannot unset: readonly variable\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: err }),
-        new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
-      ]
+      return fail('unset', `bash: unset: ${base}: cannot unset: readonly variable\n`)
     }
     const existed =
       isElement || name in session.env || name in session.arrays || name in session.assocs
@@ -222,19 +208,16 @@ export async function handleUnset(
         status === 'notarray'
           ? `unset: ${base}: not an array variable`
           : `unset: ${name.slice(base.length)}: bad array subscript`
-      const err = encodeText(`bash: ${detail}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: err }),
-        new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
-      ]
+      return fail('unset', `bash: ${detail}\n`)
     }
     if (mode === 'auto' && !existed && name in session.functions) {
-      if (session.readonlyFunctions.has(name)) return readonlyFunctionUnset(name)
+      if (session.readonlyFunctions.has(name)) {
+        return fail('unset', `bash: unset: ${name}: cannot unset: readonly function\n`)
+      }
       session.removeFunction(name)
     }
   }
-  return [null, new IOResult(), new ExecutionNode({ command: 'unset', exitCode: 0 })]
+  return ok('unset')
 }
 
 /** The `unset` arm. */

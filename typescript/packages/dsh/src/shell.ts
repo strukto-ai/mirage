@@ -130,7 +130,7 @@ function executeOptions(
   bound: boolean,
   fallbackWorkdir: string,
   sink?: JobConsole,
-): ExecuteOptions {
+): ExecuteOptions & { stream?: false } {
   // A per-call `env` makes mirage fork a subshell, exactly as `cwd` does,
   // so what goes in it decides whether anything can persist. Bound to a
   // session, only a genuine per-call override belongs here: dsh sends a

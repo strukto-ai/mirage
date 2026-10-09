@@ -17,6 +17,7 @@ import { createRequire } from 'node:module'
 import { createShellParser } from '@struktoai/mirage-core/shell/parse'
 import type { ShellParser } from '@struktoai/mirage-core/shell/parse'
 import { KERNEL_BACKENDS, MountBackend } from '@struktoai/mirage-core/types'
+import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type {
   ExecuteOptions,
@@ -146,7 +147,19 @@ export class Workspace extends CoreWorkspace {
     }
   }
 
-  override async shell(command: string, options: ExecuteOptions = {}): Promise<ExecuteResult> {
+  override shell(
+    command: string,
+    options: ExecuteOptions & { stream: true },
+  ): Promise<ShellExecution>
+  override shell(
+    command: string,
+    options?: ExecuteOptions & { stream?: false },
+  ): Promise<ExecuteResult>
+  override shell(command: string, options: ExecuteOptions): Promise<ExecuteResult | ShellExecution>
+  override async shell(
+    command: string,
+    options: ExecuteOptions = {},
+  ): Promise<ExecuteResult | ShellExecution> {
     await this.fuseReady()
     return super.shell(command, options)
   }

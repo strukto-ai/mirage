@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
+from mirage.execution.context import current_execution_id
 from mirage.observe.record import STAMP_FINGERPRINT_OPS, OpRecord, RecordIndex
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import under_path
@@ -421,6 +422,7 @@ def finish_record(
         fingerprint=fingerprint,
         revision=revision,
         mount_id=recorder.mount_id if recorder is not None else None,
+        execution_id=current_execution_id(),
     )
 
 
@@ -509,6 +511,7 @@ def record_stream(
         fingerprint=fingerprint,
         revision=revision,
         mount_id=rec.mount_id,
+        execution_id=current_execution_id(),
     )
     rec.sink.append(op_rec)
     mine = _command_sink.get()
