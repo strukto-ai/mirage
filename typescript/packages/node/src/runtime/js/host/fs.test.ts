@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type fs from 'node:fs'
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { render } from '@struktoai/mirage-core/test-utils'
@@ -168,6 +168,20 @@ describe('patchNodeFs — routed calls', () => {
     await ws.close()
   })
 
+  it('leaves a relative path to node under a root mount', async () => {
+    // A mount made at / claims every absolute path, and a relative one
+    // still names the process's working directory.
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+
+    await fs.promises.writeFile(relative(process.cwd(), join(scratch, 'here.txt')), 'host')
+    await fs.promises.writeFile('/there.txt', 'mount')
+    expect(readFileSync(join(scratch, 'here.txt'), 'utf8')).toBe('host')
+    expect(await ws.vfs.cat('/there.txt')).toBe('mount')
+    await ws.close()
+  })
+
   it('takes null for options, as node does', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)
@@ -310,6 +324,16 @@ describe('patchNodeFs — what a mount cannot serve', () => {
     ],
     ['rm of a directory without recursive', 'EISDIR', (fs: Fs) => fs.promises.rm('/data/d')],
     ['a truncate of a missing file', 'ENOENT', (fs: Fs) => fs.promises.truncate('/data/nope')],
+    [
+      'an rm of a mount root spelled with a dot',
+      'EBUSY',
+      (fs: Fs) => fs.promises.rm('/data/.', { recursive: true }),
+    ],
+    [
+      'an rmdir of a mount root spelled with a dot',
+      'EBUSY',
+      (fs: Fs) => fs.promises.rmdir('/data/.'),
+    ],
     [
       'a sync spelling',
       'ENOTSUP',

@@ -265,8 +265,12 @@ export class FileHandle {
 
   /** Set the file's length: a shrink drops bytes, growth reads zeros. */
   truncate(size: number): void {
+    // ftruncate(2) sets the length outright, so a cut to the length this
+    // handle holds still drops what another writer appended since the open.
+    if (this.base !== null && size <= this.size) {
+      this.cut = this.cut === null ? size : Math.min(this.cut, size)
+    }
     if (size < this.size) {
-      if (this.base !== null) this.cut = this.cut === null ? size : Math.min(this.cut, size)
       this.runs = this.runs
         .filter((run) => run.start < size)
         .map((run) => ({ ...run, length: Math.min(run.length, size - run.start) }))

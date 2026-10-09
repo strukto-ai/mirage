@@ -158,9 +158,11 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
 
   /** Whether `path` is under a mount the patch answers for. The synthetic
    * root anchor matches every path but backs no files, so a path only it
-   * catches stays on the host; a mount the caller put at `/` is honored. */
+   * catches stays on the host; a mount the caller put at `/` is honored.
+   * A relative path names the process's working directory, which stays
+   * node's whatever is mounted. */
   mounted(path: string | null): path is string {
-    if (path === null) return false
+    if (path?.startsWith('/') !== true) return false
     const mount = this.ws.registry.tryMountFor(path)
     if (mount === null) return false
     return !(this.ws.syntheticRoot && mount === this.ws.registry.rootMount)
@@ -374,6 +376,9 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   async rm(path: string, options?: Options): Promise<void> {
     const force = fieldsOf(options).force === true
     const recursive = fieldsOf(options).recursive === true
+    // A mount root is refused however it is spelled (`/data/.`), before
+    // the stat a backend may answer for that spelling or not.
+    if (this.ws.registry.isMountRoot(posix.normalize(path))) throw refusal('EBUSY', 'rm', path)
     let st: VFSStat
     try {
       st = await this.files.stat(path, true)
@@ -410,7 +415,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     out: [string, boolean][],
     top = path,
   ): Promise<void> {
-    if (this.ws.registry.isMountRoot(path)) throw refusal('EBUSY', 'rm', path)
+    if (this.ws.registry.isMountRoot(posix.normalize(path))) throw refusal('EBUSY', 'rm', path)
     if (isDir) {
       let rows: VFSEntry[]
       try {
@@ -430,7 +435,9 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   async rmdir(path: string): Promise<void> {
     // rmdir(2) on a mount point is EBUSY. A mount root is the
     // deployment's own, which the shell's rm refuses the same way.
-    if (this.ws.registry.isMountRoot(path)) throw refusal('EBUSY', 'rmdir', path)
+    if (this.ws.registry.isMountRoot(posix.normalize(path))) {
+      throw refusal('EBUSY', 'rmdir', path)
+    }
     await this.files.rmdir(path)
   }
 

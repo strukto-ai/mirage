@@ -1663,9 +1663,12 @@ class Workspace:
         profile: str | None = None,
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
-        # No read= here: each restored Mount carries its own spec.
+        # No read= here: each restored Mount carries its own spec, and
+        # its own mode, so `mode` reaches only the scratch root the
+        # workspace adds again.
         ws = cls(
             args.mount_args,
+            mode=args.anchor_mode or MountMode.READ,
             write=args.write_default,
             session_id=args.default_session_id,
             agent_id=args.default_agent_id,

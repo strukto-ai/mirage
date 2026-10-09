@@ -281,6 +281,8 @@ export function installQuickJsFs(
   defineSync('__mirage_ferror', (fdH) => (failed.has(ctx.getNumber(fdH)) ? ctx.true : ctx.false))
 
   defineSync('__mirage_clearerr', (fdH) => {
+    // A cleared stream reads again, so a fetch that failed is tried anew.
+    unreadable.delete(ctx.getNumber(fdH))
     failed.delete(ctx.getNumber(fdH))
     return ctx.undefined
   })

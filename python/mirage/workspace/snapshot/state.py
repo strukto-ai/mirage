@@ -263,20 +263,24 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
                 if m.vfs.name in (VFSName.DISK, VFSName.REDIS)
                 else m.vfs.get_state()
             )
-        mounts_state.append(
-            {
-                MountKey.INDEX: idx,
-                MountKey.PREFIX: m.prefix,
-                MountKey.MODE: m.mode.value,
-                MountKey.READ: m.read.policy.value,
-                MountKey.TTL: m.read.ttl,
-                MountKey.WRITE: m.write.value,
-                MountKey.VFS_CLASS: f"{type(m.vfs).__module__}.{type(m.vfs).__name__}",
-                MountKey.VFS_REF: m.vfs_ref,
-                MountKey.INDEX_CONFIG: index_config_dump(m.index_config),
-                MountKey.VFS_STATE: vfs_state,
-            }
-        )
+        row: dict[str, Any] = {
+            MountKey.INDEX: idx,
+            MountKey.PREFIX: m.prefix,
+            MountKey.MODE: m.mode.value,
+            MountKey.READ: m.read.policy.value,
+            MountKey.TTL: m.read.ttl,
+            MountKey.WRITE: m.write.value,
+            MountKey.VFS_CLASS: f"{type(m.vfs).__module__}.{type(m.vfs).__name__}",
+            MountKey.VFS_REF: m.vfs_ref,
+            MountKey.INDEX_CONFIG: index_config_dump(m.index_config),
+            MountKey.VFS_STATE: vfs_state,
+        }
+        # The scratch root nobody mounted keeps its files across the
+        # round trip, and stays the anchor: a load leaves it out of the
+        # mounts and lets the new workspace add its own.
+        if ws._implicit_root and m.prefix == "/":
+            row[MountKey.ANCHOR] = True
+        mounts_state.append(row)
 
     # Only a RAM cache holds entries the snapshot can carry; a Redis
     # cache lives outside the workspace and is skipped on both sides
@@ -431,9 +435,13 @@ def build_mount_args(
         )
 
     mount_args: dict[str, Mount] = {}
+    anchor_mode: MountMode | None = None
     for m in state[StateKey.MOUNTS]:
         prefix = norm_mount_prefix(m[MountKey.PREFIX])
         override = overrides.get(prefix)
+        if m.get(MountKey.ANCHOR) and override is None:
+            anchor_mode = MountMode(m[MountKey.MODE])
+            continue
         # A live override placed as a ``Mount`` names the door it came
         # through; a bare VFS, or a rebuilt one, keeps the saved
         # reference so a second round trip rebuilds through the same
@@ -536,6 +544,7 @@ def build_mount_args(
         default_agent_id=state.get(StateKey.DEFAULT_AGENT_ID),
         clis=cli_args or None,
         write_default=coerce_write_policy(str(saved_default)),
+        anchor_mode=anchor_mode,
     )
 
 

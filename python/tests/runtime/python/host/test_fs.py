@@ -662,3 +662,48 @@ class TestProcessPatch:
             assert os.listdir(str(tmp_path)) == ["host.txt"]
             assert isinstance(os.stat(str(tmp_path)), os.stat_result)
             assert os.path.exists(str(tmp_path / "host.txt")) is True
+
+
+class TestRmtree:
+    @staticmethod
+    def _busy_world():
+        ws = Workspace(
+            {"/data/": RAMVFS(), "/data/d/m/": RAMVFS()}, mode=MountMode.WRITE
+        )
+        run(ws.vfs.mkdir("/data/d"))
+        run(ws.vfs.write("/data/d/keep.txt", b"k"))
+        return ws
+
+    def test_a_tree_holding_a_mount_root_reaches_the_handlers(self):
+        ws = self._busy_world()
+        seen = []
+        with ws:
+            for path in ("/data/d", "/data/."):
+                shutil.rmtree(path, onexc=lambda f, p, e: seen.append(e.errno))
+                shutil.rmtree(
+                    path, onerror=lambda f, p, i: seen.append(i[1].errno)
+                )
+                shutil.rmtree(path, ignore_errors=True)
+                with pytest.raises(OSError) as caught:
+                    shutil.rmtree(path)
+                seen.append(caught.value.errno)
+            assert os.path.exists("/data/d/keep.txt")
+        assert seen == [errno.EBUSY] * 6
+
+    def test_a_mounted_tree_leaves_shutils_own_walk_alone(self):
+        # The switch is the whole process's: a host rmtree on another
+        # thread mid-walk must still get the descriptor walk.
+        seen = []
+
+        class Watching(RAMVFS):
+            async def readdir(self, *args, **kwargs):
+                seen.append(shutil._use_fd_functions)
+                return await super().readdir(*args, **kwargs)
+
+        ws = Workspace({"/data/": Watching()}, mode=MountMode.WRITE)
+        run(ws.vfs.mkdir("/data/t"))
+        run(ws.vfs.write("/data/t/a.txt", b"a"))
+        with ws:
+            shutil.rmtree("/data/t")
+            assert not os.path.exists("/data/t")
+        assert seen and all(seen)

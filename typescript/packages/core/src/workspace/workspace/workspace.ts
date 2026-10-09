@@ -1921,6 +1921,9 @@ export class Workspace {
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
+      // Each restored Mount carries its own mode, so this reaches only the
+      // scratch root the workspace adds again.
+      ...(args.anchorMode !== undefined ? { mode: args.anchorMode } : {}),
       ...options,
       write: args.writeDefault,
     }

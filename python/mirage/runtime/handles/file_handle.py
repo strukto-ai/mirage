@@ -283,9 +283,12 @@ class FileHandle:
         Args:
             size (int): the new length.
         """
+        # ftruncate(2) sets the length outright, so a cut to the length
+        # this handle holds still drops what another writer appended
+        # since the open.
+        if self.base is not None and size <= self.size:
+            self.cut = size if self.cut is None else min(self.cut, size)
         if size < self.size:
-            if self.base is not None:
-                self.cut = size if self.cut is None else min(self.cut, size)
             kept: list[tuple[int, bytearray]] = []
             for start, run in self.runs:
                 if start < size:

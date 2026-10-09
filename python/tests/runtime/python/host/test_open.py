@@ -122,3 +122,19 @@ def test_open_refuses_what_ws_vfs_refuses(path, mode, code):
     assert direct.value.errno == code
     assert type(opened.value) is type(OSError(code, "builtin"))
     assert opened.value.errno == code
+
+
+def test_a_relative_path_stays_the_hosts_under_a_root_mount(
+    tmp_path, monkeypatch
+):
+    # A mount made at / claims every absolute path, and a relative one
+    # still names the process's working directory.
+    monkeypatch.chdir(tmp_path)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    with ws:
+        with open("here.txt", "w") as f:
+            f.write("host")
+        with open("/there.txt", "w") as f:
+            f.write("mount")
+    assert (tmp_path / "here.txt").read_text() == "host"
+    assert not Path("/there.txt").exists()

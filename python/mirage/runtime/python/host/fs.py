@@ -140,26 +140,98 @@ def syscall(fn: Callable[..., T]) -> Callable[..., T]:
     return call
 
 
+ErrorHandler = Callable[[Callable[..., Any], str, OSError], object]
+
+
+def _ignored(func: Callable[..., Any], path: str, exc: OSError) -> None:
+    return None
+
+
+def _reraised(func: Callable[..., Any], path: str, exc: OSError) -> None:
+    raise exc
+
+
+def _rmtree_handler(
+    ignore_errors: bool,
+    onerror: Callable[..., object] | None,
+    onexc: ErrorHandler | None,
+) -> ErrorHandler:
+    """What ``shutil.rmtree`` does with a failure, from its own arguments.
+
+    Args:
+        ignore_errors (bool): drop every failure.
+        onerror (Callable[..., object] | None): the old handler, given
+            ``sys.exc_info()``-shaped arguments.
+        onexc (ErrorHandler | None): the handler given the exception,
+            which wins over ``onerror``.
+    """
+    if ignore_errors:
+        return _ignored
+    if onexc is not None:
+        return onexc
+    if onerror is not None:
+        handler = onerror
+        return lambda func, path, exc: handler(
+            func, path, (type(exc), exc, exc.__traceback__)
+        )
+    return _reraised
+
+
+def _remove_tree(path: str, onexc: ErrorHandler) -> None:
+    """Remove a tree by name, children first, through the door's ``os``.
+
+    The walk shutil keeps for a platform without descriptor calls, so a
+    failure reaches ``onexc`` with the function and path shutil names.
+
+    Args:
+        path (str): the directory to remove.
+        onexc (ErrorHandler): what a failure goes to.
+    """
+    try:
+        with _real_os.scandir(path) as listing:
+            entries = list(listing)
+    except OSError as err:
+        onexc(_real_os.scandir, path, err)
+        entries = []
+    for entry in entries:
+        try:
+            is_dir = entry.is_dir(follow_symlinks=False)
+        except OSError:
+            is_dir = False
+        if is_dir:
+            _remove_tree(entry.path, onexc)
+            continue
+        try:
+            _real_os.unlink(entry.path)
+        except OSError as err:
+            onexc(_real_os.unlink, entry.path, err)
+    try:
+        _real_os.rmdir(path)
+    except OSError as err:
+        onexc(_real_os.rmdir, path, err)
+
+
 def make_rmtree(files: Files) -> Callable[..., None]:
     """``shutil.rmtree``, walking a mounted tree by name.
 
     shutil removes a tree through descriptors where the platform has
     them, ``os.open`` on each directory and then ``os.scandir`` of the
     descriptor, and a mount has none: the door refuses ``os.open``, so
-    every rmtree of a mounted path failed ENOTSUP. A mounted path takes
-    the walk shutil keeps for a platform without those calls, which
-    reaches the mount through ``os.scandir``, ``os.unlink`` and
-    ``os.rmdir`` like any other caller; a host path keeps the
-    descriptor walk. A tree holding a mount root is refused (EBUSY)
-    before anything goes, as node's door refuses it, so nothing under
-    it is half removed; ``ignore_errors`` drops that refusal as it drops
-    any other.
+    every rmtree of a mounted path failed ENOTSUP. A mounted path is
+    walked by name here instead, through ``os.scandir``, ``os.unlink``
+    and ``os.rmdir`` like any other caller, while a host path keeps
+    shutil's own descriptor walk: shutil's switch between the two is
+    the whole process's, so flipping it would hand a host removal on
+    another thread the walk a swapped link can lead astray. A tree
+    holding a mount root, spelled however (``/data/.``), is refused
+    (EBUSY) before anything goes, as node's door refuses it, and the
+    refusal reaches ``onexc``, ``onerror`` or ``ignore_errors`` as any
+    other failure does.
 
     Args:
         files (Files): the workspace's ``ws.vfs``.
     """
     original = shutil.rmtree
-    module = vars(shutil)
 
     @functools.wraps(original)
     def rmtree(path: Any, *args: Any, **kwargs: Any) -> None:
@@ -172,19 +244,25 @@ def make_rmtree(files: Files) -> Callable[..., None]:
         ):
             original(path, *args, **kwargs)
             return
-        root = spelled.rstrip("/")
+        onexc = _rmtree_handler(
+            kwargs.get("ignore_errors", args[0] if args else False),
+            kwargs.get("onerror", args[1] if len(args) > 1 else None),
+            kwargs.get("onexc"),
+        )
+        root = posixpath.normpath(spelled).rstrip("/")
         for prefix in files.mount_prefixes():
             mount = prefix.rstrip("/")
             if mount == root or mount.startswith(root + "/"):
-                if kwargs.get("ignore_errors", args[0] if args else False):
-                    return
-                raise as_raised(ebusy(mount or "/"))
-        saved = module["_use_fd_functions"]
-        module["_use_fd_functions"] = False
+                busy = mount or "/"
+                onexc(_real_os.rmdir, busy, as_raised(ebusy(busy)))
+                return
         try:
-            original(path, *args, **kwargs)
-        finally:
-            module["_use_fd_functions"] = saved
+            if _real_os.path.islink(spelled):
+                raise OSError("Cannot call rmtree on a symbolic link")
+        except OSError as err:
+            onexc(_real_os.path.islink, spelled, err)
+            return
+        _remove_tree(spelled, onexc)
 
     return rmtree
 
@@ -806,7 +884,8 @@ class HostFs:
         # rmdir(2) on a mount point is EBUSY. A mount root is the
         # deployment's own, which the shell's rm refuses the same way.
         owner = owner_prefix(self._files.mount_prefixes(), virtual)
-        if owner is not None and owner.rstrip("/") == virtual.rstrip("/"):
+        named = posixpath.normpath(virtual).rstrip("/")
+        if owner is not None and owner.rstrip("/") == named:
             raise ebusy(virtual)
         self._door.rmdir(virtual)
 

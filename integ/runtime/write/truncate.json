@@ -96,6 +96,52 @@
           }
         }
       ]
+    },
+    {
+      "id": "truncate_to_the_length_at_open_drops_what_another_handle_appended",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abcd"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "a = open('/data/f.txt', 'r+')\nwith open('/data/f.txt', 'a') as b:\n    b.write('XY')\na.truncate(4)\na.close()\nprint(repr(open('/data/f.txt').read()))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "'abcd'\n",
+            "ops_contain": [
+              "truncate /data/f.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /data/f.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "abcd"
+          }
+        }
+      ]
     }
   ]
 }

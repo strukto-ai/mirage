@@ -941,9 +941,11 @@ class Files:
         skipped on purpose: nobody mounted it, and it matches every
         absolute path, so counting it would hijack real filesystem paths
         (a FUSE mountpoint, ``/tmp``) into ops. A mount made at ``/`` is the
-        workspace's root and claims every path, as it does for a guest.
-        Routing to the anchor for ops themselves still happens at the door;
-        this gate is only about what the interception should leave alone.
+        workspace's root and claims every path, as it does for a guest. A
+        relative path names the process's working directory, which the
+        interception leaves alone whatever is mounted. Routing to the anchor
+        for ops themselves still happens at the door; this gate is only
+        about what the interception should leave alone.
 
         Args:
             path (str): Virtual path.
@@ -951,6 +953,8 @@ class Files:
         Returns:
             bool: True if path is under a mount other than the anchor.
         """
+        if not path.startswith("/"):
+            return False
         return (
             owner_prefix(
                 (m.prefix for m in self._mounts if not m.anchor), path
