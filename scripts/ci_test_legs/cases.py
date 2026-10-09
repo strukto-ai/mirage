@@ -198,6 +198,42 @@ SHARD_CASES = (
         scripts={**CLEAN, "a": f"{CLEAN['a']} --shard 1/1"},
     ),
     LegCase(
+        name="shards select different file collections",
+        scripts={
+            **SHARDED,
+            "a": f"--filter {CORE} run test shell --shard=1/2",
+            "b": f"--filter {CORE} run test runtime --shard=2/2",
+        },
+        declared=list(SHARDED),
+        expect="only --shard",
+    ),
+    LegCase(
+        name="shards select the same incomplete file collection",
+        scripts={
+            **SHARDED,
+            "a": f"{SHARDED['a']} shell",
+            "b": f"{SHARDED['b']} shell",
+        },
+        declared=list(SHARDED),
+        expect="only --shard",
+    ),
+    *(
+        LegCase(
+            name=f"shard narrows its test selection: {arguments}",
+            scripts={**SHARDED, "a": f"{SHARDED['a']} {arguments}"},
+            declared=list(SHARDED),
+            expect="only --shard",
+        )
+        for arguments in (
+            "--testNamePattern=matches",
+            '--testNamePattern "matches a name"',
+            '-t "matches a name"',
+            "--exclude=src/runtime/**",
+            "--changed",
+            "--project=unit",
+        )
+    ),
+    LegCase(
         name="missing shard",
         scripts={**CLEAN, "a": SHARDED["a"]},
         expect="every shard exactly once",

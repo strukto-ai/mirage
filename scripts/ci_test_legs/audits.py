@@ -202,7 +202,7 @@ def audit_gates(
 
 
 def shard_of(body: str) -> tuple[int, int] | None:
-    """Read the optional Vitest shard, refusing malformed or repeated flags.
+    """Read the optional Vitest shard without allowing a filtered collection.
 
     Args:
         body (str): the leg's pnpm script.
@@ -224,6 +224,17 @@ def shard_of(body: str) -> tuple[int, int] | None:
     index, total = map(int, values[0].split("/"))
     if not 1 <= index <= total:
         raise ValueError("--shard needs 1 <= index <= total")
+    if "run" not in words or invoked_script(body) != "test":
+        raise ValueError("sharded legs must invoke `run test`")
+    arguments = words[words.index("run") + 2 :]
+    # Matching shard numbers cover a package only when every invocation
+    # collects all of its tests. Allow only the shard option; new options
+    # need an explicit audit before they can change the CI test selection.
+    if arguments not in ([f"--shard={values[0]}"], ["--shard", values[0]]):
+        raise ValueError(
+            "sharded legs may pass only --shard after `run test`; "
+            "extra arguments can omit files or test names"
+        )
     return index, total
 
 
