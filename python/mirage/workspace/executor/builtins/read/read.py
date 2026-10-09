@@ -19,7 +19,6 @@ from mirage.io.async_line_iterator import AsyncLineIterator, line_buffer
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import decode_text, encode_text
-from mirage.shell.errors import ArithError
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.read.constants import (
@@ -27,7 +26,6 @@ from mirage.workspace.executor.builtins.read.constants import (
     READ_VALUE_LETTERS,
 )
 from mirage.workspace.executor.builtins.shared import (
-    arith_refusal,
     is_valid_name,
     readonly_refusal,
     record_delimiter,
@@ -73,15 +71,11 @@ async def _read_store(
             await view.set(var, value)
         except PolicyDenied as exc:
             return refusal("read", exc)
-        except ArithError as exc:
-            return arith_refusal("read", exc)
         return None
     try:
         status = await assign_element(session, view, base, subscript, value)
     except PolicyDenied as exc:
         return refusal("read", exc)
-    except ArithError as exc:
-        return arith_refusal("read", exc)
     if status == "readonly":
         return readonly_refusal("read", base)
     if status == "denied":

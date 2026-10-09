@@ -18,7 +18,7 @@ from mirage.policy import PolicyDenied
 from mirage.shell.array import array_extent, array_unset
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import FUNCNAME
-from mirage.shell.errors import ArithError, ExitSignal
+from mirage.shell.errors import ArithError
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.shared import refusal, require_view
@@ -66,9 +66,7 @@ async def _fatal_index(
     try:
         return await subscript_index(session, subscript, view)
     except ArithError as exc:
-        raise ExitSignal(
-            1, stderr=encode_text(f"bash: {exc}\n"), contained_code=1
-        ) from exc
+        raise exc.signal(fatal=True) from exc
 
 
 async def _unset_element(

@@ -70,7 +70,9 @@ describe('RANDOM generator', () => {
     expect(nextRandom(s, '0')).toBe(20814)
     const diagnostics: (string | Uint8Array)[] = []
     await sessionView(s, null, diagnostics).set(RANDOM, '1.5')
-    expect(diagnostics).toEqual(['1.5: syntax error: invalid character "."'])
+    expect(diagnostics).toEqual([
+      '1.5: syntax error: invalid arithmetic operator (error token is ".5")',
+    ])
     expect(nextRandom(s, stored(s))).toBe(24386)
     expect(nextRandom(s, stored(s))).toBe(149)
   })
@@ -362,13 +364,16 @@ it('draws from the pending seed and settles once the session view has landed it'
 it.each([
   // An operand or subscript that does not evaluate ends the line in
   // bash's words, after landing what was assigned before it.
-  ['v=abc; echo "${v:1/0}"; echo after', 'bash: v: 1/0: division by 0\n'],
-  ['a=(1 2 3); echo "${a[@]:1/0}"; echo after', 'bash: a[@]: 1/0: division by 0\n'],
-  ['a=(1); echo "${a[1/0]}"; echo after', 'bash: 1/0: division by 0\n'],
-  ['a=(1); a[1/0]=v; echo after', 'bash: 1/0: division by 0\n'],
-  ['a=(1); unset "a[1/0]"; echo after', 'bash: 1/0: division by 0\n'],
-  ['a=(1); [[ -v a[1/0] ]]; echo after', 'bash: 1/0: division by 0\n'],
-  ['a=(1); a[x=3,1/0]=v; echo after', 'bash: x=3,1/0: division by 0\n'],
+  ['v=abc; echo "${v:1/0}"; echo after', 'bash: v: 1/0: division by 0 (error token is "0")\n'],
+  [
+    'a=(1 2 3); echo "${a[@]:1/0}"; echo after',
+    'bash: a[@]: 1/0: division by 0 (error token is "0")\n',
+  ],
+  ['a=(1); echo "${a[1/0]}"; echo after', 'bash: 1/0: division by 0 (error token is "0")\n'],
+  ['a=(1); a[1/0]=v; echo after', 'bash: 1/0: division by 0 (error token is "0")\n'],
+  ['a=(1); unset "a[1/0]"; echo after', 'bash: 1/0: division by 0 (error token is "0")\n'],
+  ['a=(1); [[ -v a[1/0] ]]; echo after', 'bash: 1/0: division by 0 (error token is "0")\n'],
+  ['a=(1); a[x=3,1/0]=v; echo after', 'bash: x=3,1/0: division by 0 (error token is "0")\n'],
 ])('a subscript or operand that fails ends the line: %s', async (command, stderr) => {
   const { ws } = await makeIntegrationWS()
   try {

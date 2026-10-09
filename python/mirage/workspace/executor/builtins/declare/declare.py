@@ -31,7 +31,6 @@ from mirage.shell.variable import (
     ShellVar,
     VarAttr,
     VarKind,
-    appended,
     attr_letters,
 )
 from mirage.utils.hidden import var_hidden
@@ -48,7 +47,6 @@ from mirage.workspace.executor.builtins.declare.types import (
     DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.shared import (
-    arith_refusal,
     is_valid_name,
     readonly_line,
     refusal,
@@ -56,6 +54,7 @@ from mirage.workspace.executor.builtins.shared import (
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
+    appended,
     conversion_scalar,
     deref,
     in_call_env,
@@ -173,12 +172,23 @@ def kind_conflict(held: ShellValue | None, kind: VarKind | None) -> str | None:
     return None
 
 
+def held_slot(held: ShellValue | None) -> str:
+    """What a declaration's ``NAME+=value`` extends: a scalar's text,
+    element 0 of an array, key ``"0"`` of a map (``S=x; declare -a
+    S+=y`` gives ``([0]="xy")``), "" when unset.
+
+    Args:
+        held (ShellValue | None): the value the declaration lands on.
+    """
+    if isinstance(held, dict):
+        return held.get("0", "")
+    if isinstance(held, list):
+        return array_get(held, 0)
+    return held or ""
+
+
 def scalar_value(
-    held: ShellValue | None,
-    value: str,
-    kind: VarKind | None,
-    append: bool = False,
-    integer: bool = False,
+    held: ShellValue | None, value: str, kind: VarKind | None
 ) -> tuple[ShellValue, frozenset[int | str] | None]:
     """What a declaration's ``NAME=value`` stores, and the elements it
     assigns (``coerce_value``).
@@ -187,37 +197,26 @@ def scalar_value(
     ``"0"`` in a map), as a plain ``NAME=value`` does, leaving the other
     elements as stored; otherwise ``-A`` makes the map ``([0]=value)``
     and ``-a`` the one-element array, a held scalar converting to that
-    element first, and with neither the value stays a scalar.
-    ``NAME+=value`` appends to what that slot holds (``S=x; declare -a
-    S+=y`` gives ``([0]="xy")``), and on an integer adds (``appended``).
+    element first, and with neither the value stays a scalar. A
+    ``NAME+=value`` arrives here as ``appended`` hands it.
 
     Args:
         held (ShellValue | None): the value the declaration lands on.
-        value (str): the assigned text.
+        value (str): the text the slot takes.
         kind (VarKind | None): the kind ``-a`` / ``-A`` asked for.
-        append (bool): the operand was ``NAME+=value``.
-        integer (bool): the variable carries ``-i``.
     """
     scalar = held if isinstance(held, str) else None
     if isinstance(held, dict) or kind is VarKind.ASSOC:
         amap = dict(held) if isinstance(held, dict) else {}
-        if scalar is not None:
-            amap["0"] = scalar
-        amap["0"] = (
-            appended(amap.get("0", ""), value, integer) if append else value
-        )
+        amap["0"] = value
         return amap, frozenset({"0"})
     if isinstance(held, list) or kind is VarKind.INDEXED:
         arr = list(held) if isinstance(held, list) else []
         if scalar is not None:
             arr.append(scalar)
-        array_set(
-            arr,
-            0,
-            appended(array_get(arr, 0), value, integer) if append else value,
-        )
+        array_set(arr, 0, value)
         return arr, frozenset({0})
-    return (appended(scalar or "", value, integer) if append else value), None
+    return value, None
 
 
 def kind_listed(session: SessionState, name: str, flags: set[str]) -> bool:
@@ -518,7 +517,9 @@ async def store_staged_arrays(
         except PolicyDenied as exc:
             return refusal(cmd, exc)
         except ArithError as exc:
-            return arith_refusal(cmd, exc)
+            # An element or subscript of a literal names no builtin, as
+            # an assignment's does (`declare -ai A=(2+)` is `2+: ...`).
+            raise exc.signal(fatal=True) from exc
         if stored is not None:
             stored[position] = checked
     return None
@@ -1060,7 +1061,7 @@ async def mark_variables(
     except PolicyDenied as exc:
         return refusal(cmd, exc)
     except ArithError as exc:
-        return arith_refusal(cmd, exc)
+        raise exc.signal(cmd, fatal=True) from exc
     if refused is not None:
         return refused
     return declaration_result(cmd, errors, warnings)
@@ -1113,16 +1114,14 @@ async def _mark_operand(
     if val is not None and conflict is None:
         checked = deref(session, key)
         target = session.vars.get(checked)
-        value, assigned = scalar_value(
-            held,
-            val,
-            kind,
-            append,
-            target is not None and VarAttr.INTEGER in target.attrs,
+        integer = target is not None and VarAttr.INTEGER in target.attrs
+        val, added = (
+            appended(held_slot(held), val, integer) if append else (val, None)
         )
+        value, assigned = scalar_value(held, val, kind)
         if kind is not None:
             await drop_reference(session, view, key)
-        await view.set(key, value, assigned=assigned)
+        await view.set(key, value, assigned=assigned, added=added)
         # Rides on the gate the `view.set` above passed, unless the
         # write re-aimed a reference (`mark_written`).
         await mark_written(session, view, key, checked, attr, on)

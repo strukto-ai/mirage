@@ -44,7 +44,7 @@ import {
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import { ExitSignal } from '../../shell/errors.ts'
+import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT, ProcessSubDirection } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
@@ -809,21 +809,29 @@ async function routeArgv(
   // the interpreters are not in the table; they route below.
   const builtin = BUILTINS.get(name)
   if (builtin !== undefined) {
-    return builtin({
-      argv,
-      context,
-      stdin,
-      callStack,
-      signal,
-      row,
-      dispatch,
-      registry,
-      namespace,
-      executeFn,
-      ...(parser === undefined ? {} : { parser }),
-      ...(sink === undefined ? {} : { sink }),
-      ...(jobTable === null ? {} : { jobTable }),
-    })
+    try {
+      return await builtin({
+        argv,
+        context,
+        stdin,
+        callStack,
+        signal,
+        row,
+        dispatch,
+        registry,
+        namespace,
+        executeFn,
+        ...(parser === undefined ? {} : { parser }),
+        ...(sink === undefined ? {} : { sink }),
+        ...(jobTable === null ? {} : { jobTable }),
+      })
+    } catch (err) {
+      // A value a builtin stores into an `-i` name did not evaluate: bash
+      // discards the line in that builtin's voice (`bash: getopts: ?:
+      // syntax error: ...`).
+      if (err instanceof ArithError) throw err.signal(name, true)
+      throw err
+    }
   }
 
   // Pathname resolution (POSIX): every component of an operand but the

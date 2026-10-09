@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { seedVar } from '../workspace/session/state.ts'
+import { seedVar, setAttr } from '../workspace/session/state.ts'
 import { VarAttr } from '../shell/variable.ts'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Command } from '../commands/config.ts'
@@ -433,10 +433,18 @@ describe('the remaining session writers clear the same gate', () => {
   })
 
   it('an append assignment fires the gate', async () => {
+    // An integer `+=` evaluates behind the gate, so what its sides assign
+    // waits for it, as a plain `SECRET_N=X=5`'s does.
     const ws = await makeWs([new DenySecretEnv()])
-    const io = await ws.shell('SECRET_A+=x')
-    expect(io.exitCode).not.toBe(0)
+    const session = ws.getSession(ws.defaultSessionId)
+    seedVar(session, 'SECRET_N', '1')
+    setAttr(session, 'SECRET_N', VarAttr.Integer)
+    for (const line of ['SECRET_A+=x', 'SECRET_N+=X=5']) {
+      expect((await ws.shell(line)).exitCode).not.toBe(0)
+    }
     expect('SECRET_A' in ws.env).toBe(false)
+    expect('X' in ws.env).toBe(false)
+    expect(ws.env.SECRET_N).toBe('1')
   })
 
   it('an array assignment fires the gate', async () => {
@@ -861,15 +869,24 @@ describe('hidden vars across the shell tier', () => {
 
   it('declare -ni stops its value at a hidden write', async () => {
     // `declare -ni r=M` evaluates M through the `-i` coercion, so a hidden name
-    // it assigns is refused there and nothing after it lands.
+    // it assigns is refused there and nothing after it lands; an integer `+=`
+    // onto a hidden name is refused before its held text evaluates, so no
+    // error quotes it.
     const ws = await makeHiddenVarsWs()
-    const io = await ws.shell("X=0; M='SLACK_TOKEN=5,X=7'; declare -ni r=M", {
-      sessionId: 'agent',
-    })
-    expect(io.exitCode).not.toBe(0)
-    expect(stderrStr(io)).toContain('permission denied')
     const session = ws.getSession('agent')
-    expect(session.vars.SLACK_TOKEN?.value).toBe('xoxb-real')
+    seedVar(session, 'SLACK_TOKEN', '1xoxb-real')
+    setAttr(session, 'SLACK_TOKEN', VarAttr.Integer)
+    for (const line of [
+      "X=0; M='SLACK_TOKEN=5,X=7'; declare -ni r=M",
+      'SLACK_TOKEN+=X=7',
+      'declare SLACK_TOKEN+=X=7',
+    ]) {
+      const io = await ws.shell(line, { sessionId: 'agent' })
+      expect(io.exitCode).not.toBe(0)
+      expect(stderrStr(io)).toContain('permission denied')
+      expect(stderrStr(io)).not.toContain('xoxb-real')
+    }
+    expect(session.vars.SLACK_TOKEN?.value).toBe('1xoxb-real')
     expect(session.vars.X?.value).toBe('0')
   })
 

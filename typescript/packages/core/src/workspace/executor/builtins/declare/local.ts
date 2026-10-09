@@ -15,9 +15,10 @@
 import { IOResult } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { appended, type ShellVar, VarAttr, type VarKind } from '../../../../shell/variable.ts'
+import { type ShellVar, VarAttr, type VarKind } from '../../../../shell/variable.ts'
 import { sessionEntry, type SessionState } from '../../../session/session.ts'
 import {
+  appended,
   deref,
   envGet,
   evaluateInteger,
@@ -29,11 +30,12 @@ import {
 } from '../../../session/state.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { arithRefusal, isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
+import { isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
 import { SUBSCRIPT_RE } from './constants.ts'
 import {
   declarationResult,
   dropReference,
+  heldSlot,
   heldValue,
   identifierRefusal,
   kindConflict,
@@ -209,7 +211,7 @@ async function declareOperands(
     if (refused !== null) return refused
   } catch (err) {
     if (err instanceof PolicyDenied) return refusal(cmd, err)
-    if (err instanceof ArithError) return arithRefusal(cmd, err)
+    if (err instanceof ArithError) throw err.signal(cmd, true)
     throw err
   }
   return declarationResult(cmd, errors, warnings)
@@ -327,9 +329,10 @@ async function declareOperand(
   const checked = deref(session, key) || key
   await premark(view, key, shaping)
   const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
-  const [value, assigned] = scalarValue(held, given, kind, append, integer)
+  const [slot, added] = append ? appended(heldSlot(held), given, integer) : [given, null]
+  const [value, assigned] = scalarValue(held, slot, kind)
   if (kind !== null) await dropReference(session, view, key)
-  await view.set(key, value, true, assigned)
+  await view.set(key, value, true, assigned, added)
   await stampMarks(session, view, key, checked, marks)
   return null
 }
@@ -372,7 +375,9 @@ async function aimReference(
   const old = typeof held === 'string' ? held : ''
   let value = old + given
   if (shaping.some(([attr, on]) => attr === VarAttr.Integer && on)) {
-    await evaluateInteger(session, view, append ? appended(old, given, true) : given)
+    await (append
+      ? evaluateInteger(session, view, old, given)
+      : evaluateInteger(session, view, given))
     value = ''
   }
   if (isValidName(value) || SUBSCRIPT_RE.test(value)) {

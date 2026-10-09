@@ -154,18 +154,15 @@ def guard_expansion_write(session: SessionState, *names: str) -> None:
 def _write_refusal(exc: PolicyDenied | ArithError) -> ExitSignal:
     """The line's death for a refused expansion-time write.
 
-    The gate's own reason discards the line, as a readonly name's does;
-    the ``-i`` coercion refusing the text ends the shell with 1, as
-    ``n=1+`` does.
+    The gate's own reason discards the line, as a readonly name's does,
+    and so does the ``-i`` coercion refusing the text, as ``n=1+`` does.
 
     Args:
         exc (PolicyDenied | ArithError): the refusal.
     """
     if isinstance(exc, PolicyDenied):
         return DiscardSignal(encode_text(f"bash: {exc.strerror}\n"))
-    return ExitSignal(
-        1, stderr=encode_text(f"bash: {exc}\n"), contained_code=1
-    )
+    return exc.signal(fatal=True)
 
 
 async def _expansion_index(
@@ -999,13 +996,7 @@ class _ArithOperand:
             await land_arith_writes(
                 self.session, self.view, exc.writes, reader
             )
-            raise ExitSignal(
-                1,
-                stderr=encode_text(
-                    f"bash: {self.ref}: {text.strip()}: {exc}\n"
-                ),
-                contained_code=1,
-            ) from exc
+            raise exc.signal(self.ref) from exc
         await land_arith_writes(self.session, self.view, result.writes, reader)
         return result.value
 

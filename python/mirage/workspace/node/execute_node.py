@@ -40,7 +40,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import (
@@ -157,8 +157,8 @@ async def _eval_cfor_expr(
             assignments land through; None outside a workspace.
 
     Raises:
-        ArithError: re-raised with the expression text prepended, so
-            the loop can print bash's `((: expr: reason` diagnostic.
+        ArithError: the slot did not evaluate; the loop prints it as
+            bash's ``((: expr: reason`` diagnostic.
         ReadonlyError: the expression assigns to a readonly variable,
             which aborts the loop the same way an invalid expression
             does; the writes before it have landed.
@@ -168,16 +168,7 @@ async def _eval_cfor_expr(
     session = context.session
     if not exprs:
         return default
-    # One comma expression, evaluated once, so an assignment early in
-    # the slot is seen by the expressions after it.
-    text = ", ".join(
-        [
-            await expand_arith(
-                expr, context, execute_fn, call_stack, view=view
-            )
-            for expr in exprs
-        ]
-    )
+    text = await _slot_text(exprs, context, execute_fn, call_stack, view)
     reader = random_reader(session)
     error: ArithError | ReadonlyError | None = None
     value = 0
@@ -198,8 +189,52 @@ async def _eval_cfor_expr(
             raise error.signal()
         raise error
     if error is not None:
-        raise ArithError(f"{text}: {error}") from error
+        raise error
     return int(value)
+
+
+async def _slot_text(
+    exprs: list[Any],
+    context: EvaluationContext,
+    execute_fn: Callable[..., Any],
+    call_stack: CallStack | None,
+    view: SessionView | None,
+) -> str:
+    """A C-style for slot's text as bash evaluates it: its source up to
+    the ``;`` or ``))`` that ends it, each node's expansions substituted.
+
+    Args:
+        exprs (list[Any]): the slot's nodes and tokens, in order.
+        context (EvaluationContext): the evaluation.
+        execute_fn (Callable): recursive execute for substitutions.
+        call_stack (CallStack | None): function-call scope, if any.
+        view (SessionView | None): the gated session view.
+    """
+    first, last = exprs[0], exprs[-1]
+    parent = first.parent
+    closer = last.next_sibling
+    if parent is None or closer is None:
+        raw, base, end = b"", first.start_byte, last.end_byte
+    else:
+        raw, base, end = (
+            parent.text or b"",
+            parent.start_byte,
+            closer.start_byte,
+        )
+    parts: list[str] = []
+    at = first.start_byte
+    for expr in exprs:
+        parts.append(decode_text(raw[at - base : expr.start_byte - base]))
+        parts.append(
+            await expand_arith(
+                expr, context, execute_fn, call_stack, view=view
+            )
+            if expr.is_named
+            else get_text(expr)
+        )
+        at = expr.end_byte
+    parts.append(decode_text(raw[at - base : end - base]))
+    return "".join(parts)
 
 
 STREAMING_KINDS = frozenset(
@@ -1504,7 +1539,9 @@ async def _execute_node(
                 ExecutionNode(command=text, exit_code=1, stderr=err),
             )
         if error is not None:
-            err = encode_text(f"bash: ((: {expr}: {error}\n")
+            if error.in_subscript:
+                raise error.signal()
+            err = encode_text(f"bash: ((: {error}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),

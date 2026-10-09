@@ -1977,10 +1977,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf -v x '\\xc3\\xa9'; [ \"$x\" = é ] && echo same; printf -v y '%b' '\\xc3\\xa9\\xff'; printf '%s' \"$y\" | od -An -tx1",
+      "command": "printf -v x '\\xc3\\xa9'; [ \"$x\" = é ] && echo same; printf -v y '%b' '\\xc3\\xa9\\xff'; printf '%s' \"$y\" | od -An -tx1; printf -v z '1\\0002'; declare -p z",
       "expect": {
         "exit": 0,
-        "stdout": "same\n c3 a9 ff\n",
+        "stdout": "same\n c3 a9 ff\ndeclare -- z=\"1\"\n",
         "stderr": ""
       }
     },

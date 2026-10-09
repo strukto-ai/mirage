@@ -23,7 +23,6 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import (
     ArithError,
     BadSubstitution,
-    DiscardSignal,
     ReadonlyError,
     named,
 )
@@ -170,25 +169,6 @@ def _find_first(node: TSNodeLike, ntype: str) -> TSNodeLike | None:
     return None
 
 
-def arith_exit(expr: str, exc: ArithError) -> DiscardSignal:
-    """The fatal shape of an arithmetic expansion error.
-
-    bash discards the rest of the line on a bad ``$((...))``: the
-    command never runs, ``$?`` is 1, and a subshell or pipeline segment
-    containing it reports 1. The old return of the expansion's
-    own text printed ``$((1/0))`` with exit 0, the silent wrong answer
-    the fail-loud rule forbids. The diagnostic is the expression as
-    expanded (``1/0`` for ``$((1/$x))`` with ``x=0``), trimmed, in the
-    house style that drops bash's ``line N:`` prefix and its
-    ``(error token is ...)`` suffix, the same shape ``(( ))`` reports.
-
-    Args:
-        expr (str): the expression text handed to the evaluator.
-        exc (ArithError): what the evaluator refused.
-    """
-    return DiscardSignal(encode_text(f"bash: {expr.strip()}: {exc}\n"))
-
-
 async def expand_arith(
     ts_node: TSNodeLike,
     context: EvaluationContext,
@@ -273,7 +253,7 @@ async def _arith_text(
                 )
             )
     parts.append(decode_text(raw[end:]))
-    return "".join(parts).strip()
+    return "".join(parts)
 
 
 async def _arith_subscript(
@@ -352,7 +332,7 @@ async def _arith_value(
         result = session_arith(session, expr, reader)
     except ArithError as exc:
         await land_arith_writes(session, view, exc.writes, reader)
-        raise arith_exit(expr, exc) from exc
+        raise exc.signal() from exc
     except ReadonlyError as exc:
         await land_arith_writes(session, view, exc.writes, reader)
         raise exc.signal() from exc

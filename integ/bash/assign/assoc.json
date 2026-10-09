@@ -573,9 +573,9 @@
       ],
       "command": "declare -i QBB=1+; echo \"rc=$? |$QBB|\"",
       "expect": {
-        "exit": 0,
-        "stdout": "rc=1 ||\n",
-        "stderr": "bash: declare: 1+: syntax error: operand expected\n"
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: declare: 1+: syntax error: operand expected (error token is \"+\")\n"
       }
     },
     {

@@ -29,10 +29,10 @@ from mirage.shell.array import (
 )
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.errors import ArithError, DiscardSignal, ExitSignal
+from mirage.shell.errors import ArithError, DiscardSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
-from mirage.shell.variable import ShellValue, VarAttr, appended
+from mirage.shell.variable import ShellValue, VarAttr
 from mirage.shell.xtrace import trace_assignment
 from mirage.types import word_text
 from mirage.view.types import SessionView
@@ -43,26 +43,13 @@ from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session.state import (
+    appended,
     conversion_scalar,
     deref,
     session_view,
     subscript_index,
 )
 from mirage.workspace.types import ExecutionNode
-
-
-def _arith_fatal(exc: ArithError) -> ExitSignal:
-    """The line's death for a subscript that does not evaluate.
-
-    bash aborts the line on ``a[1/0]=v`` with ``1/0: division by 0``,
-    the way it does for a bad ``-i`` value.
-
-    Args:
-        exc (ArithError): the evaluator's refusal, subscript leading.
-    """
-    return ExitSignal(
-        1, stderr=encode_text(f"bash: {exc}\n"), contained_code=1
-    )
 
 
 async def _fatal_index(
@@ -79,7 +66,7 @@ async def _fatal_index(
     try:
         return await subscript_index(session, subscript, view)
     except ArithError as exc:
-        raise _arith_fatal(exc) from exc
+        raise exc.signal(fatal=True) from exc
 
 
 async def _fatal_index_literal(
@@ -100,7 +87,7 @@ async def _fatal_index_literal(
     try:
         return await build_indexed_literal(held, items, append, index_of)
     except ArithError as exc:
-        raise _arith_fatal(exc) from exc
+        raise exc.signal(fatal=True) from exc
 
 
 async def _assign_var(
@@ -108,6 +95,7 @@ async def _assign_var(
     key: str,
     value: ShellValue,
     assigned: frozenset[int | str] | None = None,
+    added: str | None = None,
 ) -> None:
     """One assignment through the session view; denial is fatal.
 
@@ -123,18 +111,14 @@ async def _assign_var(
         value (ShellValue): the resulting value to store.
         assigned (frozenset[int | str] | None): the elements written,
             None for the whole value.
+        added (str | None): an integer ``+=``'s text (``appended``).
     """
     try:
-        await view.set(key, value, assigned=assigned)
+        await view.set(key, value, assigned=assigned, added=added)
     except PolicyDenied as exc:
         raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
     except ArithError as exc:
-        # The `-i` coercion refused the text. GNU ends the shell with 1
-        # the way a subscript that does not evaluate does, voicing the
-        # evaluator's own message after the offending value:
-        # `bash: 1+: syntax error: ...`.
-        err = encode_text(f"bash: {exc}\n")
-        raise ExitSignal(1, stderr=err, contained_code=1) from exc
+        raise exc.signal(fatal=True) from exc
 
 
 async def expand_array_items(
@@ -365,12 +349,12 @@ async def execute_assignment(
             # The subscript is the key: no arithmetic, `m[1+1]`
             # writes the key "1+1".
             new_map = dict(amap)
-            new_map[sub_text] = (
+            new_map[sub_text], added = (
                 appended(amap.get(sub_text, ""), val, integer)
                 if append
-                else val
+                else (val, None)
             )
-            await _assign_var(view, key, new_map, frozenset({sub_text}))
+            await _assign_var(view, key, new_map, frozenset({sub_text}), added)
             code = assignment_status(context.frame, sub_seq)
             return (
                 None,
@@ -392,12 +376,13 @@ async def execute_assignment(
             raise DiscardSignal(
                 encode_text(f"bash: {name_text}: bad array subscript\n")
             )
-        array_set(
-            arr,
-            idx,
-            appended(array_get(arr, idx), val, integer) if append else val,
+        slot, added = (
+            appended(array_get(arr, idx), val, integer)
+            if append
+            else (val, None)
         )
-        await _assign_var(view, key, arr, frozenset({idx}))
+        array_set(arr, idx, slot)
+        await _assign_var(view, key, arr, frozenset({idx}), added)
         code = assignment_status(context.frame, sub_seq)
         return (
             None,
@@ -406,31 +391,30 @@ async def execute_assignment(
         )
     held_map = session.assocs.get(key)
     held_arr = session.arrays.get(key)
+    stored, added = val, None
+    if append:
+        # `a+=x` appends onto element 0 (key "0" of a map); `n+=3` on
+        # an integer name adds: `declare -i n=5; n+=3` stores 8.
+        if held_map is not None:
+            old = held_map.get("0", "")
+        elif held_arr is not None:
+            old = array_get(held_arr, 0)
+        else:
+            old = session.env.get(key, "")
+        stored, added = appended(old, val, integer)
     if held_map is not None:
         # `m=x` on an associative array writes the literal key "0"
         # and keeps every other key, as bash does.
         new_map = dict(held_map)
-        new_map["0"] = (
-            appended(held_map.get("0", ""), val, integer) if append else val
-        )
-        await _assign_var(view, key, new_map, frozenset({"0"}))
+        new_map["0"] = stored
+        await _assign_var(view, key, new_map, frozenset({"0"}), added)
     elif held_arr is not None:
-        # `a=x` writes element 0 and keeps the rest; `a+=x` appends
-        # onto element 0.
+        # `a=x` writes element 0 and keeps the rest.
         new_arr = list(held_arr)
-        array_set(
-            new_arr,
-            0,
-            appended(array_get(new_arr, 0), val, integer) if append else val,
-        )
-        await _assign_var(view, key, new_arr, frozenset({0}))
+        array_set(new_arr, 0, stored)
+        await _assign_var(view, key, new_arr, frozenset({0}), added)
     else:
-        # `n+=3` on an integer name adds: `declare -i n=5; n+=3` stores
-        # 8, not 53.
-        new_val = (
-            appended(session.env.get(key, ""), val, integer) if append else val
-        )
-        await _assign_var(view, key, new_val)
+        await _assign_var(view, key, stored, added=added)
     # Reassigning OPTIND (even to its current value) restarts the
     # getopts scan, matching bash's internal char pointer.
     if key == "OPTIND":

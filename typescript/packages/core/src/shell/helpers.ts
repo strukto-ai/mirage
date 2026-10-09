@@ -368,19 +368,13 @@ export function getForParts(node: TSNodeLike): [string, TSNodeLike[], TSNodeLike
 }
 
 /**
- * Get ([init, cond, update], bodyCommands) from a C-style for.
- *
- * The expression slots are positional between the (( )) delimiters,
- * separated by `;` tokens, and any of them may be empty (null):
- * `for ((;;))`.
- */
-/**
  * ([init, cond, update], body) from a C-style for. The expression slots
  * are positional between the (( )) delimiters, separated by `;` tokens,
- * and any of them may be empty: `for ((;;))`. A slot holds every
- * comma-separated expression the parser found in it, in order, since
- * bash evaluates `for ((a=1, i=0; ...))` as one comma expression;
- * keeping only the last child dropped `a=1`.
+ * and any of them may be empty: `for ((;;))`. A slot holds every node and
+ * token the parser found in it, in order, commas and stray operators
+ * included, since bash evaluates the slot's text as one expression: `for
+ * ((a=1, i=0; ...))` assigns both, and `i<1 2` is an error, not two
+ * expressions.
  */
 export function getCforParts(node: TSNodeLike): [TSNodeLike[][], TSNodeLike[]] {
   const exprs: TSNodeLike[][] = [[], [], []]
@@ -398,7 +392,7 @@ export function getCforParts(node: TSNodeLike): [TSNodeLike[][], TSNodeLike[]] {
     }
     if (inside) {
       if (child.type === NT.SEMI) slot += 1
-      else if (child.isNamed === true && slot < 3) exprs[slot]?.push(child)
+      else if (slot < 3) exprs[slot]?.push(child)
       continue
     }
     if (child.type === NT.DO_GROUP) body = [...child.namedChildren]

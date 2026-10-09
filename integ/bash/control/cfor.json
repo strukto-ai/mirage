@@ -333,11 +333,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "readonly zcfi=5; for ((;zcfi<10;zcfi++)); do echo hi; done; echo c=$?; echo zcfi=$zcfi",
+      "command": "readonly zcfi=5; for ((;zcfi<10;zcfi++)); do echo hi; done; echo c=$?; echo zcfi=$zcfi; za=(1); zv='za[1+]'; for ((zi=0; zi<1; zi+=zv)); do echo kept; done; echo unreached",
       "expect": {
-        "exit": 0,
-        "stdout": "hi\nc=1\nzcfi=5\n",
-        "stderr": "bash: zcfi: readonly variable\n"
+        "exit": 1,
+        "stdout": "hi\nc=1\nzcfi=5\nkept\n",
+        "stderr": "bash: zcfi: readonly variable\nbash: 1+: syntax error: operand expected (error token is \"+\")\n"
       }
     },
     {

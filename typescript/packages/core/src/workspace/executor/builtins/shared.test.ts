@@ -19,13 +19,11 @@ import { MountMode, PathSpec } from '../../../types.ts'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { PolicyDenied } from '../../../policy/errors.ts'
-import { ArithError } from '../../../shell/errors.ts'
 import { SessionState } from '../../session/session.ts'
 import { sessionView } from '../../session/state.ts'
 import { IDENTIFIER_RE } from './constants.ts'
 import {
   absPath,
-  arithRefusal,
   expandOperands,
   fail,
   finish,
@@ -169,14 +167,6 @@ describe('builtins/shared: the session helpers', () => {
     expect(io.exitCode).toBe(1)
     expect(stderrOf(io)).toBe('bash: X: readonly variable\n')
     expect(node.command).toBe('read')
-  })
-
-  it('arithRefusal prefixes the builtin', () => {
-    const [out, io, node] = arithRefusal('let', new ArithError('1+: syntax error'))
-    expect(out).toBeNull()
-    expect(io.exitCode).toBe(1)
-    expect(stderrOf(io)).toBe('bash: let: 1+: syntax error\n')
-    expect(node.command).toBe('let')
   })
 
   it('isValidName / isCountWord', () => {

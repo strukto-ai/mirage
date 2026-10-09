@@ -102,14 +102,6 @@ describe('evaluateArith', () => {
     expect(evaluateArith('(1 << 63) - 1 + 1', {}).value).toBe(-(1n << 63n))
   })
 
-  it('raises ArithError on bad input', () => {
-    expect(() => evaluateArith('1 / 0', {})).toThrow(ArithError)
-    expect(() => evaluateArith('2 ** -1', {})).toThrow(ArithError)
-    expect(() => evaluateArith('1 +', {})).toThrow(ArithError)
-    expect(() => evaluateArith('@', {})).toThrow(ArithError)
-    expect(() => evaluateArith('r + 1', { r: 'r + 1' })).toThrow(ArithError)
-  })
-
   it('parses base#value literals', () => {
     expect(evaluateArith('16#ff', {}).value).toBe(255n)
     expect(evaluateArith('2#101', {}).value).toBe(5n)
@@ -339,5 +331,182 @@ describe('nounset', () => {
 
   it('reads an unset name as 0 without it', () => {
     expect(evaluateArith('v + 1', {}).value).toBe(1n)
+  })
+})
+
+/** The line an evaluation's error reads, or null when it evaluates. */
+function errorLine(expr: string, env: Record<string, string> = {}): string | null {
+  try {
+    evaluateArith(expr, env)
+  } catch (err) {
+    if (err instanceof ArithError) return err.message
+    throw err
+  }
+  return null
+}
+
+describe('an error is worded as bash names it', () => {
+  // Pinned against bash 5.2.37 (`let "$e"` and `$(( e ))`).
+  it.each([
+    ['1+', 'syntax error: operand expected (error token is "+")'],
+    ['1 2 3', 'syntax error in expression (error token is "2 3")'],
+    ['(1+2', 'missing `)\' (error token is "2")'],
+    ['1)', 'syntax error in expression (error token is ")")'],
+    ['1/0 + 2', 'division by 0 (error token is "0 + 2")'],
+    ['-(1/0)', 'division by 0 (error token is "0)")'],
+    ['2**-1 + 3', 'exponent less than 0 (error token is "+ 3")'],
+    ['3=4', 'attempted assignment to non-variable (error token is "=4")'],
+    ['0 && x=08', 'attempted assignment to non-variable (error token is "=08")'],
+    ['1?2', '`:\' expected for conditional expression (error token is "2")'],
+    ['1 ? : 3', 'expression expected (error token is ": 3")'],
+    ['1.5', 'syntax error: invalid arithmetic operator (error token is ".5")'],
+    ["'a'", 'syntax error: operand expected (error token is "\'a\'")'],
+    ['x[1', 'bad array subscript (error token is "x[1")'],
+    ['--x--', '--: assignment requires lvalue (error token is "--")'],
+    ['5++', 'syntax error: operand expected (error token is "+")'],
+    ['1+ ', 'syntax error: operand expected (error token is "+ ")'],
+  ])('%j', (expr, line) => {
+    expect(errorLine(expr)).toBe(`${expr.trimStart()}: ${line}`)
+  })
+})
+
+describe('an error names the expression it happened in', () => {
+  // A bad constant names the expression up to its end, an error in a
+  // variable's value names that value, and a reference cycle the name at
+  // the depth limit, as bash's does.
+  it.each([
+    ['x=08 + 1', {}, 'x=08: value too great for base (error token is "08")'],
+    ['09+1', {}, '09: value too great for base (error token is "09")'],
+    ['1#1', {}, '1#1: invalid arithmetic base (error token is "1#1")'],
+    ['10#', {}, '10#: invalid integer constant (error token is "10#")'],
+    ['64##', {}, '64##: invalid integer constant (error token is "64##")'],
+    ['64#1#2', {}, '64#1#2: invalid number (error token is "64#1#2")'],
+    ['0x10#f', {}, '0x10#f: invalid number (error token is "0x10#f")'],
+    ['08#7', {}, '08#7: value too great for base (error token is "08#7")'],
+    ['1 || 2**(--x)', { x: '1' }, '1 || 2**(--x): exponent less than 0 (error token is ")")'],
+    ['1 || 2**(x-=2)', { x: '1' }, '1 || 2**(x-=2): exponent less than 0 (error token is ")")'],
+    ['2 * x', { x: ' 1+ ' }, '1+ : syntax error: operand expected (error token is "+ ")'],
+    ['x', { x: 'y', y: 'x' }, 'y: expression recursion level exceeded (error token is "y")'],
+    ['x', { x: '(x)' }, '(x): expression recursion level exceeded (error token is "x)")'],
+  ])('%j', (expr, env, line) => {
+    expect(errorLine(expr, env)).toBe(line)
+  })
+})
+
+describe('a value is what bash reads', () => {
+  // `++` and `--` bind to a name next to them, else read as signs.
+  it.each([
+    ['1++2', 3n],
+    ['1--1', 2n],
+    ['++5', 5n],
+    ['---1', -1n],
+    ['x+++y', 6n],
+    ['x---1', 4n],
+    ['++ x', 6n],
+    ['0x', 0n],
+    ['99999999999999999999', 7766279631452241919n],
+    ['3 ** 41', -420491770248316829n],
+    ['-2 ** 2', 4n],
+    ['1 ? 2, 3 : 4', 3n],
+    ['0 ? 1/0 : 2', 2n],
+    ['0 && 1/0', 0n],
+  ])('%j', (expr, value) => {
+    expect(evaluateArith(expr, { x: '5', y: '1' }).value).toBe(value)
+  })
+
+  it('wraps a long decimal value', () => {
+    expect(evaluateArith('x', { x: '99999999999999999999999' }).value).toBe(200376420520689663n)
+  })
+
+  it('steps once it reads the token after its operand', () => {
+    const writesOf = (expr: string): unknown => {
+      try {
+        evaluateArith(expr, { x: '3' })
+      } catch (err) {
+        if (err instanceof ArithError) return err.writes
+        throw err
+      }
+      return null
+    }
+    expect(writesOf('x++ 08')).toEqual([{ name: 'x', key: null, value: '4' }])
+    expect(writesOf('++x 08')).toEqual([])
+  })
+
+  it('reads and writes nothing in a skipped branch', () => {
+    const result = evaluateArith('0 && (x-=1), 1 || x++, 1 ? 2 : x++', { x: '1' })
+    expect([result.value, result.writes]).toEqual([2n, []])
+  })
+
+  it('reads an added side in the same record', () => {
+    const result = evaluateArith('x=5', {}, 0, null, null, null, false, null, 'x')
+    expect(result.value).toBe(10n)
+    expect(result.writes).toEqual([{ name: 'x', key: null, value: '5' }])
+    expect(() => evaluateArith('4', {}, 0, null, null, null, false, null, '1+')).toThrow(
+      '1+: syntax error: operand expected (error token is "+")',
+    )
+  })
+
+  it('resolves every subscript without isAssoc', () => {
+    const seen: string[] = []
+    const elements: ElementOps = {
+      resolve: (_name, sub) => {
+        seen.push(sub)
+        return 'k'
+      },
+      read: () => '4',
+    }
+    expect(evaluateArith('a[1+1] + 1', {}, 0, elements).value).toBe(5n)
+    expect(seen).toEqual(['1+1'])
+  })
+
+  it('keeps the writes made before an error', () => {
+    let caught: unknown = null
+    try {
+      evaluateArith('x=7, y++ +', { y: '1' })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(ArithError)
+    expect((caught as ArithError).writes).toEqual([
+      { name: 'x', key: null, value: '7' },
+      { name: 'y', key: null, value: '2' },
+    ])
+  })
+
+  it('reads no name it assigns', () => {
+    expect(evaluateArith('x=5', { x: '1+' }).value).toBe(5n)
+    // Nor one a refused assignment names, as bash's reader leaves it.
+    let caught: unknown
+    try {
+      evaluateArith('1+x=2', { x: 'y=5' })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(ArithError)
+    expect((caught as ArithError).message).toContain('non-variable')
+    expect((caught as ArithError).writes).toEqual([])
+  })
+
+  it('marks an error in a subscript', () => {
+    const elements: ElementOps = {
+      resolve: (_name, sub) => sub,
+      read: () => '1',
+      isAssoc: () => false,
+    }
+    let caught: unknown = null
+    try {
+      evaluateArith('a[1+] + 1', {}, 0, elements)
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(ArithError)
+    const error = caught as ArithError
+    expect(error.message).toBe('1+: syntax error: operand expected (error token is "+")')
+    expect(error.inSubscript).toBe(true)
+    const signal = error.signal('let')
+    expect([signal.exitCode, signal.containedCode]).toEqual([1, 1])
+    expect(new TextDecoder().decode(signal.stderr)).toBe(
+      'bash: 1+: syntax error: operand expected (error token is "+")\n',
+    )
   })
 })

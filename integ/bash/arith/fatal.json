@@ -31,7 +31,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 1/0: division by 0\n"
+        "stderr": "bash: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -65,7 +65,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 1/0: division by 0\n"
+        "stderr": "bash: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -99,7 +99,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 2**-1: exponent less than 0\n"
+        "stderr": "bash: 2**-1: exponent less than 0 (error token is \"1\")\n"
       }
     },
     {
@@ -167,7 +167,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 1/0: division by 0\n"
+        "stderr": "bash: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -201,7 +201,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 1/0: division by 0\n"
+        "stderr": "bash: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -235,7 +235,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: zv: 1/0: division by 0\n"
+        "stderr": "bash: zv: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -269,7 +269,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 1/0: division by 0\n"
+        "stderr": "bash: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -303,7 +303,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: zx=3,1/0: division by 0\n"
+        "stderr": "bash: zx=3,1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -576,6 +576,40 @@
         "exit": 0,
         "stdout": "1 0\nbg 1\n1 0\n",
         "stderr": "bash: U: m\nbash: U: m\n"
+      }
+    },
+    {
+      "id": "integer_value_error_ends_the_shell",
+      "seq": 980126,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'declare -i N; read N <<< 1+; echo no'; echo \"r=$?\"; bash -c 'declare -i N; getopts a N; echo no'; echo \"g=$?\"; bash -c 'declare -i N=5; N+=\" 2 3\"; echo no'; echo \"a=$?\"; bash -c 'a=(1 2); let \"a[1+]\"; echo no'; echo \"s=$?\"; bash -c 'declare -ai A=(1 2+); echo no'; echo \"l=$?\"; bash -c 'echo $((1/0)); echo no\necho \"e=$?\"'; ( declare -i N=1+; echo no ); echo \"sub=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "r=1\ng=1\na=1\ns=1\nl=1\ne=1\nsub=1\n",
+        "stderr": "bash: read: 1+: syntax error: operand expected (error token is \"+\")\nbash: getopts: ?: syntax error: operand expected (error token is \"?\")\nbash: 2 3: syntax error in expression (error token is \"3\")\nbash: 1+: syntax error: operand expected (error token is \"+\")\nbash: 2+: syntax error: operand expected (error token is \"+\")\nbash: 1/0: division by 0 (error token is \"0\")\nbash: declare: 1+: syntax error: operand expected (error token is \"+\")\n"
       }
     }
   ]
