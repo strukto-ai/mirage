@@ -86,7 +86,9 @@ async def handle_let(
                 raise error.signal()
             return readonly_refusal("let", error.name)
         if error is not None:
-            err = encode_text(f"bash: let: {expr}: {error}\n")
+            if error.in_subscript:
+                raise error.signal()
+            err = encode_text(f"bash: let: {error}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),

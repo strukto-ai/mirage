@@ -17,8 +17,7 @@ from functools import partial
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.errors.types import FileTooLargeError
 from mirage.io.types import materialize
-from mirage.shell.bytes import encode_text
-from mirage.shell.errors import ArithError, ExitSignal
+from mirage.shell.errors import ArithError
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.path import (
@@ -121,9 +120,7 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
             # bash aborts the line on `[[ -v a[1/0] ]]` with `1/0:
             # division by 0`, a test's grammar error being the only
             # other thing that ends it.
-            raise ExitSignal(
-                1, stderr=encode_text(f"bash: {exc}\n"), contained_code=1
-            ) from exc
+            raise exc.signal(fatal=True) from exc
     if op in ("-L", "-h"):
         return ctx.namespace.is_link(
             operand_abs(ctx.namespace, val, ctx.session.cwd)

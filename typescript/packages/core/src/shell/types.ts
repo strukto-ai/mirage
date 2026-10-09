@@ -52,6 +52,14 @@ export interface ArithWrite {
 }
 
 /**
+ * What an arithmetic expression's reader stands on: the end, a name (with
+ * its subscript), an integer constant, an operator, a `++`/`--` bound to
+ * the name after or before it, or a character bash reads no token from.
+ * Mirrors Python's ArithTokenKind.
+ */
+export type ArithTokenKind = 'end' | 'name' | 'num' | 'op' | 'pre' | 'post' | 'bad'
+
+/**
  * What one arithmetic evaluation produced: the value plus the
  * assignments made, one per target, in the order of each target's last
  * write, for the caller to land through the session view. Bare and

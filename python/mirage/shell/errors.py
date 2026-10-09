@@ -22,17 +22,60 @@ from mirage.shell.types import ArithWrite
 
 
 class ArithError(ValueError):
-    """A bash arithmetic syntax or evaluation error.
+    """A bash arithmetic syntax or evaluation error, worded as bash's line:
+    the expression, what went wrong, and the text from the token the
+    reader stood on to the end (``1+: syntax error: operand expected
+    (error token is "+")``).
 
     ``writes`` carries the assignments the expression made before it
     failed: bash binds each at once, so ``x=5, 1/0`` leaves ``x`` at 5
     and ``RANDOM=42, RANDOM + 1/0`` leaves the generator seeded and
     drawn from. The evaluator fills it as it raises; a caller lands
     them the way it lands a successful result's, then reports the
-    error.
+    error. ``in_subscript`` marks one made while an array subscript
+    evaluated, which ends the shell wherever the subscript is
+    (``let 'a[1+]'``), where ``let`` would otherwise fail with 1.
+
+    Args:
+        reason (str): what went wrong (``division by 0``).
+        expression (str): the expression bash names, its leading blanks
+            dropped; "" for none.
+        token (str | None): the error token, None when bash names none.
     """
 
     writes: tuple[ArithWrite, ...] = ()
+    in_subscript = False
+
+    def __init__(
+        self, reason: str, expression: str = "", token: str | None = None
+    ) -> None:
+        line = f"{expression}: {reason}" if expression else reason
+        if token is not None:
+            line = f'{line} (error token is "{token}")'
+        super().__init__(line)
+        self.reason = reason
+        self.expression = expression
+        self.token = token
+
+    def signal(self, cmd: str = "", fatal: bool = False) -> "ExitSignal":
+        """How the error unwinds where no status answers it: one in a
+        subscript, or in an ``-i`` value (``fatal``), ends the shell with
+        1; any other discards the line, as ``$((1/0))`` does.
+
+        The command the error belongs to leads the line (``bash: read:
+        1+: ...``, ``bash: x: 1/0: ...`` for ``${x:1/0}``), except one in a
+        subscript, which bash names by the subscript alone.
+
+        Args:
+            cmd (str): the builtin storing the value, or the parameter
+                whose offset failed; "" for none.
+            fatal (bool): the context ends the shell on it.
+        """
+        lead = f"{cmd}: " if cmd and not self.in_subscript else ""
+        stderr = encode_text(f"bash: {lead}{self}\n")
+        if fatal or self.in_subscript:
+            return ExitSignal(1, stderr=stderr, contained_code=1)
+        return DiscardSignal(stderr)
 
 
 class ReadonlyError(Exception):

@@ -17,7 +17,6 @@ import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { SessionView } from '../../../view/types.ts'
 import type { PolicyDenied } from '../../../policy/errors.ts'
-import type { ArithError } from '../../../shell/errors.ts'
 import { PathSpec, wordText } from '../../../types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { resolvePath } from '../../../utils/path.ts'
@@ -275,25 +274,6 @@ export function readonlyLine(cmd: string, name: string): string {
 /** Render the readonly refusal (`readonlyLine`) as the result. */
 export function readonlyRefusal(cmd: string, name: string): Result {
   const encoded = encodeText(`${readonlyLine(cmd, name)}\n`)
-  return [
-    null,
-    new IOResult({ exitCode: 1, stderr: encoded }),
-    new ExecutionNode({ command: cmd, exitCode: 1, stderr: encoded }),
-  ]
-}
-
-/**
- * Render the `-i` coercion's arithmetic error as bash does.
- *
- * GNU voices it as the evaluator's own line, prefixed by the builtin and
- * the offending text (`bash: read: 1+: syntax error: operand expected`),
- * and fails the builtin with 1 while the variable keeps its old value,
- * which is what the session view's copy-then-store already guarantees. A plain
- * assignment (`n=1+`) is fatal instead and is voiced by the executor
- * without a builtin name.
- */
-export function arithRefusal(cmd: string, err: ArithError): Result {
-  const encoded = encodeText(`bash: ${cmd}: ${err.message}\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: encoded }),

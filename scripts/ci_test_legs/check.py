@@ -156,7 +156,7 @@ def main() -> int:
     would pass while a whole leg's packages went untested.
 
     Returns:
-        0 when every package is claimed by exactly one running leg, else 1.
+        0 when the running legs cover every package exactly once, else 1.
     """
     if "--selftest" in sys.argv[1:]:
         return selftest()
@@ -181,7 +181,7 @@ def main() -> int:
         return 1
     print(
         f"ok: every workspace package with a test script "
-        f"({len(packages)}) is claimed by exactly one of "
+        f"({len(packages)}) is covered exactly once across "
         f"{len(declared)} legs ({', '.join(declared)})"
     )
     return 0

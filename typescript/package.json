@@ -6,7 +6,8 @@
   "scripts": {
     "build": "pnpm -r --filter './packages/*' build",
     "test": "pnpm -r --filter './packages/*' test",
-    "test:leg:core": "pnpm -r --fail-if-no-match --filter @struktoai/mirage-core run test",
+    "test:leg:core-1": "pnpm -r --fail-if-no-match --filter @struktoai/mirage-core run test --shard=1/2",
+    "test:leg:core-2": "pnpm -r --fail-if-no-match --filter @struktoai/mirage-core run test --shard=2/2",
     "test:leg:cli": "pnpm -r --fail-if-no-match --filter @struktoai/mirage-cli run test",
     "test:leg:rest": "pnpm -r --fail-if-no-match --filter @struktoai/mirage-node --filter @struktoai/mirage-agents --filter @struktoai/mirage-server --filter @struktoai/mirage-browser --filter @struktoai/mirage-dsh --filter @struktoai/mirage-opencode run test",
     "typecheck": "pnpm -r --filter './packages/*' --filter './scripts' typecheck",

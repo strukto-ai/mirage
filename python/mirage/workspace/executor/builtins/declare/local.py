@@ -16,12 +16,13 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
 from mirage.shell.errors import ArithError
-from mirage.shell.variable import ShellVar, VarAttr, VarKind, appended
+from mirage.shell.variable import ShellVar, VarAttr, VarKind
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.constants import SUBSCRIPT_RE
 from mirage.workspace.executor.builtins.declare.declare import (
     declaration_result,
     drop_reference,
+    held_slot,
     held_value,
     identifier_refusal,
     kind_conflict,
@@ -42,7 +43,6 @@ from mirage.workspace.executor.builtins.declare.types import (
     DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.shared import (
-    arith_refusal,
     is_valid_name,
     readonly_line,
     refusal,
@@ -51,6 +51,7 @@ from mirage.workspace.executor.builtins.shared import (
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
+    appended,
     deref,
     env_get,
     evaluate_integer,
@@ -261,7 +262,7 @@ async def _declare_operands(
     except PolicyDenied as exc:
         return refusal(cmd, exc)
     except ArithError as exc:
-        return arith_refusal(cmd, exc)
+        raise exc.signal(cmd, fatal=True) from exc
     return declaration_result(cmd, errors, warnings)
 
 
@@ -413,10 +414,13 @@ async def _declare_operand(
     await premark(view, key, shaping)
     target = session.vars.get(checked)
     integer = target is not None and VarAttr.INTEGER in target.attrs
-    value, assigned = scalar_value(held, val, kind, append, integer)
+    val, added = (
+        appended(held_slot(held), val, integer) if append else (val, None)
+    )
+    value, assigned = scalar_value(held, val, kind)
     if kind is not None:
         await drop_reference(session, view, key)
-    await view.set(key, value, assigned=assigned)
+    await view.set(key, value, assigned=assigned, added=added)
     await stamp_marks(session, view, key, checked, marks)
     return None
 
@@ -487,8 +491,10 @@ async def _aim_reference(
     old = held if isinstance(held, str) else ""
     value = old + given
     if (VarAttr.INTEGER, True) in shaping:
-        await evaluate_integer(
-            session, view, appended(old, given, True) if append else given
+        await (
+            evaluate_integer(session, view, old, given)
+            if append
+            else evaluate_integer(session, view, given)
         )
         value = ""
     if is_valid_name(value) or SUBSCRIPT_RE.fullmatch(value) is not None:

@@ -107,7 +107,9 @@ async def _assign_printf_target(
     as a write to AWS_KEY. The refusal is raised, not collapsed into a
     status, so the rule's own words reach the user as they do from
     ``export``. bash stores the bytes the format produced, so a ``\\x``
-    run that is valid UTF-8 is stored as its characters.
+    run that is valid UTF-8 is stored as its characters, and up to the
+    first NUL, which no variable holds (``printf -v n '1\\0002'``
+    stores 1).
 
     Args:
         session (SessionState): shell session whose variables are written.
@@ -124,7 +126,7 @@ async def _assign_printf_target(
         PolicyDenied: a pre_session rule refused the write; the caller
             renders the rule's own message.
     """
-    text = decode_text(encode_text(value))
+    text = decode_text(encode_text(value)).partition("\0")[0]
     return await assign_element(session, view, name, subscript, text)
 
 
@@ -271,13 +273,10 @@ async def handle_printf(
             )
         except ArithError as exc:
             # The target carries `-i` and the formatted text does not
-            # evaluate; bash voices the evaluator after the text.
-            err_bytes += encode_text(f"bash: printf: {exc}\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err_bytes),
-                ExecutionNode(command="printf", exit_code=1, stderr=err_bytes),
-            )
+            # evaluate, which ends the shell as any `-i` value does.
+            signal = exc.signal("printf", fatal=True)
+            signal.stderr = err_bytes + signal.stderr
+            raise signal from exc
         if status != "ok":
             if status == "readonly":
                 refusal = f"bash: {base}: readonly variable\n"

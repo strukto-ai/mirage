@@ -61,11 +61,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "set -x; xvt=5; echo $xvt; set +x",
+      "command": "declare -i xvi=1; set -x; xvt=5; xvt+=1; xvi+=2; echo $xvt $xvi; set +x",
       "expect": {
         "exit": 0,
-        "stdout": "5\n",
-        "stderr": "+ xvt=5\n+ echo 5\n+ set +x\n"
+        "stdout": "51 3\n",
+        "stderr": "+ xvt=5\n+ xvt+=1\n+ xvi+=2\n+ echo 51 3\n+ set +x\n"
       }
     }
   ]

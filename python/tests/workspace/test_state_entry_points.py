@@ -403,19 +403,30 @@ def test_a_reference_refusal_never_quotes_a_hidden_value(line: str):
 
 def test_an_integer_reference_value_stops_at_a_hidden_write():
     # `declare -ni r=M` evaluates M through the `-i` coercion, so a hidden
-    # name it assigns is refused there and nothing after it lands.
+    # name it assigns is refused there and nothing after it lands; an
+    # integer `+=` onto a hidden name is refused before its held text
+    # evaluates, so no error quotes it.
     ws = _two_mounts()
     session = ws.get_session(ws.default_session_id)
-    seed_var(session, "SECRET", "token-with-dashes")
+    seed_var(session, "SECRET", "1token-with-dashes")
+    set_attr(session, "SECRET", VarAttr.INTEGER)
     session.visibility = Visibility(vars=HiddenVars(names=("SECRET",)))
 
     async def run():
-        return await ws.shell("X=0; M='SECRET=5,X=7'; declare -ni r=M")
+        return [
+            await ws.shell(line)
+            for line in (
+                "X=0; M='SECRET=5,X=7'; declare -ni r=M",
+                "SECRET+=X=7",
+                "declare SECRET+=X=7",
+            )
+        ]
 
-    io = asyncio.run(run())
-    assert io.exit_code != 0
-    assert b"permission denied" in (io.stderr or b"")
-    assert session.vars["SECRET"].value == "token-with-dashes"
+    for io in asyncio.run(run()):
+        assert io.exit_code != 0
+        assert b"permission denied" in (io.stderr or b"")
+        assert b"token-with-dashes" not in (io.stderr or b"")
+    assert session.vars["SECRET"].value == "1token-with-dashes"
     assert session.vars["X"].value == "0"
 
 
@@ -547,14 +558,23 @@ def test_plain_assignment_fires_the_gate():
 
 
 def test_append_assignment_fires_the_gate():
+    # An integer `+=` evaluates behind the gate, so what its sides assign
+    # waits for it, as a plain `SECRET_N=X=5`'s does.
     ws = _two_mounts(policies=[DenySecretEnv()])
+    session = ws.get_session(ws.default_session_id)
+    seed_var(session, "SECRET_N", "1")
+    set_attr(session, "SECRET_N", VarAttr.INTEGER)
 
     async def run():
-        return await ws.shell("SECRET_A+=x")
+        return [
+            await ws.shell(line) for line in ("SECRET_A+=x", "SECRET_N+=X=5")
+        ]
 
-    io = asyncio.run(run())
-    assert io.exit_code != 0
+    for io in asyncio.run(run()):
+        assert io.exit_code != 0
     assert "SECRET_A" not in ws.env
+    assert "X" not in ws.env
+    assert ws.env["SECRET_N"] == "1"
 
 
 def test_array_assignment_fires_the_gate():

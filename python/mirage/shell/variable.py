@@ -203,24 +203,6 @@ def with_attr(var: ShellVar, attr: VarAttr, on: bool = True) -> ShellVar:
     return replace(var, attrs=frozenset(attrs))
 
 
-def appended(old: str, added: str, integer: bool) -> str:
-    """The text a ``+=`` stores: the old text then the added one, or on
-    an integer the expression the session view evaluates to their sum.
-
-    Each side is evaluated on its own and an empty side counts as 0, as
-    bash does: with ``N='1?2:3'`` under ``-i``, ``N+=4`` stores 6, and
-    ``N+=''`` keeps the old value.
-
-    Args:
-        old (str): what the slot holds, "" when unset.
-        added (str): the text appended.
-        integer (bool): the variable carries ``-i``.
-    """
-    if not integer:
-        return old + added
-    return f"({old.strip() or 0}) + ({added.strip() or 0})"
-
-
 def coerce_scalar(
     text: str, attrs: frozenset[VarAttr], integer: Coercer | None
 ) -> str:

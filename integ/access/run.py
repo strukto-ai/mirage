@@ -34,7 +34,8 @@ matches the adapters and the overview's matrix.
 
 ``--deployment`` picks deployments, one per CI leg. ``--access`` and
 ``--host`` narrow a run further and skip the route and command gates;
-``--print`` prints the in-app answers for pinning.
+``--host-jobs 2`` overlaps both hosts without narrowing coverage or skipping
+gates. ``--print`` prints the in-app answers for pinning.
 """
 
 import argparse
@@ -1041,14 +1042,15 @@ async def main(args: argparse.Namespace) -> int:
         snapshot_store() as store,
         issuer.serving(),
     ):
-        for host in hosts:
+
+        async def run_host(host: str) -> None:
             scratch = Path(tmp) / host
             if "inapp" in wanted:
                 await in_app(
                     host, scratch / "inapp", store, report, printing=False
                 )
             if wanted == {"inapp"}:
-                continue
+                return
             for name in deployments:
                 with deployed(name, host, scratch / name, issuer, store) as d:
                     server = Server(d, recorder)
@@ -1064,6 +1066,19 @@ async def main(args: argparse.Namespace) -> int:
                     await server_checks(server, report)
             if "dev" in deployments and "cli" in wanted:
                 await lifecycle(host, scratch / "lifecycle", recorder, report)
+
+        if args.host_jobs == 1:
+            for host in hosts:
+                await run_host(host)
+        else:
+            # Drain both hosts before surfacing an exception, so a failing
+            # host cannot leave its sibling using a stopped store or issuer.
+            results = await asyncio.gather(
+                *(run_host(host) for host in hosts), return_exceptions=True
+            )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
         if full and keys:
             gate_routes(recorder, keys, report)
         if full and "dev" in deployments:
@@ -1078,6 +1093,7 @@ def parse() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--host", action="append", choices=HOSTS)
+    parser.add_argument("--host-jobs", type=int, choices=(1, 2), default=1)
     parser.add_argument("--deployment", action="append", choices=DEPLOYMENTS)
     parser.add_argument("--access", action="append", choices=ACCESSES)
     parser.add_argument(

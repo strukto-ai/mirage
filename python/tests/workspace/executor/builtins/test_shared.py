@@ -19,14 +19,12 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
-from mirage.shell.errors import ArithError
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.constants import IDENTIFIER_RE
 from mirage.workspace.executor.builtins.shared import (
     abs_path,
-    arith_refusal,
     expand_operands,
     fail,
     finish,
@@ -154,14 +152,6 @@ def test_readonly_refusal_names_the_variable():
     assert io.exit_code == 1
     assert io.stderr == b"bash: X: readonly variable\n"
     assert node.command == "read"
-
-
-def test_arith_refusal_prefixes_the_builtin():
-    out, io, node = arith_refusal("let", ArithError("1+: syntax error"))
-    assert out is None
-    assert io.exit_code == 1
-    assert io.stderr == b"bash: let: 1+: syntax error\n"
-    assert node.command == "let"
 
 
 def test_is_valid_name():

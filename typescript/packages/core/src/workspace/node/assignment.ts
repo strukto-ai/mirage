@@ -24,10 +24,10 @@ import {
   buildAssocLiteral,
   buildIndexedLiteral,
 } from '../../shell/array.ts'
-import { ArithError, DiscardSignal, ExitSignal } from '../../shell/errors.ts'
+import { ArithError, DiscardSignal } from '../../shell/errors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { appended, type ShellValue, VarAttr } from '../../shell/variable.ts'
+import { type ShellValue, VarAttr } from '../../shell/variable.ts'
 import { sessionEntry } from '../session/session.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
@@ -40,29 +40,11 @@ import { expandAndClassify } from '../expand/parts.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
-import { conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
+import { appended, conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
-
-/**
- * One assignment through the session view; denial is fatal.
- *
- * Every assignment spelling (scalar, array literal, subscript, append)
- * computes its resulting value and stores through `view.set`, so the
- * gate and the storage invariant live in the session view, not here. Denial
- * mirrors the readonly case: a fatal variable-assignment error that
- * abandons the rest of the line.
- */
-/**
- * The line's death for a subscript that does not evaluate: bash aborts
- * the line on `a[1/0]=v` with `1/0: division by 0`, the way it does for a
- * bad `-i` value.
- */
-function arithFatal(err: ArithError): ExitSignal {
-  return new ExitSignal(1, encodeText(`bash: ${err.message}\n`), null, 1)
-}
 
 /** `subscriptIndex` whose failure ends the line, in bash's words. */
 async function fatalIndex(
@@ -74,7 +56,7 @@ async function fatalIndex(
   try {
     return await subscriptIndex(session, subscript, view)
   } catch (err) {
-    if (err instanceof ArithError) throw arithFatal(err)
+    if (err instanceof ArithError) throw err.signal('', true)
     throw err
   }
 }
@@ -89,29 +71,34 @@ async function fatalIndexLiteral(
   try {
     return await buildIndexedLiteral(held, items, append, indexOf)
   } catch (err) {
-    if (err instanceof ArithError) throw arithFatal(err)
+    if (err instanceof ArithError) throw err.signal('', true)
     throw err
   }
 }
 
+/**
+ * One assignment through the session view; denial is fatal.
+ *
+ * Every assignment spelling (scalar, array literal, subscript, append)
+ * computes its resulting value and stores through `view.set`, so the
+ * gate and the storage invariant live in the session view, not here. Denial
+ * mirrors the readonly case: a fatal variable-assignment error that
+ * abandons the rest of the line.
+ */
 async function assignVar(
   view: SessionView,
   key: string,
   value: ShellValue,
   assigned: ReadonlySet<number | string> | null = null,
+  added: string | null = null,
 ): Promise<void> {
   try {
-    await view.set(key, value, true, assigned)
+    await view.set(key, value, true, assigned, added)
   } catch (err) {
     if (err instanceof PolicyDenied) {
       throw new DiscardSignal(encodeText(`${err.message}\n`))
     }
-    if (err instanceof ArithError) {
-      // The `-i` coercion refused the text. GNU ends the shell with 1 the
-      // way a subscript that does not evaluate does, in the evaluator's
-      // voice with the text led.
-      throw new ExitSignal(1, encodeText(`bash: ${err.message}\n`), null, 1)
-    }
+    if (err instanceof ArithError) throw err.signal('', true)
     throw err
   }
 }
@@ -316,8 +303,9 @@ export async function executeAssignment(
       // The subscript is the key: no arithmetic, `m[1+1]` writes the
       // key "1+1".
       const newMap = { ...heldMap }
-      newMap[subText] = append ? appended(heldMap[subText] ?? '', val, integer) : val
-      await assignVar(view, key, newMap, new Set([subText]))
+      const [slot, added] = append ? appended(heldMap[subText] ?? '', val, integer) : [val, null]
+      newMap[subText] = slot
+      await assignVar(view, key, newMap, new Set([subText]), added)
       const mapCode = assignmentStatus(context.frame, subSeq)
       return [
         null,
@@ -340,8 +328,9 @@ export async function executeAssignment(
       const nameText = text.slice(0, eq).replace(/\+$/, '')
       throw new DiscardSignal(encodeText(`bash: ${nameText}: bad array subscript\n`))
     }
-    arraySet(arr, idx, append ? appended(arrayGet(arr, idx), val, integer) : val)
-    await assignVar(view, key, arr, new Set([idx]))
+    const [slot, added] = append ? appended(arrayGet(arr, idx), val, integer) : [val, null]
+    arraySet(arr, idx, slot)
+    await assignVar(view, key, arr, new Set([idx]), added)
     const subCode = assignmentStatus(context.frame, subSeq)
     return [
       null,
@@ -351,22 +340,29 @@ export async function executeAssignment(
   }
   const heldMap = session.assocs[key]
   const heldArr = session.arrays[key]
+  let [stored, added]: [string, string | null] = [val, null]
+  if (append) {
+    // `a+=x` appends onto element 0 (key "0" of a map); `n+=3` on an
+    // integer name adds: `declare -i n=5; n+=3` stores 8.
+    let old: string
+    if (heldMap !== undefined) old = heldMap['0'] ?? ''
+    else if (heldArr !== undefined) old = arrayGet(heldArr, 0)
+    else old = session.env[key] ?? ''
+    ;[stored, added] = appended(old, val, integer)
+  }
   if (heldMap !== undefined) {
     // `m=x` on an associative array writes the literal key "0" and
     // keeps every other key, as bash does.
     const newMap = { ...heldMap }
-    newMap['0'] = append ? appended(heldMap['0'] ?? '', val, integer) : val
-    await assignVar(view, key, newMap, new Set(['0']))
+    newMap['0'] = stored
+    await assignVar(view, key, newMap, new Set(['0']), added)
   } else if (heldArr !== undefined) {
-    // `a=x` writes element 0 and keeps the rest; `a+=x` appends onto
-    // element 0.
+    // `a=x` writes element 0 and keeps the rest.
     const newArr = [...heldArr]
-    arraySet(newArr, 0, append ? appended(arrayGet(newArr, 0), val, integer) : val)
-    await assignVar(view, key, newArr, new Set([0]))
+    arraySet(newArr, 0, stored)
+    await assignVar(view, key, newArr, new Set([0]), added)
   } else {
-    // `n+=3` on an integer name adds: `declare -i n=5; n+=3` stores 8,
-    // not 53.
-    await assignVar(view, key, append ? appended(session.env[key] ?? '', val, integer) : val)
+    await assignVar(view, key, stored, null, added)
   }
   // Reassigning OPTIND (even to its current value) restarts the getopts
   // scan, matching bash's internal char pointer.

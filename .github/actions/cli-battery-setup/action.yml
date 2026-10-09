@@ -1,8 +1,11 @@
 name: CLI battery setup
 description: >-
   Toolchain for the CLI exit-code batteries: both CLIs built and runnable from
-  the repo root. All four battery legs use this so the setup stays defined once.
+  the repo root. Battery legs share this action so setup stays defined once.
 inputs:
+  build-typescript:
+    description: Build the CLI and its dependencies locally instead of downloading the bootstrap artifact.
+    default: "false"
   libfuse:
     description: >-
       Install the OS FUSE driver. Needed by any leg whose batteries mount a
@@ -57,7 +60,14 @@ runs:
       run: pnpm install --frozen-lockfile=false
 
     - name: Download TypeScript build outputs
+      if: ${{ inputs.build-typescript != 'true' }}
       uses: actions/download-artifact@v8
       with:
         name: cli-typescript-dist
         path: typescript/packages
+
+    - name: Build the TypeScript CLI and its dependencies
+      if: ${{ inputs.build-typescript == 'true' }}
+      working-directory: typescript
+      shell: bash
+      run: pnpm --filter @struktoai/mirage-cli... build

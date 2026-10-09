@@ -646,7 +646,7 @@ describe('expanded arithmetic diagnostics', () => {
         const io = await ws.shell(line)
         expect(io.exitCode).toBe(1)
         expect(io.stdoutText).toBe('')
-        expect(io.stderrText).toBe('bash: 1/0: division by 0\n')
+        expect(io.stderrText).toBe('bash: 1/0: division by 0 (error token is "0")\n')
       } finally {
         await ws.close()
       }

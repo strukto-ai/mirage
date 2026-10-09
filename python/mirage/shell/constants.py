@@ -24,41 +24,65 @@ from mirage.shell.types import (
 
 PARAMETER_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-]")
 
-# Bash arithmetic tokens: integer literals (base#value/decimal/hex/
-# octal), variable names, then operators longest-first so `<<=` never
-# lexes as `<<` + `=`.
-ARITH_TOKEN = re.compile(
-    r"""
-    (?P<num>\d+\#[0-9a-zA-Z@_]+|0[xX][0-9a-fA-F]+|\d+)
-  | (?P<name>[A-Za-z_]\w*)
-  | (?P<op><<=|>>=|\*\*|\+\+|--|<<|>>|<=|>=|==|!=|&&|\|\|
-       |\+=|-=|\*=|/=|%=|&=|\^=|\|=
-       |[-+*/%<>=!~&|^?:(),])
-  | (?P<ws>\s+)
-  | (?P<bad>.)
-""",
-    re.VERBOSE,
+# The blanks bash skips between arithmetic tokens.
+ARITH_BLANKS = " \t\n"
+
+# A variable name in an expression: ASCII, as bash's names are.
+ARITH_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+# An integer constant as bash reads one off an expression: a digit and the
+# name characters, `@` and `#` after it, judged whole once read (`1a` and
+# `08` are each one constant, too great for their base).
+ARITH_LITERAL = re.compile(r"[0-9][0-9A-Za-z_@#]*")
+
+# Operators longest-first, so `<<=` never lexes as `<<` then `=`.
+ARITH_OPERATOR = re.compile(
+    r"<<=|>>=|\*\*|\+\+|--|<<|>>|<=|>=|==|!=|&&|\|\||[-+*/%&^|]="
+    r"|[-+*/%<>=!~&|^?:(),]"
 )
-
-ARITH_NAME = re.compile(r"[A-Za-z_]\w*")
-
-# An element reference token the tokenizer stitched: the name adjacent
-# to a bracket-matched subscript, whose interior is resolved by the
-# element callbacks rather than the tokenizer (an associative key can
-# hold characters no arithmetic token may).
-ARITH_ELEM = re.compile(r"([A-Za-z_]\w*)\[(.*)\]\Z", re.DOTALL)
 
 ARITH_ASSIGN_OPS = frozenset(
     {"=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|="}
 )
 
+ARITH_UNARY_OPS = frozenset({"!", "~", "-", "+"})
+
+# Binary operators by how tightly they bind, loosest first; `**` alone
+# groups from the right, and a unary operator binds tighter than all of
+# them (`-2**2` is 4).
+ARITH_PRECEDENCE = {
+    "||": 1,
+    "&&": 2,
+    "|": 3,
+    "^": 4,
+    "&": 5,
+    "==": 6,
+    "!=": 6,
+    "<": 7,
+    "<=": 7,
+    ">": 7,
+    ">=": 7,
+    "<<": 8,
+    ">>": 8,
+    "+": 9,
+    "-": 9,
+    "*": 10,
+    "/": 10,
+    "%": 10,
+    "**": 11,
+}
+
 # 64-bit wrap like bash (intmax_t arithmetic).
 ARITH_WRAP = 1 << 64
 ARITH_SIGN = 1 << 63
 
-# Recursion budget for variables holding expressions (`x="1+2"; $((x))`),
-# mirroring bash's expression recursion limit.
-ARITH_MAX_DEPTH = 16
+# How deep variables holding expressions may nest (`x="1+2"; $((x))`): a
+# variable read from an expression this many values deep is past the
+# limit. bash's is 1023; Python's stack holds about a dozen frames per
+# level, so mirage stops at 27, which names the same expression of a
+# reference cycle of 1, 2, 3, 4, 6 or 12 names as bash's limit does (27
+# and 1023 agree modulo 12).
+ARITH_MAX_DEPTH = 27
 
 # What the shell calls itself when no script is running, bash's "bash".
 # A nested `bash`/`sh` overrides it through SessionState.script_name, and

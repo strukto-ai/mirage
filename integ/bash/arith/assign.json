@@ -201,7 +201,7 @@
       "expect": {
         "exit": 0,
         "stdout": "1 26794\n1 5\n1 9\n3\n",
-        "stderr": "bash: ((: RANDOM=42, RANDOM + 1/0: division by 0\nbash: ((: zae=5, 1/0: division by 0\nbash: let: zae=9, 1/0: division by 0\nbash: ((: zae=3, 1/0: division by 0\n"
+        "stderr": "bash: ((: RANDOM=42, RANDOM + 1/0 : division by 0 (error token is \"0 \")\nbash: ((: zae=5, 1/0 : division by 0 (error token is \"0 \")\nbash: let: zae=9, 1/0: division by 0 (error token is \"0\")\nbash: ((: zae=3, 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
