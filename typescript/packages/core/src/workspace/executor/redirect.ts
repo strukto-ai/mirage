@@ -69,6 +69,9 @@ import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.
 import { concat } from '../../io/cachable_iterator.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 
+/** Opt-in diagnostic sink, kept separate from redirected shell output. */
+export const logger: { debug?: (message: string) => void } = {}
+
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 const TO_STDOUT = Symbol('stdout')
@@ -236,18 +239,30 @@ export async function handleRedirect(
     outputs.set(fd, descriptorOutput(descriptor))
     if (descriptor.identity === EXEC_CLOSED) closed.add(fd)
   }
-  const failed = async (result: Result, target = outputs.get(2)): Promise<Result> => {
+  const failed = async (
+    result: Result,
+    target = outputs.get(2),
+    failedFile: FileDescription | null = null,
+  ): Promise<Result> => {
     let [stdout] = result
     const [, io, node] = result
     const data = await io.materializeStderr()
     if (target === TO_STDERR) return result
     io.stderr = null
     if (target === TO_STDOUT) stdout = data
-    else if (target instanceof FileDescription)
-      await writeDescription(dispatch, session, target, data)
-    else if (target instanceof Inherited && !(await deliver(sink ?? null, target, data))) {
-      if (target.channel === Channel.STDOUT) stdout = data
-      else io.stderr = data
+    else {
+      try {
+        if (target instanceof FileDescription) {
+          if (target.scope.virtual !== failedFile?.scope.virtual)
+            await writeDescription(dispatch, session, target, data)
+        } else if (target instanceof Inherited && !(await deliver(sink ?? null, target, data))) {
+          if (target.channel === Channel.STDOUT) stdout = data
+          else io.stderr = data
+        }
+      } catch (error) {
+        if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
+        logger.debug?.(`redirect error reporting failed: ${String(error)}`)
+      }
     }
     return [stdout, io, node]
   }
@@ -528,7 +543,8 @@ export async function handleRedirect(
       let failedFile: FileDescription | null = null
       try {
         if (!refused)
-          for (const file of files) {
+          // Finish the deferred open before any earlier output is committed.
+          for (const file of [...files].sort((a, b) => Number(a.opened) - Number(b.opened))) {
             failedFile = file
             const unique =
               files.filter((other) => other.scope.virtual === file.scope.virtual).length === 1
@@ -558,10 +574,12 @@ export async function handleRedirect(
           }
         }
       } catch (error) {
-        if (!isFsError(error) || failedFile === null) throw error
+        if (typeof (error as { code?: unknown } | null)?.code !== 'string' || failedFile === null)
+          throw error
         const [out, refusal] = await failed(
           redirectFailure(failedFile.scope, error),
           failedFile.opened ? outputs.get(2) : openStderr,
+          failedFile,
         )
         if (out !== null) routed.push([Channel.STDOUT, await materialize(out)])
         const diagnostic = await materialize(refusal.stderr)

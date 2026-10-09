@@ -366,6 +366,7 @@ async def handle_redirect(
     async def failed(
         result: RedirectResult,
         target: _Fd | FileDescription | Inherited | None = None,
+        failed_file: FileDescription | None = None,
     ) -> RedirectResult:
         stdout, io, node = result
         data = await io.materialize_stderr()
@@ -376,14 +377,24 @@ async def handle_redirect(
         io.stderr = None
         if target is _TO_STDOUT:
             stdout = data
-        elif isinstance(target, FileDescription):
-            await write_description(dispatch, session, target, data)
-        elif isinstance(target, Inherited):
-            if not await deliver(sink, target, data):
-                if target.channel == Channel.STDOUT:
-                    stdout = data
-                else:
-                    io.stderr = data
+        else:
+            try:
+                if isinstance(target, FileDescription):
+                    if (
+                        failed_file is None
+                        or target.scope.virtual != failed_file.scope.virtual
+                    ):
+                        await write_description(
+                            dispatch, session, target, data
+                        )
+                elif isinstance(target, Inherited):
+                    if not await deliver(sink, target, data):
+                        if target.channel == Channel.STDOUT:
+                            stdout = data
+                        else:
+                            io.stderr = data
+            except OSError as exc:
+                logger.debug("redirect error reporting failed: %s", exc)
         return stdout, io, node
 
     files: list[FileDescription] = []
@@ -674,7 +685,8 @@ async def handle_redirect(
         failed_file: FileDescription | None = None
         try:
             if not refused:
-                for file in files:
+                # Finish the deferred open before any earlier output is committed.
+                for file in sorted(files, key=lambda item: item.opened):
                     failed_file = file
                     unique = (
                         sum(
@@ -717,11 +729,12 @@ async def handle_redirect(
                     io.cache = [
                         p for p in io.cache if p != target.scope.virtual
                     ]
-        except FS_ERRORS as exc:
+        except OSError as exc:
             assert failed_file is not None
             out, error, _ = await failed(
                 _redirect_failure(failed_file.scope, exc),
                 open_stderr if not failed_file.opened else None,
+                failed_file,
             )
             if out:
                 routed.append((Channel.STDOUT, await materialize(out) or b""))

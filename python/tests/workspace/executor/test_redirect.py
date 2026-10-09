@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 from unittest.mock import AsyncMock
 
 import pytest
@@ -451,7 +452,7 @@ async def test_write_target_unwritable_is_shell_attributed():
 
 
 @pytest.mark.asyncio
-async def test_write_target_unwritable_keeps_rest_of_line():
+async def test_write_target_unwritable_keeps_rest_of_line(monkeypatch):
     # Regression: the write raised with no handler, so the whole line
     # died; GNU prints the error and runs `echo next`.
     ws = await _workspace()
@@ -459,6 +460,38 @@ async def test_write_target_unwritable_keeps_rest_of_line():
     assert io.exit_code == 0
     assert (io.stdout or b"") == b"next\n"
     assert (io.stderr or b"") == b"/nodir/f: No such file or directory\n"
+    await ws.close()
+    vfs = RAMVFS()
+    ws = Workspace({"data": vfs}, mode=MountMode.WRITE)
+    try:
+        for error in (
+            PermissionError("write refused"),
+            OSError(errno.ENOSPC, "No space left on device"),
+        ):
+            with monkeypatch.context() as patched:
+                write = AsyncMock(side_effect=error)
+                patched.setattr(vfs, "pwrite", write)
+                io = await ws.shell(
+                    "echo hi > /data/out 2>&1; echo rc=$?; echo next"
+                )
+                assert (
+                    io.exit_code,
+                    await io.stdout_str(),
+                    await io.stderr_str(),
+                ) == (0, "rc=1\nnext\n", "")
+                assert write.await_count == 1
+                write.reset_mock()
+                io = await ws.shell(
+                    "echo hi > /data/out 2> /data/err; echo rc=$?; echo next"
+                )
+                assert (
+                    io.exit_code,
+                    await io.stdout_str(),
+                    await io.stderr_str(),
+                ) == (0, "rc=1\nnext\n", "")
+                assert write.await_count == 2
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -492,14 +525,15 @@ async def test_write_target_unwritable_stops_at_first_failure():
 
 
 @pytest.mark.asyncio
-async def test_write_target_unwritable_keeps_earlier_target():
+@pytest.mark.parametrize("redirect", [">", "2>", "3>"])
+async def test_write_target_unwritable_keeps_earlier_target(redirect):
     # The mirror case: GNU already opened (and truncated) the earlier
     # target before the failing one, so it survives as an empty file.
     #   $ echo y > /data/out2 > /nodir/g
     #   bash: line 1: /nodir/g: No such file or directory   # rc=1
     #   $ ls -l /data/out2 -> 0 bytes
     ws = await _workspace()
-    io = await ws.shell("echo y > /data/out2 > /nodir/g")
+    io = await ws.shell(f"echo y > /data/out2 {redirect} /nodir/g")
     assert io.exit_code == 1
     assert (io.stderr or b"") == b"/nodir/g: No such file or directory\n"
     assert (await ws.shell("test -e /data/out2")).exit_code == 0

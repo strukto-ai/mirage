@@ -23,7 +23,7 @@ import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
-import { handleRedirect } from './redirect.ts'
+import { handleRedirect, logger } from './redirect.ts'
 
 function encode(s: string): Uint8Array {
   return new TextEncoder().encode(s)
@@ -613,13 +613,38 @@ describe('handleRedirect unwritable > target', () => {
   })
 
   it('keeps the rest of the line running', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws, data } = await makeIntegrationWS()
     try {
       const [exit, out, err] = await runResult(ws, 'echo x > /nodir/f; echo next')
       expect(exit).toBe(0)
       expect(out).toBe('next\n')
       expect(err).toBe('/nodir/f: No such file or directory\n')
+      const diagnostic = vi.fn()
+      logger.debug = diagnostic
+      for (const code of ['EACCES', 'ENOSPC']) {
+        const write = vi
+          .spyOn(data, 'pwrite')
+          .mockRejectedValue(Object.assign(new Error('write refused'), { code }))
+        try {
+          expect(await runResult(ws, 'echo hi > /data/out 2>&1; echo rc=$?; echo next')).toEqual([
+            0,
+            'rc=1\nnext\n',
+            '',
+          ])
+          expect(write).toHaveBeenCalledTimes(1)
+          write.mockClear()
+          expect(
+            await runResult(ws, 'echo hi > /data/out 2> /data/err; echo rc=$?; echo next'),
+          ).toEqual([0, 'rc=1\nnext\n', ''])
+          expect(write).toHaveBeenCalledTimes(2)
+          expect(diagnostic).toHaveBeenCalledTimes(1)
+          diagnostic.mockClear()
+        } finally {
+          write.mockRestore()
+        }
+      }
     } finally {
+      delete logger.debug
       await ws.close()
     }
   })
@@ -666,12 +691,12 @@ describe('handleRedirect unwritable > target', () => {
     }
   })
 
-  it('keeps a target opened before the failing one', async () => {
+  it.each(['>', '2>', '3>'])('keeps a target opened before the failing %s', async (redirect) => {
     // GNU: `echo y > /data/out2 > /nodir/g` already truncated
     // /data/out2, so it survives as an empty file.
     const { ws } = await makeIntegrationWS()
     try {
-      const [exit, , err] = await runResult(ws, 'echo y > /data/out2 > /nodir/g')
+      const [exit, , err] = await runResult(ws, `echo y > /data/out2 ${redirect} /nodir/g`)
       expect(exit).toBe(1)
       expect(err).toBe('/nodir/g: No such file or directory\n')
       expect(await runExit(ws, 'test -e /data/out2')).toBe(0)
