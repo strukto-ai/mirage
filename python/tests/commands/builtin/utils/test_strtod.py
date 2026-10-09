@@ -20,6 +20,7 @@ from mirage.commands.builtin.utils.strtod import (
     STRTOD,
     strtod_double,
     strtod_whole,
+    strtold_erange,
 )
 
 
@@ -95,3 +96,29 @@ def test_every_nan_spelling_is_one_quiet_nan(text):
     value = _double(text)
     assert math.isnan(value)
     assert math.copysign(1.0, value) == 1.0
+
+
+# Where glibc's strtold reports ERANGE for a binary128 long double, pinned
+# with bash 5.2.37's printf: past the largest finite value, and under the
+# least normal one unless the value sits on the binary grid. Mirrored in
+# strtod.test.ts.
+@pytest.mark.parametrize(
+    "text,erange",
+    [
+        ("1e400", False),
+        ("1.1e4932", False),
+        ("1.2e4932", True),
+        ("4e-4932", False),
+        ("3e-4932", True),
+        ("1e-4970", True),
+        ("0e99999", False),
+        ("0x1.8p16383", False),
+        ("0x1p99999", True),
+        ("0x1p-16400", False),
+        ("-inf", False),
+    ],
+)
+def test_strtold_erange_marks_what_a_long_double_cannot_hold(text, erange):
+    found = STRTOD.match(text)
+    assert found is not None
+    assert strtold_erange(found) is erange

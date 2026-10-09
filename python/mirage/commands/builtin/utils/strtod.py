@@ -32,6 +32,11 @@ STRTOD = re.compile(
     r"|([nN][aA][nN](?:\([0-9A-Za-z_]*\))?))"
 )
 
+# The binary128 long double strtold rounds to, written 0.DIGITS x 10**EXP:
+# the largest finite value and the least normal one.
+_LDBL_MAX = (4933, "118973149535723176508575932662800702")
+_LDBL_MIN = (-4931, "336210314311209350626267781732175260")
+
 
 def strtod_whole(text: str) -> re.Match[str] | None:
     """A STRTOD match spanning the whole word, as xstrtod demands, or None.
@@ -74,3 +79,42 @@ def strtod_double(found: re.Match[str]) -> float:
     else:
         value = float(decimal)
     return -value if sign == "-" else value
+
+
+def strtold_erange(found: re.Match[str]) -> bool:
+    """Whether strtold reports ERANGE for a STRTOD match.
+
+    It does past the largest finite long double, and for a nonzero value
+    under the least normal one that it cannot hold exactly: a decimal
+    never lands on the binary grid there, while a hex float does unless
+    it has a bit below 2**-16494. An infinity or nan as typed is no error.
+    The long double is binary128, as on arm64; x86-64's 80-bit format
+    has the same exponent range.
+
+    Args:
+        found (re.Match[str]): a STRTOD match.
+    """
+    _, hexa, decimal, _, _ = found.groups()
+    if hexa is not None:
+        mantissa, _, power = hexa[2:].lower().partition("p")
+        whole, _, fraction = mantissa.partition(".")
+        digits = int(whole + fraction or "0", 16)
+        if digits == 0:
+            return False
+        exponent = int(power or "0") - 4 * len(fraction)
+        top = digits.bit_length() - 1 + exponent
+        low = (digits & -digits).bit_length() - 1 + exponent
+        return top >= 16384 or (top < -16382 and low < -16494)
+    if decimal is None:
+        return False
+    mantissa, _, power = decimal.lower().partition("e")
+    whole, _, fraction = mantissa.partition(".")
+    joined = whole + fraction
+    digits = joined.lstrip("0").rstrip("0")
+    if not digits:
+        return False
+    # Both sides are 0.DIGITS x 10**EXP with a nonzero lead digit and no
+    # trailing zero, so equal exponents order by the digits as text.
+    zeros = len(joined) - len(joined.lstrip("0"))
+    scaled = (len(whole) - zeros + int(power or "0"), digits)
+    return scaled > _LDBL_MAX or scaled < _LDBL_MIN

@@ -1,5 +1,5 @@
 {
- "baseline": 3982,
+ "baseline": 3979,
  "modules": {
   "commands/builtin/generic/iconv_multibyte": {
    "typescript_only": {

@@ -2635,6 +2635,68 @@
         "stdout": "x\ny\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "printf_numeric_errors",
+      "seq": 1310110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf '[%d]' '12 ' 0x1g 08 99999999999999999999 '' \"'ab\"; echo \" $?\"; printf '[%u]' 18446744073709551616; echo \" $?\"; printf '[%f]' 1x 1e99999; echo \" $?\"; printf '[%*d]' x 5; echo \" $?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[12][1][0][9223372036854775807][0][97] 1\n[18446744073709551615] 0\n[1.000000][inf] 1\n[5] 1\n",
+        "stderr": "bash: printf: 12 : invalid number\nbash: printf: 0x1g: invalid hex number\nbash: printf: 08: invalid octal number\nbash: printf: warning: 99999999999999999999: Numerical result out of range\nbash: printf: warning: 18446744073709551616: Numerical result out of range\nbash: printf: 1x: invalid number\nbash: printf: warning: 1e99999: Numerical result out of range\nbash: printf: x: invalid number\n"
+      }
+    },
+    {
+      "id": "printf_program_numeric_errors",
+      "seq": 1310111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "env printf '[%d]' x 1x '' 99999999999999999999 \"a'b\" $'\\t'; echo \" $?\"; env printf '[%d]' \"'ab\"; echo \" $?\"; env printf '[%d]' \"'\" 0b11; echo \" $?\"; env printf '[%f]' 1.5.5 1e99999 3e-4932; echo \" $?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[0][1][0][9223372036854775807][0][0] 1\n[97] 0\n[0][3] 1\n[1.500000][inf][0.000000] 1\n",
+        "stderr": "printf: 'x': expected a numeric value\nprintf: '1x': value not completely converted\nprintf: '': expected a numeric value\nprintf: '99999999999999999999': Numerical result out of range\nprintf: 'a\\'b': expected a numeric value\nprintf: '\\t': expected a numeric value\nprintf: warning: b: character(s) following character constant have been ignored\nprintf: '\\'': expected a numeric value\nprintf: '1.5.5': value not completely converted\nprintf: '1e99999': Numerical result out of range\nprintf: '3e-4932': Numerical result out of range\n"
+      }
     }
   ]
 }

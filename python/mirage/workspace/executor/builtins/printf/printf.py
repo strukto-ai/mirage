@@ -246,7 +246,9 @@ async def handle_printf(
             IOResult(exit_code=2, stderr=err),
             ExecutionNode(command="printf", exit_code=2),
         )
-    output, messages, failed, excess = run_printf(args[0], args[1:])
+    output, messages, failed, excess = run_printf(
+        args[0], args[1:], program_invocation(session)
+    )
     voice = "" if program_invocation(session) else "bash: "
     err_bytes = encode_text("".join(voice + message for message in messages))
     exit_code = 1 if failed else 0

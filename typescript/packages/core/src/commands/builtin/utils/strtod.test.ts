@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { STRTOD, strtodDouble, strtodWhole } from './strtod.ts'
+import { STRTOD, strtodDouble, strtodWhole, strtoldErange } from './strtod.ts'
 
 function double(text: string): number {
   const found = STRTOD.exec(text)
@@ -72,5 +72,27 @@ describe('strtod', () => {
 
   it.each(['nan', '-NaN', 'nan(0x1)'])('reads %j as the one quiet NaN', (text) => {
     expect(Number.isNaN(double(text))).toBe(true)
+  })
+
+  // Where glibc's strtold reports ERANGE for a binary128 long double, pinned
+  // with bash 5.2.37's printf: past the largest finite value, and under the
+  // least normal one unless the value sits on the binary grid. Mirrors
+  // test_strtod.py.
+  it.each([
+    ['1e400', false],
+    ['1.1e4932', false],
+    ['1.2e4932', true],
+    ['4e-4932', false],
+    ['3e-4932', true],
+    ['1e-4970', true],
+    ['0e99999', false],
+    ['0x1.8p16383', false],
+    ['0x1p99999', true],
+    ['0x1p-16400', false],
+    ['-inf', false],
+  ])('marks %j out of a long double range: %j', (text, erange) => {
+    const found = STRTOD.exec(text)
+    if (found === null) throw new Error(`no number in ${text}`)
+    expect(strtoldErange(found)).toBe(erange)
   })
 })

@@ -23,6 +23,11 @@
 export const STRTOD =
   /^[ \t\n\v\f\r]*([+-]?)(?:(0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?)|((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)|([iI][nN][fF](?:[iI][nN][iI][tT][yY])?)|([nN][aA][nN](?:\([0-9A-Za-z_]*\))?))/
 
+// The binary128 long double strtold rounds to, written 0.DIGITS x 10**EXP:
+// the largest finite value and the least normal one.
+const LDBL_MAX: [number, string] = [4933, '118973149535723176508575932662800702']
+const LDBL_MIN: [number, string] = [-4931, '336210314311209350626267781732175260']
+
 // A STRTOD match spanning the whole word, as xstrtod demands, or null.
 // Mirrors Python's strtod_whole.
 export function strtodWhole(text: string): RegExpExecArray | null {
@@ -73,4 +78,43 @@ export function strtodDouble(found: RegExpExecArray): number {
   else if (hexa !== undefined) value = hexDouble(hexa)
   else value = Number(decimal)
   return sign === '-' ? -value : value
+}
+
+// Whether strtold reports ERANGE for a STRTOD match: past the largest finite
+// long double, and for a nonzero value under the least normal one that it
+// cannot hold exactly. A decimal never lands on the binary grid there, while
+// a hex float does unless it has a bit below 2**-16494. An infinity or nan
+// as typed is no error. The long double is binary128, as on arm64; x86-64's
+// 80-bit format has the same exponent range. Mirrors Python's strtold_erange.
+export function strtoldErange(found: RegExpExecArray): boolean {
+  const [, , hexa, decimal] = found
+  if (hexa !== undefined) {
+    const [mantissa = '', power = '0'] = hexa.slice(2).toLowerCase().split('p')
+    const [whole = '', fraction = ''] = mantissa.split('.')
+    const digits = BigInt('0x' + (whole + fraction || '0'))
+    if (digits === 0n) return false
+    const exponent = Number(power) - 4 * fraction.length
+    const bits = digits.toString(2)
+    const top = bits.length - 1 + exponent
+    const low = bits.length - 1 - bits.lastIndexOf('1') + exponent
+    return top >= 16384 || (top < -16382 && low < -16494)
+  }
+  if (decimal === undefined) return false
+  const [mantissa = '', power = '0'] = decimal.toLowerCase().split('e')
+  const [whole = '', fraction = ''] = mantissa.split('.')
+  const joined = whole + fraction
+  const unled = joined.replace(/^0+/, '')
+  const digits = unled.replace(/0+$/, '')
+  if (digits === '') return false
+  // Both sides are 0.DIGITS x 10**EXP with a nonzero lead digit and no
+  // trailing zero, so equal exponents order by the digits as text.
+  const exponent = whole.length - (joined.length - unled.length) + Number(power)
+  const [maxExponent, maxDigits] = LDBL_MAX
+  const [minExponent, minDigits] = LDBL_MIN
+  return (
+    exponent > maxExponent ||
+    (exponent === maxExponent && digits > maxDigits) ||
+    exponent < minExponent ||
+    (exponent === minExponent && digits < minDigits)
+  )
 }

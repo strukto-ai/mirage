@@ -15,16 +15,27 @@
 import math
 import re
 
+from mirage.commands.builtin.constants import C_SPACE, INTMAX, UINTMAX
+from mirage.commands.builtin.utils.strtod import (
+    STRTOD,
+    strtod_double,
+    strtold_erange,
+)
+from mirage.commands.quote import quote_text
 from mirage.shell.bytes import byte_char, encode_text
 from mirage.shell.escapes import code_point_text
 
-_PRINTF_INT = re.compile(r"[+-]?(?:0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)")
+# The integer strtoimax and strtoumax read at base 0 in the C locale: the
+# blanks and sign, then hex after 0x, binary after 0b (glibc 2.38 on),
+# octal after a leading 0, else decimal. A 0x or 0b with no digit after
+# it reads as the 0 alone.
+_STRTOL = re.compile(
+    rf"{C_SPACE}([+-]?)(?:0[xX]([0-9a-fA-F]+)|0[bB]([01]+)|(0[0-7]*)|([1-9][0-9]*))"
+)
 
 _PRINTF_FLAGS = "-+ 0#"
 
 _PRINTF_CONV = "sdiouxXeEfFgGaAcbq%"
-
-_UINT64_MASK = 0xFFFFFFFFFFFFFFFF
 
 # printf's escape grammar is not echo's: it reads a bare \NNN, while
 # echo -e wants \0NNN and gives \c a different meaning. Only the simple
@@ -63,70 +74,150 @@ _Q_SAFE = set(
 )
 
 
-def _wrap_signed(n: int) -> int:
-    return ((n + (1 << 63)) & _UINT64_MASK) - (1 << 63)
+def _read_int(text: str, signed: bool) -> tuple[int, int, bool]:
+    """Read an integer argument as strtoimax (signed) or strtoumax does.
 
-
-def _parse_printf_int(value: str) -> tuple[int, bool]:
-    """Parse a printf integer argument like C's ``strtol`` (base auto:
-    ``0x`` hex, leading ``0`` octal, else decimal, optional sign). The
-    leading valid numeric prefix is used; a trailing or wholly invalid
-    tail makes the parse ``ok=False`` while still yielding a value.
+    Returns the value, how many characters were read (0 when no number
+    starts the text) and whether it was out of range. A signed value
+    stops at the 64-bit bounds and an unsigned one at 2**64 - 1, while a
+    negative unsigned one in range wraps around 2**64.
 
     Args:
-        value (str): the raw argument text.
+        text (str): the argument as typed.
+        signed (bool): read for ``%d``/``%i`` rather than ``%o %u %x %X``.
     """
-    s = value.strip()
-    if not s:
-        return 0, True
-    m = _PRINTF_INT.match(s)
-    if not m:
-        return 0, False
-    tok = m.group(0)
-    ok = tok == s
-    sign = -1 if tok.startswith("-") else 1
-    digits = tok.lstrip("+-")
-    if digits[:2] in ("0x", "0X"):
-        n = int(digits[2:], 16)
-    elif len(digits) > 1 and digits[0] == "0":
-        n = int(digits, 8)
+    found = _STRTOL.match(text)
+    if found is None:
+        return 0, 0, False
+    sign, hexa, binary, octal, decimal = found.groups()
+    if hexa is not None:
+        n = int(hexa, 16)
+    elif binary is not None:
+        n = int(binary, 2)
+    elif octal is not None:
+        n = int(octal, 8)
     else:
-        n = int(digits)
-    return sign * n, ok
+        n = int(decimal)
+    if signed:
+        limit = INTMAX + (sign == "-")
+        value = min(n, limit)
+        return (-value if sign == "-" else value), found.end(), n > limit
+    if n > UINTMAX:
+        return UINTMAX, found.end(), True
+    return (-n & UINTMAX if sign == "-" else n), found.end(), False
 
 
-def _numeric_value(value: str) -> tuple[int, bool]:
-    """Resolve a numeric argument, honoring the GNU leading-quote form
-    (``"A`` / ``'A`` yields the code point of the next character).
+def _numeric_error(
+    raw: str, read: int, erange: bool, program: bool, warnings: list[str]
+) -> str | None:
+    """The error a numeric argument fails printf with, or None.
+
+    bash's builtin says ``invalid number`` for an argument it could not
+    read whole, naming the base when the text opens as an octal (``0``
+    and a digit) or hex (``0x``) number, and only warns when the value
+    was out of range; an empty argument is a quiet 0. GNU's program
+    refuses an empty or unread argument, a partly read one and an out of
+    range one alike, quoting the argument. A warning that does not fail
+    printf goes to ``warnings``.
 
     Args:
-        value (str): the raw argument text.
+        raw (str): the argument as typed.
+        read (int): how many characters the reader took.
+        erange (bool): the value was out of range.
+        program (bool): the coreutils program's voice, not the builtin's.
+        warnings (list[str]): collects the warnings.
     """
-    if value[:1] in ("'", '"'):
-        rest = value[1:]
-        return (ord(rest[0]) if rest else 0), True
-    return _parse_printf_int(value)
+    if program:
+        if erange:
+            problem = "Numerical result out of range"
+        elif read == 0:
+            problem = "expected a numeric value"
+        elif read < len(raw):
+            problem = "value not completely converted"
+        else:
+            return None
+        return f"printf: '{quote_text(raw)}': {problem}\n"
+    if read < len(raw):
+        if re.match("0[0-9]", raw):
+            base = "octal "
+        elif raw.startswith("0x"):
+            base = "hex "
+        else:
+            base = ""
+        return f"printf: {raw}: invalid {base}number\n"
+    if erange:
+        warnings.append(
+            f"printf: warning: {raw}: Numerical result out of range\n"
+        )
+    return None
 
 
-def _parse_float_arg(value: str) -> tuple[float, bool]:
-    """Resolve a floating-point argument (decimal, hex float, inf/nan, or
-    the leading-quote code-point form).
+def _character_value(
+    raw: str, program: bool, warnings: list[str]
+) -> tuple[int, str | None]:
+    """The value of a leading-quote argument: its next character's code.
+
+    bash's builtin takes a lone quote as 0. GNU's program refuses it, and
+    warns that it ignored any characters after the first.
 
     Args:
-        value (str): the raw argument text.
+        raw (str): the argument, opening with ``'`` or ``"``.
+        program (bool): the coreutils program's voice, not the builtin's.
+        warnings (list[str]): collects the warning.
     """
-    s = value.strip()
-    if not s:
-        return 0.0, True
-    if s[0] in ("'", '"'):
-        rest = s[1:]
-        return (float(ord(rest[0])) if rest else 0.0), True
-    try:
-        if s.lower().lstrip("+-").startswith("0x"):
-            return float.fromhex(s), True
-        return float(s), True
-    except ValueError:
-        return 0.0, False
+    rest = raw[1:]
+    if not rest:
+        if program:
+            return (
+                0,
+                f"printf: '{quote_text(raw)}': expected a numeric value\n",
+            )
+        return 0, None
+    if program and len(rest) > 1:
+        warnings.append(
+            f"printf: warning: {rest[1:]}: character(s) following character"
+            " constant have been ignored\n"
+        )
+    return ord(rest[0]), None
+
+
+def _int_argument(
+    raw: str, signed: bool, program: bool, warnings: list[str]
+) -> tuple[int, str | None]:
+    """An integer argument's value and the error it fails printf with.
+
+    Args:
+        raw (str): the argument as typed.
+        signed (bool): read for ``%d``/``%i`` (and a ``*`` width or
+            precision) rather than ``%o %u %x %X``.
+        program (bool): the coreutils program's voice, not the builtin's.
+        warnings (list[str]): collects the warnings.
+    """
+    if raw[:1] in ("'", '"'):
+        return _character_value(raw, program, warnings)
+    value, read, erange = _read_int(raw, signed)
+    return value, _numeric_error(raw, read, erange, program, warnings)
+
+
+def _float_argument(
+    raw: str, program: bool, warnings: list[str]
+) -> tuple[float, str | None]:
+    """A floating-point argument's value and the error it fails printf with.
+
+    Args:
+        raw (str): the argument as typed.
+        program (bool): the coreutils program's voice, not the builtin's.
+        warnings (list[str]): collects the warnings.
+    """
+    if raw[:1] in ("'", '"'):
+        code, err = _character_value(raw, program, warnings)
+        return float(code), err
+    found = STRTOD.match(raw)
+    if found is None:
+        return 0.0, _numeric_error(raw, 0, False, program, warnings)
+    return strtod_double(found), _numeric_error(
+        raw, found.end(), strtold_erange(found), program, warnings
+    )
 
 
 def _apply_pad(
@@ -155,10 +246,11 @@ def _apply_pad(
 def _format_int(
     value: int, conv: str, flags: str, width: int | None, precision: int | None
 ) -> str:
-    """Render ``%d %i %o %u %x %X`` with 64-bit wrap and GNU flag rules.
+    """Render ``%d %i %o %u %x %X`` with GNU flag rules.
 
     Args:
-        value (int): the parsed value.
+        value (int): the value as read, signed for ``%d``/``%i`` and
+            unsigned for the rest.
         conv (str): the conversion character.
         flags (str): active flags.
         width (int | None): minimum field width.
@@ -166,23 +258,20 @@ def _format_int(
     """
     prefix = ""
     if conv in ("d", "i"):
-        n = _wrap_signed(value)
-        neg = n < 0
-        digits = str(-n if neg else n)
+        neg = value < 0
+        digits = str(-value if neg else value)
         if neg:
             prefix = "-"
         elif "+" in flags:
             prefix = "+"
         elif " " in flags:
             prefix = " "
+    elif conv == "o":
+        digits = format(value, "o")
+    elif conv in ("x", "X"):
+        digits = format(value, "x")
     else:
-        u = value & _UINT64_MASK
-        if conv == "o":
-            digits = format(u, "o")
-        elif conv in ("x", "X"):
-            digits = format(u, "x")
-        else:
-            digits = format(u, "d")
+        digits = format(value, "d")
     if precision is not None:
         if precision == 0 and all(c == "0" for c in digits):
             digits = ""
@@ -482,7 +571,7 @@ def _read_conversion(
 
 
 def run_printf(
-    fmt: str, args: list[str]
+    fmt: str, args: list[str], program: bool = False
 ) -> tuple[str, list[str], bool, str | None]:
     """Apply GNU printf's format-reuse semantics: scan ``fmt`` once per
     cycle, consuming arguments; repeat while arguments remain and a cycle
@@ -502,6 +591,8 @@ def run_printf(
     Args:
         fmt (str): the format string.
         args (list[str]): remaining positional arguments.
+        program (bool): word numeric errors as the coreutils program
+            does rather than as bash's builtin.
     """
     out: list[str] = []
     messages: list[str] = []
@@ -533,7 +624,10 @@ def run_printf(
                     star = args[arg_i] if arg_i < total else "0"
                     if arg_i < total:
                         arg_i += 1
-                    wv, _ = _numeric_value(star)
+                    wv, err = _int_argument(star, True, program, messages)
+                    if err is not None:
+                        messages.append(err)
+                        failed = True
                     if wv < 0:
                         flags += "-"
                         width = -wv
@@ -543,14 +637,19 @@ def run_printf(
                     star = args[arg_i] if arg_i < total else "0"
                     if arg_i < total:
                         arg_i += 1
-                    pv, _ = _numeric_value(star)
+                    pv, err = _int_argument(star, True, program, messages)
+                    if err is not None:
+                        messages.append(err)
+                        failed = True
                     precision = None if pv < 0 else pv
                 raw = args[arg_i] if arg_i < total else None
                 if raw is not None:
                     arg_i += 1
                 w = width if isinstance(width, int) else None
                 p = precision if isinstance(precision, int) else None
-                text, err, stop = _convert(conv, raw, flags, w, p, messages)
+                text, err, stop = _convert(
+                    conv, raw, flags, w, p, program, messages
+                )
                 if err is not None:
                     messages.append(err)
                     failed = True
@@ -572,6 +671,7 @@ def _convert(
     flags: str,
     width: int | None,
     precision: int | None,
+    program: bool,
     warnings: list[str],
 ) -> tuple[str, str | None, bool]:
     """Render one conversion. Returns (text, error message or None, stop),
@@ -584,8 +684,10 @@ def _convert(
         flags (str): active flags.
         width (int | None): resolved field width.
         precision (int | None): resolved precision.
+        program (bool): word numeric errors as the coreutils program
+            does rather than as bash's builtin.
         warnings (list[str]): collects the escape warnings of a ``%b``
-            argument.
+            argument and the numeric warnings.
     """
     if conv == "s":
         return (
@@ -607,14 +709,15 @@ def _convert(
             False,
         )
     if conv in ("d", "i", "o", "u", "x", "X"):
-        if raw is None:
-            value, err = 0, None
-        else:
-            value, valid = _numeric_value(raw)
-            err = None if valid else f"printf: {raw}: invalid number\n"
+        value, err = (
+            (0, None)
+            if raw is None
+            else _int_argument(raw, conv in ("d", "i"), program, warnings)
+        )
         return _format_int(value, conv, flags, width, precision), err, False
-    value_f, valid = (0.0, True) if raw is None else _parse_float_arg(raw)
-    err = None if valid else f"printf: {raw}: invalid number\n"
+    value_f, err = (
+        (0.0, None) if raw is None else _float_argument(raw, program, warnings)
+    )
     if conv in ("a", "A"):
         return (
             _format_hex_float(value_f, flags, width, precision, conv == "A"),

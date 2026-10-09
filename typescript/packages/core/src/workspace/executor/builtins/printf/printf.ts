@@ -211,7 +211,11 @@ export async function handlePrintf(
       new ExecutionNode({ command: 'printf', exitCode: 2, stderr: err }),
     ]
   }
-  const [output, rawMessages, failed, excess] = runPrintf(args[0] ?? '', args.slice(1))
+  const [output, rawMessages, failed, excess] = runPrintf(
+    args[0] ?? '',
+    args.slice(1),
+    isProgramInvocation(session),
+  )
   const voice = isProgramInvocation(session) ? '' : 'bash: '
   const messages = rawMessages.map((message) => voice + message)
   const errBytes = messages.length > 0 ? encodeText(messages.join('')) : null
