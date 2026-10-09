@@ -29,7 +29,7 @@ from mirage.runtime.python.host.constants import (
     REFUSED_CALLS,
     ROUTED_CALLS,
 )
-from mirage.runtime.python.host.fs import make_os_module, os_routing
+from mirage.runtime.python.host.fs import HostFs, make_os_module, os_routing
 from mirage.types import HiddenPaths, PathSpec, Visibility
 from mirage.utils.stat_view import DIR_SIZE
 from mirage.vfs.disk import DiskVFS
@@ -707,3 +707,41 @@ class TestRmtree:
             shutil.rmtree("/data/t")
             assert not os.path.exists("/data/t")
         assert seen and all(seen)
+
+    def test_a_directory_swapped_for_a_link_is_left(self, monkeypatch):
+        # Another writer swaps the child for a link to /data/outside right
+        # after the walk classified it: the walk must not follow it there.
+        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+        for folder in ("/data/t", "/data/t/child", "/data/outside"):
+            run(ws.vfs.mkdir(folder))
+        run(ws.vfs.write("/data/t/child/f.txt", b"t"))
+        run(ws.vfs.write("/data/outside/f.txt", b"o"))
+        classify = HostFs.lstat
+
+        def swapping(self, path, *args, **kwargs):
+            answer = classify(self, path, *args, **kwargs)
+            if path == "/data/t/child" and not os.path.exists("/data/moved"):
+                os.rename("/data/t/child", "/data/moved")
+                os.symlink("/data/outside", "/data/t/child")
+            return answer
+
+        monkeypatch.setattr(HostFs, "lstat", swapping)
+        with ws:
+            assert shutil.rmtree.avoids_symlink_attacks is False
+            with pytest.raises(OSError, match="symbolic link"):
+                shutil.rmtree("/data/t")
+        assert run(ws.vfs.read("/data/outside/f.txt")) == b"o"
+        assert run(ws.vfs.read("/data/moved/f.txt")) == b"t"
+
+    @pytest.mark.parametrize("spelling", ["/data/t", "/data/t/", "/data/up/t"])
+    def test_a_tree_goes_however_it_is_reached(self, spelling):
+        # A link above the tree is the caller's path, not a swap inside it.
+        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+        run(ws.vfs.mkdir("/data/t"))
+        run(ws.vfs.mkdir("/data/t/sub"))
+        run(ws.vfs.write("/data/t/sub/f.txt", b"f"))
+        run(ws.vfs.write("/data/t/g.txt", b"g"))
+        run(ws.vfs.symlink("/data/up", "/data"))
+        with ws:
+            shutil.rmtree(spelling)
+            assert os.listdir("/data") == ["up"]

@@ -13,7 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type fs from 'node:fs'
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
@@ -147,6 +155,41 @@ describe('patchNodeFs — routed calls', () => {
     await fs.promises.copyFile('/data/in.txt', join(scratch, 'out.txt'))
     expect(await fs.promises.readFile('/data/in.txt', 'utf-8')).toBe('from the host')
     expect(await fs.promises.readFile(join(scratch, 'out.txt'), 'utf-8')).toBe('from the host')
+    await ws.close()
+  })
+
+  it('leaves a Buffer path to node beside a mounted one', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const real = join(scratch, 'in.txt')
+    writeFileSync(real, 'from the host')
+
+    await fs.promises.copyFile(Buffer.from(real), '/data/in.txt')
+    await fs.promises.copyFile('/data/in.txt', Buffer.from(join(scratch, 'out.txt')))
+    expect(await fs.promises.readFile('/data/in.txt', 'utf-8')).toBe('from the host')
+    expect(readFileSync(join(scratch, 'out.txt'), 'utf-8')).toBe('from the host')
+    await expect(fs.promises.rename(Buffer.from(real), '/data/x')).rejects.toMatchObject({
+      code: 'EXDEV',
+    })
+    await ws.close()
+  })
+
+  it('copies exclusively onto the host, refusing a dangling link', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/f.txt', 'f')
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const link = join(scratch, 'link')
+    symlinkSync(join(scratch, 'target'), link)
+    const { COPYFILE_EXCL } = fs.constants
+
+    await expect(fs.promises.copyFile('/data/f.txt', link, COPYFILE_EXCL)).rejects.toMatchObject({
+      code: 'EEXIST',
+    })
+    expect(existsSync(join(scratch, 'target'))).toBe(false)
+    await fs.promises.copyFile('/data/f.txt', join(scratch, 'new.txt'), COPYFILE_EXCL)
+    expect(readFileSync(join(scratch, 'new.txt'), 'utf-8')).toBe('f')
     await ws.close()
   })
 
@@ -311,6 +354,25 @@ describe('patchNodeFs — what a mount cannot serve', () => {
       (fs: Fs) => fs.promises.writeFile('/data/f.txt', 'x', { flag: 'ax' }),
     ],
     [
+      'an exclusive copy onto a dangling link',
+      'EEXIST',
+      (fs: Fs) => fs.promises.copyFile('/data/f.txt', '/data/dangling', fs.constants.COPYFILE_EXCL),
+    ],
+    [
+      'a glob whose pattern list names a mount',
+      'ENOTSUP',
+      async (fs: Fs) => {
+        for await (const _ of fs.promises.glob(['/tmp/*', '/data/*'])) return
+      },
+    ],
+    [
+      'a glob under a mounted cwd',
+      'ENOTSUP',
+      async (fs: Fs) => {
+        for await (const _ of fs.promises.glob('*', { cwd: '/data' })) return
+      },
+    ],
+    [
       'a watch, on its first event',
       'ENOTSUP',
       async (fs: Fs) => {
@@ -343,6 +405,7 @@ describe('patchNodeFs — what a mount cannot serve', () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.vfs.write('/data/f.txt', 'f')
     await ws.vfs.mkdir('/data/d')
+    await ws.vfs.symlink('/data/dangling', '/data/nowhere')
     restore = patchNodeFs(ws)
     const fs = requireCjs('fs') as Fs
     await expect(call(fs)).rejects.toMatchObject({ code })
@@ -392,6 +455,49 @@ describe('patchNodeFs — what a mount cannot serve', () => {
 
     await fs.promises.rm('/data/d', { recursive: true })
     expect(await ws.vfs.exists('/data/d')).toBe(false)
+    await ws.close()
+  })
+
+  it('leaves a directory another writer swapped for a link mid-rm', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    for (const dir of ['/data/t', '/data/t/child', '/data/outside']) await ws.vfs.mkdir(dir)
+    await ws.vfs.write('/data/t/child/f.txt', 't')
+    await ws.vfs.write('/data/outside/f.txt', 'o')
+    const facade = ws.vfs as unknown as {
+      dispatch: (name: string, path: string, ...rest: unknown[]) => Promise<unknown>
+    }
+    const dispatch = facade.dispatch.bind(ws.vfs)
+    facade.dispatch = async (name, path, ...rest) => {
+      const answer = await dispatch(name, path, ...rest)
+      if (name === 'readdir' && path === '/data/t/child') {
+        await ws.vfs.rename('/data/t/child', '/data/moved')
+        await ws.vfs.symlink('/data/t/child', '/data/outside')
+      }
+      return answer
+    }
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+
+    await expect(fs.promises.rm('/data/t', { recursive: true })).rejects.toMatchObject({
+      code: 'ELOOP',
+      path: '/data/t/child',
+    })
+    expect(await fs.promises.readFile('/data/outside/f.txt', 'utf-8')).toBe('o')
+    expect(await fs.promises.readFile('/data/moved/f.txt', 'utf-8')).toBe('t')
+    await ws.close()
+  })
+
+  it('removes a tree reached through a link above it', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.mkdir('/data/t')
+    await ws.vfs.mkdir('/data/t/sub')
+    await ws.vfs.write('/data/t/sub/f.txt', 'f')
+    await ws.vfs.symlink('/data/up', '/data')
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+
+    await fs.promises.rm('/data/up/t', { recursive: true })
+    expect(await fs.promises.readdir('/data')).toEqual(['up'])
     await ws.close()
   })
 

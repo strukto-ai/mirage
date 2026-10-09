@@ -128,7 +128,7 @@ def patch_process(
     ]
     builtins.open = opener
     io.open = opener
-    shutil.rmtree = cast(Any, make_rmtree(files))
+    shutil.rmtree = cast(Any, make_rmtree(files, loop))
     for name, fn in routing.items():
         setattr(os, name, fn)
     return patched

@@ -25,6 +25,7 @@ import types
 from collections.abc import Callable, Iterator
 from typing import Any, TypeVar, cast
 
+from mirage.bridge.sync import run_async_from_sync
 from mirage.errors import FsCondition, classify
 from mirage.errors.fs import ebusy, eexist, fs_error
 from mirage.errors.posix import posix_errno, posix_phrase
@@ -179,16 +180,50 @@ def _rmtree_handler(
     return _reraised
 
 
-def _remove_tree(path: str, onexc: ErrorHandler) -> None:
+def _held(
+    path: str, where: str, onexc: ErrorHandler, resolve: Callable[[str], str]
+) -> bool:
+    """Whether `path` still resolves where the walk found it.
+
+    A directory swapped for a link, or under an ancestor that was, now
+    resolves elsewhere, and a name under it would reach the link's
+    target. shutil's descriptor walk reports that directory as a link
+    and leaves it, and so does this one.
+
+    Args:
+        path (str): the directory the next call acts in.
+        where (str): what it resolved to when the walk reached it.
+        onexc (ErrorHandler): what a moved directory goes to.
+        resolve (Callable[[str], str]): the namespace's follow, now.
+    """
+    try:
+        if resolve(path) == where:
+            return True
+        raise OSError("Cannot call rmtree on a symbolic link")
+    except OSError as err:
+        onexc(_real_os.path.islink, path, err)
+        return False
+
+
+def _remove_tree(
+    path: str, where: str, onexc: ErrorHandler, resolve: Callable[[str], str]
+) -> None:
     """Remove a tree by name, children first, through the door's ``os``.
 
     The walk shutil keeps for a platform without descriptor calls, so a
     failure reaches ``onexc`` with the function and path shutil names.
+    A name is all a mount gives, so before each call the directory it
+    acts in is checked against where it resolved when the walk reached
+    it, which is how a descriptor would have held it.
 
     Args:
         path (str): the directory to remove.
+        where (str): what `path` resolved to when the walk reached it.
         onexc (ErrorHandler): what a failure goes to.
+        resolve (Callable[[str], str]): the namespace's follow, now.
     """
+    if not _held(path, where, onexc, resolve):
+        return
     try:
         with _real_os.scandir(path) as listing:
             entries = list(listing)
@@ -204,19 +239,26 @@ def _remove_tree(path: str, onexc: ErrorHandler) -> None:
             logger.debug("rmtree: classifying %s failed: %s", entry.path, err)
             is_dir = False
         if is_dir:
-            _remove_tree(entry.path, onexc)
+            child = posixpath.join(where, entry.name)
+            _remove_tree(entry.path, child, onexc, resolve)
             continue
+        if not _held(path, where, onexc, resolve):
+            return
         try:
             _real_os.unlink(entry.path)
         except OSError as err:
             onexc(_real_os.unlink, entry.path, err)
+    if not _held(path, where, onexc, resolve):
+        return
     try:
         _real_os.rmdir(path)
     except OSError as err:
         onexc(_real_os.rmdir, path, err)
 
 
-def make_rmtree(files: Files) -> Callable[..., None]:
+def make_rmtree(
+    files: Files, loop: asyncio.AbstractEventLoop | None
+) -> Callable[..., None]:
     """``shutil.rmtree``, walking a mounted tree by name.
 
     shutil removes a tree through descriptors where the platform has
@@ -233,10 +275,27 @@ def make_rmtree(files: Files) -> Callable[..., None]:
     refusal reaches ``onexc``, ``onerror`` or ``ignore_errors`` as any
     other failure does.
 
+    The mounted walk asks the namespace, on the block's loop where its
+    table changes, where each directory resolves before acting in it,
+    so a directory swapped for a link is left rather than followed.
+    That check and the call after it are two steps, not one descriptor,
+    so ``avoids_symlink_attacks`` is False, the answer shutil itself
+    gives where it walks by name.
+
     Args:
         files (Files): the workspace's ``ws.vfs``.
+        loop (asyncio.AbstractEventLoop | None): the block's loop.
     """
     original = shutil.rmtree
+    links = files.links
+
+    async def follow(path: str) -> str:
+        return posixpath.normpath(
+            path if links is None else links.follow(path)
+        )
+
+    def resolve(path: str) -> str:
+        return run_async_from_sync(follow(path), loop)
 
     @functools.wraps(original)
     def rmtree(path: Any, *args: Any, **kwargs: Any) -> None:
@@ -264,11 +323,13 @@ def make_rmtree(files: Files) -> Callable[..., None]:
         try:
             if _real_os.path.islink(spelled):
                 raise OSError("Cannot call rmtree on a symbolic link")
+            where = resolve(spelled)
         except OSError as err:
             onexc(_real_os.path.islink, spelled, err)
             return
-        _remove_tree(spelled, onexc)
+        _remove_tree(spelled, where, onexc, resolve)
 
+    cast(Any, rmtree).avoids_symlink_attacks = False
     return rmtree
 
 

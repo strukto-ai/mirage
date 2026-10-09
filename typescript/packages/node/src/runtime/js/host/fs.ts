@@ -165,9 +165,10 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
    * root anchor matches every path but backs no files, so a path only it
    * catches stays on the host; a mount the caller put at `/` is honored.
    * A relative path names the process's working directory, which stays
-   * node's whatever is mounted. */
-  mounted(path: string | null): path is string {
-    if (path?.startsWith('/') !== true) return false
+   * node's whatever is mounted, and a `Buffer` spelling is the host's,
+   * as a bytes path is on the python door. */
+  mounted(path: unknown): path is string {
+    if (typeof path !== 'string' || !path.startsWith('/')) return false
     const mount = this.ws.registry.tryMountFor(path)
     if (mount === null) return false
     return !(this.ws.syntheticRoot && mount === this.ws.registry.rootMount)
@@ -282,9 +283,19 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     const data = this.mounted(src)
       ? await this.files.read(src, { raw: true })
       : await this.nativeCall('readFile', src)
-    if (mode & COPYFILE_EXCL && (await this.exists(dst))) throw refusal('EEXIST', 'copyfile', dst)
-    if (this.mounted(dst)) await this.files.write(dst, data as Uint8Array)
-    else await this.nativeCall('writeFile', dst, data)
+    const exclusive = (mode & COPYFILE_EXCL) !== 0
+    if (!this.mounted(dst)) {
+      // O_EXCL on the host: the write itself refuses a name already
+      // there, a dangling link included.
+      await this.nativeCall('writeFile', dst, data, exclusive ? { flag: 'wx' } : undefined)
+      return
+    }
+    // A mount has no exclusive create, so the name is looked up as `wx`
+    // looks it up, the link itself rather than its target.
+    if (exclusive && (await this.files.statOrNull(dst, true)) !== null) {
+      throw refusal('EEXIST', 'copyfile', dst)
+    }
+    await this.files.write(dst, data as Uint8Array)
   }
 
   async exists(path: string): Promise<boolean> {
@@ -396,11 +407,12 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
       return
     }
     if (!recursive) throw refusal('EISDIR', 'rm', path)
-    const doomed: [string, boolean][] = []
-    await this.plan(path, true, doomed)
+    const doomed: [string, boolean, string][] = []
+    await this.plan(path, true, doomed, path, this.ws.namespace.follow(path))
     // A name another writer removed since the plan is already gone, as
     // node's own recursive rm counts it.
-    for (const [name, isDir] of doomed) {
+    for (const [name, isDir, where] of doomed) {
+      this.held(posix.dirname(name), posix.dirname(where))
       try {
         if (isDir) await this.files.rmdir(name)
         else await this.files.unlink(name)
@@ -411,18 +423,20 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     }
   }
 
-  /** Every name under `path` onto `out`, children before their directory.
-   * The whole tree is planned before anything goes, as the agent adapters
-   * plan it, so a mount root anywhere in it refuses the call with nothing
-   * removed. */
+  /** Every name under `path` onto `out`, children before their directory,
+   * each with where it resolved when planned. The whole tree is planned
+   * before anything goes, as the agent adapters plan it, so a mount root
+   * anywhere in it refuses the call with nothing removed. */
   private async plan(
     path: string,
     isDir: boolean,
-    out: [string, boolean][],
-    top = path,
+    out: [string, boolean, string][],
+    top: string,
+    where: string,
   ): Promise<void> {
     if (this.ws.registry.isMountRoot(posix.normalize(path))) throw refusal('EBUSY', 'rm', path)
     if (isDir) {
+      this.held(path, where)
       let rows: VFSEntry[]
       try {
         rows = await this.files.readdir(path)
@@ -432,11 +446,23 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
         return
       }
       for (const row of rows) {
-        const child = posix.join(path, leaf(row.path))
-        await this.plan(child, row.isDir && row.isLink !== true, out, top)
+        const name = leaf(row.path)
+        const isChildDir = row.isDir && row.isLink !== true
+        await this.plan(posix.join(path, name), isChildDir, out, top, posix.join(where, name))
       }
     }
-    out.push([path, isDir])
+    out.push([path, isDir, where])
+  }
+
+  /** Refuse to act in `directory` once it resolves elsewhere than `where`,
+   * where the plan found it: swapped for a link, or under an ancestor
+   * that was, a name in it would reach the link's target. A name is all
+   * a mount gives, so this check stands in for the descriptor a host
+   * walk would hold. */
+  private held(directory: string, where: string): void {
+    if (posix.normalize(this.ws.namespace.follow(directory)) !== posix.normalize(where)) {
+      throw refusal('ELOOP', 'rm', directory)
+    }
   }
 
   async rmdir(path: string): Promise<void> {
@@ -530,15 +556,22 @@ export function patchNodeFs(ws: Workspace): () => void {
     }
     target[name] = wrapped
   }
+  // The paths a call names. glob names one per pattern, a relative one
+  // under its `cwd`.
+  const namedPaths = (name: string, args: unknown[]): (string | null)[] => {
+    if (name !== 'glob') return (PATH_ARGS[name] ?? [0]).map((index) => spelled(args[index]))
+    const cwd = spelled(fieldsOf(args[1] as Options).cwd)
+    const patterns: unknown[] = Array.isArray(args[0]) ? args[0] : [args[0]]
+    return patterns.map((pattern) => {
+      const path = spelled(pattern)
+      if (path === null || cwd === null || posix.isAbsolute(path)) return path
+      return posix.join(cwd, path)
+    })
+  }
   // The mounted path a call names, or null when every path it takes is
   // the host's, which leaves the call to node.
-  const mountedIn = (name: string, args: unknown[]): string | null => {
-    for (const index of PATH_ARGS[name] ?? [0]) {
-      const path = spelled(args[index])
-      if (host.mounted(path)) return path
-    }
-    return null
-  }
+  const mountedIn = (name: string, args: unknown[]): string | null =>
+    namedPaths(name, args).find((path) => host.mounted(path)) ?? null
   const spellPaths = (name: string, args: unknown[]): unknown[] => {
     const positions = PATH_ARGS[name] ?? [0]
     return args.map((arg, index) => (positions.includes(index) ? (spelled(arg) ?? arg) : arg))
