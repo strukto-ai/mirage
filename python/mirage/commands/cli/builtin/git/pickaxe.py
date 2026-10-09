@@ -22,6 +22,7 @@ from dulwich.objects import Blob, Commit, ObjectID
 
 from mirage.commands.cli.builtin.git.patch import byte_lines
 from mirage.commands.cli.builtin.git.summary import BINARY_SNIFF
+from mirage.shell.bytes import decode_text
 
 EMPTY_TREE = None
 
@@ -92,7 +93,7 @@ def _occurrences(
     data = _blob(store, sha)
     if not isinstance(needle, re.Pattern):
         return (data.lower() if ignore_case else data).count(needle)
-    return contains(data.decode("utf-8", "replace"), needle)
+    return contains(decode_text(data), needle)
 
 
 def _changes(
@@ -143,7 +144,7 @@ def greps(
             if tag == "equal":
                 continue
             for line in (*before[i1:i2], *after[j1:j2]):
-                text = line.decode("utf-8", "replace").removesuffix("\n")
+                text = decode_text(line).removesuffix("\n")
                 if pattern.search(text):
                     return True
     return False

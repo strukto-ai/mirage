@@ -275,11 +275,15 @@ function perlRegex(value: string, ignoreCase: boolean): RegExp {
 /**
  * A `-G` or `--pickaxe-regex` pattern, compiled as git's diffcore-pickaxe
  * compiles it: POSIX extended whatever -E, -F or -P say, `-i` folding case,
- * and matched one line at a time (REG_NEWLINE).
+ * and matched one line at a time (REG_NEWLINE). Linux regcomp keeps dot off
+ * NUL, unlike Darwin.
  */
 function pickaxePattern(value: string, ignoreCase: boolean): RegExp {
   try {
-    return compilePosixRegex(translateEre(value, PosixSyntax.EXTENDED)[0], ignoreCase ? 'i' : '')
+    return compilePosixRegex(
+      translateEre(value, PosixSyntax.EXTENDED, false)[0],
+      ignoreCase ? 'i' : '',
+    )
   } catch (err) {
     if (err instanceof BreError || err instanceof SyntaxError) {
       throw new GitError(`invalid regex: ${err.message}`)

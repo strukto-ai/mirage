@@ -7,7 +7,7 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "git init -q -b main /repo/binary-reachability && printf '[user]\\n name = Test\\n email = test@example.com\\n' >> /repo/binary-reachability/.git/config && printf 'old\\0\\377\\n' > /repo/binary-reachability/binary.dat && git -C /repo/binary-reachability add binary.dat && git -C /repo/binary-reachability commit -qm 'binary one' && printf 'new\\0\\376\\nneedle\\n' > /repo/binary-reachability/binary.dat && git -C /repo/binary-reachability add binary.dat && git -C /repo/binary-reachability commit -qm 'binary two'",
+      "command": "git init -q -b main /repo/binary-reachability && printf '[user]\\n name = Test\\n email = test@example.com\\n' >> /repo/binary-reachability/.git/config && printf 'old\\0\\377\\n' > /repo/binary-reachability/binary.dat && git -C /repo/binary-reachability add binary.dat && git -C /repo/binary-reachability commit -qm 'binary one' && printf 'IHDR\\0\\0\\006a\\nnew\\0\\376\\nneedle\\n' > /repo/binary-reachability/binary.dat && git -C /repo/binary-reachability add binary.dat && git -C /repo/binary-reachability commit -qm 'binary two'",
       "expect": {
         "exit": 0,
         "stdout": "",
@@ -21,10 +21,10 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "git -C /repo/binary-reachability log -G needle --format=%s; git -C /repo/binary-reachability log -G needle --text --format=%s; git -C /repo/binary-reachability log -G needle -a --format=%s; git -C /repo/binary-reachability log -S needle --text --format=%s",
+      "command": "git -C /repo/binary-reachability log -G needle --format=%s; git -C /repo/binary-reachability log -G needle --text --format=%s; git -C /repo/binary-reachability log -G needle -a --format=%s; git -C /repo/binary-reachability log -S needle --text --format=%s; git -C /repo/binary-reachability log --text --format=%s -G '�'; git -C /repo/binary-reachability log --text --format=%s -S '�' --pickaxe-regex; git -C /repo/binary-reachability log --text --format=%s -S '�'; git -C /repo/binary-reachability log --text --format=%s -G 'IHDR.{4}'; git -C /repo/binary-reachability log --text --format=%s -G 'IHDR.*a'; git -C /repo/binary-reachability log --text --format=%s -G 'IHDR[^X]{4}'; git -C /repo/binary-reachability log --text --format=%s -G 'IHDR[[:cntrl:]]{3}a'; git -C /repo/binary-reachability log --text --format=%s -G $'\\376'; git -C /repo/binary-reachability log --text --format=%s -S 'IHDR.{4}' --pickaxe-regex; git -C /repo/binary-reachability log --text --format=%s -S 'IHDR[^X]{4}' --pickaxe-regex",
       "expect": {
         "exit": 0,
-        "stdout": "binary two\nbinary two\nbinary two\n",
+        "stdout": "binary two\nbinary two\nbinary two\nbinary two\nbinary two\nbinary two\nbinary two\n",
         "stderr": ""
       }
     },

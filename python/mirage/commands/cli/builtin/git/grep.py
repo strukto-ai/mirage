@@ -64,6 +64,7 @@ class GrepFlags:
 
     Args:
         patterns (tuple[re.Pattern[str], ...]): alternative line matchers.
+        whole_word (bool): reject empty matches as Git requires for -w.
         invert (bool): select nonmatching lines.
         numbers (bool): include line numbers.
         count (bool): print each matching file's line count.
@@ -76,6 +77,7 @@ class GrepFlags:
     """
 
     patterns: tuple[re.Pattern[str], ...]
+    whole_word: bool
     invert: bool
     numbers: bool
     count: bool
@@ -158,6 +160,7 @@ def parse_flags(
         binary = "text" if name == "text" else "skip"
     return GrepFlags(
         tuple(compiled),
+        whole_word,
         fl.as_bool("invert_match"),
         fl.as_bool("line_number"),
         fl.as_bool("count"),
@@ -167,6 +170,21 @@ def parse_flags(
         fl.as_bool("null"),
         binary,
         utf8,
+    )
+
+
+def matches(pattern: re.Pattern[str], line: str, nonempty: bool) -> bool:
+    """Test a line, retaining nonempty alternatives at an empty match's offset.
+
+    Args:
+        pattern (re.Pattern[str]): compiled matcher with word boundaries.
+        line (str): one input line in the matcher's byte or character view.
+        nonempty (bool): require the match to consume input, as Git -w does.
+    """
+    if not nonempty:
+        return pattern.search(line) is not None
+    return any(
+        match.start() != match.end() for match in pattern.finditer(line)
     )
 
 
@@ -187,7 +205,10 @@ def searched(data: bytes, label: str, flags: GrepFlags) -> tuple[bytes, bool]:
     selected = [
         (number, line)
         for number, line in enumerate(lines, 1)
-        if any(pattern.search(line) is not None for pattern in flags.patterns)
+        if any(
+            matches(pattern, line, flags.whole_word)
+            for pattern in flags.patterns
+        )
         != flags.invert
     ]
     matched = bool(selected)
@@ -234,21 +255,24 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
     try:
         check_switches(inv, inv.texts[:1])
-        before, after = split_marked(inv.texts, inv.argv)
-        words, paths = list(before), list(after)
-        if words and words[-1] == "--":
-            words.pop()
+        words = list(inv.texts)
         patterns = fl.as_list("e")
         origin = "-e option" if patterns else "command line"
-        if not patterns:
-            if words:
-                patterns = [words.pop(0)]
-            elif paths:
-                patterns = [paths.pop(0)]
-            else:
+        if patterns:
+            before, after = split_marked(inv.texts, inv.argv)
+            words, paths = list(before), list(after)
+            marked = "--" in inv.argv
+            if words and words[-1] == "--":
+                words.pop()
+        else:
+            if not words:
                 if fl.as_bool("h"):
                     raise UsageError(verb_usage(inv), "")
                 raise GitError("no pattern given")
+            patterns = [words.pop(0)]
+            marked = "--" in words
+            cut = words.index("--") if marked else len(words)
+            words, paths = words[:cut], words[cut + 1 :]
         flags = parse_flags(fl, patterns, origin, utf8_locale(inv.env))
         doors = inv.doors or CLIDoors()
         repo, location = await opened(fl, doors)
@@ -258,7 +282,7 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         cached = fl.as_bool("cached")
         sources: list[tuple[str, Tree]] = []
         for index, word in enumerate(words):
-            if word.startswith("-") and "--" not in inv.argv:
+            if word.startswith("-"):
                 raise GitError(
                     f"option '{word}' must come before non-option arguments"
                 )
@@ -267,7 +291,7 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                     (word, await asyncio.to_thread(search_entries, repo, word))
                 )
             except (AmbiguousArgumentError, InvalidRevisionNameError) as exc:
-                if "--" in inv.argv:
+                if marked:
                     raise GitError(
                         f"unable to resolve revision: {word}"
                     ) from exc
@@ -345,15 +369,11 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                     data = await read_optional(doors.dispatch, target)
                     if data is None:
                         continue
-                label = (
-                    posixpath.relpath(relative, prefix or ".")
-                    if relative
-                    else ""
-                )
+                label = posixpath.relpath(relative or revision, prefix or ".")
                 if not flags.nul:
                     label = quote_path(label, False, fully)
-                if revision:
-                    label = revision + (":" + label if relative else "")
+                if revision and relative:
+                    label = revision + ":" + label
                 rendered, hit = searched(data, label, flags)
                 found = found or hit
                 if hit and flags.quiet:

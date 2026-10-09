@@ -262,7 +262,7 @@ def _pickaxe_pattern(value: str, ignore_case: bool) -> re.Pattern[str]:
     """A ``-G`` or ``--pickaxe-regex`` pattern, compiled as git's
     diffcore-pickaxe compiles it: POSIX extended whatever -E, -F or -P
     say, ``-i`` folding case, and matched one line at a time
-    (REG_NEWLINE).
+    (REG_NEWLINE). Linux regcomp keeps dot off NUL, unlike Darwin.
 
     Args:
         value (str): the pattern as typed.
@@ -271,7 +271,10 @@ def _pickaxe_pattern(value: str, ignore_case: bool) -> re.Pattern[str]:
     flags = re.IGNORECASE if ignore_case else 0
     try:
         return compile_posix_regex(
-            translate_ere(value, PosixSyntax.EXTENDED)[0], flags
+            translate_ere(value, PosixSyntax.EXTENDED, dot_matches_nul=False)[
+                0
+            ],
+            flags,
         )
     except (BreError, re.error) as exc:
         raise GitError(f"invalid regex: {exc}") from exc

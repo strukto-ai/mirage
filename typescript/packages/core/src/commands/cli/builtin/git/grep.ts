@@ -33,6 +33,7 @@ import { checkSwitches, fatal, splitMarked, startPoint, verbUsage } from './util
 /** A compiled search and presentation, independent of content source. */
 interface GrepFlags {
   readonly patterns: readonly RegExp[]
+  readonly wholeWord: boolean
   readonly invert: boolean
   readonly numbers: boolean
   readonly count: boolean
@@ -92,6 +93,7 @@ function parseFlags(
   for (const name of fl.typedOrder('text', 'args_I')) binary = name === 'text' ? 'text' : 'skip'
   return {
     patterns: compiled,
+    wholeWord,
     invert: fl.asBool('invert_match'),
     numbers: fl.asBool('line_number'),
     count: fl.asBool('count'),
@@ -104,6 +106,24 @@ function parseFlags(
   }
 }
 
+/** Test a line, retaining nonempty alternatives at an empty match's offset. */
+function matches(pattern: RegExp, line: string, nonempty: boolean): boolean {
+  let match = pattern.exec(line)
+  while (nonempty && match !== null && match[0] === '') {
+    const tail = line.slice(match.index)
+    const remaining = pattern.unicode ? Array.from(tail).length : tail.length
+    // Reject this endpoint without slicing the subject or adding capture groups.
+    // The engine can then backtrack into a nonempty alternative at the same offset.
+    const retry = compilePosixRegex(
+      `(?:${pattern.source})(?![\\s\\S]{${String(remaining)}}$)`,
+      pattern.flags + 'g',
+    )
+    retry.lastIndex = match.index
+    match = retry.exec(line)
+  }
+  return match !== null
+}
+
 /** Select and render one file, preserving its content bytes. */
 function searched(data: Uint8Array, label: string, flags: GrepFlags): [Uint8Array, boolean] {
   const binary = data.subarray(0, BINARY_SNIFF).includes(0) && flags.binary !== 'text'
@@ -112,7 +132,7 @@ function searched(data: Uint8Array, label: string, flags: GrepFlags): [Uint8Arra
   if (lines.at(-1) === '') lines.pop()
   const selected: [number, string][] = []
   for (const [index, line] of lines.entries()) {
-    if (flags.patterns.some((pattern) => pattern.test(line)) !== flags.invert)
+    if (flags.patterns.some((pattern) => matches(pattern, line, flags.wholeWord)) !== flags.invert)
       selected.push([index + 1, line])
   }
   const matched = selected.length > 0
@@ -147,18 +167,26 @@ export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
     checkSwitches(inv, inv.texts.slice(0, 1))
-    const [words, marked] = splitMarked(inv.texts, inv.argv)
-    if (words.at(-1) === '--') words.pop()
-    let paths = marked
+    let words = [...inv.texts]
     let patterns = fl.asList('e')
     const origin = patterns.length ? '-e option' : 'command line'
-    if (!patterns.length) {
-      const pattern = words.length ? words.shift() : paths.shift()
+    let paths: string[]
+    let marked: boolean
+    if (patterns.length) {
+      ;[words, paths] = splitMarked(inv.texts, inv.argv)
+      marked = inv.argv.includes('--')
+      if (words.at(-1) === '--') words.pop()
+    } else {
+      const pattern = words.shift()
       if (pattern === undefined) {
         if (fl.asBool('h')) throw new UsageError(verbUsage(inv), '')
         throw new GitError('no pattern given')
       }
       patterns = [pattern]
+      marked = words.includes('--')
+      const cut = marked ? words.indexOf('--') : words.length
+      paths = words.slice(cut + 1)
+      words = words.slice(0, cut)
     }
     const flags = parseFlags(fl, patterns, origin, utf8Locale(inv.env))
     const doors = inv.doors ?? {}
@@ -168,14 +196,14 @@ export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
     const cached = fl.asBool('cached')
     const sources: [string, Map<string, TreeEntry>][] = []
     for (const [index, word] of words.entries()) {
-      if (word.startsWith('-') && !inv.argv.includes('--'))
+      if (word.startsWith('-'))
         throw new GitError(`option '${word}' must come before non-option arguments`)
       try {
         sources.push([word, await searchEntries(repo, word)])
       } catch (err) {
         if (!(err instanceof AmbiguousArgumentError || err instanceof InvalidRevisionNameError))
           throw err
-        if (inv.argv.includes('--')) throw new GitError(`unable to resolve revision: ${word}`)
+        if (marked) throw new GitError(`unable to resolve revision: ${word}`)
         const relative = repoRelative(repo.location, start, word)
         if (
           !/[*?[]/.test(word) &&
@@ -239,9 +267,9 @@ export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
           data = await readOptional(repo.dispatch, target)
           if (data === null) continue
         }
-        let label = path ? relativePath(path, prefix) : ''
+        let label = relativePath(path || revision, prefix)
         if (!flags.nul) label = quotePath(label, false, fully)
-        if (revision) label = revision + (path ? ':' + label : '')
+        if (revision && path) label = revision + ':' + label
         const [rendered, hit] = searched(data, label, flags)
         found ||= hit
         if (hit && flags.quiet) return [null, new IOResult()]
