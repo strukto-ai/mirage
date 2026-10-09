@@ -1,3 +1,4 @@
+import { stderr, stdout } from 'node:process'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.ts'
@@ -22,6 +23,8 @@ describe.each(['vfs/read', 'glob'])('%s failure responses', (route) => {
       const wid = created.json<{ id: string }>().id
       vi.spyOn(ioSerde, 'answered').mockRejectedValue(err)
       vi.spyOn(Session.prototype, 'glob').mockRejectedValue(err)
+      const diagnostics = vi.spyOn(stderr, 'write').mockReturnValue(true)
+      const protocolOutput = vi.spyOn(stdout, 'write').mockReturnValue(true)
       const response = await app.inject({
         method: 'POST',
         url: `/v1/workspaces/${wid}/${route}`,
@@ -29,6 +32,8 @@ describe.each(['vfs/read', 'glob'])('%s failure responses', (route) => {
       })
       expect(response.statusCode).toBe(status)
       expect(response.json()).toEqual(body)
+      expect(diagnostics.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(err.stack)
+      expect(protocolOutput).not.toHaveBeenCalled()
     } finally {
       vi.restoreAllMocks()
       await app.close()

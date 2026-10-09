@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Console } from 'node:console'
+import { stderr } from 'node:process'
 import { VERSION } from '@struktoai/mirage-core/version'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
@@ -47,6 +49,8 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { answered, checked, explanationToDict, failureToDict } from '../io_serde.ts'
 import { VFS_CALLS, schemaOf, type VfsCall } from '../vfs_calls.ts'
+
+const logger = new Console({ stdout: stderr, stderr })
 
 const READ_ONLY: ToolAnnotations = { readOnlyHint: true }
 
@@ -213,6 +217,7 @@ export function createMirageMcpServer(
       }
       return await operations.call(name, given, ctx.mcpReq.signal)
     } catch (err) {
+      logger.debug('mcp tool %s failed', name, err)
       // A call that failed is a tool result the agent reads, not a
       // protocol error.
       if (vfs !== undefined) return json(failureToDict(err), true)

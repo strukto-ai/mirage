@@ -65,6 +65,7 @@
   },
   "server/mcp/server": {
    "typescript_only": {
+    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "createMirageMcpServer": "Python's lowlevel Server takes list and call handlers, so MirageMcpServer is a class that holds the tool table and answers both. TypeScript's McpServer registers each tool itself, so a factory registers the table and returns the server."
    }
   },
@@ -78,6 +79,7 @@
   },
   "server/rpc/server": {
    "typescript_only": {
+    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "MirageRpcServerOptions": "Python's MirageRpcServer takes its session, tool table, name and version as keyword arguments; the TypeScript constructor takes them as one options object, as MirageMcpServerOptions does for the MCP server."
    }
   },
@@ -376,6 +378,7 @@
     "json_body": "FastAPI hands a route the raw request, so the VFS, glob and tool routes read their JSON object through json_body, bounded by MCP's size limit; Fastify parses and bounds the body itself (bodyLimit)."
    },
    "typescript_only": {
+    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "CallQuery": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "RouteError": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "VfsRoutesDeps": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",

@@ -1084,6 +1084,15 @@ jobs:
           NEXTCLOUD_ADMIN_USER: admin
           NEXTCLOUD_ADMIN_PASSWORD: admin123
           NEXTCLOUD_TRUSTED_DOMAINS: localhost
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'if (!db.runCommand({ping:1}).ok) quit(1)'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
       NEXTCLOUD_URL: http://localhost:8080/remote.php/dav/files/admin/
       NEXTCLOUD_USERNAME: admin
@@ -1167,15 +1176,6 @@ jobs:
             -e MC_HOST_local="http://minio:minio123@localhost:9000" \
             cgr.dev/chainguard/minio-client@sha256:b8b144ab34694ecea25aa352c4be9de4c26ee2a02701521dce02ee5593c57338 \
             mb --ignore-existing local/mirage-watch
-
-      - name: Start MongoDB for the watch battery
-        run: |
-          docker run -d --name mongo-watch -p 27017:27017 mongo:8
-          for i in $(seq 1 30); do
-            docker exec mongo-watch mongosh --quiet \
-              --eval 'db.runCommand({ping:1}).ok' >/dev/null 2>&1 && break
-            sleep 1
-          done
 
       # gdrive, dropbox, box, onedrive, hf and github are the watch targets
       # whose fakes are TypeScript and out-of-process; the one in-process fake

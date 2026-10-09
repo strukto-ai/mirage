@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Readable } from 'node:stream'
+import { stderr, stdout } from 'node:process'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -117,15 +118,22 @@ describe('MirageRpcServer', () => {
   })
 
   it('redacts unknown failures in both message and data', async () => {
-    const glob = vi.spyOn(Session.prototype, 'glob').mockRejectedValue(new Error('token=secret'))
+    const err = new Error('token=secret')
+    const glob = vi.spyOn(Session.prototype, 'glob').mockRejectedValue(err)
+    const diagnostics = vi.spyOn(stderr, 'write').mockReturnValue(true)
+    const protocolOutput = vi.spyOn(stdout, 'write').mockReturnValue(true)
     try {
       expect((await call(server(), 'glob', { pattern: '/*' })).error).toEqual({
         code: -32603,
         message: 'internal server error',
         data: { detail: 'internal server error' },
       })
+      expect(diagnostics.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(err.stack)
+      expect(protocolOutput).not.toHaveBeenCalled()
     } finally {
       glob.mockRestore()
+      diagnostics.mockRestore()
+      protocolOutput.mockRestore()
     }
   })
 
