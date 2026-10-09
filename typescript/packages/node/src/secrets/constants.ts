@@ -47,7 +47,7 @@ function requirePeer(source: string, peer: string): void {
 // workspace actually uses it (Python spells the same table as import
 // paths beside its core registry). Registration itself runs at import
 // time -- the compression-codec pattern -- because core's registry
-// cannot name node modules; the node Workspace and the config door both
+// cannot name node modules; the node Workspace and the config loader both
 // import this module, so either entry point arms the builtins.
 registerSecrets('env', EnvConfig, async (config, ref) =>
   (await import('./env.ts')).fetchEnv(config, ref),

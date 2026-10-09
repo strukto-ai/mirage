@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 # The reviewer's policy program, named by workspace.yaml. Any of the
-# three admission hooks may be defined; each is handed the door's facts
+# three admission hooks may be defined; each is handed the entry point's facts
 # as ctx and answers with return: None for no opinion, {"deny": reason}
 # to refuse. It runs on the engine the document names, and open() reads
 # through the workspace.

@@ -22,12 +22,12 @@ import { Workspace } from '../workspace.ts'
 
 // Disk carries a 60s index TTL, so a cached directory listing outlives a
 // mutation unless something evicts it. Both surfaces reach the same ops
-// through the same door: ws.dispatch and ws.vfs (the path patchNodeFs and
+// through the same entry point: ws.dispatch and ws.vfs (the path patchNodeFs and
 // FUSE use) both run the Dispatcher, which calls invalidateAfterWriteByPath
 // after every write op, mirroring Python's Dispatcher.invalidate_after_write.
 // That is the whole guarantee, and it is why the ops factory forwards the
-// index to every backend in both languages: the door that populates the
-// listing is the door that evicts it.
+// index to every backend in both languages: the entry point that populates the
+// listing is the entry point that evicts it.
 function diskWorkspace(): { ws: Workspace; cleanup: () => void } {
   const { root, cleanup } = tmpRoot('mirage-index-invalidation-')
   mkdirSync(join(root, 'seed'))

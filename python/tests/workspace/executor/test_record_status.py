@@ -26,7 +26,7 @@ from mirage.workspace.session import SessionState
 _SRC = pathlib.Path(__file__).resolve().parents[3] / "mirage"
 
 
-def test_every_status_write_goes_through_the_door():
+def test_every_status_write_goes_through_record_status():
     # `$?` and `${PIPESTATUS[@]}` are recorded together by record_status;
     # a direct write anywhere else would let the two disagree.
     offenders = []

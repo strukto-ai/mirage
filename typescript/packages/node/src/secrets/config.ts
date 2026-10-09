@@ -39,7 +39,7 @@ const AWS_SM_KEYS: Readonly<Record<string, string>> = {
  * A source's config keys travel raw out of yaml, spelled python's way
  * like a mount's are, so the four prefixed AWS keys reach this schema
  * as `aws_profile` and friends. The rename lives here rather than in
- * the config door because the door would impose it on every source's
+ * the config loader because the loader would impose it on every source's
  * model, a custom one included; this one is the only builtin whose
  * fields are more than a single word. Camel keys pass through, so a
  * TS caller building the config directly is unaffected.

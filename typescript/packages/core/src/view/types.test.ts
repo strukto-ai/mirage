@@ -39,7 +39,7 @@ describe('NamespaceLinks', () => {
   })
 
   it('carries no mutator', () => {
-    // Creating and removing a link belongs to the op door, which is the
+    // Creating and removing a link belongs to the dispatcher, which is the
     // only layer that sees both planes: it decides symlink(2)'s refusal
     // to overwrite an occupied name, and it is where session grants,
     // admission policies and the ledger fire. A mutator here is a write
@@ -60,7 +60,7 @@ describe('NamespaceLinks', () => {
 
   it('is still satisfied by the workspace Namespace', () => {
     // Narrowing the seam must not cost the structural match, and the
-    // concrete Namespace keeps the mutators the door calls on it.
+    // concrete Namespace keeps the mutators the dispatcher calls on it.
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     const links: NamespaceLinks = ws.namespace
     expect(links.symlinkTargets()).toBeInstanceOf(Map)

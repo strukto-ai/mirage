@@ -481,7 +481,7 @@ async function fileSystems(
   return [formatRecords(lines), io]
 }
 
-// statfs through the op door.
+// statfs through the dispatcher.
 async function dispatchedStatfs(
   dispatch: DispatchFn,
   path: PathSpec,

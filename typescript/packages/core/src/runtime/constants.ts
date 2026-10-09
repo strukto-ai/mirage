@@ -18,12 +18,12 @@ import type { FsCondition } from '../errors/index.ts'
 export const EXTERNAL_COMMANDS = '@external'
 
 /**
- * The most requests one runtime file door keeps in flight.
+ * The most requests one runtime file adapter keeps in flight.
  *
  * Classifying or preloading an entry is a request of its own on a
  * mount that keeps no listing index, so an unbounded listing puts a
  * whole directory's worth of requests on the wire together. Every
- * request a door sends shares the one cap, a preload walk's included.
+ * request an entry point sends shares the one cap, a preload walk's included.
  */
 export const LISTING_ENTRY_CONCURRENCY = 16
 

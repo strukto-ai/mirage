@@ -222,8 +222,8 @@ class TestMirageFile:
             MirageFile(ops, "/data/dir/nope.txt", "r")
 
     def test_a_create_under_a_missing_directory_carries_its_errno(self):
-        # The backend raises a bare FileNotFoundError; the door numbers it
-        # as open(2) would, so `except OSError as e: e.errno` holds.
+        # The backend raises a bare FileNotFoundError; the entry point numbers
+        # it as open(2) would, so `except OSError as e: e.errno` holds.
         ops, _ = make_ops_with_dir()
         with pytest.raises(FileNotFoundError) as caught:
             MirageFile(ops, "/data/dir/nope/f.txt", "w")

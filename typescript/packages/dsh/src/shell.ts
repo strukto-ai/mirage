@@ -557,7 +557,7 @@ export class MirageShellExecutor extends ShellExecutor {
    * workspace-write sandbox: reads and writes land only where mounts
    * (and their modes) allow. Declaring it lets sandbox-aware plugins
    * (dsh's permission presets) compose over this executor. A world
-   * holding a runtime with doors around the gate (the host `local`
+   * holding a runtime with entry points around the gate (the host `local`
    * python, a remote sandbox) voids that claim, so this answers
    * undefined then (the base contract's "does not sandbox") and those
    * plugins refuse to compose instead of trusting a lie.

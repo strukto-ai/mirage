@@ -32,14 +32,14 @@ from mirage.types import JsonValue
 
 @dataclass(frozen=True)
 class SSHConfig:
-    """Where the daemon's SSH door listens and whom it lets in.
+    """Where the daemon's SSH endpoint listens and whom it lets in.
 
-    The HTTPS route carries SSH whatever the port says; the TCP door
+    The HTTPS route carries SSH whatever the port says; the TCP endpoint
     opens only with a port.
 
     Args:
         port (int | None): TCP port; 0 asks the OS for a free one, None
-            keeps the TCP door shut.
+            keeps the TCP endpoint shut.
         host (str): interface to bind.
         host_key_file (Path): the server's private host key, minted on
             first start and kept, so clients' known_hosts stay valid.
@@ -99,7 +99,7 @@ def resolve_ssh_config(
     """Resolve the SSH settings.
 
     Per key the environment variable wins over the ``[daemon]`` table
-    in ``config.toml``, which wins over the default. The TCP door is
+    in ``config.toml``, which wins over the default. The TCP endpoint is
     off unless a port is set, so a daemon nobody configured for SSH
     never listens on a second port.
 
@@ -115,7 +115,7 @@ def resolve_ssh_config(
 
     Returns:
         SSHConfig: the resolved settings, with no port when the TCP
-            door is off.
+            entry point is off.
 
     Raises:
         SSHConfigError: the port is not an integer in range.

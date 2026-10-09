@@ -83,7 +83,7 @@ def test_line_allowed_reads_the_whole_line_and_skips_non_tools():
     assert not line_allowed(_ctx("git", tokens=("git", "push")), rules)
     # A word that is not a tool is never refused by an allow list.
     assert line_allowed(_ctx("cd", tokens=("cd", "/x"), tool=False), rules)
-    # A context built without the door's tokens reads the raw argv.
+    # A context built without the entry point's tokens reads the raw argv.
     raw = _ctx("git", ("push",))
     assert line_tokens(raw) == ("git", "push")
     assert not line_allowed(raw, rules)

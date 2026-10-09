@@ -89,7 +89,7 @@ async def _relay_write(
 ) -> None:
     """Write one whole file on the mount that owns it.
 
-    The door every generic writes through, which the transfer
+    The dispatcher every generic writes through, which the transfer
     commands call with ``data=`` and the archivers call positionally.
 
     Args:
@@ -228,7 +228,7 @@ def transfer_links_of(
 
     Args:
         links (LinkView): the namespace's symlink facts.
-        dispatch (DispatchFn): the op door.
+        dispatch (DispatchFn): the dispatcher.
         cwd (str): the directory a typed operand resolves against.
         visibility (Visibility | None): the session's visibility.
     """

@@ -79,7 +79,7 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -220,10 +220,10 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
     words = filter_words(inv)
     texts = without_filter_values(inv.texts, words)
     filtered = bool(words)
@@ -258,7 +258,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         list_only = list_mode_option(words) if flags.delete else None
         if list_only is not None:
             raise ListModeOnlyError(list_only)
-        repo, location = await opened(fl, doors)
+        repo, location = await opened(fl, view)
         cfg = await read_config(dispatch, location)
         keys = sort_keys(fl, configured_sort(cfg, b"tag"))
         filt = await asyncio.to_thread(ref_filter, repo, words)
@@ -354,7 +354,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 name,
                 target,
                 flags.message or "",
-                identity(fl, doors.session_view),
+                identity(fl, view.session_view),
                 int(time.time()),
             )
             pointed = written.id

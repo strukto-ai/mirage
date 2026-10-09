@@ -205,10 +205,10 @@ async def read_cli_file(
             raise ValueError(f"{option} needs standard input")
         return await materialize(inv.stdin)
     spec = PathSpec.from_str_path(raw, cwd=inv.cwd)
-    if inv.doors is None or inv.doors.dispatch is None:
+    if inv.view is None or inv.view.dispatch is None:
         raise ValueError(f"{option} needs a workspace to read files from")
     try:
-        data, _ = await inv.doors.dispatch("read", spec)
+        data, _ = await inv.view.dispatch("read", spec)
         return await materialize(data)
     except (FileNotFoundError, NotADirectoryError) as exc:
         raise ValueError(f"read {path}: {fs_strerror(exc)}") from None

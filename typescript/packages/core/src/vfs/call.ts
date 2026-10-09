@@ -17,7 +17,7 @@ import { type Declaration, Effect, Target } from './types.ts'
 
 const MARK = Symbol.for('mirage.vfsCall')
 
-// Removing or moving a name is what these calls do, and the door's link,
+// Removing or moving a name is what these calls do, and the dispatcher's link,
 // overlay and cache bookkeeping for it is keyed on their names.
 const NAMED: Partial<Record<Effect, readonly string[]>> = {
   [Effect.REMOVE]: ['unlink', 'rmdir'],
@@ -32,16 +32,16 @@ interface Marked {
  * Make a VFS method callable by name through the dispatcher.
  *
  * `ws.dispatch('search_abc', path)` reaches a method marked here through
- * every check the door runs: hidden paths, path rules, the mount's mode and
- * admission policies. The effect tells the door what the call does to the
+ * every check the dispatcher runs: hidden paths, path rules, the mount's mode and
+ * admission policies. The effect tells the dispatcher what the call does to the
  * mount, so a read-only mount refuses a write and a policy judges it as one.
  * A subclass overriding a marked method keeps the mark, so a backend writes
  * its `read` without repeating it.
  *
- * The built-in functions' marks are where the door's op classes come from:
+ * The built-in functions' marks are where the dispatcher's op classes come from:
  * which ops follow a link, create a name, run one at a time per path or stamp
  * an mtime is read off what they declare here. REMOVE belongs to `unlink` and
- * `rmdir` and RENAME to `rename`: what the door does around them (a link
+ * `rmdir` and RENAME to `rename`: what the dispatcher does around them (a link
  * removed rather than followed, a rename refused when it would bring hidden
  * entries into view, the links and cache below a moved directory) is keyed on
  * those names, so another function declaring either is refused. A VFS that deletes or moves defines those functions. `target` is the

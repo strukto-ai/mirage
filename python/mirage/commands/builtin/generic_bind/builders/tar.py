@@ -50,7 +50,7 @@ async def tar(
     fl = FlagView(opts.flags, spec=SPECS["tar"])
     if opts.dispatch is not None and not fl.as_bool("create"):
         # -t reads and -x writes wherever cwd or -C says, which needs
-        # not be this mount, so both run on dispatch-relayed doors and
+        # not be this mount, so both run on dispatch-relayed calls and
         # each path routes to the mount that owns it. Only -c stays on
         # the accessor: its planner walks this mount's tree.
         prim = transfer_primitives(opts.dispatch)

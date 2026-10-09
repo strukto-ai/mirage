@@ -39,7 +39,7 @@ def coerce_read_policy(value: "str | ReadPolicy | None") -> ReadPolicy:
         return ReadPolicy.BOUNDED
     # Already coerced: `str()` of a (str, Enum) member renders as
     # "ReadPolicy.BOUNDED", so re-coercing one would refuse it. The
-    # config door validates the field and then builds the spec, so the
+    # config loader validates the field and then builds the spec, so the
     # value arrives here twice. Mirrors `_coerce_mount_mode`.
     if isinstance(value, ReadPolicy):
         return value
@@ -60,7 +60,7 @@ def coerce_read_policy(value: "str | ReadPolicy | None") -> ReadPolicy:
 def coerce_read_ttl(value: JsonValue) -> int:
     """Coerce a declared bound to a whole number of seconds.
 
-    Every door that reads a bound off a document runs this, so one
+    Every loader that reads a bound off a document runs this, so one
     scalar is judged the same whether it came from YAML or from a
     snapshot's JSON.
 
@@ -101,7 +101,7 @@ def resolve_read_spec(
     resolved policy is one this mount's backend can honour is
     ``check_read_capability``'s question. The two are split the way
     ``fuse/backend.py`` splits ``resolve_backend`` from
-    ``require_kernel_backend``, so the config door and the mount door
+    ``require_kernel_backend``, so the config loader and the mount entry point
     each run exactly one of them and a refusal is computed once.
 
     Missing means bounded at the default bound, everywhere: an absent
@@ -166,7 +166,7 @@ def check_read_capability(
     # Coerced, not compared raw. `ReadPolicy` is a (str, Enum) and
     # `ReadSpec` coerces nothing, so an embedder's
     # `ReadSpec(policy="fresh")` would match neither `is` below and the
-    # whole verdict would silently no-op on the one door -- the
+    # whole verdict would silently no-op on the one path -- the
     # programmatic one -- that does not pass through `resolve_read_spec`.
     # Idempotent on a member, and it refuses a name that is not a policy
     # at all. `MountEntry` stores the coerced spec for the same reason.
@@ -178,7 +178,7 @@ def check_read_capability(
     policy = coerce_read_policy(spec.policy)
     # Before the policy dispatch, because a bound has to be usable
     # whatever the policy is. `resolve_read_spec` refuses a bad one at
-    # the YAML and snapshot doors, but a `ReadSpec` handed straight to
+    # the YAML and snapshot loaders, but a `ReadSpec` handed straight to
     # `Workspace` or `add_mount` never passes through it, and a mount
     # taking ttl=0 accepts every write and keeps nothing: RAM marks the
     # entry expired as it is written and redis deletes the key outright,

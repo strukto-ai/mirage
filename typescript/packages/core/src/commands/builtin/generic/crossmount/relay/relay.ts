@@ -53,7 +53,7 @@ export async function runRelay(
   // overlay, child mounts) and for the archivers' scan (tar, zip: links,
   // mount boundaries).
   ns?: NamespaceView,
-  // The session plane's door, for the generic that renders the session's
+  // The session view, for the generic that renders the session's
   // profile (ls -l).
   sessionView?: SessionView,
   stdin: ByteSource | null = null,

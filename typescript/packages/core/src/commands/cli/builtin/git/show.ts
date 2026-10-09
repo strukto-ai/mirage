@@ -223,13 +223,13 @@ async function commitEntry(
  * that changes nothing they name prints nothing at all.
  */
 export async function show(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
     checkOperands(inv, texts)
     const [revisions, paths] = splitMarked(texts, inv.argv)
-    const repo = await opened(fl, doors)
+    const repo = await opened(fl, view)
     const base = parseShowFlags(
       fl,
       await renamesEnabled(repo),
@@ -302,7 +302,7 @@ export async function diffTree(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
     if (optionOperand(inv, inv.texts) !== null) throw new UsageError('', verbUsage(inv))
-    const repo = await opened(fl, inv.doors ?? {})
+    const repo = await opened(fl, inv.view ?? {})
     const parsed = parseDiffFlags(
       fl,
       false,

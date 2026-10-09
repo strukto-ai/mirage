@@ -82,8 +82,8 @@ interface KeyOption {
  * The public keys allowed to log in, read fresh for every attempt so a key
  * added or revoked takes effect on the next login. A line that cannot be
  * read is skipped with a warning. `mirage-profile` and `mirage-account`
- * are the OpenSSH-style key options this door reads; a line carrying any
- * other (`command=`, `from=`, ...) is skipped too, since the door does not
+ * are the OpenSSH-style key options this endpoint reads; a line carrying any
+ * other (`command=`, `from=`, ...) is skipped too, since the endpoint does not
  * honor it and so will not accept the key as if it were absent.
  */
 export async function readAuthorizedKeys(
@@ -328,7 +328,7 @@ export async function startSSHServer(
   config: SSHConfig,
 ): Promise<SSHListener> {
   const listenPort = config.port
-  if (listenPort === null) throw new Error('the SSH door needs ssh_port')
+  if (listenPort === null) throw new Error('the SSH endpoint needs ssh_port')
   const ssh2 = await loadSsh2()
   try {
     await access(config.authorizedKeysFile)

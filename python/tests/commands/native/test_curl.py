@@ -545,14 +545,14 @@ def test_dump_header_file_gets_the_headers_and_stdout_the_body(monkeypatch):
     assert io.writes == {"/tmp/h": RESPONSE_DUMP.encode()}
 
 
-def test_dump_header_file_is_written_through_the_door(monkeypatch):
+def test_dump_header_file_is_written_through_the_dispatcher(monkeypatch):
     _stub(monkeypatch)
     written: list[tuple[str, bytes]] = []
 
-    async def door(op, scope, **kwargs):
+    async def dispatch(op, scope, **kwargs):
         written.append((scope.virtual, kwargs["data"]))
 
-    body, io = _run("http://x.test/f", dump_header="/tmp/h", dispatch=door)
+    body, io = _run("http://x.test/f", dump_header="/tmp/h", dispatch=dispatch)
     assert body == b"hello body"
     assert written == [("/tmp/h", RESPONSE_DUMP.encode())]
     assert io.exit_code == 0

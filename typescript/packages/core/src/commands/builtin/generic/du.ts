@@ -288,7 +288,7 @@ async function duOperands(
     try {
       exists = await duOperandExists(path, stattable, hasContent, statPath)
     } catch (err) {
-      // The door refuses to stat it: GNU names the errno it got
+      // The dispatcher refuses to stat it: GNU names the errno it got
       // (`du: cannot access 'P': Permission denied`).
       if ((err as { code?: string }).code !== 'EACCES') throw err
       missing.push([path.rawPath, fsStrerror(err) ?? posixPhrase('EACCES')])

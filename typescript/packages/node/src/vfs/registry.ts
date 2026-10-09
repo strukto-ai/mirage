@@ -418,7 +418,7 @@ export async function buildVfs(
   // A `{from, ref, key}` in the config is fetched here, before the
   // VFS's own schema parses, so every credential reaches its
   // client as the plain string it already reads. Python resolves one
-  // step earlier, in its config door (`resolve_secrets`), because
+  // step earlier, in its config loader (`resolve_secrets`), because
   // `build_vfs` is sync by rule there. A config with no pointer
   // does no I/O.
   const resolved = await resolveConfigSecrets(config, sources, `mounts.${name}.config`)

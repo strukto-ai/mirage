@@ -25,7 +25,7 @@ const unzip: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   const dispatch = opts.dispatch
   if (dispatch !== undefined) {
     // Extraction writes wherever cwd or -d says, which need not be
-    // this mount, so the doors are dispatch-relayed and each path
+    // this mount, so the functions are dispatch-relayed and each path
     // routes to the mount that owns it.
     const readBytes = readBytesOp(dispatch)
     async function* streamOf(p: PathSpec): AsyncIterable<Uint8Array> {

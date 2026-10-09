@@ -108,7 +108,7 @@ const PYTHON_OPTIONS: readonly Option[] = [
 // first operand is a file the interpreter reads, unless a -c or -m
 // already named the program, and the words after it are the program's
 // argv. The slot has to say so, because a runtime that reads the script
-// itself (a sandbox, a host process) is outside every op door, so the
+// itself (a sandbox, a host process) is outside every dispatcher, so the
 // admission gate is the one place a path rule can see the file.
 const PYTHON_SCRIPT = new Operand({ type: 'path', providedBy: ['-c', '-m'] })
 

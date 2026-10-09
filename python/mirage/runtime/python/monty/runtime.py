@@ -60,7 +60,7 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
     version_suffix = " (monty)"
     # The pooled worker subprocess exists for crash isolation, not
     # host access: the interpreter inside it has no host filesystem,
-    # environment, or network door, and its file I/O is serviced only
+    # environment, or network entry point, and its file I/O is serviced only
     # through the workspace dispatch, so nothing goes around the gate.
     reach: RuntimeReach = "workspace"
     filesystem: ClassVar[tuple[FilesystemOperation, ...]] = (

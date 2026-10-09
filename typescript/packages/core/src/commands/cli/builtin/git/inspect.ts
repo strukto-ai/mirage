@@ -72,7 +72,7 @@ export async function remote(inv: CLIInvocation): Promise<CommandFnResult> {
     if (word === 'get-url') return await remoteGetUrl(inv)
     checkOperands(inv, inv.texts)
     if (word !== undefined) throw new UnknownSubcommandError(word, verbUsage(inv))
-    const repo = await opened(fl, inv.doors ?? {})
+    const repo = await opened(fl, inv.view ?? {})
     const rows = (await git.listRemotes(repoArgs(repo))).sort((a, b) =>
       compareCodePoints(a.remote, b.remote),
     )
@@ -166,7 +166,7 @@ export async function remoteGetUrl(inv: CLIInvocation): Promise<CommandFnResult>
     if (names.length !== 1 || name === undefined)
       throw new UsageError('', gitUsage('remote get-url', GET_URL))
     const fl = new FlagView(parseToKwargs(parsed), GET_URL)
-    const repo = await opened(new FlagView(inv.flags), inv.doors ?? {})
+    const repo = await opened(new FlagView(inv.flags), inv.view ?? {})
     const cfg = await configLines(
       new TextDecoder().decode(
         await readFile(repo.dispatch, repo.location.commondir.join('config')),
@@ -199,7 +199,7 @@ export async function globalSources(
   inv: CLIInvocation,
   listing: boolean,
 ): Promise<{ source: string; data: Uint8Array }[]> {
-  const dispatch = inv.doors?.dispatch
+  const dispatch = inv.view?.dispatch
   if (!dispatch) throw new NoWorkspaceError()
   const home = inv.env.HOME ?? ''
   const override = inv.env.GIT_CONFIG_GLOBAL
@@ -223,7 +223,7 @@ export async function config(inv: CLIInvocation): Promise<CommandFnResult> {
     let sources: { source: string; data: Uint8Array }[]
     if (fl.asBool('global')) sources = await globalSources(inv, fl.asBool('list'))
     else {
-      const repo = await opened(fl, inv.doors ?? {})
+      const repo = await opened(fl, inv.view ?? {})
       const path = repo.location.commondir.join(`config`)
       const ordinary =
         repo.location.commondir.virtual === repo.location.worktree.virtual + '/.git' &&
@@ -284,7 +284,7 @@ export async function showRef(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
     checkSwitches(inv, inv.texts)
-    const repo = await opened(fl, inv.doors ?? {})
+    const repo = await opened(fl, inv.view ?? {})
     const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
     const lines: string[] = []
     for (const ref of [...refs.keys()]
@@ -315,7 +315,7 @@ export async function revList(inv: CLIInvocation): Promise<CommandFnResult> {
     if (optionOperand(inv, inv.texts, sole ? STDOUT : STDERR) !== null) {
       throw new UsageError('', verbUsage(inv))
     }
-    const repo = await opened(fl, inv.doors ?? {})
+    const repo = await opened(fl, inv.view ?? {})
     const flags = parseFlags(fl)
     if (!inv.texts.length && !flags.allRefs) throw new UsageError('', verbUsage(inv))
     const [shown, hidden] = await splitRevisions(repo, inv.texts)
@@ -460,7 +460,7 @@ export async function revParse(inv: CLIInvocation): Promise<CommandFnResult> {
     const toplevel = named.includes(SHOW_TOPLEVEL)
     const mode = fl.raw('abbrev_ref')
     if (typeof mode === 'string') abbrevStrict(mode, true)
-    repo = await opened(fl, inv.doors ?? {}, toplevel)
+    repo = await opened(fl, inv.view ?? {}, toplevel)
     const start = startPoint(fl).virtual
     if (
       toplevel &&

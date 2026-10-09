@@ -653,7 +653,7 @@ async def clone_cmd(
         flags=flags,
         stdin=inv.stdin,
         env=inv.env,
-        doors=inv.doors,
+        view=inv.view,
         spec=leaf,
     )
     return await git_clone(git, token_header(inv.config))

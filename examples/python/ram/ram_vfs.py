@@ -59,7 +59,7 @@ async def main():
     with ws:
         print("=== VFS MODE ===\n")
 
-        # The doors are installed on the real `os` module, not swapped
+        # The entry points are installed on the real `os` module, not swapped
         # into sys.modules, so this file's own import routes.
         print("--- import os ---")
         print(f"  patched in place: {os.listdir is not HOST_LISTDIR}")

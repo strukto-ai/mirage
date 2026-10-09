@@ -24,7 +24,7 @@ import type { CrossResult, DispatchFn } from '../types.ts'
 /**
  * Run a zip whose archive and operands span mounts.
  *
- * Pure wiring: the shared generic plans on dispatch-relayed doors, so
+ * Pure wiring: the shared generic plans on dispatch-relayed calls, so
  * each operand is walked on the mount that owns it and the archive lands
  * on its own. The scan still stops at a mount nested under an operand,
  * exactly as it does when the whole line is on one mount.

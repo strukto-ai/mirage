@@ -80,7 +80,7 @@ export function perRepoModels(): string[] {
   return deleteOrder(dmmf).filter((name) => holdsRepo.has(name))
 }
 
-// One typed door onto a delegate named at runtime. The two lifecycle walks are
+// One typed handle onto a delegate named at runtime. The two lifecycle walks are
 // the only callers, and both do exactly these two things.
 interface RepoScopedDelegate {
   updateMany(args: { where: Record<string, string>; data: { repo: string } }): Promise<unknown>

@@ -39,7 +39,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
@@ -61,13 +61,13 @@ async def ls_files(
     fl = FlagView(inv.flags)
     try:
         check_switches(inv, inv.texts)
-        doors = inv.doors or CLIDoors()
-        _, location = await opened(fl, doors)
-        assert doors.dispatch is not None
+        view = inv.view or CLIView()
+        _, location = await opened(fl, view)
+        assert view.dispatch is not None
         fully = await config_bool(
-            doors.dispatch, location, b"core", b"quotepath", True
+            view.dispatch, location, b"core", b"quotepath", True
         )
-        state = await read_index(doors.dispatch, location.gitdir)
+        state = await read_index(view.dispatch, location.gitdir)
         start = start_point(fl).virtual
         prefix = repo_relative(location, start, ".")
         patterns = pathspec_patterns(location, start, inv.texts)
@@ -112,9 +112,9 @@ async def ls_tree(
         check_switches(inv, inv.texts)
         if not inv.texts:
             raise UsageError("", verb_usage(inv))
-        doors = inv.doors or CLIDoors()
-        repo, location = await opened(fl, doors)
-        assert doors.dispatch is not None
+        view = inv.view or CLIView()
+        repo, location = await opened(fl, view)
+        assert view.dispatch is not None
         name, *paths = inv.texts
         try:
             tree = await asyncio.to_thread(resolve_tree, repo, name)
@@ -148,7 +148,7 @@ async def ls_tree(
             fl.as_bool("d"),
         )
         fully = await config_bool(
-            doors.dispatch, location, b"core", b"quotepath", True
+            view.dispatch, location, b"core", b"quotepath", True
         )
         nul = fl.as_bool("z")
         names = fl.as_bool("name_only") or fl.as_bool("name_status")

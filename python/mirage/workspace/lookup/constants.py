@@ -566,7 +566,7 @@ def ls_link_mode(words: Sequence[str | PathSpec]) -> LsLinkMode:
 # mkdir is naming something that must not exist yet -- resolving its
 # last component would make `mkdir -p dangle` create the link's missing
 # target where GNU answers "File exists". getfattr and setfattr read -h
-# off their own line and hand the door the link or its target.
+# off their own line and hand the dispatcher the link or its target.
 # A trailing slash still applies: these are lstat-by-default, not
 # slash-proof (`touch dlink/` succeeds against the target directory,
 # `touch flink/` is "Not a directory"), which is why they are separate

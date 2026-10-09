@@ -108,7 +108,7 @@ describe('RulePolicy preVfs twin', () => {
   }
 
   it('holds for path-only rules', () => {
-    // Pure path protection also fires at the op door, so FUSE and
+    // Pure path protection also fires at the dispatcher, so FUSE and
     // programmatic ops cannot bypass it.
     const policy = new RulePolicy({ reason: 'frozen', paths: ['/data/locked/*'] })
     const deny = policy.preVfs(opsCtx('/data/locked/a'))

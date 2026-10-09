@@ -83,7 +83,7 @@ async def run_relay(
         ns (NamespaceView | None): Name-plane facts for the generics that
             render them (ls: links, attr overlay, child mounts) and for
             the archivers' scan (tar, zip: links, mount boundaries).
-        session_view (SessionView | None): The session plane's door, for
+        session_view (SessionView | None): The session view, for
             the generic that renders the session's profile (ls -l).
         stdin (ByteSource | None): The line's input, which a ``-``
             operand reads.

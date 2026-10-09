@@ -114,11 +114,11 @@ def _load_ssh_starter() -> StartSSH:
 
 
 async def _start_ssh(app: FastAPI) -> SSHListener | None:
-    """Open the SSH door when one is configured.
+    """Open the SSH endpoint when one is configured.
 
-    A configured door that cannot open (the port is taken, asyncssh is
+    A configured entry point that cannot open (the port is taken, asyncssh is
     missing) fails the daemon's start rather than leaving it up without
-    the door its config asked for.
+    the entry point its config asked for.
 
     Args:
         app (FastAPI): the daemon app.
@@ -211,7 +211,7 @@ def build_app(
         pid_file (str | Path | None): a file to hold the process id
             while the app runs. ``None`` (default) writes none; the
             daemon passes ``$MIRAGE_HOME/daemon.pid``.
-        ssh_config (SSHConfig | None): the SSH door, opened with the
+        ssh_config (SSHConfig | None): the SSH endpoint, opened with the
             app's lifespan. ``None`` (default) resolves it from the
             ``MIRAGE_SSH_*`` env vars and the ``ssh_*`` config keys; it
             stays shut unless a port is set.

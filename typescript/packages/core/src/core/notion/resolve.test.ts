@@ -6,7 +6,7 @@ import { read } from './read.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 
-const doors = [
+const routes = [
   [stat, ''],
   [stat, '/page.json'],
   [readdir, ''],
@@ -17,9 +17,9 @@ const doors = [
 ] as const
 
 it.each(['title', 'parent', 'trash', 'archived'])(
-  'validates a row at every door: %s',
+  'validates a row at every entry point: %s',
   async (change) => {
-    for (const [operation, suffix] of doors) {
+    for (const [operation, suffix] of routes) {
       const calls: string[] = []
       const accessor = {
         transport: {

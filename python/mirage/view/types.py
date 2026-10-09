@@ -68,7 +68,7 @@ EnvGet = Callable[[str], "str | None"]
 EnvSnapshot = Callable[[], dict[str, str]]
 # Write one variable through the session plane (readonly + pre_session).
 # General over variable shapes: a string stores a scalar, a ShellArray
-# stores a whole array, and the door keeps the two storages exclusive.
+# stores a whole array, and the session view keeps the two storages exclusive.
 # Writers with richer mechanics (subscripts, appends, holes) compute the
 # resulting value on a copy and hand it here, so a denial never leaves a
 # half-applied write. A Protocol rather than a Callable alias so the
@@ -148,7 +148,7 @@ class SessionView:
     session behind it.
 
     Delivered as the ``session_view`` field of ``CommandOpts`` and of
-    ``CLIDoors``; a command opts in by reading it, and one that never
+    ``CLIView``; a command opts in by reading it, and one that never
     reads it cannot write the session. The name is not ``env`` because
     the snapshot has that one.
     """
@@ -222,14 +222,14 @@ class NamespaceLinks(Protocol):
     modules).
 
     Read-only, and the TypeScript twin declares the same five members
-    in the same order. A link is created and removed through the op
-    door (``Files.symlink``, ``Files.unlink``), never here: the door is the
-    only layer that sees both planes, so it is where symlink(2)'s
-    refusal to overwrite an occupied name is decided, and where session
-    grants, admission policies and the op ledger fire. A mutator on
+    in the same order. A link is created and removed through the
+    dispatcher (``Files.symlink``, ``Files.unlink``), never here: the
+    dispatcher is the only layer that sees both planes, so it is where
+    symlink(2)'s refusal to overwrite an occupied name is decided, and where
+    session grants, admission policies and the op ledger fire. A mutator on
     this seam is a write at a layer no session view covers, which is
     how a session-scoped kernel mount came to delete a link on a mount
-    its profile hides. Routing through the door costs a caller nothing:
+    its profile hides. Routing through the dispatcher costs a caller nothing:
     the dispatcher already answers ``unlink`` on a link path, because
     ``unlink`` is in ``LINK_ENTRY_OPS``.
     """
@@ -318,7 +318,7 @@ class NamespaceView:
     ``run_command``, every builder, and the generic.
 
     Delivered as ``CommandOpts.ns`` to every command handler and as
-    ``CLIDoors.ns`` to a CLI verb; a command opts in by reading the
+    ``CLIView.ns`` to a CLI verb; a command opts in by reading the
     field it wants, so there is no signature for the dispatcher to
     inspect and no registry to keep in step. Fields default to None so
     a unit test constructs only what it exercises; inside a workspace

@@ -16,7 +16,7 @@
 class ReadonlyVariableError(Exception):
     """A write to a name ``readonly`` has marked.
 
-    Raised by the session door so every writer refuses the same way;
+    Raised by the session view so every writer refuses the same way;
     each builtin catches it and renders its own bash wording. Its
     message is bash's plain refusal, which a line that does not catch it
     reports as it ends (``declare -i n; n='R=3'``).

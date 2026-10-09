@@ -559,18 +559,18 @@ async def test_xattr_follows_rename(seed_ws):
 
 @pytest.mark.asyncio
 async def test_xattr_is_the_same_attribute_every_surface_reads(seed_ws):
-    # The kernel's attribute is the door's, not an advisory copy held
+    # The kernel's attribute is the dispatcher's, not an advisory copy held
     # for the mount's lifetime: the shell and a guest read what the
     # mountpoint wrote, and the mountpoint reads what they wrote.
     fs = MirageFS(seed_ws.vfs)
     fs.setxattr("/a.txt", "user.kernel", b"k", 0)
     assert await seed_ws.vfs.getxattr("/a.txt", "user.kernel") == b"k"
-    await seed_ws.vfs.setxattr("/a.txt", "user.door", b"d")
-    assert fs.getxattr("/a.txt", "user.door") == b"d"
+    await seed_ws.vfs.setxattr("/a.txt", "user.vfs", b"d")
+    assert fs.getxattr("/a.txt", "user.vfs") == b"d"
 
 
 @pytest.mark.asyncio
-async def test_xattr_create_and_replace_flags_reach_the_door(seed_ws):
+async def test_xattr_create_and_replace_flags_reach_the_dispatcher(seed_ws):
     fs = MirageFS(seed_ws.vfs)
     fs.setxattr("/a.txt", "user.once", b"1", XATTR_CREATE)
     with pytest.raises(OSError) as exists:

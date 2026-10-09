@@ -1,5 +1,5 @@
 const __join = (a) => a.map(String).join(' ')
-// The host's string door is a C string: text with a NUL in it crosses
+// The host's string channel is a C string: text with a NUL in it crosses
 // as the pieces between its NULs.
 const __text = (v) => (typeof v === 'string' ? v : v.join('\0'))
 const __pieces = (s) => (s.includes('\0') ? s.split('\0') : s)

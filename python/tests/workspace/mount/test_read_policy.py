@@ -95,7 +95,7 @@ def test_empty_policy_reads_as_absent():
 def test_an_already_coerced_policy_passes_through():
     # str() of a (str, Enum) member is "ReadPolicy.BOUNDED", so a second
     # coercion of an already-coerced value would refuse it. The config
-    # door validates the field and then builds the spec, so it happens.
+    # loader validates the field and then builds the spec, so it happens.
     assert coerce_read_policy(ReadPolicy.FRESH) is ReadPolicy.FRESH
     assert resolve_read_spec(ReadPolicy.BOUNDED, 30) == ReadSpec(
         policy=ReadPolicy.BOUNDED, ttl=30
@@ -149,7 +149,7 @@ def test_unknown_policy_names_the_known_ones():
     ],
 )
 def test_the_verdict_refuses_a_bound_no_mount_could_use(bad, message):
-    """The programmatic door bypasses ``resolve_read_spec`` entirely.
+    """The programmatic entry point bypasses ``resolve_read_spec`` entirely.
 
     A `ReadSpec` handed straight to `Workspace` or `add_mount` never
     passes through the coercer, so before this the mount was accepted
@@ -164,7 +164,7 @@ def test_the_verdict_refuses_a_bound_no_mount_could_use(bad, message):
         check_read_capability("/d/", RAMVFS(), spec)
 
 
-def test_a_bad_bound_is_refused_at_the_workspace_door_too():
+def test_a_bad_bound_is_refused_by_the_workspace_constructor_too():
     with pytest.raises(ValueError, match="at least 1 second"):
         Workspace(
             {"/d": RAMVFS()},
@@ -179,7 +179,7 @@ def test_a_wire_string_policy_is_judged_like_the_enum(policy):
 
     An embedder writing ``ReadSpec(policy="fresh")`` against the public
     API matched neither `is` in the verdict, so the whole check silently
-    no-opped on the one door that skips ``resolve_read_spec``. On a
+    no-opped on the one path that skips ``resolve_read_spec``. On a
     backend that *can* revalidate it was worse: the mount passed and
     then read as `bounded` everywhere downstream, which is the silent
     downgrade this policy exists to remove.
@@ -202,7 +202,7 @@ def test_a_mount_stores_the_coerced_policy_not_the_wire_string():
     assert mount.read.policy is ReadPolicy.FRESH
 
 
-def test_the_two_doors_refuse_a_doubly_bad_config_the_same_way():
+def test_the_two_entry_points_refuse_a_doubly_bad_config_the_same_way():
     # TypeScript's `resolveReadSpec` names the policy first; python has
     # to agree, or one document yields two different refusals across the
     # shared config fixtures.
@@ -211,7 +211,7 @@ def test_the_two_doors_refuse_a_doubly_bad_config_the_same_way():
 
 
 def test_the_verdict_names_the_policy_before_the_bound():
-    """The coercer's order, applied at the mount door too.
+    """The coercer's order, applied at the mount entry point too.
 
     `check_read_capability` judged the bound first while
     `checkReadCapability` judged the policy first, so one

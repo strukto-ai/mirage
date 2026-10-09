@@ -94,7 +94,7 @@ function visible(
 
 // One operand of a multi-operand cat: a read that fails once the stat passed
 // (a table past its read cap) is reported like a missing operand, and the
-// next operand still prints. The door keeps only a read that ends, so
+// next operand still prints. The dispatcher keeps only a read that ends, so
 // nothing partial reaches the cache. Mirrors the python non-local loop in
 // cat_generic.
 async function* reported(

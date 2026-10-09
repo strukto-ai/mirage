@@ -41,4 +41,4 @@ async def reply(
         ),
         quote_headline=fl.as_str("quote_headline") or "",
     )
-    return await route(inv.config, fl, inv.stdin, source, inv.doors)
+    return await route(inv.config, fl, inv.stdin, source, inv.view)

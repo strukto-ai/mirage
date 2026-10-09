@@ -14,14 +14,14 @@
 
 import type { SSHConfig } from './config.ts'
 
-/** A running SSH door, as the daemon holds it. */
+/** A running SSH endpoint, as the daemon holds it. */
 export interface SSHListener {
   readonly port: number
   close(): Promise<void>
 }
 
-/** The daemon's SSH door: its config, and the listener once it is open. */
-export interface SSHDoor {
+/** The daemon's SSH endpoint: its config, and the listener once it is open. */
+export interface SSHEndpoint {
   readonly config: SSHConfig
   listener: SSHListener | null
 }

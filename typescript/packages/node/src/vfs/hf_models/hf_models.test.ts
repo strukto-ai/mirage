@@ -27,7 +27,7 @@ import { HfModelsVFS } from './hf_models.ts'
 const OPS = ['glob', 'read', 'readdir', 'stat']
 
 // The mount is read-only, so the byte-mutation functions are absent exactly
-// as they are from python's. The op door, which a shell command bypasses,
+// as they are from python's. The dispatcher, which a shell command bypasses,
 // answers `dispatch('write', ...)` and the FUSE adapter, so asserting the
 // absence here is what keeps the two channels agreeing. A Hub write belongs
 // to the `hf` CLI rather than to a POSIX write.

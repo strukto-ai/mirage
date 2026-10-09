@@ -88,7 +88,7 @@ async def handle_setfattr(
     exactly one of the two, with ``-v`` only beside ``-n``, or the usage
     block and exit 2. A malformed hex or base64 value is ``bad input
     encoding``, exit 1. A failure on one path is reported and the rest
-    are still written. The attribute lands on the op door's node table,
+    are still written. The attribute lands on the dispatcher's node table,
     which takes any name on any path (a link's own with ``-h``), as
     macOS does; Linux refuses a name outside its namespaces and a user
     attribute on a link.

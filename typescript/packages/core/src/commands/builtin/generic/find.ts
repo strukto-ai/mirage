@@ -436,7 +436,7 @@ export function findGeneric(
         try {
           start = await startStat(root.virtual)
         } catch (err) {
-          // A start point the door refuses to stat is GNU's own
+          // A start point the dispatcher refuses to stat is GNU's own
           // diagnostic for it, quoted like a missing one
           // (`find: 'P': Permission denied`), not an escaped error.
           const detail = fsStrerror(err)

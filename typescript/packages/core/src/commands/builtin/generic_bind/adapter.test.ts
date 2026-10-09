@@ -395,14 +395,14 @@ describe('withDispatchRuleGuard', () => {
       resolved: true,
     })
 
-  it('marks an op with the bound gate for the door to judge', async () => {
+  it('marks an op with the bound gate for the dispatcher to judge', async () => {
     const seen: [string, unknown][] = []
-    const door: DispatchFn = (op, _path, _args, kwargs) => {
+    const inner: DispatchFn = (op, _path, _args, kwargs) => {
       seen.push([op, kwargs?.ruleGate])
       return Promise.resolve([null, new IOResult()])
     }
-    const dispatch = withDispatchRuleGuard(door)
-    // No gate bound: the op goes to the door unmarked.
+    const dispatch = withDispatchRuleGuard(inner)
+    // No gate bound: the op goes to the dispatcher unmarked.
     await dispatch('read', spec('/data/f'))
     const asked: string[] = []
     const gate = {
@@ -424,7 +424,7 @@ describe('withDispatchRuleGuard', () => {
       ['read', gate],
       ['stat', undefined],
     ])
-    // The wrapper judges nothing itself: the door does, on its own paths.
+    // The wrapper judges nothing itself: the dispatcher does, on its own paths.
     expect(asked).toEqual([])
   })
 })
@@ -517,7 +517,7 @@ describe('withPolicyGuard', () => {
     await runWithOpPolicies(new Policies([policy]), () =>
       runWithMountGate('/data', MountMode.WRITE, async () => {
         const ops = withPolicyGuard(raw)
-        // Content reads are the door's, which admits them itself.
+        // Content reads are the dispatcher's, which admits them itself.
         expect(ops.readBytes).toBe(raw.readBytes)
         expect(ops.readStream).toBe(raw.readStream)
         // stat is not a guarded slot: deny is present and refused.

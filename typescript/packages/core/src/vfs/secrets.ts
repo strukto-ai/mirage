@@ -73,7 +73,7 @@ export function secretSchema<T extends z.ZodType>(schema: T): T {
 }
 
 /**
- * The one door a mount config comes through: rename the python-side
+ * The one loader a mount config comes through: rename the python-side
  * spellings, then validate.
  *
  * Every `normalize*Config` is this call with its schema, so a config that

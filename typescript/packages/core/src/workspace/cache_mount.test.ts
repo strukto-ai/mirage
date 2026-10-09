@@ -164,10 +164,10 @@ describe('the mount bound reaches the cache through a shell read', () => {
     }
   })
 
-  // `applyIo` with no captured function is the embedder's door
+  // `applyIo` with no captured function is the embedder's entry point
   // (`cacheFactsFor`, resolved live). Only `captureCacheFacts`, reached
   // through a shell line, is exercised by the tests above.
-  it('reads the mount bound at the live cache-facts door too', async () => {
+  it('reads the mount bound at the live cache-facts entry point too', async () => {
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
     const ws = new Workspace(
@@ -180,7 +180,7 @@ describe('the mount bound reaches the cache through a shell read', () => {
       { mode: MountMode.WRITE },
     )
     try {
-      // `dispatcher` is private; the embedder reaches this door through
+      // `dispatcher` is private; the embedder reaches this entry point through
       // `applyIo`, which defaults to `cacheFactsFor`.
       const disp = (ws as unknown as { dispatcher: Dispatcher }).dispatcher
       await disp.applyIo(
@@ -284,9 +284,9 @@ describe('namespace orphan GC on remote delete', () => {
   })
 })
 
-describe('a guarded cp reads at the door', () => {
+describe('a guarded cp reads through the dispatcher', () => {
   it('copies what cat serves under bounded', async () => {
-    // The hide forces `cp` onto the primitive walk, which reads at the door
+    // The hide forces `cp` onto the primitive walk, which reads through the dispatcher
     // like every command, so a trusted entry is what both copy and print.
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true

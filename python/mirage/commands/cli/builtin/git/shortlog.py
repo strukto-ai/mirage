@@ -25,7 +25,7 @@ from mirage.commands.cli.builtin.git.util import (
     option_operand,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 
@@ -88,10 +88,10 @@ async def shortlog(
         word = option_operand(inv, inv.texts)
         if word is not None:
             raise ShortlogOptionError(word, verb_usage(inv))
-        doors = inv.doors or CLIDoors()
-        repo, location = await opened(fl, doors)
-        assert doors.dispatch is not None
-        mailmap = await load_mailmap(doors.dispatch, location)
+        view = inv.view or CLIView()
+        repo, location = await opened(fl, view)
+        assert view.dispatch is not None
+        mailmap = await load_mailmap(view.dispatch, location)
         out = await asyncio.to_thread(
             _summary,
             repo,

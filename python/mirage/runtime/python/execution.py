@@ -23,7 +23,7 @@ def main_filename(args: RunArgs) -> str | None:
     """The file CPython runs a program from, named the way it names it.
 
     A script and a program piped to stdin both come through CPython's
-    file door, which binds ``__file__`` to the file's name and compiles
+    file adapter, which binds ``__file__`` to the file's name and compiles
     every frame under it: the script operand made absolute against the
     working directory as typed, never normalized (``./s.py`` under /w
     is ``/w/./s.py``), or ``<stdin>`` for either stdin spelling. A
@@ -32,7 +32,7 @@ def main_filename(args: RunArgs) -> str | None:
 
     Args:
         args (RunArgs): the run, whose ``script_path`` and ``prog`` say
-            which door the source came through.
+            which entry point the source came through.
     """
     script = args.script_path
     if script is None:
@@ -52,11 +52,11 @@ def prepare_source(args: RunArgs, *, search_path: bool = False) -> str:
     the source comes off a mount and may not exist on the host at all.
     CPython then hardcodes argv[0] to "-c", names every frame "<string>"
     and binds no ``__file__``, which is right for a payload and wrong for
-    the other three doors: a script must see its own path in argv[0] and
+    the other three entry points: a script must see its own path in argv[0] and
     ``__file__``, and its own name in a traceback.
 
     Re-compiling under the real name fixes the frames, and the preamble
-    binds only what CPython's own file door binds (``__file__`` and
+    binds only what CPython's own file adapter binds (``__file__`` and
     ``__cached__``): `__import__` is called, not imported, and the
     program execs into `globals()`, which is `__main__`'s own dict, so it
     runs in the module identity CPython would have given it.

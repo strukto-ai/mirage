@@ -69,7 +69,7 @@ class NodeMeta:
     # backends for files written through mirage.
     observed_mtime: float | None = None
     # Extended attributes a caller set, by name. What a backend reports
-    # about the path is not stored here; the door derives it from stat.
+    # about the path is not stored here; the dispatcher derives it from stat.
     xattrs: dict[str, bytes] = field(default_factory=dict)
 
     def is_empty(self) -> bool:
@@ -586,7 +586,7 @@ class Namespace:
         """The names of the links living directly under a directory.
 
         What a readdir row's link mark needs, which is a name question
-        rather than a stat one: the door already holds every entry's
+        rather than a stat one: the dispatcher already holds every entry's
         stat and has only to learn which of those names the node table
         owns.
 

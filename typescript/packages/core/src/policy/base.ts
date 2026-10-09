@@ -45,8 +45,8 @@ export interface Policy {
    */
   preExecute?(ctx: RouteContext): Action | null | Promise<Action | null>
   /**
-   * Admit or refuse one VFS op, at the op doors and on the command
-   * tier's backend I/O. The doors are the dispatcher and `ws.vfs`,
+   * Admit or refuse one VFS op, at the dispatcher and on the command
+   * tier's backend I/O. The entry points are the dispatcher and `ws.vfs`,
    * which is also how FUSE, the runtime guests,
    * `find -delete` and the warm cache arrive; a mount command's
    * handler (cat, grep -r, sed -i, rm) admits each content read,
@@ -65,7 +65,7 @@ export interface Policy {
   preVfs?(ctx: VfsContext): Action | null | Promise<Action | null>
   /** Observe one completed VFS op; a Deny suppresses its result, a
    * Limit caps a byte-producing one. Narrower than preVfs: the
-   * dispatcher and facade doors only. The backend I/O inside a mount
+   * dispatcher and facade entry points only. The backend I/O inside a mount
    * command's handler and each `find -delete` deletion admit through
    * preVfs and report no per-op result here; the command tier's
    * result plane is postExecute, which bounds the finished line's

@@ -51,7 +51,7 @@ interface RawResultDict {
 
 export type ResultDict = IoResultDict | RawResultDict
 
-/** A refusal record as the server's doors carry it. Mirrors Python's `refusal_to_dict`. */
+/** A refusal record as the server's entry points carry it. Mirrors Python's `refusal_to_dict`. */
 export function refusalToDict(refusal: Refusal | null): IoResultDict['refusal'] {
   return refusal === null
     ? null
@@ -65,7 +65,7 @@ export function refusalToDict(refusal: Refusal | null): IoResultDict['refusal'] 
 }
 
 /**
- * A failed call as the server's doors carry it: its text, the errno it
+ * A failed call as the server's entry points carry it: its text, the errno it
  * names and, for a policy's refusal, its record. Mirrors Python's
  * `failure_to_dict`.
  */
@@ -90,7 +90,7 @@ export function ioResultToDict(result: unknown): ResultDict & JsonValue {
   return { kind: 'raw', value: String(result) }
 }
 
-/** One policy's answer as the server's doors carry it. Mirrors Python's `answer_to_dict`. */
+/** One policy's answer as the server's entry points carry it. Mirrors Python's `answer_to_dict`. */
 function answerToDict(action: Deny | Ask | Route): Record<string, JsonValue> {
   if (action.kind === 'route') {
     return { kind: 'route', runtime: action.runtime, policy: action.policy ?? '' }
@@ -99,7 +99,7 @@ function answerToDict(action: Deny | Ask | Route): Record<string, JsonValue> {
 }
 
 /**
- * An explanation as the server's doors answer it: a line with its tree
+ * An explanation as the server's entry points answer it: a line with its tree
  * (`shell` explained) or a VFS call (`vfs/<call>` explained). Mirrors Python's
  * `explanation_to_dict`.
  */
@@ -139,7 +139,7 @@ export function explanationToDict(
   }
 }
 
-/** One node of a line's tree as the doors carry it. Mirrors Python's `_node_to_dict`. */
+/** One node of a line's tree as the entry points carry it. Mirrors Python's `_node_to_dict`. */
 function nodeToDict(node: ShellNode | CommandExplanation): Record<string, JsonValue> {
   if ('command' in node) return explanationToDict(node)
   return { type: node.type, text: node.text, children: node.children.map(nodeToDict) }

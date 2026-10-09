@@ -268,7 +268,7 @@
     },
     {
       "id": "whole_line_interpreter_script",
-      "note": "A whole-line runtime runs the interpreter itself, where no op door follows the script read, so the gate reads the script slot from the interpreter's spec exactly as it reads a mount command's: a bare script name under the working directory is the file it names, and a payload's operands are not paths. A lone dash selects stdin and carries no path, while ./-, absolute dash filenames and stdin redirects still name protected files.",
+      "note": "A whole-line runtime runs the interpreter itself, where no dispatcher follows the script read, so the gate reads the script slot from the interpreter's spec exactly as it reads a mount command's: a bare script name under the working directory is the file it names, and a payload's operands are not paths. A lone dash selects stdin and carries no path, while ./-, absolute dash filenames and stdin redirects still name protected files.",
       "world": {
         "runtimes": [
           {

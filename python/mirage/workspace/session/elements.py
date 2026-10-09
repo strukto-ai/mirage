@@ -58,7 +58,7 @@ async def element_is_set(
     Args:
         session (SessionState): shell session state.
         ref (str): the reference as the operand spelled it.
-        view (SessionView | None): the gated door the subscript's
+        view (SessionView | None): the gated session view the subscript's
             assignments land through; None outside a workspace.
     """
     match = _ELEMENT_REF.fullmatch(ref)
@@ -109,7 +109,7 @@ async def assign_element(
     """Assign one element (or a bare name resolved as element 0).
 
     The element mechanics are computed on a copy and the landing write
-    goes through the door as the whole variable the write produces, so
+    goes through the session view as the whole variable the write produces, so
     a refused write leaves nothing half-applied and a ``pre_session``
     rule sees ``m[k]=v`` as a write to ``m``. The subscript arrives
     already expanded: an associative name takes it as the key verbatim,
@@ -117,7 +117,7 @@ async def assign_element(
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView | None): the session plane's gated door;
+        view (SessionView | None): the gated session view;
             None seeds directly (a writer outside a workspace).
         name (str): the target's base variable name.
         subscript (str | None): the ``[...]`` text, or None for a bare
@@ -192,14 +192,14 @@ async def land_arith(
     reader: RandomReader,
 ) -> None:
     """Land an arithmetic command's assignments in the order the
-    expression made them, each through the door: a hidden name refuses
+    expression made them, each through the session view: a hidden name refuses
     and the ones after it never land, as a readonly name stopped the
     evaluation itself (``let 'X=5, R=3'`` leaves X at 5). The draws made
     after a seed that landed settle either way.
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
         writes (Sequence[ArithWrite]): the assignments, in order.
         reader (RandomReader): the expression's ``RANDOM`` reader.
 

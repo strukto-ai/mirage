@@ -66,11 +66,11 @@ def test_named_files_win_over_the_include_filter():
     ],
 )
 async def test_download_still_names_the_absence_when_the_tree_refuses(
-    mock_tree, doors, refusal
+    mock_tree, view, refusal
 ):
     # The tree walk raises for a repo it cannot see; download reads that as
     # nothing listed, so the message upstream prints is unchanged.
-    record, _, _, _ = doors
+    record, _, _, _ = view
     mock_tree.side_effect = refusal
     with patch(
         "mirage.commands.cli.builtin.hf.download.classify_absence",
@@ -81,15 +81,15 @@ async def test_download_still_names_the_absence_when_the_tree_refuses(
                 inv(
                     texts=("acme/widget",),
                     flags={"local_dir": PathSpec.from_str_path("/work/out")},
-                    doors=record,
+                    view=record,
                 )
             )
 
 
 @pytest.mark.asyncio
 @patch("mirage.commands.cli.builtin.hf.download.fetch_tree")
-async def test_download_lets_a_server_failure_through(mock_tree, doors):
-    record, _, _, _ = doors
+async def test_download_lets_a_server_failure_through(mock_tree, view):
+    record, _, _, _ = view
     mock_tree.side_effect = HfHubError("boom", 500)
     classify = AsyncMock(return_value=Absence.REPO)
     with patch(
@@ -100,7 +100,7 @@ async def test_download_lets_a_server_failure_through(mock_tree, doors):
                 inv(
                     texts=("acme/widget",),
                     flags={"local_dir": PathSpec.from_str_path("/work/out")},
-                    doors=record,
+                    view=record,
                 )
             )
     classify.assert_not_awaited()
@@ -109,17 +109,17 @@ async def test_download_lets_a_server_failure_through(mock_tree, doors):
 @pytest.mark.asyncio
 @patch("mirage.commands.cli.builtin.hf.download.hub_bytes")
 @patch("mirage.commands.cli.builtin.hf.download.fetch_tree")
-async def test_download_writes_through_the_workspace_door(
-    mock_tree, mock_bytes, doors
+async def test_download_writes_through_the_workspace_dispatcher(
+    mock_tree, mock_bytes, view
 ):
-    record, calls, tree, _ = doors
+    record, calls, tree, _ = view
     mock_tree.return_value = TREE
     mock_bytes.return_value = b"payload"
     await download_cmd(
         inv(
             texts=("acme/widget", "a.txt"),
             flags={"local_dir": PathSpec.from_str_path("/work/out")},
-            doors=record,
+            view=record,
         )
     )
     assert tree["/work/out/a.txt"] == b"payload"
@@ -130,19 +130,19 @@ async def test_download_writes_through_the_workspace_door(
 @patch("mirage.commands.cli.builtin.hf.download.hub_bytes")
 @patch("mirage.commands.cli.builtin.hf.download.fetch_tree")
 async def test_download_creates_every_nested_level(
-    mock_tree, mock_bytes, doors
+    mock_tree, mock_bytes, view
 ):
     """The dispatcher's mkdir is single-level, so a nested repo path
     needs one call per missing segment; a level that is already there is
     left alone, which is why /work is absent from the list."""
-    record, calls, tree, _ = doors
+    record, calls, tree, _ = view
     mock_tree.return_value = TREE
     mock_bytes.return_value = b"x"
     await download_cmd(
         inv(
             texts=("acme/widget", "sub/b.json"),
             flags={"local_dir": PathSpec.from_str_path("/work/out")},
-            doors=record,
+            view=record,
         )
     )
     made = [path for op, path, _ in calls if op == "mkdir"]
@@ -151,23 +151,23 @@ async def test_download_creates_every_nested_level(
 
 
 @pytest.mark.asyncio
-async def test_download_requires_a_local_dir(doors):
+async def test_download_requires_a_local_dir(view):
     """Upstream defaults to ~/.cache/huggingface, which a workspace has
     no equivalent of, so this must not silently resolve somewhere the
     agent cannot see."""
-    record, _, _, _ = doors
+    record, _, _, _ = view
     with pytest.raises(UsageError, match="--local-dir"):
-        await download_cmd(inv(texts=("acme/widget",), doors=record))
+        await download_cmd(inv(texts=("acme/widget",), view=record))
 
 
 @pytest.mark.asyncio
-async def test_download_requires_a_repo_id(doors):
-    record, _, _, _ = doors
+async def test_download_requires_a_repo_id(view):
+    record, _, _, _ = view
     with pytest.raises(UsageError, match="repo_id"):
         await download_cmd(
             inv(
                 flags={"local_dir": PathSpec.from_str_path("/work")},
-                doors=record,
+                view=record,
             )
         )
 
@@ -185,11 +185,11 @@ async def test_download_needs_a_workspace():
 
 @pytest.mark.asyncio
 @patch("mirage.commands.cli.builtin.hf.download.fetch_tree")
-async def test_download_refuses_when_nothing_matched(mock_tree, doors):
+async def test_download_refuses_when_nothing_matched(mock_tree, view):
     """A glob that matched nothing in a repository that is plainly
     there: the Hub is asked why anyway, says nothing is missing, and the
     refusal names the line rather than inventing an absence."""
-    record, _, _, _ = doors
+    record, _, _, _ = view
     mock_tree.return_value = TREE
     with patch(
         "mirage.commands.cli.builtin.hf.download.classify_absence",
@@ -203,18 +203,18 @@ async def test_download_refuses_when_nothing_matched(mock_tree, doors):
                         "local_dir": PathSpec.from_str_path("/work/out"),
                         "include": ["zzz*"],
                     },
-                    doors=record,
+                    view=record,
                 )
             )
 
 
 @pytest.mark.asyncio
 @patch("mirage.commands.cli.builtin.hf.download.fetch_tree")
-async def test_download_tells_the_three_absences_apart(mock_tree, doors):
+async def test_download_tells_the_three_absences_apart(mock_tree, view):
     """download folds a refused tree walk (401/403/404) into an empty
     listing itself. Three different failures would then all read as "no
     files matched", so the CLI asks the Hub which one it was."""
-    record, _, _, _ = doors
+    record, _, _, _ = view
     mock_tree.return_value = {}
     cases = [
         (Absence.REPO, (), "Repository Not Found"),
@@ -233,7 +233,7 @@ async def test_download_tells_the_three_absences_apart(mock_tree, doors):
                         flags={
                             "local_dir": PathSpec.from_str_path("/work/out")
                         },
-                        doors=record,
+                        view=record,
                     )
                 )
 
@@ -241,8 +241,8 @@ async def test_download_tells_the_three_absences_apart(mock_tree, doors):
 @pytest.mark.asyncio
 @patch("mirage.commands.cli.builtin.hf.download.hub_bytes")
 @patch("mirage.commands.cli.builtin.hf.download.fetch_tree")
-async def test_quiet_prints_only_the_directory(mock_tree, mock_bytes, doors):
-    record, _, _, _ = doors
+async def test_quiet_prints_only_the_directory(mock_tree, mock_bytes, view):
+    record, _, _, _ = view
     mock_tree.return_value = TREE
     mock_bytes.return_value = b"x"
     text = await _text(
@@ -253,7 +253,7 @@ async def test_quiet_prints_only_the_directory(mock_tree, mock_bytes, doors):
                     "local_dir": PathSpec.from_str_path("/work/out"),
                     "quiet": True,
                 },
-                doors=record,
+                view=record,
             )
         )
     )
@@ -278,9 +278,9 @@ def test_refuse_variadic_names_the_spelling_that_works():
 @patch("mirage.commands.cli.builtin.hf.download.hub_bytes")
 @patch("mirage.commands.cli.builtin.hf.download.fetch_tree")
 async def test_download_refuses_the_upstream_variadic_line(
-    mock_tree, mock_bytes, doors
+    mock_tree, mock_bytes, view
 ):
-    record, _, _, _ = doors
+    record, _, _, _ = view
     mock_tree.return_value = TREE
     mock_bytes.return_value = b"x"
     with pytest.raises(UsageError, match="--include"):
@@ -291,7 +291,7 @@ async def test_download_refuses_the_upstream_variadic_line(
                     "include": ["*.txt"],
                     "local_dir": PathSpec.from_str_path("/work/out"),
                 },
-                doors=record,
+                view=record,
             )
         )
 
@@ -300,12 +300,12 @@ async def test_download_refuses_the_upstream_variadic_line(
 @patch("mirage.commands.cli.builtin.hf.download.hub_bytes")
 @patch("mirage.commands.cli.builtin.hf.download.fetch_tree")
 async def test_download_fetches_with_a_bounded_pool(
-    mock_tree, mock_bytes, doors
+    mock_tree, mock_bytes, view
 ):
     """The bound is the point, not the parallelism: the Hub rate-limits
     its resolvers, so a repository of many small files must not fan out
     without one."""
-    record, _, tree, _ = doors
+    record, _, tree, _ = view
     mock_tree.return_value = TREE
     mock_bytes.return_value = b"x"
     await download_cmd(
@@ -315,7 +315,7 @@ async def test_download_fetches_with_a_bounded_pool(
                 "local_dir": PathSpec.from_str_path("/work/out"),
                 "max_workers": 2,
             },
-            doors=record,
+            view=record,
         )
     )
     assert "/work/out/a.txt" in tree

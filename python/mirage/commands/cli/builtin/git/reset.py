@@ -42,7 +42,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -113,11 +113,11 @@ async def reset(
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
-    stat_path = doors.stat_path
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
+    stat_path = view.stat_path
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
@@ -125,7 +125,7 @@ async def reset(
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
-        repo, location = await opened(fl, doors)
+        repo, location = await opened(fl, view)
         named = fl.as_path("work_tree") is not None
         if not named and await is_bare(dispatch, location):
             raise BareResetError()
@@ -169,7 +169,7 @@ async def reset(
             location,
             {path.decode("utf-8", errors="replace") for path in state.entries},
             UNTRACKED_NO,
-            links_of(doors),
+            links_of(view),
         )
         unstaged = await work_changes(
             dispatch,

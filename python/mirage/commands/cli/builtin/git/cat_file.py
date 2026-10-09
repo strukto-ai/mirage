@@ -35,7 +35,7 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 
@@ -179,10 +179,10 @@ async def cat_file(
         inv (CLIInvocation[None]): the line's invocation record.
     """
     fl = FlagView(inv.flags)
-    doors = inv.doors or CLIDoors()
+    view = inv.view or CLIView()
     texts = tuple(inv.texts)
     try:
-        if doors.dispatch is None:
+        if view.dispatch is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         modes = fl.typed_order(*QUERIES)
@@ -201,7 +201,7 @@ async def cat_file(
             for found in FORMAT_ATOM.finditer(template):
                 if found.group(1) not in BATCH_ATOMS:
                     raise GitError(f"bad cat-file format: {found.group(0)}")
-            repo, _ = await opened(fl, doors)
+            repo, _ = await opened(fl, view)
             text = (await read_stdin_async(inv.stdin) or b"").decode(
                 "utf-8", "replace"
             )
@@ -227,7 +227,7 @@ async def cat_file(
                 raise UsageError(
                     "", "fatal: too many arguments\n\n" + verb_usage(inv)
                 )
-            repo, _ = await opened(fl, doors)
+            repo, _ = await opened(fl, view)
             out, code = await asyncio.to_thread(
                 _query, repo, modes[0], texts[0]
             )
@@ -241,7 +241,7 @@ async def cat_file(
         kind, name = texts
         if kind not in OBJECT_TYPES:
             raise GitError(f'invalid object type "{kind}"')
-        repo, _ = await opened(fl, doors)
+        repo, _ = await opened(fl, view)
         obj = peeled(
             repo, await asyncio.to_thread(named_object, repo, name), kind
         )

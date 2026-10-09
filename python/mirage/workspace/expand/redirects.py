@@ -84,7 +84,7 @@ async def _expand_target(
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
         links (NamespaceLinks | None): namespace links for pathname expansion.
     """
     session = context.session

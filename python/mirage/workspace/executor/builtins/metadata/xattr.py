@@ -81,7 +81,7 @@ def attr_error(exc: OSError) -> str:
     wording for everything else.
 
     Args:
-        exc (OSError): what the op door raised.
+        exc (OSError): what the dispatcher raised.
     """
     condition = classify(exc)
     if condition is FsCondition.NO_XATTR:

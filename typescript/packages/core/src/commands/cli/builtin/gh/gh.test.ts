@@ -91,7 +91,7 @@ function inv(
   texts: string[],
   flags: CLIInvocation['flags'] = {},
   config: unknown = { token: 't' },
-  extra: Partial<Pick<CLIInvocation, 'stdin' | 'doors' | 'argv'>> = {},
+  extra: Partial<Pick<CLIInvocation, 'stdin' | 'view' | 'argv'>> = {},
 ): CLIInvocation {
   return cliInvocation({ config, texts, flags, ...extra })
 }
@@ -440,7 +440,7 @@ describe('gh file input', () => {
       for (const chunk of content) yield await Promise.resolve(new TextEncoder().encode(chunk))
     })
     const read = vi.fn(() => Promise.resolve([dispatch(), new IOResult()] as [unknown, IOResult]))
-    const call = inv([], {}, { token: 't' }, { doors: { dispatch: read } })
+    const call = inv([], {}, { token: 't' }, { view: { dispatch: read } })
     expect(DEC.decode(await readCliFile(call, path, '--body-file'))).toBe('first second')
     expect(read).toHaveBeenCalledWith('read', path)
   })

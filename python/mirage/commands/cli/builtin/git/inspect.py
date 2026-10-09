@@ -62,7 +62,7 @@ from mirage.commands.cli.refusal import (
     git_usage,
     leaf_refusal,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_command, parse_to_kwargs
 from mirage.commands.spec.types import (
@@ -99,12 +99,12 @@ GET_URL = CommandSpec(
 
 
 async def repo_config(inv: CLIInvocation[None], fl: FlagView) -> ConfigFile:
-    doors = inv.doors or CLIDoors()
-    _, location = await opened(fl, doors)
-    assert doors.dispatch is not None
+    view = inv.view or CLIView()
+    _, location = await opened(fl, view)
+    assert view.dispatch is not None
     return ConfigFile.from_file(
         BytesIO(
-            await read_file(doors.dispatch, location.commondir.join("config"))
+            await read_file(view.dispatch, location.commondir.join("config"))
         )
     )
 
@@ -250,10 +250,11 @@ async def global_sources(
     the host's. Only ``--list`` refuses when neither exists.
 
     Args:
-        inv (CLIInvocation[None]): the invocation, for its env and doors.
+        inv (CLIInvocation[None]): the invocation, for its env and entry
+            points.
         listing (bool): ``--list`` was given.
     """
-    dispatch = inv.doors.dispatch if inv.doors is not None else None
+    dispatch = inv.view.dispatch if inv.view is not None else None
     if dispatch is None:
         raise NoWorkspaceError()
     home = inv.env.get("HOME", "")
@@ -289,11 +290,11 @@ async def config(
         if fl.as_bool("global"):
             sources = await global_sources(inv, fl.as_bool("list"))
         else:
-            doors = inv.doors or CLIDoors()
-            _, location = await opened(fl, doors)
-            assert doors.dispatch is not None
+            view = inv.view or CLIView()
+            _, location = await opened(fl, view)
+            assert view.dispatch is not None
             path = location.commondir.join("config")
-            data = await read_file(doors.dispatch, path)
+            data = await read_file(view.dispatch, path)
             source = path.raw_path
             ordinary = (
                 location.commondir.virtual
@@ -374,7 +375,7 @@ async def show_ref(
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         check_switches(inv, inv.texts)
-        repo, _ = await opened(FlagView(inv.flags), inv.doors or CLIDoors())
+        repo, _ = await opened(FlagView(inv.flags), inv.view or CLIView())
         out = await asyncio.to_thread(_show_refs, repo, tuple(inv.texts))
         return out, IOResult(exit_code=0 if out else 1)
     except GitError as exc:
@@ -398,7 +399,7 @@ async def rev_list(
         sole = inv.argv[-2:] == ("rev-list", HELP_SWITCH)
         if option_operand(inv, inv.texts, STDOUT if sole else STDERR):
             raise UsageError("", verb_usage(inv))
-        repo, _ = await opened(fl, inv.doors or CLIDoors())
+        repo, _ = await opened(fl, inv.view or CLIView())
         flags = parse_flags(fl)
         if not inv.texts and not flags.all_refs:
             raise UsageError("", verb_usage(inv))
@@ -594,16 +595,16 @@ async def rev_parse(
         mode = fl.raw("abbrev_ref")
         if isinstance(mode, str):
             _abbrev_strict(mode, True)
-        doors = inv.doors or CLIDoors()
-        repo, location = await opened(fl, doors, work_tree=toplevel)
-        assert doors.dispatch is not None
+        view = inv.view or CLIView()
+        repo, location = await opened(fl, view, work_tree=toplevel)
+        assert view.dispatch is not None
         start = start_point(fl).virtual
         if toplevel and _in_git_dir(start, location):
             raise NotAWorkTreeError()
-        answers = await _place_answers(doors.dispatch, location, start)
+        answers = await _place_answers(view.dispatch, location, start)
         if fl.as_bool("is_shallow_repository"):
             shallow = await read_optional(
-                doors.dispatch, location.commondir.join("shallow")
+                view.dispatch, location.commondir.join("shallow")
             )
             answers["--is-shallow-repository"] = (
                 f"{str(shallow is not None).lower()}\n".encode()
@@ -614,10 +615,10 @@ async def rev_parse(
             None if short is None else _short_width(short, abbrev_for(repo))
         )
         table = await load_refs(
-            doors.dispatch, location.gitdir, location.commondir
+            view.dispatch, location.gitdir, location.commondir
         )
         warn = await config_bool(
-            doors.dispatch, location, b"core", b"warnambiguousrefs", True
+            view.dispatch, location, b"core", b"warnambiguousrefs", True
         )
         strict = warn if mode is None else _abbrev_strict(mode, warn)
         shown: list[bytes] = []
@@ -647,7 +648,7 @@ async def rev_parse(
                 shown.append(f"{hexid[:length]}\n".encode())
                 continue
             line, error = await _abbreviated(
-                doors.dispatch, location.gitdir, table, revision, strict, warn
+                view.dispatch, location.gitdir, table, revision, strict, warn
             )
             shown.append(line)
             # git prints each name's error right after its warning, so the

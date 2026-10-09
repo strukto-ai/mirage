@@ -86,7 +86,7 @@ def test_set_and_unset_write_the_session():
 
 
 def test_set_is_general_over_variable_shapes():
-    # One door for every write: a string stores a scalar, a list stores
+    # One entry point for every write: a string stores a scalar, a list stores
     # a whole array, and the two storages stay exclusive.
 
     async def run():
@@ -211,7 +211,7 @@ def test_snapshot_omits_hidden_vars():
 def test_setting_a_hidden_var_is_refused_and_leaves_it_intact():
     # A write that landed would clobber the real value the host's
     # wiring still reads, and a write that silently vanished would be a
-    # swallow; the door refuses loudly instead, the vars twin of EACCES
+    # swallow; the session view refuses loudly instead, the vars twin of EACCES
     # on a create into hidden path space.
 
     async def run():
@@ -365,7 +365,7 @@ def test_subscript_index_lands_its_assignments_and_seeds_random():
         # the session past it.
         assert await subscript_index(session, "RANDOM=42, RANDOM") == 17772
         assert next_random(session, session.vars["RANDOM"].value) == 26794
-        # Through a door, a refusal is the gate's.
+        # Through the session view, a refusal is the gate's.
         view = session_view(session, Policies([DenySecrets()]))
         with pytest.raises(PolicyDenied):
             await subscript_index(session, "SECRET_N=1", view)

@@ -224,7 +224,7 @@ async def test_local_cancellation_kills_subprocess():
 
 
 def test_reach_is_process():
-    # The subprocess sees the host filesystem and network: doors the
+    # The subprocess sees the host filesystem and network: entry points the
     # workspace gate never sees, so a world holding this runtime may
     # not claim a sandbox.
     assert LocalRuntime.reach == "process"

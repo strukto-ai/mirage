@@ -200,7 +200,7 @@ describe('structure-only directories', () => {
     expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/ghost:\ndeep\n\n/ghost/deep:\nlnk\n')
   })
 
-  // Absence of the door can only mean "nobody can answer", so the row keeps
+  // Absence of the dispatcher can only mean "nobody can answer", so the row keeps
   // the shape every caller outside a workspace already saw.
   it('falls back to a directory row with no dispatcher', async () => {
     const result = await lsGeneric(

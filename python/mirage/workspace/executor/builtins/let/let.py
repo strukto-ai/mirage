@@ -55,7 +55,7 @@ async def handle_let(
     Args:
         args (list[str]): the words after ``let``, one expression each.
         session (SessionState): shell session state.
-        state (SessionView | None): the session plane's gated door.
+        state (SessionView | None): the gated session view.
     """
     if not args:
         err = b"bash: let: expression expected\n"

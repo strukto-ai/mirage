@@ -223,7 +223,7 @@
       }
     },
     {
-      "id": "scriptops_read_passes_the_op_door",
+      "id": "scriptops_read_passes_the_dispatcher",
       "seq": 923271,
       "targets": [
         "ram-commands"
@@ -237,7 +237,7 @@
       }
     },
     {
-      "id": "scriptops_write_is_refused_at_the_op_door",
+      "id": "scriptops_write_is_refused_at_the_dispatcher",
       "seq": 923272,
       "targets": [
         "ram-commands"
@@ -251,7 +251,7 @@
       }
     },
     {
-      "id": "scriptops_unlink_is_refused_at_the_op_door",
+      "id": "scriptops_unlink_is_refused_at_the_dispatcher",
       "seq": 923273,
       "targets": [
         "ram-commands"
@@ -349,7 +349,7 @@
       }
     },
     {
-      "id": "scriptops_env_write_is_refused_at_the_session_door",
+      "id": "scriptops_env_write_is_refused_at_the_session_view",
       "seq": 923276,
       "targets": [
         "ram-commands"
@@ -448,7 +448,7 @@
       }
     },
     {
-      "id": "scriptopsjs_write_is_refused_at_the_op_door",
+      "id": "scriptopsjs_write_is_refused_at_the_dispatcher",
       "seq": 923280,
       "targets": [
         "ram-scripted"
@@ -462,7 +462,7 @@
       }
     },
     {
-      "id": "scriptopsjs_read_passes_the_op_door",
+      "id": "scriptopsjs_read_passes_the_dispatcher",
       "seq": 923281,
       "targets": [
         "ram-scripted"
@@ -532,7 +532,7 @@
       }
     },
     {
-      "id": "scriptopsjs_env_write_is_refused_at_the_session_door",
+      "id": "scriptopsjs_env_write_is_refused_at_the_session_view",
       "seq": 923282,
       "targets": [
         "ram-scripted"

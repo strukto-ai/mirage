@@ -176,7 +176,7 @@ class WorkspaceRegistry:
     ) -> WorkspaceEntry | None:
         """The live entry ``account`` may use, else None.
 
-        The one access rule every door asks. A caller with no account
+        The one access rule every entry point asks. A caller with no account
         may use every workspace unless accounts are required; an
         account may use only the workspaces it owns, so one created by
         a caller with no account is closed to every account. A

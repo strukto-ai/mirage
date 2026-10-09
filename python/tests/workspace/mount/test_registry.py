@@ -394,7 +394,7 @@ def _remote_registry_with_cache():
 async def test_resolve_mount_keeps_cached_read_on_real_mount():
     # A cached read-only command stays on its real mount (keeping its
     # limits and custom handlers) instead of being redirected to the cache
-    # mount; its reads are served warm at the door.
+    # mount; its reads are served warm at the dispatcher.
     reg, cache = _remote_registry_with_cache()
     await cache.set("/ssh/a.txt", b"hi")
     scope = PathSpec(

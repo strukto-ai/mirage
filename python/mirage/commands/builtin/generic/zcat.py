@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.commands.builtin.constants import GZIP_SUFFIX
 from mirage.commands.builtin.generic.decompress import decompress_inputs
-from mirage.commands.builtin.utils.links import link_door
+from mirage.commands.builtin.utils.links import link_resolver
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
@@ -61,7 +61,7 @@ async def zcat_generic(
         force=fl.as_bool("f"),
         quiet=fl.as_bool("q"),
         suffix=GZIP_SUFFIX if suffix is None else suffix,
-        door=link_door(opts),
+        resolver=link_resolver(opts),
     )
 
 

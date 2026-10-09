@@ -264,7 +264,7 @@ async def du_operands(
                 path, stattable, has_content, stat_path
             )
         except PermissionError as exc:
-            # The door refuses to stat it: GNU names the errno it got
+            # The dispatcher refuses to stat it: GNU names the errno it got
             # (`du: cannot access 'P': Permission denied`).
             missing.append((path.raw_path, fs_strerror(exc) or str(exc)))
             continue

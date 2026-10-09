@@ -26,7 +26,7 @@ from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors.fs import einval, enoent, erofs
 from mirage.fuse.platform.macos import is_macos_metadata
-from mirage.policy.match import skipped_at_op_doors
+from mirage.policy.match import skipped_at_dispatch
 from mirage.runtime.handles import ChunkedHandle, FileTable, write_runs
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.types import FileStat, FileType
@@ -98,17 +98,17 @@ class MountCore:
         self._files = files
         self._session = session
         skipped = (
-            skipped_at_op_doors(session.commands)
+            skipped_at_dispatch(session.commands)
             if session is not None
             else ()
         )
         if session is not None and skipped:
-            # This door sees ops, never a line, so the profile's
+            # This entry point sees ops, never a line, so the profile's
             # command-level rules have nothing here to judge.
             logger.warning(
-                "session %s: a door that sees only ops (a kernel mount, "
-                "SFTP, codex-exec's file calls) cannot apply %s; path "
-                "rules, hides and modes still hold",
+                "session %s: an entry point that sees only ops (a kernel "
+                "mount, SFTP, codex-exec's file calls) cannot apply %s; "
+                "path rules, hides and modes still hold",
                 session.session_id,
                 "; ".join(skipped),
             )
@@ -282,7 +282,7 @@ class MountCore:
         Built from the target string alone, every link over a mount
         answered the mount's construction time and the mounting user, so
         what ``chown -h`` and ``touch -h`` wrote was invisible through
-        the kernel. The row is the same one the door answers a no-follow
+        the kernel. The row is the same one the dispatcher answers a no-follow
         stat with. Size stays the displayable target's length (what this
         mount's readlink returns), and the mode is always lrwxrwxrwx: a
         symlink's permission bits are not consulted by any POSIX system.
@@ -481,7 +481,7 @@ class MountCore:
         """Land write runs on the mount, one pwrite each, in order.
 
         A pwrite keeps every stored byte the handle did not write, so
-        nothing is read through the door first: a session that may write
+        nothing is read through the dispatcher first: a session that may write
         a file and not read it writes through FUSE, as through a
         write-only descriptor. The runs that landed leave ``runs`` in one
         step, so after a failure ``runs`` holds only what did not land
@@ -564,7 +564,7 @@ class MountCore:
         Relative sources are stored verbatim (resolved at follow time,
         exactly like the shell ``ln -s``); absolute sources are mapped
         into virtual space so a scoped mount stores the path it will
-        later follow. The write routes through the op door like every
+        later follow. The write routes through the dispatcher like every
         other FUSE op, so session grants and admission policies refuse
         a scoped kernel mount exactly like a scoped shell.
 
@@ -583,8 +583,8 @@ class MountCore:
     def unlink(self, path: str) -> None:
         """Remove the entry at ``path``, a link entry like any other.
 
-        A link routes through the op door rather than straight to the
-        node table: ``unlink`` is a LINK_ENTRY_OPS member, so the door
+        A link routes through the dispatcher rather than straight to the
+        node table: ``unlink`` is a LINK_ENTRY_OPS member, so the dispatcher
         answers a link path itself, gated by session grants and
         admission policies and recorded on the ledger. Writing the
         table here instead let a session-scoped kernel mount delete a
@@ -632,9 +632,9 @@ class MountCore:
         create: bool = False,
         replace: bool = False,
     ) -> None:
-        """Store an extended attribute through the workspace door.
+        """Store an extended attribute through the dispatcher.
 
-        The door keeps it on the path's namespace node, so it outlives
+        The dispatcher keeps it on the path's namespace node, so it outlives
         the mount, moves with a rename, and is the same attribute every
         other surface (the shell's getfattr, a guest's os.getxattr)
         reads. Tools that set xattrs as a matter of course (rsync -aX,
@@ -834,7 +834,7 @@ class MountCore:
         self._changed(path)
 
     def _changed(self, path: str, rehydrate: bool = True) -> None:
-        """The one door every mutation of a file's bytes goes through.
+        """The one function every mutation of a file's bytes goes through.
 
         Every cache the core keeps for a file is keyed by its identity
         (the mount path with namespace links followed), and this is the

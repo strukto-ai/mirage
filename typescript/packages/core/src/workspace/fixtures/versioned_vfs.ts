@@ -95,7 +95,7 @@ export class VersionedVFS extends RAMVFS {
 
 /**
  * Mount `vfs` at `/m`, its stat the stub's. `asked` names every op the
- * mount's door was called for. Restore with vi.restoreAllMocks().
+ * mount's entry point was called for. Restore with vi.restoreAllMocks().
  */
 export function versionedWorkspace(
   vfs: VersionedVFS,

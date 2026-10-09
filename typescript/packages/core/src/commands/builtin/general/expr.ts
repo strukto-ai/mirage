@@ -493,7 +493,7 @@ function expr(
       // GNU writes the refusal to stderr, nothing to stdout, and exits
       // 2; exit 1 is reserved for a zero-valued success. The diagnostic
       // quotes a byte view of the offending word, so it leaves through
-      // the same door the value does.
+      // the same entry point the value does.
       return [null, new IOResult({ exitCode: 2, stderr: fromByteView(`${err.message}\n`, utf8) })]
     }
     throw err

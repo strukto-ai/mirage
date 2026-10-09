@@ -19,9 +19,9 @@ from mirage.vfs.history import HistoryViewVFS
 from mirage.vfs.registry import resolve_class, resolve_entry
 from tests.fixtures.vfs_io import served, vfs_over
 
-# Every backend's op surface as the door sees it, pinned when the op tables
-# became VFS methods. A diff here is a lost or gained op unless the change
-# is deliberate.
+# Every backend's op surface as the dispatcher sees it, pinned when the op
+# tables became VFS methods. A diff here is a lost or gained op unless the
+# change is deliberate.
 
 SERVED = {
     "chroma": {"glob", "read", "readdir", "stat"},

@@ -170,11 +170,11 @@ def get_current_session_unless_foreign(
 ) -> SessionState | None:
     """The bound session, unless another owner published it.
 
-    An op door keeps the session it is reached under, so it never
+    An entry point keeps the session it is reached under, so it never
     widens a caller's view: a command's runtime, a kernel mount and a
     guest runtime all bind before they call. A binding that names an
     owner other than ``owner`` is another workspace's, and its session
-    describes that workspace's hides and grants, so the door must not
+    describes that workspace's hides and grants, so the entry point must not
     adopt it. A binding that names no owner is a deliberate placement
     (a kernel mount, a guest runtime, an embedder binding by hand) and
     is kept.
@@ -360,7 +360,7 @@ def get_mount_gate() -> tuple[str, MountMode] | None:
     return _current_mount_gate.get()
 
 
-# Where a refusal a door raises is noted for the line running it.
+# Where a refusal an entry point raises is noted for the line running it.
 RefusalSink = Callable[[Refusal], None]
 
 _refusal_sink: ContextVar[RefusalSink | None] = ContextVar(
@@ -370,17 +370,17 @@ _refusal_sink: ContextVar[RefusalSink | None] = ContextVar(
 
 
 def set_refusal_sink(sink: RefusalSink) -> Token[Any]:
-    """Bind where the doors note a policy's refusal, for one line's run.
+    """Bind where the entry points note a policy's refusal, for one line's run.
 
     Set by the workspace around a typed line: a command renders an op
     refusal in its own GNU words, which say nothing of the policy, so
-    the door notes the record here and the line carries it on its
+    the entry point notes the record here and the line carries it on its
     result. Every task and nested line the line starts inherits the
     binding, so a stream drained after its command returned still
     reaches it.
 
     Args:
-        sink (RefusalSink): takes each record as a door raises it.
+        sink (RefusalSink): takes each record as an entry point raises it.
     """
     return _refusal_sink.set(sink)
 
@@ -391,7 +391,7 @@ def reset_refusal_sink(token: Token[Any]) -> None:
 
 
 def line_running() -> bool:
-    """Whether a typed line is running in this context: the door it
+    """Whether a typed line is running in this context: the entry point it
     reaches is inside a command, not a file tool's or the host's own
     call."""
     return _refusal_sink.get() is not None
@@ -431,8 +431,8 @@ def explaining() -> list[VfsExplanation] | DryRun | None:
 
 
 def note_refusal(refusal: Refusal) -> None:
-    """Hand a door's refusal to the line running in this context; a
-    door reached outside any line (a programmatic op) has no line to
+    """Hand an entry point's refusal to the line running in this context; an
+    entry point reached outside any line (a programmatic op) has no line to
     tell, and the record rides the raised error alone.
 
     Args:
@@ -454,12 +454,12 @@ def set_walk_probe(probe: WalkProbe) -> Token[Any]:
 
     Set by ``Mount.run_command`` around the handler, beside the mount
     gate: the command tier reaches its backend without passing the
-    dispatcher's door, so the walk guard on its I/O proves an operand's
-    ``.`` and ``..`` with the door's stat and link follow through this
+    dispatcher, so the walk guard on its I/O proves an operand's
+    ``.`` and ``..`` with the dispatcher's stat and link follow through this
     binding.
 
     Args:
-        probe (WalkProbe): the door's stat and the namespace's follow.
+        probe (WalkProbe): the dispatcher's stat and the namespace's follow.
     """
     return _current_walk_probe.set(probe)
 
@@ -629,17 +629,17 @@ def program_invocation(session: SessionState) -> bool:
 
 
 def redirect_target_judged(virtual: str) -> bool:
-    """Whether a path is a redirect target the command door already
+    """Whether a path is a redirect target command admission already
     judged for the statement writing it now.
 
-    The op doors ask this, and unlike :func:`redirect_paths_for` it
+    The dispatcher asks this, and unlike :func:`redirect_paths_for` it
     takes no node id, because by the time the shell writes the file the
-    node has returned and a door sees only a path. The binding is what
+    node has returned and the dispatcher sees only a path. The binding is what
     keeps that honest: it exists only while one statement's targets are
     being written, and a statement whose targets a rule refused never
     reaches the write at all. So a bound target is one the line was
-    admitted with, and re-deriving a verdict for it from a door that
-    knows neither the line nor the nod it holds can only get it wrong.
+    admitted with, and re-deriving a verdict for it from the dispatcher, which
+    knows neither the line nor the nod it holds, can only get it wrong.
 
     Args:
         virtual (str): absolute virtual path of the op.
@@ -763,7 +763,7 @@ def strongest_mode_under(
     session is bound.
 
     What the whole-mount gates read: a write command stays runnable on
-    a mount whose only writable region is a show entry (the op door
+    a mount whose only writable region is a show entry (the dispatcher
     then refuses per path), and the interpreters' any-``x`` rule counts
     a show grant the way it counts a whole mount.
 

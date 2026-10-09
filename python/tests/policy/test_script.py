@@ -97,7 +97,7 @@ class FakeEngine(EvaluatorMixin):
 
 
 class FakeLanguageEngine(LanguageRuntime, EvaluatorMixin):
-    """An interpreter engine, recording the doors it was attached to."""
+    """An interpreter engine, recording the entry points it was attached to."""
 
     language = "python"
     name = "fake"
@@ -129,8 +129,8 @@ class FakeLanguageEngine(LanguageRuntime, EvaluatorMixin):
         pass
 
 
-async def _door(op, path, **kwargs):
-    raise AssertionError("the door is attached, never called here")
+async def _dispatch(op, path, **kwargs):
+    raise AssertionError("the entry point is attached, never called here")
 
 
 class OneScript:
@@ -262,7 +262,7 @@ def test_a_deny_answer_becomes_a_whole_command_deny():
     assert action == Deny("sealed", DenyScope.COMMAND)
 
 
-def test_an_ask_answer_goes_to_the_approval_door():
+def test_an_ask_answer_goes_to_the_approval_entry_point():
     action = script_action({"ask": "sign-off"})
     assert action == Ask("sign-off")
     assert action.rule is None
@@ -326,7 +326,7 @@ async def test_a_deny_it_computed_refuses_the_command():
 
 
 @pytest.mark.asyncio
-async def test_an_ask_it_computed_reaches_the_door():
+async def test_an_ask_it_computed_reaches_the_dispatcher():
     policy = _policy({"ask": "sign-off"})
     assert await policy.pre_command(_ctx()) == Ask("sign-off")
 
@@ -401,10 +401,12 @@ async def test_an_engine_it_cannot_build_fails_closed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_wired_policy_attaches_the_doors_to_the_engine(monkeypatch):
+async def test_a_wired_policy_attaches_the_entry_points_to_the_engine(
+    monkeypatch,
+):
     # The facts name the path; the engine opens it. Attached before the
     # first evaluation, as Runtimes attaches an agent's engine, so the
-    # script's open() reads the mounts through the same door.
+    # script's open() reads the mounts through the same entry point.
     engine = FakeLanguageEngine()
     monkeypatch.setattr(
         "mirage.policy.script.script_engine", lambda script, runtime: engine
@@ -412,18 +414,18 @@ async def test_a_wired_policy_attaches_the_doors_to_the_engine(monkeypatch):
     resolver = PrefixResolver(lambda: ["/repo/"])
     marked: list[bool] = []
 
-    async def door(op, path, **kwargs):
+    async def backend(op, path, **kwargs):
         marked.append(_POLICY_READ.get())
         return None, None
 
     policy = ScriptPolicy(
-        OneScript(_entry()), _mounts, dispatch=door, resolver=resolver
+        OneScript(_entry()), _mounts, dispatch=backend, resolver=resolver
     )
     assert await policy.pre_command(_ctx()) is None
     assert engine.attached is not None
     dispatch, attached = engine.attached
     assert attached is resolver
-    # The door is the workspace's, reached through the policy's own
+    # The entry point is the workspace's, reached through the policy's own
     # wrapper, which marks the op as the policy's read for as long as it
     # runs so the policy's pre_vfs lets it through; outside the call the
     # mark is down.
@@ -434,7 +436,7 @@ async def test_a_wired_policy_attaches_the_doors_to_the_engine(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_bare_policy_attaches_nothing(monkeypatch):
-    # Outside a workspace there is no door to hand over, and the
+    # Outside a workspace there is no entry point to hand over, and the
     # engine is left as built: its scripts see no file.
     engine = FakeLanguageEngine()
     monkeypatch.setattr(
@@ -447,7 +449,7 @@ async def test_a_bare_policy_attaches_nothing(monkeypatch):
 
 def test_dispatch_and_resolver_travel_together():
     with pytest.raises(ValueError, match="travel together"):
-        ScriptPolicy(OneScript(None), _mounts, dispatch=_door)
+        ScriptPolicy(OneScript(None), _mounts, dispatch=_dispatch)
     with pytest.raises(ValueError, match="travel together"):
         ScriptPolicy(
             OneScript(None), _mounts, resolver=PrefixResolver(lambda: [])
@@ -507,7 +509,7 @@ def test_defined_hooks_refuses_anything_else(value):
 
 
 def test_a_session_hook_may_not_ask():
-    # The session door cannot wait on a host, so the vocabulary there is
+    # The session view cannot wait on a host, so the vocabulary there is
     # allow or deny, and an ask is a wrong answer.
     hook = "pre_session"
     assert script_action({"deny": "frozen"}, hook) == Deny("frozen")
@@ -520,7 +522,7 @@ def test_a_session_hook_may_not_ask():
 
 @pytest.mark.asyncio
 async def test_a_hook_the_program_leaves_out_is_silence_without_an_evaluation():
-    # The probe found pre_command alone, so the op and session doors
+    # The probe found pre_command alone, so the op and session views
     # cost no evaluation: a program that judges commands is not charged
     # per op for a hook it never wrote.
     policy = _policy(DENY_ANSWER)
@@ -540,7 +542,7 @@ async def test_an_op_hook_it_defines_judges_the_op_with_its_facts():
     assert engine.seen == {
         "ctx": ops_script_context("release", _ops_ctx(), _mounts())
     }
-    # The command door, which the program leaves out, is silence.
+    # The command hook, which the program leaves out, is silence.
     assert await policy.pre_command(_ctx()) is None
 
 
@@ -559,14 +561,14 @@ async def test_a_session_hook_it_defines_judges_the_write_with_its_facts():
 
 @pytest.mark.asyncio
 async def test_an_op_hook_may_ask():
-    # The door puts it to the host where no line is running, and refuses
+    # The entry point puts it to the host where no line is running, and refuses
     # it inside one.
     policy = _policy({"ask": "nod"}, hooks=("pre_vfs",))
     assert await policy.pre_vfs(_ops_ctx()) == Ask("nod")
 
 
 @pytest.mark.asyncio
-async def test_a_program_defining_no_hook_fails_closed_at_every_door():
+async def test_a_program_defining_no_hook_fails_closed_at_every_entry_point():
     policy = _policy(None, hooks=())
     for action in (
         await policy.pre_command(_ctx()),
@@ -602,7 +604,7 @@ async def test_the_probe_runs_once_per_program():
     await policy.pre_vfs(_ops_ctx())
     await policy.pre_vfs(_ops_ctx("read", write=False))
     await policy.pre_command(_ctx())
-    # The probe, then two op judgments; the command door was silence.
+    # The probe, then two op judgments; the command hook was silence.
     assert FakeEngine.built[0].evals == 3
 
 
@@ -635,7 +637,7 @@ async def test_the_hook_set_is_remembered_per_language():
 
 @pytest.mark.asyncio
 async def test_the_policys_own_read_is_not_judged_by_its_op_hook():
-    # The mark the reading door raises is what pre_vfs reads first, so a
+    # The mark the reading entry point raises is what pre_vfs reads first, so a
     # read the engine issues never re-enters the evaluation waiting on
     # it; the same op from anyone else is judged.
     policy = _policy({"deny": "frozen"}, hooks=("pre_vfs",))
@@ -652,7 +654,7 @@ async def test_the_policys_own_read_is_not_judged_by_its_op_hook():
 
 @pytest.mark.asyncio
 async def test_wants_for_says_which_sessions_a_hook_speaks_for():
-    # The per-session refinement the secret fill asks: the door is
+    # The per-session refinement the secret fill asks: the hook is
     # overridden for everyone, but speaks only for a session whose
     # program defines the hook.
     policy = _policy(None, hooks=("pre_command",))
@@ -669,8 +671,8 @@ async def test_wants_for_says_which_sessions_a_hook_speaks_for():
 
 
 @pytest.mark.asyncio
-async def test_wants_for_counts_a_program_the_door_will_refuse():
-    # No hook at all, or a probe that failed: the door refuses every
+async def test_wants_for_counts_a_program_the_dispatcher_will_refuse():
+    # No hook at all, or a probe that failed: the dispatcher refuses every
     # write for this program, which is speaking.
     assert await _policy(None, hooks=()).wants_for("pre_session", "s") is True
     broken = _policy(error=EvalError("boom"))

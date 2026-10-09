@@ -17,7 +17,7 @@ import pathlib
 
 SRC = pathlib.Path(__file__).resolve().parents[2] / "mirage"
 
-# `set_attr` is the *ungated* attribute door: it writes the record and
+# `set_attr` is the *ungated* attribute entry point: it writes the record and
 # asks no policy. That is correct only where this operand's own path
 # already cleared `pre_session`, which is a per-call-site fact and not a
 # property of the function it sits in. Reading a nearby `view.set` and
@@ -41,7 +41,7 @@ ALLOWED = {
         "mirage/workspace/node/command_dispatch.py",
         "execute_command",
     ): "the prefix-assignment loop calls `pre_session_gate` explicitly "
-    "before seeding, since `seed_var` is the ungated door",
+    "before seeding, since `seed_var` is the ungated entry point",
     (
         "mirage/workspace/node/command_dispatch.py",
         "seed_prefix",
@@ -53,11 +53,11 @@ ALLOWED = {
     ): "the shell's own bookkeeping for the two fixed names PWD and "
     "OLDPWD as part of a cd the router already authorized, not a "
     "name the agent chose; an agent-typed `PWD=x` is an ordinary "
-    "assignment and goes through the door",
+    "assignment and goes through the session view",
     (
         "mirage/workspace/session/state.py",
         "mark_var",
-    ): "this is the gated door itself: the write lands after "
+    ): "this is the gated session view itself: the write lands after "
     "`ensure_var_visible` and `pre_session_gate`",
 }
 

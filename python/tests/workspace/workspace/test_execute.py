@@ -318,7 +318,7 @@ async def test_eval_keeps_the_record_the_inner_line_earned():
 
 
 # A substitution keeps only the inner stdout, so its record has to
-# reach the line through the door every nested line re-enters by.
+# reach the line through the entry point every nested line re-enters by.
 @pytest.mark.asyncio
 async def test_a_substitution_keeps_the_record_the_inner_line_earned():
     ws = _policed_ws()

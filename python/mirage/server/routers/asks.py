@@ -77,7 +77,7 @@ async def list_asks(
 ) -> list[AskResponse]:
     """The workspace's asks: pending by default, every decision under
     ``all=true``. The ledger already serves both views from one store,
-    so the door only picks which query to run."""
+    so the entry point only picks which query to run."""
     entry = _require_entry(request, workspace_id)
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
     # The ledger reads a named session through SessionManager.get, which

@@ -91,7 +91,7 @@ def patch_process(
 ) -> list[Patched]:
     """Point ``open`` and ``os`` at the workspace for a ``with`` block.
 
-    Each door is installed as an attribute on the module that owns the
+    Each entry point is installed as an attribute on the module that owns the
     name, never as a replacement module in ``sys.modules``, because a
     module imported before the block holds its own reference to the
     real one: a script whose ``import os`` sits at the top of the file
