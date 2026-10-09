@@ -732,7 +732,7 @@ async function printed(job: Job | null, want: string): Promise<string> {
 }
 
 describe('a follow prints each append past the file cache', () => {
-  // A follow polls at the door for what the backend holds now: neither the
+  // A follow polls at the dispatcher for what the backend holds now: neither the
   // cached body nor the stat the freshness probe kept has the bytes it
   // waits for, under either read policy. Mirrors Python's
   // test_follow_prints_each_append_past_the_file_cache.

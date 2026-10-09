@@ -90,7 +90,7 @@ export function queryFlag(value: string | undefined, name: string): boolean {
 }
 
 /**
- * A call's failure as the HTTP doors answer it: the errno it names picks
+ * A call's failure as the HTTP entry points answer it: the errno it names picks
  * the status, and the body carries the errno, the text and, for a policy's
  * refusal, its record. Mirrors Python's `failure`.
  */

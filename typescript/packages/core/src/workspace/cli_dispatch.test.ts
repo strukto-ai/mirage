@@ -384,9 +384,9 @@ class DenyAwsWrites implements Policy {
   }
 }
 
-/** A leaf that writes the session plane through its door. */
+/** A leaf that writes the session plane through its entry point. */
 async function stash(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
-  const view = inv.doors?.sessionView
+  const view = inv.view?.sessionView
   if (view === undefined) {
     return [new TextEncoder().encode('no session plane\n'), new IOResult({ exitCode: 1 })]
   }
@@ -398,8 +398,8 @@ async function stash(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
 const STASH = new CLISpec({ name: 'stash', fn: stash, rest: new Operand({ type: 'str' }) })
 
 describe('the session plane reaches a CLI leaf', () => {
-  it('a leaf writes the session through its door', async () => {
-    // The session plane's door is what a registered CLI has instead of
+  it('a leaf writes the session through its entry point', async () => {
+    // The session view is what a registered CLI has instead of
     // reaching into the session: the write lands, and the shell sees it.
     const ws = buildWorkspace()
     ws.registerCli('stash', STASH)
@@ -410,9 +410,9 @@ describe('the session plane reaches a CLI leaf', () => {
   })
 
   it("a leaf's session write clears the same gate the shell does", async () => {
-    // A door that skipped the gate would make an installed CLI the way around
+    // An entry point that skipped the gate would make an installed CLI the way around
     // every preSession rule, which is the whole reason writes go through one
-    // door rather than to the session.
+    // entry point rather than to the session.
     const ram = new RAMVFS()
     const ws = new Workspace(
       { '/data': ram },

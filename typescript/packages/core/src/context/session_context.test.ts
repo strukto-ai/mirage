@@ -152,9 +152,9 @@ describe('a binding belongs to the workspace that published it', () => {
     })
   })
 
-  it("the op door keeps any bind but another owner's", async () => {
+  it("the dispatcher keeps any bind but another owner's", async () => {
     // A kernel mount and a guest runtime bind without an owner, and
-    // the door keeps those; only a binding another workspace made is
+    // the entry point keeps those; only a binding another workspace made is
     // refused, since its session describes that workspace's view.
     const mine = new SessionManager('default')
     const theirs = new SessionManager('default')
@@ -208,7 +208,7 @@ describe('hides', () => {
   })
 
   it('the explicit-session predicate answers without a binding', async () => {
-    // A door that holds the session (the admission gate) asks it
+    // An entry point that holds the session (the admission gate) asks it
     // directly; the bound form is the same answer for the bound
     // session, and no session bound means nothing is hidden.
     const sess = new SessionState({
@@ -319,7 +319,7 @@ describe('the path axis modes', () => {
     })
     await runWithSession(sess, () => {
       // The mount-wide mode is READ, but a deeper grant makes a write
-      // command runnable; the op door then refuses per path.
+      // command runnable; the dispatcher then refuses per path.
       expect(strongestModeUnder('/repo', MountMode.EXEC)).toBe(MountMode.WRITE)
       // Capped by the configured mode, and other mounts unaffected.
       expect(strongestModeUnder('/repo', MountMode.READ)).toBe(MountMode.READ)

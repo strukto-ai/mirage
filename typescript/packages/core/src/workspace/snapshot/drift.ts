@@ -62,7 +62,7 @@ interface RegistryLike {
   allMounts(): readonly MountEntry[]
 }
 
-// The drain needs only path-to-mount resolution, so the door can pass
+// The drain needs only path-to-mount resolution, so the entry point can pass
 // its namespace (which answers tryMountFor) without holding the
 // registry. The try variant: a snapshot path the live workspace no
 // longer mounts is skipped, never an error.

@@ -34,7 +34,7 @@
       ],
       "session": "veiled",
       "command": "cat /scratch/private/k",
-      "explain_blind": "the refusal comes from the op door during the walk, below the command plane the dry run reads",
+      "explain_blind": "the refusal comes from the dispatcher during the walk, below the command plane the dry run reads",
       "expect": {
         "exit": 1,
         "stdout": "",

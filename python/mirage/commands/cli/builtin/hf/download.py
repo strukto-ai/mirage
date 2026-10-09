@@ -412,7 +412,7 @@ async def download_cmd(
             "(or set HF_HUB_CACHE / HF_HOME), since a workspace has no "
             "home directory to default a cache under"
         )
-    if inv.doors is None or inv.doors.dispatch is None:
+    if inv.view is None or inv.view.dispatch is None:
         raise UsageError("hf download needs a workspace to write into")
     repo_id, *names = list(inv.texts)
     include = list(fl.as_list("include"))
@@ -444,11 +444,11 @@ async def download_cmd(
             # --force-download only means anything in cache mode.
             base = local_dir.virtual
             written = await fetch_all(
-                inv.doors.dispatch, accessor, paths, local_dir, workers
+                inv.view.dispatch, accessor, paths, local_dir, workers
             )
         else:
             base, written = await fetch_into_cache(
-                inv.doors.dispatch,
+                inv.view.dispatch,
                 accessor,
                 tree,
                 paths,

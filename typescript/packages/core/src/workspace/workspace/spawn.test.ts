@@ -53,7 +53,7 @@ it('drains stdin and stdout concurrently and isolates cwd', async () => {
   }
 })
 
-it('revokes captured process doors on profile replacement', async () => {
+it('revokes captured process entry points on profile replacement', async () => {
   const ws = new Workspace({}, { runtimes: [], shellParser: parser })
   try {
     ws.createSession('a')

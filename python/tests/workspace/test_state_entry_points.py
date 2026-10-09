@@ -106,7 +106,7 @@ def test_ln_fires_the_op_gates():
 
 def test_ln_leaves_an_op_record():
     # The op ledger must not say a workspace with ln traffic did
-    # nothing: the door records the namespace write like any other op.
+    # nothing: the entry point records the namespace write like any other op.
     ws = _two_mounts()
 
     async def run():
@@ -131,7 +131,7 @@ def test_scoped_shell_ln_onto_hidden_turf_is_refused():
 
 def test_scoped_shell_ln_does_not_follow_a_hidden_link_into_its_directory():
     # A hidden link to a visible directory is not a directory the session
-    # can link into: the door checks the typed path before it follows,
+    # can link into: the dispatcher checks the typed path before it follows,
     # and ln's own directory probe has to agree, or the link lands in
     # the directory the hidden link points at.
     ws = _two_mounts()
@@ -187,7 +187,7 @@ def test_scoped_shell_ln_onto_a_hidden_mount_root_does_not_say_it_exists():
 
 def test_symlink_and_readlink_answer_on_the_ops_facade():
     # readlink is the read twin: guests and CLIs ask through the same
-    # door instead of a bespoke channel.
+    # entry point instead of a bespoke channel.
     ws = _two_mounts()
 
     async def run():
@@ -256,7 +256,7 @@ def test_readlink_on_a_non_link_raises_einval():
 
 def test_chown_h_on_a_link_fires_the_op_gates():
     # chown -h writes the link's own attrs; that overlay write used to
-    # bypass the door entirely, so no policy could bound it.
+    # bypass the entry point entirely, so no policy could bound it.
     ws = _two_mounts(policies=[DenyOp("setattr")])
 
     async def run():
@@ -362,7 +362,7 @@ def test_every_declaring_spelling_fires_the_state_gate():
 
 
 def test_a_hidden_name_cannot_be_marked_readonly():
-    # The same door from the other side: a session that cannot see the
+    # The same entry point from the other side: a session that cannot see the
     # name must not be able to freeze it either, which would deny the
     # host's own wiring a write to state the session never had.
     ws = _two_mounts()
@@ -384,7 +384,7 @@ def test_a_hidden_name_cannot_be_marked_readonly():
 )
 def test_a_reference_refusal_never_quotes_a_hidden_value(line: str):
     # A reference checks the value its name holds; a hidden one reads as
-    # unset, so the refusal is the door's and not a line quoting it.
+    # unset, so the refusal is the entry point's and not a line quoting it.
     ws = _two_mounts()
     session = ws.get_session(ws.default_session_id)
     seed_var(session, "SECRET", "token-with-dashes")
@@ -402,7 +402,7 @@ def test_a_reference_refusal_never_quotes_a_hidden_value(line: str):
 
 
 def test_an_integer_reference_value_stops_at_a_hidden_write():
-    # `declare -ni r=M` evaluates M through the `-i` door, so a hidden
+    # `declare -ni r=M` evaluates M through the `-i` entry point, so a hidden
     # name it assigns is refused there and nothing after it lands.
     ws = _two_mounts()
     session = ws.get_session(ws.default_session_id)
@@ -632,7 +632,7 @@ def test_a_prefix_assignment_clears_the_gate():
     # `SECRET=leak cmd` is a session write like any other, and the form
     # puts it in the command's environment, so a deployment refusing
     # `SECRET_*` has to be asked. Only the hidden half was checked here,
-    # and the seeding goes through the ungated door, so the secret
+    # and the seeding goes through the ungated entry point, so the secret
     # reached the command and printed.
     ws = _two_mounts(policies=[DenySecretEnv()])
 
@@ -687,7 +687,7 @@ def test_a_declaration_stamps_what_stored_despite_a_bad_sibling():
 
 def test_readonly_name_refuses_a_declaration_array_store():
     # The staged-array store is the builtin's own; the shell's readonly
-    # rule is pre-checked there, before the door is asked.
+    # rule is pre-checked there, before the entry point is asked.
     ws = _two_mounts()
 
     async def run():
@@ -803,7 +803,7 @@ def test_readonly_loop_variable_refuses_before_the_body():
 
 def test_the_gate_learns_which_session_asked():
     # `deny set for session X` is just a policy once the context says
-    # who asked; the door adds the id in one place for every spelling.
+    # who asked; the entry point adds the id in one place for every spelling.
     seen: list[str] = []
 
     class CaptureSession(Policy):
@@ -917,7 +917,7 @@ def test_assign_default_writes_raw_env_under_hidden_vars():
 def test_assign_default_of_a_hidden_var_is_refused():
     # ${SLACK_TOKEN:=fake} observes the hidden name as unset, so
     # without a gate the write-back would overwrite the real value
-    # the host's wiring still reads; the door refuses like any denied
+    # the host's wiring still reads; the entry point refuses like any denied
     # assignment.
     ws = _hidden_vars_ws()
 
@@ -1004,7 +1004,7 @@ def test_export_p_omits_hidden_vars():
 
 def test_exporting_a_hidden_var_is_refused_and_preserves_it():
     # A landed write would clobber the real value the host's wiring
-    # still reads; a swallowed one would gaslight the agent. The door
+    # still reads; a swallowed one would gaslight the agent. The entry point
     # refuses loudly, and the line dies like any denied assignment.
     ws = _hidden_vars_ws()
 
@@ -1097,7 +1097,7 @@ def test_prefix_assignment_of_a_hidden_var_is_refused():
 def test_bare_declare_a_of_a_hidden_var_is_refused():
     # `declare -a NAME` at top level migrates an existing scalar into
     # element 0 with raw writes, which would move the hidden value
-    # into array storage; the door refuses instead.
+    # into array storage; the entry point refuses instead.
     ws = _hidden_vars_ws()
 
     async def run():
@@ -1300,7 +1300,7 @@ def test_unscoped_session_sees_everything():
 
 
 def test_fuse_hides_hidden_paths():
-    # FUSE rides the same door, so a scoped kernel mount agrees with a
+    # FUSE rides the same entry point, so a scoped kernel mount agrees with a
     # scoped shell about what exists.
     ws = _hidden_paths_ws()
     sess = ws.get_session("agent")

@@ -589,7 +589,7 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
 async def _dispatched_statfs(
     dispatch: DispatchFn, path: PathSpec
 ) -> tuple[str, CapacityResult]:
-    """statfs through the op door.
+    """statfs through the dispatcher.
 
     Args:
         dispatch (DispatchFn): the workspace op dispatcher.

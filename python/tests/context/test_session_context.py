@@ -289,7 +289,7 @@ def test_strongest_mode_under_counts_a_show_grant():
     token = set_current_session(sess)
     try:
         # The mount-wide mode is READ, but a deeper grant makes a write
-        # command runnable; the op door then refuses per path.
+        # command runnable; the dispatcher then refuses per path.
         assert strongest_mode_under("/repo", MountMode.EXEC) == MountMode.WRITE
         # Capped by the configured mode, and other mounts unaffected.
         assert strongest_mode_under("/repo", MountMode.READ) == MountMode.READ
@@ -441,9 +441,9 @@ def test_hidden_refusal_answers_a_create_by_its_parent():
     )
 
 
-def test_the_op_door_keeps_any_bind_but_another_owners():
+def test_the_dispatcher_keeps_any_bind_but_another_owners():
     # A kernel mount and a guest runtime bind without an owner, and
-    # the door keeps those; only a binding another workspace made is
+    # the entry point keeps those; only a binding another workspace made is
     # refused, since its session describes that workspace's view.
     mine = SessionManager("default")
     theirs = SessionManager("default")

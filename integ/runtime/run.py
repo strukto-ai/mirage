@@ -97,12 +97,13 @@ RUNTIME_LANGUAGE: dict[str, str | None] = {
 }
 PROGRAM_HEAD: dict[str, str] = {"python": "python3 -c", "js": "node -e"}
 # Every language a program or an `expect` may be keyed by. `node` is the
-# typescript host door's: node's own `fs`, where `js` is QuickJS's std/os.
+# typescript host entry point's: node's own `fs`, where `js` is QuickJS's
+# std/os.
 LANGUAGES = frozenset({"python", "js", "node"})
-# The runtime that is no runtime: the SDK's in-process door (`with ws:`
+# The runtime that is no runtime: the SDK's in-process entry point (`with ws:`
 # here, `patchNodeFs` on the typescript host), which runs a program in the
 # runner's own process with `open` and `os` pointed at the workspace.
-HOST_DOOR = "host"
+HOST_RUNTIME = "host"
 # The expect keys that read the workspace's op ledger.
 LEDGER_CHECKS = frozenset({"ops_contain", "ops_absent", "ops_count"})
 # What a `runtimes` entry needs on this host before it can run. A runtime
@@ -178,7 +179,7 @@ class EchoBox(Runtime, LineExecutorMixin):
 
 # Registered the way a host registers its own runtime, so a case names
 # it by string like a builtin, `build_runtime` resolves it, and the
-# unknown-name refusal lists it. The registry suite pins that door.
+# unknown-name refusal lists it. The registry suite pins that entry point.
 register_runtime(EchoBox.name, EchoBox)
 
 
@@ -891,7 +892,7 @@ async def _run_step(
             ]
         return []
     if "read_op" in step:
-        # Reads through the op door (the surface FUSE and programmatic
+        # Reads through the dispatcher (the surface FUSE and programmatic
         # access share), where pre_vfs/post_vfs policies fire.
         content = ""
         try:
@@ -968,7 +969,7 @@ def _overlay(step: dict[str, Any], keys: list[str]) -> dict[str, Any]:
 
 
 def _step_for(
-    step: dict[str, Any], language: str | None, door: bool = False
+    step: dict[str, Any], language: str | None, on_host: bool = False
 ) -> tuple[dict[str, Any] | None, bool]:
     """One step as a runtime of ``language`` runs it, and whether it
     holds a guest program; None when nothing in it runs there.
@@ -978,7 +979,7 @@ def _step_for(
     ``node -e``, and a ``command`` map gives the whole line per
     language. An ``expect`` keyed by language, as ``program`` is, gives
     each language its own answer, and must hold one for the language.
-    A parallel step keeps the branches that run there. The host door
+    A parallel step keeps the branches that run there. The host entry point
     runs a program in the runner itself (``host_program``), so it has
     no line for a ``command`` map to give.
 
@@ -986,11 +987,11 @@ def _step_for(
         step (dict[str, Any]): the step as the suite spells it.
         language (str | None): the runtime's guest language; None for a
             sandbox, which runs the plain lines.
-        door (bool): the runtime is the host door.
+        on_host (bool): the runtime is the host entry point.
     """
     if "parallel" in step:
-        if door:
-            raise ValueError("the host door runs no parallel step")
+        if on_host:
+            raise ValueError("the host entry point runs no parallel step")
         mapped = [_step_for(branch, language) for branch in step["parallel"]]
         branches = [branch for branch, _ in mapped if branch is not None]
         if not branches:
@@ -1011,9 +1012,11 @@ def _step_for(
         return None, False
     source = by_language[language]
     step = {k: v for k, v in step.items() if k not in ("program", "script")}
-    if door:
+    if on_host:
         if key == "command":
-            raise ValueError("the host door has no line for a command map")
+            raise ValueError(
+                "the host entry point has no line for a command map"
+            )
         if key == "script":
             source = (
                 SUITE_DIR.parent / "fixtures" / "runtime" / source
@@ -1052,12 +1055,12 @@ def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
         runtime (str): one name from the case's ``runtimes``.
     """
     language = RUNTIME_LANGUAGE[runtime]
-    door = runtime == HOST_DOOR
+    on_host = runtime == HOST_RUNTIME
     steps: list[dict[str, Any]] = []
     programs = 0
     for listed in case["steps"]:
         try:
-            step, guest = _step_for(listed, language, door)
+            step, guest = _step_for(listed, language, on_host)
         except ValueError as exc:
             raise ValueError(f"{case['id']}@{runtime}: {exc}") from exc
         if step is None:
@@ -1067,7 +1070,7 @@ def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
     if programs == 0 and language is not None:
         return None
     world = copy.deepcopy(case.get("world", {}))
-    if not door:
+    if not on_host:
         world["runtimes"] = [
             _entry(runtime, case.get("entry", {})),
             "workspace",
@@ -1206,7 +1209,7 @@ def _run_host_program(
 ) -> list[str]:
     """Run one program the way ``python3 -c`` would, inside ``with ws:``.
 
-    The door is ``patch_process``, what ``with ws:`` installs, over the
+    The entry point is ``patch_process``, what ``with ws:`` installs, over the
     case's own loop, which sits idle while the program runs on this
     thread and is driven a call at a time, as a ``with ws:`` block's is.
     The streams, argv and exit status are the interpreter's: an uncaught
@@ -1270,13 +1273,13 @@ def _run_host_program(
     return problems
 
 
-def _run_door_case(suite: str, case: dict[str, Any]) -> list[str]:
-    """One host door variant, on a loop of its own on this thread.
+def _run_host_case(suite: str, case: dict[str, Any]) -> list[str]:
+    """One host entry point variant, on a loop of its own on this thread.
 
     A ``with ws:`` block drives its workspace's loop from the block's
     own thread, so the case builds its workspace on a fresh loop here,
     runs each program step between that loop's turns, and runs every
-    other step on it. The door patches the whole process, which is safe
+    other step on it. The entry point patches the whole process, which is safe
     because the runner runs one case at a time.
 
     Args:
@@ -1293,7 +1296,9 @@ def _run_door_case(suite: str, case: dict[str, Any]) -> list[str]:
         try:
             backend = case.get("backend")
             keys = (
-                [] if backend is None else [backend, f"{HOST_DOOR}@{backend}"]
+                []
+                if backend is None
+                else [backend, f"{HOST_RUNTIME}@{backend}"]
             )
             for index, step in enumerate(case["steps"]):
                 step = _overlay(step, keys)
@@ -1319,8 +1324,8 @@ def _run_door_case(suite: str, case: dict[str, Any]) -> list[str]:
 
 
 async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:
-    if case.get("runtime") == HOST_DOOR:
-        return await asyncio.to_thread(_run_door_case, suite, case)
+    if case.get("runtime") == HOST_RUNTIME:
+        return await asyncio.to_thread(_run_host_case, suite, case)
     case_id = f"{suite}/{case['id']}"
     world = case.get("world", {})
     run_id = uuid.uuid4().hex[:8]

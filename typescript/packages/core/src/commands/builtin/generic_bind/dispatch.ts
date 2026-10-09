@@ -31,7 +31,7 @@ import type { CommandIO } from '../../config.ts'
 /** Use the workspace's policy-checked operations as a generic IO adapter.
  * A listing answers the way a backend's does, which is what every generic is
  * written against: no backend stores a link, and the generics merge the
- * namespace's own from `ns.links`, so the door's copy would be a second row
+ * namespace's own from `ns.links`, so the dispatcher's copy would be a second row
  * (find) or a followed stat (ls). With `bound` (a walk kept on one
  * filesystem, `du -x`) a listing also leaves out the roots of the mounts
  * below it, which the walk must neither list nor stat. Mirrors Python's

@@ -301,8 +301,8 @@ describe('the gdrive read record', () => {
     expect(records[0]?.path).toBe('/gd/gd-report.pdf')
   })
 
-  it('stamps the same token through the API stat door', async () => {
-    // stat has two doors and the index arm is only one of them: a cold cache
+  it('stamps the same token through the API stat function', async () => {
+    // stat has two entry points and the index arm is only one of them: a cold cache
     // that cannot list the parent falls to statFromApi, which reads its own
     // getFile. Fixing the index arm alone leaves this one on a timestamp.
     const index = new RAMIndexCacheStore()
@@ -325,7 +325,7 @@ describe('the gdrive read record', () => {
       },
     ])
     const [, records] = await runWithRecording(async () => read(makeAccessor(), specFor(), index))
-    // `undefined` index is statFromApi's own door, taken before any warm.
+    // `undefined` index is statFromApi's own entry point, taken before any warm.
     const apiStat = await stat(makeAccessor(), specFor(), undefined)
     expect(apiStat.fingerprint).toBe(DIGEST)
     expect(apiStat.fingerprint).toBe(records[0]?.fingerprint)

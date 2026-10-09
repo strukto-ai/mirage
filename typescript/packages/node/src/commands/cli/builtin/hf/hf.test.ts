@@ -16,7 +16,7 @@ import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import type * as CommitModule from '../../../../core/hf_hub/commit.ts'
-import type { CLIDoors, CLIInvocation, CLISpec } from '@struktoai/mirage-core/commands/cli/types'
+import type { CLIView, CLIInvocation, CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { materialize } from '@struktoai/mirage-core/io/types'
 import { yieldBytes } from '@struktoai/mirage-core/io/stream'
@@ -76,7 +76,7 @@ function inv(
   texts: readonly string[] = [],
   flags: Record<string, FlagValue> = {},
   config: HfConfig = CONFIG,
-  doors?: CLIDoors,
+  view?: CLIView,
   stdin?: string,
 ): CLIInvocation {
   return {
@@ -88,7 +88,7 @@ function inv(
     stdin: stdin === undefined ? null : yieldBytes(new TextEncoder().encode(stdin)),
     cwd: PathSpec.fromStrPath('/'),
     env: {},
-    ...(doors !== undefined ? { doors } : {}),
+    ...(view !== undefined ? { view } : {}),
   }
 }
 
@@ -294,7 +294,7 @@ describe('why nothing was selected', () => {
   // download folds a refused tree walk (401/403/404) into an empty listing
   // itself. Three different failures would then all read as "no files
   // matched", so the CLI asks the Hub which one it was.
-  const doors = { dispatch: vi.fn() } as unknown as CLIDoors
+  const view = { dispatch: vi.fn() } as unknown as CLIView
 
   it.each([
     [Absence.REPO, [] as string[], 'Repository Not Found'],
@@ -310,7 +310,7 @@ describe('why nothing was selected', () => {
           ['acme/widget', ...names],
           { local_dir: PathSpec.fromStrPath('/work/out') },
           CONFIG,
-          doors,
+          view,
         ),
       ),
     ).rejects.toThrow(expected)
@@ -320,7 +320,7 @@ describe('why nothing was selected', () => {
 describe('a tree the Hub refuses', () => {
   // The tree walk raises for a repo it cannot see; download reads that as
   // nothing listed, so the message upstream prints is unchanged.
-  const doors = { dispatch: vi.fn() } as unknown as CLIDoors
+  const view = { dispatch: vi.fn() } as unknown as CLIView
 
   it.each([
     [401, ''],
@@ -332,7 +332,7 @@ describe('a tree the Hub refuses', () => {
     classifyAbsenceMock.mockResolvedValue(Absence.REPO)
     await expect(
       downloadCmd(
-        inv(['acme/widget'], { local_dir: PathSpec.fromStrPath('/work/out') }, CONFIG, doors),
+        inv(['acme/widget'], { local_dir: PathSpec.fromStrPath('/work/out') }, CONFIG, view),
       ),
     ).rejects.toThrow('Repository Not Found')
   })
@@ -341,7 +341,7 @@ describe('a tree the Hub refuses', () => {
     fetchTreeMock.mockRejectedValue(new HfHubError('boom', 500))
     await expect(
       downloadCmd(
-        inv(['acme/widget'], { local_dir: PathSpec.fromStrPath('/work/out') }, CONFIG, doors),
+        inv(['acme/widget'], { local_dir: PathSpec.fromStrPath('/work/out') }, CONFIG, view),
       ),
     ).rejects.toThrow('boom')
     expect(classifyAbsenceMock).not.toHaveBeenCalled()
@@ -406,7 +406,7 @@ describe('where an upload lands', () => {
     '/work/a.txt': { dir: false, data: 'alpha', kids: [] },
     '/work/sub/b.txt': { dir: false, data: 'beta', kids: [] },
   }
-  const doors = {
+  const view = {
     dispatch: vi.fn((op: string, spec: { virtual: string }) => {
       const node = tree[spec.virtual]
       if (node === undefined) {
@@ -418,11 +418,11 @@ describe('where an upload lands', () => {
       if (op === 'readdir') return Promise.resolve([node.kids, null])
       return Promise.resolve([new TextEncoder().encode(node.data), null])
     }),
-  } as unknown as CLIDoors
+  } as unknown as CLIView
 
   const additions = async (local: string, ...inRepo: string[]): Promise<string[]> => {
     await uploadCmd({
-      ...inv(['acme/widget', ...inRepo], {}, CONFIG, doors),
+      ...inv(['acme/widget', ...inRepo], {}, CONFIG, view),
       paths: [PathSpec.fromStrPath(local)],
     })
     const call = commitMock.mock.calls[0]?.[1] as { additions: { path: string }[] }

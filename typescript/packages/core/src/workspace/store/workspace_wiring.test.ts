@@ -99,7 +99,7 @@ describe('Workspace on a WorkspaceStateStore', () => {
     expect(wsB.getSession(wsB.defaultSessionId).env.MARK).toBe('1')
   })
 
-  it('the op door adopts the stored default before binding', async () => {
+  it('the dispatcher adopts the stored default before binding', async () => {
     // The first `ws.vfs` call on a fresh attach used to hydrate the
     // session store alone, so it ran as the minted default rather than
     // the writer's, whose hides the discovery record points at.

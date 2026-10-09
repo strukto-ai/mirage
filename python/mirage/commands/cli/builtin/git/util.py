@@ -29,7 +29,7 @@ from mirage.commands.cli.refusal import (
     git_option_refusal,
     git_usage,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLIInvocation, CLISpec, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -61,7 +61,7 @@ DOTTED_HEADER = re.compile(rb"\s*\[([A-Za-z0-9-]+)\.([^\]\s]*)\]")
 ESCAPED = re.compile(rb"\\(.)")
 
 
-def links_of(doors: CLIDoors) -> LinkView | None:
+def links_of(view: CLIView) -> LinkView | None:
     """The name plane's link facts, None when no namespace is wired.
 
     git walks the working tree itself rather than through a generic, so
@@ -70,12 +70,12 @@ def links_of(doors: CLIDoors) -> LinkView | None:
     it points at, and a link to nothing reads as absent.
 
     Args:
-        doors (CLIDoors): the invocation's doors, one per state plane.
+        view (CLIView): the invocation's view, one per state plane.
     """
-    return doors.ns.links if doors.ns is not None else None
+    return view.ns.links if view.ns is not None else None
 
 
-def mounts_of(doors: CLIDoors) -> MountView | None:
+def mounts_of(view: CLIView) -> MountView | None:
     """The name plane's mount boundaries, None when no namespace is wired.
 
     A mount nested inside the repository is served by another VFS
@@ -85,9 +85,9 @@ def mounts_of(doors: CLIDoors) -> MountView | None:
     the index pointing at files that never moved.
 
     Args:
-        doors (CLIDoors): the invocation's doors, one per state plane.
+        view (CLIView): the invocation's view, one per state plane.
     """
-    return doors.ns.mounts if doors.ns is not None else None
+    return view.ns.mounts if view.ns is not None else None
 
 
 def start_point(fl: FlagView) -> PathSpec:

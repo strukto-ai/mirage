@@ -58,7 +58,7 @@ CWD_DEFAULT_RAW = {
 # runs where its positional operands (or the cwd) put it, and `-o` and
 # `-D` on two mounts, or `--slurpfile` over a process substitution, is not
 # cross-mount.
-DOOR_FLAG_KEYS: dict[str, tuple[str, ...]] = {
+DISPATCH_FLAG_KEYS: dict[str, tuple[str, ...]] = {
     "curl": ("output", "dump_header"),
     "jq": ("rawfile", "slurpfile"),
 }
@@ -139,10 +139,13 @@ def path_flag_scopes(
     parsed = parse_command(spec, argv, cwd, cmd_name)
     kwargs = parse_to_kwargs(parsed)
     flag_paths = list(parsed.path_flag_values)
-    # A program file and a door option's file are read or written
+    # A program file and an entry point option's file are read or written
     # through the dispatcher, not on the line's mount. A pair's name
     # slots are words, never resolved paths, so they match nothing here.
-    for key in (FILE_KEYS.get(cmd_name), *DOOR_FLAG_KEYS.get(cmd_name, ())):
+    for key in (
+        FILE_KEYS.get(cmd_name),
+        *DISPATCH_FLAG_KEYS.get(cmd_name, ()),
+    ):
         if key is None:
             continue
         value = kwargs.get(key)
@@ -224,8 +227,8 @@ def routed_operands(
 ) -> list[PathSpec]:
     """The classified path words that route a line.
 
-    Classification makes a door option's file a path word like any
-    other, so a command in DOOR_FLAG_KEYS routes by its positional
+    Classification makes an entry point option's file a path word like any
+    other, so a command in DISPATCH_FLAG_KEYS routes by its positional
     operands alone; every other command by all its path words.
 
     Args:
@@ -235,7 +238,7 @@ def routed_operands(
         words (list[str | PathSpec]): the same words, classified.
         path_scopes (list[PathSpec]): the line's classified path words.
     """
-    if cmd_name not in DOOR_FLAG_KEYS:
+    if cmd_name not in DISPATCH_FLAG_KEYS:
         return path_scopes
     return positional_scopes(cmd_name, argv, cwd, words)
 

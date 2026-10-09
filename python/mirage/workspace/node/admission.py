@@ -147,7 +147,7 @@ class Admitted:
     paths the gate already judged pass, since the line was admitted on
     them; every other entry is judged by ``io_refusal`` under the same
     precedence the gate applied to the line, and a refusal is the op
-    door's ``PolicyDenied`` (EACCES, the path, the reason on its
+    entry point's ``PolicyDenied`` (EACCES, the path, the reason on its
     record), which every command renders as GNU's ``Permission
     denied``.
 
@@ -156,7 +156,7 @@ class Admitted:
         tokens (tuple[str, ...]): the line's tokens, command name first.
         judged (frozenset[str]): the virtual paths the gate judged.
         granted (tuple[CommandRule, ...]): the ask rules the line runs
-            under a grant for: the one the door answered for this
+            under a grant for: the one the entry point answered for this
             line, and the session's standing ones.
         scoped (bool): whether a path rule in force reads this
             command's paths, or a pre_vfs policy speaks for its session
@@ -230,7 +230,7 @@ def policy_scopes(
     The operands as typed and the values of path-valued flags, then, for
     a command that follows links, the targets they resolve to: ``cat
     /data/link`` reads ``/data/secret``, so a rule protecting the target
-    has to see it, and a command-scoped rule never runs at the op door
+    has to see it, and a command-scoped rule never runs at the dispatcher
     where the resolved path would otherwise be checked. The follow
     policy is the command's own (``follows_last_component``: ``rm``,
     ``mv``, ``ln``, ``stat``, ``tar`` ... act on the link itself, ``-L``
@@ -307,7 +307,7 @@ def _seen(
     learn of it either: a rule scoped to it must not fire (the reason
     would say the path is there), an ask must not be raised for it (a
     request would name it to the host), and the line runs on to the
-    door, which answers ENOENT like any other absent path. A path the
+    entry point, which answers ENOENT like any other absent path. A path the
     reader could not read goes the same way, since the line may never
     name it.
 
@@ -453,9 +453,9 @@ async def admit(
     the session's allow lists do not install is bash's "command not
     found" before any admission hook, so an unlisted tool never leaks
     a deny reason; a path the session cannot see is dropped before any
-    hook, so a rule never names it and the door answers ENOENT; a Deny
+    hook, so a rule never names it and the entry point answers ENOENT; a Deny
     renders in the outcome table's voice; an Ask is answered by the
-    door from the session's grants or the host. A command that gets
+    entry point from the session's grants or the host. A command that gets
     through comes back as its ``Admitted`` gate, which its own I/O
     consults for the entries the gate did not see.
 
@@ -597,7 +597,7 @@ def _word_hints(
 
     A mount command's spec is read, and so is a native capture's and an
     interpreter's: ``python3 steal.py`` runs on the runtime's own disk
-    or a host process, where no op door follows the read, so the
+    or a host process, where no dispatcher follows the read, so the
     script slot the spec declares is the one place a path rule can see
     the file. The tree's gate reads a native capture the same way
     (``expand_argv``), and an interpreter it runs itself for the script
@@ -911,7 +911,7 @@ def statement_redirects(node: Any, home: str | None) -> tuple[Word, ...]:
     The walk climbs the last-command chain instead, which is bash's own
     rule for a list, a pipeline and a ``!``. A compound (``{ }``, a loop, a
     subshell) redirects every command inside it, which is not a chain,
-    so none is claimed here and the op door judges the write.
+    so none is claimed here and the dispatcher judges the write.
 
     Args:
         node (Any): the command's tree-sitter node.

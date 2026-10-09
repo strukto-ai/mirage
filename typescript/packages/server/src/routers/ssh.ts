@@ -15,11 +15,11 @@
 import type { FastifyInstance } from 'fastify'
 import { type WebSocket, createWebSocketStream } from 'ws'
 import type { WorkspaceRegistry } from '../registry.ts'
-import type { SSHDoor } from '../ssh/types.ts'
+import type { SSHEndpoint } from '../ssh/types.ts'
 
 export interface SshRoutesDeps {
   registry: WorkspaceRegistry
-  ssh: SSHDoor
+  ssh: SSHEndpoint
 }
 
 interface SshParams {
@@ -32,7 +32,7 @@ interface SshParams {
  * workspace, else the upgrade answers 404 before any SSH. The login needs
  * no key and may only name this workspace. `ssh -o ProxyCommand="mirage
  * ssh-proxy %r"` reaches it. The SSH server is loaded on first use, as the
- * TCP door loads it, so a daemon nobody reaches over SSH never loads ssh2.
+ * TCP endpoint loads it, so a daemon nobody reaches over SSH never loads ssh2.
  */
 export function registerSshRoutes(app: FastifyInstance, deps: SshRoutesDeps): void {
   // An upgrade answered over HTTP was refused, maybe by a hook that ran

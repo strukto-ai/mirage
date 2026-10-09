@@ -33,8 +33,8 @@ class WorkspaceRuntime(Runtime):
 
     It is a pure routing marker, so it carries no capability mixin: a
     line resolved to workspace runs on the workspace executor inline, the
-    path the line takes anyway, so there is no interpreter door (run)
-    and no delegate door (run_line) to implement.
+    path the line takes anyway, so there is no interpreter entry point (run)
+    and no delegate entry point (run_line) to implement.
 
     Constructed like every runtime (captures, config, script), with
     two workspace readings: captures None (the default) keeps the catch-all
@@ -44,7 +44,7 @@ class WorkspaceRuntime(Runtime):
 
     name = "workspace"
     # A workspace-routed line runs on the workspace executor itself: it IS
-    # the gate, so there is no door around it.
+    # the gate, so there is no entry point around it.
     reach: RuntimeReach = "workspace"
     captures: tuple[str, ...] = ()
 

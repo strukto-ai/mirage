@@ -119,7 +119,7 @@ class JobRoute(JobOutput):
         outputs (dict[int, _Fd | FileDescription | Inherited]): where
             the redirect pointed stdout and stderr.
         outer (JobConsole): where a job writes outside the redirect.
-        dispatch (DispatchFn): op door, for a file the job writes later.
+        dispatch (DispatchFn): dispatcher, for a file the job writes later.
         session (SessionState): the shell, for file creation.
     """
 

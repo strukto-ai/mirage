@@ -50,7 +50,7 @@ class BaseVFS:
     ``tar -t`` still run as readers on a read-only backend. A function
     marked ``@vfs_call`` is also reachable by name through the
     dispatcher (``ws.dispatch("search_abc", path)``), with every check the
-    door runs; the built-in ones are marked here, and an override keeps
+    entry point runs; the built-in ones are marked here, and an override keeps
     the mark.
 
     Everything a tree needs to run one (the placement, the index store,

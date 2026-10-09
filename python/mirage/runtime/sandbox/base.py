@@ -36,8 +36,8 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
     ``mirage workspace create`` in the image entrypoint or by hand)
     with mounts at the same prefixes as the host workspace, so the
     session cwd and every path in a line resolve unchanged. Mirage
-    only connects and execs lines: the whole-line door is
-    LineExecutorMixin's run_line, and there is no interpreter door.
+    only connects and execs lines: the whole-line entry point is
+    LineExecutorMixin's run_line, and there is no interpreter entry point.
     Subclasses adapt one provider by implementing connect() and
     exec_line(); routing, captures, and per-line scripts are
     inherited. Constructed like every runtime (captures, config,

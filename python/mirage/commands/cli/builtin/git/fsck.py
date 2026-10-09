@@ -18,7 +18,7 @@ from mirage.commands.cli.builtin.git.io import (
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.session import located
 from mirage.commands.cli.builtin.git.util import fatal
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
@@ -196,14 +196,14 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         inv (CLIInvocation[None]): repository and fsck options.
     """
     try:
-        doors = inv.doors or CLIDoors()
+        view = inv.view or CLIView()
         fl = FlagView(inv.flags)
-        location = await located(fl, doors)
-        assert doors.dispatch is not None and doors.stat_path is not None
-        await check_packs(doors.dispatch, location.commondir)
-        repo = await open_repo(doors.dispatch, location)
+        location = await located(fl, view)
+        assert view.dispatch is not None and view.stat_path is not None
+        await check_packs(view.dispatch, location.commondir)
+        repo = await open_repo(view.dispatch, location)
         roots: set[bytes] = set(repo.refs.as_dict().values())
-        index = await read_index(doors.dispatch, location.gitdir)
+        index = await read_index(view.dispatch, location.gitdir)
         roots.update(
             entry.sha
             for entry in index.entries.values()
@@ -212,7 +212,7 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         for directory in {location.gitdir, location.commondir}:
             roots.update(
                 await log_roots(
-                    doors.dispatch, doors.stat_path, directory.join("logs")
+                    view.dispatch, view.stat_path, directory.join("logs")
                 )
             )
         out, io = await asyncio.to_thread(
@@ -220,7 +220,7 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         )
         if not roots:
             head = await read_optional(
-                doors.dispatch, location.gitdir.join("HEAD")
+                view.dispatch, location.gitdir.join("HEAD")
             )
             branch = (
                 (head or b"").decode().strip().removeprefix("ref: refs/heads/")

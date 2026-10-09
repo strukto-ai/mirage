@@ -44,7 +44,7 @@ async def unzip(
     )
     if opts.dispatch is not None:
         # Extraction writes wherever cwd or -d says, which need not be
-        # this mount, so the doors are dispatch-relayed and each path
+        # this mount, so the entry points are dispatch-relayed and each path
         # routes to the mount that owns it.
         prim = transfer_primitives(opts.dispatch)
         return await unzip_generic(

@@ -527,7 +527,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('keeps the abort of one line out of another on the same session', async () => {
-    // The status door reads the signal of the line that produced the
+    // The status dispatcher reads the signal of the line that produced the
     // statement, so an aborted sibling cannot make this line throw or
     // stop early.
     const ws = await makeWs()
@@ -542,10 +542,10 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('starts no further op after the release of a namespace-routed line', async () => {
-    // `rm l1 l2` on two links: the first unlink is held at the op door
+    // `rm l1 l2` on two links: the first unlink is held at the dispatcher
     // past the grace, so the caller is released. The held unlink then
     // completes and the handler resumes; the second operand must not
-    // reach the door. Python's cancelled task never gets there.
+    // reach the entry point. Python's cancelled task never gets there.
     const parser = await getTestParser()
     const ram = new RAMVFS()
     const seen: string[] = []

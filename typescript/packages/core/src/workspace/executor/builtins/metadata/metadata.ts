@@ -132,7 +132,7 @@ export function permissionError(cmd: string, action: string, path: PathSpec, err
   return `${cmd}: ${action} '${path.rawPath}': ${fsStrerror(err) ?? posixPhrase('EROFS')}\n`
 }
 
-// Route one attribute write through the op door. The door applies what
+// Route one attribute write through the dispatcher. The entry point applies what
 // the backend can hold natively and stores the residual in the namespace
 // overlay (dropping overlay fields the backend applied, so a stale
 // overlay never shadows the fresh backend value); a VFS with no
@@ -147,8 +147,8 @@ export async function setattrVia(
 }
 
 // Setattr a link node itself (the -h family): dispatched with `nofollow`
-// so the door writes the link entry's own attrs instead of the target's;
-// a link has no backend inode, so the door stores them in the overlay.
+// so the dispatcher writes the link entry's own attrs instead of the target's;
+// a link has no backend inode, so the entry point stores them in the overlay.
 export async function setattrLink(
   dispatch: DispatchFn,
   path: PathSpec,
@@ -160,7 +160,7 @@ export async function setattrLink(
 // A subtree as [path, stat] pairs, parents before children. Each entry's
 // stat is captured during the walk because chmod's symbolic clauses (u+x)
 // build on the entry's own current mode. Symlinks are skipped by name:
-// the door's readdir reports them (they are namespace structure), GNU
+// the entry point's readdir reports them (they are namespace structure), GNU
 // chmod -R changes neither a traversed link nor its referent, and the
 // skip must come before the stat because stat follows a link and would
 // descend through a directory link.

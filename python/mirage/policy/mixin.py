@@ -23,10 +23,10 @@ class SessionScopedMixin(ABC):
     carry a rule for it (a profile's policy program speaks only for the
     sessions under that profile), and says so through ``wants_for``.
     ``Policies.wants`` is the static answer, true as soon as any policy
-    overrides the hook, and every door keeps gating on it; a seam that
+    overrides the hook, and every entry point keeps gating on it; a seam that
     pays ahead for a hook (the secret fill drops its masks under a
     session-write gate) asks ``Policies.wants_for`` instead, which
-    consults this mixin so one profile's door does not charge every
+    consults this mixin so one profile's entry point does not charge every
     session.
     """
 

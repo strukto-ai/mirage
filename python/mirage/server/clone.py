@@ -34,7 +34,7 @@ async def build_override_mounts(
     """Build the mounts an override supplies, against the declarations
     the new workspace will run with.
 
-    Shared by the clone and load doors, which both take the same
+    Shared by the clone and load entry points, which both take the same
     ``mounts: {<prefix>: {vfs, config, write}}`` shape. An override mount
     reads a pointer the way a yaml one does: `build_vfs` is sync,
     so the credential is fetched before it. The declared sources are

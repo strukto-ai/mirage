@@ -51,7 +51,7 @@ export interface NodeMeta {
   // files written through mirage.
   observedMtime?: number
   // Extended attributes a caller set, by name; absent rather than empty.
-  // What a backend reports about the path is not stored here: the door
+  // What a backend reports about the path is not stored here: the dispatcher
   // derives it from stat.
   xattrs?: Map<string, Uint8Array>
 }
@@ -467,7 +467,7 @@ export class Namespace {
 
   // The names of the links living directly under a directory. What a
   // readdir row's link mark needs, which is a name question rather than
-  // a stat one: the door already holds every entry's stat and has only
+  // a stat one: the dispatcher already holds every entry's stat and has only
   // to learn which of those names the node table owns.
   //
   // Resolves a link prefix first, because a listing does: a readdir of

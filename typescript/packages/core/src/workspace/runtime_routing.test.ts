@@ -317,8 +317,8 @@ describe('routing ladder', () => {
     expect(evaluatorOf([])).toBeNull()
   })
 
-  it('one language attribute serves both doors', () => {
-    // The eval door and the run door read the same Runtime.language, so
+  it('one language attribute serves both entry points', () => {
+    // The eval entry point and the run dispatcher read the same Runtime.language, so
     // an engine cannot be picked as a js interpreter and a python
     // evaluator at once. Two attributes could disagree, and the
     // disagreement only showed up as an unexplained 127 or a policy
@@ -939,7 +939,7 @@ describe('whole-line runtimes', () => {
 
   it('the workspace entry is a pure routing marker', async () => {
     // A workspace-resolved line runs on the workspace executor inline; the
-    // entry is a marker with no line door to call.
+    // entry is a marker with no line entry point to call.
     const parser = await getTestParser()
     const fallback = new WorkspaceRuntime()
     const ws = new Workspace(

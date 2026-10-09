@@ -209,7 +209,7 @@ async def _delete(
     errors: list[bytes],
     stat_path: StatPath | None,
 ) -> bool:
-    """Remove a matched entry through the shared operation door.
+    """Remove a matched entry through the shared operation entry point.
 
     The dispatcher owns admission, backend support, cache invalidation and
     namespace cleanup. A find action never resolves a shell command.
@@ -217,7 +217,7 @@ async def _delete(
     Args:
         ps (PathSpec): the selected row, with its display spelling.
         ns (NamespaceView | None): the namespace's link facts.
-        dispatch (DispatchFn | None): workspace operation door.
+        dispatch (DispatchFn | None): workspace operation entry point.
         errors (list[bytes]): receives a failure in find's voice.
         stat_path (StatPath | None): distinguishes files from directories.
     """
@@ -257,7 +257,7 @@ async def _row_stat(
 ) -> FileStat | None:
     """The facts ``find -ls`` renders one accepted row from.
 
-    They come from the two doors the command boundary has: a symlink is
+    They come from the two entry points the command boundary has: a symlink is
     namespace state no backend can see, so the link view answers for
     one (lstat, as GNU's ``-ls`` reports the link itself), and every
     other row is statted through the op dispatcher, which answers for a
@@ -276,7 +276,7 @@ async def _row_stat(
     """
     path = ps.raw_path or ps.virtual
     if stat_path is None:
-        errors.append(encode_text(f"find: '{path}': no stat door\n"))
+        errors.append(encode_text(f"find: '{path}': no stat function\n"))
         return None
     link = (
         ns.links.stat_at(ps.virtual)
@@ -523,7 +523,7 @@ async def _apply_find_actions(
         stat_path (StatPath | None): dispatcher stat, threaded with it
             and used to find a slash-carrying ``-exec`` head.
         dispatch (DispatchFn | None): removes matched rows through the
-            operation door, which owns admission and cleanup.
+            operation entry point, which owns admission and cleanup.
         identity (Identity | None): who the session is, for the owner
             and group columns of ``-ls``.
 

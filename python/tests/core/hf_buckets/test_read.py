@@ -210,8 +210,8 @@ async def test_a_name_that_needs_encoding_reads_whole(make_acc):
 async def test_a_zero_length_window_is_empty_but_still_checks_the_file(
     make_acc, fake_hub
 ):
-    # The VFS range door reaches here with no factory short-circuit, and a
-    # zero-length Range header is not one the client can build; the read
+    # The VFS range entry point reaches here with no factory short-circuit, and
+    # a zero-length Range header is not one the client can build; the read
     # still has to say whether the file is there, as opendal's open did.
     acc = make_acc({"a.txt": SEED})
     assert (

@@ -258,7 +258,7 @@ function rootOf(prefix: string): string {
  * refuses one that does not) and is left as written. A name pattern
  * (`*.pem`, no slash) anchors nothing, and both places a mount section's
  * entries are read from have lost the section by then: the session's
- * hidden set is one list for every mount, and the op door matches a
+ * hidden set is one list for every mount, and the dispatcher matches a
  * rule's paths without consulting `rule.mount`. Left raw,
  * `mounts./repo.paths.hide: ["*.pem"]` hid `/other/key.pem` too, and a
  * path-only deny under `/repo` refused a read of it. The dialect's `*`
@@ -276,7 +276,7 @@ function anchored(entries: readonly string[], root: string): string[] {
  * anchored to it. The stamp is what makes the rule apply to a line that
  * *works inside* the mount, by cwd or by operand, which a path-scoped
  * rule cannot express. The anchor is for the entries the stamp cannot
- * reach: the op door reads a rule's paths alone (`anchored`).
+ * reach: the dispatcher reads a rule's paths alone (`anchored`).
  */
 function scopeRules(rules: readonly CommandRule[], root: string): CommandRule[] {
   return rules.map((rule) =>
@@ -376,7 +376,7 @@ function modesOf(profile: SessionProfile): Map<string, MountMode> | null {
  * policy reads as `ctx.profile`.
  *
  * @throws PolicyError - the policy is still a path, which means it
- * reached the workspace without passing the config door that loads one.
+ * reached the workspace without passing the config loader that loads one.
  */
 export function compileScript(effective: SessionProfile, name: string): ProfileScript | null {
   const policy = effective.policy
@@ -384,7 +384,7 @@ export function compileScript(effective: SessionProfile, name: string): ProfileS
   if (typeof policy.script === 'string') {
     throw new PolicyError(
       `profile '${name}' names a policy by path ('${policy.script}'); ` +
-        `only the config door loads one, pass ScriptSource in code`,
+        `only the config loader loads one, pass ScriptSource in code`,
     )
   }
   return { profile: name, script: policy.script, runtime: policy.runtime }

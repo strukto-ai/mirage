@@ -228,11 +228,11 @@ describe('ln with a source it cannot read', () => {
   })
 })
 
-describe('rm and unlink reach a link through the op door', () => {
-  it('rm of a link goes through the door', async () => {
+describe('rm and unlink reach a link through the dispatcher', () => {
+  it('rm of a link goes through the entry point', async () => {
     // The strip used to write the node table directly, so a preVfs
     // policy protecting a link never fired for `rm` while it fired for
-    // every other door (the FUSE unlink hole, one tier up). The mount is
+    // every other entry point (the FUSE unlink hole, one tier up). The mount is
     // writable, so only the policy can be what refuses.
     const ws = await makeWs([new PinLinks()])
     try {
@@ -341,7 +341,7 @@ describe('rm and unlink reach a link through the op door', () => {
   it('every refused operand speaks in one voice', async () => {
     // GNU reports each operand it could not remove, so a read grant is
     // one line per operand -- a link the node table refuses and a
-    // backend file the op door refuses say the same thing.
+    // backend file the dispatcher refuses say the same thing.
     const ws = await makeWs()
     try {
       await ws.shell('echo b > /data/f.txt')

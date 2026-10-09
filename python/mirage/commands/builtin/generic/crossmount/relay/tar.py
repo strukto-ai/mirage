@@ -39,7 +39,7 @@ async def run_tar(
 ) -> CrossResult:
     """Run a tar whose archive, operands and -C destination span mounts.
 
-    Pure wiring: the shared generic runs on dispatch-relayed doors, so
+    Pure wiring: the shared generic runs on dispatch-relayed calls, so
     the archive is read from or written to its mount, every extracted
     path lands on whichever mount owns it, and each -c operand is walked
     on the mount that owns it. The create scan still stops at a mount

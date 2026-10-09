@@ -152,11 +152,14 @@ function countNoun(count: number, singular: string, plural: string): string {
   return count === 1 ? singular : `${String(count)} ${plural}`
 }
 
-// Read a path through the workspace's door, on whatever mount holds it: a
+// Read a path through the workspace's entry point, on whatever mount holds it: a
 // checksum list names files anywhere, not on the list's mount. A stdin name
 // (`-`, /dev/stdin) reads the command's input through `stream`, on the
-// cursor the list itself reads from. Mirrors Python's door_reader.
-export function doorReader(dispatch: NonNullable<CommandOpts['dispatch']>, stream: Stream): Stream {
+// cursor the list itself reads from. Mirrors Python's dispatched_reader.
+export function dispatchedReader(
+  dispatch: NonNullable<CommandOpts['dispatch']>,
+  stream: Stream,
+): Stream {
   return async function* read(path: PathSpec): AsyncIterable<Uint8Array> {
     if (isStdin(path)) {
       yield* stream(path)
@@ -176,7 +179,7 @@ async function checkFile(
   flags: ChecksumFlags,
 ): Promise<[string, string, number]> {
   const data = DEC.decode(await materialize(stream(p)))
-  const listed = opts.dispatch !== undefined ? doorReader(opts.dispatch, stream) : stream
+  const listed = opts.dispatch !== undefined ? dispatchedReader(opts.dispatch, stream) : stream
   // A list read from stdin names files on the mount the command runs on.
   const mountPrefix = isStdin(p) ? (opts.mountPrefix ?? '') : mountPrefixOf(p.virtual, p.vfsPath)
   // GNU quotes its stdin name, which holds a space.

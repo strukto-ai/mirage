@@ -96,7 +96,7 @@ def _ssh_config(tmp_path, key: asyncssh.SSHKey) -> SSHConfig:
     )
 
 
-def test_build_app_keeps_the_ssh_door_shut_by_default(tmp_path):
+def test_build_app_keeps_the_ssh_endpoint_shut_by_default(tmp_path):
     app = build_app(pid_file=tmp_path / "daemon.pid")
     assert app.state.ssh_config.port is None
 
@@ -145,7 +145,7 @@ async def test_lifespan_serves_http_workspaces_over_ssh(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_configured_door_without_asyncssh_fails_the_start(
+async def test_a_configured_entry_point_without_asyncssh_fails_the_start(
     monkeypatch, tmp_path
 ):
     key = asyncssh.generate_private_key("ssh-ed25519")

@@ -154,7 +154,7 @@ export function rmRootRefusal(
 }
 
 // Every mount-root refusal is about one operand and speaks in the
-// command's own voice: the door prefixes the command name and picks the
+// command's own voice: the entry point prefixes the command name and picks the
 // exit code from the operand table (1, tar 2).
 function deny(reason: string): Deny {
   return { kind: 'deny', reason, scope: 'operand' }

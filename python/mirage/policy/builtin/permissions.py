@@ -38,7 +38,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
     still win) and before user policies, so a document rule speaks
     before a coded one when both match. It reads the session's
     compiled rules through the narrow ``SessionCommandsQuery`` by the
-    session id the door put in the context, never through ambient
+    session id the entry point put in the context, never through ambient
     state: an explicit fact survives the thread hop that drops a
     contextvar. Verdicts render through the one outcome table
     (``render_deny``), so an agent cannot tell a document deny from a
@@ -48,11 +48,11 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
     law lives: the allow list first (a line it does not cover is
     refused whole, though its head was visible), then the winning rule,
     refused whole or per operand by whether it names paths, or taken to
-    the approval door when it asks. ``pre_vfs`` walks the deny rules
+    the approval entry point when it asks. ``pre_vfs`` walks the deny rules
     that are pure paths, so FUSE, programmatic ops and the warm cache
     cannot bypass a path the profile protects. A path rule that asks is
     a question only where no line is running (a file tool, the host's
-    facade), which the door puts to the approval ledger keyed by rule
+    facade), which the entry point puts to the approval ledger keyed by rule
     and path; inside a line it refuses, since the line was admitted
     without it.
 
@@ -88,7 +88,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
             return None
         # The grants belong to the line, not the session: a once grant
         # is spent as the command is admitted, so by the time its own
-        # walk reaches this door the session holds nothing and only the
+        # walk reaches this entry point the session holds nothing and only the
         # bound gate still remembers the nod.
         gate = get_admission()
         granted = gate.granted if gate is not None else ()
@@ -104,12 +104,12 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
 
     async def wants_for(self, hook: str, session_id: str) -> bool:
         """Whether this session's rules speak at ``hook``: always at the
-        command door, and at the op door only through a pure path rule,
-        the one kind an op can meet (``op_reach``).
+        command entry point, and at the dispatcher only through a pure path
+        rule, the one kind an op can meet (``op_reach``).
 
         Args:
             hook (str): the hook in python spelling.
-            session_id (str): the session the door serves.
+            session_id (str): the session the dispatcher serves.
         """
         if hook != "pre_vfs":
             return True

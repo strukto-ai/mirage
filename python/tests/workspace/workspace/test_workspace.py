@@ -60,8 +60,8 @@ async def _seed(ws: Workspace) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_handle_binds_both_doors_to_one_session():
-    # One object per agent: the shell door and the op door answer
+async def test_a_handle_binds_both_entry_points_to_one_session():
+    # One object per agent: the shell entry point and the dispatcher answer
     # under the same profile, so a hide the shell honors is a hide the
     # file tool honors too.
     ws = _seeded()
@@ -104,9 +104,9 @@ async def test_a_handle_adopts_an_existing_session_and_refuses_a_profile():
 @pytest.mark.asyncio
 async def test_a_handle_adopts_a_persisted_session_before_creating_one():
     # A session store hydrates on first use, so a handle asked for
-    # before any async door has run used to see an empty session
+    # before any async entry point has run used to see an empty session
     # table, recreate a persisted session bare, and hand the next
-    # flush a record that overwrote the stored profile. The door
+    # flush a record that overwrote the stored profile. The entry point
     # hydrates first, so the stored session is adopted as is.
     store = RAMSessionStore()
     first = Workspace(
@@ -145,7 +145,7 @@ async def test_a_handle_forwards_per_call_options():
         assert reviewer.state.cwd != "/repo"
         token = set_current_session(ws.get_session(ws.default_session_id))
         try:
-            # A session already bound is kept by the op door, so a
+            # A session already bound is kept by the dispatcher, so a
             # handle reached from inside the default session's own
             # command reads as that session, never wider.
             assert (

@@ -540,11 +540,11 @@ export function registryClasses(registryFile: string): Map<string, string | null
 // Config field sets: what a mount can be told.
 //
 // Python dumps its pydantic wire names off the model. TypeScript's twin is
-// the zod schema behind each `normalize*Config` door, and it is read from
+// the zod schema behind each `normalize*Config` entry point, and it is read from
 // the source rather than observed, for the same reason capabilities are:
 // most schemas are module-private, and constructing a VFS to reach one
 // is not inert. The walk follows exactly the forms the config modules use --
-// a door call in the exported function, `alias.normalize` off one of the
+// a dispatcher call in the exported function, `alias.normalize` off one of the
 // S3 factories, a re-exported normalizer -- and throws on any other, so a
 // new form fails the dump rather than emitting a row that reads as "no
 // divergence here".
@@ -556,7 +556,7 @@ export interface ConfigFacts {
   validates: boolean
 }
 
-const DOOR = 'parseConfigWithSchema'
+const CONFIG_PARSER = 'parseConfigWithSchema'
 const NORMALIZER_RE = /^normalize\w*Config$/
 
 interface Bound {
@@ -853,7 +853,7 @@ function returnExpression(
   return found
 }
 
-// The `rename` map a door applies, resolved through any const or spread.
+// The `rename` map an entry point applies, resolved through any const or spread.
 function renameOf(
   expr: ts.Expression | undefined,
   source: ts.SourceFile,
@@ -894,14 +894,14 @@ function renameOf(
 }
 
 // The `parseConfigWithSchema(schema, input, normalizer?)` call inside a body.
-function doorCall(body: ts.Node): ts.CallExpression | undefined {
+function configCall(body: ts.Node): ts.CallExpression | undefined {
   let found: ts.CallExpression | undefined
   const visit = (node: ts.Node): void => {
     if (
       found === undefined &&
       ts.isCallExpression(node) &&
       ts.isIdentifier(node.expression) &&
-      node.expression.text === DOOR
+      node.expression.text === CONFIG_PARSER
     ) {
       found = node
     }
@@ -911,7 +911,7 @@ function doorCall(body: ts.Node): ts.CallExpression | undefined {
   return found
 }
 
-function factsOfDoor(
+function factsOfConfigCall(
   call: ts.CallExpression,
   source: ts.SourceFile,
   env: Env,
@@ -919,7 +919,7 @@ function factsOfDoor(
   label: string,
 ): ConfigFacts {
   const schema = call.arguments[0]
-  if (schema === undefined) throw new Error(`${label}: ${DOOR} without a schema`)
+  if (schema === undefined) throw new Error(`${label}: ${CONFIG_PARSER} without a schema`)
   return {
     fields: shapeOf(schema, source, env, packagesRoot, label),
     rename: renameOf(call.arguments[2], source, env, packagesRoot, label),
@@ -942,9 +942,9 @@ function factsOfNormalizer(
     return factsOfNormalizer(reExport.file, reExport.name, packagesRoot, label, depth + 1)
   const fn = topLevelFunction(source, name)
   if (fn !== undefined) {
-    const call = fn.body === undefined ? undefined : doorCall(fn.body)
+    const call = fn.body === undefined ? undefined : configCall(fn.body)
     if (call === undefined) return { fields: {}, rename: {}, validates: false }
-    return factsOfDoor(call, source, new Map(), packagesRoot, label)
+    return factsOfConfigCall(call, source, new Map(), packagesRoot, label)
   }
   const init = topLevelConst(source, name)
   if (init === undefined) {
@@ -991,9 +991,9 @@ function factsOfNormalizer(
       }
     })
     const body = factory.decl.body
-    const call = body === undefined ? undefined : doorCall(body)
+    const call = body === undefined ? undefined : configCall(body)
     if (call === undefined) return { fields: {}, rename: {}, validates: false }
-    return factsOfDoor(call, factory.source, env, packagesRoot, label)
+    return factsOfConfigCall(call, factory.source, env, packagesRoot, label)
   }
   throw new Error(
     `${label}: unsupported normalizer declaration ${init.getText(source).slice(0, 60)}`,

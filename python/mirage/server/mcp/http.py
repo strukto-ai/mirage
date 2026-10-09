@@ -65,7 +65,7 @@ class DaemonToolOperations(MirageToolOperations):
     A caller cancelled while it waits (an MCP client's cancel) cancels
     the job too.
     The other tools run on the workspace's own loop through the
-    session's own table (``session.tools``), so a read through any door
+    session's own table (``session.tools``), so a read through any entry point
     guards a write through another.
 
     Args:
@@ -163,7 +163,7 @@ class DaemonToolOperations(MirageToolOperations):
 
 class DaemonMcpServer(MirageMcpServer):
     """The MCP server as the daemon serves it: each Session call runs on
-    the workspace's loop, as the RPC door's does.
+    the workspace's loop, as the RPC endpoint's does.
 
     Args:
         entry (WorkspaceEntry): the workspace the tools act on.
@@ -199,7 +199,7 @@ class DaemonMcpServer(MirageMcpServer):
         return await self._entry.runner.call(work)
 
 
-class McpDoor:
+class McpEndpoint:
     """Serves every workspace's tools over MCP's streamable HTTP.
 
     The endpoint is stateless: each request runs in the workspace's
@@ -436,10 +436,10 @@ class McpDoor:
     ) -> DaemonToolOperations:
         """The tool table a workspace session is served by.
 
-        One table per workspace and live session, shared by every door
+        One table per workspace and live session, shared by every entry point
         that serves the tools (this endpoint, the HTTP tool routes, the
         RPC endpoint and the CLI through them), so a read through one
-        door stamps the file for an edit through another.
+        entry point stamps the file for an edit through another.
 
         Args:
             workspace_id (str): the workspace.
@@ -570,7 +570,7 @@ class McpDoor:
 
 def register_mcp_routes(
     app: FastAPI, registry: WorkspaceRegistry, jobs: JobTable
-) -> McpDoor:
+) -> McpEndpoint:
     """Serve MCP at ``/v1/workspaces/{workspace_id}/mcp``.
 
     The route sits behind the app's host check and auth, as every other
@@ -582,15 +582,16 @@ def register_mcp_routes(
         jobs (JobTable): the daemon's job table.
 
     Returns:
-        McpDoor: the door, whose ``close`` the app's lifespan awaits.
+        McpEndpoint: the entry point, whose ``close`` the app's lifespan
+        awaits.
     """
-    door = McpDoor(registry, jobs)
+    endpoint = McpEndpoint(registry, jobs)
     app.router.routes.append(
         Route(
             MCP_PATH,
-            door,
+            endpoint,
             methods=["GET", "POST", "DELETE"],
             include_in_schema=False,
         )
     )
-    return door
+    return endpoint

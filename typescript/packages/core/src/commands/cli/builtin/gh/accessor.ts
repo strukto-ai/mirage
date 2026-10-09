@@ -160,7 +160,7 @@ export async function readCliFile(
     if (inv.stdin === null) throw new Error(`${option} needs standard input`)
     return materialize(inv.stdin)
   }
-  const dispatch = inv.doors?.dispatch
+  const dispatch = inv.view?.dispatch
   if (dispatch === undefined) throw new Error(`${option} needs a workspace to read files from`)
   const spec = PathSpec.fromStrPath(raw, undefined, inv.cwd)
   try {

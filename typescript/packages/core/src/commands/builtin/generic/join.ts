@@ -598,7 +598,7 @@ export async function join(paths: PathSpec[], io: JoinIO): Promise<[ByteSource |
 }
 
 /**
- * The builder's door: parse the line's flags, then `join`. Each operand's
+ * The builder's entry point: parse the line's flags, then `join`. Each operand's
  * glob expands on its own, so the option loop sees its matches where the
  * word was typed (`join -j1 2 *.txt`). Mirrors join_generic in join.py.
  */

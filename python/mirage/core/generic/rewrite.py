@@ -164,7 +164,7 @@ async def refuse_taken(stat: StatFn, path: PathSpec, parents: bool) -> None:
     mkdir(2) refuses a name that exists, file or directory, and ``mkdir
     -p`` passes only a directory. Not every backend's create says so (a
     Graph 409 on a folder, Nextcloud's MKCOL 405, SFTP under ``-p``), so
-    both doors look the name up before the create. A directory under
+    both entry points look the name up before the create. A directory under
     ``-p`` still reaches the create, which keeps it durable (an object
     store writes the marker of a directory only a key implied), and a
     name that cannot be looked up is left to it too, to answer ENOENT or

@@ -90,7 +90,7 @@ class TestReadWrite:
         with pytest.raises(PermissionError):
             run(ops.pwrite("/data/file.txt", b"data", 0))
 
-    def test_pwrite_is_one_write_at_the_door(self):
+    def test_pwrite_is_one_write_at_the_dispatcher(self):
         ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
         run(ws.vfs.write("/data/f.txt", b"abc"))
         seen = _WriteOnly()
@@ -187,7 +187,7 @@ class TestRename:
             run(ops.read("/data/dir/old.txt"))
 
     def test_rename_across_mounts_refuses_exdev(self):
-        # A mount is a filesystem boundary; the door refuses before
+        # A mount is a filesystem boundary; the dispatcher refuses before
         # any backend is touched, so a kernel-facing caller (a
         # whole-workspace FUSE mount) falls back to copy+unlink instead
         # of writing one backend's path into another's key space.
@@ -315,7 +315,7 @@ class TestSetattr:
     def test_setattr_returns_what_the_backend_could_not_keep(self):
         # RAM holds attrs itself, so nothing is left for the overlay and
         # the residual is empty; a mount with no setattr op gets every
-        # field back from the door instead.
+        # field back from the dispatcher instead.
         ops, _ = make_ops()
         run(ops.mkdir("/data/dir"))
         run(ops.write("/data/dir/f.txt", b"hello"))
@@ -323,7 +323,7 @@ class TestSetattr:
         assert run(ops.stat("/data/dir/f.txt")).mode == 0o640
 
     def test_setattr_on_a_link_entry_lands_in_the_overlay(self):
-        # A link has no backend inode, so the door keeps its attrs
+        # A link has no backend inode, so the dispatcher keeps its attrs
         # whatever the owning mount can do.
         ops, _ = make_ops()
         run(ops.mkdir("/data/dir"))
@@ -424,7 +424,7 @@ def _structure_only_ops(policies: list[Policy]) -> Files:
 
 class TestStructureFallbackGates:
     def test_the_synthetic_answer_still_clears_admission(self):
-        # Mirrors the dispatcher door: a policy that bounds readdir or
+        # Mirrors the dispatcher: a policy that bounds readdir or
         # stat by path must cover a structure-only directory too.
         ops = _structure_only_ops([_SealInner()])
         with pytest.raises(PolicyDenied):
@@ -508,7 +508,7 @@ class _DenyEverything(Policy):
         return Deny("sealed\n")
 
 
-class TestAttachedOpsOneDoor:
+class TestAttachedOpsOneDispatcher:
     """A workspace-attached Files delegates every op to the dispatcher."""
 
     @pytest.mark.asyncio
@@ -552,7 +552,7 @@ class TestAttachedOpsOneDoor:
             await ws.close()
 
     @pytest.mark.asyncio
-    async def test_read_only_mount_refuses_writes_at_the_door(self):
+    async def test_read_only_mount_refuses_writes_at_the_dispatcher(self):
         ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.READ)
         try:
             with pytest.raises(PermissionError):
@@ -634,7 +634,7 @@ class TestPerCallSession:
     A shell line *sets* the session; an op *inherits* it. So the
     argument names the session to run as when no line is running, and
     the line's session wins when one is. That second half is what keeps
-    a handler reaching this door from widening the view it was given.
+    a handler reaching the dispatcher from widening the view it was given.
     """
 
     @staticmethod
@@ -694,7 +694,7 @@ class TestPerCallSession:
             run(ws.close())
 
     def test_a_line_in_progress_outranks_the_named_session(self):
-        # The door never widens a caller's view: a command running for
+        # The dispatcher never widens a caller's view: a command running for
         # a confined session cannot read as a wider one by naming it.
         ws = self._split_ws()
         session = SessionState(
@@ -716,8 +716,8 @@ class TestPerCallSession:
     def test_no_session_named_is_the_facade_s_own(self):
         ws = self._split_ws()
         try:
-            door = Session(ws, "blind").vfs
-            assert run(door.exists("/data/secret.txt")) is False
+            files = Session(ws, "blind").vfs
+            assert run(files.exists("/data/secret.txt")) is False
             assert run(ws.vfs.exists("/data/secret.txt")) is True
         finally:
             run(ws.close())
@@ -761,7 +761,7 @@ async def test_a_streamed_read_holds_one_chunk_at_a_time(tmp_path):
 
 
 def test_is_mounted_skips_the_anchor_and_claims_for_a_root_mount():
-    # The open()/os door asks this: the scratch root nobody mounted
+    # The open()/os entry point asks this: the scratch root nobody mounted
     # leaves the host its paths, a mount made at / takes every one.
     anchored = Workspace({"/data/": RAMVFS()})
     assert anchored.vfs.is_mounted("/data/x.txt")

@@ -44,7 +44,7 @@ export function posixRelative(target: string, startDir: string): string {
 // resolved on the way to it, while `stat dlink` reports the link. A
 // no-follow command therefore still needs its operand's prefix
 // resolved. The walk is the namespace's (`Namespace.followParent`, which
-// the op door runs for every surface); the operand comes back without a
+// the dispatcher runs for every surface); the operand comes back without a
 // trailing slash, which the slash-keeping commands read off `rawPath`
 // instead. Throws CycleError on ELOOP.
 function followParent(namespace: Namespace, virtual: string): string {
@@ -158,7 +158,7 @@ export function acceptsLine(
 // Unlink and drop `rm`/`unlink` operands that are symlinks. GNU rm removes
 // the link itself and never follows it; a dangling link removes fine.
 //
-// The removal is a dispatch op, never a direct table write: the door is
+// The removal is a dispatch op, never a direct table write: the entry point is
 // where session grants, the turf's mode, admission policies and the op
 // ledger fire, and writing the table from here let a session delete a
 // link its grant reads and a policy protecting one never fired (the same
@@ -263,7 +263,7 @@ async function slashedLinkRefusal(
  * (ls.c's DEREF_COMMAND_LINE_SYMLINK_TO_DIR, coreutils 9.7). `ls dlink` lists
  * the directory, while `ls flink` and a dangling `ls dang` report the link
  * itself, and so does a loop, whose stat fails where GNU then lstats it.
- * Where a link leads takes a stat through the door to know, since the target
+ * Where a link leads takes a stat through the entry point to know, since the target
  * may live on any mount, so this runs after `followPaths` has resolved every
  * operand's prefix. Mirrors Python's follow_directory_links.
  */

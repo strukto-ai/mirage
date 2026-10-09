@@ -55,7 +55,7 @@ function payloadBytes(result: unknown, args: readonly unknown[]): number {
 }
 
 /**
- * A streamed answer, recorded once it ends: the door stamps the report with
+ * A streamed answer, recorded once it ends: the dispatcher stamps the report with
  * the bytes the stream carried when it ends, so the record waits for that
  * rather than counting none. The caller runs it to its empty first step,
  * inside the `try`, so a stream closed before its first pull is still closed
@@ -85,7 +85,7 @@ async function* recorded(
  * Every op delegates to the workspace dispatcher, so `ws.vfs` walks the
  * same pipeline as a shell command: link follow, session grants,
  * admission policies, cache read-through, namespace structure, and
- * post-write invalidation all fire once, at that one door. The facade
+ * post-write invalidation all fire once, at that one dispatcher. The facade
  * keeps only what is its own: the typed surface and the op ledger
  * (`records`, with the network/cache split derived from it) — the
  * ledger lives here, not on the workspace, which is what lets
@@ -108,10 +108,10 @@ async function* recorded(
  * shell line *sets* the session, an op *inherits* it. So the argument
  * is the session to run as when no line is already running, and the
  * line's session wins when one is, which is what keeps a handler
- * reaching this door from widening the view it was given.
+ * reaching the dispatcher from widening the view it was given.
  */
 export class Files {
-  private readonly door: DispatchFn
+  private readonly dispatchFn: DispatchFn
   private readonly sink: OpSink | null
   // Injected namespace seam (workspace wires it); FUSE reads `links`
   // for its symlink surface.
@@ -134,7 +134,7 @@ export class Files {
     ownerOf: OwnerOf = () => null,
     options: FilesOptions = {},
   ) {
-    this.door = dispatch
+    this.dispatchFn = dispatch
     this.sink = sink
     this.links = links
     this.ownerOf = ownerOf
@@ -147,7 +147,7 @@ export class Files {
    * The same facade run as another session, over the same ledger, so
    * the workspace-wide account stays one list.
    *
-   * @internal The mechanism behind `Session.vfs`, not a door of
+   * @internal The mechanism behind `Session.vfs`, not a dispatcher of
    * its own: a host binds a session with `ws.session(id)` (creating it
    * when the id is new) or `new Session(ws, id)` (adopting one
    * that exists), so there is one way to say it rather than two.
@@ -156,7 +156,7 @@ export class Files {
    * `Files._for_session`.
    */
   forSession(sessionId: string): Files {
-    return new Files(this.door, this.sink, this.links, this.ownerOf, {
+    return new Files(this.dispatchFn, this.sink, this.links, this.ownerOf, {
       bind: this.bind,
       sessionId,
       records: this.records,
@@ -200,7 +200,7 @@ export class Files {
 
   /**
    * `Workspace.dispatch` as this facade runs it: as its session, and
-   * recorded on `records`. The door `RuntimeFiles` drives for node's
+   * recorded on `records`. The dispatcher `RuntimeFiles` drives for node's
    * patched `fs` (`patchNodeFs`), a facade caller like FUSE. Mirrors
    * Python's `Files.dispatch`.
    */
@@ -216,13 +216,13 @@ export class Files {
   /**
    * Run one op through the workspace dispatcher and record it.
    *
-   * The door owns the whole pipeline (follow, grants, gates, cache,
+   * The dispatcher owns the whole pipeline (follow, grants, gates, cache,
    * structure, invalidation); the facade's own share is the record. The
    * path is link-followed here first so the record carries the resolved
-   * path; the door's second follow of an already-resolved path is a
+   * path; the dispatcher's second follow of an already-resolved path is a
    * no-op. That follow runs inside the session binding and only from a
    * path the session can see: a link the session cannot see stays the
-   * typed path, so the door refuses it as absent instead of serving the
+   * typed path, so the dispatcher refuses it as absent instead of serving the
    * visible target it points at. Mirrors Python's Files._call.
    */
   private async through(
@@ -253,7 +253,7 @@ export class Files {
         vfsPath: spec.vfsPath,
         dotted: dottedSpelling(path),
       })
-      return this.door(op, typed, args, kwargs, report)
+      return this.dispatchFn(op, typed, args, kwargs, report)
     }
     let result: unknown
     let owner: MountOwner | null = null
@@ -267,8 +267,8 @@ export class Files {
       // Anything thrown after the op ran (a postVfs deny, a hard
       // output cap, a bookkeeping failure) suppresses the result, not
       // the effect, so observation must reflect the op before the
-      // error propagates. The door stamps the report at the moment of
-      // completion, so even a foreign error the door never defined
+      // error propagates. The dispatcher stamps the report at the moment of
+      // completion, so even a foreign error the dispatcher never defined
       // leaves the transfer on the books.
       if (report.completed && owner !== null) {
         await this.recordOp(
@@ -308,15 +308,15 @@ export class Files {
   }
 
   /** The session id a record carries: the one the op ran as, else this
-   * facade's own, else the unbound door's empty id. */
+   * facade's own, else the unbound entry point's empty id. */
   private sessionFor(seen: string | null): string {
     return seen ?? this.sessionId ?? ''
   }
 
   /**
-   * Record one op from the door's report of who served it.
+   * Record one op from the dispatcher's report of who served it.
    *
-   * The door names the server when it was not the owning mount (a warm
+   * The dispatcher names the server when it was not the owning mount (a warm
    * cache hit, a synthetic namespace answer): neither moved bytes over
    * the network, and 'ram' is what OpRecord.isCache reads. It names the
    * moved bytes when the delivered result no longer measures them,
@@ -344,7 +344,7 @@ export class Files {
   }
 
   // `raw` skips the filetype cascade: an explicit null filetype stops
-  // the door from stamping the path's extension, so a rendered read op
+  // the dispatcher from stamping the path's extension, so a rendered read op
   // (gdoc/gsheet/gslide) is bypassed and the stored bytes come back.
   // `offset`/`size` ride the same kwargs the generic read op already reads,
   // so a backend with a native range fetches one window instead of the whole
@@ -373,7 +373,7 @@ export class Files {
    * Read file content as the caller pulls it. The first chunk is read before
    * this returns, so a missing file fails here rather than at the first pull.
    * A cold read fills the cache as it is pulled, and the read is recorded once
-   * the stream ends. A read the door answers whole (a warm copy, a rendering,
+   * the stream ends. A read the dispatcher answers whole (a warm copy, a rendering,
    * a backend with no stream) arrives as one chunk. Python spells this
    * `read_stream(path, raw)`.
    */
@@ -406,7 +406,7 @@ export class Files {
    * Write bytes at an offset, keeping the rest of the file (the python
    * facade's `pwrite`). pwrite(2): the bytes outside the window stay, a gap
    * past the end reads back as zeros, and a missing file is created. It is
-   * one write at the door, so a session that may write the file and not
+   * one write at the dispatcher, so a session that may write the file and not
    * read it can still do it.
    */
   async pwrite(path: string, data: Uint8Array, offset: number, sessionId?: string): Promise<void> {
@@ -477,11 +477,11 @@ export class Files {
   /**
    * Create a namespace symlink at `path`.
    *
-   * Routed through the door like every write: session grants and
+   * Routed through the dispatcher like every write: session grants and
    * admission policies fire on the link's turf, and the write lands on
    * the ledger. The target is stored verbatim as typed. Throws EEXIST
    * when something is already at `path` (a file, a directory, another
-   * link, a mount root): symlink(2) never overwrites, and the door is
+   * link, a mount root): symlink(2) never overwrites, and the dispatcher is
    * the layer that can see both planes to tell. Throws ENOENT when the
    * directory `path` would sit in is absent, and ENOTDIR when a
    * non-directory stands there or above it. Mirrors Python's
@@ -499,7 +499,7 @@ export class Files {
   /**
    * Write metadata fields, natively where the backend can hold them.
    *
-   * Every field is passed, unset ones as undefined, because the door
+   * Every field is passed, unset ones as undefined, because the dispatcher
    * reads the whole set and stores in the namespace overlay whatever
    * the backend cannot keep. A mount with no setattr op therefore still
    * answers: a chmod on an s3 or dropbox mount lands in the name plane

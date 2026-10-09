@@ -444,12 +444,12 @@ def io_refusal(
 
 
 def posix_level(rule: CommandRule) -> bool:
-    """Whether a rule holds at an op door too: a pure path rule, which
+    """Whether a rule holds at a dispatcher too: a pure path rule, which
     names no command and has paths to match, the one kind an op can meet.
 
     The sort of a profile's rules: a POSIX-level rule holds at every
-    door, a command-level one (it names a command, or no path) only where
-    a line is judged.
+    entry point, a command-level one (it names a command, or no path) only
+    where a line is judged.
 
     Args:
         rule (CommandRule): the rule.
@@ -457,8 +457,8 @@ def posix_level(rule: CommandRule) -> bool:
     return not rule.commands and rule_scope(rule) is not None
 
 
-def skipped_at_op_doors(rules: AdmissionRules | None) -> tuple[str, ...]:
-    """The command-level parts of a profile's rules, which a door that
+def skipped_at_dispatch(rules: AdmissionRules | None) -> tuple[str, ...]:
+    """The command-level parts of a profile's rules, which an entry point that
     sees only ops (a kernel mount, SFTP, codex-exec's file calls) cannot
     apply, each described for the operator's warning: the allow list and
     every rule that is not POSIX level.
@@ -490,9 +490,9 @@ def op_reach(
     the directory holding the scope or on any ancestor, since it would
     take the scope along. A metadata op (``METADATA_OPS``) is reached by
     nothing: deny is present and refused, so the entry stats and its
-    content is what the door withholds.
+    content is what the entry point withholds.
 
-    The op-door twin of :func:`rule_reach`, and the same shape: the
+    The dispatcher twin of :func:`rule_reach`, and the same shape: the
     depth is the one the arm that matched measures, so a rule cannot
     lend an operand specificity from an entry that said nothing about
     it.
@@ -534,18 +534,18 @@ def op_ruling(
     """The rule an op meets and whether it asks, None when the op may
     run.
 
-    The op-door twin of :func:`io_refusal`, and the same law: anchor
+    The dispatcher twin of :func:`io_refusal`, and the same law: anchor
     depth first, deny before ask at equal depth, and an ask satisfied
     by a grant the line already holds. Reading every deny before any
     ask instead let a broad deny on ``/repo/*`` overrule an approved
-    ask on ``/repo/outbox/*``, so the carve-out the command door had
+    ask on ``/repo/outbox/*``, so the carve-out the command entry point had
     just admitted the line under could not authorize the redirect it
-    was written for: the write reached this door and was refused there.
+    was written for: the write reached this entry point and was refused there.
 
-    What an ask means is the door's to say: inside a running line it
+    What an ask means is the entry point's to say: inside a running line it
     refuses like a deny, since the line was admitted without it, and
     outside one (a file tool, the host's facade) it goes to the
-    approval door, keyed by rule and path.
+    approval entry point, keyed by rule and path.
 
     Args:
         rules (AdmissionRules | None): the session's admission rules.

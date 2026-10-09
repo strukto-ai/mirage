@@ -613,19 +613,19 @@ describe('a lookup the index is cleared under', () => {
     stubHead()
   })
 
-  it('retries at the read door', async () => {
+  it('retries at the read entry point', async () => {
     const accessor = new HfHubAccessor({ repoId: 'acme/widget' } as never)
     const walk = vi
       .spyOn(client, 'hubGetResponse')
       .mockResolvedValue(page([{ type: 'file', oid: 'oid-a', size: 7, path: 'a.txt' }]))
     const entry = await resolveEntry(accessor, ps('a.txt'), new ClearedMidLookup())
     // Without the retry the cleared store answers "no such file", and through
-    // a dispatcher door that drops the file's overlay for good.
+    // a dispatcher that drops the file's overlay for good.
     expect(entry.size).toBe(7)
     expect(walk).toHaveBeenCalledTimes(2)
   })
 
-  it('retries at the stat door', async () => {
+  it('retries at the stat function', async () => {
     const accessor = loaded()
     const index = new ClearedMidLookup()
     await seedIndex(accessor.tree, index, '')
@@ -683,7 +683,7 @@ describe('a lookup a reseed hides the clear from', () => {
     stubHead()
   })
 
-  it('retries at the read door', async () => {
+  it('retries at the read entry point', async () => {
     const accessor = new HfHubAccessor({ repoId: 'acme/widget' } as never)
     vi.spyOn(client, 'hubGetResponse').mockResolvedValue(
       page([{ type: 'file', oid: 'oid-a', size: 7, path: 'a.txt' }]),

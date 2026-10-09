@@ -86,7 +86,7 @@ afterEach(async () => {
   for (const ws of open.splice(0)) await ws.close()
 })
 
-describe('name-plane writes go through the door', () => {
+describe('name-plane writes go through the entry point', () => {
   it('ln fires the op gates', async () => {
     const ws = await makeWs([new DenyOp('symlink')])
     const io = await ws.shell('ln -s x.txt /a/lk')
@@ -97,7 +97,7 @@ describe('name-plane writes go through the door', () => {
 
   it('ln leaves an op record', async () => {
     // The op ledger must not say a workspace with ln traffic did
-    // nothing: the door records the namespace write like any other op.
+    // nothing: the entry point records the namespace write like any other op.
     const ws = await makeWs()
     const io = await ws.shell('ln -s x.txt /a/lk')
     expect(io.exitCode).toBe(0)
@@ -114,7 +114,7 @@ describe('name-plane writes go through the door', () => {
 
   it('scoped shell ln does not follow a hidden link into its directory', async () => {
     // A hidden link to a visible directory is not a directory the session
-    // can link into: the door checks the typed path before it follows,
+    // can link into: the dispatcher checks the typed path before it follows,
     // and ln's own directory probe has to agree, or the link lands in
     // the directory the hidden link points at.
     const ws = await makeWs()
@@ -152,7 +152,7 @@ describe('name-plane writes go through the door', () => {
 
   it('symlink and readlink answer on ws.vfs', async () => {
     // readlink is the read twin: guests and CLIs ask through the same
-    // door instead of a bespoke channel.
+    // entry point instead of a bespoke channel.
     const ws = await makeWs()
     await ws.vfs.symlink('/a/lk', 'x.txt')
     expect(await ws.vfs.readlink('/a/lk')).toBe('x.txt')
@@ -214,7 +214,7 @@ describe('name-plane writes go through the door', () => {
 
   it('chown -h on a link fires the op gates', async () => {
     // chown -h writes the link's own attrs; that overlay write used to
-    // bypass the door entirely, so no policy could bound it.
+    // bypass the entry point entirely, so no policy could bound it.
     const ws = await makeWs([new DenyOp('setattr')])
     const made = await ws.shell('ln -s x.txt /a/lk')
     expect(made.exitCode).toBe(0)
@@ -287,7 +287,7 @@ describe('session-state writes go through the view', () => {
     // `SECRET=leak cmd` is a session write like any other, and the form
     // puts it in the command's environment, so a deployment refusing
     // `SECRET_*` has to be asked. Only the hidden half was checked here,
-    // and the seeding goes through the ungated door, so the secret
+    // and the seeding goes through the ungated entry point, so the secret
     // reached the command and printed.
     const ws = await makeWs([new DenySecretEnv()])
     const denied = await ws.shell('SECRET_K=leak printenv SECRET_K')
@@ -492,7 +492,7 @@ describe('the remaining session writers clear the same gate', () => {
 
   it('a readonly name refuses a declaration array store', async () => {
     // The staged-array store is the builtin's own; the shell's readonly
-    // rule is pre-checked there, before the door is asked.
+    // rule is pre-checked there, before the entry point is asked.
     const ws = await makeWs()
     await ws.shell('readonly LOCKED')
     const io = await ws.shell('export LOCKED=(a)')
@@ -634,7 +634,7 @@ class IdentityRecorder implements Policy {
 }
 
 async function makeSealedWs(policies: Policy[]): Promise<Workspace> {
-  // Seeded through the door (not the raw store) so the index knows the
+  // Seeded through the entry point (not the raw store) so the index knows the
   // implicit /a/prod directory, then the policies join, mirroring the
   // python twin's setup order.
   const parser = await getTestParser()
@@ -649,15 +649,15 @@ async function makeSealedWs(policies: Policy[]): Promise<Workspace> {
   return ws
 }
 
-describe('op hooks bind at the op doors and the command tier', () => {
-  it('preVfs refuses the doors and handler I/O alike', async () => {
+describe('op hooks bind at the dispatcher and the command tier', () => {
+  it('preVfs refuses the entry points and handler I/O alike', async () => {
     // The documented boundary (Policy.preVfs): coded op hooks fire at
-    // the op doors AND for the backend I/O inside a mount command's
+    // the dispatcher AND for the backend I/O inside a mount command's
     // handler (withPolicyGuard). Both tiers are pinned so a move of
     // the boundary is loud.
     const ws = await makeSealedWs([new SealedPaths()])
 
-    // The doors hold: `ws.vfs`, and a dispatcher-routed redirect
+    // The entry points hold: `ws.vfs`, and a dispatcher-routed redirect
     // write.
     await expect(ws.vfs.read('/a/secret.txt')).rejects.toMatchObject({
       refusal: { reason: 'secret is sealed' },
@@ -742,7 +742,7 @@ describe('op hooks bind at the op doors and the command tier', () => {
   })
 
   it('shell rm -r admits through preVfs', async () => {
-    // The cascade asymmetry closed: an ops-door rmdir cascade always
+    // The cascade asymmetry closed: an ops-entry point rmdir cascade always
     // admitted per deletion while a shell rm -r admitted nothing. The
     // shell tree removal now admits the op the backend performs, and
     // the subtree write-deny refuses it outright.
@@ -777,7 +777,7 @@ describe('op hooks bind at the op doors and the command tier', () => {
 
   it('preVfs sees the session and prefix on lazy drains', async () => {
     // VfsContext.prefix and .sessionId name the command's identity at the
-    // op door, including for a reader the pipeline drains after the gate
+    // dispatcher, including for a reader the pipeline drains after the gate
     // scopes return (head binds a lazy stream).
     const recorder = new IdentityRecorder()
     const ws = await makeSealedWs([recorder])
@@ -815,7 +815,7 @@ describe('hidden vars across the shell tier', () => {
   it('assign-default of a hidden var is refused', async () => {
     // ${SLACK_TOKEN:=fake} observes the hidden name as unset, so
     // without a gate the write-back would overwrite the real value
-    // the host's wiring still reads; the door refuses like any denied
+    // the host's wiring still reads; the entry point refuses like any denied
     // assignment.
     const ws = await makeHiddenVarsWs()
     const io = await ws.shell('echo "${SLACK_TOKEN:=fake}"', { sessionId: 'agent' })
@@ -847,7 +847,7 @@ describe('hidden vars across the shell tier', () => {
   ]) {
     it(`${line} never quotes the hidden value`, async () => {
       // A reference checks the value its name holds; a hidden one reads as
-      // unset, so the refusal is the door's and not a line quoting it.
+      // unset, so the refusal is the entry point's and not a line quoting it.
       const ws = await makeHiddenVarsWs()
       const io = await ws.shell(line, { sessionId: 'agent' })
       expect(io.exitCode).not.toBe(0)
@@ -860,7 +860,7 @@ describe('hidden vars across the shell tier', () => {
   }
 
   it('declare -ni stops its value at a hidden write', async () => {
-    // `declare -ni r=M` evaluates M through the `-i` door, so a hidden name
+    // `declare -ni r=M` evaluates M through the `-i` entry point, so a hidden name
     // it assigns is refused there and nothing after it lands.
     const ws = await makeHiddenVarsWs()
     const io = await ws.shell("X=0; M='SLACK_TOKEN=5,X=7'; declare -ni r=M", {
@@ -966,7 +966,7 @@ describe('hidden vars across the shell tier', () => {
   it('bare declare -a of a hidden var is refused', async () => {
     // `declare -a NAME` at top level migrates an existing scalar into
     // element 0 with raw writes, which would move the hidden value
-    // into array storage; the door refuses instead.
+    // into array storage; the entry point refuses instead.
     const ws = await makeHiddenVarsWs()
     const io = await ws.shell('declare -a SLACK_TOKEN', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
@@ -1441,7 +1441,7 @@ describe('command permissions end to end', () => {
   async function commandsWs(): Promise<Workspace> {
     const parser = await getTestParser()
     // The frozen subtree is seeded on the VFS: the pure path rule
-    // holds at every op door, the host's `ws.vfs` included.
+    // holds at every dispatcher, the host's `ws.vfs` included.
     const repo = new RAMVFS()
     repo.store.dirs.add('/locked')
     repo.store.files.set('/locked/y', ENC.encode('y\n'))
@@ -1566,7 +1566,7 @@ describe('command permissions end to end', () => {
     ])
     expect((await line(ws, 'rm /scratch/z'))[0]).toBe(0)
     // A pure path rule holds at the command plane for any command and
-    // at the op door for every op, whatever door.
+    // at the dispatcher for every op, whatever entry point.
     expect(await line(ws, 'cat /repo/locked/y')).toEqual([
       1,
       '',
@@ -1591,11 +1591,11 @@ describe('command permissions end to end', () => {
     expect((await line(ws, 'cd /repo && git reset --soft HEAD'))[2]).not.toContain('read-only')
   })
 
-  it('find -delete is gated at the op door, not by a named rule', async () => {
+  it('find -delete is gated at the dispatcher, not by a named rule', async () => {
     // mirage's find has no -exec; -delete is find's own action, not an
     // `rm` line, so a rule naming `rm` does not cover it (the same
     // honest limit as a guest's os.remove), while a pure path rule does,
-    // at the op door the removal clears.
+    // at the dispatcher the removal clears.
     const ws = await commandsWs()
     await ws.shell('mkdir -p /repo/d && touch /repo/d/x')
     await ws.shell('find /repo/d -name x -delete')
@@ -1609,7 +1609,7 @@ describe('command permissions end to end', () => {
   })
 
   it('a command-scoped path rule reads the path the command touches', async () => {
-    // A command-scoped rule never runs at the op door, so the command
+    // A command-scoped rule never runs at the dispatcher, so the command
     // plane has to see the path the command will actually touch: for a
     // command that follows links (open(2)) that is the target, for one
     // that acts on the link itself (rm, lstat(2)) it is the link.
@@ -1753,7 +1753,7 @@ describe('command permissions end to end', () => {
   it('a whole-line runtime is gated like the tree', async () => {
     // A runtime that captures the raw line runs it under the same
     // tiers: every parsed command clears visibility, the policy chain
-    // and the approval door before the runtime sees a byte, so a
+    // and the approval entry point before the runtime sees a byte, so a
     // captured line cannot run what the tree would refuse.
     const parser = await getTestParser()
     const box = new Box()
@@ -1938,7 +1938,7 @@ describe('command permissions end to end', () => {
   it('a hidden path reads as absent to every rule', async () => {
     // hide outranks every admission arm: a path the session cannot see
     // is dropped before any hook, so a deny never names it, an ask is
-    // never raised for it, and the door answers ENOENT as for any
+    // never raised for it, and the entry point answers ENOENT as for any
     // absent path. The same lines under a session that sees them meet
     // the rules as usual.
     const parser = await getTestParser()
@@ -2032,7 +2032,7 @@ class Box extends Runtime implements LineExecutor {
 }
 
 describe('ask end to end', () => {
-  // Through the document parser, as the YAML door reads it: a bare
+  // Through the document parser, as the YAML loader reads it: a bare
   // string under `ask` is one pattern with the default reason.
   const ASK_DOC = parseSessionProfile({
     commands: {
@@ -2074,7 +2074,7 @@ describe('ask end to end', () => {
     return [r.exitCode, stdoutStr(r), voicedStderr(r)]
   }
 
-  // The one request a step expects on the door; a missing one is the
+  // The one request a step expects on the entry point; a missing one is the
   // test's failure, not a type to thread through.
   function pendingRequest(ws: Workspace, command?: string): Decision {
     const found = ws.decisions.pending().find((r) => command === undefined || r.command === command)
@@ -2195,7 +2195,7 @@ describe('ask end to end', () => {
     expect(other[2]).toContain('requires approval')
   })
 
-  it('a coded ask routes to the same door', async () => {
+  it('a coded ask routes to the same entry point', async () => {
     const ws = await askWs()
     await ws.shell('touch /scratch/z')
     const [code, , err] = await line(ws, 'wc -c /scratch/z')
@@ -2391,7 +2391,7 @@ describe('a walk below the operand meets the rule guard', () => {
     expect(await line(ws, 'grep -r a /data/t/asked')).toEqual([0, '/data/t/asked/a:a\n', ''])
   })
 
-  it('the op door stats a refused entry and withholds its content', async () => {
+  it('the dispatcher stats a refused entry and withholds its content', async () => {
     const ws = await walkWs()
     const sess = ws.getSession('g')
     await runWithSession(sess, async () => {
@@ -2635,7 +2635,7 @@ describe('a dispatched read through a link meets the target rule', () => {
   })
 
   // A path a command names inside its own program (awk's getline, sed's r)
-  // reaches the dispatcher unjudged, and the door follows a link to its
+  // reaches the dispatcher unjudged, and the entry point follows a link to its
   // target. The rule on the target holds through the link exactly as it
   // holds on the target itself; a link to an allowed file reads.
   it('refuses the target as it refuses the target named', async () => {
@@ -2675,7 +2675,7 @@ describe('a dispatched read through a link meets the target rule', () => {
   })
 })
 
-describe('a dispatched op meets the rule on the path the door reaches', () => {
+describe('a dispatched op meets the rule on the path the entry point reaches', () => {
   // A host command that removes or moves a name through the dispatcher it
   // is handed, the way a custom command reaches a mount.
   const zap = new Command({
@@ -2708,7 +2708,7 @@ describe('a dispatched op meets the rule on the path the door reaches', () => {
     return [r.exitCode, stdoutStr(r), voicedStderr(r)]
   }
 
-  // The door walks every link above the final name before it acts, so
+  // The entry point walks every link above the final name before it acts, so
   // /data/alias/secret is /data/real/secret by the time anything is removed
   // or moved. The rule on the real path holds there for an op on the name
   // itself (unlink, rename) as for one that follows it.
@@ -2737,7 +2737,7 @@ describe('a dispatched op meets the rule on the path the door reaches', () => {
     }
   })
 
-  // The door judges the path the command handed it as well as the one its
+  // The entry point judges the path the command handed it as well as the one its
   // walk reaches, so a rule written through a link holds for the command's
   // own ops exactly as it holds for a named operand.
   it('binds a rule spelled through a linked parent', async () => {
@@ -2836,7 +2836,7 @@ describe('a walk the executor fans out meets the command rules', () => {
 
   // The deletion is find's own write: an entry the rule names stays,
   // reported with the rule's reason, as a paths rule's refusal at the op
-  // door already is.
+  // entry point already is.
   it('keeps an entry find -delete may not remove', async () => {
     const ws = await fanoutWs()
     expect(await line(ws, 'find /data/w -name a.txt -delete')).toEqual([
@@ -2908,7 +2908,7 @@ describe('a dispatched op is judged by the gate of the command that issued it', 
     expect(stdoutStr(await ws.shell('cat /data/real/other'))).toBe('o\n')
   })
 
-  // The command rules bind what a command does; the session's raw door
+  // The command rules bind what a command does; the session's raw entry point
   // (ws.vfs, the agent's file tool) is held to paths rules only, as before.
   it('leaves the raw vfs route to its own policy scope', async () => {
     const parser = await getTestParser()

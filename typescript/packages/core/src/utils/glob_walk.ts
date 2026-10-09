@@ -341,8 +341,8 @@ export type TargetStat = (virtual: string) => Promise<FileStat | null>
 // backend's to stat: the namespace answers for it through `targetStat`,
 // which follows a link and stats what it reaches, so a link to a
 // directory is kept and a link to a file or to nothing is dropped, bash's
-// own rule for `*/`. Without that door the owed name is kept, and without
-// a stat door every match is kept, since nothing can tell them apart.
+// own rule for `*/`. Without that entry point the owed name is kept, and without
+// a stat function every match is kept, since nothing can tell them apart.
 // Otherwise one stat per match, served from the index the readdir just
 // filled.
 async function isDirectory<A, I>(
@@ -410,7 +410,7 @@ export async function resolveGlobWith<A, I>(
         : p
       // The hidden filter sits here, in the one loop every backend's
       // resolveGlob runs through, because per-backend glob modules bind
-      // raw readdirs that never pass the command-door guard. It runs
+      // raw readdirs that never pass the command-entry point guard. It runs
       // before the empty-match test so an all-hidden match set reads as
       // no matches and falls back to the literal word, exactly what bash
       // prints when nothing matched.

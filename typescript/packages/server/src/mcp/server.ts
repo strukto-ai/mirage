@@ -50,7 +50,7 @@ import { VFS_CALLS, schemaOf, type VfsCall } from '../vfs_calls.ts'
 
 const READ_ONLY: ToolAnnotations = { readOnlyHint: true }
 
-/** The tools every door serves, in the order a client lists them. */
+/** The tools every dispatcher serves, in the order a client lists them. */
 export const TOOLS: readonly {
   name: string
   description: string
@@ -140,7 +140,7 @@ export interface MirageMcpServerOptions extends MirageToolOperationsOptions {
   version?: string
   /**
    * The tool table to serve; the session's own (`session.tools`) when
-   * absent. The HTTP door passes one that runs each call through its API.
+   * absent. The HTTP endpoint passes one that runs each call through its API.
    */
   operations?: MirageToolOperations
   /**

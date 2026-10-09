@@ -263,7 +263,7 @@ describe('a conditional write on the fallback storage', () => {
   }
 
   it("agrees with itself across one mount's nested frames", async () => {
-    // A command's frame and its op door's are one mount, so the version stays.
+    // A command's frame and its dispatcher's are one mount, so the version stays.
     const [entry, path] = await conditional()
     const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
       runWithWriteContext('/s3/', entry.writeContext(), () => writeCondition(path, 'put')),

@@ -1335,7 +1335,7 @@ def test_redirect_concat_target():
 
 def test_redirect_append():
     """echo touches no file of its own, so its ``>>`` target is opened by
-    the one append of its output, through the op door without a content
+    the one append of its output, through the dispatcher without a content
     pre-read."""
     _, _, _, _, _, dispatch = _exec("echo hello >> /data/out.txt")
     ops = [c[0][0] for c in dispatch.call_args_list]

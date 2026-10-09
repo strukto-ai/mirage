@@ -20,7 +20,7 @@ import type { SessionState } from './session/session.ts'
  * One running line: its signal and the sessions its statements stamp
  * on (the target session and the per-call fork, one object when the
  * call named no cwd or env). Bound by `shell` for the line's duration
- * and read at the status door. It rides the async context rather than
+ * and read at the status entry point. It rides the async context rather than
  * the session, so two lines on one session each see their own, and a
  * statement that settles after its caller was released still reads the
  * signal of the line that produced it.
@@ -35,7 +35,7 @@ const lineAbortContext = createAsyncContext<LineAbortFrame>()
 
 /**
  * Run `fn` as the body of the line `signal` belongs to. Everything the
- * body awaits, down to the status door, can then ask `abortedLine`
+ * body awaits, down to the status entry point, can then ask `abortedLine`
  * whether its caller is still waiting, without the signal being threaded
  * through every handler. `shell` is the only caller.
  */
@@ -72,7 +72,7 @@ export function lineStatusWriter(session: SessionState): StatusWriter | null {
  * Read from every live frame for the session rather than the newest
  * frame. On an isolating runtime the live frames are the current task's
  * alone, so the answer is exact. On the browser fallback the newest
- * frame may belong to another line that happens to overlap, so the door
+ * frame may belong to another line that happens to overlap, so the entry point
  * refuses only when every live line on this session has aborted: one
  * line's abort never reaches a concurrent line's statement, and the one
  * case left open is two aborted-or-not lines overlapping on one session
@@ -183,7 +183,7 @@ export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise
  * that loops over operands (`rm link1 link2`, `chmod`, `touch`) never
  * reaches the next one. A JS handler resumes after the await that was in
  * flight when the caller was released and would begin the next write.
- * Refusing at the op door, the one seam every handler's I/O goes through,
+ * Refusing at the dispatcher, the one seam every handler's I/O goes through,
  * stops it there without threading the signal through each handler. An
  * op already in flight settles on its own.
  */

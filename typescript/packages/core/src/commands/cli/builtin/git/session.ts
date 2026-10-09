@@ -15,7 +15,7 @@
 import { materialize } from '../../../../io/types.ts'
 import { concat } from '../../../../io/cachable_iterator.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIDoors, CLIInvocation, CLIVerbFn } from '../../types.ts'
+import type { CLIView, CLIInvocation, CLIVerbFn } from '../../types.ts'
 import { discover, requireWorkTree } from './discover.ts'
 import { IndexLockError, NoWorkspaceError } from './errors.ts'
 import { configValues } from './fs.ts'
@@ -28,12 +28,12 @@ import type { CommandFnResult } from '../../../config.ts'
 
 const ENC = new TextEncoder()
 
-// The ambiguity warnings each invocation collects, keyed by the doors `verb`
+// The ambiguity warnings each invocation collects, keyed by the entry points `verb`
 // handed it, which are its own.
-const AMBIGUOUS = new WeakMap<CLIDoors, string[]>()
+const AMBIGUOUS = new WeakMap<CLIView, string[]>()
 // The repository each invocation opened, for the refusal a read-only mount
 // gets in git's words.
-const LOCATIONS = new WeakMap<CLIDoors, RepoLocation>()
+const LOCATIONS = new WeakMap<CLIView, RepoLocation>()
 
 /** The refusal of every verb whose first write is the index's. */
 export const indexLocked: ReadOnlyRefusal = (_inv, location) =>
@@ -44,7 +44,7 @@ export const indexLocked: ReadOnlyRefusal = (_inv, location) =>
  * refusal by a read-only mount is in git's words.
  *
  * git prints the warning where it resolves the name, ahead of anything the verb
- * says after; each invocation gets doors of its own here, `opened` hands the
+ * says after; each invocation gets a view of its own here, `opened` hands the
  * repository the list kept for them, and the lines it gathered go in front of
  * the verb's own stderr. A write a read-only mount turns down fails before
  * anything is written, so the verb's own refusal stands in for it: git's lock
@@ -68,7 +68,7 @@ function gitWouldRefuse(
   path: string | undefined,
 ): boolean {
   if (location === null || path === undefined || path === '') return true
-  const root = inv.doors?.ns?.mounts?.rootOf(location.commondir.virtual) ?? '/'
+  const root = inv.view?.ns?.mounts?.rootOf(location.commondir.virtual) ?? '/'
   return [root, location.gitdir.virtual].some(
     (base) => path === base || path.startsWith(`${rstripSlash(base)}/`),
   )
@@ -76,15 +76,15 @@ function gitWouldRefuse(
 
 export function verb(fn: CLIVerbFn, refused: ReadOnlyRefusal | null = null): CLIVerbFn {
   return async (inv) => {
-    if (inv.doors === undefined) return await fn(inv)
-    const doors = { ...inv.doors }
+    if (inv.view === undefined) return await fn(inv)
+    const view = { ...inv.view }
     const lines: string[] = []
-    AMBIGUOUS.set(doors, lines)
+    AMBIGUOUS.set(view, lines)
     let result: CommandFnResult
     try {
-      result = await fn({ ...inv, doors })
+      result = await fn({ ...inv, view })
     } catch (err) {
-      const location = LOCATIONS.get(doors) ?? null
+      const location = LOCATIONS.get(view) ?? null
       const path = (err as { virtualPath?: string }).virtualPath
       if (refused === null || !isErofs(err) || !gitWouldRefuse(inv, location, path)) throw err
       result = fatal(refused(inv, location))
@@ -104,17 +104,17 @@ export function verb(fn: CLIVerbFn, refused: ReadOnlyRefusal | null = null): CLI
  * place so a new verb inherits the discovery rules rather than restating them.
  *
  * @param fl the leaf's flag bag, read for `-C`, `--git-dir` and `--work-tree`
- * @param doors the invocation's doors, one per state plane
+ * @param view the invocation's view, one per state plane
  * @param workTree the verb reads or writes working files, so there must be a
  *   work tree to enter, as git's `NEED_WORK_TREE` asks
  */
-export async function opened(fl: FlagView, doors: CLIDoors, workTree = false): Promise<Repo> {
-  const dispatch = doors.dispatch
-  const statPath = doors.statPath
-  // The mount root comes from the name plane rather than a door of its own:
+export async function opened(fl: FlagView, view: CLIView, workTree = false): Promise<Repo> {
+  const dispatch = view.dispatch
+  const statPath = view.statPath
+  // The mount root comes from the name plane rather than a dispatcher of its own:
   // `ns.mounts.rootOf` is the same fact the command tier reads, and a second
   // field holding the same callable is a second thing to keep in step.
-  const mounts = doors.ns?.mounts
+  const mounts = view.ns?.mounts
   if (statPath === undefined || mounts === undefined || dispatch === undefined) {
     throw new NoWorkspaceError()
   }
@@ -127,13 +127,13 @@ export async function opened(fl: FlagView, doors: CLIDoors, workTree = false): P
     fl.asPath('git_dir'),
     chosen,
   )
-  const location = { ...found, ns: doors.ns ?? null }
-  LOCATIONS.set(doors, location)
+  const location = { ...found, ns: view.ns ?? null }
+  LOCATIONS.set(view, location)
   if (workTree) await requireWorkTree(dispatch, statPath, location, chosen !== undefined)
   const warn = gitBool(
     await configValues(dispatch, location, 'core.warnAmbiguousRefs'),
     'core.warnambiguousrefs',
     true,
   )
-  return openRepo(dispatch, location, warn ? (AMBIGUOUS.get(doors) ?? null) : null)
+  return openRepo(dispatch, location, warn ? (AMBIGUOUS.get(view) ?? null) : null)
 }

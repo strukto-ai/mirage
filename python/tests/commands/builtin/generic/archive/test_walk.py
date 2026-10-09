@@ -295,7 +295,7 @@ async def test_a_link_across_a_mount_is_refused_not_followed():
 async def test_a_directory_the_walk_could_not_open_is_one_unreadable_problem():
     # Its own entry is kept (the archivers store the directory), its
     # contents are not there, and both listings meeting the same closed
-    # door report it once.
+    # entry point report it once.
     tree = _Tree(
         {"/d/a.txt": b"a", "/d/sealed/s": b"s"}, dirs=("/d", "/d/sealed")
     )

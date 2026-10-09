@@ -285,7 +285,7 @@ async def test_post_vfs_gate_suppresses_the_result():
             b"a long secret payload",
         )
     # A post deny suppresses the result of an op that already ran; the
-    # door's OpReport, stamped before this gate fires, is what keeps
+    # entry point's OpReport, stamped before this gate fires, is what keeps
     # the accounting of the completed op.
     assert excinfo.value.errno == errno.EACCES
 
@@ -385,8 +385,8 @@ async def test_a_deny_anywhere_in_the_chain_outranks_an_ask():
 
 @pytest.mark.asyncio
 async def test_an_op_ask_with_no_ledger_refuses_like_a_deny():
-    # A door that cannot put the question (no ledger) refuses it, in the
-    # deny voice, with the reason on the record.
+    # An entry point that cannot put the question (no ledger) refuses it, in
+    # the deny voice, with the reason on the record.
     policies = Policies([AskOnOps()])
     with pytest.raises(PolicyDenied) as info:
         await pre_vfs_gate(policies, "write", _path("/data/x"), True, "/data/")
@@ -499,7 +499,7 @@ def test_says_why_needs_the_operand_diagnostic_itself():
 
 
 class ForSomeSessions(Policy, SessionScopedMixin):
-    """Overrides the session door, but speaks only for session ``a``."""
+    """Overrides the session view, but speaks only for session ``a``."""
 
     async def pre_session(self, ctx: SessionContext) -> Action | None:
         return None
@@ -516,7 +516,7 @@ class ForEveryone(Policy):
 @pytest.mark.asyncio
 async def test_wants_for_refines_wants_per_session():
     # The static answer is yes as soon as any policy overrides the hook,
-    # and the doors keep gating on it; the per-session answer asks a
+    # and the entry points keep gating on it; the per-session answer asks a
     # session-scoped policy whether this session is one of its.
     scoped = Policies([ForSomeSessions()])
     assert scoped.wants("pre_session")

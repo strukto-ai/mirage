@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 
 const SRC = dirname(dirname(fileURLToPath(import.meta.url)))
 
-// `setAttr` is the *ungated* attribute door: it writes the record and
+// `setAttr` is the *ungated* attribute entry point: it writes the record and
 // asks no policy. That is correct only where this operand's own path
 // already cleared `preSession`, which is a per-call-site fact and not a
 // property of the function it sits in. Reading a nearby `view.set` and
@@ -39,14 +39,14 @@ const ALLOWED: Record<string, string> = {
     'reference marks its new target through `view.mark`',
   'workspace/node/command_dispatch.ts::executeCommand':
     'the prefix-assignment loop calls `preSessionGate` explicitly ' +
-    'before seeding, since `seedVar` is the ungated door',
+    'before seeding, since `seedVar` is the ungated entry point',
   'workspace/session/shell_dirs.ts::changeDir':
     "the shell's own bookkeeping for the two fixed names PWD and " +
     'OLDPWD as part of a cd the router already authorized, not a name ' +
     'the agent chose; an agent-typed `PWD=x` is an ordinary ' +
-    'assignment and goes through the door',
+    'assignment and goes through the entry point',
   'workspace/session/state.ts::markVar':
-    'this is the gated door itself: the write lands after ' +
+    'this is the gated session view itself: the write lands after ' +
     '`ensureVarVisible` and `preSessionGate`',
 }
 

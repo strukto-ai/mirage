@@ -154,7 +154,7 @@ async def run_target(
             if mount.get("seed_root"):
                 await harness.seed_mount_root(ws, mount["path"])
         # Sessions a case can name via its "session" field, through the
-        # two doors a host really has. A string names one of the
+        # two entry points a host really has. A string names one of the
         # target's profiles (`profile=`), which is the whole document that
         # session runs under. A mapping is an inline document added to
         # the default profile (`permissions=`): it may add ask and deny

@@ -258,7 +258,7 @@ it.each([
   ['x=1; let "x=9, 1/0" 2>/dev/null; echo $? $x', '1 9\n'],
   ['x=1; for ((x=3, 1/0;;)); do :; done 2>/dev/null; echo $x', '3\n'],
   // A seed, a -i coercion and a numeric [[ ]] operand land the
-  // assignments they make, through the door.
+  // assignments they make, through the entry point.
   ['x=1; RANDOM="x=5"; echo $x $RANDOM', '5 18498\n'],
   ['declare -i n; n="x=7"; echo $n $x', '7 7\n'],
   ['a=(1 2); declare -i n; n="a[1]=9"; echo $n ${a[1]}', '9 9\n'],
@@ -339,17 +339,17 @@ it.each([
   }
 })
 
-it('draws from the pending seed and settles once the door has landed it', () => {
+it('draws from the pending seed and settles once the entry point has landed it', () => {
   // The reader is told of the assignment, draws from a scratch
   // generator seeded with it, and replays those draws on the session
-  // only once the door has landed the same seed.
+  // only once the entry point has landed the same seed.
   const s = new SessionState({ sessionId: 's' })
   s.vars[RANDOM] = makeVar('1')
   const reader = randomReader(s)
   expect(reader.read('X')).toBeNull()
   reader.wrote(RANDOM, '42')
   expect([reader.read(RANDOM), reader.read(RANDOM)]).toEqual(['17772', '26794'])
-  // The door never seeded 42: nothing to replay.
+  // The entry point never seeded 42: nothing to replay.
   reader.settle()
   expect(s.randomState).toBeNull()
   s.randomState = 42
@@ -493,7 +493,7 @@ describe('RANDOM as an array', () => {
     }
   })
 
-  it('ends the meaning through every store door on a non-string', async () => {
+  it('ends the meaning through every store entry point on a non-string', async () => {
     const s = new SessionState({ sessionId: 's' })
     seedVar(s, RANDOM, ['1', '2'])
     expect(nextRandom(s, undefined)).toBeNull()

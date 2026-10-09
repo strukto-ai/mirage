@@ -100,7 +100,7 @@ async function subtree(
     found.set(rstripSlash(virtual), ['file', ''])
   }
   // Named under nameBase like the entries, once each (both listings
-  // meet the same closed door).
+  // meet the same closed entry point).
   const unreadable = [...new Set([...(dirs.unreadable ?? []), ...(files.unreadable ?? [])])].map(
     (u) => rstripSlash(nameBase) + rstripSlash(u).slice(rstripSlash(base).length),
   )

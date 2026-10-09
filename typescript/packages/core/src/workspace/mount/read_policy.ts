@@ -23,8 +23,8 @@ import { DevVFS } from '../../vfs/dev/dev.ts'
  * Coercion only: an unknown name is refused here, but whether the resolved
  * policy is one this mount's backend can honour is `checkReadCapability`'s
  * question. The two are split the way Python's `fuse/backend.py` splits
- * `resolve_backend` from `require_kernel_backend`, so the config door and the
- * mount door each run exactly one of them and a refusal is computed once.
+ * `resolve_backend` from `require_kernel_backend`, so the config loader and the
+ * mount entry point each run exactly one of them and a refusal is computed once.
  *
  * Missing means bounded at the default bound, everywhere: an absent `read:`
  * in YAML, `undefined` here, and the `Mount` options default all resolve to
@@ -36,7 +36,7 @@ import { DevVFS } from '../../vfs/dev/dev.ts'
 /**
  * Coerce one declared policy name to its `ReadPolicy`, or refuse it.
  *
- * Split out so the mount door can run it on a spec that never passed
+ * Split out so the mount entry point can run it on a spec that never passed
  * through `resolveReadSpec`: `ReadPolicy` is a plain string-const object, so
  * a runtime `ReadSpec` carrying `'FRESH'` or `'banana'` matches no `===` in
  * the verdict and would mount and then read as `bounded` everywhere. Absent
@@ -103,13 +103,13 @@ export function checkReadCapability(
 ): void {
   // Coerced, not compared raw. `ReadPolicy` is a string-const object, so a
   // runtime `ReadSpec` carrying `'FRESH'` or `'banana'` -- what an untyped
-  // caller reaches the programmatic door with -- matches neither `===`
+  // caller reaches the programmatic entry point with -- matches neither `===`
   // below and the whole verdict silently no-ops. `MountEntry` stores the
   // coerced spec for the same reason. Python coerces at both points too.
   const policy = coerceReadPolicy(spec.policy)
   // Before the policy dispatch, because a bound has to be usable whatever
   // the policy is. `resolveReadSpec` refuses a bad one at the YAML and
-  // snapshot doors, but a `ReadSpec` handed straight to `Workspace` or
+  // snapshot entry points, but a `ReadSpec` handed straight to `Workspace` or
   // `addMount` never passes through it, and a mount taking ttl=0 accepts
   // every write and keeps nothing: RAM marks the entry expired as it is
   // written and redis deletes the key outright, so the mount silently

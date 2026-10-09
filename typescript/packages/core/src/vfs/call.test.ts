@@ -218,7 +218,7 @@ describe('VFS functions', () => {
     }
   })
 
-  it('passes a second path through the door', async () => {
+  it('passes a second path through the dispatcher', async () => {
     const ws = new Workspace(
       { '/shelf': new Shelf(), '/ram': new RAMVFS() },
       { mode: MountMode.WRITE },

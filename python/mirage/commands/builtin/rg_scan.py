@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from mirage.commands.builtin.constants import BINARY_EXTENSIONS
 from mirage.commands.builtin.rg_filetypes import FileTypes
 from mirage.commands.builtin.rg_glob import Overrides, Verdict, walk_candidate
-from mirage.commands.builtin.utils.links import LinkDoor
+from mirage.commands.builtin.utils.links import LinkResolver
 from mirage.commands.builtin.utils.types import AsyncReaddirFn, AsyncStatFn
 from mirage.errors.classify import classify
 from mirage.errors.constants import WALK_ERRORS
@@ -184,16 +184,16 @@ class Haystack:
             sorts read it).
         spec (PathSpec | None): the operand itself when it was named on
             the line, which a stream read takes.
-        door (LinkDoor | None): the door a file the walk reached through a
-            link is read through, since the link may lead onto a mount
-            the operand's backend cannot read.
+        resolver (LinkResolver | None): the dispatcher a file the walk reached
+            through a link is read through, since the link may lead onto a
+            mount the operand's backend cannot read.
     """
 
     virtual: str
     shown: str
     stat: FileStat | None = None
     spec: PathSpec | None = None
-    door: LinkDoor | None = None
+    resolver: LinkResolver | None = None
 
 
 def _entry_name(entry: str) -> str:
@@ -230,7 +230,7 @@ async def walk_haystacks(
     sort_by_name: bool,
     warnings: list[str] | None,
     boundary: MountIsRoot | None = None,
-    door: LinkDoor | None = None,
+    resolver: LinkResolver | None = None,
     follow: bool = False,
     parallel: bool = False,
 ) -> AsyncIterator[Haystack]:
@@ -258,8 +258,9 @@ async def walk_haystacks(
         boundary (MountIsRoot | None): --one-file-system's test for a
             directory on another mount than the operand's, which the walk
             does not enter; None to enter everything.
-        door (LinkDoor | None): the namespace's links and the door past
-            them, None outside a workspace, where no link can stand.
+        resolver (LinkResolver | None): the namespace's links and the
+            dispatcher past them, None outside a workspace, where no link can
+            stand.
         follow (bool): -L, walk through a link rather than skip it.
         parallel (bool): ripgrep would walk with its parallel walker,
             which words a failure without repeating the path.
@@ -272,7 +273,7 @@ async def walk_haystacks(
         sort_by_name,
         warnings,
         boundary,
-        door,
+        resolver,
         follow,
         shown_root == "",
         parallel,
@@ -296,7 +297,8 @@ class _Walker:
         sort_by_name (bool): each directory's entries in name order.
         warnings (list[str] | None): collects what could not be read.
         boundary (MountIsRoot | None): --one-file-system's mount test.
-        door (LinkDoor | None): the namespace's links and the door.
+        resolver (LinkResolver | None): the namespace's links and the
+            dispatcher.
         follow (bool): -L.
         implicit (bool): the operand is the implicit cwd.
         parallel (bool): ripgrep would walk with its parallel walker.
@@ -309,7 +311,7 @@ class _Walker:
     sort_by_name: bool
     warnings: list[str] | None
     boundary: MountIsRoot | None
-    door: LinkDoor | None
+    resolver: LinkResolver | None
     follow: bool
     implicit: bool
     parallel: bool
@@ -344,8 +346,8 @@ class _Walker:
             virtual (str): the entry's virtual path.
         """
         return (
-            self.door is not None
-            and self.door.links.stat_at(virtual) is not None
+            self.resolver is not None
+            and self.resolver.links.stat_at(virtual) is not None
         )
 
     async def below(
@@ -372,26 +374,26 @@ class _Walker:
                 resolved path and the walker's name for it: what a link
                 leading back into the walk is caught against.
             linked (bool): reached through a link, so read through the
-                door rather than the operand's backend.
+                entry point rather than the operand's backend.
         """
         if self.walk.max_depth is not None and depth >= self.walk.max_depth:
             return
-        door = self.door if linked else None
+        resolver = self.resolver if linked else None
         try:
-            if door is not None:
-                entries = await door.readdir(here)
+            if resolver is not None:
+                entries = await resolver.readdir(here)
             else:
                 entries = await self.readdir_fn(here)
         except WALK_ERRORS as exc:
             self.warn(walk_error_line(chain[0][1], exc, self.parallel))
             return
-        if self.follow and self.door is not None:
+        if self.follow and self.resolver is not None:
             listed = {_entry_name(entry) for entry in entries}
             entries = [
                 *entries,
                 *(
                     link
-                    for link in self.door.children(here)
+                    for link in self.resolver.children(here)
                     if link not in listed
                 ),
             ]
@@ -409,8 +411,8 @@ class _Walker:
                         yield found
                 continue
             try:
-                if door is not None:
-                    s = await door.stat(entry)
+                if resolver is not None:
+                    s = await resolver.stat(entry)
                 else:
                     s = await self.stat_fn(entry)
             except WALK_ERRORS as exc:
@@ -436,7 +438,7 @@ class _Walker:
             elif s.type is FileType.FILE and self.walk.admits_file(
                 candidate, name, s
             ):
-                yield Haystack(child, shown, s, door=door)
+                yield Haystack(child, shown, s, resolver=resolver)
 
     async def through(
         self,
@@ -459,13 +461,13 @@ class _Walker:
             chain (tuple[tuple[str, str], ...]): that directory and
                 every one above it, nearest first.
         """
-        door = self.door
-        if door is None:
+        resolver = self.resolver
+        if resolver is None:
             return
         named = self.named(shown)
         try:
-            target = door.target(link)
-            s = await door.stat(target)
+            target = resolver.target(link)
+            s = await resolver.stat(target)
         except WALK_ERRORS as exc:
             self.warn(walk_error_line(named, exc, self.parallel))
             return
@@ -491,7 +493,7 @@ class _Walker:
         elif s.type is FileType.FILE and self.walk.admits_file(
             candidate, name, s
         ):
-            yield Haystack(target, shown, s, door=door)
+            yield Haystack(target, shown, s, resolver=resolver)
 
 
 def walk_candidates(

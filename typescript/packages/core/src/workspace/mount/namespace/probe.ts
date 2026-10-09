@@ -158,9 +158,9 @@ export async function pathExists(
 // overlay from the ops dispatcher itself; here it is applied on the way
 // out, against the resolved path rather than the link's.
 /**
- * Where a path really points, as the door can address it: the namespace's
+ * Where a path really points, as the dispatcher can address it: the namespace's
  * walk, with a relative target's walk up from the link's own directory
- * (`../a.txt`) collapsed, which the door does not do for a path it is handed
+ * (`../a.txt`) collapsed, which the dispatcher does not do for a path it is handed
  * whole. The link's directory is a real one, since the table keys every link
  * by its resolved parent, so the `..` it names is that directory's parent.
  * Throws CycleError when the chain loops. Mirrors Python's resolve_link.

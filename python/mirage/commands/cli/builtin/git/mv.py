@@ -41,7 +41,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.posix import posix_phrase
@@ -471,11 +471,11 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
-    stat_path = doors.stat_path
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
+    stat_path = view.stat_path
     texts = inv.texts
     fl = FlagView(inv.flags)
     try:
@@ -485,7 +485,7 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         flags = parse_flags(fl)
         if len(texts) < 2:
             raise UsageError("", verb_usage(inv))
-        repo, location = await opened(fl, doors, work_tree=True)
+        repo, location = await opened(fl, view, work_tree=True)
         state = await read_index(dispatch, location.gitdir)
         conflicted = {
             path.decode("utf-8", errors="replace") for path in state.conflicts
@@ -498,8 +498,8 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         } | conflicted
         moves = await plan(
             stat_path,
-            links_of(doors),
-            mounts_of(doors),
+            links_of(view),
+            mounts_of(view),
             location,
             start_point(fl).virtual,
             texts,

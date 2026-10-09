@@ -705,7 +705,7 @@ async def _jq(
         read_bytes (Callable): byte reader for one path.
         read_stream (Callable): chunk reader for one path.
         stdin (ByteSource | None): the invocation's stdin.
-        dispatch (DispatchFn | None): the door a flag's file is read
+        dispatch (DispatchFn | None): the dispatcher a flag's file is read
             through.
     """
     fl = FlagView(flags, spec=SPECS["jq"])
@@ -713,8 +713,8 @@ async def _jq(
 
     async def read_flag_file(path: PathSpec) -> bytes:
         # -f, --rawfile and --slurpfile route nothing (the executor's
-        # FILE_KEYS and DOOR_FLAG_KEYS), so the file may sit on another
-        # mount than the operands: it is read through the door. jq opens
+        # FILE_KEYS and DISPATCH_FLAG_KEYS), so the file may sit on another
+        # mount than the operands: it is read through the dispatcher. jq opens
         # it by name, so /dev/stdin is the invocation's own stdin and `-`
         # is a file named `-`.
         if is_stdin(path, dash=False):

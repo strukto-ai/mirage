@@ -21,7 +21,7 @@ import { newStatusWriter } from './abort.ts'
 
 // The browser-runtime branch under node's test runner: the mock forces
 // the real FallbackStorage (no task isolation, one frame stack per
-// storage), so this pins what the status door does where the newest
+// storage), so this pins what the status entry point does where the newest
 // frame can belong to another line.
 vi.mock('../utils/async_context.ts', async (importOriginal) => {
   const real = await importOriginal<typeof asyncContextModule>()
@@ -43,7 +43,7 @@ function gate(): [Promise<void>, () => void] {
   return [held, release]
 }
 
-describe('the status door on the fallback storage', () => {
+describe('the status entry point on the fallback storage', () => {
   it('an aborted line does not reach a concurrent line on another session', async () => {
     // B binds after A and aborts; while B's frame is the newest, A stamps.
     // The slot would answer A with B's signal and make A throw B's abort.

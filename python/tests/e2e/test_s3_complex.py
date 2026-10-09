@@ -321,7 +321,7 @@ def _resolved(original: str) -> PathSpec:
 @pytest.mark.asyncio
 async def test_cat_multifile_prints_each_file_in_order():
     """Multi-file cat on a streaming backend prints each file whole, in
-    operand order, and leaves the cache to the door."""
+    operand order, and leaves the cache to the entry point."""
     objects = _s3_objects()
     backend = _s3_backend()
     with _patch_async_session(objects):

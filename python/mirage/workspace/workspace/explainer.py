@@ -73,16 +73,16 @@ class Explainer:
 class VfsExplainer:
     """``session.vfs`` explained: each VFS call (the POSIX-shaped calls:
     ``read``, ``pwrite``, ``rename``, ``setxattr``, ...) takes the
-    arguments the real one does and walks the same door (the path
+    arguments the real one does and walks the same entry point (the path
     resolved, links followed, hides, the mount mode, every policy),
     which stops at the gate with what it would answer.
 
-    A call the door answers before any policy is asked (a path that is
+    A call the entry point answers before any policy is asked (a path that is
     hidden or missing, a rename across mounts) explains as a call no
     policy refuses: a dry run says what the policies decide, not whether
     the call would otherwise succeed, which is what keeps a hide from
     surfacing; for the same reason an explanation names no paths beyond
-    the ones it was asked about, since what the door resolved a path to
+    the ones it was asked about, since what the entry point resolved a path to
     would tell a hidden one from a missing one. A rename passes
     two gates, its source and then its destination; its explanation is
     the first that refuses, with the answers of both. ``list_files``
@@ -409,7 +409,7 @@ class VfsExplainer:
 async def _dry(
     call: str, paths: tuple[str, ...], run: Callable[[], Awaitable[Any]]
 ) -> VfsExplanation:
-    """Walk one VFS call through its door as a dry run and say what its
+    """Walk one VFS call through its entry point as a dry run and say what its
     gates answered.
 
     Args:
@@ -420,7 +420,7 @@ async def _dry(
 
     Raises:
         RuntimeError: the call returned, so it ran past its gate, which
-            no door may let it do.
+            no entry point may let it do.
     """
     trace: list[VfsExplanation] = []
     token = set_explaining(trace)

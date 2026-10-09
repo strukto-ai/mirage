@@ -6,7 +6,7 @@ import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // A per-command judge: deny cat under /data/sealed/ with a computed
-// reason, take shred to the approval door, stay silent otherwise. A
+// reason, take shred to the approval entry point, stay silent otherwise. A
 // policy defines the hook it answers at, and answers with return.
 const JUDGE = `\
 function preCommand(ctx) {
@@ -133,7 +133,7 @@ describe('profile policies', () => {
     }
   })
 
-  it('takes an ask it computed to the approval door', async () => {
+  it('takes an ask it computed to the approval entry point', async () => {
     const ws = await build(scripted())
     try {
       ws.createSession('s', { profile: 'release' })
@@ -185,7 +185,7 @@ describe('profile policies', () => {
 
   it('a python judge reads what the line names, through the mounts', async () => {
     // Content, not names: the script opens each operand through the
-    // same door an agent's program would, so it can ask about what a
+    // same entry point an agent's program would, so it can ask about what a
     // file holds. A directory operand is not its business, and a file
     // without the marker runs.
     const ws = await build(scripted(READER_PY, 'monty', 'python'))
@@ -277,7 +277,7 @@ describe('profile policies', () => {
   })
 })
 
-// A program at the op and session doors and nowhere else: writes under
+// A program at the op and session views and nowhere else: writes under
 // /data/frozen and AWS_* variables are refused, and no command is judged.
 const GATES = `\
 function preVfs(ctx) {
@@ -290,7 +290,7 @@ function preSession(ctx) {
 `
 
 // The content judge with an op hook beside it: its own reads have to
-// pass the door its pre_vfs guards.
+// pass the dispatcher its pre_vfs guards.
 const READER_AND_GATE_PY = `${READER_PY}
 def pre_vfs(ctx):
     op = ctx['op']
@@ -299,8 +299,8 @@ def pre_vfs(ctx):
     return None
 `
 
-describe('profile policies at the op and session doors', () => {
-  it('judges the op door with the facts of the op', async () => {
+describe('profile policies at the op and session views', () => {
+  it('judges the dispatcher with the facts of the op', async () => {
     const ws = await build(scripted(GATES))
     try {
       await ws.shell('mkdir -p /data/frozen && echo keep > /data/frozen/k')
@@ -324,7 +324,7 @@ describe('profile policies at the op and session doors', () => {
     }
   })
 
-  it('judges the session door with the facts of the write', async () => {
+  it('judges the session view with the facts of the write', async () => {
     const ws = await build(scripted(GATES))
     try {
       ws.createSession('s', { profile: 'release' })
@@ -340,8 +340,8 @@ describe('profile policies at the op and session doors', () => {
     }
   })
 
-  it("a policy's own read passes the door its op hook guards", async () => {
-    // preCommand opens the operand through the workspace's door while
+  it("a policy's own read passes the dispatcher its op hook guards", async () => {
+    // preCommand opens the operand through the workspace's entry point while
     // preVfs stands at it: the read is the policy's own and is let
     // through rather than re-entering the evaluation waiting on it, so
     // the content verdict lands and the op hook still refuses a write.

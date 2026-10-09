@@ -44,7 +44,7 @@ quickjs_live = pytest.mark.skipif(
     reason=f"{QUICKJS_HOME_ENV} does not point at a quickjs WASI build",
 )
 
-# One world, three surfaces, one door. The suite pins the facts a mount
+# One world, three surfaces, one entry point. The suite pins the facts a mount
 # tree must present identically through the shell (virtual commands),
 # through a sandboxed guest (its own stdlib), and through a headless
 # FUSE MountCore. A guest and the shell disagreeing about the same
@@ -55,10 +55,10 @@ quickjs_live = pytest.mark.skipif(
 # Facts broken on main are marked xfail(strict=True) with the R-step
 # that fixes them: the mark comes off as each step lands, and a fact
 # that starts passing early fails loud instead of rotting as a silent
-# xpass. R1 (mount structure into the door: readdir/stat merge child
+# xpass. R1 (mount structure into the entry point: readdir/stat merge child
 # mounts and namespace links behind the session guard, fan-out and the
 # ls fact session-filtered) landed, which is why the structure and
-# enumeration groups run unmarked. R2 (one guarded door for every op;
+# enumeration groups run unmarked. R2 (one guarded entry point for every op;
 # RuntimeFiles captures the launch session and re-binds it across the
 # thread hop) landed too, so the guest confinement group runs unmarked.
 
@@ -245,7 +245,7 @@ async def test_link_ancestors_synthesize_on_every_surface():
 @pytest.mark.asyncio
 async def test_namespace_only_ancestor_serves_every_ls_variant():
     """A mount at ``/ghost/deep`` gives ``/ghost`` no backend, so the
-    door alone says it exists; plain ls, ls -R (whose walk runs through
+    entry point alone says it exists; plain ls, ls -R (whose walk runs through
     the cross-mount fan-out) and ls -d must all agree instead of
     reporting the operand missing.
     """

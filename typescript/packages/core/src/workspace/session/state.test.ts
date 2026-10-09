@@ -90,7 +90,7 @@ describe('sessionView', () => {
   })
 
   it('set is general over variable shapes', async () => {
-    // One door for every write: a string stores a scalar, a list stores
+    // One entry point for every write: a string stores a scalar, a list stores
     // a whole array, and the two storages stay exclusive.
     const [view, session] = makeView()
     await view.set('A', ['x', 'y'])
@@ -223,7 +223,7 @@ function makeHiddenView(): [SessionView, SessionState] {
   return [sessionView(session), session]
 }
 
-describe('hidden vars in the session door', () => {
+describe('hidden vars in the session view', () => {
   it('a hidden var reads as unset', () => {
     const [view] = makeHiddenView()
     expect(view.get('SLACK_TOKEN')).toBeNull()
@@ -245,7 +245,7 @@ describe('hidden vars in the session door', () => {
   it('setting a hidden var is refused and leaves it intact', async () => {
     // A write that landed would clobber the real value the host's
     // wiring still reads, and a write that silently vanished would be
-    // a swallow; the door refuses loudly instead, the vars twin of
+    // a swallow; the entry point refuses loudly instead, the vars twin of
     // EACCES on a create into hidden path space.
     const [view, session] = makeHiddenView()
     await expect(view.set('SLACK_TOKEN', 'fake')).rejects.toBeInstanceOf(PolicyDenied)
@@ -333,7 +333,7 @@ describe('subscriptIndex', () => {
     expect(await subscriptIndex(s, 'RANDOM=42, RANDOM')).toBe(17772)
     const drawn = s.vars[RANDOM].value
     expect(nextRandom(s, typeof drawn === 'string' ? drawn : undefined)).toBe(26794)
-    // Through a door, a refusal is the gate's.
+    // Through an entry point, a refusal is the gate's.
     const view = sessionView(s, new Policies([new DenySecrets()]))
     await expect(subscriptIndex(s, 'SECRET_N=1', view)).rejects.toBeInstanceOf(PolicyDenied)
     expect(s.env.SECRET_N).toBeUndefined()
@@ -369,7 +369,7 @@ describe('sessionElements', () => {
   })
 })
 
-describe('managed variables through the session door', () => {
+describe('managed variables through the session view', () => {
   function managedVar(value: string | null): ShellVar {
     return {
       value,

@@ -177,8 +177,8 @@ class SessionManager(SessionOwner):
         (SessionCommandsQuery).
 
         The default profile's rules for an id this manager does not know,
-        the empty id of an unbound door included (FUSE, the host's own
-        ``ws.vfs``), so a door that names no session is judged like a
+        the empty id of an unbound entry point included (FUSE, the host's own
+        ``ws.vfs``), so an entry point that names no session is judged like a
         session that named no profile rather than judged not at all.
 
         Args:
@@ -199,7 +199,7 @@ class SessionManager(SessionOwner):
 
         The default profile's for an id this manager does not know, the
         same fallback ``commands_of`` makes and for the same reason: a
-        door that names no session is judged like a session that named
+        entry point that names no session is judged like a session that named
         no profile.
 
         Args:

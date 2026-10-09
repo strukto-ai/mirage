@@ -686,7 +686,8 @@ def run(request, arm_interrupt, disarm_interrupt):
                 main_module = types.ModuleType("__main__")
                 user_globals = main_module.__dict__
                 user_globals["__annotations__"] = {}
-                # What CPython's file door binds, for a script and for stdin.
+                # What CPython's file adapter binds, for a script and for
+                # stdin.
                 if filename is not None:
                     user_globals["__file__"] = filename
                     user_globals["__cached__"] = None
@@ -916,7 +917,7 @@ def seed_sys_path(paths):
 # Emscripten builds os without the extended-attribute family CPython has
 # on linux, so a guest asking a mounted path for its attributes got
 # AttributeError. The host
-# registers _mirage_xattr, which answers from the workspace door, and
+# registers _mirage_xattr, which answers from the workspace entry point, and
 # each condition it reports is raised as the errno linux would raise.
 XATTR_ERRNO = {
     "NO_XATTR": errno.ENODATA,
@@ -932,7 +933,7 @@ XATTR_ERRNO = {
 }
 
 
-def xattr_door(
+def xattr_call(
     op, path, attribute=None, value=None, flags=0, follow_symlinks=True
 ):
     if isinstance(path, int):
@@ -963,7 +964,7 @@ def xattr_door(
 
 
 def getxattr(path, attribute, *, follow_symlinks=True):
-    found = xattr_door(
+    found = xattr_call(
         "getxattr", path, attribute, follow_symlinks=follow_symlinks
     )
     return base64.b64decode(found)
@@ -971,7 +972,7 @@ def getxattr(path, attribute, *, follow_symlinks=True):
 
 def listxattr(path=None, *, follow_symlinks=True):
     return list(
-        xattr_door(
+        xattr_call(
             "listxattr",
             "." if path is None else path,
             follow_symlinks=follow_symlinks,
@@ -980,11 +981,11 @@ def listxattr(path=None, *, follow_symlinks=True):
 
 
 def setxattr(path, attribute, value, flags=0, *, follow_symlinks=True):
-    xattr_door("setxattr", path, attribute, value, flags, follow_symlinks)
+    xattr_call("setxattr", path, attribute, value, flags, follow_symlinks)
 
 
 def removexattr(path, attribute, *, follow_symlinks=True):
-    xattr_door("removexattr", path, attribute, follow_symlinks=follow_symlinks)
+    xattr_call("removexattr", path, attribute, follow_symlinks=follow_symlinks)
 
 
 def install_xattrs():

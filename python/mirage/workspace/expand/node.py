@@ -86,7 +86,7 @@ async def _expand_backtick_region(
     Args:
         raw (str): the region's text, the folded prefix stripped.
         context (EvaluationContext): the session expanding it.
-        execute_fn (Callable[..., Any]): the nested-line door.
+        execute_fn (Callable[..., Any]): the nested-line entry point.
         node (TSNodeLike): the region's node.
         offset (int): where ``raw`` starts in the node's text, in the
             parser's offsets.
@@ -297,7 +297,7 @@ async def _arith_subscript(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
     """
     name = ""
     inner: list[TSNodeLike] = []
@@ -337,14 +337,14 @@ async def _arith_value(
     """An arithmetic expansion's value.
 
     Reads resolve against the visible env, so a hidden name counts as
-    unset; the write-back goes through the session plane's door, so a
+    unset; the write-back goes through the session view, so a
     ``pre_session`` rule governs ``$((X=5))`` exactly as it governs
     ``X=5``. bash bound the assignments made before an error, RANDOM's
     seed included; they land before the line dies.
 
     Args:
         session (SessionState): the session the expression reads.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
         expr (str): the expanded expression.
     """
     reader = random_reader(session)
@@ -374,7 +374,7 @@ async def expand_node(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        view (SessionView | None): the session plane's gated door, for
+        view (SessionView | None): the gated session view, for
             the expansions that write; None outside a workspace.
     """
     return unmark_globs(
@@ -403,7 +403,7 @@ async def expand_node_marked(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        view (SessionView | None): the session plane's gated door, for
+        view (SessionView | None): the gated session view, for
             the expansions that write; None outside a workspace.
     """
     return join_chunks(
@@ -433,7 +433,7 @@ async def expand_chunks(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        view (SessionView | None): the session plane's gated door, for
+        view (SessionView | None): the gated session view, for
             the expansions that write; None outside a workspace.
         quoted (bool): whether the node sits inside double quotes.
     """
@@ -573,7 +573,7 @@ async def _expand_child(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
     """
     return await expand_chunks(
         node, context, execute_fn, call_stack, view=view, quoted=quoted
@@ -605,7 +605,7 @@ async def _string_chunks(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
     """
     chunks: list[Chunk] = [Piece("")]
     splat = False
@@ -649,7 +649,7 @@ async def _substitution(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
     """
     session = context.session
     prefix = _folded_whitespace(ts_node)
@@ -727,7 +727,7 @@ async def _literal_node(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
     """
     ntype = ts_node.type
 

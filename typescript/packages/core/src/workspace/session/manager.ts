@@ -163,7 +163,7 @@ export class SessionManager extends SessionOwner {
   /**
    * The admission rules one session runs under (SessionCommandsQuery).
    * The default profile's rules for an id this manager does not know, the
-   * empty id of an unbound door included, so a door that names no
+   * empty id of an unbound entry point included, so an entry point that names no
    * session still fails toward refusal.
    */
   commandsOf(sessionId: string): AdmissionRules | null {
@@ -176,7 +176,7 @@ export class SessionManager extends SessionOwner {
   /**
    * The profile script one session runs under (SessionScriptsQuery).
    * The default profile's for an id this manager does not know, the
-   * same fallback `commandsOf` makes and for the same reason: a door
+   * same fallback `commandsOf` makes and for the same reason: an entry point
    * that names no session is judged like a session that named no
    * profile.
    */

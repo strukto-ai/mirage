@@ -3256,7 +3256,7 @@ async def open_target(
     # The target's profiles, and which one shapes a session that names
     # none. A profile is the whole permission document, so this is every
     # permission the target states; the models are the ones the YAML
-    # door validates with.
+    # entry point validates with.
     profiles = scripted_profiles(target.get("profiles") or None)
     default_profile = target.get("profile")
     if read is not None:
@@ -3407,7 +3407,7 @@ async def open_consistency(
 
 
 def scripted_profiles(profiles: dict | None) -> dict | None:
-    """Wrap a profile's inline policy source the way the config door does.
+    """Wrap a profile's inline policy source the way the config loader does.
 
     A target is JSON, so it carries a profile's policy as source rather
     than as the path a YAML config would name. Loading is the config

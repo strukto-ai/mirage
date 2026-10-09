@@ -33,7 +33,7 @@ import { encodeText } from '../../../../shell/bytes.ts'
 // path answers). All of them land on GNU readlink's silent exit 1, so
 // this matches python's `except OSError` rather than naming errnos one
 // at a time — a list would silently print a raw path the first time a
-// door answered with an errno nobody had added yet.
+// entry point answered with an errno nobody had added yet.
 function readlinkRefused(err: unknown): boolean {
   if (err instanceof PolicyDenied) return true
   return typeof (err as { code?: unknown }).code === 'string'
@@ -100,7 +100,7 @@ export async function handleReadlink(
   for (const op of operands) {
     const absOp = operandAbs(namespace, op, session.cwd)
     const spec = PathSpec.fromStrPath(op, undefined, session.cwd)
-    // The link entry is namespace state behind the op door: session grants
+    // The link entry is namespace state behind the dispatcher: session grants
     // and admission policies decide whether this session may read the
     // target at all, so a link operand clears it even under -f, -e and -m.
     // EINVAL (not a link), a refusal and a failed walk all land on GNU

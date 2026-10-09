@@ -108,7 +108,7 @@ def render_pending(subject: str, pending: Pending) -> tuple[bytes, int]:
 
     Args:
         subject (str): the command name.
-        pending (Pending): the door's answer.
+        pending (Pending): the entry point's answer.
     """
     return f"{subject}: Permission denied\n".encode(), POLICY_DENIED_EXIT
 
@@ -173,8 +173,8 @@ def policy_denied(
     filename: str,
     strerror: str = posix_phrase(FsCondition.EACCES),
 ) -> PolicyDenied:
-    """The error a door raises for a policy's Deny, or for a question the
-    host has not answered, its record noted for the line running it.
+    """The error an entry point raises for a policy's Deny, or for a question
+    the host has not answered, its record noted for the line running it.
 
     The error says what the terminal would, EACCES and ``strerror``;
     the reason (or the ask id the agent quotes) rides the record, on the
@@ -186,7 +186,7 @@ def policy_denied(
             answer.
         filename (str): the path or name refused.
         strerror (str): the terminal's words, ``Permission denied``
-            unless the door words its own.
+            unless the entry point words its own.
     """
     refusal = refusal_of(action)
     note_refusal(refusal)
@@ -210,14 +210,14 @@ async def pre_vfs_gate(
     decisions: Decisions | None = None,
     final: bool = True,
 ) -> None:
-    """Fire pre_vfs at an op door; a Deny becomes EACCES.
+    """Fire pre_vfs at a dispatcher; a Deny becomes EACCES.
 
-    The one seam helper both doors (``ws.vfs`` and the dispatcher)
+    The one seam helper both entry points (``ws.vfs`` and the dispatcher)
     call, so a refusal is byte-identical however the mount is reached:
     PermissionError with errno EACCES and the virtual path as filename,
     which the shell renders as "<cmd>: <path>: Permission denied" and
     FUSE translates to -EACCES. An Ask is a question only where no line
-    is running and the door holds the ledger (a file tool, the host's
+    is running and the entry point holds the ledger (a file tool, the host's
     facade): the ledger answers it from a standing grant or records it,
     and an unanswered one refuses with the ask id on the record. Inside
     a line an Ask refuses like a deny, since the line was admitted
@@ -229,23 +229,23 @@ async def pre_vfs_gate(
         path (PathSpec): the resolved virtual path.
         write (bool): whether the op mutates the mount.
         prefix (str): the owning mount's prefix.
-        session_id (str): the session the door serves, empty for the
+        session_id (str): the session the dispatcher serves, empty for the
             unbound host view.
         mode (MountMode | None): the owning mount's mode, judged by the
-            mount-mode built-in; None at a door that judges it itself.
+            mount-mode built-in; None at an entry point that judges it itself.
         create (bool): the op creates the path.
         subtree (bool): the op mutates the path's descendants too.
-        check_hidden (bool): False only for a door that has already
+        check_hidden (bool): False only for an entry point that has already
             answered the hides itself.
         decisions (Decisions | None): the approval ledger, None at a
-            door that cannot ask.
+            entry point that cannot ask.
         final (bool): the op's last gate; False for a rename's source,
             whose destination is gated next.
 
     Raises:
         Explained: in a dry run (``explaining``), once the gate's answer
             is noted and the op would refuse or has no gate left: the
-            door stops before any backend or cache is touched.
+            entry point stops before any backend or cache is touched.
         ReadOnlyError: a write a policy makes while it decides a dry
             run's op, which the dry run may not let change anything (an
             ask its read meets reads the ledger and records nothing).
@@ -314,14 +314,14 @@ async def _explained_op(
 ) -> VfsExplanation:
     """What the gate would answer one VFS call, as ``pre_vfs_gate``
     decides it and without its consequences: every policy's answer, the
-    one that wins, and the error the door would raise. A question reads
+    one that wins, and the error the entry point would raise. A question reads
     the ledger's settled records and records nothing.
 
     Args:
         policies (Policies): the workspace's admission policies.
         ctx (VfsContext): the call the gate sees.
         decisions (Decisions | None): the approval ledger, None at a
-            door that cannot ask.
+            entry point that cannot ask.
     """
     said = await policies.answers("pre_vfs", ctx)
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
@@ -368,10 +368,10 @@ async def post_vfs_gate(
     prefix: str,
     result: Any,
 ) -> Limit | None:
-    """Fire post_vfs at an op door; a Deny suppresses the result.
+    """Fire post_vfs at a dispatcher; a Deny suppresses the result.
 
     Returns the merged Limit bound (tightest per field across every
-    opining policy) for the door to apply to a byte-producing result,
+    opining policy) for the entry point to apply to a byte-producing result,
     or None when no policy bounds this op.
 
     Args:
@@ -401,14 +401,14 @@ async def pre_session_gate(
 ) -> None:
     """Fire pre_session on the session plane; a Deny becomes EACCES.
 
-    The one seam helper the session plane's door calls, so a refusal
+    The one seam helper the session view calls, so a refusal
     is identical however the state is reached: shell builtin, command
     view, or a later tier. None policies (a view constructed outside a
     workspace) gate nothing.
 
     Args:
         policies (Policies | None): the workspace's admission policies.
-        ctx (SessionContext): the mutation, built by the door so the
+        ctx (SessionContext): the mutation, built by the entry point so the
             plane, verb, rendering and session identity are stated in
             exactly one place.
     """
@@ -595,7 +595,7 @@ class Policies:
         (``SessionScopedMixin``) and says this is not one of its. For
         a seam that pays ahead for a hook rather than gating on it: the
         secret fill drops its masks under a session-write gate, and a
-        profile's policy at that door is one profile's, not every
+        profile's policy at that entry point is one profile's, not every
         session's.
 
         Args:
@@ -649,13 +649,13 @@ class Policies:
         """The one loop every stage runs: each policy's answer, named and
         checked against what the hook may carry.
 
-        The door stops at the first Deny, since nothing after it can
+        The entry point stops at the first Deny, since nothing after it can
         change the outcome; ``every`` goes on, so ``explain`` shows the
         answers a Deny would hide. A policy that raises answers with a
         Deny naming it (fail closed), except the built-in placement,
         which raises to the caller. A kind the hook cannot carry
         (VALIDITY) raises PolicyError: a programming error, not a
-        refusal, and as loud in a dry run as at the door.
+        refusal, and as loud in a dry run as at the entry point.
 
         Args:
             hook (str): the hook in python spelling.
@@ -709,7 +709,7 @@ class Policies:
     async def _fire(
         self, hook: str, ctx: HookContext, placed: bool = False
     ) -> tuple[Deny | Ask | None, Limit | None, tuple[Route, ...]]:
-        """One stage at a door: the first Deny wins, Limits merge.
+        """One stage at an entry point: the first Deny wins, Limits merge.
 
         A refusal short-circuits (limits are moot once the result is
         suppressed); Limit actions aggregate to the tightest value per
@@ -737,14 +737,14 @@ class Policies:
     ) -> tuple[Deny | Ask | Route, ...]:
         """The policies' answers at one stage, in the order the stage
         asks them, each naming its policy: what ``explain`` shows, from
-        the same loop the door runs.
+        the same loop the entry point runs.
 
         With ``every`` no answer stops the loop, so a Deny does not hide
         the answers after it; without it the answers end at the first
-        Deny, as the door's do. The built-in hides never answer here,
+        Deny, as the entry point's do. The built-in hides never answer here,
         since a hide never surfaces; the built-in placement answers first
         at ``pre_execute`` and the built-in mount mode last at
-        ``pre_vfs``, as they do at the door.
+        ``pre_vfs``, as they do at the entry point.
 
         Args:
             hook (str): the hook in python spelling.
@@ -795,7 +795,7 @@ class Policies:
         self, ctx: VfsContext, *, check_hidden: bool = True
     ) -> Hide | Deny | Ask | None:
         """Fire pre_vfs across the policies; first Deny wins, else the
-        first Ask, which the door decides how to put.
+        first Ask, which the entry point decides how to put.
 
         The built-in hides answer before every policy, with a Hide that
         outranks whatever a policy would say, so a refusal never tells a
@@ -805,7 +805,7 @@ class Policies:
 
         Args:
             ctx (VfsContext): the op about to run.
-            check_hidden (bool): False only for a door that has already
+            check_hidden (bool): False only for an entry point that has already
                 answered the hides itself.
         """
         if check_hidden:

@@ -12,7 +12,7 @@ from mirage.commands.builtin.constants import (
 )
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
 from mirage.commands.builtin.utils.copy import path_exists
-from mirage.commands.builtin.utils.links import LinkDoor
+from mirage.commands.builtin.utils.links import LinkResolver
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.errors.constants import FS_ERRORS
@@ -177,14 +177,14 @@ async def open_gzip_input(
     suffix: str = GZIP_SUFFIX,
     decompress: bool = True,
     follow: bool = False,
-    door: LinkDoor | None = None,
+    resolver: LinkResolver | None = None,
 ) -> GzipInput | None:
     """Open one operand the way gzip 1.13's open_input_file does.
 
     A name typed with a trailing slash has to be a directory. Without
     -c, -t or -f gzip opens with O_NOFOLLOW, so a link standing at the
     name, dangling or not, is ELOOP, which -q never quiets; with them it
-    is followed, a retried name through the door, since what it leads to
+    is followed, a retried name through the dispatcher, since what it leads to
     may live on any mount. A directory is a warning. A missing name with
     no suffix gzip knows is retried, when decompressing, with each
     suffix in turn and reported with the -S one; any other failure ends
@@ -199,24 +199,30 @@ async def open_gzip_input(
         suffix (str): the -S suffix.
         decompress (bool): whether a missing name is retried.
         follow (bool): -c, -t or -f, under which a link is followed.
-        door (LinkDoor | None): the namespace's links, None when there
+        resolver (LinkResolver | None): the namespace's links, None when there
             are none.
     """
     retry = decompress and gzip_suffix(path.raw_path, suffix) is None
     names = [path]
     for name in names:
-        link = door.link_at(name) if door is not None else None
+        link = resolver.link_at(name) if resolver is not None else None
         if link is not None and not follow:
             report(fs_error_line("gzip", name, eloop(name)), 1, False)
             return None
         try:
-            if door is not None and name is path and door.vanished(name):
+            if (
+                resolver is not None
+                and name is path
+                and resolver.vanished(name)
+            ):
                 raise enoent(name.raw_path)
             # The router followed the operand itself; a retried name it
-            # never saw is followed through the door.
+            # never saw is followed through the dispatcher.
             reads = (
-                door.read(link)
-                if door is not None and link is not None and name is not path
+                resolver.read(link)
+                if resolver is not None
+                and link is not None
+                and name is not path
                 else source(name)
             )
             return GzipInput(name, await _opened(reads), link)
@@ -237,22 +243,22 @@ async def open_gzip_input(
 
 
 async def output_taken(
-    where: PathSpec, stat: StatFn | None, door: LinkDoor | None
+    where: PathSpec, stat: StatFn | None, resolver: LinkResolver | None
 ) -> bool:
     """Whether anything stands where gzip creates an output.
 
     gzip creates with O_EXCL, which a link standing there refuses,
-    dangling or not, so the probe is an lstat: through the door while
+    dangling or not, so the probe is an lstat: through the dispatcher while
     the namespace holds links, the mount's own stat otherwise.
 
     Args:
         where (PathSpec): the output.
         stat (StatFn | None): the mount's stat.
-        door (LinkDoor | None): the namespace's links.
+        resolver (LinkResolver | None): the namespace's links.
     """
-    if door is not None:
+    if resolver is not None:
         return await path_exists(
-            door.lstat, PathSpec.from_str_path(where.virtual)
+            resolver.lstat, PathSpec.from_str_path(where.virtual)
         )
     return stat is not None and await path_exists(stat, where)
 
@@ -284,7 +290,7 @@ async def decompress_inputs(
     write: Callable[..., Awaitable[None]] | None = None,
     unlink: Callable[..., Awaitable[None]] | None = None,
     stat: StatFn | None = None,
-    door: LinkDoor | None = None,
+    resolver: LinkResolver | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Decode operands in order the way gzip 1.13 does, in its voice.
 
@@ -315,7 +321,7 @@ async def decompress_inputs(
         write (Callable | None): Write an in-place result.
         unlink (Callable | None): Remove a replaced input.
         stat (StatFn | None): Stat an operand or an in-place output.
-        door (LinkDoor | None): The namespace's links, None when there
+        resolver (LinkResolver | None): The namespace's links, None when there
             are none.
     """
     refused = suffix_refusal(suffix)
@@ -351,7 +357,7 @@ async def decompress_inputs(
                     report,
                     suffix=suffix,
                     follow=follow,
-                    door=door,
+                    resolver=resolver,
                 )
             )
             if opened is None and not on_stdin:
@@ -398,7 +404,7 @@ async def decompress_inputs(
             out_name, out = output
             if link is not None:
                 out = beside_link(link, out_name)
-            existed = await output_taken(out, stat, door)
+            existed = await output_taken(out, stat, resolver)
             if existed and not force:
                 report(
                     f"gzip: {out_name} already exists;\tnot overwritten\n", 2
@@ -412,7 +418,9 @@ async def decompress_inputs(
                     continue
             data = b"".join(chunks)
             try:
-                await replace_output(out, data, write, door, link is not None)
+                await replace_output(
+                    out, data, write, resolver, link is not None
+                )
             except FS_ERRORS as exc:
                 line = fs_error_line("gzip", out_name, exc)
                 report(line if existed else "\n" + line, 1)
@@ -424,8 +432,8 @@ async def decompress_inputs(
             if not keep:
                 await (
                     unlink(path)
-                    if link is None or door is None
-                    else door.unlink(link)
+                    if link is None or resolver is None
+                    else resolver.unlink(link)
                 )
 
     body = run()
@@ -440,25 +448,28 @@ async def replace_output(
     out: PathSpec,
     data: bytes,
     write: Callable[..., Awaitable[None]],
-    door: LinkDoor | None,
+    resolver: LinkResolver | None,
     beside: bool,
 ) -> None:
     """Write an in-place output, replacing a link standing at its name.
 
     gzip -f unlinks whatever holds the name before it creates the file,
     so a link there is removed, never written through; an output beside
-    a link goes through the door, since the link may sit on any mount.
+    a link goes through the dispatcher, since the link may sit on any mount.
 
     Args:
         out (PathSpec): the output.
         data (bytes): its content.
         write (Callable): the operand mount's write.
-        door (LinkDoor | None): the namespace's links.
+        resolver (LinkResolver | None): the namespace's links.
         beside (bool): whether the output goes beside a link.
     """
-    if door is not None and door.links.stat_at(out.virtual) is not None:
-        await door.unlink(out.virtual)
-    if beside and door is not None:
-        await door.write(out.virtual, data)
+    if (
+        resolver is not None
+        and resolver.links.stat_at(out.virtual) is not None
+    ):
+        await resolver.unlink(out.virtual)
+    if beside and resolver is not None:
+        await resolver.write(out.virtual, data)
         return
     await write(out, data)

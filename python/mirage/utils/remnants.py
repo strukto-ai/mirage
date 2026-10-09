@@ -50,7 +50,7 @@ class RemnantChannel(Protocol):
     deletion must still answer for its path's mode and rules exactly as
     a first-class op would (the command plane binds its mode- and
     rule-guarded slots, the dispatchers route through their own op
-    door), while the visibility filter stays off because the cascade
+    entry point), while the visibility filter stays off because the cascade
     exists to see and destroy what the session cannot. The cascade
     never sprinkles those checks itself; wiring a raw, unguarded
     channel here is the bug this contract exists to prevent.
@@ -84,7 +84,7 @@ def visible_below(base: str, names: Iterable[str], allowed: Allowed) -> bool:
     The one emptiness predicate every remnant arm judges with, fed
     every name source its plane can enumerate (the backend listing,
     and on the ops plane the namespace's merged children too), so
-    "visibly empty" cannot mean different things at different doors.
+    "visibly empty" cannot mean different things at different entry points.
 
     Args:
         base (str): absolute virtual path of the directory.

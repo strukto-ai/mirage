@@ -83,7 +83,7 @@ def numbered(exc: OSError) -> OSError:
     is returned as it came.
 
     Args:
-        exc (OSError): what the door raised, errno set or not.
+        exc (OSError): what the entry point raised, errno set or not.
     """
     condition = classify(exc)
     if exc.errno is not None or condition is None:
@@ -226,8 +226,8 @@ def eloop(path: str | PathSpec) -> DotWalkLoop:
 
     A walk refusal: final for every layer that re-reads a miss, and an
     OSError, so a per-operand catch words it where the namespace's own
-    ``CycleError`` escaped every one. The door raises it for a loop above
-    any name it is handed.
+    ``CycleError`` escaped every one. The entry point raises it for a loop
+    above any name it is handed.
 
     Args:
         path (str | PathSpec): the path whose walk looped.

@@ -88,13 +88,13 @@ class PinLinksPolicy(Policy):
 
 
 def run_link_probe(result: dict[str, ProbeValue]) -> None:
-    """Record that removing a link through the kernel goes through the door.
+    """Record that removing a link through the kernel reaches the dispatcher.
 
     FUSE used to drop a link straight into the namespace table, at a
     layer no policy or session view covers, so a pre_vfs deny never
     fired on one and the removal left no OpRecord. Routing the removal
-    through the op door is exactly what makes the two answers below
-    differ, and unlink is a LINK_ENTRY_OPS member so the door answers a
+    through the dispatcher is exactly what makes the two answers below
+    differ, and unlink is a LINK_ENTRY_OPS member so the dispatcher answers a
     link path itself.
 
     Args:
@@ -157,7 +157,7 @@ def run_link_probe(result: dict[str, ProbeValue]) -> None:
 def run_policy_probe(result: dict[str, ProbeValue]) -> None:
     """Record that op policies gate the kernel path too.
 
-    FUSE serves the workspace's op door, so a pre_vfs deny (sealed
+    FUSE serves the workspace's dispatcher, so a pre_vfs deny (sealed
     path) and a post_vfs deny (redacted content) must both surface as
     EACCES to ordinary file APIs, while unguarded reads pass.
 
@@ -222,8 +222,8 @@ def run_session_probe(result: dict[str, ProbeValue]) -> None:
     Through the kernel the hidden directory is absent: a read under
     it and a create under it both answer ENOENT and the listing omits
     it; the cap refuses a write and leaves the file as it was. The
-    shell door run as the same session gives every answer the same
-    way, and the host's own door still reads the hidden file, so the
+    shell entry point run as the same session gives every answer the same
+    way, and the host's own entry point still reads the hidden file, so the
     hide is the session's and not the mount's.
 
     Args:
@@ -242,7 +242,7 @@ def run_session_probe(result: dict[str, ProbeValue]) -> None:
             "mounts": {"/data": "read"},
         },
     )
-    # The shell door first, before the mount goes live, on the same
+    # The shell entry point first, before the mount goes live, on the same
     # loop discipline the link probe keeps.
     hidden = asyncio.run(
         ws.shell("cat /data/vault/secret.txt", session_id="agent")

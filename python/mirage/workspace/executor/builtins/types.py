@@ -53,7 +53,7 @@ class BuiltinCall:
         row (int): the command's line within its parse; only ``alias``
             reads it, so a definition is invisible to a use on the same
             line, as bash's line reader has it.
-        dispatch (DispatchFn): the op dispatcher door.
+        dispatch (DispatchFn): the op dispatcher.
         registry (MountRegistry): the mount registry.
         namespace (Namespace): the name plane (links, node table).
         execute_fn (Callable[..., Any]): runs a text line in this

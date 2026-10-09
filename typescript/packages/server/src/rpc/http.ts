@@ -19,7 +19,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { InFlight } from '../inflight.ts'
 import { ioResultToDict } from '../io_serde.ts'
 import { JobStatus, type JobTable } from '../jobs.ts'
-import type { McpDoor } from '../mcp/http.ts'
+import type { McpEndpoint } from '../mcp/http.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { RPC_INTERNAL_ERROR, RPC_INVALID_REQUEST, RPC_PARSE_ERROR } from './constants.ts'
 import {
@@ -89,13 +89,13 @@ class DaemonRpcServer extends MirageRpcServer {
  * is held in `inflight`, so `$/cancelRequest` on another request reaches
  * it, and a caller that drops the request cancels it.
  */
-class RpcDoor {
+class RpcEndpoint {
   readonly inflight = new InFlight()
 
   constructor(
     private readonly registry: WorkspaceRegistry,
     private readonly jobs: JobTable,
-    private readonly mcp: McpDoor,
+    private readonly mcp: McpEndpoint,
   ) {}
 
   /** The RPC server for a workspace session, or why there is none. */
@@ -176,9 +176,9 @@ export function registerRpcRoutes(
   app: FastifyInstance,
   registry: WorkspaceRegistry,
   jobs: JobTable,
-  mcp: McpDoor,
+  mcp: McpEndpoint,
 ): void {
-  const door = new RpcDoor(registry, jobs, mcp)
+  const endpoint = new RpcEndpoint(registry, jobs, mcp)
   app.post<{ Params: { workspaceId: string }; Querystring: { session_id?: string } }>(
     RPC_PATH,
     {
@@ -190,6 +190,6 @@ export function registerRpcRoutes(
         void reply.send(parse ? errorResponse(null, RPC_PARSE_ERROR, 'parse error') : error)
       },
     },
-    (req, reply) => door.handle(req, reply),
+    (req, reply) => endpoint.handle(req, reply),
   )
 }

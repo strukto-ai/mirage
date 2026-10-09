@@ -27,7 +27,7 @@ class MarkerRuntime(Runtime):
     captures = ("echo-run",)
 
 
-def test_base_carries_no_capability_doors():
+def test_base_carries_no_capability_entry_points():
     # The base holds identity and config only; run, run_line, eval and
     # attach belong to the tiers and mixins, detected by isinstance.
     rt = MarkerRuntime()

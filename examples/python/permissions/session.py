@@ -20,18 +20,18 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session
 
 # One agent, one session. `ws.session(id, profile=...)` creates a session
-# under a role and hands back its two doors bound together: `shell`
+# under a role and hands back its two entry points bound together: `shell`
 # runs a shell line as the session and `vfs` is the file API run as it.
-# Whichever door an agent's tools use, the same profile answers.
+# Whichever entry point an agent's tools use, the same profile answers.
 #
 # Two roles read one world and see two filesystems. The reviewer's
 # profile hides /repo/secrets and its session caps /repo at read, so the
-# directory does not exist for it on either door and a write is a
-# read-only file system on either door. The editor may write, and a
+# directory does not exist for it on either entry point and a write is a
+# read-only file system on either entry point. The editor may write, and a
 # deny rule keeps it out of the secrets by name, so the same file is
 # "does not exist" for one role and "permission denied" for the other,
 # through the shell and through vfs.read alike. The workspace names no
-# default profile, so its own doors (`ws.vfs`, bare `ws.shell`) are
+# default profile, so its own entry points (`ws.vfs`, bare `ws.shell`) are
 # the host's view. A second `ws.session(id)` adopts the session as is;
 # naming a profile for a session that already exists is refused.
 
@@ -69,28 +69,28 @@ def shell(out: bytes, err: bytes, code: int) -> str:
     return f"[{code}] {' '.join(out.decode().split())}".rstrip()
 
 
-def show(role: str, door: str, call: str, answer: str, note: str) -> None:
+def show(role: str, entry: str, call: str, answer: str, note: str) -> None:
     """Print one probe as the truth file records it.
 
     Args:
         role (str): whose session answered.
-        door (str): which of its doors.
+        entry (str): which of its entry points.
         call (str): what was asked.
         answer (str): what came back.
         note (str): why it matters.
     """
-    print(f"{role:9} {door:9} {call:34} {answer}")
+    print(f"{role:9} {entry:9} {call:34} {answer}")
     print(f"{'':9} {'':9} {'':34} {note}")
 
 
 async def line(
     role: str, handle: Session | Workspace, cmd: str, note: str
 ) -> None:
-    """Run one shell line through a session's shell door and print it.
+    """Run one shell line through a session's shell entry point and print it.
 
     Args:
         role (str): whose session.
-        handle (Session | Workspace): the doors; the workspace's
+        handle (Session | Workspace): the entry points; the workspace's
             own are the host's.
         cmd (str): the shell line.
         note (str): why it matters.
@@ -112,15 +112,15 @@ async def read(
     note: str,
     session_id: str | None = None,
 ) -> None:
-    """Read one path through a session's op door and print the answer.
+    """Read one path through a session's dispatcher and print the answer.
 
     Args:
         role (str): whose session.
-        handle (Session | Workspace): the doors.
+        handle (Session | Workspace): the entry points.
         path (str): the virtual path.
         note (str): why it matters.
         session_id (str | None): name one session for this call alone,
-            the way ``shell`` takes one; None reads as the door's own.
+            the way ``shell`` takes one; None reads as the entry point's own.
     """
     call = path if session_id is None else f"{path} as {session_id}"
     try:
@@ -134,11 +134,11 @@ async def read(
 async def write(
     role: str, handle: Session | Workspace, path: str, note: str
 ) -> None:
-    """Write one path through a session's op door and print the answer.
+    """Write one path through a session's dispatcher and print the answer.
 
     Args:
         role (str): whose session.
-        handle (Session | Workspace): the doors.
+        handle (Session | Workspace): the entry points.
         path (str): the virtual path.
         note (str): why it matters.
     """
@@ -166,7 +166,7 @@ async def main() -> None:
         "reviewer",
         reviewer,
         "cat /repo/README.md",
-        "the shell door, as the reviewer",
+        "the shell entry point, as the reviewer",
     )
     await line(
         "reviewer",
@@ -184,25 +184,25 @@ async def main() -> None:
         "reviewer",
         reviewer,
         "/repo/secrets/key.pem",
-        "the op door, the same hide, the same answer",
+        "the dispatcher, the same hide, the same answer",
     )
     await read(
         "editor",
         editor,
         "/repo/secrets/key.pem",
-        "the op door, the same rule, the same answer",
+        "the dispatcher, the same rule, the same answer",
     )
     await read(
         "host",
         ws,
         "/repo/secrets/key.pem",
-        "no default profile: the workspace's own door sees it",
+        "no default profile: the workspace's own entry point sees it",
     )
     await read(
         "host",
         ws,
         "/repo/secrets/key.pem",
-        "the same door, named per call: the reviewer's hide",
+        "the same entry point, named per call: the reviewer's hide",
         session_id="reviewer",
     )
     await read(
@@ -230,7 +230,7 @@ async def main() -> None:
         "reviewer",
         reviewer,
         "echo x > /repo/new.txt",
-        "the shell door reads the same cap",
+        "the shell dispatcher reads the same cap",
     )
     await line(
         "editor", editor, "echo x > /repo/new.txt", "and the same grant"

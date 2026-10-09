@@ -101,7 +101,7 @@ describe('SharePoint mkdir under a mount root the drive does not have yet', () =
 describe('SharePoint mkdir names a refusal', () => {
   const plain = (): SharePointAccessor => new SharePointAccessor({ accessToken: 'token' })
 
-  // A folder another client made after the doors looked still 409s, and
+  // A folder another client made after the lookup ran still 409s, and
   // only -p passes it.
   it.each([
     [{ folder: {} }, false, 'EEXIST'],

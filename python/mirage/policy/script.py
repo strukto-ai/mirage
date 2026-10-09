@@ -49,7 +49,7 @@ from mirage.types import PathSpec
 logger = logging.getLogger(__name__)
 
 # The admission hooks a policy program may define, python spelling to
-# JavaScript spelling. The output doors (post_vfs, post_execute) stay
+# JavaScript spelling. The output entry points (post_vfs, post_execute) stay
 # coded: they answer with a Limit over a live result.
 HOOKS: Mapping[str, str] = {
     "pre_command": "preCommand",
@@ -113,7 +113,7 @@ def ops_script_context(
 
     Args:
         profile (str): the profile the script speaks for.
-        ctx (VfsContext): the op about to run, as the door built it.
+        ctx (VfsContext): the op about to run, as the entry point built it.
         mounts (Sequence[str]): the workspace's mount prefixes.
     """
     return {
@@ -137,7 +137,7 @@ def session_script_context(
 
     Args:
         profile (str): the profile the script speaks for.
-        ctx (SessionContext): the write about to land, as the door
+        ctx (SessionContext): the write about to land, as the entry point
             built it.
         mounts (Sequence[str]): the workspace's mount prefixes.
     """
@@ -189,8 +189,8 @@ def hook_probe(script: ScriptSource) -> str:
     """The expression that lists which hooks a policy program defines.
 
     Appended to the program once, before its first judgment, so a hook
-    the program leaves out is silence at that door rather than a call
-    that fails, and the op door in particular is never charged an
+    the program leaves out is silence at that entry point rather than a call
+    that fails, and the dispatcher in particular is never charged an
     evaluation for a program that only judges commands. Spelled per
     language and in the engines' common subset: monty has neither
     ``globals()`` nor ``callable()``, so python asks each name and
@@ -250,7 +250,7 @@ def script_action(
     refuses it, and can never override one that does), ``'deny'`` /
     ``{'deny': reason}`` refuses, and at ``pre_command`` and ``pre_vfs``
     ``'ask'`` / ``{'ask': reason}`` takes the line (or an op no line is
-    running behind) to the approval door, since the session door cannot
+    running behind) to the approval entry point, since the session view cannot
     wait on a host (``VALIDITY``). The bare strings carry the document's
     default reasons, the same ones a rule stating no reason gets.
 
@@ -301,9 +301,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     (``ops_script_context``), ``pre_session`` per env write
     (``session_script_context``). Which ones it defines is probed once
     per program (``hook_probe``), so a hook it leaves out is silence at
-    that door and costs no evaluation, and a program defining none
-    fails closed at every door. It reads the session's policy through
-    the narrow ``SessionScriptsQuery`` by the session id the door put
+    that entry point and costs no evaluation, and a program defining none
+    fails closed at every entry point. It reads the session's policy through
+    the narrow ``SessionScriptsQuery`` by the session id the entry point put
     in the context, so a session whose profile states no policy costs
     one lookup and nothing else.
 
@@ -318,7 +318,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     and ``resolver``, attached before its first evaluation exactly as
     ``Runtimes`` attaches an agent's engine), so a policy may read what
     an operand holds and answer for its content, not only its name. A
-    read from a policy clears the op door like any other, except this
+    read from a policy clears the dispatcher like any other, except this
     policy's own ``pre_vfs``: the policy is the one asking, and judging
     its own read would re-enter the evaluation waiting on it.
 
@@ -334,7 +334,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             prefixes, read per evaluation so a mount added after
             construction is visible to the script.
         dispatch (DispatchFn | None): the workspace's op dispatch, the
-            door a policy's ``open()`` reads the mounts through; None
+            entry point a policy's ``open()`` reads the mounts through; None
             for a ScriptPolicy outside a workspace, whose programs see
             no file.
         resolver (MountResolver | None): the live mount routing table
@@ -395,12 +395,12 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     async def wants_for(self, hook: str, session_id: str) -> bool:
         """Whether this session's policy speaks at ``hook``: it has a
         program, and the program defines the hook, or defines none and
-        so refuses at every door. A probe that fails answers True for
-        the same reason: the door will refuse.
+        so refuses at every entry point. A probe that fails answers True for
+        the same reason: the entry point will refuse.
 
         Args:
             hook (str): the hook in python spelling.
-            session_id (str): the session the door serves.
+            session_id (str): the session the dispatcher serves.
         """
         entry = self._sessions.script_of(session_id)
         if entry is None or hook not in HOOKS:
@@ -424,11 +424,11 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         session_id: str,
         facts: Callable[[ProfileScript], dict[str, EvalValue]],
     ) -> Action | None:
-        """One hook of the session's policy, with the door's facts.
+        """One hook of the session's policy, with the entry point's facts.
 
         Args:
-            hook (str): the hook the door fired, in python spelling.
-            session_id (str): the session the door serves.
+            hook (str): the hook the entry point fired, in python spelling.
+            session_id (str): the session the dispatcher serves.
             facts (Callable[[ProfileScript], dict[str, EvalValue]]):
                 builds what the program sees as ``ctx``, given the
                 policy it speaks for.
@@ -522,7 +522,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         report: OpReport | None = None,
         **kwargs: Any,
     ) -> tuple[Any, IOResult]:
-        """The door the policy's engine reads through: the workspace's
+        """The entry point the policy's engine reads through: the workspace's
         dispatch, with the op marked as the policy's own for as long as
         it runs, so ``pre_vfs`` above lets it through.
 
@@ -554,7 +554,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
 
 
 def _clause(exc: Exception) -> str:
-    """An error's message as the clause after "policy": the engine door
+    """An error's message as the clause after "policy": the engine entry point
     and the answer reader both speak of "script", which is the
     program's generic name, and the profile's word for its program is
     policy.

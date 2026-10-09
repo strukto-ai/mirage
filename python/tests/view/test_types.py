@@ -20,7 +20,7 @@ from mirage.view.types import NamespaceLinks
 from mirage.workspace import Workspace
 
 # The seam's members in declaration order. The TypeScript twin
-# (doors/types.test.ts) pins this same list camelCased and in this same
+# (entry points/types.test.ts) pins this same list camelCased and in this same
 # order, so a member added, dropped or moved in one language fails the
 # other language's test instead of drifting quietly.
 MEMBERS = ("follow", "is_link", "readlink", "link_stat_at", "symlink_targets")
@@ -37,7 +37,7 @@ def test_members_and_declaration_order():
 
 
 def test_the_seam_carries_no_mutator():
-    # Creating and removing a link belongs to the op door, which is the
+    # Creating and removing a link belongs to the dispatcher, which is the
     # only layer that sees both planes: it decides symlink(2)'s refusal
     # to overwrite an occupied name, and it is where session grants,
     # admission policies and the ledger fire. A mutator here is a write
@@ -61,7 +61,7 @@ def test_every_member_is_a_plain_read():
 def test_namespace_satisfies_the_narrowed_protocol():
     # Narrowing the seam must not cost the structural match: the
     # workspace Namespace still answers every member, and keeps the
-    # mutators the door calls on it directly.
+    # mutators the dispatcher calls on it directly.
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     assert isinstance(ws.namespace, NamespaceLinks)
     assert inspect.iscoroutinefunction(ws.namespace.symlink)

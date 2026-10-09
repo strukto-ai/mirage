@@ -37,13 +37,13 @@ async def _recorded(
 ) -> AsyncIterator[bytes]:
     """A streamed answer, recorded once it ends.
 
-    The door stamps the report with the bytes the stream carried when it
+    The dispatcher stamps the report with the bytes the stream carried when it
     ends, so the record waits for that rather than counting none. The
     caller runs it to its empty first step, inside the ``try``, so a
     stream closed before its first pull is still closed and recorded.
 
     Args:
-        stream (AsyncIterator[bytes]): the door's stream.
+        stream (AsyncIterator[bytes]): the dispatcher's stream.
         record (Callable[[], None]): records the op from the report.
     """
     try:
@@ -61,13 +61,13 @@ class Files:
     Every op delegates to the workspace dispatcher, so FUSE and
     ``ws.vfs`` walk the same pipeline as a shell command: link follow,
     session grants, admission policies, cache read-through, namespace
-    structure, and write invalidation all fire once, at that one door.
+    structure, and write invalidation all fire once, at that one dispatcher.
     The facade keeps only what is its own: the typed surface, op
     recording (``records``/``network_bytes``), and the mount-table
     helpers.
 
     ``dispatch`` is required, so there is no workspace-less mode. A
-    second pipeline here would be a second door, and it drifted from
+    second pipeline here would be a second entry point, and it drifted from
     the real one exactly as expected: it served no cache, saw no
     namespace structure, and fired the gates only when a caller
     remembered to hand it policies. TypeScript's ``Files`` takes
@@ -90,7 +90,7 @@ class Files:
     line *sets* the session, an op *inherits* it. So the argument is
     the session to run as when no line is already running, and the
     line's session wins when one is, which is what keeps a handler
-    reaching this door from widening the view it was given.
+    reaching the dispatcher from widening the view it was given.
     """
 
     def __init__(
@@ -123,7 +123,7 @@ class Files:
     def _for_session(self, session_id: str) -> "Files":
         """The same facade run as another session.
 
-        The mechanism behind ``Session.vfs``, not a door of its
+        The mechanism behind ``Session.vfs``, not a dispatcher of its
         own: a host binds a session with ``ws.session(id)`` (creating
         it when the id is new) or ``Session(ws, id)`` (adopting
         one that exists), so there is one way to say it rather than
@@ -282,8 +282,8 @@ class Files:
         self, name: str, path: PathSpec, /, **kwargs: Any
     ) -> tuple[Any, IOResult]:
         """``Workspace.dispatch`` as this facade runs it: as its session,
-        and recorded on ``records``. The door ``RuntimeFiles`` drives for a
-        ``with ws:`` block, which is a facade caller like FUSE. The
+        and recorded on ``records``. The dispatcher ``RuntimeFiles`` drives for
+        a ``with ws:`` block, which is a facade caller like FUSE. The
         IOResult is empty: a facade op's account is its record.
 
         Args:
@@ -298,20 +298,20 @@ class Files:
     ) -> Any:
         """Run one op through the workspace dispatcher and record it.
 
-        The door owns the whole pipeline (follow, grants, gates, cache,
+        The dispatcher owns the whole pipeline (follow, grants, gates, cache,
         structure, invalidation); the facade's own share is the record.
         The path is link-followed here first so the record carries the
-        resolved path; the door's second follow of an already-resolved
+        resolved path; the dispatcher's second follow of an already-resolved
         path is a no-op. That follow runs inside the session binding
         and only from a path the session can see: a link the session
-        cannot see stays the typed path, so the door refuses it as
+        cannot see stays the typed path, so the dispatcher refuses it as
         absent instead of serving the visible target it points at.
         ``nofollow`` is the caller's AT_SYMLINK_NOFOLLOW and suppresses
         both follows, so an op meant for a link entry itself
         (``chmod -h``, a guest's ``lchown``) still records the link's
         own path.
 
-        Whether the op is a write is the door's call too: it reads that
+        Whether the op is a write is the dispatcher's call too: it reads that
         off the op name, so there is nothing for a caller here to
         declare.
 
@@ -359,8 +359,8 @@ class Files:
             # Anything raised after the op ran (a post_vfs deny, a hard
             # output cap, a bookkeeping failure) suppresses the result,
             # not the effect, so observation must reflect the op before
-            # the error propagates. The door stamps the report at the
-            # moment of completion, so even a foreign error the door
+            # the error propagates. The dispatcher stamps the report at the
+            # moment of completion, so even a foreign error the dispatcher
             # never defined leaves the transfer on the books.
             owner = self._owner(resolved[0])
             if report.completed and owner is not None:
@@ -402,7 +402,7 @@ class Files:
 
     def _session_for(self, seen: list[str]) -> str:
         """The session id a record carries: the one the op ran as, else
-        this facade's own, else the unbound door's empty id.
+        this facade's own, else the unbound entry point's empty id.
 
         Args:
             seen (list[str]): what ``_run_as_seen`` noted.
@@ -423,9 +423,9 @@ class Files:
         timer: OpTimer,
         session: str,
     ) -> None:
-        """Record one op from the door's report of who served it.
+        """Record one op from the dispatcher's report of who served it.
 
-        The door names the server when it was not the owning mount (a
+        The dispatcher names the server when it was not the owning mount (a
         warm cache hit, a synthetic namespace answer): neither moved
         bytes over the network, and "ram" is what ``OpRecord.is_cache``
         reads. It names the moved bytes when the delivered result no
@@ -436,7 +436,7 @@ class Files:
             op (str): the op name.
             path (str): the resolved virtual path.
             owner (MountRow): the mount owning the path.
-            source (str | None): the door's server, None for the mount.
+            source (str | None): the dispatcher's server, None for the mount.
             moved (int | None): bytes the backend moved, None to
                 measure the result.
             result (Any): what the op returned, None when withheld.
@@ -499,7 +499,7 @@ class Files:
         The first chunk is read before this returns, so a missing file
         fails here rather than at the first pull. A cold read fills the
         cache as it is pulled, and the read is recorded once the stream
-        ends. A read the door answers whole (a warm copy, a rendering, a
+        ends. A read the dispatcher answers whole (a warm copy, a rendering, a
         backend with no stream) arrives as one chunk.
 
         Args:
@@ -549,7 +549,7 @@ class Files:
 
         pwrite(2): the bytes outside ``[offset, offset + len(data))``
         stay, a gap past the end reads back as zeros, and a missing file
-        is created. It is one write at the door, so a session that may
+        is created. It is one write at the dispatcher, so a session that may
         write the file and not read it can still do it.
 
         Args:
@@ -711,7 +711,7 @@ class Files:
     ) -> None:
         """Create a namespace symlink at ``path``.
 
-        Routed through the door like every write: session grants and
+        Routed through the dispatcher like every write: session grants and
         admission policies fire on the link's turf, and the write lands
         on the ledger. The target is stored verbatim as typed.
 
@@ -723,7 +723,7 @@ class Files:
         Raises:
             FileExistsError: something is already at ``path`` (a file, a
                 directory, another link, a mount root). symlink(2) never
-                overwrites, and the door is the layer that can see both
+                overwrites, and the dispatcher is the layer that can see both
                 planes to tell.
             FileNotFoundError: the directory ``path`` would sit in is
                 absent.
@@ -760,7 +760,7 @@ class Files:
     ) -> dict[str, int | str]:
         """Write metadata fields, natively where the backend can hold them.
 
-        Every field is passed, unset ones as None, because the door
+        Every field is passed, unset ones as None, because the dispatcher
         reads the whole set and stores in the namespace overlay whatever
         the backend cannot keep. A mount with no setattr op therefore
         still answers: a chmod on an s3 or dropbox mount lands in the
@@ -780,7 +780,7 @@ class Files:
 
         Returns:
             dict[str, int | str]: the fields the backend could not keep,
-                which the door stored in the overlay instead.
+                which the dispatcher stored in the overlay instead.
         """
         return await self._call(
             "setattr",
@@ -944,7 +944,7 @@ class Files:
         workspace's root and claims every path, as it does for a guest. A
         relative path names the process's working directory, which the
         interception leaves alone whatever is mounted. Routing to the anchor
-        for ops themselves still happens at the door; this gate is only
+        for ops themselves still happens at the dispatcher; this gate is only
         about what the interception should leave alone.
 
         Args:

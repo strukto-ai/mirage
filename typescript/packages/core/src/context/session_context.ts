@@ -89,7 +89,7 @@ export function runWithEvaluation<T>(
  *
  * On an isolating runtime that is the task's own binding. On the fallback
  * storage it is the newest live binding that carries one: a bind for
- * another session without an evaluation (a held op door's) may be the
+ * another session without an evaluation (a held dispatcher's) may be the
  * newest frame, and must not answer a running line with none, which would
  * skip that line's abort checks. Mirrors Python's get_current_evaluation.
  */
@@ -139,11 +139,11 @@ export function getCurrentSessionFor(owner: SessionOwner): SessionState | null {
 /**
  * The bound session, unless another owner published it.
  *
- * An op door keeps the session it is reached under, so it never widens
+ * A dispatcher keeps the session it is reached under, so it never widens
  * a caller's view: a command's runtime, a kernel mount and a guest
  * runtime all bind before they call. A binding that names an owner
  * other than `owner` is another workspace's, and its session describes
- * that workspace's hides and grants, so the door must not adopt it. A
+ * that workspace's hides and grants, so the entry point must not adopt it. A
  * binding that names no owner is a deliberate placement (a kernel
  * mount, a guest runtime, an embedder binding by hand) and is kept.
  */
@@ -300,7 +300,7 @@ export function runWithAdmission<T>(gate: EntryGate, fn: () => Promise<T>): Prom
  * refusal: an entry must pass every live gate's `check`, `refuses` is
  * true when any live gate refuses, a rule counts as granted only when
  * every live gate carries it (a once-grant nodded for one line must not
- * authorize another's op door), and `scoped` and `scopes` are true when
+ * authorize another's dispatcher), and `scoped` and `scopes` are true when
  * any live gate scopes, keeping walks off the unfiltered native fast
  * paths.
  */
@@ -380,18 +380,18 @@ export function mountGateFor(virtual: string): readonly [string, MountMode] | nu
   return bestPrefix === null || bestMode === null ? null : [bestPrefix, bestMode]
 }
 
-/** Where a refusal a door raises is noted for the line running it. */
+/** Where a refusal an entry point raises is noted for the line running it. */
 export type RefusalSink = (refusal: Refusal) => void
 
 const refusalSinkStorage = createAsyncContext<RefusalSink>()
 
 /**
- * Bind where the doors note a policy's refusal, for the duration of `fn`:
+ * Bind where the entry points note a policy's refusal, for the duration of `fn`:
  * one line's run.
  *
  * Bound by the workspace around a typed line: a command renders an op
  * refusal in its own GNU words, which say nothing of the policy, so the
- * door notes the record here and the line carries it on its result.
+ * entry point notes the record here and the line carries it on its result.
  * Every task and nested line the line starts inherits the binding, so a
  * stream drained after its command returned still reaches it. Mirrors
  * Python's set_refusal_sink.
@@ -401,7 +401,7 @@ export function runWithRefusalSink<T>(sink: RefusalSink, fn: () => Promise<T>): 
 }
 
 /**
- * Whether a typed line is running in this context: the door it reaches is
+ * Whether a typed line is running in this context: the entry point it reaches is
  * inside a command, not a file tool's or the host's own call. Mirrors
  * Python's `line_running`.
  */
@@ -434,7 +434,7 @@ export function explaining(): VfsExplanation[] | DryRun | null {
 }
 
 /**
- * Hand a door's refusal to the line running in this context; a door
+ * Hand an entry point's refusal to the line running in this context; an entry point
  * reached outside any line (a programmatic op) has no line to tell, and
  * the record rides the thrown error alone.
  */
@@ -449,9 +449,9 @@ const walkProbeStorage = createAsyncContext<readonly [string, WalkProbe]>()
  * of one command.
  *
  * Bound by `Mount.runCommand` around the handler, beside the mount gate: the
- * command tier reaches its backend without passing the dispatcher's door,
+ * command tier reaches its backend without passing the dispatcher,
  * so the walk guard on its I/O proves an operand's `.` and `..` with the
- * door's stat and link follow through this binding. Mirrors Python's
+ * entry point's stat and link follow through this binding. Mirrors Python's
  * set_walk_probe.
  */
 export function runWithWalkProbe<T>(
@@ -606,18 +606,18 @@ export function redirectOpenerFor(node: object): RedirectOpener | null {
 }
 
 /**
- * Whether a path is a redirect target the command door already judged
+ * Whether a path is a redirect target the command entry point already judged
  * for the statement writing it now.
  *
- * The op doors ask this, and unlike `redirectPathsFor` it takes no node,
+ * The dispatcher ask this, and unlike `redirectPathsFor` it takes no node,
  * because by the time the shell writes the file the node has returned
- * and a door sees only a path. The binding is what keeps that honest: it
+ * and an entry point sees only a path. The binding is what keeps that honest: it
  * exists only while one statement's targets are being written, and a
  * statement whose targets a rule refused never reaches the write at all.
  * So a bound target is one the line was admitted with, and re-deriving a
- * verdict for it from a door that knows neither the line nor the nod it
+ * verdict for it from an entry point that knows neither the line nor the nod it
  * holds can only get it wrong. Every live binding counts, because a
- * target is only ever bound after its own line's door judged it: on the
+ * target is only ever bound after its own line's entry point judged it: on the
  * fallback storage a concurrent statement's frame must not shadow this
  * one's targets into a re-derived refusal.
  */
@@ -731,7 +731,7 @@ export function strongestUnderSession(
  * runs only when every live session would let it.
  *
  * What the whole-mount gates read: a write command stays runnable on a
- * mount whose only writable region is a show entry (the op door then
+ * mount whose only writable region is a show entry (the dispatcher then
  * refuses per path), and the interpreters' any-`x` rule counts a show
  * grant the way it counts a whole mount.
  */

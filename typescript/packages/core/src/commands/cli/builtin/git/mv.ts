@@ -374,20 +374,20 @@ async function apply(
  * an add.
  */
 export async function mv(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   const lines: string[] = []
   try {
-    const dispatch = doors.dispatch
-    const statPath = doors.statPath
+    const dispatch = view.dispatch
+    const statPath = view.statPath
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
     const flags = parseFlags(fl)
     if (texts.length < 2) throw new UsageError('', verbUsage(inv))
-    const repo = await opened(fl, doors, true)
+    const repo = await opened(fl, view, true)
     const state = await readIndex(repo, dispatch)
     const conflicted = new Set(state.conflicts.keys())
     // An unmerged path holds no ordinary entry, so a tracked set built from the
@@ -396,8 +396,8 @@ export async function mv(inv: CLIInvocation): Promise<CommandFnResult> {
     const tracked = new Set([...state.entries.keys(), ...conflicted])
     const moves = await plan(
       statPath,
-      doors.ns?.links ?? null,
-      doors.ns?.mounts ?? null,
+      view.ns?.links ?? null,
+      view.ns?.mounts ?? null,
       repo.location,
       startPoint(fl).virtual,
       texts,

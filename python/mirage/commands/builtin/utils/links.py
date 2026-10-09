@@ -67,18 +67,18 @@ def typed_link(links: LinkView, path: PathSpec, cwd: str) -> FileStat | None:
 
 
 @dataclass(frozen=True, slots=True)
-class LinkDoor:
-    """The namespace's links as a command meets a name, and the door past
+class LinkResolver:
+    """The namespace's links as a command meets a name, and the dispatcher past
     them.
 
     A link is invisible to every backend, so a command bound to one
     mount needs the links to tell a name that stands on one, and the op
-    door to act where the link leads or where it stands: the target may
+    entry point to act where the link leads or where it stands: the target may
     live on any mount, and so may the link.
 
     Attributes:
         links (LinkView): the namespace's symlink facts.
-        dispatch (DispatchFn): the op door, which reaches every mount.
+        dispatch (DispatchFn): the dispatcher, which reaches every mount.
         cwd (str): the directory a typed name resolves against.
     """
 
@@ -145,7 +145,7 @@ class LinkDoor:
             raise eloop(link) from None
 
     async def stat(self, virtual: str) -> FileStat:
-        """What a name leads to, its stat through the door.
+        """What a name leads to, its stat through the dispatcher.
 
         Args:
             virtual (str): the name's virtual path, on any mount.
@@ -155,7 +155,7 @@ class LinkDoor:
         return stat
 
     async def readdir(self, virtual: str) -> list[str]:
-        """A directory's entries through the door, links among them.
+        """A directory's entries through the dispatcher, links among them.
 
         Args:
             virtual (str): the directory's virtual path, on any mount.
@@ -166,7 +166,7 @@ class LinkDoor:
         return list(entries)
 
     async def lstat(self, path: PathSpec) -> FileStat:
-        """A name's own stat through the door: a link's, not its target's.
+        """A name's own stat at the dispatcher: a link's, not its target's.
 
         Args:
             path (PathSpec): the name.
@@ -176,7 +176,7 @@ class LinkDoor:
         return stat
 
     async def read(self, virtual: str) -> AsyncIterator[bytes]:
-        """What a name leads to, read through the door, which follows it.
+        """What a name leads to, read through the dispatcher, which follows it.
 
         Args:
             virtual (str): the name's virtual path.
@@ -204,8 +204,8 @@ class LinkDoor:
         await self.dispatch("unlink", PathSpec.from_str_path(virtual))
 
 
-def link_door(opts: CommandOpts) -> LinkDoor | None:
-    """The link door an invocation carries: None when the namespace holds
+def link_resolver(opts: CommandOpts) -> LinkResolver | None:
+    """The link resolver an invocation carries: None when the namespace holds
     no link, the fast path, or outside a workspace.
 
     Args:
@@ -214,7 +214,9 @@ def link_door(opts: CommandOpts) -> LinkDoor | None:
     links = opts.ns.links if opts.ns is not None else None
     if links is None or opts.dispatch is None:
         return None
-    return LinkDoor(links=links, dispatch=opts.dispatch, cwd=opts.cwd.virtual)
+    return LinkResolver(
+        links=links, dispatch=opts.dispatch, cwd=opts.cwd.virtual
+    )
 
 
-__all__ = ["LinkDoor", "link_door", "name_location", "typed_link"]
+__all__ = ["LinkResolver", "link_resolver", "name_location", "typed_link"]

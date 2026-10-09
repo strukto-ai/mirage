@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "probes_answer_through_the_door",
+      "id": "probes_answer_through_the_dispatcher",
       "world": {
         "mounts": {
           "/data": {

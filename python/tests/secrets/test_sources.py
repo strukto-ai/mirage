@@ -331,7 +331,7 @@ def broken_bootstrap() -> dict[str, dict]:
 @pytest.mark.asyncio
 async def test_resolve_sources_for_builds_nothing_when_no_config_points():
     """Building a source reads its bootstrap pointers, and a dotenv file
-    is I/O; a door whose configs hold no pointer must not pay it, or a
+    is I/O; an entry point whose configs hold no pointer must not pay it, or a
     momentarily unreadable file fails a workspace that never needed
     the source."""
     assert (
@@ -360,7 +360,7 @@ async def test_resolve_sources_for_leaves_a_bad_container_to_the_constructor():
     assert await resolve_sources_for(None, [{"token": pointer}]) is None
     assert await resolve_sources_for({}, [{"token": pointer}]) is None
     # A list from an untyped REST override is not a mapping; the
-    # constructor refuses it with the wording every door shares.
+    # constructor refuses it with the wording every entry point shares.
     assert (
         await resolve_sources_for(
             [broken_bootstrap()],  # type: ignore[arg-type]

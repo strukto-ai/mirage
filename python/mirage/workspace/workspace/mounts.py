@@ -90,7 +90,7 @@ def normalize_mounts(
 
     Every spelling converges here, which is why this is where a mount's
     read policy is checked against what its backend can honour: one
-    verdict per mount, whatever door declared it.
+    verdict per mount, whatever entry point declared it.
 
     Args:
         mounts (dict[str, VFSMount]): the constructor mapping.

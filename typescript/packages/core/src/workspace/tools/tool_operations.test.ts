@@ -382,7 +382,7 @@ describe('a path ask outside a line', () => {
     // The nod was for one call on that path, and it is spent.
     expect((await tools.write('/data/out/a.txt', 'again')).isError).toBe(true)
     // A line holds no question for its ops: the redirect is the line's to
-    // ask about, at the command door.
+    // ask about, at the command entry point.
     const io = await own.shell('echo hi > /data/out/b.txt', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
   })

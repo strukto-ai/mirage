@@ -190,7 +190,7 @@ export async function reflog(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const texts = inv.texts[0] === 'show' ? inv.texts.slice(1) : inv.texts
     checkOperands(inv, texts)
-    const repo = await opened(fl, inv.doors ?? {})
+    const repo = await opened(fl, inv.view ?? {})
     const revision = texts[0] ?? HEAD
     await resolveCommit(repo, revision)
     const [name, data] = await namedLog(repo.dispatch, repo.location, revision)

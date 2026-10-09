@@ -18,7 +18,7 @@ import type { OpenMode } from './handles/mode.ts'
 import type { VFSEntry, VFSStat } from './types.ts'
 
 /**
- * What an open asks of the filesystem it lands on. The file door
+ * What an open asks of the filesystem it lands on. The file adapter
  * (`RuntimeFiles`) answers it for the mounts.
  */
 export interface OpenSurface {

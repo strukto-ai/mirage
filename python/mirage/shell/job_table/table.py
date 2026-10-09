@@ -144,7 +144,7 @@ class JobTable:
     because the workspace owns the tasks: teardown must stop every job
     in every session (``kill_all``), snapshot capture reads every
     finished one (``all_jobs``), and a disowned job keeps running after
-    its shell forgot it. Those are the only cross-session doors; every
+    its shell forgot it. Those are the only cross-session views; every
     other method takes the session whose list it reads, and the empty
     session id is the list a caller with no session (a bare table in a
     test) shares.
@@ -318,7 +318,7 @@ class JobTable:
         ]
 
     def all_jobs(self) -> list[Job]:
-        """Every session's jobs, for the workspace-wide doors only.
+        """Every session's jobs, for the workspace-wide entry points only.
 
         Snapshot capture and the server summary read this; a shell
         builtin never does, since bash lists only its own jobs.
@@ -391,7 +391,7 @@ class JobTable:
         hung up, and a later shell that reuses the same id starts from
         an empty list numbered from 1 rather than inheriting jobs it
         never launched, under a profile it may not share. Session closure
-        revokes its process doors and stops disowned runners too.
+        revokes its process entry points and stops disowned runners too.
 
         Args:
             session_id (str): the session being closed.

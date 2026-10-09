@@ -124,7 +124,7 @@ describe('hf_buckets under read: fresh', () => {
       await out(w, 'cat /m/a.txt')
       await w.namespace.setAttrs('/m/a.txt', { mode: 0o600 })
       b.hub.fail.set('bucket_paths_info', [status, code])
-      // Cross-mount cp reads through the dispatcher, the door whose "no such
+      // Cross-mount cp reads through the dispatcher, the dispatcher whose "no such
       // file" drops the overlay; a plain cat never reaches it.
       const cp = await w.shell('cp /m/a.txt /r/x')
       expect(cp.exitCode).toBe(1)
@@ -176,7 +176,7 @@ describe('hf_buckets under read: fresh', () => {
 
   // `ls` of a file reaches paths-info through the listing's file probe
   // (object_store readdir `probeFile`); find and du answer from the opendal
-  // listing alone, so only this door can mistake a refusal for an absence.
+  // listing alone, so only the dispatcher can mistake a refusal for an absence.
   it('never lists a refused bucket as absent', async () => {
     const b = await bucket({ 'a.txt': OLD })
     b.hub.fail.set('bucket_paths_info', [401, ''])
@@ -215,9 +215,9 @@ describe('hf_buckets under read: fresh', () => {
 })
 
 // Measured on the first green run, then pinned (test plan T23): the routing
-// probe; the handler's own stat and the cache door reuse its answer.
-// Cross-mount cp skips routing's probe, so the cache door asks, and its stat
-// goes through its own door against a mount index nothing filled.
+// probe; the handler's own stat and the cache entry point reuse its answer.
+// Cross-mount cp skips routing's probe, so the cache entry point asks, and its stat
+// goes through its own entry point against a mount index nothing filled.
 const WARM: [string, string, number][] = [
   ['', 'cat /m/a.txt', 1],
   ['ls /m', 'cat /m/a.txt', 1],
@@ -312,13 +312,13 @@ describe('hf_buckets snapshot pins', () => {
 })
 
 describe('hf_buckets past EOF', () => {
-  it('reads a window past EOF as empty on every door', async () => {
+  it('reads a window past EOF as empty on every entry point', async () => {
     const b = await bucket({ 'a.txt': ENC.encode('abc') })
     const vfs = await vfsOf(b)
     const w = ws(vfs, ReadPolicy.BOUNDED)
     const spec = new PathSpec({ virtual: '/m/a.txt', directory: '/m/', vfsPath: 'a.txt' })
     try {
-      // The op door folds a 416 for every backend; the VFS's own windowed
+      // The dispatcher folds a 416 for every backend; the VFS's own windowed
       // read has no fold, so it must answer one itself.
       const viaOp = (await w.mount('/m').callKeyed('read', spec, [], {
         index: new RAMIndexCacheStore(),

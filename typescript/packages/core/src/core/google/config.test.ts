@@ -46,7 +46,7 @@ describe('GoogleConfig', () => {
     expect(normalizeGoogleConfig({ access_token: provider }).accessToken).toBe(provider)
   })
 
-  // Mirrors python's `_one_credential`: refused at the door, not on the
+  // Mirrors python's `_one_credential`: refused at the entry point, not on the
   // first read.
   it('refuses a config naming no credential', () => {
     expect(() => normalizeGoogleConfig({ api_base: 'http://localhost:1' })).toThrow(

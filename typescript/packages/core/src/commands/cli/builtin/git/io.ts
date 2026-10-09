@@ -301,7 +301,7 @@ export async function exists(dispatch: Dispatch, path: PathSpec): Promise<boolea
  * refusal, and it leaves the file itself alone, so a write another session makes
  * to it is never undone. A lock already there is another writer's, which git
  * refuses and so does this (EEXIST), untouched. The look and the create are two
- * ops, since the door has no exclusive create.
+ * ops, since the dispatcher has no exclusive create.
  */
 export async function takeLock(dispatch: Dispatch, path: PathSpec): Promise<void> {
   const lock = PathSpec.fromStrPath(`${path.dotted ?? path.virtual}.lock`, undefined, '/')

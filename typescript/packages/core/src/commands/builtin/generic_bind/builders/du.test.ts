@@ -215,7 +215,7 @@ describe('du walk fallback under a path rule', () => {
 
 describe('du rows for directories no file points at', () => {
   // /db/sealed lists as refused and /db/walled refuses its stat, the two
-  // doors a rule or the host can shut.
+  // entry points a rule or the host can shut.
   const sealed: Record<string, string[]> = {
     '/db': ['/db/a.txt', '/db/empty', '/db/sealed', '/db/walled'],
     '/db/empty': [],

@@ -84,7 +84,7 @@ export async function read(
     }
     // A window starting at or past EOF: the Hub answers 416 where a POSIX read
     // returns nothing. Folded here rather than left to the ops factory,
-    // because a caller reading the range door directly has no fold of its own.
+    // because a caller reading the range entry point directly has no fold of its own.
     data = new Uint8Array()
     etag = ''
   }

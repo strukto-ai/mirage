@@ -1202,7 +1202,7 @@ def test_a_workspace_level_read_is_judged_at_every_mount_it_lands_on():
         Workspace(**cfg.to_workspace_kwargs())
 
 
-def test_the_two_dependent_read_keys_are_refused_at_the_door():
+def test_the_two_dependent_read_keys_are_refused_at_the_dispatcher():
     """`bounded` and `ttl:` each imply the other.
 
     By the time a ReadSpec exists the bound has already defaulted, so
@@ -1216,7 +1216,7 @@ def test_the_two_dependent_read_keys_are_refused_at_the_door():
         load_config({"mounts": {"/a": {"vfs": "ram", "read": "bounded"}}})
 
 
-def test_a_bound_that_is_not_whole_seconds_is_refused_at_the_door():
+def test_a_bound_that_is_not_whole_seconds_is_refused_at_the_dispatcher():
     """pydantic coerces where this key cannot afford it.
 
     `ttl: "30"` arrived as 30 and `ttl: true` as 1 -- a mount silently
@@ -1250,8 +1250,8 @@ def test_an_integral_float_bound_is_a_bound():
     assert isinstance(cfg.mounts["/a"].ttl, int)
 
 
-def test_an_unusable_bound_is_refused_at_the_config_door_not_later():
-    """The same door TypeScript refuses it at.
+def test_an_unusable_bound_is_refused_at_the_config_entry_point_not_later():
+    """The same entry point TypeScript refuses it at.
 
     `resolve_read_spec` catches this too, but only once
     `to_workspace_kwargs` runs; the shared fixture loads the config and
@@ -1277,7 +1277,7 @@ def test_a_missing_policy_is_named_before_an_unusable_bound():
         load_config({"mounts": {"/a": {"vfs": "ram", "ttl": 0}}})
 
 
-def test_a_junk_read_policy_is_refused_at_the_door():
+def test_a_junk_read_policy_is_refused_at_the_dispatcher():
     with pytest.raises(ValueError, match="fresh, bounded, pinned"):
         load_config({"mounts": {"/a": {"vfs": "ram", "read": "banana"}}})
     with pytest.raises(ValueError, match="fresh, bounded, pinned"):
@@ -1290,7 +1290,7 @@ def test_an_uppercase_read_policy_is_accepted():
 
 
 def test_a_mount_declaring_fresh_on_ram_is_refused_when_the_workspace_builds():
-    """The config door parses; the mount door judges.
+    """The config loader parses; the mount entry point judges.
 
     Keeping the verdict at mount time is what makes one rule cover
     YAML, ``add_mount`` and a snapshot restore alike.
@@ -1340,7 +1340,7 @@ async def test_global_and_profile_command_limits_from_config():
         },
     ],
 )
-def test_bad_command_limit_fields_fail_at_config_door(block):
+def test_bad_command_limit_fields_fail_at_config_entry_point(block):
     with pytest.raises(ValueError):
         load_config({"mounts": {"/data": {"vfs": "ram"}}, **block})
 
@@ -1349,7 +1349,7 @@ REDIS_URL = "redis://127.0.0.1:1/0"
 
 
 # The workspace index is Redis at 73, so a mount that took any of it
-# would show; the code door from `Mount(index=...)` on is tested in
+# would show; the code entry point from `Mount(index=...)` on is tested in
 # tests/workspace.
 @pytest.mark.parametrize(
     "block, built",
@@ -1380,7 +1380,8 @@ def test_a_mount_index_block_becomes_its_mount_index(block, built):
     assert kwargs["mounts"]["/b"].index is None
 
 
-# Non-default neighbours fail a door that rebuilds the mount around the key.
+# Non-default neighbours fail an entry point that rebuilds the mount around the
+# key.
 @pytest.mark.parametrize(
     "workspace, block, expected",
     [

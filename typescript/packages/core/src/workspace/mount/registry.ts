@@ -110,7 +110,7 @@ export class MountRegistry {
   private defaultWrite: WritePolicy = WritePolicy.UNCONDITIONAL
   private cacheStore: FileCache | null = null
   private reconciler: ReadReconciler | null = null
-  private opStatDoor: OpStat | null = null
+  private opStatFn: OpStat | null = null
   // The world's workspace runtime, set by Workspace after construction.
   // Catch-all when its captures are empty; explicit captures make
   // unclaimed commands an admission failure (126).
@@ -132,7 +132,7 @@ export class MountRegistry {
     new MountRootPolicy(),
     new OutputCapPolicy((prefix, name) => this.limitOverride(prefix, name)),
   ])
-  // The approval door the executor takes an Ask to, hosted here for the
+  // The approval entry point the executor takes an Ask to, hosted here for the
   // same reason as the policies: the workspace replaces it with one
   // bound to its session manager and ask handler.
   decisions = new Decisions()
@@ -158,11 +158,11 @@ export class MountRegistry {
   // Null until the workspace wires its dispatcher in; a bare registry (no
   // workspace behind it) uses the mount's registered stat operation.
   get opStat(): OpStat | null {
-    return this.opStatDoor
+    return this.opStatFn
   }
 
   setOpStat(stat: OpStat): void {
-    this.opStatDoor = stat
+    this.opStatFn = stat
   }
 
   /**
@@ -294,7 +294,7 @@ export class MountRegistry {
    * the driver's command and op tables registered on the entry, the
    * general commands beside them, and the activity gate shared with any
    * earlier mount of the same instance. The constructor and `mount()`
-   * both place through here, so a mount is the same whichever door
+   * both place through here, so a mount is the same whichever entry point
    * built it. Mirrors the Python registry, whose constructor mounts
    * through `mount()` as well.
    */

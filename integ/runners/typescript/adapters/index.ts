@@ -300,13 +300,13 @@ function cacheFor(target: Target): RedisCacheConfig | undefined {
 // The target's profiles, and which one shapes a session that names none.
 // A profile is the whole permission document, so this is every permission
 // the target states, including the per-mount ones; the parser is the
-// one the YAML door uses, so a case runs under exactly what a
+// one the YAML loader uses, so a case runs under exactly what a
 // deployment would write. Only the openers that consult it may declare
 // one (main.ts refuses it on any other VFS), the same way the
 // console block rides ram alone: an unwired opener would run the target
 // unbound and it would read as covered.
 /**
- * Wrap a profile's inline policy source the way the config door does.
+ * Wrap a profile's inline policy source the way the config loader does.
  *
  * A target is JSON, so it carries a profile's policy as source rather than
  * as the path a YAML config would name. Loading is the config layer's
@@ -2413,14 +2413,14 @@ export async function openConsistency(
       throw new Error(`${command}: ${new TextDecoder().decode(result.stderr)}`)
     }
   }
-  // Through the op door, as python's mutate_write: a shell tee would cache
+  // Through the dispatcher, as python's mutate_write: a shell tee would cache
   // its bytes on the shadow, which a later shadow line would then read stale.
   const writeOut = async (path: string, content: Uint8Array): Promise<void> => {
     await shadow.dispatch('write', path, [content])
   }
   // A mount that cannot take a write (a Hub repo, where a change is a commit)
   // brings its own out-of-band change; every other one writes through the
-  // shadow's op door. A file an account CLI edits by id (a Google Doc through
+  // shadow's dispatcher. A file an account CLI edits by id (a Google Doc through
   // gws) has no bytes to write, so its scenario names the line the shadow
   // runs: the same line on the read side would drop that side's own caches.
   // No fallback for a delete: a write is a fair stand-in for a write, but

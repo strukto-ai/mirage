@@ -697,7 +697,7 @@ async def fill_env(
     idempotent. Fetches group by ``(source, ref)``, one await per
     distinct secret, and the fetched value lands directly in
     ``session.vars`` with the pointer kept: this is the one host-tier
-    writer, above the agent's gated door.
+    writer, above the agent's gated session view.
 
     A failed fetch, or a secret without the wanted field, raises
     SecretsError naming the variable and the source -- never the ref,

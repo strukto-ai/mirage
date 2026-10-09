@@ -28,9 +28,9 @@ describe('RAM VFS: presign + fingerprint', () => {
     expect(typeof r.fingerprint).toBe('undefined')
   })
 
-  it('RAM VFS serves read/write/stat at the door', () => {
-    const door = ops(new RAMVFS())
-    for (const name of ['read', 'write', 'stat']) expect(door.has(name)).toBe(true)
+  it('RAM VFS serves read/write/stat at the dispatcher', () => {
+    const table = ops(new RAMVFS())
+    for (const name of ['read', 'write', 'stat']) expect(table.has(name)).toBe(true)
   })
 
   it('glob is callable on RAM store when files exist', async () => {

@@ -101,7 +101,7 @@ export function isDirOf(
 /**
  * One directory as its own backend lists it, through the dispatcher.
  *
- * The door adds the names the namespace owes a directory (nested mount roots
+ * The dispatcher adds the names the namespace owes a directory (nested mount roots
  * and symlinks) to every listing. The archive scan adds those itself, from
  * the same tables, and a walk that followed one would descend into a link's
  * target under the link's name or into a mount the scan must not cross, so

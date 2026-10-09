@@ -52,7 +52,7 @@ export interface FSLike {
 /**
  * Carry a row's mode and stamp onto the target it was just written to.
  *
- * The row already holds both (the door stats every entry it does not
+ * The row already holds both (the dispatcher stats every entry it does not
  * slash-mark, and leaves both off one it could not classify), so this
  * costs no extra call. Without it a seeded tree
  * reports the tree's own defaults: 0o644 whatever the mount says, and
@@ -89,7 +89,7 @@ async function preloadEntry(fs: FSLike, files: RuntimeFiles, entry: VFSEntry): P
     return
   }
   if (isUnclassified(entry)) {
-    // The door's stat of this entry failed, and the guest will have no
+    // The entry point's stat of this entry failed, and the guest will have no
     // way to ask again once the run starts, so this is its stat: an
     // answer seeds the entry as what the mount says it is, an entry
     // that is gone stays out, and any other failure seeds a node that
@@ -155,8 +155,8 @@ async function preloadEntry(fs: FSLike, files: RuntimeFiles, entry: VFSEntry): P
  * Copy one mount prefix into a synchronous target.
  *
  * The whole walk keeps at most `LISTING_ENTRY_CONCURRENCY` requests
- * in flight (listings, stats, reads, readlinks), the door's own cap, so
- * a wide tree does not multiply it by its breadth. An entry the door
+ * in flight (listings, stats, reads, readlinks), the entry point's own cap, so
+ * a wide tree does not multiply it by its breadth. An entry the entry point
  * could not classify is stat'd once more here: the answer seeds it as
  * usual, and a second failure seeds a node whose stat and open both
  * report it, never a guess at a file.

@@ -16,7 +16,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { OPERAND } from '../../spec/constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { ensureDir, extractDest, type StatDoor } from './archive/extract.ts'
+import { ensureDir, extractDest, type StatFn } from './archive/extract.ts'
 import {
   renderHeader,
   renderRow,
@@ -39,7 +39,7 @@ import { isDirectory, pathExists } from '../utils/copy.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-// One central-directory entry: zipinfo's row plus a door to its bytes.
+// One central-directory entry: zipinfo's row plus a dispatcher to its bytes.
 // The bytes are inflated on demand, so a listing never touches them and
 // an archive using a method mirage cannot inflate still lists.
 export interface ZipEntry extends ZipRow {
@@ -512,7 +512,7 @@ function checkdirFile(dir: string, member: string): string {
 // The first level of `chain` below `base` that is not a directory, which
 // Info-ZIP names ("exists but is not directory") instead of the mkdir that
 // failed under it. Mirrors Python's `_file_in_chain`.
-async function fileInChain(stat: StatDoor, base: string, chain: string): Promise<string | null> {
+async function fileInChain(stat: StatFn, base: string, chain: string): Promise<string | null> {
   let level = base
   for (const part of chain
     .slice(base.length)
@@ -575,7 +575,7 @@ export async function unzipGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   mkdir: (p: PathSpec, parents?: boolean) => Promise<void>,
-  stat?: StatDoor,
+  stat?: StatFn,
   relay = false,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('unzip'))
@@ -615,7 +615,7 @@ export async function unzipGeneric(
   }
   const operand = paths[0]
   if (operand === undefined) return [null, new IOResult()]
-  // Relay doors address by full virtual path (flatten's convention),
+  // Relay entry points address by full virtual path (flatten's convention),
   // not by the mount-relative key the wrapper's accessor stamped.
   const archivePath: PathSpec = relay
     ? new PathSpec({

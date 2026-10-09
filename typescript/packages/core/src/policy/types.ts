@@ -59,13 +59,13 @@ export enum Outcome {
 
 /**
  * Refuse the command, op or session write, with a reason. Rendered by
- * the door it fires at: the command plane prints it in the scope's voice
- * (DenyScope), the op doors throw EACCES with it, the session door
+ * the entry point it fires at: the command plane prints it in the scope's voice
+ * (DenyScope), the dispatcher throw EACCES with it, the session view
  * EACCES too. `kind` is the wire discriminant shared with Python.
  */
 export interface Deny {
   kind: 'deny'
-  /** Why, without the command name and without a trailing newline; the door adds both. */
+  /** Why, without the command name and without a trailing newline; the entry point adds both. */
   reason: string
   /** Whole command (the default) or one operand; ignored off the command plane. */
   scope?: DenyScope
@@ -76,7 +76,7 @@ export interface Deny {
   /** The error a built-in refusal raises in place of EACCES (EROFS for a
    * read-only path). */
   error?: Error
-  /** The operand an `operand` refusal is about, as typed: the door prints
+  /** The operand an `operand` refusal is about, as typed: the entry point prints
    * the command's own line for it and `Permission denied`, the reason
    * riding the record. Absent leaves the reason as the diagnostic. */
   path?: string
@@ -90,7 +90,7 @@ export interface Deny {
  *
  * Outranks every other answer: a hidden path is absent, so there is
  * nothing left to allow, refuse or ask about. Never rendered as a
- * refusal: no reason, no `refusal` record, no explain line. The door
+ * refusal: no reason, no `refusal` record, no explain line. The entry point
  * throws `error` as the terminal would for a missing name (ENOENT, or
  * EACCES for a create landing in a visible directory). The built-in hide
  * answers it; no coded hook returns one. `kind` is the wire
@@ -128,8 +128,8 @@ export interface Route {
  * command patterns (a whole-line rule on each, no paths), a mapping of
  * command pattern to its paths (one command to many paths, one rule per
  * command, so a path is never stated beside a command it was not meant
- * for), or paths alone (a rule on every command, at the op door too). A
- * command entry is a token-prefix pattern over the line as the door
+ * for), or paths alone (a rule on every command, at the dispatcher too). A
+ * command entry is a token-prefix pattern over the line as the entry point
  * normalizes it (`rm` is every rm line, `git push` every `git push ...`,
  * a `*` token any one token). Path entries use the document's one
  * grammar: an entry with `*`, `?` or `[` is a pattern (repo fnmatch
@@ -157,7 +157,7 @@ export interface CommandRule {
  * The document may state a hide as `{patterns: [...], reason: ...}`;
  * the patterns compile into the flat hide spec like any other entry,
  * and this side table keeps the reason beside them for the host's
- * doors (audit, read-back). It is never rendered to the agent: a hide
+ * entry points (audit, read-back). It is never rendered to the agent: a hide
  * answers ENOENT, and a reason on a nonexistent path would confirm the
  * path exists.
  */
@@ -206,7 +206,7 @@ export interface Ruling {
  * policy for a coded condition, and both route to the workspace's
  * decision ledger (`Decisions`). A Deny from any policy outranks it: the
  * chain keeps looking past an Ask for a Deny, so an approval can never
- * re-open a refusal. Command plane only: the op doors cannot wait on a
+ * re-open a refusal. Command plane only: the dispatcher cannot wait on a
  * host. `rule` is the document rule that asked, absent for a coded
  * condition, for which the ledger keys a session answer on the program
  * that asked. Mirrors the Python Ask.
@@ -219,10 +219,10 @@ export interface Ask {
   /**
    * Every rule the line has to be granted, `rule` among them and usually
    * alone: a line whose operands were each asked about by a different
-   * rule carries them all. The door asks about them one at a time and
+   * rule carries them all. The entry point asks about them one at a time and
    * runs the line only once each is answered, so a nod given for one
    * operand cannot carry another. Absent for a coded Ask, whose one rule
-   * the door synthesizes.
+   * the entry point synthesizes.
    */
   rules?: readonly CommandRule[]
   /** The policy that asked, as `explain` names it. */
@@ -379,7 +379,7 @@ export interface Claimant {
 }
 
 /**
- * The door's answer while the host has not decided: the line is refused
+ * The entry point's answer while the host has not decided: the line is refused
  * for now, and the id names what to grant. Mirrors the Python Pending.
  */
 export interface Pending {
@@ -395,7 +395,7 @@ export interface Pending {
  * The record is left waiting, and whatever the host eventually answers
  * is dropped rather than recorded — an answer banked against a run that
  * no longer exists would be taken by the next identical line with
- * nobody asked. The door turns this into the same abort every other
+ * nobody asked. The entry point turns this into the same abort every other
  * killed wait raises; the ledger states the fact in its own vocabulary
  * because execution is not its to know about.
  */
@@ -404,8 +404,8 @@ export interface Abandoned {
 }
 
 /**
- * The session questions the approval door asks. The SessionManager
- * satisfies it structurally, so the door reads and writes a session's
+ * The session questions the approval entry point asks. The SessionManager
+ * satisfies it structurally, so the dispatcher reads and writes a session's
  * grants by id without this package importing the workspace, and always
  * on the registered session rather than the fork a line may be running
  * in. Mirrors the Python SessionDecisionsQuery.
@@ -444,7 +444,7 @@ export type LiveRules = readonly (readonly [Outcome, CommandRule])[]
  * The one session question the permissions policy asks. The
  * SessionManager satisfies it structurally, so the policy reads the
  * rules by session id without this package importing the workspace.
- * An id the manager does not know (or the empty id of an unbound door)
+ * An id the manager does not know (or the empty id of an unbound entry point)
  * answers the default profile's rules, so it still fails toward refusal.
  */
 export interface SessionCommandsQuery {
@@ -456,7 +456,7 @@ export interface SessionCommandsQuery {
  * engine it runs on, and the profile it speaks for. Compiled off the
  * profile's policy block beside the admission rules; `ScriptPolicy`
  * calls the admission hooks it defines (`preCommand`, `preVfs`,
- * `preSession`) with the door's facts, and a hook returns allow (no
+ * `preSession`) with the entry point's facts, and a hook returns allow (no
  * opinion), deny, or at the command gate ask. `profile` is
  * the profile's name, which the policy reads as `ctx.profile`; empty
  * for a profile document passed to `createSession` without a name.
@@ -470,7 +470,7 @@ export interface ProfileScript {
 /**
  * The one session question the script policy asks, satisfied the same
  * way `SessionCommandsQuery` is: the policy reads a session's script by
- * the id the door put in the context, falling back to the default
+ * the id the entry point put in the context, falling back to the default
  * profile's for an id the manager does not know.
  */
 export interface SessionScriptsQuery {
@@ -496,7 +496,7 @@ export interface CommandContext {
   argv: readonly string[]
   cwd: string
   registry: MountRootQuery
-  /** The session running the line, set by the door; empty outside a workspace. */
+  /** The session running the line, set by the entry point; empty outside a workspace. */
   sessionId?: string
   /**
    * The agent the workspace attributes the line to, carried per
@@ -515,7 +515,7 @@ export interface CommandContext {
   program?: readonly string[]
   /**
    * Whether the word is a tool the allow lists govern, which every
-   * named command is, shell builtins included. The door clears it for
+   * named command is, shell builtins included. The entry point clears it for
    * the agent's own function where the function is what runs, and for
    * an executed path: neither is a name a list could hold, and every
    * line either runs passes the gate itself, so an allow list never
@@ -533,12 +533,12 @@ export interface CommandContext {
 }
 
 /** Facts about one VFS op, as preVfs hooks see it. Fires at the op
- * door (the dispatcher every access routes through, FUSE included),
- * before any backend or cache I/O. `sessionId` is the session the door
+ * entry point (the dispatcher every access routes through, FUSE included),
+ * before any backend or cache I/O. `sessionId` is the session the entry point
  * serves, set from the session it already resolves for hides and
  * modes; empty for the unbound host view. `issuer` is the token the op
  * arrived with, when its caller stamped one: a policy whose own engine
- * reads through the door stamps those reads, and recognizes its token
+ * reads through the entry point stamps those reads, and recognizes its token
  * here so the read an evaluation is waiting on is not judged by the
  * hook that is waiting. It travels with the op as an argument, never
  * through ambient context, so no concurrent op can be taken for it;
@@ -552,7 +552,7 @@ export interface VfsContext {
   sessionId?: string
   issuer?: symbol
   /** The owning mount's mode, judged by the mount-mode built-in; unset at
-   * a door that judges it itself. */
+   * an entry point that judges it itself. */
   mode?: MountMode
   /** The op creates the path. */
   create?: boolean
@@ -620,7 +620,7 @@ export type PolicyHook = keyof typeof VALIDITY
 /**
  * What a dry run's calls are while the policies decide the op it
  * explains. DECIDING is a policy's own ops: a read runs for real, a
- * refusal throws the door's error with no question recorded, and a write
+ * refusal throws the entry point's error with no question recorded, and a write
  * is refused as on a read-only mount, so an explanation changes nothing.
  * Mirrors the Python DryRun.
  */
@@ -779,13 +779,13 @@ export interface EntryGate {
   readonly scoped: boolean
   /**
    * The ask rules this line runs under a grant for. Read by the op
-   * doors, which see the same entries from below and would otherwise
+   * entry points, which see the same entries from below and would otherwise
    * re-derive a verdict that knows nothing of the nod the gate already
    * took.
    */
   readonly granted: readonly CommandRule[]
   check(virtual: string): void
-  /** True exactly where `check` would throw, for a door that declines instead (the read cache). */
+  /** True exactly where `check` would throw, for a caller that declines (the read cache). */
   refuses(virtual: string): boolean
   /** Whether anything at or under this path could be refused for the
    * running command, so a native walk there gives way to the guarded one;

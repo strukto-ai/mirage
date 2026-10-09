@@ -54,7 +54,7 @@ async def expand_redirects(
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
         forked (bool): the redirects belong to a program bash forks
             for, which expands them in the child: an error there is
             kept for the command to fail on (``UNEXPANDED``) rather
@@ -118,7 +118,7 @@ async def _expand_redirect(
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
     """
     session = context.session
     if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):

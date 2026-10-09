@@ -138,7 +138,7 @@ def test_strict_drift_names_the_virtual_path_of_a_key_named_like_its_mount(
 def test_strict_load_checks_drift_before_an_ops_write(tmp_path):
     """The ops facade (the FUSE path) reaches the dispatcher without
     passing Workspace.dispatch, so the pending checks must run at the
-    door itself: a first write may not clobber drifted remote state
+    entry point itself: a first write may not clobber drifted remote state
     before ContentDriftError fires.
     """
     store = {"data.csv": b"version 1 bytes\n"}

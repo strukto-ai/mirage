@@ -45,7 +45,7 @@ from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 
@@ -86,13 +86,13 @@ async def for_each_ref(
         inv (CLIInvocation[None]): optional ref patterns and options.
     """
     fl = FlagView(inv.flags)
-    doors = inv.doors or CLIDoors()
+    view = inv.view or CLIView()
     words = filter_words(inv)
     texts = without_filter_values(inv.texts, words)
     try:
         check_switches(inv, texts)
-        repo, location = await opened(fl, doors)
-        assert doors.dispatch is not None
+        repo, location = await opened(fl, view)
+        assert view.dispatch is not None
         filt = await asyncio.to_thread(ref_filter, repo, words)
         count = fl.as_int("count") or 0
         if count < 0:
@@ -126,10 +126,10 @@ async def for_each_ref(
             )
 
         items, ctx, errors = await ref_listing(
-            doors.dispatch,
+            view.dispatch,
             repo,
             location,
-            await read_config(doors.dispatch, location),
+            await read_config(view.dispatch, location),
             used_fields(fmt, keys or ()),
             wanted,
             filt,

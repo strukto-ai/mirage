@@ -58,7 +58,8 @@ def _stub(name: str) -> BaseVFS:
         ("", WritePolicy.UNCONDITIONAL),
         ("conditional", WritePolicy.CONDITIONAL),
         ("CONDITIONAL", WritePolicy.CONDITIONAL),
-        # The config door coerces once, then the mount coerces the member again.
+        # The config loader coerces once, then the mount coerces the member
+        # again.
         (WritePolicy.CONDITIONAL, WritePolicy.CONDITIONAL),
         ("staged", WritePolicy.STAGED),
     ],

@@ -1999,7 +1999,7 @@ async def test_a_bad_instance_config_fails_the_lines_that_read_it():
         await ws.close()
 
 
-# A profile policy at the session door and one away from it: only the
+# A profile policy at the session view and one away from it: only the
 # first is a session-write gate, and only for the sessions under its
 # profile.
 SESSION_GATE = """\
@@ -2031,7 +2031,7 @@ def _scripted_ws(env, source: str) -> Workspace:
 
 
 @pytest.mark.asyncio
-async def test_a_profile_policy_at_the_session_door_drops_the_masks():
+async def test_a_profile_policy_at_the_session_view_drops_the_masks():
     # Its pre_session may refuse the assignment mid-line, so the standing
     # value is fetched, as under a coded pre_session policy.
     calls, fetch = counting_source({"TOKEN": "t0"})
@@ -2046,9 +2046,9 @@ async def test_a_profile_policy_at_the_session_door_drops_the_masks():
 
 
 @pytest.mark.asyncio
-async def test_a_profile_policy_away_from_the_session_door_keeps_the_masks():
-    # The script policy stands at every door of every workspace, but this
-    # program says nothing at the session door, so the fill's masks hold
+async def test_a_profile_policy_away_from_the_session_view_keeps_the_masks():
+    # The script policy stands at every entry point of every workspace, but
+    # this program says nothing at the session view, so the fill's masks hold
     # and no source is contacted.
     calls, fetch = counting_source({"TOKEN": "t0"})
     register_secrets("fake", FakeConfig, fetch)

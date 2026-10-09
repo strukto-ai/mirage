@@ -160,7 +160,7 @@ describe('record paths name the virtual path (node backends)', () => {
         forcePathStyle: true,
       })
       // cat, the cp sources and gzip's read are served from cache; tee -a
-      // and the op-door append are a read plus a write, since s3 has no
+      // and the dispatcher append are a read plus a write, since s3 has no
       // native append.
       expect(await ledger(vfs, null)).toEqual([
         ['write', K],
@@ -334,9 +334,9 @@ describe('every record resolves to the mount whose id it carries (node backends)
   })
 })
 
-// The command door wraps a lazily consumed stream so its deferred backend
+// The command entry point wraps a lazily consumed stream so its deferred backend
 // read records under the mount that produced it (`wrapMountStreams`).
-describe('command-door streams carry the mount id', () => {
+describe('command-entry point streams carry the mount id', () => {
   it('ram cat', async () => {
     const swept = await sweep(new RAMVFS(), 'mkdir -p /m/m')
     expect(swept.catRecords.map((r) => [r.op, r.path])).toEqual([['read', K]])
@@ -356,9 +356,9 @@ describe('command-door streams carry the mount id', () => {
   })
 })
 
-// The dispatch door (redirects, cp, a direct `ws.dispatch`) binds the
+// The dispatcher (redirects, cp, a direct `ws.dispatch`) binds the
 // executing mount's id too, so no record of the sweep is left unattributed.
-describe('dispatch-door records carry the mount id', () => {
+describe('dispatch-entry point records carry the mount id', () => {
   it('ram', async () => {
     const swept = await sweep(new RAMVFS(), 'mkdir -p /m/m')
     const unattributed = swept.records

@@ -175,7 +175,7 @@ export function installQuickJsFs(
     }
     if (files?.serves(path) !== true) return ctx.newNumber(-ENOENT)
     // The open's effect lands through the mount at open, by the rule
-    // every door shares, so write modes and a read-narrowed session
+    // every entry point shares, so write modes and a read-narrowed session
     // refuse here (the guest gets null), the ledger records the real
     // op, and a backend with a native truncate receives it. Any refusal
     // or failure is the guest's null: a transient failure or a policy
@@ -195,13 +195,13 @@ export function installQuickJsFs(
       // Nothing is read at open: the handle fetches what a read lands in.
       // A handle that writes reads the stored bytes, since its writes land
       // on them; a read-only one sees the rendering.
-      const door = files
+      const bound = files
       handle = FileHandle.opened(
         path,
         row === null
           ? null
           : (offset, size) =>
-              door.read(
+              bound.read(
                 path,
                 size === null ? { raw: mode.writable } : { offset, size, raw: mode.writable },
               ),
@@ -372,7 +372,7 @@ export function installQuickJsFs(
     const src = absolute(srcH)
     const dst = absolute(dstH)
     if (files?.serves(src) !== true || !files.serves(dst)) return ctx.newNumber(-ENOENT)
-    // The door refuses a pair on different mounts with EXDEV, which this
+    // The entry point refuses a pair on different mounts with EXDEV, which this
     // engine numbers -75, as the real engine does.
     try {
       await files.rename(src, dst)

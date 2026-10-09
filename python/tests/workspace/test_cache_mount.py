@@ -180,8 +180,8 @@ async def test_stat_keeps_overlay_under_bounded():
 async def test_a_guarded_cp_copies_what_cat_serves(tmp_path):
     """Under ``bounded`` the guarded walk reads the entry ``cat`` serves.
 
-    The hide forces `cp` onto the primitive walk, which reads at the door
-    like every command, so a trusted entry is what both copy and print.
+    The hide forces `cp` onto the primitive walk, which reads at the entry
+    point like every command, so a trusted entry is what both copy and print.
     """
     (tmp_path / "dir").mkdir()
     (tmp_path / "dir" / "a.txt").write_bytes(b"v1\n")

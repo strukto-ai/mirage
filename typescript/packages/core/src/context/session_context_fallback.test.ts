@@ -81,25 +81,25 @@ function gate(): [Promise<void>, () => void] {
 
 describe('the bound evaluation on the fallback storage', () => {
   it('a bind without an evaluation does not hide a running line', async () => {
-    // A line waits (its write's turn) while a held op door binds another
+    // A line waits (its write's turn) while a held dispatcher binds another
     // session with no evaluation: that frame is the newest, and must not
     // answer the line with none, or its abort check is skipped.
     const line = new SessionState({ sessionId: 'line', cwd: '/' })
     const other = new SessionState({ sessionId: 'other', cwd: '/' })
     const evaluation = new EvaluationContext(line)
     const [holdLine, releaseLine] = gate()
-    const [holdDoor, releaseDoor] = gate()
+    const [holdGate, releaseGate] = gate()
     let seen: EvaluationContext | null = null
     const running = runWithEvaluation(evaluation, async () => {
       await holdLine
       seen = getCurrentEvaluation()
-      releaseDoor()
+      releaseGate()
     })
-    const door = runWithSession(other, async () => {
+    const entered = runWithSession(other, async () => {
       releaseLine()
-      await holdDoor
+      await holdGate
     })
-    await Promise.all([running, door])
+    await Promise.all([running, entered])
     expect(seen).toBe(evaluation)
   })
 })
@@ -256,7 +256,7 @@ describe('session predicates on the fallback storage', () => {
     })
   })
 
-  it('a command view folds the live sessions as the op door does', async () => {
+  it('a command view folds the live sessions as the dispatcher does', async () => {
     const hider = new SessionState({
       sessionId: 'hider',
       visibility: { paths: { paths: ['/data/x'] } },
@@ -483,7 +483,7 @@ describe('a named facade session on the fallback storage', () => {
     // this task's own, so a facade that names its session must not
     // take that frame for its ambient context: a wide session held
     // live by a concurrent task would otherwise judge the named
-    // session's ops. The unnamed door keeps the ambient frame, which
+    // session's ops. The unnamed entry point keeps the ambient frame, which
     // is what a command's runtime reaching `ws.vfs` relies on.
     const parser = await getTestParser()
     const ws = new Workspace(

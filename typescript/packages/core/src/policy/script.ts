@@ -43,7 +43,7 @@ export type ScriptHook = 'preCommand' | 'preVfs' | 'preSession'
 
 /**
  * The admission hooks a policy program may define, JavaScript spelling
- * to python spelling. The output doors (postVfs, postExecute) stay
+ * to python spelling. The output entry points (postVfs, postExecute) stay
  * coded: they answer with a Limit over a live result.
  */
 export const HOOKS: Readonly<Record<ScriptHook, string>> = {
@@ -132,7 +132,7 @@ export function sessionScriptContext(
  * it, and can never override one that does), `'deny'` / `{deny: reason}`
  * refuses, and at `preCommand` and `preVfs` `'ask'` / `{ask: reason}`
  * takes the line (or an op no line is running behind) to the approval
- * door, since the session door cannot wait on a host (`VALIDITY`). The
+ * entry point, since the session view cannot wait on a host (`VALIDITY`). The
  * bare strings carry the document's default reasons, the same ones a rule
  * stating no reason gets.
  *
@@ -170,15 +170,15 @@ export function scriptAction(value: EvalValue, hook: ScriptHook = 'preCommand'):
 }
 
 /**
- * The workspace's file doors, for the engine a profile policy runs on.
+ * The workspace's file calls, for the engine a profile policy runs on.
  *
  * A policy judges a line before it runs, and some judgments are about
  * what a file holds rather than what it is called. The engine is
  * attached with these exactly as `Runtimes` attaches an agent's, so
- * the policy's `open()` reads the mounts through the same door an
- * agent's program would, and a read from a policy clears the op door
+ * the policy's `open()` reads the mounts through the same entry point an
+ * agent's program would, and a read from a policy clears the dispatcher
  * like any other. The bridge is built for one `issuer`, the policy's
- * own token: every op it dispatches carries the token to the op door
+ * own token: every op it dispatches carries the token to the dispatcher
  * (`VfsContext.issuer`), which is how the policy's `preVfs` tells its
  * own read from anyone else's. The workspace supplies them; a bare
  * ScriptPolicy (outside a workspace) has none, and its programs see no
@@ -213,8 +213,8 @@ export function hookCall(script: ScriptSource, hook: ScriptHook): string {
  * The expression that lists which hooks a policy program defines.
  *
  * Appended to the program once, before its first judgment, so a hook
- * the program leaves out is silence at that door rather than a call
- * that fails, and the op door in particular is never charged an
+ * the program leaves out is silence at that entry point rather than a call
+ * that fails, and the dispatcher in particular is never charged an
  * evaluation for a program that only judges commands. Spelled per
  * language and in the engines' common subset: monty has neither
  * `globals()` nor `callable()`, so python asks each name and catches
@@ -263,16 +263,16 @@ export function definedHooks(script: ScriptSource, value: EvalValue): ReadonlySe
  * `preVfs` per VFS op (`opsScriptContext`), `preSession` per env write
  * (`sessionScriptContext`). Which ones it defines is probed once per
  * program (`hookProbe`), so a hook it leaves out is silence at that
- * door and costs no evaluation, and a program defining none fails
- * closed at every door. It reads the session's policy through the
- * narrow `SessionScriptsQuery` by the session id the door put in the
+ * entry point and costs no evaluation, and a program defining none fails
+ * closed at every entry point. It reads the session's policy through the
+ * narrow `SessionScriptsQuery` by the session id the entry point put in the
  * context, so a session whose profile states no policy costs one lookup
  * and nothing else.
  *
  * The facts name the paths; the engine can open them. It is wired to
  * the workspace's files the way an agent's runtime is (`ScriptWiring`),
  * so a policy may read what an operand holds and answer for its
- * content, not only its name. A read from a policy clears the op door
+ * content, not only its name. A read from a policy clears the dispatcher
  * like any other, except this policy's own `preVfs`: the policy is the
  * one asking, and judging its own read would re-enter the evaluation
  * waiting on it. It knows its own read by `issuer`, a token only its
@@ -336,8 +336,8 @@ export class ScriptPolicy implements Policy, SessionScoped {
   /**
    * Whether this session's policy speaks at `hook`: it has a program,
    * and the program defines the hook, or defines none and so refuses at
-   * every door. A probe that fails answers true for the same reason:
-   * the door will refuse.
+   * every entry point. A probe that fails answers true for the same reason:
+   * the entry point will refuse.
    */
   async wantsFor(hook: PolicyHook, sessionId: string): Promise<boolean> {
     const entry = this.sessions.scriptOf(sessionId)
@@ -346,7 +346,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
     try {
       defined = await this.hooksOf(entry)
     } catch {
-      // The door reports the failure itself, as a refusal naming the
+      // The entry point reports the failure itself, as a refusal naming the
       // profile; here the answer is only that it will speak.
       return true
     }
@@ -360,7 +360,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
     for (const engine of engines) await engine.close()
   }
 
-  /** One hook of the session's policy, with the door's facts as `ctx`. */
+  /** One hook of the session's policy, with the entry point's facts as `ctx`. */
   private async judge(
     hook: ScriptHook,
     sessionId: string,
@@ -450,7 +450,7 @@ function failed(entry: ProfileScript, detail: string): Deny {
 }
 
 /**
- * An error's message as the clause after "policy": the engine door and
+ * An error's message as the clause after "policy": the engine entry point and
  * the answer reader both speak of "script", which is the program's
  * generic name, and the profile's word for its program is policy.
  */

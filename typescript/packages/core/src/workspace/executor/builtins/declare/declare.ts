@@ -56,7 +56,7 @@ import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * Put a declaration's value-shaping marks on a name before its value
- * stores. The door coerces on write by reading the record's attributes, so
+ * stores. The entry point coerces on write by reading the record's attributes, so
  * for the declaration's *own* value to coerce (`declare -i n=3+4` stores
  * `7`), the attribute has to be there first; a `+` letter comes off first
  * too, so `declare -i N=5; declare +i N+=x` stores `5x`. Gated like every
@@ -108,7 +108,7 @@ export function localAttrs(v: ShellVar | undefined, inherit: boolean): Set<VarAt
  * 0 of `(old keep)`. This is the scope's own bookkeeping, not a session
  * write: the caller's record is the frame's to put back on return, so no
  * policy is asked to delete it. The local's value lands later through the
- * gated door, which judges that write.
+ * gated session view, which judges that write.
  */
 export function startLocal(session: SessionState, name: string, inherit: boolean): void {
   const v = sessionEntry(session.vars, name)
@@ -184,7 +184,7 @@ export function kindListed(
  * covered `checked`, the target before it, so the mark rides on that
  * decision; a write that re-aimed an unset `declare -n` reference
  * (`declare -n r; export r=X`) landed on a target no gate has seen, so that
- * mark goes through the gated door, as does the reference mark itself
+ * mark goes through the gated session view, as does the reference mark itself
  * (`+n`), which belongs to the reference's own record. `followRef` is false
  * when the write was a `declare -n` declaration's, on the reference itself.
  */
@@ -208,7 +208,7 @@ export async function markWritten(
  * soon as it lands: `declare -r R=1 R=2` refuses the second write, and
  * under `-g` the global record takes them. A written operand's marks ride
  * on its write's gate (`markWritten`); a bare one (`checked` null) wrote
- * nothing, so each mark goes through the gated door.
+ * nothing, so each mark goes through the gated session view.
  */
 export async function stampMarks(
   session: SessionState,
@@ -227,7 +227,7 @@ export async function stampMarks(
 /**
  * Take the mark off an unaimed `declare -n` reference a declared array kind
  * is about to land on, silently, as bash's `export -a ref=v` does (an
- * undeclared array warns at the door).
+ * undeclared array warns at the entry point).
  */
 export async function dropReference(
   session: SessionState,
@@ -281,7 +281,7 @@ export function plusRefusal(
 }
 
 /**
- * Store a declaration's array literals through the session door, the first
+ * Store a declaration's array literals through the session view, the first
  * of bash's two passes over a declaration.
  *
  * bash stores every literal before it runs any other operand, then goes
@@ -295,7 +295,7 @@ export function plusRefusal(
  * that re-aims a reference in between cannot carry a mark past the gate.
  *
  * The builtin owns the store; readonly is the shell's rule, checked per name
- * before the door, and the door's gate covers the policy half. Names are
+ * before the entry point, and the entry point's gate covers the policy half. Names are
  * processed in order, so an earlier operand stays stored when a later one
  * refuses, as bash does. A readonly refusal or kind conflict of an array
  * literal is a variable-assignment error in GNU, not a builtin failure: for
@@ -363,7 +363,7 @@ export async function storeStagedArrays(
     const checked = deref(session, name) || name
     // One try around the literal and the write: a subscript in the
     // literal may assign (`([x=2]=v)`), and that lands through the same
-    // door.
+    // entry point.
     try {
       if (kind === VarKind.Assoc || Object.hasOwn(session.assocs, name)) {
         const { map, badWords } = buildAssocLiteral(session.assocs[name] ?? null, items, append)
@@ -865,7 +865,7 @@ export async function markVariables(
 /**
  * Assign and mark one `export` / `readonly` word. A value of the other array
  * kind is refused and the name is still marked, as bash does. The bare form
- * writes no value, so it marks through the plane's no-value door rather than
+ * writes no value, so it marks through the plane's no-value entry point rather than
  * inventing an empty string: on a new name that leaves it *unset* and
  * marked, bash's own third state (`export Z` prints `declare -x Z` and stays
  * out of `env`). Still gated, since marking is a session write: through

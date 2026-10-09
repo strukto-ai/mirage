@@ -709,7 +709,7 @@ async def test_external_admission_reads_the_expanded_argv(kind):
 )
 async def test_interpreter_script_cannot_bypass_path_policy(kind, line):
     # The script is a file the runtime reads on its own machine, outside
-    # every op door, so the gate has to see it as the path it is
+    # every dispatcher, so the gate has to see it as the path it is
     # (`python3 steal.py` reads /work/steal.py exactly as `cat steal.py`
     # does), whatever option run precedes it.
     probe = kind(captures=("python", "python3", "js", "node"))

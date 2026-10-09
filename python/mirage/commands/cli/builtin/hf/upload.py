@@ -23,7 +23,7 @@ from mirage.commands.cli.builtin.hf.accessor import (
     text_out,
 )
 from mirage.commands.cli.builtin.hf.download import refuse_variadic
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hf_hub.admin import create_repo
@@ -48,7 +48,7 @@ from mirage.utils.quote import shell_quote
 
 
 async def collect(
-    doors: CLIDoors, local: PathSpec
+    view: CLIView, local: PathSpec
 ) -> tuple[list[Addition], bool]:
     """Read workspace files as additions relative to the source.
 
@@ -56,14 +56,14 @@ async def collect(
     the names reached through the source directory.
 
     Args:
-        doors (CLIDoors): the workspace dispatcher doors.
+        view (CLIView): the workspace dispatcher entry points.
         local (PathSpec): the resolved source file or directory.
 
     Returns:
         tuple[list[Addition], bool]: sorted files and whether the source
         was a directory, which determines the destination semantics.
     """
-    dispatch = doors.dispatch
+    dispatch = view.dispatch
     if dispatch is None:
         raise UsageError("hf upload: no workspace to read from")
     stat, _ = await dispatch("stat", local)
@@ -127,7 +127,7 @@ async def upload_cmd(
     require_operands(inv, ["repo_id"])
     require_token(inv, "upload")
     fl = FlagView(inv.flags)
-    if inv.doors is None or inv.doors.dispatch is None:
+    if inv.view is None or inv.view.dispatch is None:
         raise UsageError("hf upload needs a workspace to read from")
     repo_id = inv.texts[0]
     # LOCAL_PATH is path-typed, so the parser resolved it against the cwd;
@@ -153,7 +153,7 @@ async def upload_cmd(
             refuse_variadic(operands, flag, patterns)
     in_repo = inv.texts[1] if len(inv.texts) > 1 else ""
     try:
-        collected, from_dir = await collect(inv.doors, source)
+        collected, from_dir = await collect(inv.view, source)
     except (FileNotFoundError, NotADirectoryError) as exc:
         raise UsageError(
             f"{shell_quote(source.raw_path)}: {fs_strerror(exc)}"

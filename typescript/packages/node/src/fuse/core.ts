@@ -25,7 +25,7 @@ import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { DIR_MODE, DIR_SIZE, FILE_MODE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
-import { skippedAtOpDoors } from '@struktoai/mirage-core/policy/match/rule'
+import { skippedAtDispatch } from '@struktoai/mirage-core/policy/match/rule'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { errnoError } from './errors.ts'
 import { isMacosMetadata } from './platform/macos.ts'
@@ -83,10 +83,10 @@ export interface MountCoreOptions {
  * error codes with `classifyErrno`. Mirrors Python's `MountCore`.
  *
  * Every op goes through `ws.vfs`, which delegates to the dispatcher, so
- * a mount walks the same door as a shell line (mount modes, policies,
+ * a mount walks the same entry point as a shell line (mount modes, policies,
  * cache, invalidation) and every op it runs lands in `ws.records` for
  * `drainOps`. Reaching `ws.dispatch` from here instead would skip the
- * record; reaching a backend directly would skip the door.
+ * record; reaching a backend directly would skip the dispatcher.
  */
 export class MountCore {
   readonly files: Files
@@ -119,12 +119,12 @@ export class MountCore {
     this.uid = typeof process.getuid === 'function' ? process.getuid() : 0
     this.gid = typeof process.getgid === 'function' ? process.getgid() : 0
     this.session = options.session ?? null
-    const skipped = this.session === null ? [] : skippedAtOpDoors(this.session.commands)
+    const skipped = this.session === null ? [] : skippedAtDispatch(this.session.commands)
     if (this.session !== null && skipped.length > 0) {
-      // This door sees ops, never a line, so the profile's command-level
+      // The dispatcher sees ops, never a line, so the profile's command-level
       // rules have nothing here to judge.
       console.warn(
-        `session ${this.session.sessionId}: a door that sees only ops (a kernel mount, ` +
+        `session ${this.session.sessionId}: a dispatcher that sees only ops (a kernel mount, ` +
           `SFTP, codex-exec's file calls) cannot apply ${skipped.join('; ')}; path rules, ` +
           'hides and modes still hold',
       )
@@ -237,7 +237,7 @@ export class MountCore {
    * Built from the target string alone, every link over a mount answered
    * the mount's construction time and the mounting user, so what
    * `chown -h` and `touch -h` wrote was invisible through the kernel.
-   * The row is the same one the door answers a no-follow stat with. Size
+   * The row is the same one the dispatcher answers a no-follow stat with. Size
    * stays the displayable target's length (what this mount's readlink
    * returns), and the mode is always lrwxrwxrwx: a symlink's permission
    * bits are not consulted by any POSIX system.
@@ -366,7 +366,7 @@ export class MountCore {
   /**
    * Land write runs on the mount, one pwrite each, in order. A pwrite keeps
    * every stored byte the handle did not write, so nothing is read through
-   * the door first: a session that may write a file and not read it writes
+   * the dispatcher first: a session that may write a file and not read it writes
    * through FUSE, as through a write-only descriptor. The runs that landed
    * leave `runs` in one step, so after a failure `runs` holds only what did
    * not land and a retry never replays a run over bytes another writer has
@@ -506,7 +506,7 @@ export class MountCore {
    * will later follow.
    */
   async symlink(src: string, dest: string): Promise<void> {
-    // The write routes through the op door like every other FUSE op, so
+    // The write routes through the dispatcher like every other FUSE op, so
     // session grants and admission policies refuse a scoped kernel
     // mount exactly like a scoped shell.
     if (this.files.links === null) throw errnoError('EROFS', 'workspace has no namespace links')
@@ -517,8 +517,8 @@ export class MountCore {
   /**
    * Remove the entry at `path`, a link entry like any other.
    *
-   * A link routes through the op door rather than straight to the node
-   * table: `unlink` is a LINK_ENTRY_OPS member, so the door answers a
+   * A link routes through the dispatcher rather than straight to the node
+   * table: `unlink` is a LINK_ENTRY_OPS member, so the dispatcher answers a
    * link path itself, gated by session grants and admission policies
    * and recorded on the ledger. Writing the table here instead let a
    * session-scoped kernel mount delete a link on a mount its profile
@@ -535,7 +535,7 @@ export class MountCore {
   }
 
   /**
-   * The one door every mutation of a file's bytes goes through. Every
+   * The one dispatcher every mutation of a file's bytes goes through. Every
    * cache the core keeps for a file is keyed by its identity (the mount
    * path with namespace links followed), and this is the only place they
    * are invalidated, so a new mutating op cannot forget one of them and a
@@ -689,7 +689,7 @@ export class MountCore {
   }
 
   /**
-   * Store an extended attribute through the workspace door, which keeps
+   * Store an extended attribute through the workspace entry point, which keeps
    * it on the path's namespace node: it outlives the mount, moves with a
    * rename, and is the attribute every other surface (the shell's
    * getfattr, a guest's os.getxattr) reads. Tools that set xattrs as a

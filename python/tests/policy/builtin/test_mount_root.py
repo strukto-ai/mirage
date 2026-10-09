@@ -85,7 +85,7 @@ async def test_mount_root_refuses(cmd, needle):
     assert deny is not None
     assert needle in deny.reason
     # Every mount-root refusal is about one operand and speaks in the
-    # command's own voice; the door renders `<cmd>: <reason>`.
+    # command's own voice; the entry point renders `<cmd>: <reason>`.
     assert deny.scope is DenyScope.OPERAND
     assert render_deny(cmd, deny) == (f"{cmd}: {deny.reason}\n".encode(), 1)
 

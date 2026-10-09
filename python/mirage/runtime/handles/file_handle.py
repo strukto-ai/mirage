@@ -26,7 +26,7 @@ class FileHandle:
     """One open file: its stored bytes fetched as read, its writes kept.
 
     Nothing moves at open. A read fetches the chunk it lands in through
-    ``base`` (a ``ChunkedHandle`` over the door's ranged read), and what
+    ``base`` (a ``ChunkedHandle`` over the entry point's ranged read), and what
     the handle wrote is kept as byte ranges laid over those stored
     bytes. A close owes the mount only those ranges (``flush_plan``),
     so another writer's bytes between them survive, which a copy of the
@@ -80,7 +80,7 @@ class FileHandle:
 
         Args:
             path (str): guest-absolute virtual path.
-            fetch (FileFetch | None): the door's
+            fetch (FileFetch | None): the entry point's
                 read of ``(offset, size)``, a None size reading to the
                 end; None when the open created or emptied the file.
             size (int): the file's length as the open saw it.
@@ -90,12 +90,12 @@ class FileHandle:
         """
         base = None
         if fetch is not None:
-            door = fetch
+            fetcher = fetch
 
             def ranged(offset: int, asked: int) -> bytes:
                 if offset == 0 and size <= READ_CHUNK:
-                    return door(0, None)
-                return door(offset, asked)
+                    return fetcher(0, None)
+                return fetcher(offset, asked)
 
             base = ChunkedHandle(path=path, size=size, fetch=ranged)
         handle = cls(
@@ -305,7 +305,7 @@ class FileHandle:
         second flush then owes only what came after the first.
 
         Args:
-            fetch (FileFetch): the door's read
+            fetch (FileFetch): the entry point's read
                 of the stored bytes, as ``opened`` takes it.
         """
         size = self.size

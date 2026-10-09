@@ -23,13 +23,13 @@ from mirage.commands.cli.builtin.git.errors import (
     NoWorkspaceError,
 )
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.types import CLIDoors
+from mirage.commands.cli.types import CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
-from tests.commands.cli.builtin.git.conftest import repo_doors
+from tests.commands.cli.builtin.git.conftest import repo_view
 
 from .conftest import REPO
 
@@ -39,22 +39,22 @@ async def test_no_workspace_behind_the_cli_is_a_fatal():
     # Only reachable when a leaf is called directly: inside a workspace
     # the dispatcher always offers the facts a leaf declares.
     with pytest.raises(NoWorkspaceError):
-        await opened(FlagView({"C": REPO}), CLIDoors())
+        await opened(FlagView({"C": REPO}), CLIView())
 
 
 @pytest.mark.asyncio
 async def test_a_missing_plane_is_enough_to_fail(workspace):
     # The name plane carries the mount root discovery stops at, so a
     # record without it cannot open a repository even with the other
-    # two doors wired.
-    doors = replace(repo_doors(workspace), ns=None)
+    # two entry points wired.
+    view = replace(repo_view(workspace), ns=None)
     with pytest.raises(NoWorkspaceError):
-        await opened(FlagView({"C": REPO}), doors)
+        await opened(FlagView({"C": REPO}), view)
 
 
 @pytest.mark.asyncio
 async def test_opening_reports_both_the_gitdir_and_its_worktree(workspace):
-    repo, location = await opened(FlagView({"C": REPO}), repo_doors(workspace))
+    repo, location = await opened(FlagView({"C": REPO}), repo_view(workspace))
     assert isinstance(repo, BaseRepo)
     assert location.gitdir.virtual == "/repo/.git"
     assert location.worktree.virtual == "/repo"
@@ -62,9 +62,7 @@ async def test_opening_reports_both_the_gitdir_and_its_worktree(workspace):
 
 @pytest.mark.asyncio
 async def test_every_verb_inherits_the_same_discovery_walk(workspace):
-    _repo, location = await opened(
-        FlagView({"C": REPO}), repo_doors(workspace)
-    )
+    _repo, location = await opened(FlagView({"C": REPO}), repo_view(workspace))
     assert location.mount_root.virtual == "/repo"
 
 
@@ -76,7 +74,7 @@ async def test_a_directory_that_is_not_there_is_gits_chdir_fatal(workspace):
     with pytest.raises(NoWorkingDirectoryError) as excinfo:
         await opened(
             FlagView({"C": PathSpec.from_str_path("/nowhere")}),
-            repo_doors(workspace),
+            repo_view(workspace),
         )
     assert str(excinfo.value) == (
         "cannot change to '/nowhere': No such file or directory"

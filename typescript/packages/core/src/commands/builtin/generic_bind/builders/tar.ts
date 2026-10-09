@@ -30,7 +30,7 @@ const tar: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   const fl = new FlagView(opts.flags, specOf('tar'))
   if (dispatch !== undefined && !fl.asBool('create')) {
     // -t reads and -x writes wherever cwd or -C says, which need not
-    // be this mount, so both run on dispatch-relayed doors and each
+    // be this mount, so both run on dispatch-relayed calls and each
     // path routes to the mount that owns it. Only -c stays on the
     // accessor: its planner walks this mount's tree.
     const readBytes = readBytesOp(dispatch)

@@ -43,7 +43,7 @@ def test_directory_row_is_monty_s_own_four_kilobytes_and_two_links() -> None:
 
 
 def test_unknown_stamp_stays_zero_rather_than_becoming_now() -> None:
-    # 0 is the door's spelling of "no stamp"; monty reads 0.0 as epoch
+    # 0 is the entry point's spelling of "no stamp"; monty reads 0.0 as epoch
     # zero rather than substituting the host clock.
     assert (
         stat_result(

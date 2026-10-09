@@ -545,7 +545,7 @@ class TestProcessPatch:
     def test_a_runtime_command_inside_the_block_shares_its_files(self):
         # A command runs with the patch transparent (its mount op holds
         # host_io), so the guest reaches the workspace through its own
-        # door while the block's code reaches it through the patch.
+        # entry point while the block's code reaches it through the patch.
         ws = Workspace({"/mem/": RAMVFS()}, mode=MountMode.EXEC)
         with ws:
             Path("/mem/host.txt").write_text("from host")

@@ -1289,7 +1289,7 @@ async def probe_operand(
             )
             return Operand(path, None, []), warnings
         # No backend serves it, but the namespace owes it children (a
-        # nested mount, a link's ancestors), so the door lists it as a
+        # nested mount, a link's ancestors), so the dispatcher lists it as a
         # directory and ls must agree: the merge below renders those
         # rows from an empty backend listing.
         names = []
@@ -1424,7 +1424,7 @@ async def walk(
                 and child_mounts(path.virtual)
             ):
                 # No backend serves it, but the namespace owes it
-                # children, so the door stats it as a directory and -d
+                # children, so the dispatcher stats it as a directory and -d
                 # must print the same row.
                 return WalkResult(
                     [FileStat(name=path.raw_path, type=FileType.DIRECTORY)]

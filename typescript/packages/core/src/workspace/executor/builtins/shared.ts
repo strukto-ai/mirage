@@ -262,7 +262,7 @@ export function refusal(cmd: string, err: PolicyDenied): Result {
 }
 
 /**
- * The shell's own readonly refusal line, checked before the door.
+ * The shell's own readonly refusal line, checked before the entry point.
  * `declare`, `local` and `typeset` name themselves in it (`bash: declare: R:
  * readonly variable`); every other writer refuses in the assignment's voice
  * (`bash: R: readonly variable`).
@@ -288,7 +288,7 @@ export function readonlyRefusal(cmd: string, name: string): Result {
  * GNU voices it as the evaluator's own line, prefixed by the builtin and
  * the offending text (`bash: read: 1+: syntax error: operand expected`),
  * and fails the builtin with 1 while the variable keeps its old value,
- * which is what the door's copy-then-store already guarantees. A plain
+ * which is what the entry point's copy-then-store already guarantees. A plain
  * assignment (`n=1+`) is fatal instead and is voiced by the executor
  * without a builtin name.
  */

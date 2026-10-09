@@ -152,13 +152,13 @@ async def test_the_read_only_refusal_is_newline_terminated():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", [MountMode.READ, MountMode.WRITE])
 @pytest.mark.parametrize("path_guarded", [False, True])
-async def test_only_a_write_command_the_door_cannot_see_is_refused_up_front(
+async def test_only_a_write_command_the_dispatcher_cannot_see_is_refused_up_front(
     mode, path_guarded
 ):
     # A path-guarded command's writes go through the guarded op slots,
     # which refuse each one where it happens, so a read-only mount runs
     # it like a reader (`gzip -c`, `split -n 1/2`). A write command that
-    # reaches its service some other way has no door to refuse it, so
+    # reaches its service some other way has no entry point to refuse it, so
     # the mount refuses it before it runs.
     vfs = RAMVFS()
     mount = MountEntry("/ram/", vfs, mode)

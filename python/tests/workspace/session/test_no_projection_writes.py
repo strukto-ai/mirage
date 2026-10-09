@@ -23,7 +23,7 @@ REPO = Path(__file__).resolve().parents[4]
 # Writers go through `seed_var`/`seedVar`, `set_attr`/`setAttr`, or the
 # `env` setter.
 #
-# Those three are the *ungated* doors and this test does not claim
+# Those three are the *ungated* entry points and this test does not claim
 # otherwise: the gate is `SessionView.set`/`.mark`, and anything a line
 # the agent typed can reach has to use it. What this test pins is
 # narrower and still worth pinning, because it is a silent failure the
@@ -54,8 +54,8 @@ TS_PATTERNS = (
 # invocation (`env_snapshot` returns a fresh dict), so writing into it is
 # writing into a throwaway and is exactly what these two tests assert.
 ALLOWED = {
-    "python/tests/workspace/test_state_doors.py",
-    "typescript/packages/core/src/workspace/state_doors.test.ts",
+    "python/tests/workspace/test_state_entry_points.py",
+    "typescript/packages/core/src/workspace/state_entry_points.test.ts",
 }
 
 SEARCH_ROOTS = (

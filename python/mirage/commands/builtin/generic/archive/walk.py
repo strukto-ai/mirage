@@ -109,7 +109,7 @@ async def _subtree(
     for virtual in files.paths:
         found[virtual.rstrip("/")] = ("file", "")
     # Named under name_base like the entries, once each (both listings
-    # meet the same closed door).
+    # meet the same closed entry point).
     unreadable = [
         name_base.rstrip("/") + u.rstrip("/")[len(base.rstrip("/")) :]
         for u in dict.fromkeys((*dirs.unreadable, *files.unreadable))

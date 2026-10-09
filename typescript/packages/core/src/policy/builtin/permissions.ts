@@ -32,7 +32,7 @@ import {
  * Seeded by the workspace after `MountRootPolicy` (POSIX messages still
  * win) and before user policies, so a document rule speaks before a
  * coded one when both match. It reads the session's compiled rules
- * through the narrow `SessionCommandsQuery` by the session id the door
+ * through the narrow `SessionCommandsQuery` by the session id the entry point
  * put in the context, never through ambient state: an explicit fact
  * survives the async hop that drops a store. Verdicts render through
  * the one outcome table (`renderDeny`), so an agent cannot tell a
@@ -41,11 +41,11 @@ import {
  * `preCommand` renders one `decide` call, which is where the law lives:
  * the allow list first (a line it does not cover is refused whole,
  * though its head was visible), then the winning rule, refused whole or
- * per operand by whether it names paths, or taken to the approval door
+ * per operand by whether it names paths, or taken to the approval entry point
  * when it asks. `preVfs` walks the deny rules that are pure paths, so
  * FUSE, programmatic ops and the warm cache cannot bypass a path the
  * profile protects. A path rule that asks is a question only where no
- * line is running (a file tool, the host's facade), which the door puts
+ * line is running (a file tool, the host's facade), which the entry point puts
  * to the approval ledger keyed by rule and path; inside a line it
  * refuses, since the line was admitted without it.
  */
@@ -84,7 +84,7 @@ export class PermissionsPolicy implements Policy, SessionScoped {
     if (redirectTargetJudged(ctx.path.virtual)) return null
     // The grants belong to the line, not the session: a once grant is
     // spent as the command is admitted, so by the time its own walk
-    // reaches this door the session holds nothing and only the bound
+    // reaches this entry point the session holds nothing and only the bound
     // gate still remembers the nod.
     const gate = getAdmission()
     const ruled = opRuling(this.sessions.commandsOf(ctx.sessionId ?? ''), ctx, gate?.granted ?? [])
@@ -96,7 +96,7 @@ export class PermissionsPolicy implements Policy, SessionScoped {
 
   /**
    * Whether this session's rules speak at `hook`: always at the command
-   * door, and at the op door only through a pure path rule, the one kind
+   * entry point, and at the dispatcher only through a pure path rule, the one kind
    * an op can meet (`opReach`).
    */
   wantsFor(hook: PolicyHook, sessionId: string): Promise<boolean> {

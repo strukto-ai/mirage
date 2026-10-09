@@ -260,9 +260,9 @@ export function coversDepth(rule: CommandRule, virtual: string, ancestors = true
  * directory holding the scope or on any ancestor, since it would take
  * the scope along. A metadata op (METADATA_OPS) is reached by nothing:
  * deny is present and refused, so the entry stats and its content is
- * what the door withholds.
+ * what the entry point withholds.
  *
- * The op-door twin of `ruleReach`, and the same shape: the depth is the
+ * The dispatcher twin of `ruleReach`, and the same shape: the depth is the
  * one the arm that matched measures, so a rule cannot lend an operand
  * specificity from an entry that said nothing about it.
  */
@@ -286,18 +286,18 @@ export function matchOp(rule: CommandRule, scope: HiddenPaths | null, ctx: VfsCo
 /**
  * The rule an op meets and whether it asks, null when the op may run.
  *
- * The op-door twin of `ioRefusal`, and the same law: anchor depth first,
+ * The dispatcher twin of `ioRefusal`, and the same law: anchor depth first,
  * deny before ask at equal depth, and an ask satisfied by a grant the
  * line already holds. Reading every deny before any ask instead let a
  * broad deny on `/repo/*` overrule an approved ask on `/repo/outbox/*`,
- * so the carve-out the command door had just admitted the line under
+ * so the carve-out the command entry point had just admitted the line under
  * could not authorize the redirect it was written for: the write reached
- * this door and was refused there.
+ * this entry point and was refused there.
  *
- * What an ask means is the door's to say: inside a running line it
+ * What an ask means is the entry point's to say: inside a running line it
  * refuses like a deny, since the line was admitted without it, and
  * outside one (a file tool, the host's facade) it goes to the approval
- * door, keyed by rule and path. Mirrors Python's `op_ruling`.
+ * entry point, keyed by rule and path. Mirrors Python's `op_ruling`.
  */
 export function opRuling(
   rules: AdmissionRules | null,
@@ -372,9 +372,9 @@ export function matchIo(
 }
 
 /**
- * Whether a rule holds at an op door too: a pure path rule, which names
+ * Whether a rule holds at a dispatcher too: a pure path rule, which names
  * no command and has paths to match, the one kind an op can meet. The
- * sort of a profile's rules: a POSIX-level rule holds at every door, a
+ * sort of a profile's rules: a POSIX-level rule holds at every entry point, a
  * command-level one (it names a command, or no path) only where a line
  * is judged.
  */
@@ -383,12 +383,12 @@ export function posixLevel(rule: CommandRule): boolean {
 }
 
 /**
- * The command-level parts of a profile's rules, which a door that sees
+ * The command-level parts of a profile's rules, which an entry point that sees
  * only ops (a kernel mount, SFTP, codex-exec's file calls) cannot apply,
  * each described for the operator's warning: the allow list and every
  * rule that is not POSIX level.
  */
-export function skippedAtOpDoors(rules: AdmissionRules | null): string[] {
+export function skippedAtDispatch(rules: AdmissionRules | null): string[] {
   if (rules === null) return []
   const skipped = rules.allow !== null ? ['commands.allow'] : []
   for (const [verb, listed] of [

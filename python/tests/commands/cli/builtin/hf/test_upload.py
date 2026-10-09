@@ -28,8 +28,8 @@ from tests.commands.cli.builtin.hf.conftest import ANON, inv
 
 
 @pytest.mark.asyncio
-async def test_collect_reads_one_file_under_its_basename(doors):
-    record, _, _, _ = doors
+async def test_collect_reads_one_file_under_its_basename(view):
+    record, _, _, _ = view
     assert await collect(record, PathSpec.from_str_path("/work/a.txt")) == (
         [Addition("a.txt", b"alpha")],
         False,
@@ -37,8 +37,8 @@ async def test_collect_reads_one_file_under_its_basename(doors):
 
 
 @pytest.mark.asyncio
-async def test_collect_walks_a_directory_relative_to_it(doors):
-    record, _, _, _ = doors
+async def test_collect_walks_a_directory_relative_to_it(view):
+    record, _, _, _ = view
     assert await collect(record, PathSpec.from_str_path("/work")) == (
         [Addition("a.txt", b"alpha"), Addition("sub/b.txt", b"beta")],
         True,
@@ -49,15 +49,15 @@ async def test_collect_walks_a_directory_relative_to_it(doors):
 @patch("mirage.commands.cli.builtin.hf.upload.create_repo")
 @patch("mirage.commands.cli.builtin.hf.upload.commit")
 async def test_upload_commits_every_walked_file_at_once(
-    mock_commit, mock_create, doors
+    mock_commit, mock_create, view
 ):
-    record, _, _, _ = doors
+    record, _, _, _ = view
     await upload_cmd(
         inv(
             texts=("acme/widget",),
             paths=("/work",),
             flags={"create_pr": True},
-            doors=record,
+            view=record,
         )
     )
     additions = mock_commit.await_args.kwargs["additions"]
@@ -78,27 +78,27 @@ async def test_upload_commits_every_walked_file_at_once(
 @patch("mirage.commands.cli.builtin.hf.upload.create_repo")
 @patch("mirage.commands.cli.builtin.hf.upload.commit")
 async def test_upload_destination(
-    mock_commit, mock_create, doors, local, in_repo, expected
+    mock_commit, mock_create, view, local, in_repo, expected
 ):
     """A file lands at path_in_repo; a folder spreads underneath it."""
-    record, _, _, _ = doors
+    record, _, _, _ = view
     texts = ("acme/widget", in_repo) if in_repo else ("acme/widget",)
-    await upload_cmd(inv(texts=texts, paths=(local,), doors=record))
+    await upload_cmd(inv(texts=texts, paths=(local,), view=record))
     assert [
         a.path for a in mock_commit.await_args.kwargs["additions"]
     ] == expected
 
 
 @pytest.mark.asyncio
-async def test_upload_refuses_without_a_token(doors):
-    record, _, _, _ = doors
+async def test_upload_refuses_without_a_token(view):
+    record, _, _, _ = view
     with pytest.raises(UsageError, match="token"):
         await upload_cmd(
             inv(
                 texts=("acme/widget",),
                 paths=("/work",),
                 config=ANON,
-                doors=record,
+                view=record,
             )
         )
 

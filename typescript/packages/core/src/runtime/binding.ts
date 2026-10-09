@@ -22,7 +22,7 @@ import { ContextScope } from '../utils/context_scope.ts'
 import type { MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn } from './types.ts'
 
-/** Local workspace doors captured for one execution, never guest globals. */
+/** Local workspace entry points captured for one execution, never guest globals. */
 export interface RuntimeContext {
   readonly binding: WorkspaceBinding
   readonly dispatch: BridgeDispatchFn
@@ -171,7 +171,7 @@ export function workspaceBridge(
         return undefined
       }
       case 'stat':
-        // The mount's own row, nothing projected: the runtime door
+        // The mount's own row, nothing projected: the runtime entry point
         // builds the one VFSStat both languages read, so the two
         // tiers cannot drift into two translations of one fact.
         // `nofollow` is the only attrs field a stat carries, and it
@@ -220,8 +220,8 @@ export function workspaceBridge(
         return undefined
       }
       case 'readdir':
-        // The names as the door merged them, nothing resolved: the
-        // runtime door (`RuntimeFiles.readdir`) stats each entry and
+        // The names as the entry point merged them, nothing resolved: the
+        // runtime entry point (`RuntimeFiles.readdir`) stats each entry and
         // marks the links, so a row is built in one tier and in one
         // shape in both languages.
         return ((await dispatch('readdir', path)) as string[] | null) ?? []

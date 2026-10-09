@@ -31,7 +31,7 @@ async def run_unzip(
 ) -> CrossResult:
     """Run an unzip whose archive and -d destination span mounts.
 
-    Pure wiring: the shared generic runs on dispatch-relayed doors, so
+    Pure wiring: the shared generic runs on dispatch-relayed calls, so
     the archive is read from its mount and every extracted path lands
     on whichever mount owns it. The generic reads every flag itself, so
     ``-v`` still lists and ``-x`` still excludes when ``-d`` names

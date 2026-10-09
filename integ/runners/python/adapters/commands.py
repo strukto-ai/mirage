@@ -158,7 +158,7 @@ class CommandService(RAMVFS):
 async def scope_probe(inv: CLIInvocation):
     size = 0
     for path in inv.paths:
-        stat, _ = await inv.doors.dispatch("stat", path)
+        stat, _ = await inv.view.dispatch("stat", path)
         size += stat.size or 0
     return (
         str(size) + ":" + ",".join(p.virtual for p in inv.paths) + "\n"

@@ -128,7 +128,7 @@ async def test_a_path_shaped_word_is_the_programs_argv_as_typed(
     "line, file",
     [("cd /w && python3 s.py", "/w/s.py")],
 )
-async def test_the_file_door_binds_file_on_a_cpython_runtime(
+async def test_the_file_adapter_binds_file_on_a_cpython_runtime(
     ws_cpython, line, file
 ):
     # CPython 3.13.5: the operand made absolute as typed, never

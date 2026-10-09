@@ -24,16 +24,16 @@ def extract_dest(
 ) -> str:
     """Where extraction lands: the explicit operand, else the cwd.
 
-    Relay doors route by full virtual path, accessor doors by
+    Relay entry points route by full virtual path, accessor entry points by
     mount-relative path, so the same operand renders differently per
-    door space. Outside a workspace the cwd arrives as a plain string
+    entry point space. Outside a workspace the cwd arrives as a plain string
     and the two spaces coincide.
 
     Args:
         explicit (PathSpec | str | None): tar's last -C or unzip's -d,
             when the line named one.
         cwd (PathSpec | str): the session working directory.
-        relay (bool): True when the doors are dispatch-relayed.
+        relay (bool): True when the entry points are dispatch-relayed.
     """
     target = explicit if explicit is not None else cwd
     if isinstance(target, PathSpec):
@@ -45,7 +45,7 @@ async def dir_exists(stat: StatFn, level: str) -> bool:
     """Whether a directory already stands at this path.
 
     Args:
-        stat (StatFn): stat door in the same path space as ``level``.
+        stat (StatFn): stat function in the same path space as ``level``.
         level (str): the directory path to probe.
     """
     try:
@@ -71,8 +71,8 @@ async def ensure_dir(
 
     Args:
         dir_path (str): the directory whose chain must exist.
-        mkdir_fn (Callable): mkdir door, single level.
-        stat (StatFn): stat door in the same path space.
+        mkdir_fn (Callable): mkdir function, single level.
+        stat (StatFn): stat function in the same path space.
         made (set[str]): levels already ensured this run, updated here.
     """
     parts = [p for p in dir_path.strip("/").split("/") if p]

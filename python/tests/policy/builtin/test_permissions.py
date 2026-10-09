@@ -145,7 +145,7 @@ async def test_the_allow_list_refuses_a_visible_head_it_does_not_cover():
 @pytest.mark.asyncio
 async def test_a_deny_rule_speaks_by_scope_and_by_where_it_was_written():
     policy = _policy()
-    # Whole-command rule: reason only, the door renders `git: policy
+    # Whole-command rule: reason only, the entry point renders `git: policy
     # denied: ...` at 126. A mount section's rule applies when the line
     # works inside that mount (here by cwd).
     assert await policy.pre_command(
@@ -304,7 +304,7 @@ async def test_a_pathless_rule_is_read_by_verb_wherever_it_is_written():
 async def test_an_ask_rule_speaks_after_every_deny():
     policy = _policy()
     # A line an ask rule covers, refused by nothing: the Ask names the
-    # rule so the door can key a session grant on it.
+    # rule so the entry point can key a session grant on it.
     assert await policy.pre_command(
         _ctx(
             "git",
@@ -328,12 +328,12 @@ async def test_an_ask_rule_speaks_after_every_deny():
             ),
         )
     )
-    door = PermissionsPolicy(_Sessions({"s": shared}))
-    assert await door.pre_command(
+    perms = PermissionsPolicy(_Sessions({"s": shared}))
+    assert await perms.pre_command(
         _ctx("rm", "/repo/shared/a", paths=(_path("/repo/shared/a"),))
     ) == Ask("shared", shared.ask[0], (shared.ask[0],))
     assert (
-        await door.pre_command(
+        await perms.pre_command(
             _ctx("rm", "/repo/b", paths=(_path("/repo/b"),))
         )
         is None
@@ -351,7 +351,7 @@ async def test_pre_vfs_holds_the_pure_path_rules():
         session_id="s",
     )
     assert await policy.pre_vfs(locked) == Deny("frozen", rule=FULL.deny[2])
-    # Command-scoped rules do not reach the op door: an op does not
+    # Command-scoped rules do not reach the dispatcher: an op does not
     # know which command issued it.
     assert (
         await policy.pre_vfs(
@@ -382,7 +382,7 @@ async def test_seeded_in_a_policies_chain_after_the_builtins():
 
 
 @pytest.mark.asyncio
-async def test_speaks_at_the_op_door_only_through_a_pure_path_rule():
+async def test_speaks_at_the_dispatcher_only_through_a_pure_path_rule():
     p = _policy()
     assert await p.wants_for("pre_vfs", "s")
     assert not await p.wants_for("pre_vfs", "rev")

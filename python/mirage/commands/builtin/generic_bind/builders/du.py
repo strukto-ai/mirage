@@ -118,7 +118,7 @@ def _account_for_walk_error(
     worse than an unknown one, so it surfaces instead of being summed as
     nothing.
 
-    Both of the walk's doors come through here, because a refused
+    Both of the walk's entry points come through here, because a refused
     ``stat`` is the same fact as a refused ``readdir``: a rule denying a
     path outright refuses before the walk ever learns the entry is a
     directory.

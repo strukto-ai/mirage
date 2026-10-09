@@ -570,7 +570,7 @@ async def test_trailing_slash_spells_an_absolute_word():
 
 
 @pytest.mark.asyncio
-async def test_trailing_slash_without_a_stat_door_keeps_every_match():
+async def test_trailing_slash_without_a_stat_function_keeps_every_match():
     out = await resolve_glob_with(
         fake_readdir, None, [typed_spec("/*", "*/")], NULL_INDEX
     )

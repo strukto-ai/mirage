@@ -30,7 +30,7 @@ from mirage.commands.cli.refusal import (
     directory_refusal,
     leaf_refusal,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLIInvocation, CLISpec, CLIView
 from mirage.commands.cli.walk import listed_node, node_help, owns_argv, walk
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec import flag_kwarg_name
@@ -219,7 +219,7 @@ async def _script_output(
 class CLIContext:
     """Workspace facts the dispatcher can offer but most CLIs do not
     want: an API client needs no filesystem, while ``git`` is nothing
-    but one. Forwarded whole onto the leaf's doors, so a leaf that does
+    but one. Forwarded whole onto the leaf's view, so a leaf that does
     not read them ignores them and there is no allowlist of
     filesystem-aware CLIs to keep in step (the same rule ``links``
     follows for mount commands). Mirrors the TS ``CLIContext``
@@ -238,7 +238,7 @@ class CLIContext:
         ns (NamespaceView | None): the name plane's facts, which no
             backend can see, for a verb that walks a tree itself. The
             mount prefix serving a path is one of them
-            (``ns.mounts.root_of``), so it needs no door of its own.
+            (``ns.mounts.root_of``), so it needs no entry point of its own.
         session_view (SessionView | None): the session plane's live,
             gated handle; ``inv.env`` stays the frozen process view.
     """
@@ -304,8 +304,8 @@ async def handle_cli(
             invocation record.
         context (CLIContext): the workspace context on offer, one bag
             (the fifth argument TS's ``handleCli`` has always taken).
-            The four door facts ride ``inv.doors`` as one CLIDoors,
-            one door per state plane; a verb that never reads it
+            The four entry point facts ride ``inv.view`` as one CLIView,
+            one entry point per state plane; a verb that never reads it
             cannot touch a mount, and outside a workspace the field
             is None.
         drop_caches (Callable | None): drop cached listings and bodies
@@ -451,20 +451,20 @@ async def handle_cli(
         # --help itself is handed the value it asked for.
         kw.pop("help", None)
 
-    # One door per state plane, riding the record as one field. Most
+    # One entry point per state plane, riding the record as one field. Most
     # CLIs never read it: an API client has no filesystem, while `git`
     # is nothing but one. None outside a workspace, so a verb that needs
     # a plane refuses there on its own.
     opened = (dispatch, stat_path, ns, session_view, context.processes)
-    doors = (
-        CLIDoors(
+    view = (
+        CLIView(
             dispatch=dispatch,
             stat_path=stat_path,
             ns=ns,
             session_view=session_view,
             processes=context.processes,
         )
-        if any(door is not None for door in opened)
+        if any(part is not None for part in opened)
         else None
     )
     active = True
@@ -485,7 +485,7 @@ async def handle_cli(
         flags=kw,
         stdin=stdin,
         env=env_snapshot(session),
-        doors=doors,
+        view=view,
         spec=leaf,
         shell=shell if context.shell is not None else None,
     )

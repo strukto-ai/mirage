@@ -47,11 +47,11 @@ import { encodeText } from '../../shell/bytes.ts'
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 /**
- * One assignment through the session door; denial is fatal.
+ * One assignment through the session view; denial is fatal.
  *
  * Every assignment spelling (scalar, array literal, subscript, append)
  * computes its resulting value and stores through `view.set`, so the
- * gate and the storage invariant live in the door, not here. Denial
+ * gate and the storage invariant live in the entry point, not here. Denial
  * mirrors the readonly case: a fatal variable-assignment error that
  * abandons the rest of the line.
  */
@@ -187,7 +187,7 @@ async function subscriptKeyText(
  *
  * Every spelling — scalar, array literal, subscript, append — is
  * computed with bash's own mechanics on a copy of the held value and
- * then stored through the session door, which owns the admission gate
+ * then stored through the session view, which owns the admission gate
  * and the scalar/array invariant.
  */
 export async function executeAssignment(
@@ -227,7 +227,7 @@ export async function executeAssignment(
     (c) => c.type !== NT.VARIABLE_NAME && c.type !== 'subscript',
   )
   // Every branch below computes its resulting value with bash's own
-  // mechanics on a copy, then stores through the one session door,
+  // mechanics on a copy, then stores through the one session view,
   // which owns the gate and the scalar/array invariant.
   const view = sessionView(session, registry.policies, context.frame.diagnostics)
   const firstVal = valNodes[0]

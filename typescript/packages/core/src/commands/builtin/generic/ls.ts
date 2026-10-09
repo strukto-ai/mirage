@@ -554,7 +554,7 @@ async function listDir(
     if (!isWalkError(err) || isDotWalkError(err) || (childMounts?.(dir.virtual) ?? []).length === 0)
       throw err
     // No backend serves it, but the namespace owes it children (a
-    // nested mount, a link's ancestors), so the door lists it as a
+    // nested mount, a link's ancestors), so the dispatcher lists it as a
     // directory and ls must agree: the merge below renders those rows
     // from an empty backend listing.
     entries = []
@@ -1193,7 +1193,7 @@ export async function lsGeneric(
         if (!isWalkError(err)) throw err
         if (!isDotWalkError(err) && (opts.ns?.childMounts?.(p.virtual) ?? []).length > 0) {
           // No backend serves it, but the namespace owes it children,
-          // so the door stats it as a directory and -d must print the
+          // so the dispatcher stats it as a directory and -d must print the
           // same row.
           collected.push({
             row: new FileStat({ name: p.rawPath, type: FileType.DIRECTORY }),
@@ -1279,7 +1279,7 @@ export async function lsGeneric(
           const target = posixNormpath(`${dirSpec.virtual}/${name}`)
           let row = new FileStat({ name, type: FileType.DIRECTORY })
           // Only the namespace can stat a parent outside this mount.
-          // Without that door, keep the synthetic directory row.
+          // Without that entry point, keep the synthetic directory row.
           if (statNeeded(flags) && (opts.statPath !== undefined || underPath(target, prefix))) {
             try {
               const found =

@@ -78,11 +78,11 @@ function entry(
 }
 
 /**
- * A read-only door over a few files, answering ENOENT for the rest. An
+ * A read-only entry point over a few files, answering ENOENT for the rest. An
  * open lists the directory and stats the file before it reads, so the
- * door answers all three.
+ * entry point answers all three.
  */
-function doorsOver(files: Record<string, string>): BridgeDispatchFn {
+function bridgeOver(files: Record<string, string>): BridgeDispatchFn {
   return (op, path) => {
     if (op === 'readdir') {
       const names = Object.keys(files).filter(
@@ -157,7 +157,7 @@ describe('scriptAction', () => {
     expect(scriptAction({ deny: 'sealed' })).toEqual({ kind: 'deny', reason: 'sealed' })
   })
 
-  it('takes an ask answer to the approval door', () => {
+  it('takes an ask answer to the approval entry point', () => {
     const action = scriptAction({ ask: 'sign-off' })
     expect(action).toEqual({ kind: 'ask', reason: 'sign-off' })
   })
@@ -200,7 +200,7 @@ describe('ScriptPolicy', () => {
     expect(await policy.preCommand(ctx('ls'))).toBeNull()
   })
 
-  it('takes an ask it computed to the door', async () => {
+  it('takes an ask it computed to the entry point', async () => {
     const policy = track(policyOf(entry()))
     expect(await policy.preCommand(ctx('shred'))).toEqual({ kind: 'ask', reason: 'sign-off' })
   })
@@ -223,7 +223,7 @@ describe('ScriptPolicy', () => {
   it('fails closed on a program that defines no hook', async () => {
     // A verdict as a bare last expression was the old contract; a policy
     // defines the hooks it answers at, and a program defining none is
-    // refused at every door rather than read for a value it never meant.
+    // refused at every entry point rather than read for a value it never meant.
     const policy = track(policyOf(entry('null')))
     expect(await policy.preCommand(ctx())).toEqual({
       kind: 'deny',
@@ -254,13 +254,13 @@ describe('ScriptPolicy', () => {
 })
 
 describe('ScriptPolicy wiring', () => {
-  it('reads the workspace through the doors it is wired to', async () => {
+  it('reads the workspace through the entry points it is wired to', async () => {
     // The facts name the path; the engine opens it. The read arrives
     // on the bridge the workspace handed over, the way an agent's own
     // program reaches a mount.
     const policy = track(
       new ScriptPolicy({ scriptOf: () => entry(READER_PY, 'monty', 'python') }, () => ['/repo/'], {
-        bridge: () => doorsOver({ '/repo/sealed/k': 'subject: invoice\n\na payload\n' }),
+        bridge: () => bridgeOver({ '/repo/sealed/k': 'subject: invoice\n\na payload\n' }),
         resolver: new PrefixResolver(() => ['/repo/']),
       }),
     )
@@ -270,16 +270,16 @@ describe('ScriptPolicy wiring', () => {
     })
   }, 60_000)
 
-  it('a bare policy has no door, and its program reads no file', async () => {
+  it('a bare policy has no entry point, and its program reads no file', async () => {
     // Unwired, the engine sees no mount: the open misses, the policy's
     // own except arm runs, and nothing is judged on content it never
-    // saw. The workspace is what supplies the doors.
+    // saw. The workspace is what supplies the entry points.
     const policy = track(policyOf(entry(READER_PY, 'monty', 'python')))
     expect(await policy.preCommand(ctx('cat'))).toBeNull()
   }, 60_000)
 })
 
-// A program at the op and session doors and nowhere else.
+// A program at the op and session views and nowhere else.
 const GATES = `\
 function preVfs(ctx) {
   const op = ctx.op
@@ -341,9 +341,9 @@ describe('opsScriptContext and sessionScriptContext', () => {
   })
 })
 
-describe('scriptAction at the op and session doors', () => {
-  it('answers allow or deny at the session door, never ask', () => {
-    // The session door cannot wait on a host, so the vocabulary there is
+describe('scriptAction at the op and session views', () => {
+  it('answers allow or deny at the session view, never ask', () => {
+    // The session view cannot wait on a host, so the vocabulary there is
     // allow or deny, and an ask is a wrong answer.
     const hook = 'preSession'
     expect(scriptAction({ deny: 'frozen' }, hook)).toEqual({ kind: 'deny', reason: 'frozen' })
@@ -354,7 +354,7 @@ describe('scriptAction at the op and session doors', () => {
   })
 })
 
-describe('ScriptPolicy at the op and session doors', () => {
+describe('ScriptPolicy at the op and session views', () => {
   it('a hook the program leaves out is silence', async () => {
     const policy = track(policyOf(entry()))
     expect(await policy.preVfs(opsCtx())).toBeNull()
@@ -381,13 +381,13 @@ describe('ScriptPolicy at the op and session doors', () => {
   })
 
   it('an op hook may ask', async () => {
-    // The door puts it to the host where no line is running, and refuses
+    // The entry point puts it to the host where no line is running, and refuses
     // it inside one.
     const policy = track(policyOf(entry("function preVfs() { return { ask: 'nod' } }")))
     expect(await policy.preVfs(opsCtx())).toEqual({ kind: 'ask', reason: 'nod' })
   })
 
-  it('fails closed at every door on a program that defines no hook', async () => {
+  it('fails closed at every entry point on a program that defines no hook', async () => {
     const policy = track(policyOf(entry('null')))
     const refused = {
       kind: 'deny',
@@ -400,7 +400,7 @@ describe('ScriptPolicy at the op and session doors', () => {
 
 describe('wantsFor', () => {
   it('says which sessions a hook speaks for', async () => {
-    // The per-session refinement the secret fill asks: the door is
+    // The per-session refinement the secret fill asks: the entry point is
     // defined for everyone, but speaks only for a session whose program
     // defines the hook.
     const policy = track(policyOf(entry()))
@@ -411,8 +411,8 @@ describe('wantsFor', () => {
     expect(await track(policyOf(null)).wantsFor('preSession', 's')).toBe(false)
   })
 
-  it('counts a program the door will refuse', async () => {
-    // No hook at all, or a probe that failed: the door refuses every
+  it('counts a program the entry point will refuse', async () => {
+    // No hook at all, or a probe that failed: the entry point refuses every
     // write for this program, which is speaking.
     expect(await track(policyOf(entry('null'))).wantsFor('preSession', 's')).toBe(true)
     expect(
@@ -424,8 +424,8 @@ describe('wantsFor', () => {
     // One text, two programs: the probe asks in each language's own
     // spelling, so what it found in one says nothing about the other.
     // `pre_command = 1` binds the python hook's name and no JavaScript
-    // hook's, so the js profile fails closed at every door and the
-    // python one speaks at the command door alone.
+    // hook's, so the js profile fails closed at every entry point and the
+    // python one speaks at the command entry point alone.
     const text = 'pre_command = 1'
     const scripts: Record<string, ProfileScript> = {
       j: { profile: 'j', script: new ScriptSource(text, 'js'), runtime: 'quickjs' },
@@ -451,7 +451,7 @@ describe('wantsFor', () => {
   })
 })
 
-// A program that reads at the command door and refuses at the op door,
+// A program that reads at the command entry point and refuses at the dispatcher,
 // so its own read is exactly what its op hook would deadlock on.
 const READER_AND_GATE_PY = `\
 def pre_command(ctx):
@@ -465,19 +465,19 @@ def pre_vfs(ctx):
     return {'deny': 'judged ' + ctx['op']['path']}
 `
 
-interface HeldDoor {
-  door: BridgeDispatchFn
-  /** Settles when the engine's read of `/repo/a` reaches the door. */
+interface HeldDispatch {
+  dispatch: BridgeDispatchFn
+  /** Settles when the engine's read of `/repo/a` reaches the entry point. */
   arrived: Promise<void>
   /** Lets that read answer. */
   release: () => void
 }
 
 /**
- * A door over one file, `/repo/a`, whose read waits until the test
+ * An entry point over one file, `/repo/a`, whose read waits until the test
  * releases it: the window in which the policy's own read is in flight.
  */
-function heldDoor(): HeldDoor {
+function heldDispatch(): HeldDispatch {
   let arrive!: () => void
   let release!: () => void
   const arrived = new Promise<void>((resolve) => {
@@ -487,7 +487,7 @@ function heldDoor(): HeldDoor {
     release = resolve
   })
   const body = new TextEncoder().encode('hello')
-  const door: BridgeDispatchFn = async (op, p) => {
+  const dispatch: BridgeDispatchFn = async (op, p) => {
     if (op === 'readdir') return ['/repo/a']
     if (p !== '/repo/a') throw Object.assign(new Error(p), { code: 'ENOENT' })
     if (op === 'stat') {
@@ -505,10 +505,10 @@ function heldDoor(): HeldDoor {
     }
     throw Object.assign(new Error(`${op} ${p}`), { code: 'EROFS' })
   }
-  return { door, arrived, release }
+  return { dispatch, arrived, release }
 }
 
-describe("a policy's own reads at its op door", () => {
+describe("a policy's own reads at its dispatcher", () => {
   it('lets through an op carrying its token and judges every other', async () => {
     // The token is what the bridge built for this policy stamps on each
     // op, and what the dispatcher hands back on the op's context. Another
@@ -517,7 +517,7 @@ describe("a policy's own reads at its op door", () => {
     // evaluation the read belongs to, then gets the hook's answer. So is
     // an op carrying a token from anywhere else.
     const stamped: symbol[] = []
-    const { door, arrived, release } = heldDoor()
+    const { dispatch, arrived, release } = heldDispatch()
     const policy = track(
       new ScriptPolicy(
         { scriptOf: () => entry(READER_AND_GATE_PY, 'monty', 'python') },
@@ -525,7 +525,7 @@ describe("a policy's own reads at its op door", () => {
         {
           bridge: (issuer) => {
             stamped.push(issuer)
-            return door
+            return dispatch
           },
           resolver: new PrefixResolver(() => ['/repo/']),
         },

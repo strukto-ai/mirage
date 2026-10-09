@@ -127,7 +127,7 @@ _SEALED_TREE = {
 
 def _sealed_ops() -> CommandIO:
     # /db/sealed lists as refused and /db/walled refuses its stat, the two
-    # doors a rule or the host can shut.
+    # entry points a rule or the host can shut.
 
     async def readdir(_accessor, path, _index=None):
         if path.virtual == "/db/sealed":

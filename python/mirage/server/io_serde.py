@@ -43,7 +43,7 @@ class CallArgsError(ValueError):
 
 
 def refusal_to_dict(refusal: Refusal | None) -> dict[str, JsonValue] | None:
-    """A refusal record as the server's doors carry it.
+    """A refusal record as the server's entry points carry it.
 
     Args:
         refusal (Refusal | None): the record, or None when nothing was
@@ -53,7 +53,7 @@ def refusal_to_dict(refusal: Refusal | None) -> dict[str, JsonValue] | None:
 
 
 def failure_to_dict(exc: Exception) -> dict[str, JsonValue]:
-    """A failed call as the server's doors carry it: its text, the errno
+    """A failed call as the server's entry points carry it: its text, the errno
     it names and, for a policy's refusal, its record.
 
     Args:
@@ -91,7 +91,7 @@ async def io_result_to_dict(result: IOResult | None) -> dict[str, Any]:
 
 
 def explanation_to_dict(expl: Explanation) -> dict[str, JsonValue]:
-    """An explanation as the server's doors answer it: a line with its
+    """An explanation as the server's entry points answer it: a line with its
     tree (``shell`` explained) or a VFS call (``vfs/<call>`` explained).
 
     Args:
@@ -144,7 +144,7 @@ def explanation_to_dict(expl: Explanation) -> dict[str, JsonValue]:
 def _node_to_dict(
     node: ShellNode | CommandExplanation,
 ) -> dict[str, JsonValue]:
-    """One node of a line's tree as the doors carry it.
+    """One node of a line's tree as the entry points carry it.
 
     Args:
         node (ShellNode | CommandExplanation): the node.
@@ -159,7 +159,7 @@ def _node_to_dict(
 
 
 def answer_to_dict(action: Deny | Ask | Route) -> dict[str, JsonValue]:
-    """One policy's answer as the server's doors carry it.
+    """One policy's answer as the server's entry points carry it.
 
     Args:
         action (Deny | Ask | Route): the answer.

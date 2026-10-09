@@ -20,7 +20,7 @@ import {
 } from '../../../../core/email/client.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
-import type { CLIDoors, CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
+import type { CLIView, CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
 import { materialize, type IOResult } from '@struktoai/mirage-core/io/types'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
@@ -476,7 +476,7 @@ describe('himalaya verbs', () => {
     const files: Record<string, Uint8Array> = {
       '/scratch/note.txt': new TextEncoder().encode('the note body\n'),
     }
-    const doors: CLIDoors = {
+    const view: CLIView = {
       dispatch: (op: string, path: PathSpec) => {
         const data = files[path.virtual]
         if (op !== 'read' || data === undefined) return Promise.reject(enoent(path))
@@ -492,7 +492,7 @@ describe('himalaya verbs', () => {
             body: 'see attached',
             attach: [PathSpec.fromStrPath('/scratch/note.txt')],
           },
-          doors,
+          view,
         }),
       ),
     )) as [Uint8Array, IOResult]
@@ -504,7 +504,7 @@ describe('himalaya verbs', () => {
   })
 
   it('compose --attach of a missing file names the path', async () => {
-    const doors: CLIDoors = {
+    const view: CLIView = {
       dispatch: (_op: string, path: PathSpec) => Promise.reject(enoent(path)),
     }
     await expect(
@@ -516,7 +516,7 @@ describe('himalaya verbs', () => {
               body: 'yo',
               attach: [PathSpec.fromStrPath('/scratch/gone.txt')],
             },
-            doors,
+            view,
           }),
         ),
       ),
@@ -748,7 +748,7 @@ describe('himalaya dispatch', () => {
 })
 
 describe('himalaya writes and a mounted account', () => {
-  // The CLI and a mount are two doors to one account, so a message the CLI
+  // The CLI and a mount are two entry points to one account, so a message the CLI
   // files has to show in the mount's listing without waiting out the index
   // TTL. The mailbox here is test state; the VFS, the CLI, the workspace
   // and its caches are the real ones.

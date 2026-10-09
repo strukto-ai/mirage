@@ -366,12 +366,12 @@ def test_scoped_io_sets_a_content_index_aside():
 async def test_dispatch_rule_guard_marks_an_op_with_the_bound_gate():
     seen: list[tuple[str, _Gate | None]] = []
 
-    async def door(op, path, **kwargs):
+    async def inner(op, path, **kwargs):
         seen.append((op, kwargs.get("rule_gate")))
         return None, None
 
-    dispatch = with_dispatch_rule_guard(door)
-    # No gate bound: the op goes to the door unmarked.
+    dispatch = with_dispatch_rule_guard(inner)
+    # No gate bound: the op goes to the dispatcher unmarked.
     await dispatch("read", _spec("/data/f"))
     gate = _Gate(refused="/data/locked/y")
     token = set_admission(gate)
@@ -382,7 +382,7 @@ async def test_dispatch_rule_guard_marks_an_op_with_the_bound_gate():
     finally:
         reset_admission(token)
     assert seen == [("read", None), ("read", gate), ("stat", None)]
-    # The wrapper judges nothing itself: the door does, on its own paths.
+    # The wrapper judges nothing itself: the dispatcher does, on its own paths.
     assert gate.asked == []
 
 
@@ -1153,7 +1153,7 @@ async def test_policy_guard_admits_slots_and_leaves_stat_alone():
     gtoken = set_mount_gate("/data", MountMode.WRITE)
     try:
         ops = with_policy_guard(raw)
-        # Content reads are the door's, which admits them itself.
+        # Content reads are the dispatcher's, which admits them itself.
         assert ops.read_bytes is raw.read_bytes
         assert ops.read_stream is raw.read_stream
         # stat is not a guarded slot: deny is present and refused.

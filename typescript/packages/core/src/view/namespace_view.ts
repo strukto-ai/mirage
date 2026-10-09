@@ -96,7 +96,7 @@ function linkNames(vis: Visibility | null, links: NamespaceLinks | null, parent:
 /**
  * Every child segment the namespace owes `parent`: mounts + links.
  *
- * The one union both consumers derive from: the door merges these
+ * The one union both consumers derive from: the dispatcher merges these
  * names into its readdir and the `childMounts` fact offers them to
  * listing commands, so the shell and the ops surface cannot disagree
  * about what a directory holds.

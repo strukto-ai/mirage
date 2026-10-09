@@ -22,7 +22,7 @@ import type { FlagValue } from '../../../../spec/types.ts'
 /**
  * Run an unzip whose archive and -d destination span mounts.
  *
- * Pure wiring: the shared generic runs on dispatch-relayed doors, so
+ * Pure wiring: the shared generic runs on dispatch-relayed calls, so
  * the archive is read from its mount and every extracted path lands on
  * whichever mount owns it.
  */

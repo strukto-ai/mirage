@@ -55,7 +55,7 @@ export const CWD_DEFAULT_RAW: Record<string, string> = {
 // operand of the mount the line runs on, so it routes nothing: the line runs
 // where its positional operands (or the cwd) put it, and `-o` and `-D` on two
 // mounts, or `--slurpfile` over a process substitution, is not cross-mount.
-export const DOOR_FLAG_KEYS: Readonly<Record<string, readonly string[]>> = {
+export const DISPATCH_FLAG_KEYS: Readonly<Record<string, readonly string[]>> = {
   curl: ['output', 'dump_header'],
   jq: ['rawfile', 'slurpfile'],
 }
@@ -119,10 +119,10 @@ export function pathFlagScopes(cmdName: string, argv: string[], cwd: string): Pa
   const parsed = parseCommand(spec, argv, cwd, cmdName)
   const kwargs = parseToKwargs(parsed)
   const flagPaths = [...parsed.pathFlagValues]
-  // A program file and a door option's file are read or written through the
+  // A program file and an entry point option's file are read or written through the
   // dispatcher, not on the line's mount. A pair's name slots are words, never
   // resolved paths, so they match nothing here.
-  for (const key of [FILE_KEYS[cmdName], ...(DOOR_FLAG_KEYS[cmdName] ?? [])]) {
+  for (const key of [FILE_KEYS[cmdName], ...(DISPATCH_FLAG_KEYS[cmdName] ?? [])]) {
     if (key === undefined) continue
     const value = kwargs[key]
     for (const item of Array.isArray(value) ? value : [value]) {
@@ -191,8 +191,8 @@ export function optionLoopExits(
 }
 
 /**
- * The classified path words that route a line. Classification makes a door
- * option's file a path word like any other, so a command in DOOR_FLAG_KEYS
+ * The classified path words that route a line. Classification makes an entry point
+ * option's file a path word like any other, so a command in DISPATCH_FLAG_KEYS
  * routes by its positional operands alone; every other command by all its
  * path words.
  */
@@ -203,7 +203,7 @@ export function routedOperands(
   words: readonly (string | PathSpec)[],
   pathScopes: PathSpec[],
 ): PathSpec[] {
-  if (!(cmdName in DOOR_FLAG_KEYS)) return pathScopes
+  if (!(cmdName in DISPATCH_FLAG_KEYS)) return pathScopes
   return positionalScopes(cmdName, argv, cwd, words)
 }
 

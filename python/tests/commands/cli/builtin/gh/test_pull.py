@@ -39,7 +39,7 @@ def _inv(texts=(), flags=None) -> CLIInvocation:
         texts=tuple(texts),
         flags=flags or {},
         stdin=None,
-        doors=None,
+        view=None,
     )
 
 

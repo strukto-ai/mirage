@@ -2,7 +2,7 @@
   "cases": [
     {
       "id": "registered_runtime_named_like_a_builtin",
-      "note": "register_runtime / registerRuntime is the host-side door for a runtime mirage does not ship (the harness registers `echobox` through it). Once registered the name works where a builtin's does: a bare string entry resolves through the same table, and the lines it captures route to it while everything else stays with the workspace.",
+      "note": "register_runtime / registerRuntime is the host-side entry point for a runtime mirage does not ship (the harness registers `echobox` through it). Once registered the name works where a builtin's does: a bare string entry resolves through the same table, and the lines it captures route to it while everything else stays with the workspace.",
       "world": {
         "runtimes": [
           "echobox",

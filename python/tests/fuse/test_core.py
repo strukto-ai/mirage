@@ -225,7 +225,7 @@ async def test_getattr_of_a_link_reports_the_nodes_own_row():
 async def test_scoped_mount_may_not_touch_a_link_on_hidden_turf():
     # Both halves of one hole: a session-scoped kernel mount could
     # write the namespace table directly, at a layer no session view
-    # covers. Creation was closed by routing through the op door;
+    # covers. Creation was closed by routing through the dispatcher;
     # removal stayed open until unlink stopped calling the table too.
     # Both refuse as ENOENT: symlink is a create, and a create under a
     # hidden directory answers as every read of that directory does
@@ -252,7 +252,7 @@ async def test_scoped_mount_may_not_touch_a_link_on_hidden_turf():
 
 @pytest.mark.asyncio
 async def test_unlink_removes_a_link_and_keeps_its_target():
-    # The other side of routing removal through the door: an unscoped
+    # The other side of routing removal through the dispatcher: an unscoped
     # mount still drops the link entry, and only that, the way
     # unlink(2) on a symlink leaves the pointee alone.
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
@@ -361,7 +361,7 @@ class _NoReads(Policy):
 
 @pytest.mark.asyncio
 async def test_a_write_lands_on_a_file_the_session_may_not_read():
-    # Writing at an offset is one write at the door, so a policy that
+    # Writing at an offset is one write at the dispatcher, so a policy that
     # refuses reads leaves FUSE writes alone, as a write-only descriptor
     # takes pwrite(2). The flush used to read the file first and fail.
     vfs = RAMVFS()
@@ -660,7 +660,7 @@ async def test_removing_a_link_leaves_its_targets_handles_alone():
 
 
 @pytest.mark.asyncio
-async def test_a_session_is_told_the_command_rules_a_door_of_ops_skips(
+async def test_a_session_is_told_the_command_rules_the_dispatcher_skips(
     caplog,
 ):
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)

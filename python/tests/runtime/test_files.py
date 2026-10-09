@@ -165,7 +165,7 @@ def test_rename_within_one_mount_dispatches():
     assert kwargs["dst"].virtual == "/data/b.txt"
 
 
-def test_serves_scopes_to_the_mounts_and_an_unscoped_door_serves_all():
+def test_serves_scopes_to_the_mounts_and_an_unscoped_entry_point_serves_all():
     scoped = RecordingVFS(prefixes=["/data/"])
     assert scoped.serves("/data/a.txt") is True
     assert scoped.serves("/tmp/a.txt") is False
@@ -175,7 +175,7 @@ def test_serves_scopes_to_the_mounts_and_an_unscoped_door_serves_all():
 def test_serves_a_path_reached_through_a_link_outside_every_mount():
     # The dispatcher follows a link outside every mount, so what is
     # reached through one is the workspace's too.
-    door = RuntimeFiles(
+    files = RuntimeFiles(
         dispatch=None,
         loop=None,
         resolver=PrefixResolver(
@@ -183,9 +183,9 @@ def test_serves_a_path_reached_through_a_link_outside_every_mount():
             lambda directory: {"alias"} if directory == "/" else set(),
         ),
     )
-    assert door.serves("/alias") is True
-    assert door.serves("/alias/inner.txt") is True
-    assert door.serves("/tmp/a.txt") is False
+    assert files.serves("/alias") is True
+    assert files.serves("/alias/inner.txt") is True
+    assert files.serves("/tmp/a.txt") is False
 
 
 F = "/data/f"
@@ -238,10 +238,10 @@ def test_a_refusal_is_not_read_as_an_absence():
 
 
 def test_readdir_lifts_names_into_entries():
-    # The TS bridge resolves path/size/isDir once at the door, off the
+    # The TS bridge resolves path/size/isDir once at the dispatcher, off the
     # stat index the readdir just populated; python answered bare names
     # and every consumer re-parsed the trailing-slash convention, paying
-    # one guest stat per entry for a fact the door already had.
+    # one guest stat per entry for a fact the dispatcher already had.
     vfs = ListingVFS(
         listing=["/data/sub/", "/data/a.txt", "/data/ghost.txt"],
         stats={
@@ -377,7 +377,7 @@ def test_readdir_marks_the_names_the_resolver_calls_links():
 
 
 def test_stat_projects_one_struct_for_every_surface():
-    # The projection is the door's, so preview1, monty and Emscripten
+    # The projection is the dispatcher's, so preview1, monty and Emscripten
     # read the same five facts instead of translating a FileStat three
     # ways. mode carries the type bits, which is what a wire with no
     # mode field of its own reads the kind out of.
@@ -430,8 +430,8 @@ def test_stat_projects_character_type_bits_and_logical_device_numbers():
     )
 
 
-def test_stat_nofollow_asks_the_door_for_the_link_row():
-    # lstat is one door question now, not a surface reaching past it:
+def test_stat_nofollow_asks_the_dispatcher_for_the_link_row():
+    # lstat is one dispatcher question now, not a surface reaching past it:
     # the flag rides the dispatch, which answers a link's own row from
     # the node table and gates it exactly as it gates readlink.
     vfs = ListingVFS(
@@ -576,7 +576,7 @@ def test_readlink_returns_the_stored_target():
     assert LinkVFS(prefixes=["/data/"]).readlink("/data/l") == "../up/t.txt"
 
 
-def test_setattr_passes_every_field_so_the_door_reads_the_whole_set():
+def test_setattr_passes_every_field_so_the_dispatcher_reads_the_whole_set():
     vfs = RecordingVFS(prefixes=["/data/"])
     vfs.setattr("/data/f.txt", mode=0o600, mtime="1970-01-01T00:03:20+00:00")
     assert vfs.calls == [

@@ -55,7 +55,7 @@ function makeFakeFS(withLinks = true): FakeFS {
   }
 }
 
-// The door builds each row from a name plus one stat, so a double
+// The entry point builds each row from a name plus one stat, so a double
 // standing in for the bridge has to answer both.
 function fileStat(size: number): FileStat {
   return new FileStat({ name: 'f', size, type: FileType.FILE, content: ContentType.TEXT })
@@ -115,7 +115,7 @@ describe('preloadInto', () => {
     expect(dispatch.mock.calls.every(([op]) => op !== 'read')).toBe(true)
   })
 
-  // The row already carries both (the door stats every entry it does not
+  // The row already carries both (the dispatcher stats every entry it does not
   // slash-mark), so the seed gets the mount's metadata for free. Without
   // it every seeded node reported 0o644 and the moment it was built.
   it('carries each row mode and stamp onto the seed', async () => {
@@ -234,7 +234,7 @@ describe('preloadInto', () => {
     warn.mockRestore()
   })
 
-  // The door lists it unclassified; the preload asks once more and, on a
+  // The entry point lists it unclassified; the preload asks once more and, on a
   // second failure, seeds it as neither a file nor absent.
   it('marks an entry the mount will not stat as unclassified, and never reads it', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
@@ -276,7 +276,7 @@ describe('preloadInto', () => {
 
   // One cap for the whole walk: twenty subdirectories of twenty files
   // must not become twenty listings each reading sixteen files at once,
-  // and the door's classifying stats share it with the walk's reads.
+  // and the entry point's classifying stats share it with the walk's reads.
   it('keeps the whole walk under one cap, however wide the tree', async () => {
     let now = 0
     let peak = 0

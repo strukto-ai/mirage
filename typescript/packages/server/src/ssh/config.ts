@@ -29,12 +29,12 @@ import { SSHConfigError } from './errors.ts'
 export type SSHSettingKey = keyof typeof SSH_ENV_KEYS
 
 /**
- * Where the daemon's SSH door listens and whom it lets in.
+ * Where the daemon's SSH endpoint listens and whom it lets in.
  *
  * `hostKeyFile` is minted on first start and kept, so clients'
  * known_hosts stay valid; `authorizedKeysFile` holds OpenSSH-format public
  * keys and is re-read on every connection, so adding a key needs no
- * restart. A port of 0 asks the OS for a free one; null keeps the TCP door
+ * restart. A port of 0 asks the OS for a free one; null keeps the TCP endpoint
  * shut, while the HTTPS route carries SSH whatever the port says.
  */
 export interface SSHConfig {
@@ -86,7 +86,7 @@ function parsePort(raw: string): number {
  * Resolve the SSH settings.
  *
  * Per key the environment variable wins over the `[daemon]` table in
- * `config.toml`, which wins over the default. The TCP door is off unless a
+ * `config.toml`, which wins over the default. The TCP endpoint is off unless a
  * port is set, so a daemon nobody configured for SSH never listens on a
  * second port. An explicit `env` with no `table` stays hermetic and reads
  * no file.

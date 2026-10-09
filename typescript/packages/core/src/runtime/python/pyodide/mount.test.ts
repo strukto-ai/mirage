@@ -59,7 +59,7 @@ function makeBridge(): {
         }
       }
     }
-    // The door builds each row from a name plus one stat, so the double
+    // The entry point builds each row from a name plus one stat, so the double
     // answers both, and a directory is whatever a deeper key implies.
     if (op === 'stat') {
       const found = files.get(path)
@@ -77,7 +77,7 @@ function makeBridge(): {
       if (deeper) return Promise.resolve(new FileStat({ name: path, type: FileType.DIRECTORY }))
       return Promise.reject(Object.assign(new Error(`no such file: ${path}`), { code: 'ENOENT' }))
     }
-    // The real door merges child mounts and directories into readdir
+    // The real entry point merges child mounts and directories into readdir
     // (R1), so the double reports them too: preload descends through
     // them exactly as it does against a live workspace.
     for (const d of dirs) entries.push(d)

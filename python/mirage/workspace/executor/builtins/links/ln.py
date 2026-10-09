@@ -227,7 +227,7 @@ def _visible_link(namespace: Namespace, virtual: str) -> bool:
     """Whether the session may know that a path is a link.
 
     A hidden path is nonexistent for the session, so a link there is
-    not one ln may follow, copy or resolve. The door checks the typed
+    not one ln may follow, copy or resolve. The dispatcher checks the typed
     path before it follows a link, and every namespace read in this
     module has to answer the same way, or a link inside hidden space
     leads ln out of it: into the directory it points at, or to the
@@ -263,8 +263,8 @@ def operand_abs(namespace: Namespace, arg: str | PathSpec, cwd: str) -> str:
     Command dispatch walks the links above the name of every operand it
     classifies; the relative words of ln, readlink and ``[`` arrive
     unclassified, so they are walked here, and every namespace read sees
-    the name the door will. A hidden path stays as typed, and a loop is
-    left for the door to report when the link is made.
+    the name the entry point will. A hidden path stays as typed, and a loop is
+    left for the entry point to report when the link is made.
 
     Args:
         namespace (Namespace): the link table.
@@ -295,7 +295,7 @@ def _walk_verdict(
     An empty name resolves nowhere, and a link loop stops the walk in
     front of the final name; ``follow_last`` asks for that name too, for
     an operand that has to be a directory. None when the walk gets
-    there, and for a hidden path, which the door answers like any other
+    there, and for a hidden path, which the entry point answers like any other
     absent one. ln's relative words arrive unclassified, so the verdict
     cannot be read off a PathSpec.
 
@@ -324,7 +324,7 @@ def _walk_verdict(
 async def _listed_by_parent(dispatch: DispatchFn, virtual: str) -> bool:
     """Whether a path's own name is in its parent's listing.
 
-    The door's proof of a directory, repeated here because a stat row
+    The entry point's proof of a directory, repeated here because a stat row
     settles nothing: an API tree synthesizes its directories (a postgres
     schema lists ``tables/`` and ``views/`` for a schema nobody created,
     a grouping mount stats every path under a live collection as one),
@@ -356,7 +356,7 @@ async def _dir_at(
     GNU dereferences a destination that is a link to a directory and
     links inside that directory; ``-n`` keeps the link itself as the
     name. A real directory is the directory either way, and a directory
-    row counts only when the door would (a mount root, or a name its
+    row counts only when the entry point would (a mount root, or a name its
     parent lists).
 
     Args:
@@ -598,7 +598,7 @@ async def make_link(
     A symlink stores the target as typed (or relative under ``-r``). A
     hard link of a symlink is the link itself, so it becomes a second
     symlink with the same target, unless ``-L`` asks for the target's
-    bytes; a hard link of a file is a byte copy through the op door.
+    bytes; a hard link of a file is a byte copy through the dispatcher.
     Under ``-f`` a destination that is the source's own name is refused
     as GNU's ``are the same file`` before any backup or removal, since
     removing it would remove the source; GNU waives that when a backup
@@ -715,7 +715,7 @@ async def make_link(
         # called `missing`. A directory there took the link inside it in
         # plan_links, so only a non-directory and the absent name are
         # settled here, and a plain file without a flag falls to the
-        # door's "File exists" below.
+        # entry point's "File exists" below.
         linked = _visible_link(namespace, plan.link_abs)
         behind = (
             await link_target_stat(namespace, dispatch, plan.link_abs)
@@ -756,7 +756,7 @@ async def make_link(
         )
         return
     backup_note = ""
-    # The door refuses an occupied name for a symlink; a byte copy would
+    # The entry point refuses an occupied name for a symlink; a byte copy would
     # overwrite one, and a backup has to see it first, so those two probe.
     # A backup moves a file aside, never a directory: GNU refuses the
     # directory (`ln -bT a d` is `cannot overwrite directory`) where it
@@ -792,7 +792,7 @@ async def make_link(
             occupied = False
     elif flags.force:
         # GNU -f is "remove the destination, then link", which is why it
-        # replaces a regular file and not only a link. The door refuses
+        # replaces a regular file and not only a link. The entry point refuses
         # an occupied name (symlink(2)'s EEXIST), so the removal is what
         # makes the flag work rather than a formality; a destination
         # that is not there is what -f is for, so its miss is the
@@ -817,7 +817,7 @@ async def make_link(
         # A byte copy lands through the backend's write, which on a
         # keyed store makes the key whatever stands above it. ln is not
         # mkdir -p, so the parent chain of the name (absent by now) is
-        # judged first, as cp judges its destination's; the door judges
+        # judged first, as cp judges its destination's; the entry point judges
         # a symlink's itself.
         why = await absent_dest_error(
             partial(dispatch_stat, dispatch), link_spec
@@ -831,14 +831,14 @@ async def make_link(
         else:
             await dispatch("write", link_spec, data=data)
     except (FileNotFoundError, NotADirectoryError, DotWalkLoop) as exc:
-        # The door refuses a name its parent cannot hold (symlink(2)'s
+        # The entry point refuses a name its parent cannot hold (symlink(2)'s
         # ENOENT, ENOTDIR and ELOOP), and a store's write refuses the
         # same way.
         why = classify(exc) or FsCondition.ENOENT
         errors.append(_refused(flags, typed, target_typed, why))
         return
     except FileExistsError:
-        # The door owns the existence rule (it is the only layer that
+        # The entry point owns the existence rule (it is the only layer that
         # can see both the node table and the backend); ln owns the
         # wording.
         errors.append(f"ln: failed to create {kind} '{typed}': File exists\n")
@@ -873,10 +873,10 @@ async def handle_ln(
     session: SessionState,
     args: list[str | PathSpec],
 ) -> Result:
-    """ln [OPTION]... TARGET... : GNU ln over the namespace and the op door.
+    """ln [OPTION]... TARGET... : GNU ln over the namespace and the dispatcher.
 
     ``-s`` makes a namespace symbolic link. Without it mirage has no hard
-    link to offer, so the "link" is a byte copy through the op door, with
+    link to offer, so the "link" is a byte copy through the dispatcher, with
     one faithful exception: a hard link of a symlink is the link itself
     (GNU's default, ``-P``), so it becomes a second symlink with the same
     target, and ``-L`` copies the target's bytes instead.
@@ -888,7 +888,7 @@ async def handle_ln(
     link is made; ``-f`` removes it. ``-d``/``-F`` only change the
     wording of the refusal a directory source gets, since nobody is root
     here. Every write is a dispatch op, so session grants and admission
-    policies fire at the door; this handler keeps the operand semantics
+    policies fire at the entry point; this handler keeps the operand semantics
     and renders refusals in ln's own words.
 
     Args:

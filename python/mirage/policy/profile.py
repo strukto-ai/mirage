@@ -293,7 +293,7 @@ class PathsBlock(BaseModel):
         show (tuple[ShowEntry, ...]): the profile's show entries, in
             document order.
         reasons (tuple[HideReason, ...]): why grouped hide entries
-            exist, for the operator's doors only.
+            exist, for the operator's entry points only.
     """
 
     model_config = _DOC
@@ -565,7 +565,7 @@ class ProfilePolicy(BaseModel):
 
     Args:
         script (ScriptSource | str): the policy program. A ``str`` is
-            the path form the config door accepts and loads; code
+            the path form the config loader accepts and loads; code
             passes the loaded ``ScriptSource``, so a path still spelled
             as a string when the workspace reads it means the config
             layer never saw it, and is refused there.
@@ -588,9 +588,9 @@ class SessionProfile(BaseModel):
     no mount-owned block above it, so reading this object is reading
     everything the profile may do; what a profile does not say, it does not
     restrict. Configuration, not enforcement: the resolver compiles it
-    onto the session's narrowing fields and the doors keep enforcing.
+    onto the session's narrowing fields and the entry points keep enforcing.
     Deliberately not named a View, which per the view convention is a
-    door-scoped handle an agent holds, while a profile is what the
+    entry point-scoped handle an agent holds, while a profile is what the
     embedder uses to *define* one. Frozen so two agents with the same
     profile share one object and neither can bend the other's view.
 
@@ -605,7 +605,7 @@ class SessionProfile(BaseModel):
     the hooks it cares about: ``pre_command(ctx)`` per command,
     ``pre_vfs(ctx)`` per VFS op, ``pre_session(ctx)`` per env write
     (``preCommand``, ``preVfs``, ``preSession`` in JavaScript). Each is
-    handed the door's facts as ``ctx`` and answers with ``return``:
+    handed the entry point's facts as ``ctx`` and answers with ``return``:
     allow (no opinion), deny, or at the command gate ask, so it
     expresses the conditions a declarative rule cannot; like every
     policy, it can only restrict, never grant past a deny. A block

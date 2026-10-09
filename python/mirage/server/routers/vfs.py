@@ -122,7 +122,7 @@ async def json_body(request: Request) -> dict[str, JsonValue]:
 
 
 def failure(exc: Exception) -> JSONResponse:
-    """A call's failure as the HTTP doors answer it: the errno it names
+    """A call's failure as the HTTP entry points answer it: the errno it names
     picks the status, and the body carries the errno, the text and, for
     a policy's refusal, its record.
 

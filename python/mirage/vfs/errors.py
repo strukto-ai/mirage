@@ -17,6 +17,6 @@ class VFSConfigError(ValueError):
     """A mount config the caller got wrong.
 
     Raised by ``build_vfs`` and by a VFS constructor that refuses a
-    field. It subclasses ``ValueError`` so every door that already
+    field. It subclasses ``ValueError`` so every entry point that already
     answers a bad config as the caller's mistake keeps doing so.
     """

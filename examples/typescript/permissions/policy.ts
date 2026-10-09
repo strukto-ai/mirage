@@ -23,8 +23,8 @@ import {
   type SessionContext,
 } from '@struktoai/mirage-node'
 
-// A release workspace under two policies, one through each door code
-// has, and the point of the example is what each door is for:
+// A release workspace under two policies, one through each entry point code
+// has, and the point of the example is what each entry point is for:
 //
 //   a coded Policy     an object passed as `policies: [...]`. It runs in
 //                      this process, needs no engine, may define any of
@@ -85,9 +85,9 @@ const LINES: [string, string, string][] = [
   ['reviewer', 'cat /repo/notes.txt', 'pre_command read the file and found no marker'],
   ['reviewer', 'cat /repo/flagged.txt', 'and refuses one that holds it; the reason is for the operator'],
   ['reviewer', 'cat /scratch/cold/k', 'pre_vfs lets a read through'],
-  ['reviewer', 'echo x > /scratch/cold/f', 'and refuses a write at the op door'],
+  ['reviewer', 'echo x > /scratch/cold/f', 'and refuses a write at the dispatcher'],
   ['reviewer', 'rm /scratch/cold/k', 'whichever command asked for it'],
-  ['reviewer', 'export AWS_SECRET=x', 'the coded policy, at the session door'],
+  ['reviewer', 'export AWS_SECRET=x', 'the coded policy, at the session view'],
   ['reviewer', 'export SAFE=1 && echo $SAFE', 'silence where no hook objects'],
   ['host', 'cat /repo/flagged.txt', 'no profile, so no program'],
   ['host', 'export AWS_SECRET=x', 'the coded policy speaks for every session'],
@@ -133,8 +133,8 @@ async function main(): Promise<void> {
       console.log(`${pad('', 9)} ${pad('', 30)} ${note}`)
     }
 
-    // A dry run names who would speak, through the session's own doors:
-    // a line, as the tree of its commands, and one VFS call of a door that
+    // A dry run names who would speak, through the session's own entry points:
+    // a line, as the tree of its commands, and one VFS call of an entry point that
     // sees no command (a file tool, FUSE).
     const explain = (await ws.session('reviewer')).explain
     const shellRes = await explain.shell('cat /repo/flagged.txt')

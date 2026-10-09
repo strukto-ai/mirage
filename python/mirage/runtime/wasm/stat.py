@@ -31,7 +31,7 @@ def filetype_of(row: VFSStat | VFSEntry) -> int:
 
     Args:
         row (VFSStat | VFSEntry): the row to classify; a listing row
-            with no mode is one the door could not classify.
+            with no mode is one the entry point could not classify.
     """
     if row.is_link:
         return FT_SYMLINK

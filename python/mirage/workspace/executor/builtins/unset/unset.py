@@ -61,7 +61,7 @@ async def _fatal_index(
     Args:
         session (SessionState): the session the subscript reads.
         subscript (str): the raw subscript text.
-        view (SessionView): the gated door.
+        view (SessionView): the gated session view.
     """
     try:
         return await subscript_index(session, subscript, view)
@@ -86,14 +86,14 @@ async def _unset_element(
     after the extent is added is a bad-subscript error.
 
     The element mechanics are the builtin's own, but the landing write
-    goes through the door: a scalar's element 0 is the whole unset,
+    goes through the entry point: a scalar's element 0 is the whole unset,
     and an array's hole punch is computed on a copy and stored with
     ``view.set``, so a denial leaves the array untouched. Validation
     errors write nothing and so never ask.
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         base (str): the variable name without the subscript.
         subscript (str): the subscript text between the brackets.
 

@@ -165,7 +165,7 @@ async def _list_subtree(conn: HfConn, stem: str) -> AsyncIterator[TreeEntry]:
 async def _head(conn: HfConn, key: str) -> ObjectMeta | None:
     # paths-info, not opendal's stat: the binding reads the bucket's xet
     # hash only for the size and drops it, so a bucket stat through it
-    # carries no token. A Hub refusal propagates; the stat door names the
+    # carries no token. A Hub refusal propagates; the stat function names the
     # path it was asked about, which a key cannot.
     row = await fetch_row(conn.accessor, key)
     if row is None:

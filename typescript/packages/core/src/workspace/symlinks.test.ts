@@ -151,7 +151,7 @@ describe('symlinks (namespace-backed)', () => {
   })
 
   it('mv of a link passes the admission gate', async () => {
-    // The link rename is the door's, so a policy that denies it wins. mv
+    // The link rename is the entry point's, so a policy that denies it wins. mv
     // used to move the node itself, which made it the one write in the
     // shell no admission policy could see.
     const ram = new RAMVFS()
@@ -1297,7 +1297,7 @@ describe('trailing slash on a link name', () => {
     // Pinned on coreutils 9.7: symlink(2) and link(2) answer `missing/`
     // with ENOENT and create nothing, the hard-link line naming its
     // source; a directory takes the link inside it as before, and a file
-    // behind the slash is still the door's "File exists".
+    // behind the slash is still the entry point's "File exists".
     const ws = buildWorkspace()
     await ws.shell('printf hi > /data/a.txt; printf y > /data/reg; mkdir -p /data/d')
     for (const [line, wording] of [
@@ -1392,7 +1392,7 @@ describe('trailing slash on a link name', () => {
   })
 })
 
-it('follows parent-relative link chains through the op door', async () => {
+it('follows parent-relative link chains through the dispatcher', async () => {
   const ws = buildWorkspace()
   await ws.shell(
     'mkdir /data/s; echo hello > /data/a.txt; ln -s ../next /data/s/al; ln -s ./a.txt /data/next',

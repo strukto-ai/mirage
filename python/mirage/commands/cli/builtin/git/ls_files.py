@@ -30,7 +30,7 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     start_point,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 
@@ -51,13 +51,13 @@ async def ls_files(
     fl = FlagView(inv.flags)
     try:
         check_switches(inv, inv.texts)
-        doors = inv.doors or CLIDoors()
-        _, location = await opened(fl, doors)
-        assert doors.dispatch is not None
+        view = inv.view or CLIView()
+        _, location = await opened(fl, view)
+        assert view.dispatch is not None
         fully = await config_bool(
-            doors.dispatch, location, b"core", b"quotepath", True
+            view.dispatch, location, b"core", b"quotepath", True
         )
-        state = await read_index(doors.dispatch, location.gitdir)
+        state = await read_index(view.dispatch, location.gitdir)
         start = start_point(fl).virtual
         prefix = repo_relative(location, start, ".")
         patterns = pathspec_patterns(location, start, inv.texts)
