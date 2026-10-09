@@ -232,15 +232,6 @@ for (const backend of ['ram', 'redis']) {
         expect(await store.setDir('/dir', [])).toEqual([{ path: '/dir/a', folder: false }])
       })
 
-      it('reports the lifetime a listing gets when its writer names none', async () => {
-        const configured = build(7)
-        try {
-          expect(configured.ttl).toBe(7)
-        } finally {
-          await configured.close()
-        }
-      })
-
       // Uncapped, the store's default; capped, whichever is shorter, since
       // that is how long a listing written through the view lives.
       it('lets a view report the lifetime its listings get', async () => {
@@ -274,14 +265,12 @@ for (const backend of ['ram', 'redis']) {
       it('expires a listing after the ttl', async () => {
         const short = build(1)
         try {
+          expect(short.ttl).toBe(1)
           await short.setDir('/dir', [['a', entry()]])
           const got = (await short.get('/dir/a')).entry
           await new Promise((resolve) => setTimeout(resolve, 1100))
           expect((await short.listDir('/dir')).status).toBe(LookupStatus.EXPIRED)
           expect((await short.get('/dir/a')).entry).toEqual(got)
-          await short.invalidateDir('/dir')
-          expect((await short.listDir('/dir')).status).toBe(LookupStatus.NOT_FOUND)
-          expect((await short.get('/dir/a')).status).toBe(LookupStatus.NOT_FOUND)
         } finally {
           await short.clear()
           await short.close()

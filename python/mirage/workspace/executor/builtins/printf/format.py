@@ -384,27 +384,16 @@ def _format_hex_float(
         precision (int | None): hex-digit precision.
         upper (bool): uppercase (``%A``) form.
     """
-    if value != value:
-        body = "nan"
-        return _apply_pad(
-            "", body.upper() if upper else body, flags, width, False
-        )
-    if value in (float("inf"), float("-inf")):
-        sign = (
-            "-"
-            if value < 0
-            else ("+" if "+" in flags else (" " if " " in flags else ""))
-        )
-        body = "inf"
-        return _apply_pad(
-            sign, body.upper() if upper else body, flags, width, False
-        )
-    neg = math.copysign(1.0, value) < 0
     sign = (
         "-"
-        if neg
+        if math.copysign(1.0, value) < 0
         else ("+" if "+" in flags else (" " if " " in flags else ""))
     )
+    if not math.isfinite(value):
+        body = "nan" if math.isnan(value) else "inf"
+        sign = "" if body == "nan" else sign
+        body = body.upper() if upper else body
+        return _apply_pad(sign, body, flags, width, False)
     mant, exp = math.frexp(abs(value))
     if abs(value) == 0.0:
         lead, frac_hex, exp2 = 0, "", 0
@@ -438,42 +427,19 @@ def _format_hex_float(
 def _round_hex(frac_hex: str, precision: int) -> str:
     if precision >= len(frac_hex):
         return frac_hex.ljust(precision, "0")
+    if not precision:
+        return ""
     kept = frac_hex[:precision]
-    nxt = frac_hex[precision]
-    val = int(kept, 16) if kept else 0
-    nd = int(nxt, 16)
+    nd = int(frac_hex[precision], 16)
     round_up = nd > 8 or (
         nd == 8
         and (
             int(frac_hex[precision + 1 :] or "0", 16) > 0
-            or (kept and int(kept[-1], 16) % 2 == 1)
+            or int(kept[-1], 16) % 2 == 1
         )
     )
-    if round_up:
-        val += 1
-    result = format(val, "x").rjust(precision, "0") if precision else ""
-    return result[-precision:] if precision else ""
-
-
-def _format_printf_str(
-    s: str, flags: str, width: int | None, precision: int | None
-) -> str:
-    """Render a string for ``%s`` with GNU printf width/precision rules.
-
-    Args:
-        s (str): the value.
-        flags (str): active flags.
-        width (int | None): minimum field width.
-        precision (int | None): maximum character count.
-    """
-    if precision is not None:
-        s = s[:precision]
-    return _apply_pad("", s, flags, width, False)
-
-
-def _format_char(value: str, flags: str, width: int | None) -> str:
-    ch = value[0] if value else "\0"
-    return _apply_pad("", ch, flags, width, False)
+    rounded = format(int(kept, 16) + round_up, "x")
+    return rounded.rjust(precision, "0")[-precision:]
 
 
 def _expand_escapes(s: str, warnings: list[str]) -> tuple[str, bool]:
@@ -674,38 +640,28 @@ def run_printf(
                 if conv == "%":
                     out.append("%")
                     continue
-                if width == "*":
+                for prec in (False, True):
+                    if (precision if prec else width) != "*":
+                        continue
                     star = args[arg_i] if arg_i < total else "0"
                     if arg_i < total:
                         arg_i += 1
                     following = args[arg_i] if arg_i < total else None
-                    wv, err, fatal = _star_value(
-                        star, False, following, program, posix, messages
+                    value, err, fatal = _star_value(
+                        star, prec, following, program, posix, messages
                     )
                     if err is not None:
                         messages.append(err)
                         failed = True
                     if fatal:
                         return "".join(out), messages, True, None
-                    if wv < 0:
+                    if prec:
+                        precision = None if value < 0 else value
+                    elif value < 0:
                         flags += "-"
-                        width = -wv
+                        width = -value
                     else:
-                        width = wv
-                if precision == "*":
-                    star = args[arg_i] if arg_i < total else "0"
-                    if arg_i < total:
-                        arg_i += 1
-                    following = args[arg_i] if arg_i < total else None
-                    pv, err, fatal = _star_value(
-                        star, True, following, program, posix, messages
-                    )
-                    if err is not None:
-                        messages.append(err)
-                        failed = True
-                    if fatal:
-                        return "".join(out), messages, True, None
-                    precision = None if pv < 0 else pv
+                        width = value
                 raw = args[arg_i] if arg_i < total else None
                 if raw is not None:
                     arg_i += 1
@@ -755,25 +711,17 @@ def _convert(
         warnings (list[str]): collects the escape warnings of a ``%b``
             argument and the numeric warnings.
     """
-    if conv == "s":
-        return (
-            _format_printf_str(raw or "", flags, width, precision),
-            None,
-            False,
-        )
-    if conv == "c":
-        return _format_char(raw or "", flags, width), None, False
-    if conv == "b":
-        text, stop = _expand_escapes(raw or "", warnings)
-        if precision is not None:
+    if conv in "sbcq":
+        text, stop = raw or "", False
+        if conv == "b":
+            text, stop = _expand_escapes(text, warnings)
+        elif conv == "q":
+            text = _quote_shell(text)
+        elif conv == "c":
+            text = text[:1] or "\0"
+        if precision is not None and conv in "sb":
             text = text[:precision]
         return _apply_pad("", text, flags, width, False), None, stop
-    if conv == "q":
-        return (
-            _apply_pad("", _quote_shell(raw or ""), flags, width, False),
-            None,
-            False,
-        )
     if conv in ("d", "i", "o", "u", "x", "X"):
         value, err = (
             (0, None)
