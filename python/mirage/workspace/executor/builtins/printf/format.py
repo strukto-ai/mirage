@@ -637,7 +637,9 @@ def run_printf(
     A ``\\c`` in a ``%b`` argument returns at once and reports no
     failure. bash's ``%b`` returns there with the status it has so far,
     and only the end of the builtin folds an invalid number into it, so
-    bash 5.2.37 exits 0 for ``printf '%d%b' abc '\\c'``.
+    bash 5.2.37 exits 0 for ``printf '%d%b' abc '\\c'``. coreutils 9.7's
+    program stops there with status 0 as well, an earlier numeric error
+    or not (``env printf '%f%b' 1e99999 '\\c'``).
 
     Args:
         fmt (str): the format string.
