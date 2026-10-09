@@ -357,10 +357,11 @@ class _MountChannel:
     entry point, which is what lets the cascade see hidden entries.
 
     Each deletion answers the same pre-vfs admission a dispatched op
-    answers, with its own child path: the gate that admitted the rmdir
-    judged the directory, not what the cascade found under it, and a
-    policy that protects one of those paths must refuse its deletion
-    exactly as it would refuse a first-class op. Each deletion also
+    answers, with its own child path, and the running command's path
+    rules: the gate that admitted the rmdir judged the directory, not
+    what the cascade found under it, and a policy or rule that protects
+    one of those paths must refuse its deletion exactly as it would
+    refuse a first-class op. Each deletion also
     discharges the dispatcher's own write invalidation, the way normal
     dispatch does for its one op and the TS ``fencedCall`` does per
     call: ``call`` runs outside the cache-manager context command
@@ -379,11 +380,14 @@ class _MountChannel:
             after the entry is gone and strand the cascade.
         invalidate (Callable): the dispatcher's write invalidation,
             bound to that mount.
+        rule_gate (EntryGate | None): the running command's gate, None
+            for a call no command issued.
     """
 
     mount: MountEntry
     boundary: Boundary
     invalidate: Callable[[PathSpec], Awaitable[None]]
+    rule_gate: EntryGate | None
 
     async def readdir(self, spec: PathSpec) -> list[str]:
         return await self.mount.call("readdir", spec.virtual)
@@ -392,6 +396,8 @@ class _MountChannel:
         return await self.mount.call("stat", spec.virtual)
 
     async def unlink(self, spec: PathSpec) -> None:
+        if self.rule_gate is not None:
+            self.rule_gate.check(spec.virtual)
         await self.boundary.admit("unlink", spec, True, check_hidden=False)
         try:
             await self.mount.call("unlink", spec.virtual)
@@ -399,6 +405,8 @@ class _MountChannel:
             await self.invalidate(spec)
 
     async def rmdir(self, spec: PathSpec) -> None:
+        if self.rule_gate is not None:
+            self.rule_gate.check(spec.virtual)
         await self.boundary.admit("rmdir", spec, True, check_hidden=False)
         try:
             await self.mount.call("rmdir", spec.virtual)
@@ -1167,7 +1175,7 @@ class Dispatcher:
                 errno.EEXIST,
             ):
                 raise
-            await self._rmdir_remnants(mount, call.path, exc)
+            await self._rmdir_remnants(mount, call.path, exc, call.rule_gate)
             result = None
             if call.report is not None:
                 call.report.served(None, None)
@@ -1270,7 +1278,10 @@ class Dispatcher:
 
         The write's own record labels them with the token the backend
         answered, so a ``fresh`` mount does not refetch what it just wrote;
-        a record moving another length than was sent keeps nothing.
+        a record moving another length than was sent keeps nothing. On a
+        mount whose reads carry a content token, a write that answered
+        none keeps nothing either: the service may store other bytes than
+        it was sent, as SharePoint rewrites an uploaded Office file.
 
         Args:
             call (_Call): the write that ran.
@@ -1284,6 +1295,17 @@ class Dispatcher:
             or not isinstance(data, bytes)
             or not facts.cacheable
         ):
+            return
+        token = next(
+            (
+                rec.fingerprint
+                for rec in reversed(records)
+                if rec.op in WRITE_FINGERPRINT_OPS
+                and rec.path == call.path.virtual
+            ),
+            None,
+        )
+        if mount.vfs.read_revalidatable and not token:
             return
         # Copies, so the line's records do not hold the written bytes.
         claims = [
@@ -1440,7 +1462,11 @@ class Dispatcher:
         return not isinstance(row, FileStat) or row.type is FileType.DIRECTORY
 
     async def _rmdir_remnants(
-        self, mount: MountEntry, path: PathSpec, refusal: OSError
+        self,
+        mount: MountEntry,
+        path: PathSpec,
+        refusal: OSError,
+        rule_gate: EntryGate | None,
     ) -> None:
         """Take a visibly-empty directory's hidden remnants with it.
 
@@ -1462,6 +1488,8 @@ class Dispatcher:
             mount (MountEntry): the mount owning the directory.
             path (PathSpec): the directory being removed.
             refusal (OSError): the backend's not-empty error.
+            rule_gate (EntryGate | None): the running command's gate,
+                judged on each deletion.
         """
         vis = session_visibility()
         if not hidden_under(vis, path.virtual):
@@ -1494,6 +1522,7 @@ class Dispatcher:
             functools.partial(
                 self.invalidate_after_write, mount, removed=True
             ),
+            rule_gate,
         )
         try:
             await remove_remnants(channel, visible, path)

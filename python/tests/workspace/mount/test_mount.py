@@ -238,6 +238,22 @@ def test_write_mode_allows_write_cmd():
     assert io.exit_code == 0
 
 
+def test_a_write_with_no_dispatcher_still_answers_the_mount_mode():
+    # A host running a command straight on its mount has no dispatcher to
+    # judge the writes, so the slots are guarded here instead.
+    ram = RAMVFS()
+    reg = MountRegistry()
+    reg.mount("/ro/", ram, MountMode.READ)
+    mount = reg.mount_for("/ro/f")
+    scope = PathSpec.from_str_path("/ro/f")
+    _, io = _run(
+        mount.run_command("tee", [scope], [], {}, ExecContext(stdin=b"x"))
+    )
+    assert io.exit_code == 1
+    assert b"Read-only file system" in _run(io.materialize_stderr())
+    assert "/f" not in ram._store.files
+
+
 def test_read_only_allows_read_cmd():
     reg = MountRegistry()
     reg.mount("/ro/", RAMVFS(), MountMode.READ)

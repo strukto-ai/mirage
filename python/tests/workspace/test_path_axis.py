@@ -542,6 +542,29 @@ def test_rmdir_takes_hidden_remnants_with_the_directory():
     assert gone.exit_code == 1
 
 
+def test_a_command_rule_on_a_hidden_remnant_keeps_the_refusal():
+    # `rmdir -p` reaches the parent after its operand, so the rule that
+    # admitted the line judged neither the parent nor what the cascade
+    # finds under it; a rule naming rmdir on the hidden file refuses its
+    # deletion, so the parent's refusal stands and the file stays.
+    ws = _boxed(
+        {
+            "paths": {"hide": ["/repo/only/h"]},
+            "commands": {
+                "deny": [
+                    {"reason": "kept", "commands": {"rmdir": ["/repo/only/h"]}}
+                ]
+            },
+        }
+    )
+    assert _host(ws, "mkdir /repo/only/leaf").exit_code == 0
+    refused = _run(ws, "rmdir -p /repo/only/leaf")
+    assert refused.exit_code == 1
+    assert b"Directory not empty" in (refused.stderr or b"")
+    kept = _host(ws, "cat /repo/only/h")
+    assert (kept.stdout or b"") == b"h\n"
+
+
 def test_rmdir_with_a_visible_child_keeps_the_refusal():
     ws = _boxed({"paths": {"hide": ["/repo/box/sec"]}})
     refused = _run(ws, "rmdir /repo/box")

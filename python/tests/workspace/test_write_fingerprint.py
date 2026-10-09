@@ -175,6 +175,32 @@ def test_a_write_outside_a_line_keeps_its_bytes_with_the_backend_token():
     assert client.calls["get_object"] == 0
 
 
+def test_a_write_after_a_guarded_cp_keeps_its_own_bytes():
+    # Under a hide `cp` reads and writes entry by entry at the dispatcher;
+    # a later write keeps its own bytes and token, which the old read's
+    # must not replace when the command's result is applied.
+    store = {"a": b"old"}
+    with _workspace(store, ReadSpec(policy=ReadPolicy.BOUNDED)) as (ws, _):
+
+        async def run() -> tuple[int, bytes | None]:
+            try:
+                ws.create_session(
+                    "agent", profile={"paths": {"hide": ["*.secret"]}}
+                )
+                io = await ws.shell(
+                    "cp /s3/a /s3/b; printf new | tee /s3/a > /dev/null",
+                    session_id="agent",
+                )
+                return io.exit_code, await ws.cache.get("/s3/a")
+            finally:
+                await ws.close()
+
+        code, cached = asyncio.run(run())
+
+    assert code == 0
+    assert cached == b"new"
+
+
 def test_read_then_write_on_one_line_keeps_the_read_token():
     """`IOResult.merge` unions a line's reads and writes, and apply_io
     caches the read's bytes. If those bytes were stamped with the write's

@@ -22,6 +22,7 @@ import {
 
 const FRESH: ReadSpec = { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL }
 const BOUNDED: ReadSpec = { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL }
+import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { S3Config } from '../vfs/s3/config.ts'
 import { installS3Mock, type S3Mock } from '../vfs/s3/mock.ts'
@@ -129,6 +130,26 @@ describe('object-store write fingerprint (mocked S3)', () => {
       expect(await ws.vfs.cat('/s3/x.txt')).toBe('hello\n')
       expect(await ws.cache.isFresh('/s3/x.txt', etagOf('hello\n'))).toBe(true)
       expect(mock.calls.get('GetObject') ?? 0).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a write after a guarded cp keeps its own bytes', async () => {
+    // Under a hide `cp` reads and writes entry by entry at the dispatcher;
+    // a later write keeps its own bytes and token, which the old read's
+    // must not replace when the command's result is applied.
+    mock.store.set(BUCKET, 'a', ENC.encode('old'))
+    const ws = makeWorkspace(BOUNDED)
+    try {
+      ws.createSession('agent', {
+        profile: parseSessionProfile({ paths: { hide: ['*.secret'] } }),
+      })
+      const io = await ws.shell('cp /s3/a /s3/b; printf new | tee /s3/a > /dev/null', {
+        sessionId: 'agent',
+      })
+      expect(io.exitCode).toBe(0)
+      expect(await ws.cache.get('/s3/a')).toEqual(ENC.encode('new'))
     } finally {
       await ws.close()
     }

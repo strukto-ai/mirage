@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import hashlib
 
 import pytest
 
@@ -75,11 +74,11 @@ def _files(hub: FakeHub) -> dict[str, bytes]:
 
 
 @pytest.mark.asyncio
-async def test_a_written_path_carries_no_token_then_heals_in_one_read():
+async def test_a_written_path_keeps_nothing_then_one_read_keeps_its_token():
     # #1138. A bucket write stamps no token (opendal reports none, and #1101
-    # Phase 1 adds no stat after a write), so the written entry verifies
-    # against nothing: the first fresh read refetches once, and that read's
-    # stamp makes every read after it warm.
+    # Phase 1 adds no stat after a write), so on a mount whose reads carry
+    # one the write keeps nothing: the first read fetches once, and that
+    # read's stamp makes every read after it warm.
     with serve(_hub({})) as hub:
         ws = _ws(_vfs(hub))
         try:
@@ -90,12 +89,7 @@ async def test_a_written_path_carries_no_token_then_heals_in_one_read():
                 if r.op == "write"
             ]
             assert writes == [None]
-            # Absent, not merely different: an invented token would pass a
-            # check that only compared it with the xet hash.
-            assert ws.cache._entries["/m/w.txt"].fingerprint is None
-            assert not await ws.cache.is_fresh(
-                "/m/w.txt", hashlib.md5(b"hi\n").hexdigest()
-            )
+            assert not await ws.cache.exists("/m/w.txt")
             before = hub.count("bucket_resolve")
             assert await _out(ws, "cat /m/w.txt") == b"hi\n"
             assert hub.count("bucket_resolve") == before + 1

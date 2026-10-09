@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { createHash } from 'node:crypto'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
-import type { RAMFileCacheStore } from '@struktoai/mirage-core/cache/file/ram'
 import { DEFAULT_READ_TTL, MountMode, PathSpec, ReadPolicy } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -81,29 +79,19 @@ async function out(workspace: Workspace, command: string, stdin?: Uint8Array): P
   return result.stdout
 }
 
-function storedFingerprint(workspace: Workspace, path: string): string | null | undefined {
-  const cache = workspace.cache as unknown as RAMFileCacheStore
-  return cache.snapshotEntries().find((e) => e.key === path)?.entry.fingerprint
-}
-
 describe('hf_buckets under read: fresh', () => {
-  it('heals a written path in one read', async () => {
+  it('keeps nothing for a written path, then one read keeps its token', async () => {
     // #1138. A bucket write stamps no token (opendal reports none, and #1101
-    // Phase 1 adds no stat after a write), so the written entry verifies
-    // against nothing: the first fresh read refetches once, and that read's
-    // stamp makes every read after it warm.
+    // Phase 1 adds no stat after a write), so on a mount whose reads carry
+    // one the write keeps nothing: the first read fetches once, and that
+    // read's stamp makes every read after it warm.
     const b = await bucket({})
     const w = ws(await vfsOf(b))
     try {
       await out(w, 'tee /m/w.txt', ENC.encode('hi\n'))
       const writes = w.networkRecords.filter((r) => r.op === 'write').map((r) => r.fingerprint)
       expect(writes).toEqual([null])
-      // Absent, not merely different: an invented token would pass a check
-      // that only compared it with the xet hash.
-      expect(storedFingerprint(w, '/m/w.txt') ?? null).toBeNull()
-      expect(
-        await w.cache.isFresh('/m/w.txt', createHash('md5').update('hi\n').digest('hex')),
-      ).toBe(false)
+      expect(await w.cache.exists('/m/w.txt')).toBe(false)
       const before = b.hub.count('bucket_resolve')
       expect(DEC.decode(await out(w, 'cat /m/w.txt'))).toBe('hi\n')
       expect(b.hub.count('bucket_resolve')).toBe(before + 1)

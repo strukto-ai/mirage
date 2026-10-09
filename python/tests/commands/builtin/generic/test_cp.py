@@ -150,7 +150,8 @@ async def test_recursive_into_nested_subtree_refused():
 
 
 @pytest.mark.asyncio
-async def test_primitive_copy_records_source_reads():
+async def test_primitive_copy_reports_no_reads():
+    # Its reads went through the dispatcher, which keeps what it fetched.
     files = {"/a.txt": b"AAA"}
     stat, _, _ = _make_backend(files, set())
 
@@ -169,8 +170,8 @@ async def test_primitive_copy_records_source_reads():
         flags=CpFlags(),
     )
     assert files["/copy.txt"] == b"AAA"
-    assert io.reads == {"/a.txt": b"AAA"}
-    assert io.cache == ["/a.txt"]
+    assert io.reads == {}
+    assert io.cache == []
 
 
 @pytest.mark.asyncio

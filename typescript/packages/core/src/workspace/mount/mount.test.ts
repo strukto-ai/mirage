@@ -241,6 +241,30 @@ describe('Mount.runCommand', () => {
     },
   )
 
+  it('guards the writes of a run with no dispatcher', async () => {
+    // A host running a command straight on its mount has no dispatcher to
+    // judge the writes, so the slots are guarded here instead.
+    const vfs = new RAMVFS()
+    const m = new MountEntry({ prefix: '/ro/', vfs, mode: MountMode.READ })
+    const tee = commandsFor(vfs).find((cmd) => cmd.name === 'tee')
+    if (tee === undefined) throw new Error('missing tee')
+    m.register(tee)
+    const [, io] = await m.runCommand(
+      'tee',
+      [PathSpec.fromStrPath('/ro/f')],
+      [],
+      {},
+      {
+        stdin: new TextEncoder().encode('x'),
+      },
+    )
+    expect(io.exitCode).toBe(1)
+    expect(new TextDecoder().decode(await materialize(io.stderr))).toContain(
+      'Read-only file system',
+    )
+    expect(vfs.store.files.has('/f')).toBe(false)
+  })
+
   it('returns 127 for unknown command', async () => {
     const m = makeMount()
     const [, io] = await m.runCommand('nope', [], [], {})

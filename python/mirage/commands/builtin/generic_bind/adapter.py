@@ -528,7 +528,22 @@ def _dispatched_writes(ops: CommandIO, dispatch: DispatchFn) -> dict[str, Any]:
     }
 
 
-def dispatched_io(ops: CommandIO, dispatch: DispatchFn) -> CommandIO:
+async def _guarded_write(
+    fn: OperationFn, slot: str, *args: Any, **kwargs: Any
+) -> Any:
+    """A write slot no dispatcher judges, guarded at the call, inside the
+    command's scope, where its session, mount mode and policies are bound.
+
+    Args:
+        fn (OperationFn): the raw backend write.
+        slot (str): the slot it fills.
+        *args: the call's positionals.
+        **kwargs: forwarded untouched.
+    """
+    return await _with_operation_guards(fn, slot)(*args, **kwargs)
+
+
+def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
     """Return ``ops`` whose content reads and writes go through the
     dispatcher.
 
@@ -536,12 +551,22 @@ def dispatched_io(ops: CommandIO, dispatch: DispatchFn) -> CommandIO:
     policy, serves a warm copy and fills a cold one, and settles a write's
     caches and receipt under its name's hold, so a command's read or write
     answers what the same call through ``ws.vfs`` or FUSE answers. A slot
-    the backend does not have stays absent.
+    the backend does not have stays absent. With no dispatcher (a host
+    running a command straight on its mount) the reads stay the backend's
+    and each write slot is guarded here, since the command guards leave
+    the write slots to the dispatcher.
 
     Args:
         ops (CommandIO): the mount's table.
-        dispatch (DispatchFn): the command's dispatcher.
+        dispatch (DispatchFn | None): the command's dispatcher.
     """
+    if dispatch is None:
+        guarded: dict[str, Any] = {
+            slot: functools.partial(_guarded_write, fn, slot)
+            for slot in _DISPATCHED_WRITES
+            if (fn := getattr(ops, slot)) is not None
+        }
+        return replace(ops, **guarded)
     reader = functools.partial(_dispatched_bytes, dispatch)
     return replace(
         ops,

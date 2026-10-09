@@ -554,6 +554,23 @@ describe('subtree mutations against hides', () => {
     expect(gone.exitCode).toBe(1)
   })
 
+  it('a command rule on a hidden remnant keeps the refusal', async () => {
+    // `rmdir -p` reaches the parent after its operand, so the rule that
+    // admitted the line judged neither the parent nor what the cascade
+    // finds under it; a rule naming rmdir on the hidden file refuses its
+    // deletion, so the parent's refusal stands and the file stays.
+    const ws = await boxed({
+      paths: { hide: ['/repo/only/h'] },
+      commands: { deny: [{ reason: 'kept', commands: { rmdir: ['/repo/only/h'] } }] },
+    })
+    expect((await ws.shell('mkdir /repo/only/leaf')).exitCode).toBe(0)
+    const refused = await ws.shell('rmdir -p /repo/only/leaf', { sessionId: 'rev' })
+    expect(refused.exitCode).toBe(1)
+    expect(stderrStr(refused)).toContain('Directory not empty')
+    const kept = await ws.shell('cat /repo/only/h')
+    expect(stdoutStr(kept)).toBe('h\n')
+  })
+
   it('rmdir with a visible child keeps the refusal', async () => {
     const ws = await boxed({ paths: { hide: ['/repo/box/sec'] } })
     const refused = await ws.shell('rmdir /repo/box', { sessionId: 'rev' })

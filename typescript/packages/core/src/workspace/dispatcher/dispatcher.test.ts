@@ -1772,3 +1772,42 @@ describe('a command reads at the dispatcher', () => {
     }
   })
 })
+
+describe('a whole write keeps its bytes', () => {
+  it.each([false, true])(
+    'only where reads carry no token unless the write answered one (revalidatable=%s)',
+    async (revalidatable) => {
+      // A service whose reads carry a content token but whose write
+      // answered none may store other bytes than it was sent (SharePoint
+      // rewrites an uploaded Office file).
+      class Kept extends RAMVFS {
+        override readonly cachesReads = true
+        override readonly readRevalidatable = revalidatable
+      }
+      const ws = new Workspace({ '/r': new Kept() }, { mode: MountMode.WRITE })
+      try {
+        await ws.vfs.write('/r/f', 'sent')
+        expect(await ws.cache.get('/r/f')).toEqual(
+          revalidatable ? null : new TextEncoder().encode('sent'),
+        )
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('as a copy, so the caller can reuse its buffer', async () => {
+    class Kept extends RAMVFS {
+      override readonly cachesReads = true
+    }
+    const ws = new Workspace({ '/r': new Kept() }, { mode: MountMode.WRITE })
+    try {
+      const data = new TextEncoder().encode('sent')
+      await ws.vfs.write('/r/f', data)
+      data.fill(0)
+      expect(await ws.cache.get('/r/f')).toEqual(new TextEncoder().encode('sent'))
+    } finally {
+      await ws.close()
+    }
+  })
+})

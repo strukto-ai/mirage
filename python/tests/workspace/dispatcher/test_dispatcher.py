@@ -782,7 +782,7 @@ async def test_the_remnant_channel_invalidates_each_deletion():
     boundary = MagicMock()
     boundary.admit = admit
     boundary.complete = AsyncMock()
-    channel = _MountChannel(mount, boundary, invalidate)
+    channel = _MountChannel(mount, boundary, invalidate, None)
     await channel.readdir(_path("/data/d"))
     await channel.stat(_path("/data/d/h"))
     assert seen == []
@@ -1899,3 +1899,21 @@ async def test_a_command_reads_at_the_dispatcher(line):
         await out.stdout_str()
         assert out.exit_code == 0
         assert ("read", "/d/a.txt") in seen.seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("revalidatable", [False, True])
+async def test_a_write_with_no_token_keeps_nothing_where_reads_carry_one(
+    revalidatable,
+):
+    # A service whose reads carry a content token but whose write
+    # answered none may store other bytes than it was sent (SharePoint
+    # rewrites an uploaded Office file), so only a mount whose reads
+    # carry no token keeps them.
+    ram = RAMVFS()
+    ram.caches_reads = True
+    ram.read_revalidatable = revalidatable
+    with Workspace({"/r/": ram}, mode=MountMode.WRITE) as ws:
+        await ws.vfs.write("/r/f", b"sent")
+        kept = await ws.cache.get("/r/f")
+    assert kept == (None if revalidatable else b"sent")

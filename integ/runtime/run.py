@@ -688,6 +688,8 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
         await ws.dispatch(
             "write", PathSpec.from_str_path(f"{prefix}/{name}"), data=data
         )
+    # A seed is a file the backend already holds, not one the case wrote.
+    await ws.cache.clear()
     return ws
 
 

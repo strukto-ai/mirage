@@ -1113,7 +1113,7 @@ export class Dispatcher {
     } catch (err) {
       const code = (err as { code?: string }).code
       if (name === 'rmdir' && (code === 'ENOTEMPTY' || code === 'EEXIST')) {
-        await this.rmdirRemnants(vfs, scope, mountPrefix, mode, err, call.issuer)
+        await this.rmdirRemnants(vfs, scope, mountPrefix, mode, err, call.ruleGate, call.issuer)
         result = null
       } else {
         const fallback =
@@ -1138,8 +1138,12 @@ export class Dispatcher {
    *
    * The write's own record labels them with the token the backend
    * answered, so a `fresh` mount does not refetch what it just wrote; a
-   * record moving another length than was sent keeps nothing. Mirrors
-   * Python's Dispatcher._keep_written.
+   * record moving another length than was sent keeps nothing. On a mount
+   * whose reads carry a content token, a write that answered none keeps
+   * nothing either: the service may store other bytes than it was sent, as
+   * SharePoint rewrites an uploaded Office file. The bytes kept are a copy,
+   * so a caller reusing its buffer cannot change them. Mirrors Python's
+   * Dispatcher._keep_written.
    */
   private async keepWritten(
     call: Call,
@@ -1147,12 +1151,17 @@ export class Dispatcher {
     args: readonly unknown[],
     records: readonly OpRecord[],
   ): Promise<void> {
-    const data = args[0]
+    const sent = args[0]
     const facts = factsOf(mount)
-    if (call.name !== 'write' || !(data instanceof Uint8Array) || !facts.cacheable) return
+    if (call.name !== 'write' || !(sent instanceof Uint8Array) || !facts.cacheable) return
+    const own = records.filter(
+      (rec) => WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === call.path.virtual,
+    )
+    if (mount.vfs.readRevalidatable && !own.at(-1)?.fingerprint) return
+    const data = sent.slice()
     // Copies, so the line's records do not hold the written bytes.
     const claims = records.map((rec) =>
-      WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === call.path.virtual
+      own.includes(rec)
         ? new OpRecord({
             op: rec.op,
             path: rec.path,
@@ -1560,6 +1569,7 @@ export class Dispatcher {
     mountPrefix: string,
     mode: MountMode,
     refusal: unknown,
+    ruleGate: EntryGate | null,
     issuer?: symbol,
   ): Promise<void> {
     const vis = sessionVisibility()
@@ -1589,10 +1599,14 @@ export class Dispatcher {
         return Array.isArray(listed) ? listed.map(String) : []
       },
       stat: (at) => this.fencedCall(vfs, mountPrefix, mode, 'stat', at, issuer),
+      // The command's path rules judge each deletion too: the gate that
+      // admitted the rmdir judged the directory, not what is under it.
       unlink: async (at) => {
+        ruleGate?.check(at.virtual)
         await this.fencedCall(vfs, mountPrefix, mode, 'unlink', at, issuer)
       },
       rmdir: async (at) => {
+        ruleGate?.check(at.virtual)
         await this.fencedCall(vfs, mountPrefix, mode, 'rmdir', at, issuer)
       },
     }

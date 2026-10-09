@@ -338,6 +338,16 @@ function dispatchedWrites(ops: CommandIO, dispatch: DispatchFn): Partial<Command
   )
 }
 
+/** A write slot no dispatcher judges, guarded at the call. Mirrors Python's
+ * `_guarded_write`. */
+function guardedWrite(
+  fn: (...args: never[]) => Promise<unknown>,
+  slot: MutationSlot,
+): (...args: unknown[]) => Promise<unknown> {
+  const call = commandCall(policyCall(null, fn, slot), slot)
+  return walkedCall(null, call as (...args: unknown[]) => Promise<unknown>, slot === 'mkdir')
+}
+
 /**
  * Return `ops` whose content reads and writes go through the dispatcher.
  *
@@ -345,9 +355,22 @@ function dispatchedWrites(ops: CommandIO, dispatch: DispatchFn): Partial<Command
  * policy, serves a warm copy and fills a cold one, and settles a write's
  * caches and receipt under its name's hold, so a command's read or write
  * answers what the same call through `ws.vfs` or FUSE answers. A slot the
- * backend does not have stays absent. Mirrors Python's `dispatched_io`.
+ * backend does not have stays absent. With no dispatcher (a host running a
+ * command straight on its mount) the reads stay the backend's and each write
+ * slot is guarded here, since the command guards leave the write slots to
+ * the dispatcher. Mirrors Python's `dispatched_io`.
  */
-export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn): CommandIO {
+export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): CommandIO {
+  if (dispatch === undefined) {
+    const guarded: CommandIO = { ...ops }
+    for (const slot of mutationSlots) {
+      const fn = ops[slot]
+      if (fn !== undefined && DISPATCHED_WRITES.has(slot)) {
+        Object.assign(guarded, { [slot]: guardedWrite(fn, slot) })
+      }
+    }
+    return guarded
+  }
   return {
     ...ops,
     ...dispatchedWrites(ops, dispatch),
