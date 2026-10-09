@@ -161,9 +161,9 @@ describe('record paths name the virtual path (node backends)', () => {
         secretAccessKey: 'fake',
         forcePathStyle: true,
       })
-      // cat, the cp sources and gzip's read are served from cache; tee -a
-      // and the dispatcher append are a read plus a write, since s3 has no
-      // native append.
+      // cat, the cp sources and every read of what the line just wrote are
+      // served from cache; tee -a and the dispatcher append are a read plus
+      // a write, since s3 has no native append.
       expect(await ledger(vfs, null)).toEqual([
         ['write', K],
         ['write', K],
@@ -180,7 +180,7 @@ describe('record paths name the virtual path (node backends)', () => {
         ['rmdir', '/m/m/e'],
         ['write', '/m/m/d/f'],
         ['rm_r', '/m/m/d'],
-        ...GENERIC_OUT.slice(1),
+        ...GENERIC_OUT.filter(([op]) => op === 'write'),
         ['create', C],
         ['read', C],
         ['write', C],

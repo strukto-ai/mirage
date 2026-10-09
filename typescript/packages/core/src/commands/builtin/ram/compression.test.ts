@@ -38,6 +38,7 @@ async function runCmd(
 ): Promise<{ out: Uint8Array; writes: Record<string, Uint8Array>; exitCode: number }> {
   const cmd = reg[0]
   if (cmd === undefined) throw new Error('not registered')
+  const before = new Map(vfs.store.files)
   const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin,
     flags,
@@ -45,13 +46,17 @@ async function runCmd(
     cwd: '/',
   })
   if (result === null) return { out: new Uint8Array(), writes: {}, exitCode: 0 }
-  const [output, io] = result as [unknown, { writes: Record<string, Uint8Array>; exitCode: number }]
+  const [output, io] = result as [unknown, { exitCode: number }]
   let outBytes: Uint8Array = new Uint8Array()
   if (output !== null) {
     outBytes =
       output instanceof Uint8Array ? output : await materialize(output as AsyncIterable<Uint8Array>)
   }
-  return { out: outBytes, writes: io.writes, exitCode: io.exitCode }
+  // The files the command left with other bytes than it found.
+  const writes = Object.fromEntries(
+    [...vfs.store.files].filter(([path, data]) => before.get(path) !== data),
+  )
+  return { out: outBytes, writes, exitCode: io.exitCode }
 }
 
 describe('gzip / gunzip', () => {

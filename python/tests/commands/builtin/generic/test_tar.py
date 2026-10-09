@@ -234,7 +234,7 @@ async def test_create_announces_a_prefix_and_archives_what_it_could_read():
         "tar: nope: Cannot stat: No such file or directory",
     ]
     assert err[-1] == "tar: Exiting with failure status due to previous errors"
-    assert _names(io_res.writes["/out.tar"]) == ["file"]
+    assert _names(tree.files["/out.tar"]) == ["file"]
 
 
 @pytest.mark.asyncio
@@ -251,7 +251,7 @@ async def test_create_stores_a_symlink_as_a_symlink():
         f=_spec("/out.tar"),
         links=links,
     )
-    with tarfile.open(fileobj=io.BytesIO(io_res.writes["/out.tar"])) as tf:
+    with tarfile.open(fileobj=io.BytesIO(tree.files["/out.tar"])) as tf:
         stored = {
             m.name: (m.size, m.linkname) for m in tf.getmembers() if m.issym()
         }
@@ -287,7 +287,7 @@ async def test_create_stops_at_a_nested_mount_and_says_so():
         in io_res.stderr.decode()
     )
     # The mountpoint stays an entry; only its contents are left out.
-    assert _names(io_res.writes["/out.tar"]) == ["d/", "d/a.txt", "d/nested/"]
+    assert _names(tree.files["/out.tar"]) == ["d/", "d/a.txt", "d/nested/"]
 
 
 @pytest.mark.asyncio
@@ -296,12 +296,11 @@ async def test_an_empty_directory_round_trips_as_its_own_member():
     _, io_res = await _create(
         tree, [_raw("/d", "d")], c=True, f=_spec("/out.tar")
     )
-    assert "d/empty/" in _names(io_res.writes["/out.tar"])
-    tree.files["/out.tar"] = io_res.writes["/out.tar"]
+    assert "d/empty/" in _names(tree.files["/out.tar"])
     _, io_res = await _create(
         tree, [], x=True, f=_spec("/out.tar"), C=[_spec("/out")]
     )
-    assert any("d/a.txt" in path for path in io_res.writes)
+    assert "/out/d/a.txt" in tree.files
     assert "/out/d/empty" in tree.dirs
 
 
@@ -329,7 +328,7 @@ async def test_create_reports_what_it_may_not_open_and_exits_two():
         "tar: /d/locked/y: Cannot open: Permission denied\n"
         "tar: Exiting with failure status due to previous errors\n"
     )
-    assert _names(io_res.writes["/out.tar"]) == [
+    assert _names(tree.files["/out.tar"]) == [
         "d/",
         "d/a.txt",
         "d/locked/",

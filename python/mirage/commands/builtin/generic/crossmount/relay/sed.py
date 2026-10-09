@@ -8,7 +8,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 from mirage.commands.builtin.generic.sed import sed_generic
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec.types import FlagValue
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 
@@ -45,13 +45,11 @@ async def run_sed(
         env (dict[str, str] | None): The session's environment, whose
             locale decides bytes or characters.
     """
-    reads = IOResult()
 
     async def write(path: PathSpec, data: bytes) -> None:
         await dispatch("write", path, data=data)
-        reads.reads.pop(path.virtual, None)
 
-    body, io = await sed_generic(
+    return await sed_generic(
         flat_scopes(scopes),
         texts,
         CommandOpts(
@@ -63,13 +61,6 @@ async def run_sed(
             argv=argv,
         ),
         _resolved,
-        partial(read_file, dispatch, reads),
+        partial(read_file, dispatch),
         write,
     )
-    merged = await reads.merge(io)
-    # Every read went through the dispatcher, whose cold read keeps what
-    # the file cache may hold; listing a read path again would keep a
-    # filetype renderer's output there, which cat would then print. A
-    # written path stays listed.
-    merged.cache = [p for p in merged.cache if p not in merged.reads]
-    return body, merged

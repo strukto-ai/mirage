@@ -41,7 +41,6 @@ def _none_below(path: str) -> list[str]:
 
 def dispatch_io(
     dispatch: DispatchFn,
-    reads: IOResult | None = None,
     links: LinkView | None = None,
     bound: MountView | None = None,
 ) -> CommandIO:
@@ -54,7 +53,6 @@ def dispatch_io(
 
     Args:
         dispatch (DispatchFn): policy-checked operation dispatcher.
-        reads (IOResult | None): Optional ledger for byte reads and cache entries.
         links (LinkView | None): the namespace's symlinks, left out of
             every listing.
         bound (MountView | None): set for a walk kept on one filesystem
@@ -91,12 +89,7 @@ def dispatch_io(
         if cast(FileStat, info).type == FileType.DIRECTORY:
             raise eisdir(path)
         data, _ = await dispatch("read", path)
-        body = await materialize(data) or b""
-        if reads is not None:
-            reads.reads[path.virtual] = body
-            if path.virtual not in reads.cache:
-                reads.cache.append(path.virtual)
-        return body
+        return await materialize(data) or b""
 
     async def read_stream(
         accessor: Accessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
@@ -115,20 +108,14 @@ def dispatch_io(
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
         await dispatch("write", path, data=data)
-        if reads is not None:
-            reads.reads.pop(path.virtual, None)
 
     async def pwrite(
         accessor: Accessor, path: PathSpec, data: bytes, offset: int
     ) -> None:
         await dispatch("pwrite", path, data=data, offset=offset)
-        if reads is not None:
-            reads.reads.pop(path.virtual, None)
 
     async def unlink(accessor: Accessor, path: PathSpec) -> None:
         await dispatch("unlink", path)
-        if reads is not None:
-            reads.reads.pop(path.virtual, None)
 
     async def mkdir(
         accessor: Accessor, path: PathSpec, parents: bool = False
@@ -139,8 +126,6 @@ def dispatch_io(
         accessor: Accessor, path: PathSpec, size: int, no_create: bool = False
     ) -> None:
         await dispatch("truncate", path, length=size, no_create=no_create)
-        if reads is not None:
-            reads.reads.pop(path.virtual, None)
 
     return CommandIO(
         readdir=readdir,
@@ -219,10 +204,8 @@ async def run_dispatch(
         dispatch=dispatch,
         argv=argv,
     )
-    reads = IOResult()
     io_ops = dispatch_io(
         dispatch,
-        reads,
         ns.links if ns is not None else None,
         ns.mounts if ns is not None and bounded else None,
     )
@@ -236,11 +219,4 @@ async def run_dispatch(
     if result is None:
         return None, IOResult()
     stdout, io = result
-    body = await materialize(stdout)
-    merged = await reads.merge(io)
-    # Every read went through the dispatcher, whose cold read keeps what
-    # the file cache may hold; listing a read path again would keep a
-    # filetype renderer's output there, which cat would then print. A
-    # written path stays listed.
-    merged.cache = [p for p in merged.cache if p not in merged.reads]
-    return body, merged
+    return await materialize(stdout), io

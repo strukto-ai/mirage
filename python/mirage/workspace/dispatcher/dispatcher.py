@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import errno
 import functools
 import posixpath
@@ -32,6 +33,7 @@ from mirage.context import (
     hidden_refusal,
     session_visibility,
 )
+from mirage.context.session_context import effective_path_mode
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
@@ -42,11 +44,13 @@ from mirage.errors.fs import (
     enoent,
     enotdir,
     enotempty,
+    erofs,
     exdev,
     no_mount,
     no_xattr,
     walk_refusal,
 )
+from mirage.errors.types import ReadOnlyError
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly
 from mirage.observe.context import (
@@ -214,6 +218,65 @@ def _appends_nothing(name: str, kwargs: dict[str, Any]) -> bool:
         kwargs (dict[str, Any]): its kwargs; an append's ``data``.
     """
     return name == "append" and not kwargs.get("data")
+
+
+async def _mkdir_on_read_only(
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    prefix: str,
+    mode: MountMode,
+    path: PathSpec,
+    parents: bool,
+) -> None:
+    """Answer a mkdir on a read-only region the way the filesystem would.
+
+    A read-only filesystem refuses only a create it would really make,
+    so the answer is whatever the create runs into first, walking the
+    components from the mount root: a missing one is refused with EROFS,
+    a file in the chain is ENOTDIR, an existing leaf is EEXIST, and
+    ``mkdir -p`` of a directory that is already there succeeds. The
+    blamed path is the first component that would have been made, as
+    GNU's ``mkdir -p`` names it (``'/ro/n'`` for ``/ro/n/m``). Pinned
+    against GNU coreutils 9.7 on a read-only tmpfs.
+
+    Args:
+        stat (Callable[[PathSpec], Awaitable[FileStat]]): the
+            dispatcher's own stat, raising when nothing is there.
+        prefix (str): the mount prefix.
+        mode (MountMode): the mount's mode.
+        path (PathSpec): the directory to make.
+        parents (bool): ``-p``.
+    """
+    base = prefix.rstrip("/")
+    leaf = path.virtual.rstrip("/") or "/"
+    if leaf != base and not leaf.startswith(base + "/"):
+        raise erofs(path.virtual)
+    parts = [part for part in leaf[len(base) :].split("/") if part]
+    chain = [
+        PathSpec.from_str_path(f"{base}/{'/'.join(parts[:depth])}")
+        for depth in range(1, len(parts) + 1)
+    ]
+    for index, component in enumerate(chain):
+        try:
+            row = await stat(component)
+        except FileNotFoundError as exc:
+            if not parents and index < len(chain) - 1:
+                raise enoent(path) from exc
+            blame = next(
+                (
+                    spec
+                    for spec in chain[index:]
+                    if effective_path_mode(spec.virtual, prefix, mode)
+                    == MountMode.READ
+                ),
+                path,
+            )
+            raise erofs(blame.virtual) from exc
+        if row.type is not FileType.DIRECTORY:
+            if index == len(chain) - 1:
+                raise eexist(path)
+            raise enotdir(component if parents else path)
+    if not parents:
+        raise eexist(path)
 
 
 def _visible_entries(entries: list[str], parent: str) -> list[str]:
@@ -632,7 +695,27 @@ class Dispatcher:
         if mount is None:
             return await self._answer_unmounted(call), IOResult()
         await self._refuse_cross_mount(call, mount)
-        boundary = await self._admit(call, mount)
+        try:
+            boundary = await self._admit(call, mount)
+        except ReadOnlyError:
+            # mkdir(2) looks its name up first, so on a read-only region
+            # the answer is whatever that lookup finds.
+            if (
+                name != "mkdir"
+                or effective_path_mode(
+                    call.path.virtual, mount.prefix, mount.mode
+                )
+                != MountMode.READ
+            ):
+                raise
+            await _mkdir_on_read_only(
+                self._walk_stat,
+                mount.prefix,
+                mount.mode,
+                call.path,
+                bool(call.kwargs.get("parents")),
+            )
+            return None, IOResult()
         await mount.ensure_ready()
         served = await self._serve_cached(call, mount, boundary)
         if served is not None:
@@ -1200,14 +1283,23 @@ class Dispatcher:
             call.name != "write"
             or not isinstance(data, bytes)
             or not facts.cacheable
-            or call.renders_read(mount)
         ):
             return
-        for rec in records:
-            if rec.op in WRITE_FINGERPRINT_OPS and rec.path == call.path.virtual:
-                rec.claimed = data
+        # Copies, so the line's records do not hold the written bytes.
+        claims = [
+            dataclasses.replace(rec, claimed=data)
+            if rec.op in WRITE_FINGERPRINT_OPS
+            and rec.path == call.path.virtual
+            else rec
+            for rec in records
+        ]
         await cache_io.set_cached(
-            self._cache, call.path.virtual, data, data, records, lambda _: facts
+            self._cache,
+            call.path.virtual,
+            data,
+            data,
+            claims,
+            lambda _: facts,
         )
 
     def _filter(self, call: _Call, result: Any) -> Any:
@@ -1262,11 +1354,13 @@ class Dispatcher:
         observed = (
             time.time() if name in STAMP_WRITE_OPS and not opened else None
         )
+        # rename(2) moves a file without touching its times, which the
+        # node table carries to the new name below.
         await self.invalidate_after_write(
             mount,
             path,
             observed=observed,
-            times=not opened,
+            times=not opened and name != "rename",
             removed=name in ("unlink", "rmdir"),
         )
         for _, other in _operands(name, kwargs):

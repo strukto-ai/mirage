@@ -28,6 +28,8 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
+import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import { MountEntry } from './mount.ts'
 
 class StubVFS extends BaseVFS {
@@ -486,17 +488,23 @@ describe('ExecContext parity with CommandOpts', () => {
 it('a path-guarded command is still held at its write', async () => {
   const vfs = new RAMVFS()
   vfs.store.files.set('/a', new TextEncoder().encode('original'))
-  const mount = new MountEntry({ prefix: '/ram/', vfs, mode: MountMode.READ })
   const cmd = commandsFor(vfs).find((cmd) => cmd.name === 'gzip')
   if (cmd === undefined) throw new Error('missing gzip')
   expect(cmd.pathGuarded).toBe(true)
-  mount.register(cmd)
-  // The write is refused where it happens and gzip says so in its own words
-  // (the fatal write_error form), leaving the store untouched.
-  const [, io] = await mount.runCommand('gzip', [PathSpec.fromStrPath('/ram/a')], [], {})
-  expect([io.exitCode, new TextDecoder().decode(io.stderr as Uint8Array)]).toEqual([
-    1,
-    '\ngzip: /ram/a.gz: Read-only file system\n',
-  ])
-  expect([...vfs.store.files.entries()]).toEqual([['/a', new TextEncoder().encode('original')]])
+  const ws = new Workspace(
+    { '/ram/': [vfs, MountMode.READ] },
+    { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+  )
+  try {
+    // The write is refused where it happens and gzip says so in its own
+    // words (the fatal write_error form), leaving the store untouched.
+    const io = await ws.shell('gzip /ram/a')
+    expect([io.exitCode, new TextDecoder().decode(io.stderr)]).toEqual([
+      1,
+      '\ngzip: /ram/a.gz: Read-only file system\n',
+    ])
+    expect([...vfs.store.files.entries()]).toEqual([['/a', new TextEncoder().encode('original')]])
+  } finally {
+    await ws.close()
+  }
 })

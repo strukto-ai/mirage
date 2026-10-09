@@ -25,7 +25,7 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { createShellParser } from '../../../shell/parse/index.ts'
 import { ops } from '../../../test-utils.ts'
 import { Limit, MountMode, PathSpec } from '../../../types.ts'
-import { cachingRamWorkspace, captureMarks } from '../../fixtures/workspace_fixture.ts'
+import { cachingRamWorkspace } from '../../fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { dropMountCaches } from './run.ts'
 
@@ -250,21 +250,6 @@ describe('the provenance mark', () => {
     delete DEFAULT_COMMAND_LIMITS.sleep
     slowWrite.gate = null
     slowWrite.returned = 0
-  })
-
-  it('marks a claimed write with the claimed value', async () => {
-    const ws = await cachingRamWorkspace()
-    const captured = captureMarks(ws)
-    try {
-      expect((await ws.shell('echo a | tee /r/f')).exitCode).toBe(0)
-    } finally {
-      await ws.close()
-    }
-    expect(captured).toHaveLength(1)
-    const [marks, writes] = captured[0] ?? [[], {} as Record<string, ByteSource>]
-    const claimed = marks.filter(([op, path]) => op === 'write' && path === '/r/f')
-    expect(claimed).toHaveLength(1)
-    expect(claimed[0]?.[2]).toBe(writes['/r/f'])
   })
 
   it.each([

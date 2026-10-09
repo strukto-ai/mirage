@@ -438,7 +438,6 @@ export async function splitGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
-  relay = false,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('split'))
   if (paths.length > 2) throw extraOperandError(CommandName.SPLIT, paths[2]?.rawPath ?? '')
@@ -501,7 +500,6 @@ export async function splitGeneric(
     source = resolveSource(opts.stdin)
   }
 
-  const writes: Record<string, Uint8Array> = {}
   let fileIdx = 0
   const emit = async (name: string, data: Uint8Array): Promise<void> => {
     const virtual = prefixVirtual + name
@@ -512,10 +510,6 @@ export async function splitGeneric(
       if (!isFsError(err)) throw err
       throw new UsageError(`split: ${typedPrefix + name}: ${String(fsStrerror(err))}`, 1)
     }
-    // Relay writes land on whichever mount owns each path and invalidate
-    // through the dispatcher; keying them here would have the runner prefix
-    // them onto this mount.
-    if (!relay) writes[spec.mountPath] = data
   }
 
   if (chunks !== null) {
@@ -573,5 +567,5 @@ export async function splitGeneric(
       await emit(name, data)
     }
   }
-  return [null, new IOResult({ writes })]
+  return [null, new IOResult()]
 }

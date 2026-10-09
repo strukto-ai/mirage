@@ -27,6 +27,7 @@ from mirage.errors.types import OperationNotSupportedError
 from mirage.io.types import IOResult, materialize
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 
@@ -75,19 +76,12 @@ def test_mount_rejects_a_renderer_that_names_no_method():
 # ── read-only enforcement ──────────────────────
 
 
-def test_read_only_blocks_write_cmd():
-    reg = MountRegistry()
-    reg.mount("/ro/", RAMVFS(), MountMode.READ)
-    mount = reg.mount_for("/ro/file.txt")
-    scope = PathSpec(
-        vfs_path="ro/newdir",
-        virtual="/ro/newdir",
-        directory="/ro/",
-        resolved=True,
-    )
-    stdout, io = _run(mount.run_command("mkdir", [scope], [], {}))
+@pytest.mark.asyncio
+async def test_read_only_blocks_write_cmd():
+    ws = Workspace({"/ro/": (RAMVFS(), MountMode.READ)}, mode=MountMode.WRITE)
+    io = await ws.shell("mkdir /ro/newdir")
     assert io.exit_code != 0
-    assert io.stderr == (
+    assert await io.materialize_stderr() == (
         b"mkdir: cannot create directory '/ro/newdir': Read-only file system\n"
     )
 
@@ -357,16 +351,13 @@ def test_resolve_command_missing(registry):
 async def test_a_path_guarded_command_is_still_held_at_its_write():
     vfs = RAMVFS()
     vfs._store.files["/a"] = b"original"
-    mount = MountEntry("/ram/", vfs, MountMode.READ)
     cmd = next(cmd for cmd in commands_for(vfs) if cmd.name == "gzip")
     assert cmd.path_guarded
-    mount.register(cmd)
+    ws = Workspace({"/ram/": (vfs, MountMode.READ)}, mode=MountMode.WRITE)
     # The write is refused where it happens and gzip says so in its own
     # words (the fatal write_error form), leaving the store untouched.
-    _, io = await mount.run_command(
-        "gzip", [PathSpec.from_str_path("/ram/a")], [], {}
-    )
-    assert (io.exit_code, io.stderr) == (
+    io = await ws.shell("gzip /ram/a")
+    assert (io.exit_code, await io.materialize_stderr()) == (
         1,
         b"\ngzip: /ram/a.gz: Read-only file system\n",
     )

@@ -432,10 +432,7 @@ export async function iconvGeneric(
   if (outPath !== null) {
     const spec = outPath
     await write(spec, encoded)
-    return [
-      null,
-      new IOResult({ exitCode: failed ? 1 : 0, stderr, writes: { [spec.mountPath]: encoded } }),
-    ]
+    return [null, new IOResult({ exitCode: failed ? 1 : 0, stderr })]
   }
   const result: ByteSource = encoded
   return [result, new IOResult({ exitCode: failed ? 1 : 0, stderr })]

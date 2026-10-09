@@ -87,6 +87,19 @@ def _run(
     return bytes(body), io
 
 
+def _run_writing(
+    *texts: str, **flags
+) -> tuple[bytes, object, dict[str, bytes]]:
+    """Run curl with a dispatcher that keeps what each write sent."""
+    written: dict[str, bytes] = {}
+
+    async def dispatch(op, scope, **kwargs):
+        written[scope.virtual] = kwargs["data"]
+
+    body, io = _run(*texts, dispatch=dispatch, **flags)
+    return body, io, written
+
+
 def test_get_returns_body(monkeypatch):
     _stub(monkeypatch)
     body, io = _run("http://x.test/f")
@@ -148,23 +161,27 @@ def test_redirects_only_followed_with_L(monkeypatch):
 
 def test_o_writes_and_prints_nothing(monkeypatch):
     _stub(monkeypatch)
-    body, io = _run("http://x.test/f", output="/tmp/out.txt")
+    body, io, written = _run_writing("http://x.test/f", output="/tmp/out.txt")
     assert body == b""
-    assert io.writes == {"/tmp/out.txt": b"hello body"}
+    assert written == {"/tmp/out.txt": b"hello body"}
 
 
 def test_o_on_404_writes_the_error_body(monkeypatch):
     _stub(monkeypatch, resp=_ok(b"not found", 404, "Not Found"))
-    _body, io = _run("http://x.test/missing", output="/tmp/e.txt")
+    _body, io, written = _run_writing(
+        "http://x.test/missing", output="/tmp/e.txt"
+    )
     assert io.exit_code == 0
-    assert io.writes == {"/tmp/e.txt": b"not found"}
+    assert written == {"/tmp/e.txt": b"not found"}
 
 
 def test_fail_flag_writes_nothing(monkeypatch):
     _stub(monkeypatch, resp=_ok(b"not found", 404, "Not Found"))
-    _body, io = _run("http://x.test/missing", output="/tmp/e.txt", fail=True)
+    _body, io, written = _run_writing(
+        "http://x.test/missing", output="/tmp/e.txt", fail=True
+    )
     assert io.exit_code == 22
-    assert io.writes == {}
+    assert written == {}
 
 
 def test_header_and_method_reach_the_request(monkeypatch):
@@ -519,11 +536,11 @@ def test_verbose_with_location_drops_the_body_headers_after_a_switch(
 
 def test_include_with_output_writes_headers_and_body(monkeypatch):
     _stub(monkeypatch)
-    body, io = _run("http://x.test/f", include=True, output="/tmp/out.txt")
+    body, io, written = _run_writing(
+        "http://x.test/f", include=True, output="/tmp/out.txt"
+    )
     assert body == b""
-    assert io.writes == {
-        "/tmp/out.txt": (RESPONSE_DUMP + "hello body").encode()
-    }
+    assert written == {"/tmp/out.txt": (RESPONSE_DUMP + "hello body").encode()}
 
 
 # -D/--dump-header and -k/--insecure, pinned against curl 8.14.1 in
@@ -533,16 +550,16 @@ def test_include_with_output_writes_headers_and_body(monkeypatch):
 
 def test_dump_header_dash_prints_the_headers_before_the_body(monkeypatch):
     _stub(monkeypatch)
-    body, io = _run("http://x.test/f", dump_header="-")
+    body, io, written = _run_writing("http://x.test/f", dump_header="-")
     assert body.decode() == RESPONSE_DUMP + "hello body"
-    assert io.writes == {}
+    assert written == {}
 
 
 def test_dump_header_file_gets_the_headers_and_stdout_the_body(monkeypatch):
     _stub(monkeypatch)
-    body, io = _run("http://x.test/f", dump_header="/tmp/h")
+    body, io, written = _run_writing("http://x.test/f", dump_header="/tmp/h")
     assert body == b"hello body"
-    assert io.writes == {"/tmp/h": RESPONSE_DUMP.encode()}
+    assert written == {"/tmp/h": RESPONSE_DUMP.encode()}
 
 
 def test_dump_header_file_is_written_through_the_dispatcher(monkeypatch):
@@ -562,15 +579,19 @@ def test_dump_header_dash_with_output_leaves_only_headers_on_stdout(
     monkeypatch,
 ):
     _stub(monkeypatch)
-    body, io = _run("http://x.test/f", dump_header="-", output="/tmp/b")
+    body, io, written = _run_writing(
+        "http://x.test/f", dump_header="-", output="/tmp/b"
+    )
     assert body.decode() == RESPONSE_DUMP
-    assert io.writes == {"/tmp/b": b"hello body"}
+    assert written == {"/tmp/b": b"hello body"}
 
 
 def test_dump_header_and_output_naming_one_file_leave_the_body(monkeypatch):
     _stub(monkeypatch)
-    _body, io = _run("http://x.test/f", dump_header="/tmp/x", output="/tmp/x")
-    assert io.writes == {"/tmp/x": b"hello body"}
+    _body, io, written = _run_writing(
+        "http://x.test/f", dump_header="/tmp/x", output="/tmp/x"
+    )
+    assert written == {"/tmp/x": b"hello body"}
 
 
 @pytest.mark.parametrize(

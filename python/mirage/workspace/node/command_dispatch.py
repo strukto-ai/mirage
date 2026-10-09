@@ -80,7 +80,6 @@ from mirage.workspace.executor.builtins import (
     handle_setfattr,
     handle_touch,
     prepare_mv,
-    settle_moves,
     strip_link_operands,
 )
 from mirage.workspace.executor.builtins.alias import (
@@ -1004,8 +1003,6 @@ async def _route_argv(
                 else:
                     await namespace.unlink(item.virtual)
                     await namespace.purge_under(item.virtual)
-    if name == "mv" and io.renames:
-        await settle_moves(namespace, io.renames)
     if link_errors:
         # A refused link operand fails the line the way a refused
         # backend operand does: its lines lead (they were reported

@@ -44,7 +44,6 @@ async def touch(
     paths = await ops.resolve_glob(accessor, paths, opts.index)
     exists = require_op(ops, Operation.EXISTS)
     write = require_op(ops, Operation.WRITE)
-    created: dict[str, ByteSource] = {}
     errors: list[str] = []
     for p in paths:
         if c:
@@ -60,11 +59,8 @@ async def touch(
                 f"touch: cannot touch '{p.virtual}': {fs_strerror(exc)}"
             )
             continue
-        created[p.mount_path] = b""
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
-    return None, IOResult(
-        writes=created, stderr=stderr, exit_code=1 if errors else 0
-    )
+    return None, IOResult(stderr=stderr, exit_code=1 if errors else 0)
 
 
 BUILDER = GenericCommand("touch", touch, write=True)

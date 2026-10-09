@@ -30,6 +30,8 @@ import {
   eisdir,
   enotdir,
   enotempty,
+  erofs,
+  isEnoent,
   isEnotdir,
   isMissError,
   isMissingOp,
@@ -59,7 +61,7 @@ import {
   startOp,
 } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
-import { WRITE_FINGERPRINT_OPS, type OpRecord } from '../../observe/record.ts'
+import { OpRecord, WRITE_FINGERPRINT_OPS } from '../../observe/record.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -99,6 +101,7 @@ import {
   XATTR_OPS,
 } from './constants.ts'
 import {
+  effectivePathMode,
   explaining,
   getCurrentSession,
   hiddenRefusal,
@@ -184,6 +187,57 @@ function factsOf(mount: MountEntry | null): CacheFacts {
     ttl: mount.read.ttl,
     keepsVersions: mount.write === WritePolicy.CONDITIONAL,
   }
+}
+
+/**
+ * Answer a mkdir on a read-only region the way the filesystem would. A
+ * read-only filesystem refuses only a create it would really make, so the
+ * answer is whatever the create runs into first, walking the components from
+ * the mount root: a missing one is refused with EROFS, a file in the chain is
+ * ENOTDIR, an existing leaf is EEXIST, and `mkdir -p` of a directory that is
+ * already there succeeds. The blamed path is the first component that would
+ * have been made, as GNU's `mkdir -p` names it (`'/ro/n'` for `/ro/n/m`).
+ * Pinned against GNU coreutils 9.7 on a read-only tmpfs. Mirrors Python's
+ * `_mkdir_on_read_only`.
+ */
+async function mkdirOnReadOnly(
+  stat: (path: PathSpec) => Promise<FileStat>,
+  prefix: string,
+  mode: MountMode,
+  path: PathSpec,
+  parents: boolean,
+): Promise<void> {
+  const base = rstripSlash(prefix)
+  const leaf = rstripSlash(path.virtual) || '/'
+  if (leaf !== base && !leaf.startsWith(base + '/')) {
+    throw erofs(path.virtual, `mount ${prefix} is read-only`)
+  }
+  const parts = leaf
+    .slice(base.length)
+    .split('/')
+    .filter((part) => part !== '')
+  const chain = parts.map((_, index) =>
+    PathSpec.fromStrPath(`${base}/${parts.slice(0, index + 1).join('/')}`),
+  )
+  for (const [index, component] of chain.entries()) {
+    let row: FileStat
+    try {
+      row = await stat(component)
+    } catch (err) {
+      if (!isEnoent(err)) throw err
+      if (!parents && index < chain.length - 1) throw enoent(path.virtual)
+      const blame =
+        chain
+          .slice(index)
+          .find((spec) => effectivePathMode(spec.virtual, prefix, mode) === MountMode.READ) ?? path
+      throw erofs(blame.virtual, `mount ${prefix} is read-only`)
+    }
+    if (row.type !== FileType.DIRECTORY) {
+      if (index === chain.length - 1) throw eexist(path.virtual)
+      throw enotdir(parents ? component.virtual : path.virtual)
+    }
+  }
+  if (!parents) throw eexist(path.virtual)
 }
 
 /** Ask a command's gate once about each distinct path an op reaches. */
@@ -460,7 +514,27 @@ export class Dispatcher {
     const boundary = this.boundary(owner)
     if (owner !== null) {
       await this.refuseCrossMount(call, owner)
-      await this.admit(call, owner, boundary)
+      try {
+        await this.admit(call, owner, boundary)
+      } catch (err) {
+        // mkdir(2) looks its name up first, so on a read-only region the
+        // answer is whatever that lookup finds.
+        if (
+          name !== 'mkdir' ||
+          (err as { code?: unknown } | null)?.code !== 'EROFS' ||
+          effectivePathMode(call.path.virtual, owner.prefix, owner.mode) !== MountMode.READ
+        ) {
+          throw err
+        }
+        await mkdirOnReadOnly(
+          dispatchStat(this.dispatch),
+          owner.prefix,
+          owner.mode,
+          call.path,
+          call.kwargs?.parents === true,
+        )
+        return [null, new IOResult()]
+      }
     }
     let resolved: [BaseVFS, PathSpec, MountMode]
     try {
@@ -1075,18 +1149,25 @@ export class Dispatcher {
   ): Promise<void> {
     const data = args[0]
     const facts = factsOf(mount)
-    if (
-      call.name !== 'write' ||
-      !(data instanceof Uint8Array) ||
-      !facts.cacheable ||
-      this.rendersRead(call, mount)
-    ) {
-      return
-    }
-    for (const rec of records) {
-      if (WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === call.path.virtual) rec.claimed = data
-    }
-    await setCached(this.cache, call.path.virtual, data, data, records, () => facts)
+    if (call.name !== 'write' || !(data instanceof Uint8Array) || !facts.cacheable) return
+    // Copies, so the line's records do not hold the written bytes.
+    const claims = records.map((rec) =>
+      WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === call.path.virtual
+        ? new OpRecord({
+            op: rec.op,
+            path: rec.path,
+            source: rec.source,
+            bytes: rec.bytes,
+            timestamp: rec.timestamp,
+            durationMs: rec.durationMs,
+            fingerprint: rec.fingerprint,
+            revision: rec.revision,
+            mountId: rec.mountId,
+            claimed: data,
+          })
+        : rec,
+    )
+    await setCached(this.cache, call.path.virtual, data, data, claims, () => facts)
   }
 
   /**
@@ -1222,10 +1303,12 @@ export class Dispatcher {
   ): Promise<void> {
     const opened = appendsNothing(name, args)
     const observed = STAMP_WRITE_OPS.has(name) && !opened ? Date.now() / 1000 : null
+    // rename(2) moves a file without touching its times, which the node
+    // table carries to the new name below.
     await this.invalidateAfterWriteByPath(
       p.virtual,
       observed,
-      !opened,
+      !opened && name !== 'rename',
       name === 'unlink' || name === 'rmdir',
     )
     for (const [, other] of others) await this.invalidateAfterWriteByPath(other.virtual)

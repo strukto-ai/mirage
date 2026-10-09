@@ -279,10 +279,7 @@ async def uniq_generic(
             )
         data = await materialize(output)
         await write_bytes(paths[1], data)
-        return b"", IOResult(
-            writes={paths[1].mount_path: data},
-            cache=[paths[1].mount_path],
-        )
+        return b"", IOResult()
     return output, IOResult()
 
 

@@ -51,7 +51,7 @@ async def test_iconv_writes_to_output_path():
     )
     assert output is None
     assert store["/out.txt"] == b"hello"
-    assert io.writes == {"/out.txt": b"hello"}
+    assert io.exit_code == 0
 
 
 @pytest.mark.asyncio

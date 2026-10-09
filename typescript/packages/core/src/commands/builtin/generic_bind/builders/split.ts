@@ -32,7 +32,6 @@ const split: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
           await dispatch('write', p, [d])
         }
       : (p, d) => write(accessor, p, d),
-    dispatch !== undefined,
   )
 }
 

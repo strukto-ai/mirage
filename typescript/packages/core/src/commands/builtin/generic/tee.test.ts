@@ -71,7 +71,6 @@ describe('writeOutput', () => {
     expect(s.written).toEqual({ '/a': 'hi', '/b': 'hi', '/c': 'hi' })
     expect(DEC.decode(out as Uint8Array)).toBe('hi')
     expect(io.exitCode).toBe(0)
-    expect(io.cache).toEqual(['/a', '/b', '/c'])
   })
 
   it('keeps writing the others when one operand fails', async () => {
@@ -123,7 +122,6 @@ describe('writeOutput', () => {
     )
     expect(out).toBeNull()
     expect(s.written).toEqual({ '/good': '' })
-    expect([Object.keys(io.writes), io.cache]).toEqual([['/good'], ['/good']])
     expect(io.exitCode).toBe(1)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('tee: /denied: disk full\n')
   })
@@ -193,28 +191,17 @@ describe('writeOutput', () => {
   it('appends through the native slot without re-uploading', async () => {
     const appended: Record<string, string> = {}
     const s = sink()
-    const [, io] = await writeOutput(
-      paths('/n'),
-      ENC.encode('add'),
-      APPEND,
-      noStream,
-      s.write,
-      (p, d) => {
-        appended[p.mountPath] = DEC.decode(d)
-        return Promise.resolve()
-      },
-    )
+    await writeOutput(paths('/n'), ENC.encode('add'), APPEND, noStream, s.write, (p, d) => {
+      appended[p.mountPath] = DEC.decode(d)
+      return Promise.resolve()
+    })
     expect(appended).toEqual({ '/n': 'add' })
     expect(s.written).toEqual({})
-    // Listed as written but not as cacheable: the resulting content is not
-    // in hand, so the stale cache entry must be dropped, not replaced.
-    expect(Object.keys(io.writes)).toEqual(['/n'])
-    expect(io.cache).toEqual([])
   })
 
   it('falls back to read-modify-write when the backend has no append', async () => {
     const s = sink()
-    const [, io] = await writeOutput(
+    await writeOutput(
       paths('/n'),
       ENC.encode('add'),
       APPEND,
@@ -226,6 +213,5 @@ describe('writeOutput', () => {
       s.write,
     )
     expect(s.written).toEqual({ '/n': 'oldadd' })
-    expect(io.cache).toEqual(['/n'])
   })
 })

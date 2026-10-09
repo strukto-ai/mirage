@@ -84,6 +84,25 @@ class DenyUnlinkAfter(Policy):
         return Deny("too late") if ctx.op == "unlink" else None
 
 
+class _FailingRAM(RAMVFS):
+    """A RAM VFS whose listing or deletion fails with an error of its own
+    type once armed, as an API backend's can (box raises its own)."""
+
+    failing: str | None = None
+
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        if self.failing == "readdir":
+            raise RuntimeError("api exploded")
+        return await super().readdir(path, index)
+
+    async def unlink(self, path: PathSpec) -> None:
+        if self.failing == "unlink":
+            raise RuntimeError("api exploded")
+        await super().unlink(path)
+
+
 def _path(virtual: str) -> PathSpec:
     return PathSpec(
         virtual=virtual,
@@ -518,7 +537,8 @@ async def test_a_read_grant_refuses_link_writes_like_file_writes():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("op", sorted(POLICY_WRITE_OPS))
+# mkdir looks its name up first (test_a_read_only_mkdir_answers_what_its_name_holds).
+@pytest.mark.parametrize("op", sorted(POLICY_WRITE_OPS - {"mkdir"}))
 async def test_read_only_admission_precedes_backend_support_and_io(op):
     with Workspace({"/ro": (RAMVFS(), MountMode.READ)}) as ws:
         mount = ws.namespace.mount_for("/ro/file")
@@ -530,6 +550,38 @@ async def test_read_only_admission_precedes_backend_support_and_io(op):
         assert exc.value.errno == errno.EROFS
         mount.ensure_ready.assert_not_awaited()
         assert not ws.namespace.is_link("/ro/file")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "parents", "errno_"),
+    [
+        ("/ro/d", False, errno.EEXIST),
+        ("/ro/d", True, None),
+        ("/ro/f", False, errno.EEXIST),
+        ("/ro/f/x", False, errno.ENOTDIR),
+        ("/ro/gone/x", False, errno.ENOENT),
+        ("/ro/gone/x", True, errno.EROFS),
+        ("/ro/new", False, errno.EROFS),
+    ],
+)
+async def test_a_read_only_mkdir_answers_what_its_name_holds(
+    path, parents, errno_
+):
+    # mkdir(2) on a read-only filesystem refuses only a create it would
+    # really make: a taken name is EEXIST, a file in the chain ENOTDIR,
+    # and `mkdir -p` of a directory already there succeeds.
+    ram = RAMVFS()
+    ram._store.files["/f"] = b"x"
+    ram._store.dirs.add("/d")
+    with Workspace({"/ro": (ram, MountMode.READ)}) as ws:
+        spec = PathSpec.from_str_path(path)
+        if errno_ is None:
+            await ws.dispatch("mkdir", spec, parents=parents)
+            return
+        with pytest.raises(OSError) as exc:
+            await ws.dispatch("mkdir", spec, parents=parents)
+        assert exc.value.errno == errno_
 
 
 @pytest.mark.asyncio
@@ -801,6 +853,29 @@ async def test_a_policy_denied_remnant_keeps_the_refusal():
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
     kept = await ws.shell("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing", ["readdir", "unlink"])
+async def test_a_remnant_cascade_failing_any_other_way_keeps_the_refusal(
+    failing,
+):
+    # A listing or deletion that fails with no errno still answers with the
+    # backend's not-empty refusal: the raw failure would reveal exactly
+    # what the refusal exists to hide.
+    vfs = _FailingRAM()
+    ws = Workspace({"/a": vfs}, mode=MountMode.WRITE)
+    io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
+    assert io.exit_code == 0, io.stderr
+    sess = ws.create_session("rev", profile={"paths": {"hide": ["/a/d/sec"]}})
+    vfs.failing = failing
+    token = set_current_session(sess)
+    try:
+        with pytest.raises(OSError) as exc:
+            await ws.vfs.rmdir("/a/d")
+    finally:
+        reset_current_session(token)
+    assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
 
 
 @pytest.mark.asyncio
@@ -1287,6 +1362,7 @@ async def test_a_render_is_neither_kept_nor_served_to_a_command():
     # renderer read returns.
     ws, fetched = _counted_workspace(filetype=".count")
     await ws.vfs.write("/data/f.count", b"STORED")
+    await ws.cache.remove("/data/f.count")
     assert await ws.vfs.read("/data/f.count") == b"BODY"
     assert not await ws.cache.exists("/data/f.count")
     out = await ws.shell("cat /data/f.count")

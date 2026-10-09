@@ -477,14 +477,43 @@ describe('the turf mode gates the node table', () => {
     }
   })
 
-  it.each([...POLICY_WRITE_OPS])('%s refuses before backend support and I/O', async (op) => {
-    const ws = new Workspace({ '/ro': [new RAMVFS(), MountMode.READ] })
+  // mkdir looks its name up first (a read-only mkdir answers what its name holds).
+  it.each([...POLICY_WRITE_OPS].filter((op) => op !== 'mkdir'))(
+    '%s refuses before backend support and I/O',
+    async (op) => {
+      const ws = new Workspace({ '/ro': [new RAMVFS(), MountMode.READ] })
+      try {
+        const mount = ws.namespace.mountFor('/ro/file')
+        const ready = vi.spyOn(mount, 'ensureReady').mockRejectedValue(new Error('backend reached'))
+        await expect(ws.dispatch(op, '/ro/file')).rejects.toMatchObject({ code: 'EROFS' })
+        expect(ready).not.toHaveBeenCalled()
+        expect(ws.namespace.isLink('/ro/file')).toBe(false)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it.each([
+    ['/ro/d', false, 'EEXIST'],
+    ['/ro/d', true, null],
+    ['/ro/f', false, 'EEXIST'],
+    ['/ro/f/x', false, 'ENOTDIR'],
+    ['/ro/gone/x', false, 'ENOENT'],
+    ['/ro/gone/x', true, 'EROFS'],
+    ['/ro/new', false, 'EROFS'],
+  ] as const)('a read-only mkdir of %s (parents %s) answers %s', async (path, parents, code) => {
+    // mkdir(2) on a read-only filesystem refuses only a create it would
+    // really make: a taken name is EEXIST, a file in the chain ENOTDIR, and
+    // `mkdir -p` of a directory already there succeeds.
+    const ram = new RAMVFS()
+    ram.store.files.set('/f', ENC.encode('x'))
+    ram.store.dirs.add('/d')
+    const ws = new Workspace({ '/ro': [ram, MountMode.READ] })
     try {
-      const mount = ws.namespace.mountFor('/ro/file')
-      const ready = vi.spyOn(mount, 'ensureReady').mockRejectedValue(new Error('backend reached'))
-      await expect(ws.dispatch(op, '/ro/file')).rejects.toMatchObject({ code: 'EROFS' })
-      expect(ready).not.toHaveBeenCalled()
-      expect(ws.namespace.isLink('/ro/file')).toBe(false)
+      const call = ws.dispatch('mkdir', path, [], { parents })
+      if (code === null) await call
+      else await expect(call).rejects.toMatchObject({ code })
     } finally {
       await ws.close()
     }
@@ -542,7 +571,8 @@ describe('a rename moves what the node table holds', () => {
 
   it('replaces the node at the landing', async () => {
     // rename(2) replaces the destination, so the overlay it carried
-    // goes with it rather than staying to shadow what just landed.
+    // goes with it rather than staying to shadow what just landed; what
+    // lands there is the moved file's own node, its write time included.
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/a': new RAMVFS() },
@@ -551,8 +581,9 @@ describe('a rename moves what the node table holds', () => {
     try {
       await ws.shell('printf one > /a/f.txt && printf two > /a/g.txt')
       await ws.namespace.setAttrs('/a/g.txt', { mode: 0o400 })
+      const moved = ws.namespace.metaFor('/a/f.txt')
       await ws.dispatch('rename', '/a/f.txt', [PathSpec.fromStrPath('/a/g.txt')])
-      expect(ws.namespace.metaFor('/a/g.txt')).toBeNull()
+      expect(ws.namespace.metaFor('/a/g.txt')).toEqual(moved)
     } finally {
       await ws.close()
     }
@@ -1054,6 +1085,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
     // renderer read returns.
     const { ws, fetched } = counted(false, '.count')
     await ws.vfs.write('/data/f.count', 'STORED')
+    await ws.cache.remove('/data/f.count')
     expect(DEC.decode(await ws.vfs.read('/data/f.count'))).toBe('BODY')
     expect(await ws.cache.exists('/data/f.count')).toBe(false)
     expect(DEC.decode((await ws.shell('cat /data/f.count')).stdout)).toBe('STORED')

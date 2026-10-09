@@ -66,7 +66,6 @@ async def csplit(
         prefix=prefix,
         mount_prefix=opts.mount_prefix,
         cwd=opts.cwd.virtual,
-        relay=opts.dispatch is not None,
         digits=int(fl.as_str("digits") or "2"),
         suffix_format=fl.as_str("suffix_format"),
         keep_on_error=fl.as_bool("keep_files"),

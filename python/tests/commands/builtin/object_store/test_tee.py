@@ -95,40 +95,6 @@ def _tee():
 
 
 @pytest.mark.asyncio
-async def test_tee_holds_each_path_to_its_regions_mode():
-    # The override rides the same guard chain as the generic it
-    # replaces: the command gate admits tee because one region grants
-    # writes, and the write below the read-only cap still refuses
-    # before the backend sees it.
-    writes: list[str] = []
-    tee = _tee()
-    sess = SessionState(
-        session_id="agent",
-        mount_modes={"/s3": MountMode.READ},
-        visibility=Visibility(
-            shown=ShownPaths(
-                entries=(ShowEntry("/s3/build", MountMode.WRITE),)
-            )
-        ),
-    )
-    session_token = set_current_session(sess)
-    gate_token = set_mount_gate("/s3", MountMode.WRITE)
-    try:
-        _, result = await tee(
-            cast(Accessor, object()),
-            [PathSpec.from_str_path("/s3/data.txt")],
-            [],
-            CommandOpts(index=NULL_INDEX, io=_io(writes)),
-        )
-    finally:
-        reset_mount_gate(gate_token)
-        reset_current_session(session_token)
-    assert result.exit_code == 1
-    assert b"Read-only file system" in (result.stderr or b"")
-    assert writes == []
-
-
-@pytest.mark.asyncio
 async def test_tee_writes_inside_the_granted_region():
     writes: list[str] = []
     tee = _tee()

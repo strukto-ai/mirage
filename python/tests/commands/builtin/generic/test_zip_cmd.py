@@ -196,7 +196,7 @@ async def test_y_stores_a_symlink_as_a_symlink():
     _, io_res = await _zip(
         tree, [_spec("/out.zip"), _raw("/d", "d")], r=True, y=True, links=links
     )
-    with zipfile.ZipFile(io.BytesIO(io_res.writes["/out.zip"])) as zf:
+    with zipfile.ZipFile(io.BytesIO(tree.files["/out.zip"])) as zf:
         info = zf.getinfo("d/link.txt")
         assert zf.read(info) == b"a.txt"
     assert info.external_attr >> 16 == 0o120777
@@ -215,7 +215,7 @@ async def test_stops_at_a_nested_mount_and_says_so():
         "not dumped\n" in io_res.stderr.decode()
     )
     # The mountpoint stays an entry; only its contents are left out.
-    assert _entries(io_res.writes["/out.zip"]) == [
+    assert _entries(tree.files["/out.zip"]) == [
         "d/",
         "d/a.txt",
         "d/nested/",
@@ -228,7 +228,7 @@ async def test_leaves_the_archive_out_of_itself():
     _, io_res = await _zip(
         tree, [_spec("/d/old.zip"), _raw("/d", "d")], r=True
     )
-    assert _entries(io_res.writes["/d/old.zip"]) == ["d/", "d/a.txt"]
+    assert _entries(tree.files["/d/old.zip"]) == ["d/", "d/a.txt"]
 
 
 @pytest.mark.asyncio
@@ -252,7 +252,7 @@ async def test_a_directory_the_walk_could_not_open_is_stored_in_silence():
     )
     assert io_res.exit_code == 0
     assert io_res.stderr in (None, b"")
-    assert _entries(io_res.writes["/out.zip"]) == [
+    assert _entries(tree.files["/out.zip"]) == [
         "d/",
         "d/a.txt",
         "d/sealed/",
@@ -274,7 +274,7 @@ async def test_one_path_named_twice_is_stored_once():
         r=True,
     )
     assert io_res.exit_code == 0
-    assert _entries(io_res.writes["/out.zip"]) == ["a.txt"]
+    assert _entries(tree.files["/out.zip"]) == ["a.txt"]
 
 
 @pytest.mark.asyncio

@@ -388,14 +388,13 @@ async def test_stdin_outputs_are_named_in_the_working_directory(
     cwd: str, named: list[str]
 ):
     # No operand to read a prefix from: `x` in the working directory
-    # names the outputs (GNU), and the writes keys stay mount-relative
-    # like every other command's, so the executor can prefix them.
+    # names the outputs (GNU).
     specs: list[PathSpec] = []
 
     async def write_bytes(path: PathSpec, data: bytes) -> None:
         specs.append(path)
 
-    _, io = await split_generic.split_generic(
+    await split_generic.split_generic(
         [],
         read_stream=_no_read_stream,
         write_bytes=write_bytes,
@@ -405,4 +404,3 @@ async def test_stdin_outputs_are_named_in_the_working_directory(
         cwd=cwd,
     )
     assert [p.virtual for p in specs] == named
-    assert list(io.writes) == [name[len("/data") :] for name in named]

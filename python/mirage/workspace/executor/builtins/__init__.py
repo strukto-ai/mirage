@@ -58,7 +58,6 @@ if TYPE_CHECKING:
         handle_ln,
         handle_readlink,
         prepare_mv,
-        settle_moves,
         strip_link_operands,
     )
     from mirage.workspace.executor.builtins.lookup import (
@@ -174,7 +173,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "handle_ln",
         "handle_readlink",
         "prepare_mv",
-        "settle_moves",
         "strip_link_operands",
     ),
     "mirage.workspace.executor.builtins.control": (
@@ -235,7 +233,6 @@ __all__ = [
     "handle_setfattr",
     "handle_touch",
     "prepare_mv",
-    "settle_moves",
     "strip_link_operands",
     "handle_man",
     "handle_mapfile",

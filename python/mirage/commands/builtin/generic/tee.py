@@ -63,15 +63,12 @@ async def write_one(
     read_stream: Callable[..., AsyncIterator[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     append_bytes: Callable[..., Awaitable[None]] | None,
-) -> bytes | None:
-    """Write one operand, returning its new content when that is known.
+) -> None:
+    """Write one operand.
 
-    ``None`` means "written, but the resulting bytes are not in hand" —
-    the native append case. The caller then lists the path in ``writes``
-    without listing it in ``cache``, which is how ``apply_io`` is told to
-    drop the stale entry instead of caching a wrong one. That costs one
-    read on the next access and saves reading and re-uploading the whole
-    object on this one.
+    A native append sends only the new bytes, which costs one read on the
+    next access and saves reading and re-uploading the whole object on
+    this one.
 
     Args:
         path (PathSpec): the operand to write.
@@ -84,10 +81,10 @@ async def write_one(
     """
     if not parsed.append:
         await write_bytes(path, raw)
-        return raw
+        return
     if append_bytes is not None:
         await append_bytes(path, raw)
-        return None
+        return
     existing = b""
     try:
         async for chunk in read_stream(path):
@@ -95,9 +92,7 @@ async def write_one(
     except FileNotFoundError:
         # GNU tee -a creates a missing file: append to empty.
         pass
-    data = existing + raw
-    await write_bytes(path, data)
-    return data
+    await write_bytes(path, existing + raw)
 
 
 async def open_refusal(
@@ -177,8 +172,6 @@ async def write_output(
         append_bytes (Callable | None): backend native append, if wired.
         stat (StatFn | None): Stats a path, for the probed open.
     """
-    writes: dict[str, ByteSource] = {}
-    cache: list[str] = []
     errors: list[bytes] = []
     if parsed.stop_on_error and stat is not None:
         opened: set[str] = set()
@@ -201,15 +194,13 @@ async def write_output(
                         parsed.append and (await entry_kind(stat, prior))[0]
                     ):
                         await write_bytes(prior, b"")
-                        writes[prior.mount_path] = b""
-                        cache.append(prior.mount_path)
                 except Exception as exc:
                     failed, refusal = prior, exc
                     break
                 opened.add(prior.mount_path)
             if refusal is None:
                 try:
-                    data = await write_one(
+                    await write_one(
                         path,
                         b"",
                         parsed,
@@ -220,14 +211,10 @@ async def write_output(
                 except Exception as exc:
                     refusal = exc
                 else:
-                    writes[path.mount_path] = b"" if data is None else data
                     opened.add(path.mount_path)
                     continue
             return None, IOResult(
-                exit_code=1,
-                stderr=error_line(failed, refusal),
-                writes=writes,
-                cache=cache,
+                exit_code=1, stderr=error_line(failed, refusal)
             )
     for index, path in enumerate(paths):
         # A store keeps a key over a directory or under a file, where an
@@ -243,22 +230,16 @@ async def write_output(
             errors.append(error_line(path, refusal))
             continue
         try:
-            data = await write_one(
+            await write_one(
                 path, raw, parsed, read_stream, write_bytes, append_bytes
             )
         except Exception as exc:
             errors.append(error_line(path, exc))
             if parsed.stop_on_error:
                 break
-            continue
-        writes[path.mount_path] = raw if data is None else data
-        if data is not None and path.mount_path not in cache:
-            cache.append(path.mount_path)
     if errors:
-        return raw, IOResult(
-            exit_code=1, stderr=b"".join(errors), writes=writes, cache=cache
-        )
-    return raw, IOResult(writes=writes, cache=cache)
+        return raw, IOResult(exit_code=1, stderr=b"".join(errors))
+    return raw, IOResult()
 
 
 async def tee_generic(

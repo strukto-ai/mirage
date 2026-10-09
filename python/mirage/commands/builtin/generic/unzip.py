@@ -619,7 +619,6 @@ async def unzip(
     return out, IOResult(
         exit_code=max(result.exit_code, floor),
         stderr=stderr or None,
-        writes=result.writes,
     )
 
 
@@ -793,7 +792,6 @@ async def _run(
         rel = virtual[len(base) :].lstrip("/")
         return f"{typed_dest.rstrip('/')}/{rel}" if typed_dest else rel
 
-    writes: dict[str, ByteSource] = {}
     made: set[str] = set()
     output_lines = [] if q else [f"Archive:  {archive_path.raw_path}"]
     errors: list[str] = []
@@ -973,11 +971,6 @@ async def _run(
             )
             continue
         extracted.add(out_path)
-        if not relay:
-            # Relay writes land on whichever mount owns each path and
-            # invalidate through the dispatcher; keying them here would
-            # have the runner prefix them onto this mount.
-            writes[out_path] = content
         if not q:
             output_lines.append(_extracted_line(info, shown(out_path)))
     output = (
@@ -991,7 +984,6 @@ async def _run(
     return output, IOResult(
         exit_code=exit_code,
         stderr=stderr or None,
-        writes=writes,
     )
 
 

@@ -83,7 +83,6 @@ async def split(
     # The pieces go to the prefix, or `x` in the working directory, which
     # need not be this mount, so a dispatcher routes each write to the
     # mount that owns it.
-    relay = opts.dispatch is not None
     write_bytes = (
         transfer_primitives(opts.dispatch)["write"]
         if opts.dispatch is not None
@@ -114,7 +113,6 @@ async def split(
         separator=parse_separator(fl.as_str("separator")),
         mount_prefix=opts.mount_prefix,
         cwd=opts.cwd.virtual,
-        relay=relay,
     )
 
 

@@ -68,7 +68,6 @@ describe('handleRedirect > / >>', () => {
     expect(writes).toHaveLength(1)
     expect(writes[0]?.path).toBe('/ram/out.txt')
     expect(decode(writes[0]?.data ?? null)).toBe('hello')
-    expect(io.writes['/ram/out.txt']).toBeDefined()
   })
 
   it('>> dispatches append without reading the target', async () => {

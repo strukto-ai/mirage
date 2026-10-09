@@ -62,6 +62,19 @@ def _run(
     return bytes(body), io
 
 
+def _run_writing(
+    *texts: str, **flags
+) -> tuple[bytes, object, dict[str, bytes]]:
+    """Run wget with a dispatcher that keeps what each write sent."""
+    written: dict[str, bytes] = {}
+
+    async def dispatch(op, scope, **kwargs):
+        written[scope.virtual] = kwargs["data"]
+
+    body, io = _run(*texts, dispatch=dispatch, **flags)
+    return body, io, written
+
+
 def test_missing_url_is_usage_error_exit_1():
     with pytest.raises(UsageError) as excinfo:
         asyncio.run(wget(NOOPAccessor(), [], [], CommandOpts()))
@@ -71,16 +84,18 @@ def test_missing_url_is_usage_error_exit_1():
 
 def test_saves_url_basename_and_reports_on_stderr(monkeypatch):
     _stub(monkeypatch)
-    body, io = _run("http://x.test/path/doc.pdf")
+    body, io, written = _run_writing("http://x.test/path/doc.pdf")
     assert body == b""
-    assert io.writes == {"doc.pdf": b"file-body"}
+    assert written == {"/doc.pdf": b"file-body"}
     assert b"'doc.pdf' saved [9/9]" in io.stderr
 
 
 def test_args_O_sets_destination(monkeypatch):
     _stub(monkeypatch)
-    _body, io = _run("http://x.test/f", args_O="/tmp/dest.bin")
-    assert io.writes == {"/tmp/dest.bin": b"file-body"}
+    _body, io, written = _run_writing(
+        "http://x.test/f", args_O="/tmp/dest.bin"
+    )
+    assert written == {"/tmp/dest.bin": b"file-body"}
 
 
 def test_quiet_silences_the_report(monkeypatch):
@@ -92,10 +107,12 @@ def test_quiet_silences_the_report(monkeypatch):
 
 def test_404_is_exit_8_and_creates_an_empty_destination(monkeypatch):
     _stub(monkeypatch, resp=_ok(b"not found", 404, "Not Found"))
-    _body, io = _run("http://x.test/missing", args_O="/tmp/w.txt")
+    _body, io, written = _run_writing(
+        "http://x.test/missing", args_O="/tmp/w.txt"
+    )
     assert io.exit_code == 8
     assert b"ERROR 404: Not Found." in io.stderr
-    assert io.writes == {"/tmp/w.txt": b""}
+    assert written == {"/tmp/w.txt": b""}
 
 
 def test_quiet_keeps_exit_8_without_message(monkeypatch):
@@ -114,10 +131,10 @@ def test_refused_connection_is_exit_4(monkeypatch):
 
 def test_spider_reports_on_stderr_without_writing(monkeypatch):
     _stub(monkeypatch)
-    body, io = _run("http://x.test/exists", spider=True)
+    body, io, written = _run_writing("http://x.test/exists", spider=True)
     assert io.exit_code == 0
     assert body == b""
-    assert io.writes == {}
+    assert written == {}
     assert io.stderr == b"Remote file exists.\n"
 
 
@@ -184,13 +201,12 @@ def test_output_dash_is_stdout_without_a_write(monkeypatch, quiet):
     body, io = _run("http://x.test/", args_O="-", q=quiet, dispatch=dispatch)
     assert body == b"page"
     assert io.exit_code == 0
-    assert io.writes == {}
     assert writes == []
 
 
 def test_http_error_without_output_option_does_not_create_file(monkeypatch):
     _stub(monkeypatch, _ok(b"missing", 404, "Not Found"))
-    body, io = _run("http://x.test/index.html", q=True)
+    body, io, written = _run_writing("http://x.test/index.html", q=True)
     assert io.exit_code == 8
     assert body == b""
-    assert io.writes == {}
+    assert written == {}

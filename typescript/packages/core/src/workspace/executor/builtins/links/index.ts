@@ -17,7 +17,6 @@ export {
   followDirectoryLinks,
   followPaths,
   prepareMv,
-  settleMoves,
   stripLinkOperands,
 } from './links.ts'
 export { handleLn, operandAbs } from './ln.ts'

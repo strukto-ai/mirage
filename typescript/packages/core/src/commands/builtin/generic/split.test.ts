@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 
-import type { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
@@ -315,8 +314,7 @@ describe('split quotes the suffix start value', () => {
 })
 
 // No operand to read a prefix from: `x` in the working directory names the
-// outputs (GNU), and the writes keys stay mount-relative like every other
-// command's, so the executor can prefix them. Mirrors test_split.py.
+// outputs (GNU). Mirrors test_split.py.
 describe('split names stdin outputs in the working directory', () => {
   it.each([['/data/sub', ['/data/sub/xaa', '/data/sub/xab']]])(
     'addresses each output under %s',
@@ -328,7 +326,7 @@ describe('split names stdin outputs in the working directory', () => {
         cwd,
         mountPrefix: '/data',
       } as CommandOpts
-      const result = await splitGeneric(
+      await splitGeneric(
         [],
         opts,
         () => {
@@ -340,8 +338,6 @@ describe('split names stdin outputs in the working directory', () => {
         },
       )
       expect(specs.map((p) => p.virtual)).toEqual(named)
-      const [, io] = result as [unknown, IOResult]
-      expect(Object.keys(io.writes)).toEqual(named.map((n) => n.slice('/data'.length)))
     },
   )
 })
