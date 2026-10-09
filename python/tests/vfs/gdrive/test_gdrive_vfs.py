@@ -80,10 +80,19 @@ async def test_read_plain_file_falls_through():
             )
         ],
     )
-    with patch(
-        "mirage.core.gdrive.read.download_file",
-        new_callable=AsyncMock,
-        return_value=b"plain content",
+    # A cold read through the door fills the cache, so it asks for the
+    # md5 its entry is stamped with, as a command's read does.
+    with (
+        patch(
+            "mirage.core.gdrive.read.capture_file_metadata",
+            new_callable=AsyncMock,
+            return_value=(None, None),
+        ),
+        patch(
+            "mirage.core.gdrive.read.download_file",
+            new_callable=AsyncMock,
+            return_value=b"plain content",
+        ),
     ):
         result = await ops.read("/gdrive/notes.txt")
         assert result == b"plain content"

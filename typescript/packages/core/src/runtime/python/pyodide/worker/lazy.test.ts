@@ -347,45 +347,48 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     },
   )
 
-  it('preserves queued run and eval session attribution without async storage isolation', async () => {
-    const calls: string[] = []
-    const rt = new PyodideRuntime()
-    rt.bind(
-      new WorkspaceBinding(
-        async (op, path) => {
-          await Promise.resolve()
-          const session = getCurrentSession()?.sessionId ?? 'missing'
-          calls.push(`${op}:${session}`)
-          if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 3 })
-          if (op === 'read') {
-            record(op, path, 'test', 3, startOp())
-            return ENC.encode(session)
-          }
-          throw new Error(`unexpected op: ${op}`)
-        },
-        new PrefixResolver(() => ['/data/']),
-      ),
-    )
-    const one = new SessionState({ sessionId: 'one' })
-    const two = new SessionState({ sessionId: 'two' })
-    try {
-      const first = runWithSession(one, () =>
-        runWithRecording(() => rt.run(runArgs("print(open('/data/one').read())"))),
+  it.each([1, 2])(
+    'preserves queued run and eval session attribution without async storage isolation (limit %s)',
+    async (maxConcurrency) => {
+      const calls: string[] = []
+      const rt = new PyodideRuntime({ config: { maxConcurrency } })
+      rt.bind(
+        new WorkspaceBinding(
+          async (op, path) => {
+            await Promise.resolve()
+            const session = getCurrentSession()?.sessionId ?? 'missing'
+            calls.push(`${op}:${session}`)
+            if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 3 })
+            if (op === 'read') {
+              record(op, path, 'test', 3, startOp())
+              return ENC.encode(session)
+            }
+            throw new Error(`unexpected op: ${op}`)
+          },
+          new PrefixResolver(() => ['/data/']),
+        ),
       )
-      const second = runWithSession(two, () =>
-        runWithRecording(() => rt.eval("open('/data/two').read()")),
-      )
-      const [[run, firstRecords], [evaluated, secondRecords]] = await Promise.all([first, second])
-      expect(DEC.decode(run.stdout)).toBe('one\n')
-      expect(evaluated.value).toBe('two')
-      expect(calls).toEqual(['stat:one', 'read:one', 'stat:two', 'read:two'])
-      expect(firstRecords.map((entry) => entry.path)).toEqual(['/data/one'])
-      expect(secondRecords.map((entry) => entry.path)).toEqual(['/data/two'])
-      expect(getCurrentSession()).toBeNull()
-    } finally {
-      await rt.close()
-    }
-  })
+      const one = new SessionState({ sessionId: 'one' })
+      const two = new SessionState({ sessionId: 'two' })
+      try {
+        const first = runWithSession(one, () =>
+          runWithRecording(() => rt.run(runArgs("print(open('/data/one').read())"))),
+        )
+        const second = runWithSession(two, () =>
+          runWithRecording(() => rt.eval("open('/data/two').read()")),
+        )
+        const [[run, firstRecords], [evaluated, secondRecords]] = await Promise.all([first, second])
+        expect(DEC.decode(run.stdout)).toBe('one\n')
+        expect(evaluated.value).toBe('two')
+        expect(calls).toEqual(['stat:one', 'read:one', 'stat:two', 'read:two'])
+        expect(firstRecords.map((entry) => entry.path)).toEqual(['/data/one'])
+        expect(secondRecords.map((entry) => entry.path)).toEqual(['/data/two'])
+        expect(getCurrentSession()).toBeNull()
+      } finally {
+        await rt.close()
+      }
+    },
+  )
 
   it.each(['abort', 'timeout'])(
     'drains a slow mutation before advancing after %s',

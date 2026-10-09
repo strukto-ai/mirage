@@ -21,7 +21,7 @@ from mirage.workspace.mount.activity import VFSActivity
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("finish", ["eof", "error", "close", "bounded"])
+@pytest.mark.parametrize("finish", ["eof", "error", "close", "discard"])
 async def test_vfs_usage_ends_with_its_stream(finish):
     activity = VFSActivity()
 
@@ -31,7 +31,7 @@ async def test_vfs_usage_ends_with_its_stream(finish):
             raise ValueError("read failed")
 
     source = chunks()
-    if finish == "bounded":
+    if finish == "discard":
         source = CachableAsyncIterator(source)
     source = activity.hold(source)
     waiting = asyncio.create_task(activity.wait())
@@ -40,8 +40,8 @@ async def test_vfs_usage_ends_with_its_stream(finish):
     if finish == "close":
         await source.aclose()
         await source.aclose()
-    elif finish == "bounded":
-        assert await source.drain_bounded(0) is None
+    elif finish == "discard":
+        await source.discard()
     elif finish == "error":
         with pytest.raises(ValueError, match="read failed"):
             async for _ in source:

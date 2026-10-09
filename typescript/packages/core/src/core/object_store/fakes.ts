@@ -262,10 +262,6 @@ export class FakeManager {
     return null
   }
 
-  readThrough(_path: PathSpec, fetch: () => Promise<Uint8Array>): Promise<Uint8Array> {
-    return fetch()
-  }
-
   readonly writes: string[] = []
   readonly ancestors: string[] = []
   readonly unlinks: string[] = []
@@ -289,10 +285,6 @@ export class FakeManager {
   invalidateSubtree(path: string | PathSpec): Promise<void> {
     this.subtrees.push(typeof path === 'string' ? path : path.mountPath)
     return Promise.resolve()
-  }
-
-  cachedBytes(_path: PathSpec): Promise<Uint8Array | null> {
-    return Promise.resolve(null)
   }
 
   cachedSize(_path: PathSpec): Promise<number | null> {

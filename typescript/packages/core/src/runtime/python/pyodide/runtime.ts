@@ -17,6 +17,9 @@ import { captureOpPolicies } from '../../../policy/policies.ts'
 import type { PathSpec } from '../../../types.ts'
 import { captureRecordingContext } from '../../../observe/context.ts'
 import { ContextScope } from '../../../utils/context_scope.ts'
+import { Activity } from '../../../utils/activity.ts'
+import { asyncContextIsolatesTasks } from '../../../utils/async_context.ts'
+import { ConcurrencyLimiter } from '../../../concurrency/limiter.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PythonRuntime } from '../base.ts'
 import { EvalError } from '../../errors.ts'
@@ -171,6 +174,8 @@ export function stripDeniedImports(code: string, denyPackages: ReadonlySet<strin
 
 /** The pyodide runtime's implementation knobs (its `config` block). */
 export interface PyodideConfig {
+  /** Maximum simultaneous top-level calls, default 1; hosts without isolated async context serialize. */
+  maxConcurrency?: number
   autoLoadFromImports?: boolean
   bootstrapCode?: string
   /** Trusted host module URL. Its default initializer receives Pyodide and may return cleanup. */
@@ -212,6 +217,7 @@ export interface PyodideConfig {
 }
 
 const PYODIDE_CONFIG_KEYS: readonly string[] = [
+  'maxConcurrency',
   'autoLoadFromImports',
   'bootstrapCode',
   'initModule',
@@ -245,6 +251,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private bootstrapPromise: Promise<void> | null = null
   private disposeModule: (() => void | Promise<void>) | null = null
   private queue: Promise<unknown> = Promise.resolve()
+  private pending = new Activity()
+  private readonly limiter: ConcurrencyLimiter
+  private readonly concurrent: boolean
   private readonly sessions = new Map<string, PyodideRuntime>()
   private readonly autoLoadFromImports: boolean
   private readonly bootstrapCode: string | null
@@ -283,6 +292,11 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   ) {
     super(options, PYODIDE_CONFIG_KEYS)
     const config = this.config as PyodideConfig
+    const { maxConcurrency = 1 } = config
+    if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1)
+      throw new Error('pyodide config: maxConcurrency must be a positive safe integer')
+    this.concurrent = asyncContextIsolatesTasks && maxConcurrency > 1
+    this.limiter = new ConcurrencyLimiter(asyncContextIsolatesTasks ? maxConcurrency : 1)
     this.reach = config.initModule === undefined ? 'workspace' : 'process'
     this.autoLoadFromImports = config.autoLoadFromImports ?? true
     this.bootstrapCode = config.bootstrapCode ?? null
@@ -318,11 +332,11 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         ...captureOpPolicies(),
         ...captureRecordingContext(),
       ])
-    const task = (): Promise<RunResult> =>
-      scope.run(() => this.withFreshRuntime((runtime) => runtime.runOne(args, context)))
-    const next = this.queue.then(task, task)
-    this.queue = next.catch(() => undefined)
-    return next
+    return this.schedule(() =>
+      this.withPermit(() =>
+        scope.run(() => this.withFreshRuntime((runtime) => runtime.runOne(args, context))),
+      ),
+    )
   }
 
   /**
@@ -350,20 +364,41 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         ...captureOpPolicies(),
         ...captureRecordingContext(),
       ])
-    const task = (): Promise<EvalResult> =>
-      scope.run(() => {
-        if (opts.session === undefined)
-          return this.withFreshRuntime((runtime) => runtime.evalOne(code, opts, context))
-        let runtime = this.sessions.get(opts.session)
-        if (runtime === undefined) {
-          runtime = this.createRuntime()
-          this.sessions.set(opts.session, runtime)
-        }
-        return runtime.evalOne(code, opts, context)
-      })
+    return this.schedule(() => {
+      if (opts.session === undefined)
+        return this.withPermit(() =>
+          scope.run(() => this.withFreshRuntime((runtime) => runtime.evalOne(code, opts, context))),
+        )
+      let runtime = this.sessions.get(opts.session)
+      if (runtime === undefined) {
+        runtime = this.createRuntime()
+        this.sessions.set(opts.session, runtime)
+      }
+      const session = runtime
+      const task = (): Promise<EvalResult> =>
+        this.withPermit(() => scope.run(() => session.evalOne(code, opts, context)))
+      return this.concurrent ? session.enqueue(task) : task()
+    })
+  }
+
+  private schedule<T>(task: () => Promise<T>): Promise<T> {
+    const release = this.pending.acquire()
+    return this.queue.then(task, task).finally(release)
+  }
+
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
     const next = this.queue.then(task, task)
     this.queue = next.catch(() => undefined)
     return next
+  }
+
+  private async withPermit<T>(task: () => Promise<T>): Promise<T> {
+    const release = await this.limiter.acquire()
+    try {
+      return await task()
+    } finally {
+      release()
+    }
   }
 
   private createRuntime(): PyodideRuntime {
@@ -476,10 +511,12 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   }
 
   override close(): Promise<void> {
-    const task = (): Promise<void> => this.closeOne()
-    const next = this.queue.then(task, task)
-    this.queue = next.catch(() => undefined)
-    return next
+    const pending = this.pending
+    this.pending = new Activity()
+    return this.enqueue(async () => {
+      await pending.wait()
+      await this.closeOne()
+    })
   }
 
   private async closeOne(): Promise<void> {

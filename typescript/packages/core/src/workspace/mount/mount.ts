@@ -40,7 +40,11 @@ import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/con
 import { hasInjectedVersion } from '../../commands/spec/standard.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
 import type { LinkView, OpKwargs } from '../../view/types.ts'
-import { commandIo, resolveGlobOf } from '../../commands/builtin/generic_bind/adapter.ts'
+import {
+  commandIo,
+  resolveGlobOf,
+  withDoorReads,
+} from '../../commands/builtin/generic_bind/adapter.ts'
 import {
   appendByRewrite,
   expectOffset,
@@ -729,7 +733,8 @@ export class MountEntry {
    * mount: each level in turn until one answers with something other than
    * null. A read resolves its renderer by `kwargs.filetype` when the caller
    * names one (null asks for the stored bytes) and by the path's extension
-   * otherwise.
+   * otherwise. A VFS with no `read` of its own (gdocs, gsheets, gslides)
+   * stores the rendering, so its stored bytes are the renderer's.
    */
   async callKeyed(
     name: string,
@@ -737,7 +742,9 @@ export class MountEntry {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
-    const filetype = kwargs.filetype === undefined ? getExtension(scope.virtual) : kwargs.filetype
+    const named = kwargs.filetype === undefined ? getExtension(scope.virtual) : kwargs.filetype
+    const filetype =
+      named === null && !this.vfs.supports('read') ? getExtension(scope.virtual) : named
     const levels = this.callers(name, filetype)
     if (levels.length === 0) throw enotsup(this.vfs.name, name, scope)
     taken(name, kwargs)
@@ -995,7 +1002,7 @@ export class MountEntry {
       command: cmdName,
       cwd: context.cwd ?? ROOT_CWD,
       index: this.index,
-      io: this.io,
+      io: context.dispatch === undefined ? this.io : withDoorReads(this.io, context.dispatch),
       ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
       ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
       ...(context.env !== undefined ? { env: context.env } : {}),

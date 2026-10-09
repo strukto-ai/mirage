@@ -417,19 +417,18 @@ describe('Files is one door with the dispatcher', () => {
     expect(DEC.decode(await ws.vfs.read('/m/doc.gdoc.json', { raw: true }))).toBe('stored')
   })
 
-  it('does not serve a raw read from the file cache', async () => {
-    // A command's read lands in the file cache keyed on the path alone
-    // (that is what `applyIo` does with an IOResult), so whatever it
-    // returned sits under the very key a raw read asks for. Seeding
-    // the cache directly is the same state one command earlier reaches.
-    // Mirrors Python's tests/workspace/dispatcher/test_raw_read.py.
+  it('serves a raw read from the file cache', async () => {
+    // The file cache holds the stored bytes commands read, never a
+    // rendering, which is what a raw read asks for. Seeding the cache
+    // directly is the same state one command earlier reaches. Mirrors
+    // Python's tests/workspace/dispatcher/test_raw_read.py.
     const vfs = new RAMVFS()
     Object.assign(vfs, { cachesReads: true })
     const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
     await ws.vfs.write('/m/doc.gdoc.json', 'stored')
-    await ws.cache.set('/m/doc.gdoc.json', new TextEncoder().encode('rendered'), { ttl: 600 })
-    expect(await ws.vfs.cat('/m/doc.gdoc.json')).toBe('rendered')
-    expect(DEC.decode(await ws.vfs.read('/m/doc.gdoc.json', { raw: true }))).toBe('stored')
+    await ws.cache.set('/m/doc.gdoc.json', new TextEncoder().encode('cached'), { ttl: 600 })
+    expect(await ws.vfs.cat('/m/doc.gdoc.json')).toBe('cached')
+    expect(DEC.decode(await ws.vfs.read('/m/doc.gdoc.json', { raw: true }))).toBe('cached')
   })
 
   // Commands fill the cache with what their own reads return. A filetype

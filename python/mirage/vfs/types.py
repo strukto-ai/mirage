@@ -89,8 +89,7 @@ class ReadStreamOp(Protocol):
     """Backend streams are async iterators; the polymorphic reader
     contract (bytes / awaitable) exists only at the generics' bound-
     reader boundary (``normalized_read``), never on the slot itself:
-    the cache wrapper and the dir-refusing chokepoint both ``async
-    for`` over this directly."""
+    the dir-refusing chokepoint ``async for``s over this directly."""
 
     def __call__(
         self, accessor: Any, path: PathSpec, /, index: IndexCacheStore = ...

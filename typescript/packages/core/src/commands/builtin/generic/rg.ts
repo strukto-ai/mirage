@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { MountView } from '../../../view/types.ts'
@@ -629,7 +628,7 @@ export async function rgGeneric(
   // Every `-` operand reads stdin through one cursor, as grep's do. With no
   // operand typed, the implicit one below is stdin's sole reader, so a search
   // that stops early closes the input.
-  stream = stdinStream(cacheAwareStream(stream), opts.stdin, paths.length === 0)
+  stream = stdinStream(stream, opts.stdin, paths.length === 0)
   const fl = new FlagView(opts.flags, specOf('rg'))
   const f = parseFlags(fl)
   const types = new FileTypes(f.typeChanges, f.typeSelections)

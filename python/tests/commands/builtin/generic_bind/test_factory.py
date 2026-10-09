@@ -27,8 +27,8 @@ from mirage.commands.builtin.generic_bind.factory import (
     generic_commands,
     scan_io,
     with_probe_answers,
-    with_read_cache,
     with_slash_guard,
+    with_stat_cache,
 )
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.types import FileStat, FileType, PathSpec
@@ -102,52 +102,6 @@ def test_factory_registers_every_command_whatever_the_backend_lacks():
     assert names == {b.name for b in BUILDERS}
 
 
-@pytest.mark.asyncio
-async def test_warm_read_stream_serves_cache_without_backend():
-    backend = _CountingBackend(b"payload")
-    cache = RAMFileCacheStore()
-    await cache.set("/s3/a.txt", b"payload")
-    manager = CacheManager(cache, None, "/s3/", True)
-    ops = with_read_cache(_ops(backend))
-    prev = push_cache_manager(manager)
-    try:
-        out = await _drain(ops.read_stream(None, _spec()))
-    finally:
-        push_cache_manager(prev)
-    assert out == b"payload"
-    assert backend.stream_calls == 0
-
-
-@pytest.mark.asyncio
-async def test_warm_read_bytes_serves_cache_without_backend():
-    backend = _CountingBackend(b"payload")
-    cache = RAMFileCacheStore()
-    await cache.set("/s3/a.txt", b"payload")
-    manager = CacheManager(cache, None, "/s3/", True)
-    ops = with_read_cache(_ops(backend))
-    prev = push_cache_manager(manager)
-    try:
-        out = await ops.read_bytes(None, _spec())
-    finally:
-        push_cache_manager(prev)
-    assert out == b"payload"
-    assert backend.bytes_calls == 0
-
-
-@pytest.mark.asyncio
-async def test_cold_read_falls_through_to_backend():
-    backend = _CountingBackend(b"payload")
-    manager = CacheManager(RAMFileCacheStore(), None, "/s3/", True)
-    ops = with_read_cache(_ops(backend))
-    prev = push_cache_manager(manager)
-    try:
-        out = await _drain(ops.read_stream(None, _spec()))
-    finally:
-        push_cache_manager(prev)
-    assert out == b"payload"
-    assert backend.stream_calls == 1
-
-
 def test_scan_io_guards_only_a_judged_mount():
     # A bespoke search scans the raw adapter when nothing on its mount is
     # hidden or refused, and the guarded one when anything is, since the
@@ -160,33 +114,6 @@ def test_scan_io_guards_only_a_judged_mount():
         assert scan is io and not scoped
     scan, scoped = scan_io(io, judged, "/s3/")
     assert scan is not io and scoped
-
-
-@pytest.mark.asyncio
-async def test_a_judged_scan_serves_warm_bytes_below_its_guards():
-    # The generics' own cache steps aside for a judged path, so the
-    # guarded scan reads the cache itself once its guards admit the path.
-    backend = _CountingBackend(b"payload")
-    cache = RAMFileCacheStore()
-    await cache.set("/s3/a.txt", b"payload")
-    manager = CacheManager(cache, None, "/s3/", True)
-    judged = NamespaceView(scoped=lambda _virtual: True)
-    prev = push_cache_manager(manager)
-    try:
-        scan, _ = scan_io(_ops(backend), judged, "/s3/")
-        out = await scan.read_bytes(None, _spec())
-    finally:
-        push_cache_manager(prev)
-    assert (out, backend.bytes_calls) == (b"payload", 0)
-
-
-@pytest.mark.asyncio
-async def test_no_manager_falls_through_to_backend():
-    backend = _CountingBackend(b"payload")
-    ops = with_read_cache(_ops(backend))
-    out = await _drain(ops.read_stream(None, _spec()))
-    assert out == b"payload"
-    assert backend.stream_calls == 1
 
 
 async def _no_target(virtual: str):
@@ -324,24 +251,6 @@ def test_a_name_no_builder_has_is_refused(option):
         generic_commands("fake", **option)
 
 
-@pytest.mark.asyncio
-async def test_partial_consumer_caches_complete_synthesized_stream():
-    backend = _CountingBackend(b"first\nsecond\n")
-    manager = CacheManager(RAMFileCacheStore(), None, "/s3/", True)
-    prev = push_cache_manager(manager)
-    try:
-        ops = with_read_cache(replace(_ops(backend), streams_bytes=True))
-    finally:
-        push_cache_manager(prev)
-    source = ops.read_stream(None, _spec())
-    assert (await anext(source))[:5] == b"first"
-    await source.aclose()
-    assert await manager.cached_bytes(_spec()) == backend.data
-    assert await ops.read_bytes(None, _spec()) == backend.data
-    assert backend.bytes_calls == 1
-    assert backend.stream_calls == 0
-
-
 class _CountingStat:
     def __init__(self, answer: FileStat) -> None:
         self.answer = answer
@@ -366,7 +275,7 @@ async def test_a_command_stat_serves_what_its_probe_saw():
     # again resolves through a listing fresh has not re-checked yet.
     stat = _CountingStat(_BACKEND)
     manager = CacheManager(RAMFileCacheStore(), None, "/s3/", True)
-    ops = with_read_cache(with_probe_answers(_stat_ops(stat)))
+    ops = with_stat_cache(with_probe_answers(_stat_ops(stat)))
     prev = push_cache_manager(manager)
     try:
         async with command_scope():
@@ -383,7 +292,7 @@ async def test_a_write_after_the_probe_sends_the_stat_to_the_backend():
     manager = CacheManager(
         RAMFileCacheStore(), RAMIndexCacheStore(), "/s3/", True
     )
-    ops = with_read_cache(with_probe_answers(_stat_ops(stat)))
+    ops = with_stat_cache(with_probe_answers(_stat_ops(stat)))
     prev = push_cache_manager(manager)
     try:
         async with command_scope():
@@ -403,7 +312,7 @@ async def test_a_probed_stat_without_a_size_still_gets_the_cached_length():
     cache = RAMFileCacheStore()
     await cache.set("/s3/a.txt", b"rendered!!")
     manager = CacheManager(cache, None, "/s3/", True)
-    ops = with_read_cache(with_probe_answers(_stat_ops(stat)))
+    ops = with_stat_cache(with_probe_answers(_stat_ops(stat)))
     prev = push_cache_manager(manager)
     try:
         async with command_scope():

@@ -328,48 +328,32 @@ async def main():
     r = await ws.shell('grep "$(echo queue)" /gcs/data/example.jsonl | wc -l')
     print(f"  count: {(await r.stdout_str()).strip()}")
 
-    # ── on-the-fly max_drain_bytes (cancellable cache drain) ──────────
-    # Demonstrates: set a small budget → cat | head leaves the source
-    # only partially read → background drain trips the budget → cache
-    # is NOT populated. Then unset the budget → drain completes → cache
-    # IS populated. Drain tasks are awaited explicitly (vs sleeping)
-    # so we don't race the network.
+    # ── max_drain_bytes: what a streamed read may buffer to fill the cache
+    # A read the line stops early (cat | head) keeps nothing; a read that
+    # ends fills the cache unless the file is larger than the budget.
     target = "/gcs/data/example.jsonl"
     await ws.cache.clear()
-    print("\n=== max_drain_bytes=1MB then cat | head (drain cancelled) ===")
-    ws.max_drain_bytes = 1_000_000
+    print("\n=== cat | head (stopped early, keeps nothing) ===")
     r = await ws.shell(f"cat {target} | head -n 3")
     print(f"  head returned {len((await r.stdout_str()).splitlines())} lines")
-    drain_keys = list(ws.cache._drain_tasks.keys())
-    print(f"  drain tasks: {json.dumps(drain_keys, separators=(',', ':'))}")
-    for k in drain_keys:
-        await ws.cache._drain_tasks[k]
-    cached = None
-    for k in drain_keys:
-        cached = await ws.cache.get(k) or cached
-    if cached:
-        status = f"POPULATED ({len(cached)} bytes)"
-    else:
-        status = "EMPTY (drain cancelled, as expected)"
-    print(f"  cache after small budget: {status}")
+    cached = await ws.cache.get(target)
+    print(f"  cache: {'POPULATED' if cached else 'EMPTY (as expected)'}")
 
-    await ws.cache.clear()
-    print("\n=== max_drain_bytes=None then cat | head (drain completes) ===")
+    print("\n=== max_drain_bytes=1 then cat (larger than the budget) ===")
+    ws.max_drain_bytes = 1
+    await (await ws.shell(f"cat {target}")).stdout_str()
+    cached = await ws.cache.get(target)
+    print(f"  cache: {'POPULATED' if cached else 'EMPTY (as expected)'}")
+
+    print("\n=== max_drain_bytes=None then cat (fills the cache) ===")
     ws.max_drain_bytes = None
-    r = await ws.shell(f"cat {target} | head -n 3")
-    print(f"  head returned {len((await r.stdout_str()).splitlines())} lines")
-    drain_keys = list(ws.cache._drain_tasks.keys())
-    print(f"  drain tasks: {json.dumps(drain_keys, separators=(',', ':'))}")
-    for k in drain_keys:
-        await ws.cache._drain_tasks[k]
-    cached = None
-    for k in drain_keys:
-        cached = await ws.cache.get(k) or cached
+    await (await ws.shell(f"cat {target}")).stdout_str()
+    cached = await ws.cache.get(target)
     if cached:
         status = f"POPULATED ({len(cached)} bytes, as expected)"
     else:
         status = "EMPTY"
-    print(f"  cache after unbounded: {status}")
+    print(f"  cache: {status}")
 
     # ── chunk-level streaming + multi-stage pipe backpressure ─────────
     print("\n=== STREAMING (single command) ===")

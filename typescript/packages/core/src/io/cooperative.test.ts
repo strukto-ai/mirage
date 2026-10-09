@@ -229,7 +229,6 @@ it('never caches partial content after a producer fails', async () => {
   const cache = new RAMFileCacheStore()
   await applyIo(cache, new IOResult({ reads: { '/bad': input }, cache: ['/bad'] }))
   expect(await cache.get('/bad')).toBeNull()
-  expect(cache.drainTasks.size).toBe(0)
 })
 
 it('discards hidden cache reads when a value barrier fails', async () => {

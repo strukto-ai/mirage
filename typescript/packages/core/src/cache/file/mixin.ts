@@ -21,11 +21,6 @@ export interface FileCache {
     data: Uint8Array,
     options?: { fingerprint?: string | null; ttl?: number | null },
   ): Promise<void>
-  add(
-    key: string,
-    data: Uint8Array,
-    options?: { fingerprint?: string | null; ttl?: number | null },
-  ): Promise<boolean>
   remove(key: string): Promise<void>
   // The path-unknown counterpart to remove(): a mutation that names no
   // path (an account CLI writing to its service by id) cannot say which
@@ -84,17 +79,14 @@ export interface FileCache {
   readonly cacheEntries?: number | null
   readonly cacheLimit: number
   maxDrainBytes: number | null
-  // Present only on stores that support background drains (mirrors the
-  // Python RAM cache's _drain_tasks); applyIo skips draining without it.
-  readonly drainTasks?: Map<string, Promise<void>>
 }
 
 /**
- * Max bytes a background drain may buffer to fill the cache.
+ * Max bytes a streamed read may buffer to fill the cache.
  *
  * null (the default) derives the budget from `cacheLimit`. An explicit
- * value limits speculative background reads further and may not exceed
- * the cache's intended capacity. Mirrors Python `drain_budget`.
+ * value keeps larger streams out of the cache and may not exceed the
+ * cache's intended capacity. Mirrors Python `drain_budget`.
  */
 export function drainBudget(cache: FileCache): number {
   validateMaxDrainBytes(cache.cacheLimit, cache.maxDrainBytes)

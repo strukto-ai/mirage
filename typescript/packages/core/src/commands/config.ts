@@ -117,7 +117,6 @@ export interface CommandIO<A extends Accessor = Accessor> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setAttrs?: (...args: any[]) => unknown
   isMounted: (accessor: A) => boolean
-  streamsBytes?: boolean
   local?: boolean
   maxGlobMatches?: number
   maxDuEntries?: number | null

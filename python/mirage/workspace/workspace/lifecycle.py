@@ -51,8 +51,7 @@ class CloseDeps:
         sessions (SessionManager): settled first, so a pending write
             lands.
         watch (WatchManager): detached before anything it reads goes.
-        cache (FileCacheMixin): cleared and closed last, once its drains
-            have settled.
+        cache (FileCacheMixin): cleared and closed last.
         owns_state_store (bool): the workspace built its state store.
         state_store (WorkspaceStateStore): where the state lives.
         closers (list[Callable[[], Awaitable[None]]]): the policy
@@ -156,9 +155,6 @@ async def close_local_parts(deps: CloseDeps) -> None:
     finally:
         for job in deps.job_table.all_running_jobs():
             cancel_job(job)
-        for task in deps.cache._drain_tasks.values():
-            task.cancel()
-        deps.cache._drain_tasks.clear()
 
 
 async def _drop_state(deps: CloseDeps) -> None:
@@ -181,8 +177,7 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
     Order matters: the watch runtime goes first (it reads mounts), then
     background jobs, then the line runtimes, then mounts not shared
     with a sibling workspace, then the state store if this workspace
-    built it, then the kernel mounts, and finally the cache once its drains
-    have settled.
+    built it, then the kernel mounts, and finally the cache.
 
     Jobs are settled here rather than merely cancelled. ``kill_all``
     records the outcome and finishes each console, which is what releases
@@ -215,7 +210,6 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
         deps.processes.stop()
     except Exception as exc:
         failures.append(exc)
-    drain_tasks = list(deps.cache._drain_tasks.values())
     for close in deps.closers:
         await settle(close())
     await settle(deps.processes.drain())
@@ -250,13 +244,6 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
     if deps.owns_state_store:
         await settle(deps.state_store.close())
     await settle(close_local_parts(deps))
-    drains = await asyncio.gather(*drain_tasks, return_exceptions=True)
-    failures.extend(
-        result
-        for result in drains
-        if isinstance(result, BaseException)
-        and not isinstance(result, asyncio.CancelledError)
-    )
     await settle(deps.cache.clear())
     await settle(deps.cache.close())
     return failures

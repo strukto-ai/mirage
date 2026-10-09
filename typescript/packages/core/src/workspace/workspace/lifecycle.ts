@@ -45,9 +45,8 @@ export interface CloseDeps {
  *
  * Order matters: the watch runtime goes first (it reads mounts), then
  * background jobs, then the runtime closers (their journals still write
- * to mounts), then in-flight cache drains settle, then the state store if
- * this workspace built it, and finally every VFS not shared with a
- * sibling workspace.
+ * to mounts), then the state store if this workspace built it, and
+ * finally every VFS not shared with a sibling workspace.
  */
 export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   const failures: unknown[] = []
@@ -82,7 +81,6 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   ])
   await settle([() => deps.jobTable.closeConsoles()])
   await settle([...deps.registry.retiringMounts.values()].map((task) => () => task))
-  await settle([...(deps.cache.drainTasks?.values() ?? [])].map((task) => () => task))
   const mounts = new Set(deps.registry.allMounts().map((mount) => mount.vfs))
   await settle(
     [...mounts].filter((vfs) => !deps.sharedMounts.has(vfs)).map((vfs) => () => vfs.close()),

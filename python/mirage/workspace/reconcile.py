@@ -56,13 +56,12 @@ class Reconciler:
     One deletion signal feeds both consumers with separate reactions: the
     file cache evicts and the namespace GCs any orphaned attribute overlay.
 
-    Three read paths call in: the cached-read gate (``may_serve_cached``),
-    which the dispatcher and the file cache's own door both run, its main-op
-    catch (``on_enoent``) for cross-mount and programmatic reads, and the
-    mount registry's per-command reconcile (``reconcile_read``) for
-    single-mount shell reads. Reconcile state follows each consumer's store
-    (RAM local, Redis shared across runtimes), so this is a thin coordinator
-    holding references, not config.
+    Three read paths call in: the dispatcher's cached-read gate
+    (``may_serve_cached``), its main-op catch (``on_enoent``), and the
+    mount registry's per-command reconcile (``reconcile_read``) for the
+    operands of a single-mount shell command. Reconcile state follows each
+    consumer's store (RAM local, Redis shared across runtimes), so this is
+    a thin coordinator holding references, not config.
 
     The gate and ``reconcile_read`` both run for a warm named operand, once
     at routing and again at the gate, and they share one scope: the

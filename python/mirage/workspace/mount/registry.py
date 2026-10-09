@@ -27,7 +27,6 @@ from mirage.commands.builtin.backends import commands_for
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.context import (
     effective_path_mode,
-    get_admission,
     strongest_mode_under,
 )
 from mirage.errors.fs import no_mount
@@ -64,8 +63,6 @@ class ReadReconciler(Protocol):
     """
 
     async def reconcile_read(self, mount: MountEntry, path: str) -> None: ...
-
-    async def may_serve_cached(self, mount: MountEntry, path: str) -> bool: ...
 
     async def on_gone(
         self, gone: list[Evicted], excluded: tuple[str, ...] = ()
@@ -217,45 +214,15 @@ class MountRegistry:
         for m in self._mounts:
             self._attach_manager(m)
 
-    async def _may_serve_cached(self, m: MountEntry, key: str) -> bool:
-        """Run the shared read verdict for one mount's cached entry.
-
-        The file cache's door and the dispatcher's door ask the same
-        question, so they ask the same function; a second verdict rule here
-        is what let the two drift apart in the first place. The reconciler
-        is read at call time because ``attach_file_cache`` runs before
-        ``set_reconciler``, and a manager with none trusts its cache.
-
-        A retiring mount answers False rather than probing: ``call``
-        raises EBUSY once teardown has started, and ``owns_path`` cannot
-        catch that on its own because it is read before several awaits.
-        False sends the caller to a cold read, which is exactly where
-        ``owns_path`` already sends it today.
-
-        Args:
-            m (MountEntry): the mount whose cache entry is in question.
-            key (str): mount-absolute cache key.
-        """
-        reconciler = self._reconciler
-        if reconciler is None:
-            return True
-        if m.retiring:
-            return False
-        try:
-            return await reconciler.may_serve_cached(m, key)
-        except OSError as exc:
-            if exc.errno != errno.EBUSY:
-                raise
-            return False
-
     async def _may_serve_listing(
         self, m: MountEntry, folder: str, version: str | None
     ) -> bool:
         """Run the shared listing verdict for one mount's cached listing.
 
-        Mirrors :meth:`_may_serve_cached`: read at call time, a retiring
-        mount answers False without asking, and EBUSY from a mount that
-        began retiring mid-check answers False too.
+        The reconciler is read at call time because ``attach_file_cache``
+        runs before ``set_reconciler``, and a manager with none trusts its
+        listings. A retiring mount answers False without asking, and EBUSY
+        from a mount that began retiring mid-check answers False too.
 
         Args:
             m (MountEntry): the mount whose listing is in question.
@@ -275,20 +242,11 @@ class MountRegistry:
             return False
 
     def _attach_manager(self, m: MountEntry) -> None:
-        async def gate(key: str) -> bool:
-            # The cache is shared by every session: a warm entry the
-            # running command may not read goes cold to the guarded read,
-            # which refuses it, before any freshness probe.
-            admission = get_admission()
-            if admission is not None and admission.refuses(key):
-                return False
-            return await self._may_serve_cached(m, key)
-
         async def listing_gate(folder: str, version: str | None) -> bool:
             return await self._may_serve_listing(m, folder, version)
 
         async def cleanup(gone: list[Evicted]) -> None:
-            # Read at call time, for the same reason as the gate; a retiring
+            # Read at call time, as the listing gate is; a retiring
             # mount's leftovers go with its teardown instead.
             reconciler = self._reconciler
             if reconciler is not None and not m.retiring:
@@ -306,7 +264,6 @@ class MountRegistry:
             m.prefix,
             m.vfs.caches_reads,
             lambda path: not m.retiring and self.try_mount_for(path) is m,
-            gate,
             read_ttl=m.read.ttl,
             on_gone=cleanup,
             may_serve_listing=listing_gate,
@@ -642,11 +599,12 @@ class MountRegistry:
 
         await mount.ensure_ready()
         resolved = mount.resolve_command(cmd_name)
-        # Warm reads are served in place by with_read_cache, so a read-only
-        # command stays on its real mount. Single-mount reads do not go
-        # through the dispatcher, so this is where they reconcile against
-        # backend truth: the shared Reconciler evicts a stale cache entry and
-        # GCs an orphaned overlay when the backend reports the path gone.
+        # A read-only command stays on its real mount. Its content reads go
+        # through the dispatcher, which revalidates a warm entry itself; its
+        # stat and listing calls reach the backend past it, so this is where
+        # they reconcile against backend truth: the shared Reconciler evicts
+        # a stale cache entry and GCs an orphaned overlay when the backend
+        # reports the path gone.
         if (
             self._reconciler is not None
             and path_scopes

@@ -30,7 +30,6 @@ import { runInCommandScope } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { CacheManager } from './manager.ts'
 import { RefusingStore, shiftPerformanceNow } from './_test_util.ts'
-import { enoent } from '../errors/fs.ts'
 
 const built = vi.hoisted((): number[] => [])
 vi.mock('../observe/record.ts', async (importOriginal) => {
@@ -335,7 +334,7 @@ describe('CacheManager', () => {
   })
 })
 
-describe('CacheManager read gate', () => {
+describe('CacheManager cachedSize', () => {
   const spec = (path = '/data/x.txt') =>
     new PathSpec({
       vfsPath: mountKey(path, '/data/'),
@@ -350,95 +349,10 @@ describe('CacheManager read gate', () => {
     return [cache, index] as const
   }
 
-  const ownsAll = () => true
-
-  it.each([
-    [null, 'cached'],
-    ['/data/x.txt', 'cached'],
-    ['/data/x.txt/', null],
-  ] as const)('serves the spelling %s as %s', async (dotted, served) => {
-    // GNU's ENOTDIR for `f/` comes from the backend; the cache key drops the slash.
+  it('cachedSize reports the length', async () => {
     const [cache, index] = await withEntry()
     const manager = new CacheManager(cache, index, '/data/', true)
-    const path = new PathSpec({
-      vfsPath: mountKey('/data/x.txt', '/data/'),
-      virtual: '/data/x.txt',
-      directory: '/data/',
-      dotted,
-    })
-    const got = await manager.cachedBytes(path)
-    expect(got === null ? null : new TextDecoder().decode(got)).toBe(served)
-  })
-
-  it('a refusal withholds the cached bytes', async () => {
-    const [cache, index] = await withEntry()
-    const asked: string[] = []
-    const manager = new CacheManager(cache, index, '/data/', true, ownsAll, (key) => {
-      asked.push(key)
-      return Promise.resolve(false)
-    })
-    expect(await manager.cachedBytes(spec())).toBeNull()
-    expect(asked).toEqual(['/data/x.txt'])
-  })
-
-  it('is not asked for a path the cache does not hold', async () => {
-    const cache = new RAMFileCacheStore()
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    const asked: string[] = []
-    const manager = new CacheManager(cache, index, '/data/', true, ownsAll, (key) => {
-      asked.push(key)
-      return Promise.resolve(true)
-    })
-    expect(await manager.cachedBytes(spec())).toBeNull()
-    expect(asked).toEqual([])
-  })
-
-  it('is not asked for a non-caching mount', async () => {
-    const [cache, index] = await withEntry()
-    const asked: string[] = []
-    const manager = new CacheManager(cache, index, '/data/', false, ownsAll, (key) => {
-      asked.push(key)
-      return Promise.resolve(true)
-    })
-    expect(await manager.cachedBytes(spec())).toBeNull()
-    expect(asked).toEqual([])
-  })
-
-  it('is not asked for a key the mount no longer owns', async () => {
-    const [cache, index] = await withEntry()
-    const asked: string[] = []
-    const manager = new CacheManager(
-      cache,
-      index,
-      '/data/',
-      true,
-      () => false,
-      (key) => {
-        asked.push(key)
-        return Promise.resolve(true)
-      },
-    )
-    expect(await manager.cachedBytes(spec())).toBeNull()
-    expect(asked).toEqual([])
-  })
-
-  it('a gate reporting the object gone propagates', async () => {
-    const [cache, index] = await withEntry()
-    const manager = new CacheManager(cache, index, '/data/', true, ownsAll, () =>
-      Promise.reject(enoent('/data/x.txt')),
-    )
-    await expect(manager.cachedBytes(spec())).rejects.toThrow()
-  })
-
-  it('cachedSize reports the length without revalidating', async () => {
-    const [cache, index] = await withEntry()
-    const asked: string[] = []
-    const manager = new CacheManager(cache, index, '/data/', true, ownsAll, (key) => {
-      asked.push(key)
-      return Promise.resolve(false)
-    })
     expect(await manager.cachedSize(spec())).toBe(6)
-    expect(asked).toEqual([])
   })
 
   it('cachedSize of an empty render is 0, not null', async () => {

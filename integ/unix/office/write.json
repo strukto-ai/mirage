@@ -14,6 +14,21 @@
         "stdout": "slide-bytes<odsp-metadata/>",
         "stderr": ""
       }
+    },
+    {
+      "id": "office_nested_write_read_keeps_the_enriched_copy",
+      "seq": 204008,
+      "targets": [
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/office && eval 'printf slide-bytes | tee /data/office/nested.pptx > /dev/null && cat /data/office/nested.pptx'; echo; cat /data/office/nested.pptx; rm -r /data/office",
+      "expect": {
+        "exit": 0,
+        "stdout": "slide-bytes<odsp-metadata/>\nslide-bytes<odsp-metadata/>",
+        "stderr": ""
+      }
     }
   ]
 }

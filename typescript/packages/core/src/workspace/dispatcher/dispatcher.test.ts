@@ -26,7 +26,7 @@ import { enoent } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { LimitExceededError } from '../../commands/errors.ts'
 import type { Policy } from '../../policy/base.ts'
-import type { Action, VfsResultContext } from '../../policy/types.ts'
+import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts'
 import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
 import { FileStat, FileType, Limit, MountMode, OnExceed, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
@@ -946,17 +946,40 @@ describe('a cold read keeps its bytes for the next reader', () => {
     expect(fetched).toEqual(['/data/f.count'])
   })
 
-  it('keeps nothing from a raw or a natively ranged read', async () => {
-    // A raw read is not the rendering the cache holds under the same key,
-    // and a store that serves a range itself moved only that range.
+  it('keeps what a command reads from a raw read', async () => {
+    // The stored bytes are what the cache holds under the path, so the cat
+    // after a raw read is served warm.
     const { ws, fetched } = counted(false, '.count')
     await ws.vfs.write('/data/f.count', 'STORED')
-    await ws.vfs.write('/data/f.txt', '0123456789')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { raw: true }))).toBe('STORED')
-    expect(DEC.decode(await ws.vfs.read('/data/f.txt', { offset: 2, size: 3 }))).toBe('234')
-    expect(await ws.cache.exists('/data/f.count')).toBe(false)
-    expect(await ws.cache.exists('/data/f.txt')).toBe(false)
+    expect(await ws.cache.get('/data/f.count')).toEqual(ENC.encode('STORED'))
+    expect(DEC.decode((await ws.shell('cat /data/f.count')).stdout)).toBe('STORED')
     expect(fetched).toEqual([])
+  })
+
+  it('neither serves nor keeps the cache on a direct read', async () => {
+    // A follow's poll asks for what the backend holds now: the warm copy is
+    // not served, and the read leaves the cache as it found it.
+    const { ws, fetched } = counted()
+    await ws.cache.set('/data/f.count', ENC.encode('WARM'))
+    const read = async (kwargs: Record<string, unknown>): Promise<string> => {
+      const data = await ws.dispatch('read', '/data/f.count', [], { ...kwargs, direct: true })
+      return DEC.decode(data as Uint8Array)
+    }
+    expect([await read({}), await read({ offset: 1, size: 2 })]).toEqual(['BODY', 'OD'])
+    expect(fetched).toEqual(['/data/f.count', '/data/f.count'])
+    expect(await ws.cache.get('/data/f.count')).toEqual(ENC.encode('WARM'))
+    await ws.cache.remove('/data/f.count')
+    await ws.dispatch('read', '/data/f.count', [], { direct: true })
+    expect(await ws.cache.exists('/data/f.count')).toBe(false)
+  })
+
+  it('keeps nothing from a natively ranged read', async () => {
+    // A store that serves a range itself moved only that range.
+    const { ws } = counted(false, '.count')
+    await ws.vfs.write('/data/f.txt', '0123456789')
+    expect(DEC.decode(await ws.vfs.read('/data/f.txt', { offset: 2, size: 3 }))).toBe('234')
+    expect(await ws.cache.exists('/data/f.txt')).toBe(false)
   })
 
   it('keeps nothing when a write races the fetch', async () => {
@@ -1591,9 +1614,10 @@ describe('a streamed read', () => {
         await sleep(100)
       }
       expect(got).toHaveLength(5)
+      tape.files.set('b.txt', tape.files.get('a.txt') ?? new Uint8Array())
       tape.delay = 500
       await expect(
-        ws.dispatch('read', TAPE, [], { stream: true, filetype: null }),
+        ws.dispatch('read', '/tape/b.txt', [], { stream: true, filetype: null }),
       ).rejects.toBeInstanceOf(CommandTimeoutError)
     } finally {
       await ws.close()
@@ -1667,6 +1691,45 @@ describe('a streamed read', () => {
       expect((await pullAll(stream)).join('')).toBe(WHOLE)
       await ws.dispatch('read', TAPE)
       expect(tape.reads).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('a command reads at the door', () => {
+  it.each([
+    'cat /d/a.txt',
+    'head -n 1 /d/a.txt',
+    'tail -n 1 /d/a.txt',
+    'wc -l /d/a.txt',
+    'grep a /d/a.txt',
+    'rg a /d/a.txt',
+    'sort /d/a.txt',
+    'md5sum /d/a.txt',
+  ])('%s', async (line) => {
+    const seen: [string, string][] = []
+    const policy: Policy = {
+      preVfs: (ctx: VfsContext) => {
+        seen.push([ctx.op, ctx.path.virtual])
+        return null
+      },
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/d': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        policies: [policy],
+        shellParserFactory: () => Promise.resolve(parser),
+      },
+    )
+    try {
+      await ws.vfs.write('/d/a.txt', 'a\nb\n')
+      seen.length = 0
+      const out = await ws.shell(line)
+      expect(out.exitCode).toBe(0)
+      expect(seen).toContainEqual(['read', '/d/a.txt'])
     } finally {
       await ws.close()
     }

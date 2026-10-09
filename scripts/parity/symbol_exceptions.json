@@ -1,5 +1,5 @@
 {
- "baseline": 3996,
+ "baseline": 3981,
  "modules": {
   "commands/builtin/generic/iconv_multibyte": {
    "typescript_only": {
@@ -490,7 +490,6 @@
   },
   "cache/file/redis": {
    "typescript_only": {
-    "luaBody": "node-redis EVALs add.lua's text on every fill, so TypeScript drops the Lua files' comment lines first; redis-py registers each script once and sends only its SHA.",
     "VERSION_SHA": "node-redis has no registered-script object for a pipeline, so TypeScript hashes version.lua itself, sends EVALSHA, and loads the script again when the server answers NOSCRIPT; redis-py's register_script does both.",
     "noScript": "node-redis has no registered-script object for a pipeline, so TypeScript hashes version.lua itself, sends EVALSHA, and loads the script again when the server answers NOSCRIPT; redis-py's register_script does both."
    },

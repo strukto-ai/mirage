@@ -16,7 +16,7 @@ import { expect, it } from 'vitest'
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import { VFSActivity } from './activity.ts'
 
-it.each(['eof', 'error', 'close', 'bounded'])(
+it.each(['eof', 'error', 'close', 'discard'])(
   'VFS usage ends with its stream (%s)',
   async (finish) => {
     const activity = new VFSActivity()
@@ -25,7 +25,7 @@ it.each(['eof', 'error', 'close', 'bounded'])(
       if (finish === 'error') throw new Error('read failed')
     }
     const source = activity.hold(
-      finish === 'bounded' ? new CachableAsyncIterator(chunks()) : chunks(),
+      finish === 'discard' ? new CachableAsyncIterator(chunks()) : chunks(),
     )
     if (source instanceof Uint8Array) throw new Error('expected stream')
     let done = false
@@ -42,7 +42,7 @@ it.each(['eof', 'error', 'close', 'bounded'])(
       await iter.return?.()
       await iter.return?.()
     } else if (source instanceof CachableAsyncIterator) {
-      expect(await source.drainBounded(0)).toBeNull()
+      await source.discard()
     } else if (finish === 'error') {
       await expect(consume()).rejects.toThrow('read failed')
     } else {

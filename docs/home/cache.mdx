@@ -11,7 +11,7 @@ Every `Workspace` ships with a **two-layer cache** so repeated work against remo
 - **Index cache.** Listings and metadata. The first directory walk hits the API; subsequent ones serve from the index until the TTL expires.
 - **File cache.** Object bytes. The first read streams from origin; later pipelines read from cache.
 
-Each mount declares how its cached bytes are served, with `read:` in its mount block. Under `read: fresh`, cached file bytes are checked against a backend freshness probe that no cached index row answers (a backend with no path lookup, such as Box, may use the mount's row only for the id it addresses its one request to). Within one shell command, the first probe of a path supplies its answer to later cache checks and compatible command stats. A write on that mount, the cache clear that follows an external program or a remote runtime line, or a re-list that finds the path gone retires the answer, including a probe still in flight. Another command obtains its own answer, so an outside change after the first probe can remain unseen for the rest of that command. Reads outside a command do not reuse probe answers. A changed fingerprint triggers a fresh read; a deleted file is evicted. Under `read: bounded` — the default — cached bytes are trusted without a check, for as long as the mount's `ttl:` allows. Each listing write is also capped by the mount's `ttl`, under either policy. Existing Redis listings retain their stored expiry until rewritten.
+Each mount declares how its cached bytes are served, with `read:` in its mount block. Under `read: fresh`, cached file bytes are checked against a backend freshness probe that no cached index row answers (a backend with no path lookup, such as Box, may use the mount's row only for the id it addresses its one request to). Within one shell command, the first probe of a path supplies its answer to later cache checks and compatible command stats. A write on that mount, the cache clear that follows an external program or a remote runtime line, or a re-list that finds the path gone retires the answer, including a probe still in flight. Another command obtains its own answer, so an outside change after the first probe can remain unseen for the rest of that command. `tail -f` is the exception: each poll stats and reads the backend itself, past the cached copy and the command's probe answer, under either policy. Reads outside a command do not reuse probe answers. A changed fingerprint triggers a fresh read; a deleted file is evicted. Under `read: bounded` — the default — cached bytes are trusted without a check, for as long as the mount's `ttl:` allows. Each listing write is also capped by the mount's `ttl`, under either policy. Existing Redis listings retain their stored expiry until rewritten.
 
 `fresh` is refused at mount time on a backend that cannot honour it: one that does not cache reads has no gate to check at, and one whose `stat` and read stamp different kinds of token could never match. A mount that asked to revalidate and quietly did not is the failure the refusal exists to prevent, so the policy is never silently downgraded. See the [YAML reference](/home/yaml) for the keys and [the VFS matrix](/home/vfs-matrix) for which backends accept `fresh` today.
 
@@ -125,7 +125,7 @@ The two layers are bounded differently:
 
 | Layer | Holds | Default | Bound | Eviction |
 | --- | --- | --- | --- | --- |
-| **File cache** | object bytes per virtual path | RAM, 512 MB | `cache: {limit}` (`CacheConfig(limit=...)`); without a `cache` config, `cache_limit` (Py) / `cacheLimit` (TS) | LRU on RAM: least-recently-used bytes drop once the total exceeds the limit. On Redis nothing is evicted client-side and the server evicts (below); the limit still keeps out any file bigger than itself, caps what each file's background fill buffers when `max_drain_bytes` is unset, and bounds `max_drain_bytes` |
+| **File cache** | object bytes per virtual path | RAM, 512 MB | `cache: {limit}` (`CacheConfig(limit=...)`); without a `cache` config, `cache_limit` (Py) / `cacheLimit` (TS) | LRU on RAM: least-recently-used bytes drop once the total exceeds the limit. On Redis nothing is evicted client-side and the server evicts (below); the limit still keeps out any file bigger than itself, caps what each streamed read buffers to fill the cache when `max_drain_bytes` is unset, and bounds `max_drain_bytes` |
 | **Index cache** | directory listings + `FileStat` metadata | RAM, the backend's `index_ttl` | the mount's own `index: {ttl}`, else the workspace `index: {ttl}` (`IndexConfig(ttl=...)`), else the backend's `index_ttl` ([Index TTL](#index-ttl)); capped by the mount's `ttl` (seconds) | time-based: listings expire after the TTL, then re-fetch on next access |
 
 Raising the file limit keeps more bytes warm at the cost of memory; lengthening the index TTL reduces API walks at the cost of staleness, up to the mount's `ttl`.
@@ -235,9 +235,9 @@ worker that shares an index together, and flush the key prefix first
 release wrote.
 
 The Redis **file cache** likewise uses server-side limits: nothing is evicted
-client-side (its `limit` keeps out any file bigger than itself, caps each
-file's background fill when `max_drain_bytes` is unset, and bounds
-`max_drain_bytes`), so cap
+client-side (its `limit` keeps out any file bigger than itself, caps what
+each streamed read buffers to fill it when `max_drain_bytes` is unset, and
+bounds `max_drain_bytes`), so cap
 memory with `maxmemory` and an LRU `maxmemory-policy`. File bytes and metadata occupy separate
 keys, so server eviction can remove either independently: a freshness check
 alone does not guarantee the bytes remain cached.

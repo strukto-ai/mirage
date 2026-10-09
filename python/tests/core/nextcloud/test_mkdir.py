@@ -27,9 +27,6 @@ class _RecordingInvalidator:
     async def invalidate_subtree(self, path: PathSpec) -> None:
         self.subtrees.append(path.mount_path)
 
-    async def cached_bytes(self, path: PathSpec) -> bytes | None:
-        return None
-
     async def cached_size(self, path: PathSpec) -> int | None:
         return None
 

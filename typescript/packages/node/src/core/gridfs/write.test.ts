@@ -62,10 +62,6 @@ class FakeManager {
     return fetch()
   }
 
-  cachedBytes(_path: PathSpec): Promise<Uint8Array | null> {
-    return Promise.resolve(null)
-  }
-
   cachedSize(_path: PathSpec): Promise<number | null> {
     return Promise.resolve(null)
   }

@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 from collections.abc import Iterable
-from typing import Any
 
 from mirage.types import PathSpec
 
@@ -39,7 +37,6 @@ class FileCacheMixin:
     """
 
     _max_drain_bytes: int | None = None
-    _drain_tasks: dict[str, asyncio.Task[Any]]
 
     async def get(self, key: str) -> bytes | None:
         raise NotImplementedError
@@ -51,15 +48,6 @@ class FileCacheMixin:
         fingerprint: str | None = None,
         ttl: int | None = None,
     ) -> None:
-        raise NotImplementedError
-
-    async def add(
-        self,
-        key: str,
-        data: bytes,
-        fingerprint: str | None = None,
-        ttl: int | None = None,
-    ) -> bool:
         raise NotImplementedError
 
     async def remove(self, key: str) -> None:
@@ -189,11 +177,11 @@ class FileCacheMixin:
 
     @property
     def drain_budget(self) -> int:
-        """Max bytes a background drain may buffer to fill this cache.
+        """Max bytes a streamed read may buffer to fill this cache.
 
         ``None`` (the default) derives the budget from ``cache_limit``.
-        An explicit value limits speculative background reads further
-        and may not exceed the cache's intended capacity.
+        An explicit value keeps larger streams out of the cache and may
+        not exceed the cache's intended capacity.
         """
         if self.max_drain_bytes is None:
             return self.cache_limit

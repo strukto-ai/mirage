@@ -1082,8 +1082,10 @@ async def test_an_unconditional_mount_sends_no_condition(fake, workspaces):
     ):
         assert (await _run(ws, line))[0] == 0, line
     assert all(params == {} for _, params in _mutations(fake))
-    # Nor does it keep a version without bytes.
-    assert (await _run(ws, "grep x /s3/g"))[0] == 1
+    # Nor does it keep a version without bytes: a read that keeps none
+    # leaves no token behind.
+    assert (await _run(ws, "head -c 1 /s3/g"))[0] == 0
+    assert not await ws._cache.exists("/s3/g")
     assert await ws._cache.fingerprint("/s3/g") is None
 
 

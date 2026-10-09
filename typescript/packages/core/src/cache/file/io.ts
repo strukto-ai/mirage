@@ -25,7 +25,7 @@ import {
 import type { CacheFacts } from '../../types.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { drainBudget, type FileCache } from './mixin.ts'
+import type { FileCache } from './mixin.ts'
 import { KeyLock } from '../lock.ts'
 
 const mutationLocks = new WeakMap<FileCache, KeyLock>()
@@ -207,9 +207,6 @@ async function store(
   }
 }
 
-// The drain each read went to; a nested line hands its outer line them too.
-const draining = new WeakMap<CachableAsyncIterator, Promise<void>>()
-
 /**
  * Whether the line no longer knows the bytes it holds for `path`: its
  * conditional write lost, or its newest version record removed or moved it
@@ -272,7 +269,10 @@ async function keepVersions(
  * Python's `apply_io`.
  *
  * @param nested a nested line's (`eval`, `$(...)`): it keeps only the
- *   versions of paths still lost; its line keeps the rest.
+ *   versions of paths still lost; its line keeps the rest. Its read records
+ *   only order reads after writes: a concurrent sibling stage records into
+ *   the same list, and its read token would label bytes this line read
+ *   before the change.
  */
 export async function applyIo(
   cache: FileCache,
@@ -283,7 +283,20 @@ export async function applyIo(
   nested = false,
 ): Promise<void> {
   // A path both read and written is dropped: neither side is the file.
-  const kept = io.cache.filter((p) => !(p in io.reads) || !(p in io.writes))
+  // A read at the door reaches here as the backend's read record, and
+  // counts once it follows the path's last write: the door kept what the
+  // backend held by then, which need not be the bytes sent.
+  const read = new Set(Object.keys(io.reads))
+  const readAfter = new Set<string>()
+  for (const rec of records ?? []) {
+    if (WRITE_FINGERPRINT_OPS.has(rec.op)) readAfter.delete(rec.path)
+    else if (READ_FINGERPRINT_OPS.has(rec.op)) readAfter.add(rec.path)
+  }
+  for (const p of readAfter) read.add(p)
+  if (nested && records !== undefined) {
+    records = records.filter((r) => !READ_FINGERPRINT_OPS.has(r.op))
+  }
+  const kept = io.cache.filter((p) => !read.has(p) || !(p in io.writes))
   const cacheSet = new Set(kept)
   const index = records !== undefined ? new RecordIndex(records) : undefined
   for (const path of kept) {
@@ -318,24 +331,6 @@ export async function applyIo(
       if (source.discarded) continue
       if (source.exhausted) {
         await setCached(cache, path, concat(source.bufferedChunks), written, records, cacheFacts)
-      } else {
-        const tasks = cache.drainTasks
-        if (tasks !== undefined && !tasks.has(path) && !(await cache.exists(path))) {
-          const task: Promise<void> = backgroundDrain(
-            cache,
-            path,
-            source,
-            drainBudget(cache),
-            () => tasks.get(path) === task,
-            cacheFacts,
-            records,
-          )
-          tasks.set(path, task)
-          draining.set(source, task)
-          void task.finally(() => {
-            if (tasks.get(path) === task) tasks.delete(path)
-          })
-        }
       }
     } else {
       const data = await materialize(source)
@@ -350,47 +345,8 @@ export async function applyIo(
   if (records !== undefined && index !== undefined && cacheFacts !== undefined) {
     await keepVersions(cache, nested ? [] : records, index, cacheFacts, lost)
   }
-  // An unfinished read no drain owns is closed; unmount waits on it.
-  for (const [path, source] of Object.entries(io.reads)) {
-    if (!(source instanceof CachableAsyncIterator) || source.exhausted) continue
-    const owner = draining.get(source)
-    if (owner === undefined || cache.drainTasks?.get(path) !== owner) await source.discard()
-  }
-}
-
-// Drains an unconsumed read stream and fills the cache, mirroring the
-// Python _background_drain. Promises cannot be cancelled, so remove()/clear()
-// delete the map entry and the result is discarded here instead. The
-// fingerprint is looked up after the drain: streaming backends stamp their
-// read record lazily, once the GET response arrives.
-async function backgroundDrain(
-  cache: FileCache,
-  path: string,
-  it: CachableAsyncIterator,
-  maxBytes: number,
-  isCurrent: () => boolean,
-  cacheFacts?: (path: string) => CacheFacts,
-  records?: readonly OpRecord[],
-): Promise<void> {
-  try {
-    const materialized = await it.drainBounded(maxBytes)
-    if (materialized === null) return
-    const token = latestFingerprint(records, path)
-    await withCacheMutation(cache, async () => {
-      const facts = cacheFacts?.(path)
-      // The large-object path stamps the bound too, or a streamed read
-      // would be the one thing `bounded` never expires. Task identity
-      // and cacheability are asked separately so this stays one
-      // callback rather than two.
-      if (isCurrent() && (facts === undefined || facts.cacheable)) {
-        await cache.add(path, materialized, {
-          fingerprint: token,
-          ttl: facts?.ttl ?? null,
-        })
-      }
-    })
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.warn(`background drain failed for ${path}: ${msg}`)
+  // An unfinished read keeps nothing and is closed; unmount waits on it.
+  for (const source of Object.values(io.reads)) {
+    if (source instanceof CachableAsyncIterator && !source.exhausted) await source.discard()
   }
 }

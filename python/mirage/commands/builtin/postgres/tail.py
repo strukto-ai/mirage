@@ -27,7 +27,6 @@ from mirage.commands.builtin.utils.paths import has_unresolved_glob
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.postgres import client
-from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.readdir import entity_exists
 from mirage.core.postgres.scope import detect_scope
 from mirage.io.types import ByteSource, IOResult
@@ -112,5 +111,5 @@ async def tail(
         list(texts),
         opts,
         bound_op(mount_io(opts).stat, accessor, opts.index),
-        bound_op(postgres_read, accessor, opts.index),
+        bound_op(mount_io(opts).read_bytes, accessor, opts.index),
     )

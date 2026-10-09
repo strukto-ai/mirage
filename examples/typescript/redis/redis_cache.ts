@@ -44,11 +44,8 @@ async function main(): Promise<void> {
   console.log(`  matches same fp: ${String(await cache.isFresh('/data/hello.txt', fp))}`)
   console.log(`  matches other fp: ${String(await cache.isFresh('/data/hello.txt', 'abc'))}`)
 
-  console.log('\n--- add (no-op if present, true if inserted) ---')
-  console.log(`  add existing: ${String(await cache.add('/data/hello.txt', payload))}`)
-  console.log(`  add new: ${String(await cache.add('/data/new.bin', new Uint8Array([1, 2, 3])))}`)
-
   console.log('\n--- multiGet ---')
+  await cache.set('/data/new.bin', new Uint8Array([1, 2, 3]))
   const keys = ['/data/hello.txt', '/data/new.bin', '/data/missing']
   const results = await cache.multiGet(keys)
   for (let i = 0; i < keys.length; i++) {

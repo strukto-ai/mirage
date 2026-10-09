@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isStdin } from '../utils/stream.ts'
 import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { CachableAsyncIterator, concat } from '../../../io/cachable_iterator.ts'
-import { asyncChain } from '../../../io/stream.ts'
+import { concat } from '../../../io/cachable_iterator.ts'
+import { asyncChain, ensureStream } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isFsError } from '../../../errors/fs.ts'
@@ -95,8 +94,9 @@ function visible(
 
 // One operand of a multi-operand cat: a read that fails once the stat passed
 // (a table past its read cap) is reported like a missing operand, and the
-// next operand still prints. A failed cachable discards itself, so nothing
-// partial reaches the cache. Mirrors the python non-local loop in cat_generic.
+// next operand still prints. The door keeps only a read that ends, so
+// nothing partial reaches the cache. Mirrors the python non-local loop in
+// cat_generic.
 async function* reported(
   source: AsyncIterable<Uint8Array>,
   io: IOResult,
@@ -177,26 +177,15 @@ export async function catGeneric(
     if (readable.length === 0) {
       return [null, new IOResult({ exitCode: err === '' ? 0 : 1, stderr: errBytes })]
     }
-    const reads: Record<string, ByteSource> = {}
-    const cacheKeys: string[] = []
     const outputs: AsyncIterable<Uint8Array>[] = []
-    const io = new IOResult({
-      reads,
-      cache: cacheKeys,
-      exitCode: err === '' ? 0 : 1,
-      stderr: errBytes,
-    })
+    const io = new IOResult({ exitCode: err === '' ? 0 : 1, stderr: errBytes })
     for (const p of readable) {
       let source: ByteSource = stream(p)
       if (stats.get(p.virtual)?.type === FileType.CHAR_DEVICE) {
         source = truncateStream(source, io, new Limit({ maxBytes: CHAR_DEVICE_MAX_BYTES }))
       }
-      const cachable = new CachableAsyncIterator(source)
-      if (!isStdin(p)) {
-        reads[p.mountPath] = cachable
-        cacheKeys.push(p.mountPath)
-      }
-      outputs.push(readable.length === 1 ? cachable : reported(cachable, io, p))
+      const out = ensureStream(source)
+      outputs.push(readable.length === 1 ? out : reported(out, io, p))
     }
     const merged = outputs.length === 1 ? outputs[0] : asyncChain(outputs)
     if (merged === undefined) throw new Error('cat: missing readable stream')

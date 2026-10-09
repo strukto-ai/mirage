@@ -12,15 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { once } from 'node:events'
+import { createServer } from 'node:http'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { IOResult } from '../../../io/types.ts'
+import { materialize, type IOResult } from '../../../io/types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { GENERAL_CURL } from './curl.ts'
 import { GENERAL_WGET } from './wget.ts'
 
 const DEC = new TextDecoder()
+const HTML = '<html><body><h1>Local Test Page</h1></body></html>'
 
 function opts(overrides: Partial<CommandOpts> = {}): CommandOpts {
   return {
@@ -41,9 +44,7 @@ async function runCurl(
   const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], opts({ flags }))
   if (result === null) throw new Error('null result')
   const [out, io] = result
-  if (out === null) return { out: new Uint8Array(), io }
-  const buf = out instanceof Uint8Array ? out : new Uint8Array()
-  return { out: buf, io }
+  return { out: await materialize(out), io }
 }
 
 async function runWget(
@@ -56,43 +57,72 @@ async function runWget(
   const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], opts({ flags }))
   if (result === null) throw new Error('null result')
   const [out, io] = result
-  if (out === null) return { out: new Uint8Array(), io }
-  const buf = out instanceof Uint8Array ? out : new Uint8Array()
-  return { out: buf, io }
+  return { out: await materialize(out), io }
 }
 
-describe.concurrent('net (live network, port of test_net.py)', () => {
-  // Use example.com (IANA reserved, rock-solid) rather than httpbin.org,
-  // which returns 502 intermittently and breaks CI.
-  it('curl raw returns html', async () => {
-    const { out } = await runCurl('https://example.com')
-    const body = DEC.decode(out).toLowerCase()
-    expect(body.includes('<html') || body.includes('<h1')).toBe(true)
-  }, 30_000)
+describe.concurrent('net over local HTTP', () => {
+  let base: string
+  const server = createServer((request, response) => {
+    if (request.method === 'POST' && request.url === '/post') {
+      let body = ''
+      request.setEncoding('utf8')
+      request.on('data', (chunk: string) => {
+        body += chunk
+      })
+      request.on('end', () => {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(
+          JSON.stringify({
+            form:
+              request.headers['content-type'] === 'application/x-www-form-urlencoded'
+                ? Object.fromEntries(new URLSearchParams(body))
+                : null,
+          }),
+        )
+      })
+      return
+    }
+    response.writeHead(200, { 'Content-Type': 'text/html' })
+    response.end(HTML)
+  })
 
-  it('curl on example.com contains Example Domain', async () => {
-    const { out } = await runCurl('https://example.com')
-    const body = DEC.decode(out)
-    expect(body).toContain('Example Domain')
-  }, 30_000)
+  beforeAll(async () => {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no HTTP port')
+    base = `http://127.0.0.1:${String(address.port)}`
+  })
 
-  it('wget on example.com downloads body containing Example Domain', async () => {
-    const { io } = await runWget('https://example.com')
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error === undefined) resolve()
+        else reject(error)
+      })
+    })
+  })
+
+  it('curl raw returns HTML', async () => {
+    const { out, io } = await runCurl(base)
+    expect(io.exitCode).toBe(0)
+    expect(DEC.decode(out)).toBe(HTML)
+  })
+
+  it('wget downloads the response body', async () => {
+    const { io } = await runWget(base)
+    expect(io.exitCode).toBe(0)
     const writes = Object.values(io.writes)
-    expect(writes.length).toBe(1)
-    const body = DEC.decode(writes[0] as Uint8Array)
-    expect(body).toContain('Example Domain')
-  }, 30_000)
+    expect(writes).toHaveLength(1)
+    expect(DEC.decode(await materialize(writes[0]))).toBe(HTML)
+  })
 
-  it('curl -X POST to postman-echo echoes the data', async () => {
-    // postman-echo.com is more reliable than httpbin.org for POST echoing.
-    const { out } = await runCurl('https://postman-echo.com/post', {
+  it('curl -X POST sends form data', async () => {
+    const { out, io } = await runCurl(`${base}/post`, {
       request: 'POST',
       data: 'hello=world',
     })
-    // -d carries curl's form Content-Type, so the echo parses the body as
-    // a form the way it does for real curl.
-    const body = DEC.decode(out)
-    expect(body).toContain('"form":{"hello":"world"}')
-  }, 30_000)
+    expect(io.exitCode).toBe(0)
+    expect(DEC.decode(out)).toBe('{"form":{"hello":"world"}}')
+  })
 })

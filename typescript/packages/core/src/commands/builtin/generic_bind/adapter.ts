@@ -22,6 +22,8 @@ import type {
 import type { BaseVFS, FindOptions } from '../../../vfs/base.ts'
 import { getExtension } from '../../../utils/filetype.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
+import { ensureStream } from '../../../io/stream.ts'
+import { materialize, type ByteSource } from '../../../io/types.ts'
 
 import type { Accessor } from '../../../accessor/base.ts'
 import {
@@ -171,7 +173,6 @@ export function commandIo(vfs: BaseVFS): CommandIO {
     readStream: streams
       ? withoutAccessor((path: PathSpec, index?: IndexCacheStore) => vfs.readStream(path, index))
       : (a, p, i) => streamFromBytes(readBytes, a, p, i),
-    streamsBytes: !streams,
     ...(vfs.readsRanges
       ? {
           readRange: (
@@ -274,6 +275,51 @@ export function commandIo(vfs: BaseVFS): CommandIO {
           },
         }
       : {}),
+  }
+}
+
+/** A command's whole or ranged read of the stored bytes, at the door. */
+async function doorBytes(
+  dispatch: DispatchFn,
+  path: PathSpec,
+  offset = 0,
+  size: number | null = null,
+): Promise<Uint8Array> {
+  const [data] = await dispatch('read', path, [], { filetype: null, offset, size })
+  return materialize(data as ByteSource)
+}
+
+/** A command's streamed read of the stored bytes, at the door, opened at
+ * the first pull as a backend stream is. */
+async function* doorStream(dispatch: DispatchFn, path: PathSpec): AsyncIterable<Uint8Array> {
+  const [data] = await dispatch('read', path, [], { stream: true, filetype: null })
+  yield* ensureStream(data as ByteSource)
+}
+
+/**
+ * Return `ops` whose content reads go through the dispatcher.
+ *
+ * The door checks hides, the command's path rule, the mount's mode and
+ * policy, serves a warm copy and fills a cold one, so a command's read
+ * answers what the same read through `ws.vfs` or FUSE answers. Mirrors
+ * Python's `with_door_reads`.
+ */
+export function withDoorReads(ops: CommandIO, dispatch: DispatchFn): CommandIO {
+  return {
+    ...ops,
+    readBytes: (_accessor, path) => doorBytes(dispatch, path),
+    readStream: (_accessor, path) => doorStream(dispatch, path),
+    ...(ops.readRange === undefined
+      ? {}
+      : {
+          readRange: (
+            _accessor: Accessor,
+            path: PathSpec,
+            _index: IndexCacheStore | undefined,
+            offset: number,
+            size: number | null,
+          ) => doorBytes(dispatch, path, offset, size),
+        }),
   }
 }
 
@@ -1114,16 +1160,14 @@ export function withCommandGuards<A extends Accessor>(
   ] as const) {
     const fn = prepared[slot]
     if (fn === undefined) continue
+    // Hides and the path rule on a content read are the door's.
+    const call =
+      slot === 'readBytes' || slot === 'readRange' ? fn : commandCall(fn, slot, slot !== 'mkdir')
     Object.assign(guarded, {
-      [slot]: walkedCall(
-        probe,
-        commandCall(fn, slot, slot !== 'mkdir') as (...args: unknown[]) => Promise<unknown>,
-        slot === 'mkdir',
-      ),
+      [slot]: walkedCall(probe, call as (...args: unknown[]) => Promise<unknown>, slot === 'mkdir'),
     })
   }
   guarded.readStream = (accessor, path, index) => {
-    checkCommandPaths([path], 'readStream')
     const source = prepared.readStream(accessor, path, index)
     const walk = walkProbeOf(probe, [path])
     return walkedStream(walk?.[0] ?? null, [path], source)
@@ -1186,10 +1230,9 @@ function opPolicyScope(prefix: string | null): OpPolicyScope | null {
  * call-time context.
  *
  * The factory applies the guard inside the command's window, so its
- * wrap-time capture also covers a reader the output pipeline drains
- * after dispatch has reset the context (head/tail/wc bind lazy
- * readers), with the prefix and session identity the drained op
- * belongs to; a registration-time wrap (the object-store overrides,
+ * wrap-time capture also covers a slot called after dispatch has reset
+ * the context, with the prefix and session identity the op belongs to;
+ * a registration-time wrap (the object-store overrides,
  * the loose-write chain) has no window when applied and reads the
  * live context instead, which its eager handlers are inside.
  */
@@ -1209,32 +1252,22 @@ async function policyAdmit(
   path: PathSpec,
   write: boolean,
 ): Promise<void> {
-  const prefix = scope.prefix ?? mountGateFor(path.virtual)?.[0] ?? ''
+  const owner = scope.prefix ?? mountGateFor(path.virtual)?.[0] ?? null
+  // The mount prefix as the op door reports it, with its slash.
+  const prefix = owner === null ? '' : `${rstripSlash(owner)}/`
   await preVfsGate(scope.policies, op, path, write, prefix, scope.sessionId, undefined, {
     checkHidden: false,
   })
 }
 
-/** Drain `source` once the read is admitted, before any byte is
- * pulled; the inner iterable was built eagerly by the caller. */
-async function* policyStream(
-  scope: OpPolicyScope,
-  path: PathSpec,
-  source: AsyncIterable<Uint8Array>,
-): AsyncIterable<Uint8Array> {
-  await policyAdmit(scope, 'read_stream', path, false)
-  yield* source
-}
-
 /**
- * Return `ops` whose content and mutation slots admit each PathSpec
+ * Return `ops` whose mutation slots and readdir admit each PathSpec
  * through the workspace's coded preVfs hooks.
  *
- * The coded-policy arm of the guard chain, applied outside the cache
- * wraps so admission fires before a warm serve, the dispatcher's own
- * order. The surface is the path rules' plus readdir: content reads
- * (readBytes, readStream, readRange), every mutation slot, and the
- * directory a readdir lists. stat/exists stay unguarded as presence
+ * The coded-policy arm of the guard chain. The surface is every mutation
+ * slot and the directory a readdir lists; content reads go through the
+ * dispatcher, which admits them itself (`withDoorReads`). stat/exists
+ * stay unguarded as presence
  * facts, the mode-000 shape the path rules already take, so a denied
  * entry still lists and stats while the read of it is what fails;
  * `scopedIo` drops the native find/du slots, so the walk meets the
@@ -1251,19 +1284,11 @@ export function withPolicyGuard<A extends Accessor = Accessor>(
   prefix?: string,
 ): CommandIO<A> {
   const scope = opPolicyScope(prefix ?? null)
-  const guarded: CommandIO<A> = {
-    ...ops,
-    readStream: (accessor, path, index) => {
-      const p = livePolicyScope(scope)
-      const inner = ops.readStream(accessor, path, index)
-      if (p === null) return inner
-      return policyStream(p, path, inner)
-    },
-  }
-  for (const slot of ['readBytes', 'readRange', 'readdir', ...mutationSlots] as const) {
+  const guarded: CommandIO<A> = { ...ops }
+  for (const slot of ['readdir', ...mutationSlots] as const) {
     const fn = ops[slot]
     if (fn !== undefined) {
-      // All slots in this set return promises; readStream keeps its own wrapper.
+      // All slots in this set return promises.
       Object.assign(guarded, { [slot]: policyCall(scope, fn, slot) })
     }
   }

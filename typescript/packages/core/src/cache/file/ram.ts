@@ -28,9 +28,6 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
   private size = 0
   private readonly invalidation = new Invalidation()
   private maxDrainBytesValue: number | null = null
-  // Promises cannot be cancelled; clearing the map makes the drain's
-  // completion check fail so the result is discarded instead.
-  readonly drainTasks = new Map<string, Promise<void>>()
 
   constructor(options: { limit?: string | number; maxDrainBytes?: number | null } = {}) {
     super()
@@ -134,53 +131,11 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
     await this.evict()
   }
 
-  async add(
-    key: string,
-    data: Uint8Array,
-    options: { fingerprint?: string | null; ttl?: number | null } = {},
-  ): Promise<boolean> {
-    const stamp = this.invalidation.enter(key)
-    let placed: boolean
-    try {
-      placed = await this.lock.withLock(key, async () => {
-        const existing = this.entries.get(key)
-        if (existing !== undefined && existing.hasBytes && !existing.expired) {
-          return Promise.resolve(false)
-        }
-        if (this.invalidation.stale(key, stamp)) return false
-        // A version kept for these bytes stays kept, as add.lua does.
-        const fingerprint = tokenOrNull(options.fingerprint)
-        const kept =
-          existing !== undefined &&
-          existing.holds !== Holds.BYTES &&
-          fingerprint !== null &&
-          existing.fingerprint === fingerprint
-        this.dropEntry(key)
-        const entry = new CacheEntry({
-          size: data.byteLength,
-          cachedAt: Math.floor(Date.now() / 1000),
-          fingerprint,
-          ttl: options.ttl ?? null,
-          holds: kept ? Holds.BYTES_AND_VERSION : Holds.BYTES,
-        })
-        this.entries.set(key, entry)
-        this.store.files.set(key, data)
-        this.size += entry.size
-        return Promise.resolve(true)
-      })
-    } finally {
-      this.invalidation.leave(key)
-    }
-    if (placed) await this.evict()
-    return placed
-  }
-
   async evictPrefix(prefix: string, excluded: readonly string[] = []): Promise<void> {
     // Before the removals below: a fill in flight under the prefix has no
     // entry yet, so only its registration can name it.
     this.invalidation.invalidatePrefix(prefix, excluded)
-    // A pending fill may not have installed an entry yet.
-    const keys = [...new Set([...this.entries.keys(), ...this.drainTasks.keys()])].filter(
+    const keys = [...this.entries.keys()].filter(
       (k) => k.startsWith(prefix) && !excluded.some((boundary) => underPath(k, boundary)),
     )
     for (const key of keys) await this.remove(key)
@@ -194,7 +149,6 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
   }
 
   remove(key: string): Promise<void> {
-    this.drainTasks.delete(key)
     return this.lock.withLock(key, () => {
       // Advanced here, when the removal takes effect, not when it was
       // called: a writer queued behind it took its stamp before this ran,
@@ -289,7 +243,6 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
 
   clear(): Promise<void> {
     this.invalidation.invalidateAll()
-    this.drainTasks.clear()
     this.entries.clear()
     this.store.files.clear()
     this.size = 0

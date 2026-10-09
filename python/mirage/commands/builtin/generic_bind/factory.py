@@ -19,10 +19,6 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import active_cache_manager
-from mirage.cache.read_through import (
-    cache_aware_read_bytes,
-    cache_aware_read_stream,
-)
 from mirage.commands.builtin.generic_bind.adapter import (
     mount_io,
     scoped_io,
@@ -31,7 +27,6 @@ from mirage.commands.builtin.generic_bind.adapter import (
     with_policy_guard,
 )
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
-from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eisdir
@@ -64,44 +59,13 @@ async def _cached_stat_result(
         and getattr(result, "size", None) is None
         and manager is not None
     ):
-        # cached_size, not cached_bytes: this runs only where the backend
+        # The length alone, ungated: this runs only where the backend
         # named no size -- the API mounts -- so gating it would turn a
         # stat into a backend stat.
         size = await manager.cached_size(path)
         if size is not None:
             result = result.model_copy(update={"size": size})
     return result
-
-
-def with_read_cache(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` whose byte reads serve cached bytes when warm.
-
-    The factory hands this to every ``read=True`` command so a warm read
-    is served from the file cache without the command knowing about it,
-    mirroring how readdir/stat already serve the index cache inside the
-    op. Content (read_stream/read_bytes) and the size a render-dependent
-    backend can't know on its own (stat, filled from the cached byte
-    length) are both served, so a warm read-only command stays on its
-    real mount and needs no redirect to the cache mount. The manager is
-    captured eagerly (when the ops method is called, inside the command's
-    cache-manager scope) rather than read lazily at stream-drain time,
-    when that scope is already gone. ``CacheManager.cached_bytes`` is a
-    no-op (returns None) for local or non-caching mounts, so this is safe
-    to apply uniformly.
-
-    Args:
-        ops (CommandIO): the backend's IO adapter.
-    """
-    read_bytes = cache_aware_read_bytes(ops.read_bytes)
-    return replace(
-        with_stat_cache(ops),
-        read_stream=(
-            functools.partial(stream_from_bytes, read_bytes)
-            if ops.streams_bytes
-            else cache_aware_read_stream(ops.read_stream)
-        ),
-        read_bytes=read_bytes,
-    )
 
 
 def scan_io(
@@ -118,8 +82,8 @@ def scan_io(
     every channel under a container). A judged command must not hand the
     service's search the answer, since the service sees every entry, and
     its scan reads the operands through the guards the generic builders
-    bind, over the read cache as theirs is, so a warm copy is served only
-    once the path is admitted; an unjudged one scans the raw adapter.
+    bind; an unjudged one scans the mount's own table. Either reads its
+    content at the door, which admits the path before a warm serve.
 
     Args:
         ops (CommandIO): the backend's raw IO adapter.
@@ -129,7 +93,7 @@ def scan_io(
     scoped = ns.scoped if ns is not None else None
     if scoped is None or not scoped(prefix.rstrip("/") or "/"):
         return ops, False
-    return with_command_guards(with_policy_guard(with_read_cache(ops))), True
+    return with_command_guards(with_policy_guard(with_stat_cache(ops))), True
 
 
 async def _slash_checked_write(
@@ -225,10 +189,6 @@ def with_probe_answers(ops: CommandIO) -> CommandIO:
     return replace(ops, stat=functools.partial(_probe_answered_stat, ops.stat))
 
 
-def _read_wraps(ops: CommandIO) -> CommandIO:
-    return with_slash_guard(with_read_cache(ops))
-
-
 def _stat_wraps(ops: CommandIO) -> CommandIO:
     return with_slash_guard(with_stat_cache(ops))
 
@@ -271,7 +231,7 @@ async def _run_with_namespace_globs(
     the policy.
 
     Args:
-        finish (Callable): the builder tier's cache and slash wraps,
+        finish (Callable): the builder tier's stat and slash wraps,
             chosen at registration from the builder's read/write kind.
         fn (Callable): the builder's command function.
         table (Callable | None): the backend's change to the table for
@@ -295,12 +255,13 @@ async def _run_with_namespace_globs(
         glob_target_stat=(links.target_stat if links is not None else None),
     )
     # Command path restrictions speak first, then the coded pre_vfs
-    # hooks, both outside the cache wraps (`finish`) so a refusal fires
-    # before a warm serve, the dispatcher's own order at the op door. A
-    # probe answer is served below them (`with_probe_answers` on the
-    # raw table), so they still judge every path before it. Under a
-    # hide or a path rule the native subtree ops are set aside
-    # (`scoped_io`), so every entry passes through the guarded walk.
+    # hooks, both outside the stat and slash wraps (`finish`). Content
+    # reads are the door's (`with_door_reads` on the mount's table),
+    # which judges them itself before a warm serve. A probe answer is
+    # served below the guards (`with_probe_answers` on the raw table),
+    # so they still judge every path before it. Under a hide or a path
+    # rule the native subtree ops are set aside (`scoped_io`), so every
+    # entry passes through the guarded walk.
     bound = with_dir_guard(
         with_command_guards(with_policy_guard(finish(stamped)))
     )
@@ -351,13 +312,7 @@ def generic_commands(
     for b in BUILDERS:
         if b.name in skip:
             continue
-        finish: Callable[[CommandIO], CommandIO]
-        if b.read:
-            finish = _read_wraps
-        elif not b.write:
-            finish = _stat_wraps
-        else:
-            finish = _write_wraps
+        finish = _write_wraps if b.write and not b.read else _stat_wraps
         bound = functools.partial(
             _run_with_namespace_globs,
             finish,

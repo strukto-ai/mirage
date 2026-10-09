@@ -50,7 +50,9 @@ from mirage.errors.fs import (
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly
 from mirage.observe.context import (
+    RecordingScope,
     active_lost,
+    active_recorder,
     command_records,
     record,
     start_op,
@@ -431,6 +433,8 @@ class _Call:
         write (bool): whether policy judges the op a write: its POSIX
             name, or the effect the mount's VFS declares for it.
         stream (bool): whether a read is answered as it is pulled.
+        direct (bool): whether a read skips the file cache, neither
+            served from it nor kept in it.
     """
 
     name: str
@@ -444,11 +448,7 @@ class _Call:
     no_follow: bool
     write: bool
     stream: bool = False
-
-    @property
-    def raw(self) -> bool:
-        """Whether the caller asked for the stored bytes, no renderer."""
-        return "filetype" in self.kwargs and self.kwargs["filetype"] is None
+    direct: bool = False
 
     @property
     def window(self) -> tuple[int, int | None]:
@@ -604,11 +604,14 @@ class Dispatcher:
     ) -> tuple[Any, IOResult]:
         # with_dispatch_rule_guard's mark, never forwarded to an op.
         rule_gate: EntryGate | None = kwargs.pop("rule_gate", None)
-        # The door's own keyword: a read answered as it is pulled.
+        # The door's own keywords: a read answered as it is pulled, and a
+        # read of what the backend holds now, past the file cache.
         stream = name == "read" and bool(kwargs.pop("stream", False))
+        direct = name == "read" and bool(kwargs.pop("direct", False))
         await self._prepare()
         call = await self._walk(name, path, kwargs, rule_gate, report)
         call.stream = stream
+        call.direct = direct
         await self._refuse_rename(call)
         if self._table_answers(name, call.path.virtual, kwargs):
             return (
@@ -923,15 +926,19 @@ class Dispatcher:
     ) -> bytes | None:
         """Answer a read from the file cache, or None to read the backend.
 
-        The file cache holds what commands read, keyed on the path alone.
-        A raw read, or a read through a filetype renderer (whoever
-        registered it), asks for a different value under the same key, so
-        it is neither served from that cache nor kept in it. The cache
-        holds the whole object, so a ranged read is answered by slicing
-        it, never by handing back the whole file: the window is what the
-        caller asked for instead of the file, and git reads pack indexes
-        this way. slice_window is the same helper the ranged read op
-        falls back to, so warm and cold agree.
+        The file cache holds what commands read, keyed on the path alone:
+        the stored bytes, which are the rendering for a VFS with no
+        ``read`` of its own. A read through a filetype renderer (whoever
+        registered it) asks for a different value under the same key, so
+        it is neither served from that cache nor kept in it, and neither
+        is a direct read (``direct=True``), which asks for what the
+        backend holds now: a follow's poll for bytes the cached copy
+        cannot have yet. The cache holds the whole object, so a ranged
+        read is answered by slicing it, never by handing back the whole
+        file: the window is what the caller asked for instead of the
+        file, and git reads pack indexes this way. slice_window is the
+        same helper the ranged read op falls back to, so warm and cold
+        agree.
 
         Args:
             call (_Call): the admitted op.
@@ -939,8 +946,8 @@ class Dispatcher:
             boundary (Boundary): the boundary the op completes through.
         """
         if (
-            not mount.vfs.caches_reads
-            or call.raw
+            call.direct
+            or not mount.vfs.caches_reads
             or call.name not in DISPATCH_READ_OPS
         ):
             return None
@@ -987,7 +994,7 @@ class Dispatcher:
         offset, size = call.window
         if (
             mount.vfs.caches_reads
-            and not call.raw
+            and not call.direct
             and call.name in DISPATCH_READ_OPS
             and size != 0
             and (
@@ -1028,6 +1035,12 @@ class Dispatcher:
                     vfs_path=mount_key(value.virtual, prefix),
                 )
         result: Any
+        # A fill keeps the token its backend records with the read; a
+        # read outside a line (FUSE, ws.vfs) records into a scope of its
+        # own for that.
+        scope = RecordingScope(
+            active=filler is not None and active_recorder() is None
+        )
         try:
             if call.name == "setattr":
                 result = await self._apply_setattr(mount, call.path, kwargs)
@@ -1079,6 +1092,8 @@ class Dispatcher:
             # output cap do next: stamped here so a failure in any of
             # them cannot erase a transfer the backend already made.
             _served(call.report, result)
+        finally:
+            scope.close()
         return result
 
     def _streams(self, call: _Call, mount: MountEntry) -> bool:

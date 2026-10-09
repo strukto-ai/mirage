@@ -21,7 +21,6 @@ from mirage.commands.builtin.generic_bind.adapter import (
 )
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
-from mirage.core.discord.read import read as discord_read
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -41,5 +40,5 @@ async def head(
         list(texts),
         opts,
         bound_op(mount_io(opts).stat, accessor, opts.index),
-        bound_op(discord_read, accessor, opts.index),
+        bound_op(mount_io(opts).read_bytes, accessor, opts.index),
     )
