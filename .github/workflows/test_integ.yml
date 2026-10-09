@@ -935,14 +935,15 @@ jobs:
 
       # Initialize MongoDB alongside the services, before dependency installs.
       # Its replica-set command cannot be expressed by a services block.
+      # Wait for its socket before mongosh creates files under /data/db,
+      # which would race the entrypoint's chown and abort container startup.
       - name: Start MongoDB replica set
         run: |
           trap 'docker inspect mongo; docker logs --tail 100 mongo' ERR
           docker run -d --name mongo -p 27017:27017 mongo:8 \
             mongod --replSet rs0 --bind_ip_all
           for i in $(seq 1 60); do
-            if docker exec mongo mongosh --quiet \
-                --eval 'if (!db.runCommand({ping:1}).ok) quit(1)' >/dev/null 2>&1; then
+            if docker exec mongo bash -c 'true > /dev/tcp/127.0.0.1/27017' >/dev/null 2>&1; then
               break
             fi
             [ "$(docker inspect --format '{{.State.Running}}' mongo)" = "true" ]
@@ -1102,7 +1103,7 @@ jobs:
         ports:
           - 27017:27017
         options: >-
-          --health-cmd "mongosh --quiet --eval 'if (!db.runCommand({ping:1}).ok) quit(1)'"
+          --health-cmd "bash -c 'true > /dev/tcp/127.0.0.1/27017' && mongosh --quiet --eval 'if (!db.runCommand({ping:1}).ok) quit(1)'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
