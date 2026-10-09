@@ -351,6 +351,23 @@ async def test_a_copy_onto_a_read_file_lets_the_lines_next_write_through(
 
 
 @pytest.mark.asyncio
+async def test_a_copy_onto_a_refused_file_lifts_its_refusal(drive, workspace):
+    def theirs() -> None:
+        drive.put("g", b"theirs\n")
+        drive.fake.hooks["upload"] = lambda: drive.put("g", b"gee\n")
+
+    drive.fake.hooks["upload"] = theirs
+    ws = workspace()
+    r = drive.root
+    line = (
+        f"cat {r}/g > /dev/null; echo x > {r}/g; echo y > {r}/y; "
+        f"cp {r}/f {r}/g && echo mine > {r}/g"
+    )
+    assert await _run(ws, line) == (0, "", f"{r}/g: {STALE}\n")
+    assert drive.fake.read("g") == b"mine\n"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("ancestor", [False, True], ids=["file", "ancestor"])
 async def test_a_move_lifts_a_kept_version(drive, workspace, ancestor):
     ws = workspace()

@@ -21,7 +21,7 @@ import {
   writeCondition,
 } from '../../cache/context.ts'
 import type { WriteCondition } from '../../cache/types.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
@@ -122,9 +122,11 @@ export async function copy(accessor: DropboxAccessor, src: PathSpec, dst: PathSp
   const from = dropboxPathOf(accessor, src)
   const to = dropboxPathOf(accessor, dst)
   const tm = accessor.tokenManager
+  const upto = lostCount()
   const timer = startOp()
   await replaceOnto(tm, src, dst, to, () => copyPath(tm, from, to), false)
   record('copy', dst.virtual, 'dropbox', 0, timer)
+  liftLost(dst, upto)
   await invalidateAfterWrite(dst)
   await invalidateAncestors(dst)
 }

@@ -94,7 +94,7 @@ async function landed(
 ): Promise<void> {
   changed.push([dst, whole])
   record(whole ? 'copy_prefix' : 'copy', dst.virtual, 'box', 0, timer)
-  if (whole) liftLost(dst, upto, true)
+  liftLost(dst, upto, whole)
   if (!writesConditioned(dst)) return
   await (whole ? invalidateSubtree(dst) : invalidateAfterWrite(dst))
 }
@@ -166,8 +166,8 @@ async function copyInto(
  * copy ends, since a listing read while the copy ran may land after the early
  * eviction. The eviction runs also when the copy fails: a request that raised
  * keeps its held version, and a folder whose request raised evicts its subtree
- * and records nothing. A folder copied whole also lifts the line's lost marks
- * beneath it.
+ * and records nothing. A landed path also lifts the line's lost marks on it, and
+ * beneath it for a folder copied whole.
  */
 export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const item = await resolveItem(accessor, pathParts(src))

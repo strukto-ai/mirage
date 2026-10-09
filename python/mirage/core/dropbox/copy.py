@@ -42,7 +42,7 @@ from mirage.core.dropbox.fingerprint import live_of
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.errors.fs import enoent
 from mirage.errors.types import StaleWriteError
-from mirage.observe.context import record, start_op
+from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
 
 T = TypeVar("T")
@@ -140,6 +140,7 @@ async def copy(
     from_path = dropbox_path_of(accessor, src)
     to_path = dropbox_path_of(accessor, dst)
     tm = accessor.token_manager
+    upto = lost_count()
     timer = start_op()
     await replace_onto(
         tm,
@@ -150,5 +151,6 @@ async def copy(
         empty_folder=False,
     )
     record("copy", dst.virtual, "dropbox", 0, timer)
+    lift_lost(dst, upto)
     await invalidate_after_write(dst)
     await invalidate_ancestors(dst)

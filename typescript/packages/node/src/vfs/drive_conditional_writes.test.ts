@@ -338,6 +338,22 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
     expect(await run(ws, line)).toEqual([0, '', `${r}/${key}: ${STALE}\n`])
     expect(drive.text(key)).toBe('new\n')
   })
+
+  it('a copy onto a refused file lifts its refusal', async () => {
+    const r = drive.root
+    drive.hook('upload', () => {
+      drive.put('g', 'theirs\n')
+      drive.hook('upload', () => {
+        drive.put('g', 'gee\n')
+      })
+    })
+    const ws = await workspace()
+    const line =
+      `cat ${r}/g > /dev/null; echo x > ${r}/g; echo y > ${r}/y; ` +
+      `cp ${r}/f ${r}/g && echo mine > ${r}/g`
+    expect(await run(ws, line)).toEqual([0, '', `${r}/g: ${STALE}\n`])
+    expect(drive.text('g')).toBe('mine\n')
+  })
 })
 
 describe('conditional writes only Box has', () => {

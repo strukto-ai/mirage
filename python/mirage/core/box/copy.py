@@ -120,8 +120,7 @@ async def _landed(
     """
     changed.append((dst, whole))
     record("copy_prefix" if whole else "copy", dst.virtual, "box", 0, timer)
-    if whole:
-        lift_lost(dst, upto, subtree=True)
+    lift_lost(dst, upto, subtree=whole)
     if not writes_conditioned():
         return
     if whole:
@@ -209,8 +208,8 @@ async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     listing read while the copy ran may land after the early eviction.
     The eviction runs also when the copy fails: a request that raised
     keeps its held version, and a folder whose request raised evicts its
-    subtree and records nothing. A folder copied whole also lifts the
-    line's lost marks beneath it.
+    subtree and records nothing. A landed path also lifts the line's lost
+    marks on it, and beneath it for a folder copied whole.
 
     Args:
         accessor (BoxAccessor): Box accessor.
