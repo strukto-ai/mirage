@@ -325,4 +325,57 @@ describe('conditional writes on a Box mount', () => {
       expect(await run(ws, 'echo y > /box/g')).toEqual([0, '', ''])
     },
   )
+
+  it('resizing a file Box keeps no sha1 for goes out plain', async () => {
+    box.unhashed.add(box.idOf('f'))
+    const ws = await workspace()
+    expect(await run(ws, 'truncate -s 2 /box/f')).toEqual([0, '', ''])
+    expect(text(box, 'f')).toBe('on')
+  })
+
+  it.each([
+    ['line', true],
+    ['next line', false],
+  ])('a cp that changed nothing keeps the held version: %s', async (_name, sameLine) => {
+    const ws = await workspace()
+    box.hooks.set('delete', () => {
+      box.write('g', ENC.encode('theirs\n'))
+      throw new Error('injected server error')
+    })
+    let code: number
+    let err: string
+    if (sameLine) {
+      ;[code, , err] = await run(ws, 'cat /box/g >/dev/null; cp /box/f /box/g; echo mine > /box/g')
+    } else {
+      await run(ws, 'cat /box/g')
+      await run(ws, 'cp /box/f /box/g')
+      ;[code, , err] = await run(ws, 'echo mine > /box/g')
+    }
+    expect(code).toBe(1)
+    expect(err.endsWith(`/box/g: ${STALE}\n`)).toBe(true)
+    expect(text(box, 'g')).toBe('theirs\n')
+  })
+
+  it('a folder merge keeps the versions of files it left', async () => {
+    box.create('e/d/a', ENC.encode('new\n'))
+    const ws = await workspace()
+    await run(ws, 'cat /box/d/b')
+    expect(await run(ws, 'cp -r /box/e/d /box')).toEqual([0, '', ''])
+    box.write('d/b', ENC.encode('theirs\n'))
+    expect(await run(ws, 'echo mine > /box/d/b')).toEqual([1, '', `/box/d/b: ${STALE}\n`])
+    expect(text(box, 'd/b')).toBe('theirs\n')
+  })
+
+  it('a cp whose delete landed but failed serves no stale bytes', async () => {
+    const ws = await workspace()
+    await run(ws, 'cat /box/g')
+    box.hooks.set('delete', () => {
+      box.delete('g', 'purge')
+      throw new Error('injected server error')
+    })
+    const [code] = await run(ws, 'cp /box/f /box/g')
+    expect(code).toBe(1)
+    const [catCode, out] = await run(ws, 'cat /box/g')
+    expect([catCode, out]).toEqual([1, ''])
+  })
 })

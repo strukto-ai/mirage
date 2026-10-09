@@ -15,6 +15,8 @@
 import type { BoxAccessor } from '../../accessor/box.ts'
 import {
   evictAfter,
+  evictKeepingVersion,
+  writesConditioned,
   invalidateAfterWrite,
   invalidateSubtree,
   nativeCondition,
@@ -25,7 +27,7 @@ import type { WriteCondition } from '../../cache/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { childSpec } from '../../utils/key_prefix.ts'
 import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { record, startOp, type OpTimer } from '../../observe/context.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
 import { BoxApiError } from './client.ts'
 import { CONFLICT_STATUS } from './constants.ts'
@@ -86,18 +88,29 @@ export async function retaken(
   return stale(dst, { gone: true })
 }
 
-async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Promise<void> {
+/**
+ * Copy `item` to `dst`, merging a folder into a folder. `changed` receives each
+ * path this copy changed (a destination cleared, a file landed, a folder copy
+ * sent), with its step's timer and whether it is a folder; `sent` receives each
+ * file path a request may have gone out for, landed or not. Mirrors Python's
+ * `_copy_into`.
+ */
+async function copyInto(
+  accessor: BoxAccessor,
+  item: BoxItem,
+  dst: PathSpec,
+  changed: [PathSpec, OpTimer, boolean][],
+  sent: PathSpec[],
+): Promise<void> {
   const tm = accessor.tokenManager
+  const timer = startOp()
   const dstParts = pathParts(dst)
   const existing = await resolveItem(accessor, dstParts)
   if (item.type === 'folder' && existing !== null && existing.type === 'folder') {
     // Merge into an existing folder (GNU cp -r semantics): copy each child
     // rather than replacing the folder, so pre-existing entries survive.
     for (const child of await listFolderItems(tm, item.id)) {
-      const spec = childSpec(dst, child.name)
-      const timer = startOp()
-      await copyInto(accessor, child, spec)
-      if (child.type === 'file') record('copy', spec.virtual, 'box', 0, timer)
+      await copyInto(accessor, child, childSpec(dst, child.name), changed, sent)
     }
     return
   }
@@ -105,6 +118,7 @@ async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Pr
   if (dstParent === null) throw enoent(dst.virtual)
   const newName = dstParts[dstParts.length - 1] ?? ''
   let cond: WriteCondition | null = null
+  let cleared = false
   if (existing !== null && existing.id !== item.id) {
     // Folder onto folder already merged above, so what is left is a type
     // mismatch or a file replacing a file. cp refuses either mismatch
@@ -112,13 +126,22 @@ async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Pr
     // only a file gives way to a file.
     if (existing.type === 'folder') throw eisdir(dst.virtual)
     if (item.type === 'folder') throw enotdir(dst.virtual)
+    sent.push(dst)
     cond = await replaceFile(accessor, dst, existing)
+    changed.push([dst, timer, false])
+    cleared = true
   } else if (existing === null && item.type === 'file') {
     cond = await replaceFile(accessor, dst, null)
   }
   try {
-    if (item.type === 'folder') await copyFolder(tm, item.id, dstParent, newName)
-    else await copyFile(tm, item.id, dstParent, newName)
+    if (item.type === 'folder') {
+      changed.push([dst, timer, true])
+      await copyFolder(tm, item.id, dstParent, newName)
+    } else {
+      sent.push(dst)
+      await copyFile(tm, item.id, dstParent, newName)
+      if (!cleared) changed.push([dst, timer, false])
+    }
   } catch (err) {
     throw (await retaken(err, cond, dst)) ?? err
   }
@@ -127,23 +150,35 @@ async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Pr
 /**
  * Copy a file or folder server-side.
  *
- * A folder copy evicts the whole destination subtree: a merge into an
- * existing folder replaces children below `dst` whose bytes were cached under
- * their own keys. A file copy evicts just its target: a file has nothing below
- * it, so it skips the subtree walk, which asks every store (a keyspace scan on
- * Redis). The eviction runs also when the copy fails, since a merge may have
- * landed some children before one failed.
+ * The copy records the paths it changed: a file it cleared or landed, and a
+ * folder it copied whole. The eviction runs also when the copy fails, since a
+ * merge may have landed some children before one failed. On an unconditional
+ * mount it evicts `dst` (its subtree for a folder). On a `write: conditional`
+ * mount it evicts exactly what changed, so a merge leaves the versions of the
+ * files it did not touch, and a file request that raised, which may or may not
+ * have landed, loses its cached bytes and listing but keeps the version mirage
+ * holds, so a change it did make is refused rather than written over.
  */
 export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const item = await resolveItem(accessor, pathParts(src))
   if (item === null) throw enoent(src.virtual)
   const folder = item.type === 'folder'
-  const timer = startOp()
+  const changed: [PathSpec, OpTimer, boolean][] = []
+  const sent: PathSpec[] = []
   await evictAfter(
-    () => copyInto(accessor, item, dst),
-    () => {
-      record('copy', dst.virtual, 'box', 0, timer)
-      return folder ? invalidateSubtree(dst) : invalidateAfterWrite(dst)
+    () => copyInto(accessor, item, dst, changed, sent),
+    async () => {
+      for (const [spec, timer] of changed) record('copy', spec.virtual, 'box', 0, timer)
+      if (!writesConditioned(dst)) {
+        await (folder ? invalidateSubtree(dst) : invalidateAfterWrite(dst))
+        return
+      }
+      for (const [spec, , whole] of changed) {
+        if (whole) await invalidateSubtree(spec)
+        else await invalidateAfterWrite(spec)
+      }
+      const landed = new Set(changed.map(([spec]) => spec.virtual))
+      for (const spec of sent) if (!landed.has(spec.virtual)) await evictKeepingVersion(spec)
     },
   )
 }

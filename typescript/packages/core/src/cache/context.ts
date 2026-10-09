@@ -505,6 +505,25 @@ export function conditioned(path: PathSpec, kind: 'copy' | 'delete'): boolean {
   return true
 }
 
+/**
+ * Evict `path`'s cached bytes and listing, keeping the version held. For a
+ * request that raised and may or may not have changed the path: what is cached
+ * may now be stale, but the version mirage holds keeps the next write
+ * conditioned, so a change the request did make is refused rather than written
+ * over. Without a write context it is a plain eviction. Mirrors Python's
+ * `evict_keeping_version`.
+ */
+export async function evictKeepingVersion(path: PathSpec): Promise<void> {
+  const context = activeWriteContext(path)
+  if (context === null) {
+    await invalidateAfterWrite(path)
+    return
+  }
+  const version = await context.readVersion(path)
+  await context.drop(path)
+  if (version !== null && version !== '') await context.keep(path, version)
+}
+
 /** Drop the write context's cached copy of `path`, if there is one. */
 export async function dropCached(path: PathSpec, keep: string | null = null): Promise<void> {
   markLost(path, keep)

@@ -17,11 +17,13 @@ from typing import Any
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import (
     evict_after,
+    evict_keeping_version,
     invalidate_after_write,
     invalidate_subtree,
     native_condition,
     stale,
     write_condition,
+    writes_conditioned,
 )
 from mirage.cache.types import WriteCondition
 from mirage.core.box.api import (
@@ -41,7 +43,7 @@ from mirage.core.box.resolve import (
 )
 from mirage.errors.fs import eisdir, enoent, enotdir
 from mirage.errors.types import StaleWriteError
-from mirage.observe.context import record, start_op
+from mirage.observe.context import OpTimer, record, start_op
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import child_spec
 
@@ -104,9 +106,27 @@ async def retaken(
 
 
 async def _copy_into(
-    accessor: BoxAccessor, item: dict[str, Any], dst: PathSpec
+    accessor: BoxAccessor,
+    item: dict[str, Any],
+    dst: PathSpec,
+    changed: list[tuple[PathSpec, OpTimer, bool]],
+    sent: list[PathSpec],
 ) -> None:
+    """Copy ``item`` to ``dst``, merging a folder into a folder.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        item (dict[str, Any]): the source as its lookup found it.
+        dst (PathSpec): where it lands.
+        changed (list[tuple[PathSpec, OpTimer, bool]]): receives each path
+            this copy changed (a destination cleared, a file landed, a
+            folder copy sent), with its step's timer and whether it is a
+            folder.
+        sent (list[PathSpec]): receives each file path a request may have
+            gone out for, landed or not.
+    """
     tm = accessor.token_manager
+    timer = start_op()
     dst_parts = path_parts(dst)
     existing = await resolve_item(accessor, dst_parts)
     if (
@@ -117,17 +137,16 @@ async def _copy_into(
         # Merge into an existing folder (GNU cp -r semantics): copy each child
         # rather than replacing the folder, so pre-existing entries survive.
         for child in await list_folder_items(tm, item["id"]):
-            spec = child_spec(dst, child["name"])
-            timer = start_op()
-            await _copy_into(accessor, child, spec)
-            if child.get("type") == "file":
-                record("copy", spec.virtual, "box", 0, timer)
+            await _copy_into(
+                accessor, child, child_spec(dst, child["name"]), changed, sent
+            )
         return
     dst_parent = await resolve_parent_id(accessor, dst_parts)
     if dst_parent is None:
         raise enoent(dst.virtual)
     new_name = dst_parts[-1]
     cond: WriteCondition | None = None
+    cleared = False
     if existing is not None and existing["id"] != item["id"]:
         # Folder onto folder already merged above, so what is left is a type
         # mismatch or a file replacing a file. cp refuses either mismatch
@@ -137,14 +156,21 @@ async def _copy_into(
             raise eisdir(dst.virtual)
         if item.get("type") == "folder":
             raise enotdir(dst.virtual)
+        sent.append(dst)
         cond = await replace_file(accessor, dst, existing)
+        changed.append((dst, timer, False))
+        cleared = True
     elif existing is None and item.get("type") == "file":
         cond = await replace_file(accessor, dst, None)
     try:
         if item.get("type") == "folder":
+            changed.append((dst, timer, True))
             await copy_folder(tm, item["id"], dst_parent, name=new_name)
         else:
+            sent.append(dst)
             await copy_file(tm, item["id"], dst_parent, name=new_name)
+            if not cleared:
+                changed.append((dst, timer, False))
     except BoxApiError as exc:
         lost = await retaken(exc, cond, dst)
         if lost is not None:
@@ -155,13 +181,16 @@ async def _copy_into(
 async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     """Copy a file or folder server-side.
 
-    A folder copy evicts the whole destination subtree: a merge into an
-    existing folder replaces children below ``dst`` whose bytes were
-    cached under their own keys. A file copy evicts just its target: a
-    file has nothing below it, so it skips the subtree walk, which asks
-    every store (a keyspace scan on Redis). The eviction runs also when
-    the copy fails, since a merge may have landed some children before
-    one failed.
+    The copy records the paths it changed: a file it cleared or landed,
+    and a folder it copied whole. The eviction runs also when the copy
+    fails, since a merge may have landed some children before one
+    failed. On an unconditional mount it evicts ``dst`` (its subtree for
+    a folder). On a ``write: conditional`` mount it evicts exactly what
+    changed, so a merge leaves the versions of the files it did not
+    touch, and a file request that raised, which may or may not have
+    landed, loses its cached bytes and listing but keeps the version
+    mirage holds, so a change it did make is refused rather than written
+    over.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -172,13 +201,26 @@ async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     if item is None:
         raise enoent(src.virtual)
     folder = item.get("type") == "folder"
-    timer = start_op()
+    changed: list[tuple[PathSpec, OpTimer, bool]] = []
+    sent: list[PathSpec] = []
 
     async def evict(_: None) -> None:
-        record("copy", dst.virtual, "box", 0, timer)
-        if folder:
-            await invalidate_subtree(dst)
-        else:
-            await invalidate_after_write(dst)
+        for spec, timer, _whole in changed:
+            record("copy", spec.virtual, "box", 0, timer)
+        if not writes_conditioned():
+            if folder:
+                await invalidate_subtree(dst)
+            else:
+                await invalidate_after_write(dst)
+            return
+        for spec, _timer, whole in changed:
+            if whole:
+                await invalidate_subtree(spec)
+            else:
+                await invalidate_after_write(spec)
+        landed = {spec.virtual for spec, _timer, _whole in changed}
+        for spec in sent:
+            if spec.virtual not in landed:
+                await evict_keeping_version(spec)
 
-    await evict_after(_copy_into(accessor, item, dst), evict)
+    await evict_after(_copy_into(accessor, item, dst, changed, sent), evict)

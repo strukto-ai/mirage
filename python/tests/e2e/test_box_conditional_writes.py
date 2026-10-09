@@ -366,3 +366,73 @@ async def test_a_destination_a_non_file_retook_after_its_clear_keeps_no_version(
     assert await _run(ws, f"{verb} /box/f /box/g") == (1, "", _refusal(verb))
     box.delete("g", "purge")
     assert await _run(ws, "echo y > /box/g") == (0, "", "")
+
+
+@pytest.mark.asyncio
+async def test_resizing_a_file_box_keeps_no_sha1_for_goes_out_plain(
+    box, workspace
+):
+    box.unhashed.add(box.id_of("f"))
+    ws = workspace()
+    assert await _run(ws, "truncate -s 2 /box/f") == (0, "", "")
+    assert box.read("f") == b"on"
+
+
+def _fail() -> None:
+    raise RuntimeError("injected server error")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("same_line", [True, False], ids=["line", "next line"])
+async def test_a_cp_that_changed_nothing_keeps_the_held_version(
+    box, workspace, same_line
+):
+    ws = workspace()
+
+    def theirs_then_fail() -> None:
+        box.write("g", b"theirs\n")
+        _fail()
+
+    box.hooks["delete"] = theirs_then_fail
+    if same_line:
+        code, _, err = await _run(
+            ws, "cat /box/g >/dev/null; cp /box/f /box/g; echo mine > /box/g"
+        )
+    else:
+        await _run(ws, "cat /box/g")
+        await _run(ws, "cp /box/f /box/g")
+        code, _, err = await _run(ws, "echo mine > /box/g")
+    assert code == 1 and err.endswith(f"/box/g: {STALE}\n")
+    assert box.read("g") == b"theirs\n"
+
+
+@pytest.mark.asyncio
+async def test_a_folder_merge_keeps_the_versions_of_files_it_left(
+    box, workspace
+):
+    box.create("e/d/a", b"new\n")
+    ws = workspace()
+    await _run(ws, "cat /box/d/b")
+    assert await _run(ws, "cp -r /box/e/d /box") == (0, "", "")
+    box.write("d/b", b"theirs\n")
+    code, _, err = await _run(ws, "echo mine > /box/d/b")
+    assert (code, err) == (1, f"/box/d/b: {STALE}\n")
+    assert box.read("d/b") == b"theirs\n"
+
+
+@pytest.mark.asyncio
+async def test_a_cp_whose_delete_landed_but_failed_serves_no_stale_bytes(
+    box, workspace
+):
+    ws = workspace()
+    await _run(ws, "cat /box/g")
+
+    def gone_then_fail() -> None:
+        box.delete("g", "purge")
+        _fail()
+
+    box.hooks["delete"] = gone_then_fail
+    code, _, _ = await _run(ws, "cp /box/f /box/g")
+    assert code == 1
+    code, out, _ = await _run(ws, "cat /box/g")
+    assert (code, out) == (1, "")

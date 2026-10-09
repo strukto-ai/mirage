@@ -523,6 +523,28 @@ async def drop_cached(path: PathSpec, keep: str | None = None) -> None:
             await context.keep(path, keep)
 
 
+async def evict_keeping_version(path: PathSpec) -> None:
+    """Evict ``path``'s cached bytes and listing, keeping the version held.
+
+    For a request that raised and may or may not have changed the path:
+    what is cached may now be stale, but the version mirage holds keeps
+    the next write conditioned, so a change the request did make is
+    refused rather than written over. Without a write context it is a
+    plain eviction.
+
+    Args:
+        path (PathSpec): the path the request may have changed.
+    """
+    context = _write.get()
+    if context is None:
+        await invalidate_after_write(path)
+        return
+    version = await context.read_version(path)
+    await context.drop(path)
+    if version:
+        await context.keep(path, version)
+
+
 async def stale(
     path: PathSpec,
     landed: bool = False,
