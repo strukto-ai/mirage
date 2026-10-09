@@ -789,6 +789,7 @@ async def _run_redirected(
     # stderr) goes around them; a compound body expands inside them.
     simple = command is not None and command.type in (
         NT.COMMAND,
+        NT.DECLARATION_COMMAND,
         NT.VARIABLE_ASSIGNMENT,
         NT.VARIABLE_ASSIGNMENTS,
     )
@@ -1098,6 +1099,7 @@ async def execute_node(
             sink,
             handed,
             execution_scope,
+            own_diagnostics=False,
         )
     outer = context.frame.diagnostics
     context.frame.diagnostics = []
@@ -1166,6 +1168,7 @@ async def _execute_node(
     sink: JobConsole | None = None,
     handed: HandOff | None = None,
     execution_scope: ExecutionScope | None = None,
+    own_diagnostics: bool = True,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Walk tree-sitter AST and dispatch each node.
 
@@ -1191,6 +1194,9 @@ async def _execute_node(
             stdout; when None it returns stdout as a value, which is
             what capture sites (command substitution, pipe stages,
             redirects) rely on.
+        own_diagnostics (bool): whether a node drained into the sink
+            flushes its own diagnostics; a redirect's simple command
+            leaves them for the redirect to put outside it.
     """
     session = context.session
     # The session view, bound once for the line: every
@@ -1275,7 +1281,12 @@ async def _execute_node(
             NodeKind.VAR_ASSIGNS,
         )
     ):
-        return await drained(sink, *await recurse(node, context, stdin, cs))
+        return await drained(
+            sink,
+            *await recurse(
+                node, context, stdin, cs, own_diagnostics=own_diagnostics
+            ),
+        )
 
     stream = partial(recurse, sink=sink) if sink is not None else recurse
 

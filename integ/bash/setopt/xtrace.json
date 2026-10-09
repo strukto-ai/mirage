@@ -61,11 +61,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "declare -i xvi=1; set -x; xvt=5; xvt+=1; xvi+=2; echo $xvt $xvi; set +x",
+      "command": "set -x; declare -i xvi=1; xvt=5; xvt+=1; xvi+=2; ( export xve=\"a b\" xvf 2>/dev/null; readonly xvg=1; export 1x=2 xvh+=c xvg=2; export -Z xvz=1; export -a xvy=1; export xvj=1 xvi=1/0; echo no ); declare -a xva=( p \"it's\" ); xva[1]=q; xvb=( 1  2 ); : café a#b '#b' '~b' a~ a:~b $'\\e'; echo $xvt $xvi; set +x",
       "expect": {
         "exit": 0,
         "stdout": "51 3\n",
-        "stderr": "+ xvt=5\n+ xvt+=1\n+ xvi+=2\n+ echo 51 3\n+ set +x\n"
+        "stderr": "+ declare -i xvi=1\n+ xvt=5\n+ xvt+=1\n+ xvi+=2\n+ export 'xve=a b' xvf\n+ readonly xvg=1\n+ xvg=1\n+ export 1x=2 xvh+=c xvg=2\nbash: export: `1x=2': not a valid identifier\n+ xvh+=c\n+ xvg=2\nbash: xvg: readonly variable\n+ export -Z xvz=1\nbash: export: -Z: invalid option\nexport: usage: export [-fn] [name[=value] ...] or export -p\n+ export -a xvy=1\n+ export xvj=1 xvi=1/0\n+ xvj=1\n+ xvi=1/0\nbash: export: 1/0: division by 0 (error token is \"0\")\n+ xva=('p' 'it'\\''s')\n+ declare -a xva\n+ xva[1]=q\n+ xvb=(1 2)\n+ : café a#b '#b' '~b' a~ 'a:~b' $'\\E'\n+ echo 51 3\n+ set +x\n"
       }
     }
   ]
