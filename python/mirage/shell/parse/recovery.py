@@ -209,7 +209,8 @@ def operator_source(data: bytes, root: TSNodeLike) -> bytes:
     test bash reads as a ``[`` command (``_bracket_is_a_command``, or one
     an error region opens), which then runs as the builtin, and so is a
     backslash-blank pair the grammar skips as whitespace
-    (``_skipped_escapes``), which then opens its word. An operator
+    (``_skipped_escapes``), spelled ``..`` so it opens its word without
+    joining a ``$name`` before it or making an assignment. An operator
     inside an error region gets its own token only once the operators
     before it are respelled, so the pass repeats on its own parse until
     nothing changes.
@@ -239,6 +240,8 @@ def _skipped_escapes(data: bytes, root: TSNodeLike) -> list[int]:
         data (bytes): shell source.
         root (TSNodeLike): the parse of ``data``.
     """
+    if _ESCAPED_BLANK.search(data) is None:
+        return []
     spans: list[tuple[int, int]] = [(len(data), len(data))]
     stack = [root]
     while stack:
@@ -260,7 +263,7 @@ def _skipped_escapes(data: bytes, root: TSNodeLike) -> list[int]:
 def _respelled(data: bytes, root: TSNodeLike) -> bytes:
     out = bytearray(data)
     for at in _skipped_escapes(data, root):
-        out[at : at + 2] = b"__"
+        out[at : at + 2] = b".."
     stack = [root]
     while stack:
         node = stack.pop()
@@ -531,8 +534,9 @@ def statement_boundaries(data: bytes) -> bytes:
     the next word when a backslash opens that word (``\\ls``, the alias
     bypass), so the next line reads as more arguments. A newline between
     children of a simple command, a redirect or a declaration cannot be
-    whitespace in bash: quoted newlines belong to a child, and
-    continuations have already been joined. Insert a semicolon without
+    whitespace in bash: quoted newlines belong to a child, continuations
+    have already been joined, and an escaped blank beside it is a word the
+    grammar skipped (``_skipped_escapes``). Insert a semicolon without
     removing bytes so source maps remain valid, before a comment that ends
     the statement, since one after it would be read as part of the comment.
 
@@ -558,7 +562,7 @@ def statement_boundaries(data: bytes) -> bytes:
         for left, right in zip(node.children, node.children[1:]):
             folded = data[right.start_byte : right.start_byte + 1] == b"\n"
             gap = data[left.end_byte : right.start_byte + folded]
-            if b"\n" in gap and not gap.strip():
+            if b"\n" in gap and not _ESCAPED_BLANK.sub(b"", gap).strip():
                 offsets.add(
                     left.start_byte
                     if left.type == "comment"

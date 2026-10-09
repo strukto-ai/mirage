@@ -109,6 +109,8 @@ def test_literal_dollar_words_stay_untouched(command, words):
         ("export a\n\\echo b", [["\\echo", "b"]]),
         ("echo a \\ b \\\tc", [["echo", "a", "\\ b", "\\\tc"]]),
         ("echo a\n\\ b", [["echo", "a"], ["\\ b"]]),
+        ("echo \\ \n\\echo b", [["echo", "\\ "], ["\\echo", "b"]]),
+        ("\\ =x", [["\\ =x"]]),
     ],
 )
 def test_a_backslash_opening_a_word_stays_in_it(command, commands):

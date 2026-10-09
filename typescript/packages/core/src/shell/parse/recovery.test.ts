@@ -115,6 +115,14 @@ describe('a backslash opening a word', () => {
     ['export a\n\\echo b', [['\\echo', 'b']]],
     ['echo a \\ b \\\tc', [['echo', 'a', '\\ b', '\\\tc']]],
     ['echo a\n\\ b', [['echo', 'a'], ['\\ b']]],
+    [
+      'echo \\ \n\\echo b',
+      [
+        ['echo', '\\ '],
+        ['\\echo', 'b'],
+      ],
+    ],
+    ['\\ =x', [['\\ =x']]],
   ])('keeps it in the word in %j', (command, commands) => {
     // Pinned against bash 5.2.37: the backslash escapes the word's first
     // character, so the newline before it still ends the command and an

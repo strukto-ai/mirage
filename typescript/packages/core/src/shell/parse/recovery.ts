@@ -165,7 +165,8 @@ function bracketIsACommand(text: string, node: ShellNode): boolean {
  * and `SourceNode` gives back their text. So is the `[` of a test bash reads
  * as a `[` command (`bracketIsACommand`, or one an error region opens), which
  * then runs as the builtin, and so is a backslash-blank pair the grammar
- * skips as whitespace (`skippedEscapes`), which then opens its word. An
+ * skips as whitespace (`skippedEscapes`), spelled `..` so it opens its word
+ * without joining a `$name` before it or making an assignment. An
  * operator inside an error region gets its own token only once the operators
  * before it are respelled, so the pass repeats on its own parse until nothing
  * changes. Mirrors Python's operator_source.
@@ -192,6 +193,7 @@ export function operatorSource(parser: NativeParser, text: string, root: ShellNo
  * is searched; a quoted or unlexed span counts as one token.
  */
 function skippedEscapes(text: string, root: ShellNode): number[] {
+  if (text.search(ESCAPED_BLANK) === -1) return []
   const spans: [number, number][] = [[text.length, text.length]]
   const stack: ShellNode[] = [root]
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
@@ -212,8 +214,8 @@ function skippedEscapes(text: string, root: ShellNode): number[] {
 function respelled(text: string, root: ShellNode): string {
   const out = text.split('')
   for (const at of skippedEscapes(text, root)) {
-    out[at] = '_'
-    out[at + 1] = '_'
+    out[at] = '.'
+    out[at + 1] = '.'
   }
   const stack: ShellNode[] = [root]
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
@@ -473,7 +475,8 @@ function errors(root: ShellNode): Set<string> {
  * Make statement newlines swallowed between simple-command words explicit.
  * The grammar also folds one into the next word when a backslash opens that
  * word (`\ls`, the alias bypass), so the next line reads as more arguments.
- * Quoted newlines are inside a child and continuations were already removed.
+ * Quoted newlines are inside a child, continuations were already removed, and
+ * an escaped blank beside one is a word the grammar skipped (`skippedEscapes`).
  * Insertion preserves the source maps used by lowered heredocs. The separator
  * goes before a comment that ends the statement, since one after it would be
  * read as part of the comment.
@@ -505,7 +508,7 @@ export function statementBoundaries(parser: NativeParser, text: string): string 
       if (left === undefined || right === undefined) continue
       const folded = text[right.startIndex] === '\n' ? 1 : 0
       const gap = text.slice(left.endIndex, right.startIndex + folded)
-      if (gap.includes('\n') && gap.trim() === '')
+      if (gap.includes('\n') && gap.replace(ESCAPED_BLANK, '').trim() === '')
         offsets.add(left.type === 'comment' ? left.startIndex : left.endIndex + gap.indexOf('\n'))
     }
   }
