@@ -201,6 +201,22 @@ def mount_prefix_of(virtual: str, vfs_path: str) -> str:
     return virtual[:prefix_len].rstrip("/")
 
 
+def raw_path_of(path: PathSpec) -> str:
+    """The path below the mount prefix, spelled as the virtual path is.
+
+    Args:
+        path (PathSpec): a path on a mount.
+
+    Returns:
+        str: ``/`` for the mount root, else the slash-led remainder with
+        any trailing slash kept.
+    """
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
+    if prefix and path.virtual.startswith(prefix):
+        return path.virtual[len(prefix) :] or "/"
+    return path.virtual
+
+
 def mounted_path(root: PathSpec, mount_path: str) -> PathSpec:
     """A PathSpec for a mount-local key, addressed like ``root``.
 

@@ -82,10 +82,6 @@ export class S3WorkspaceStateStore extends WorkspaceStateStore {
     return fields
   }
 
-  protected async writeMeta(workspaceId: string, fields: WorkspaceFields): Promise<void> {
-    await this.meta.put(workspaceId, fields)
-  }
-
   protected casWriteMeta(
     workspaceId: string,
     fields: WorkspaceFields,

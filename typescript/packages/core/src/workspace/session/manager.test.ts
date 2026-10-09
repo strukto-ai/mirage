@@ -110,14 +110,6 @@ describe('SessionManager', () => {
     const m = new SessionManager('def')
     await expect(m.close('def')).rejects.toThrow(/Cannot close the default session/)
   })
-
-  it('closeAll keeps default but drops others', async () => {
-    const m = new SessionManager('def')
-    m.create('a')
-    m.create('b')
-    await m.closeAll()
-    expect(m.list().map((x) => x.sessionId)).toEqual(['def'])
-  })
 })
 
 describe('SessionManager with a SessionStore', () => {
@@ -256,8 +248,6 @@ describe('SessionManager with a SessionStore', () => {
     expect(dflt.hideReasons).toEqual([
       { patterns: ['/repo'], reason: 'keep the bulk out of context' },
     ])
-    expect(m.hideReasonsOf('def')).toEqual(dflt.hideReasons)
-    expect(m.hideReasonsOf('stranger')).toEqual([])
   })
 
   it('defaultProfile shapes the default session and outranks a stale record', async () => {

@@ -175,7 +175,6 @@ async def test_set_attrs_on_link_keeps_target(namespace):
 async def test_overlay_nodes_are_not_links(namespace):
     await namespace.set_attrs("/data/f.txt", mode=0o600)
     assert namespace.symlink_targets() == {}
-    assert namespace.has_links() is False
 
 
 @pytest.mark.asyncio

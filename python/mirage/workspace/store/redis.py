@@ -95,16 +95,6 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         )
         return json.loads(raw) if raw is not None else None
 
-    async def _set_meta(
-        self, workspace_id: str, fields: WorkspaceFields
-    ) -> None:
-        await cast(
-            Awaitable[Any],
-            self._meta_client.hset(
-                self._meta_key, workspace_id, json.dumps(fields)
-            ),
-        )
-
     async def _cas_set_meta(
         self,
         workspace_id: str,

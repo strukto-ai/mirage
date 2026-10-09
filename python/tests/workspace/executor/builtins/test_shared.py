@@ -25,6 +25,7 @@ from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.constants import IDENTIFIER_RE
 from mirage.workspace.executor.builtins.shared import (
     abs_path,
+    count_operand,
     expand_operands,
     fail,
     finish,
@@ -185,3 +186,20 @@ def test_is_count_word():
 )
 def test_record_delimiter_is_the_first_byte(text, delimiter):
     assert record_delimiter(text) == delimiter
+
+
+@pytest.mark.parametrize(
+    "text,count",
+    [
+        ("0", 0),
+        ("12", 12),
+        ("", None),
+        ("-1", None),
+        ("+3", None),
+        (" 3", None),
+        (chr(0x663), None),
+        (chr(0xB2), None),
+    ],
+)
+def test_count_operand_takes_ascii_digits_only(text, count):
+    assert count_operand(text) == count

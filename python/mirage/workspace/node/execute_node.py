@@ -590,7 +590,7 @@ async def _negated(
         inner (Any): the wrapped statement's node.
     """
     session = context.session
-    # Lazy exit codes (exit_on_empty in grep) must be final before
+    # Lazy exit codes (grep's) must be final before
     # inverting, or `! grep miss f` negates the provisional 0.
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
     # bash reports the negated pipeline's own statuses in PIPESTATUS

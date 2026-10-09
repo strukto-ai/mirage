@@ -24,7 +24,6 @@ from mirage.utils.compress import (
     GZIP_LENGTH,
     GzipDataError,
     GzipDecoder,
-    gunzip_checked,
     gunzip_partial,
     gunzip_stream,
     gzip_compress,
@@ -36,7 +35,7 @@ HCRC_HEAD = HELLO[:3] + b"\x02" + HELLO[4:10]
 
 
 def test_every_member_decompresses():
-    assert gunzip_checked(HELLO + HELLO) == b"hello\nhello\n"
+    assert gunzip_partial(HELLO + HELLO) == (b"hello\nhello\n", None)
 
 
 @pytest.mark.parametrize(
@@ -80,9 +79,8 @@ def test_refusals_carry_gzips_reason_and_severity(data, reason, fatal):
     # reported and skipped, while a short, truncated or corrupt input
     # ends the run. Only the header refusals come without gzip's leading
     # newline.
-    with pytest.raises(GzipDataError) as exc:
-        gunzip_checked(data)
-    assert (exc.value.render("f"), exc.value.fatal) == (reason, fatal)
+    _, failure = gunzip_partial(data)
+    assert (failure.render("f"), failure.fatal) == (reason, fatal)
 
 
 def test_optional_header_fields_are_skipped():
@@ -90,7 +88,7 @@ def test_optional_header_fields_are_skipped():
     head = HELLO[:3] + bytes([flags]) + HELLO[4:10]
     head += b"\x03\x00abc" + b"name\0" + b"comment\0"
     head += (zlib.crc32(head) & 0xFFFF).to_bytes(2, "little")
-    assert gunzip_checked(head + HELLO[10:]) == b"hello\n"
+    assert gunzip_partial(head + HELLO[10:]) == (b"hello\n", None)
 
 
 @pytest.mark.parametrize(
@@ -146,9 +144,8 @@ def test_partial_keeps_what_gzip_wrote_before_it_stopped(data, decoded, keeps):
     ],
 )
 def test_a_later_members_refusal_keeps_the_members_before_it(data, keeps):
-    with pytest.raises(GzipDataError) as exc:
-        gunzip_checked(data)
-    assert (exc.value.fatal, exc.value.keeps_output) == (False, keeps)
+    _, failure = gunzip_partial(data)
+    assert (failure.fatal, failure.keeps_output) == (False, keeps)
 
 
 @pytest.mark.asyncio
@@ -196,7 +193,7 @@ async def test_trailing_warning_follows_valid_output():
 
 def test_large_member_preserves_buffered_output():
     data = b"x" * (GZIP_CHUNK_SIZE * 20 + 13)
-    assert gunzip_checked(gzip.compress(data)) == data
+    assert gunzip_partial(gzip.compress(data)) == (data, None)
 
 
 @pytest.mark.parametrize(
@@ -281,7 +278,7 @@ def test_named_gzip_header_moves_the_truncation_boundary():
     data, failure = gunzip_partial(named[:20])
     assert data == b"hel"
     assert failure is not None
-    assert gunzip_checked(named) == b"hello\nworld\n"
+    assert gunzip_partial(named) == (b"hello\nworld\n", None)
     unnamed = gzip_compress(b"hello\nworld\n")
     assert gunzip_partial(unnamed[:20])[0] == b"hello\nwor"
 

@@ -22,7 +22,6 @@ import {
   discardStreams,
   drain,
   ensureStream,
-  exitOnEmpty,
   wrapCachableStreams,
   yieldBytes,
 } from './stream.ts'
@@ -63,21 +62,6 @@ describe('wrapCachableStreams', () => {
     const io = new IOResult({ reads: { '/a': bytes }, cache: ['/a'] })
     const [, out] = wrapCachableStreams(null, io)
     expect(out.reads['/a']).toBe(bytes)
-  })
-})
-
-describe('exitOnEmpty', () => {
-  it('passes chunks through unchanged', async () => {
-    const io = new IOResult()
-    const out = await collect(exitOnEmpty(fromChunks([encode('a')]), io))
-    expect(out).toBe('a')
-    expect(io.exitCode).toBe(0)
-  })
-
-  it('sets exit_code=1 on empty stream', async () => {
-    const io = new IOResult()
-    await collect(exitOnEmpty(fromChunks([]), io))
-    expect(io.exitCode).toBe(1)
   })
 })
 

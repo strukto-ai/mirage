@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { apiRequest } from '../api/client.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { apiRequest, buildUrl } from '../api/client.ts'
 
 const TRACE_ID_RE = /^[0-9a-f]{16}$|^[0-9a-f]{32}$/i
 
@@ -51,22 +50,6 @@ export interface HttpJaegerTransportOptions {
 }
 
 const DEFAULT_TIMEOUT_SECONDS = 30
-
-function buildUrl(
-  base: string,
-  path: string,
-  query: Record<string, string | number | undefined>,
-): string {
-  const trimmed = rstripSlash(base)
-  const cleanPath = path.startsWith('/') ? path : `/${path}`
-  const params: string[] = []
-  for (const [k, v] of Object.entries(query)) {
-    if (v === undefined) continue
-    params.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
-  }
-  const qs = params.length > 0 ? `?${params.join('&')}` : ''
-  return `${trimmed}${cleanPath}${qs}`
-}
 
 function errorMessage(body: unknown, status: number): string {
   if (body !== null && typeof body === 'object') {

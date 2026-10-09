@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ByteWindow, rangeHeader, windowOf } from '../../utils/ranges.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { chunks } from '../../io/cooperative.ts'
 
 // How a >= 400 API response and its body text become the backend's own
@@ -113,6 +114,26 @@ export type ReadMode =
   | 'text'
   | 'location'
   | 'response'
+
+/**
+ * `base` and `path` joined by one slash, with each defined `query` entry
+ * URI-encoded onto the end; an undefined value is left out.
+ */
+export function buildUrl(
+  base: string,
+  path: string,
+  query: Record<string, string | number | undefined>,
+): string {
+  const trimmed = rstripSlash(base)
+  const cleanPath = path.startsWith('/') ? path : `/${path}`
+  const params: string[] = []
+  for (const [k, v] of Object.entries(query)) {
+    if (v === undefined) continue
+    params.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+  }
+  const qs = params.length > 0 ? `?${params.join('&')}` : ''
+  return `${trimmed}${cleanPath}${qs}`
+}
 
 /**
  * A response's headers as a plain record, names lower-cased; fetch already

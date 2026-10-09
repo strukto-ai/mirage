@@ -21,11 +21,11 @@ from mirage.core.discord.files import download_file, download_file_stream
 from mirage.core.discord.history import get_history_jsonl
 from mirage.core.discord.members import list_members
 from mirage.core.discord.readdir import readdir
-from mirage.core.discord.render import member_json_bytes
 from mirage.core.discord.scope import detect_scope
 from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.read import make_read, make_read_range
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.render.json import compact_json_bytes
 from mirage.core.time_range import day_channel_id, guard_day
 from mirage.errors.fs import enoent
 from mirage.io.cooperative import chunks
@@ -64,7 +64,7 @@ async def _read_member(
     for m in members:
         user = m.get("user", {})
         if user.get("id") == entry.id:
-            return member_json_bytes(m)
+            return compact_json_bytes(m)
     raise enoent(path.virtual)
 
 

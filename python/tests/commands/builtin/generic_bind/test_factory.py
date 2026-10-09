@@ -26,6 +26,7 @@ from mirage.commands.builtin.generic_bind.factory import (
     _run_with_namespace_globs,
     generic_commands,
     scan_io,
+    walked,
     with_probe_answers,
     with_slash_guard,
     with_stat_cache,
@@ -33,6 +34,7 @@ from mirage.commands.builtin.generic_bind.factory import (
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.types import DuOps
 from mirage.view.types import LinkView, NamespaceView
 
 
@@ -114,6 +116,20 @@ def test_scan_io_guards_only_a_judged_mount():
         assert scan is io and not scoped
     scan, scoped = scan_io(io, judged, "/s3/")
     assert scan is not io and scoped
+
+
+def test_walked_sets_the_native_find_and_du_aside():
+    async def native(*args, **kwargs):
+        return None
+
+    io = replace(
+        _ops(_CountingBackend(b"payload")),
+        find=native,
+        du=DuOps(size=native, entries=native),
+    )
+    rest = walked(io)
+    assert rest.find is None and rest.du is None
+    assert rest.readdir is io.readdir and rest.stat is io.stat
 
 
 async def _no_target(virtual: str):

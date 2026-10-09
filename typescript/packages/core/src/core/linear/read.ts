@@ -40,21 +40,13 @@ import {
   toJsonBytes,
   type NormalizedProjectIssue,
 } from './normalize.ts'
+import { filteredTeams } from './readdir.ts'
 import { detectScope } from './scope.ts'
 import { stat } from './stat.ts'
 
 function pickString(record: Record<string, unknown>, key: string): string {
   const value = record[key]
   return typeof value === 'string' ? value : ''
-}
-
-async function filteredTeams(accessor: LinearAccessor): Promise<Record<string, unknown>[]> {
-  let teams = await listTeams(accessor.transport)
-  if (accessor.teamIds !== null && accessor.teamIds.length > 0) {
-    const allowed = new Set(accessor.teamIds)
-    teams = teams.filter((t) => allowed.has(pickString(t, 'id')))
-  }
-  return teams
 }
 
 async function readTeamJson(

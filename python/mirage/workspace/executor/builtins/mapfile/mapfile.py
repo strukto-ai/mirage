@@ -27,6 +27,7 @@ from mirage.shell.bytes import decode_text
 from mirage.utils.quote import single_quote
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.shared import (
+    count_operand,
     fail,
     record_delimiter,
     require_view,
@@ -46,15 +47,6 @@ _USAGE = (
 )
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _DEFAULT_QUANTUM = 5000
-
-
-def _count(text: str) -> int | None:
-    """A non-negative integer option value, else None.
-
-    Args:
-        text (str): the value as typed.
-    """
-    return int(text) if text.isdigit() else None
 
 
 async def handle_mapfile(
@@ -119,7 +111,7 @@ async def handle_mapfile(
     ):
         if key not in flags:
             continue
-        value = _count(str(flags[key]))
+        value = count_operand(str(flags[key]))
         if value is None or (key == "c" and value == 0):
             return fail(
                 cmd, f"bash: {cmd}: {flags[key]}: invalid {label}\n", 1

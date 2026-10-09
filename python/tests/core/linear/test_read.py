@@ -86,7 +86,7 @@ async def test_read_team_json(accessor, index):
     ]
     await _seed(index)
     with patch(
-        "mirage.core.linear.read.list_teams",
+        "mirage.core.linear.readdir.list_teams",
         new_callable=AsyncMock,
         return_value=teams,
     ):

@@ -17,7 +17,8 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
-import { bucket, gridfsKey, rawPathOf } from './client.ts'
+import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { bucket, gridfsKey } from './client.ts'
 import { isNoFileError, resolveFileId } from './read.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192

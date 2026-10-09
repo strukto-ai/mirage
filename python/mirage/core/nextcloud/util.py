@@ -13,23 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
-
-
-def raw_path_of(path: PathSpec) -> str:
-    """The path below the mount prefix, spelled as the virtual path is.
-
-    Args:
-        path (PathSpec): a path on a nextcloud mount.
-
-    Returns:
-        str: ``/`` for the mount root, else the slash-led remainder with
-        any trailing slash kept.
-    """
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    if prefix and path.virtual.startswith(prefix):
-        return path.virtual[len(prefix) :] or "/"
-    return path.virtual
+from mirage.utils.key_prefix import raw_path_of
 
 
 def nextcloud_key(path: PathSpec) -> str:

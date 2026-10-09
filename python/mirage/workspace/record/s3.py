@@ -124,17 +124,6 @@ class S3RecordClient:
                     names.append(key.removesuffix(".json"))
         return names
 
-    async def load_all(self) -> dict[str, dict[str, Any]]:
-        """Every stored record, keyed by name; batch-first (one list,
-        then parallel reads)."""
-        names = await self.list_names()
-        records = await asyncio.gather(*(self.get(name) for name in names))
-        return {
-            name: fields
-            for name, (fields, _) in zip(names, records)
-            if fields is not None
-        }
-
     async def delete(self, names: Iterable[str]) -> None:
         ids = [{"Key": self.key(name)} for name in names]
         if not ids:

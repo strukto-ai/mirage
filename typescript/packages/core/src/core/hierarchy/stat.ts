@@ -18,6 +18,7 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { assertListed, listedSize, resolveEntry, type ReaddirFn } from './probe.ts'
 import type { Guard } from './readdir.ts'
@@ -46,17 +47,21 @@ const KINDS: ReadonlySet<string> = new Set(Object.values(FileType))
 
 /**
  * `kind` is the node's kind: a FileType for a non-regular node (a
- * directory), or a ContentType for a regular file, whose node kind is
- * then FILE. Mirrors `entry_stat` in `mirage/core/hierarchy/stat.py`.
+ * directory), a ContentType for a regular file, whose node kind is then
+ * FILE, or undefined for a regular file typed by its name (a mail
+ * attachment). Mirrors `entry_stat` in `mirage/core/hierarchy/stat.py`.
  */
-export function entryStat(idField: string, kind: FileType | ContentType): EntryStatFn {
-  const shape = KINDS.has(kind)
-    ? { type: kind as FileType }
-    : { type: FileType.FILE, content: kind as ContentType }
+export function entryStat(idField: string, kind?: FileType | ContentType): EntryStatFn {
+  const node = kind !== undefined && KINDS.has(kind) ? (kind as FileType) : null
   return function build(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
     return new FileStat({
       name: entry.vfsName,
-      ...shape,
+      ...(node !== null
+        ? { type: node }
+        : {
+            type: FileType.FILE,
+            content: (kind as ContentType | undefined) ?? contentTypeForPath(entry.vfsName),
+          }),
       size: entry.size,
       modified: entry.remoteTime !== '' ? entry.remoteTime : null,
       extra: { [idField]: entry.id },

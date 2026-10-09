@@ -12,15 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
-import {
-  httpFormRequest,
-  httpRequest,
-  isHttpError,
-  registerInsecureFetch,
-  setHttpProxyBase,
-} from './http.ts'
+import { httpFormRequest, httpRequest, isHttpError, registerInsecureFetch } from './http.ts'
 
 const ENC = new TextEncoder()
 
@@ -45,74 +39,16 @@ function urlsCalled(mock: ReturnType<typeof makeFetchMock>): string[] {
   })
 }
 
-describe('http proxy routing', () => {
-  beforeEach(() => {
-    setHttpProxyBase(null)
-  })
-
+describe('http requests', () => {
   afterEach(() => {
-    setHttpProxyBase(null)
     vi.unstubAllGlobals()
   })
 
-  it('does not rewrite when no proxy base is set', async () => {
-    const fetchMock = makeFetchMock('hello')
-    vi.stubGlobal('fetch', fetchMock)
-    await httpRequest('https://example.com/x')
-    expect(urlsCalled(fetchMock)).toEqual(['https://example.com/x'])
-  })
-
-  it('rewrites absolute URL through proxy base when set', async () => {
-    const fetchMock = makeFetchMock('hello')
-    vi.stubGlobal('fetch', fetchMock)
-    setHttpProxyBase('/__proxy')
-    await httpRequest('https://example.com/x')
-    expect(urlsCalled(fetchMock)).toEqual(['/__proxy?url=https%3A%2F%2Fexample.com%2Fx'])
-  })
-
-  it('appends url= with & when proxy base already has a query string', async () => {
-    const fetchMock = makeFetchMock('hello')
-    vi.stubGlobal('fetch', fetchMock)
-    setHttpProxyBase('/__proxy?key=abc')
-    await httpRequest('https://example.com/x')
-    expect(urlsCalled(fetchMock)).toEqual(['/__proxy?key=abc&url=https%3A%2F%2Fexample.com%2Fx'])
-  })
-
-  it('does not double-rewrite a URL that already starts with the proxy base', async () => {
-    const fetchMock = makeFetchMock('hello')
-    vi.stubGlobal('fetch', fetchMock)
-    setHttpProxyBase('/__proxy')
-    await httpRequest('/__proxy?url=https%3A%2F%2Fexample.com%2Fx')
-    expect(urlsCalled(fetchMock)).toEqual(['/__proxy?url=https%3A%2F%2Fexample.com%2Fx'])
-  })
-
-  it('does not rewrite same-origin paths starting with /', async () => {
-    const fetchMock = makeFetchMock('hello')
-    vi.stubGlobal('fetch', fetchMock)
-    setHttpProxyBase('/__proxy')
-    await httpRequest('/api/local')
-    expect(urlsCalled(fetchMock)).toEqual(['/api/local'])
-  })
-
-  it('reverts to no rewrite after proxy base is cleared', async () => {
-    const fetchMock = makeFetchMock('hello')
-    vi.stubGlobal('fetch', fetchMock)
-    setHttpProxyBase('/__proxy')
-    await httpRequest('https://example.com/a')
-    setHttpProxyBase(null)
-    await httpRequest('https://example.com/b')
-    expect(urlsCalled(fetchMock)).toEqual([
-      '/__proxy?url=https%3A%2F%2Fexample.com%2Fa',
-      'https://example.com/b',
-    ])
-  })
-
-  it('routes form requests through the proxy as well', async () => {
+  it('sends form requests as urlencoded POSTs', async () => {
     const fetchMock = makeFetchMock('ok')
     vi.stubGlobal('fetch', fetchMock)
-    setHttpProxyBase('/__proxy')
     await httpFormRequest('https://example.com/submit', { formData: { a: '1' } })
-    expect(urlsCalled(fetchMock)).toEqual(['/__proxy?url=https%3A%2F%2Fexample.com%2Fsubmit'])
+    expect(urlsCalled(fetchMock)).toEqual(['https://example.com/submit'])
     const [, init] = fetchMock.mock.calls[0] as [unknown, RequestInit]
     expect(init.method).toBe('POST')
     expect((init.headers as Record<string, string>)['Content-Type']).toBe(
@@ -120,10 +56,9 @@ describe('http proxy routing', () => {
     )
   })
 
-  it('forwards body and method untouched when proxying', async () => {
+  it('forwards body and method untouched', async () => {
     const fetchMock = makeFetchMock('ok')
     vi.stubGlobal('fetch', fetchMock)
-    setHttpProxyBase('/__proxy')
     const body = ENC.encode('{"x":1}')
     await httpRequest('https://example.com/api', {
       method: 'PUT',
@@ -142,7 +77,6 @@ describe('http proxy routing', () => {
   it('reports a non-2xx response as a status rather than throwing', async () => {
     const fetchMock = makeFetchMock('nope', 502)
     vi.stubGlobal('fetch', fetchMock)
-    setHttpProxyBase('/__proxy')
     const resp = await httpRequest('https://example.com/x')
     expect(resp.status).toBe(502)
     expect(isHttpError(resp)).toBe(true)
@@ -154,7 +88,6 @@ describe('http proxy routing', () => {
       'fetch',
       vi.fn(() => Promise.reject(new TypeError('fetch failed'))),
     )
-    setHttpProxyBase(null)
     await expect(httpRequest('http://127.0.0.1:1/x')).rejects.toThrow(HttpConnectError)
     await expect(httpRequest('http://127.0.0.1:1/x')).rejects.toMatchObject({
       host: '127.0.0.1',

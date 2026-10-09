@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 
-from mirage.workspace.record.types import RecordFields
+from mirage.workspace.record.types import RecordClient, RecordFields
 
 # One session's durable fields: the JSON-able ``SessionState.to_dict()``
 # payload, including function source and readonly metadata. Parser trees,
@@ -84,3 +85,56 @@ class SessionStore(ABC):
     @abstractmethod
     async def close(self) -> None:
         """Release any underlying connections."""
+
+
+class RecordSessionStore(SessionStore):
+    """A SessionStore over a keyed-record client, one record per session.
+
+    The disk and S3 stores differ only in the client they hand in.
+
+    Args:
+        records (RecordClient): the client holding the session records.
+    """
+
+    def __init__(self, records: RecordClient) -> None:
+        self._records = records
+
+    async def load(self) -> dict[str, SessionFields]:
+        names = await self._records.list_names()
+        records = await asyncio.gather(
+            *(self._records.get(name) for name in names)
+        )
+        return {
+            name: fields
+            for name, (fields, _) in zip(names, records)
+            if fields is not None
+        }
+
+    async def set(self, session_id: str, fields: SessionFields) -> None:
+        await self._records.put(session_id, fields)
+
+    async def cas_set(
+        self, session_id: str, fields: SessionFields, expected_generation: int
+    ) -> bool:
+        return await self._records.cas_put(
+            session_id, fields, expected_generation
+        )
+
+    async def delete(self, session_ids: Iterable[str]) -> None:
+        await self._records.delete(session_ids)
+
+    async def replace_all(self, entries: dict[str, SessionFields]) -> None:
+        stale = set(await self._records.list_names()) - set(entries)
+        await self._records.delete(stale)
+        await asyncio.gather(
+            *(
+                self._records.put(sid, fields)
+                for sid, fields in entries.items()
+            )
+        )
+
+    async def clear(self) -> None:
+        await self._records.clear()
+
+    async def close(self) -> None:
+        await self._records.close()

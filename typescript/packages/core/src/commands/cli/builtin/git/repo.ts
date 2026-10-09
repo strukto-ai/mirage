@@ -17,7 +17,8 @@ import git from 'isomorphic-git'
 
 import { abbrevLength, type CommitFacts } from './format.ts'
 import { configValues, gitFs } from './fs.ts'
-import { basename, exists, readNames, readRange, writeFile } from './io.ts'
+import { exists, readNames, readRange, writeFile } from './io.ts'
+import { entryName } from '../../../../utils/remnants.ts'
 
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { gitBool } from './util.ts'
@@ -94,7 +95,7 @@ async function packedCount(dispatch: Dispatch, commondir: PathSpec): Promise<num
   const root = commondir.join(PACK_DIR)
   let total = 0
   for (const entry of await readNames(dispatch, root)) {
-    const name = basename(entry)
+    const name = entryName(entry)
     if (!name.endsWith(IDX_SUFFIX)) continue
     const head = await readRange(dispatch, root.join(name), FANOUT_END - 4, 4)
     if (head.byteLength < 4) continue
@@ -148,13 +149,13 @@ export async function idsUnder(repo: Repo, fanout: string): Promise<string[]> {
   const byte = parseInt(fanout, 16)
   const root = repo.location.commondir.join(PACK_DIR)
   for (const entry of await readNames(repo.dispatch, root)) {
-    const name = basename(entry)
+    const name = entryName(entry)
     if (!name.endsWith(IDX_SUFFIX)) continue
     for (const oid of await packedUnder(repo.dispatch, root.join(name), byte)) found.add(oid)
   }
   const loose = repo.location.commondir.join(`${OBJECTS_DIR}/${fanout}`)
   for (const entry of await readNames(repo.dispatch, loose)) {
-    const name = basename(entry)
+    const name = entryName(entry)
     if (name.length === LOOSE_NAME_LENGTH) found.add(`${fanout}${name}`)
   }
   return [...found].sort(compareCodePoints)

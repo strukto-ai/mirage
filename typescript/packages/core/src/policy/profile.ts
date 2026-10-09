@@ -22,7 +22,7 @@ import type { ProcessScope, ShowEntry, Visibility } from '../types.ts'
 import { type MountMode, parseMountMode } from '../types.ts'
 import type { HideReason } from './types.ts'
 import { isGlob } from '../utils/hidden.ts'
-import { stripSlash } from '../utils/slash.ts'
+import { norm } from '../utils/path.ts'
 
 /**
  * `paths:` of a profile, or of one of its mount sections. `hide` entries
@@ -322,10 +322,6 @@ function requireUnderMount(entries: readonly string[], root: string, where: stri
   })
 }
 
-function normPrefix(prefix: string): string {
-  return '/' + stripSlash(prefix)
-}
-
 /**
  * The rules of a `commands` mapping: each command on its own paths, one
  * rule per entry, so the document never states a command beside a path
@@ -547,7 +543,7 @@ export function parseProfileMounts(
   const sections = new Map<string, ProfileMount>()
   for (const [prefix, entry] of entries) {
     if (typeof prefix !== 'string') throw new Error(`${where} keys must be strings`)
-    const root = normPrefix(prefix)
+    const root = norm(prefix)
     sections.set(root, parseProfileMount(entry, root, `${where}[${root}]`))
   }
   return sections

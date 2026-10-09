@@ -19,8 +19,8 @@ from opendal.exceptions import NotFound
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.nextcloud.du.walk import stat_or_null
-from mirage.core.nextcloud.util import raw_path_of
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import raw_path_of
 
 logger = logging.getLogger(__name__)
 

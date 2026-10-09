@@ -428,17 +428,6 @@ describe('MountRegistry mount lookup contract', () => {
       expect(reg.tryMountForPrefix(spelling)?.prefix).toBe('/data/')
     }
   })
-
-  it('groupByMount propagates the miss instead of dropping the path', () => {
-    const reg = new MountRegistry({ '/data': new StubVFS() }, MountMode.WRITE)
-    let thrown: unknown = null
-    try {
-      reg.groupByMount(['/data/a.txt', '/unknown/b.txt'])
-    } catch (err) {
-      thrown = err
-    }
-    expect(isNoMount(thrown)).toBe(true)
-  })
 })
 
 describe('MountRegistry listing gate', () => {

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from io import BytesIO
 from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
@@ -22,7 +21,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read
 from mirage.core.databricks_volume.stat import stat
-from mirage.core.databricks_volume.write import write
+from mirage.core.databricks_volume.write import upload_bytes_sync, write
 from mirage.errors.fs import eisdir
 from mirage.types import FileType, PathSpec
 
@@ -36,14 +35,6 @@ def _download_sync(
     if hasattr(contents, "read"):
         return contents.read()
     return bytes(contents)
-
-
-def _upload_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-    data: bytes,
-) -> None:
-    accessor.files.upload(remote_path, BytesIO(data), overwrite=True)
 
 
 def _create_directory_sync(
@@ -72,7 +63,7 @@ def _copy_tree_sync(
         if getattr(entry, "is_directory", False):
             _copy_tree_sync(accessor, entry.path, child_dst)
         else:
-            _upload_sync(
+            upload_bytes_sync(
                 accessor, child_dst, _download_sync(accessor, entry.path)
             )
 

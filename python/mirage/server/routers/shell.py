@@ -26,7 +26,7 @@ from mirage.server.io_serde import explanation_to_dict, io_result_to_dict
 from mirage.server.jobs import JobEntry, JobStatus, JobTable
 from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.registry import WorkspaceEntry
-from mirage.server.routers.vfs import session_of
+from mirage.server.routers.vfs import require_entry, session_of
 from mirage.server.stdin import LoopStdin, UploadStdin
 from mirage.server.stream import ShellOutput, ShellResponse
 from mirage.shell.console.types import Channel
@@ -53,15 +53,6 @@ class BackgroundResponse(BaseModel):
     job_id: str
     workspace_id: str
     submitted_at: float
-
-
-def _require_entry(request: Request, workspace_id: str) -> WorkspaceEntry:
-    entry = request.app.state.registry.visible(
-        workspace_id, request.state.account
-    )
-    if entry is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    return entry
 
 
 def _build_shell_kwargs(
@@ -109,7 +100,7 @@ async def shell(
     explain: bool = Query(False),
     stream: bool = Query(False),
 ) -> Response:
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     if stream and (background or explain):
         raise HTTPException(
             status_code=400,

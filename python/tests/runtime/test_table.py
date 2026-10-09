@@ -23,7 +23,6 @@ from mirage.runtime.table import (
     DEFAULT_ENTRIES,
     DEFAULT_PYTHON,
     NAMED,
-    RUNTIMES,
     bind_commands,
     build_runtime,
     known_runtimes,
@@ -99,8 +98,8 @@ def test_bind_commands_rejects_duplicate_names():
 
 
 def test_every_runtime_declares_captures():
-    for cls in RUNTIMES:
-        assert cls.captures
+    for cls in NAMED.values():
+        assert cls.captures or cls is WorkspaceRuntime
 
 
 def test_runtime_bindings_for_maps_only_the_named_captures():

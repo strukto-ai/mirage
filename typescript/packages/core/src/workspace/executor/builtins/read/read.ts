@@ -23,7 +23,14 @@ import type { SessionState } from '../../../session/session.ts'
 import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { isValidName, readonlyRefusal, recordDelimiter, refusal, requireView } from '../shared.ts'
+import {
+  countOperand,
+  isValidName,
+  readonlyRefusal,
+  recordDelimiter,
+  refusal,
+  requireView,
+} from '../shared.ts'
 import { TARGET_RE } from '../constants.ts'
 import { READ_USAGE, READ_VALUE_LETTERS } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
@@ -57,10 +64,6 @@ function readRefusal(msg: string): Result {
     new IOResult({ exitCode: 1, stderr: err }),
     new ExecutionNode({ command: 'read', exitCode: 1, stderr: err }),
   ]
-}
-
-function readCount(text: string): number | null {
-  return /^[0-9]+$/.test(text) ? parseInt(text, 10) : null
 }
 
 function readTimeout(text: string): number | null {
@@ -221,15 +224,15 @@ export async function handleRead(
   const raw = flags.r === true
   const delim = recordDelimiter(typeof flags.d === 'string' ? flags.d : null)
   for (const key of ['n', 'N'] as const) {
-    if (typeof flags[key] === 'string' && readCount(flags[key]) === null) {
+    if (typeof flags[key] === 'string' && countOperand(flags[key]) === null) {
       return readRefusal(`bash: read: ${flags[key]}: invalid number\n`)
     }
   }
   let nchars: number | null = null
   let exact: number | null = null
   const which = lastCountFlag(args)
-  if (which === 'N') exact = readCount(String(flags.N))
-  else if (which === 'n') nchars = readCount(String(flags.n))
+  if (which === 'N') exact = countOperand(String(flags.N))
+  else if (which === 'n') nchars = countOperand(String(flags.n))
   let timeout: number | null = null
   if (typeof flags.t === 'string') {
     timeout = readTimeout(flags.t)

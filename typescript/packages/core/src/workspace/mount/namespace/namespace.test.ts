@@ -191,7 +191,6 @@ describe('Namespace node metadata overlay', () => {
     const ws = new Workspace({ '/data': new RAMVFS() })
     await ws.namespace.setAttrs('/data/f.txt', { mode: 0o600 })
     expect(ws.namespace.symlinkTargets().size).toBe(0)
-    expect(ws.namespace.hasLinks()).toBe(false)
     await ws.close()
   })
 

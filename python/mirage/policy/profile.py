@@ -36,19 +36,11 @@ from mirage.types import (
     parse_mount_mode,
 )
 from mirage.utils.hidden import is_glob
+from mirage.utils.path import norm
 
 _DOC = ConfigDict(extra="forbid", frozen=True)
 
 _RULE_FIELDS = frozenset({"reason", "commands", "paths"})
-
-
-def _norm_prefix(prefix: str) -> str:
-    """One spelling for a mount prefix: leading slash, no trailing one.
-
-    Args:
-        prefix (str): a prefix as typed in the document.
-    """
-    return "/" + prefix.strip("/")
 
 
 def _list(value: Any, where: str, expected: str = "a list") -> tuple[Any, ...]:
@@ -673,7 +665,7 @@ class SessionProfile(BaseModel):
         for prefix, entry in v.items():
             if not isinstance(prefix, str):
                 raise ValueError("mounts keys must be strings")
-            entries[_norm_prefix(prefix)] = (
+            entries[norm(prefix)] = (
                 {"mode": entry} if isinstance(entry, str) else entry
             )
         return entries

@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { S3Client } from '@aws-sdk/client-s3'
-import type { PathSpec } from '../../types.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
@@ -27,13 +25,6 @@ export function s3Key(path: string, config: S3Config): string {
 
 export function stripKeyPrefix(key: string, config: S3Config): string {
   return kp.strip(config.keyPrefix ?? '', key)
-}
-
-export function rawPathOf(path: PathSpec): string {
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  return prefix !== '' && path.virtual.startsWith(prefix)
-    ? path.virtual.slice(prefix.length) || '/'
-    : path.virtual
 }
 
 export async function withClient<T>(

@@ -12,21 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { guardDay } from '../time_range.ts'
+import { dayStat, guardDay } from '../time_range.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { epochToIso } from '../../utils/dates.ts'
-import { enoent } from '../../errors/fs.ts'
 import { contentTypeForMime } from '../../utils/filetype.ts'
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeStat } from '../hierarchy/stat.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 
 function slackModified(remoteTime: string): string | null {
   if (remoteTime === '') return null
@@ -84,38 +79,6 @@ function fileBlobStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): F
   })
 }
 
-/**
- * Stat a day directory, which resolves beyond the listed window.
- *
- * The channel listing synthesizes a bounded window of recent days, but the
- * history API answers a range query for any date, so a well-formed day under
- * a channel that exists is a directory whether or not the window lists it. A
- * bogus channel chain is ENOENT.
- */
-async function statDay(
-  accessor: SlackAccessor,
-  match: ScopeMatch,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
-  await guardDay(accessor, match, path.virtual)
-  const entry = await resolveEntry(readdir, accessor, path, index)
-  if (entry !== null) {
-    return new FileStat({ name: entry.vfsName, type: FileType.DIRECTORY })
-  }
-  const virtual = rstripSlash(path.virtual).split('/').slice(0, -1).join('/')
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const channelSpec = new PathSpec({
-    virtual,
-    directory: virtual,
-    vfsPath: mountKey(virtual, prefix),
-  })
-  if ((await resolveEntry(readdir, accessor, channelSpec, index)) === null) {
-    throw enoent(path)
-  }
-  return new FileStat({ name: match.slots.day ?? '', type: FileType.DIRECTORY })
-}
-
 export const stat = makeStat<SlackAccessor>(detectScope, readdir, {
   guards: { messages: guardDay, files: guardDay, file_blob: guardDay },
   entryStats: {
@@ -125,5 +88,5 @@ export const stat = makeStat<SlackAccessor>(detectScope, readdir, {
     files: dirStat,
     file_blob: fileBlobStat,
   },
-  overrides: { day: statDay },
+  overrides: { day: dayStat(readdir, guardDay) },
 })

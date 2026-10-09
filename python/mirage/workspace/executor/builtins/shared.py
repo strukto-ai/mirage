@@ -300,6 +300,16 @@ def record_delimiter(text: str | None) -> bytes:
     return encode_text(text)[:1] or b"\0"
 
 
+def count_operand(text: str) -> int | None:
+    """A count option's value (``read -n``/``-N``, ``mapfile -n``/``-s``
+    and the rest): a run of ASCII digits, else None.
+
+    Args:
+        text (str): the option's value as typed.
+    """
+    return int(text) if text.isascii() and text.isdigit() else None
+
+
 def is_valid_name(name: str) -> bool:
     """Whether the word is a shell identifier.
 

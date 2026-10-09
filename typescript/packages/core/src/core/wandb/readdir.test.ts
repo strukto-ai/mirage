@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fileEntries, readdir } from './readdir.ts'
+import { fileTree, readdir } from './readdir.ts'
 import { WandbAccessor } from '../../accessor/wandb.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import type { Evicted } from '../../cache/index/config.ts'
@@ -12,10 +12,10 @@ const file = (name: string) => ({ name, url: 'https://example.com', sizeBytes: 1
 const path = (key: string) => PathSpec.fromStrPath('/wandb/' + key, key)
 describe('W&B file tree', () => {
   it.each(['../escape', '/absolute', 'a//b', 'a/./b', 'a\\b'])('refuses unsafe file %s', (name) => {
-    expect(() => fileEntries([file(name)], '')).toThrow('unsafe')
+    expect(() => fileTree([file(name)])).toThrow('unsafe')
   })
   it('refuses file/directory collisions', () => {
-    expect(() => fileEntries([file('a'), file('a/b')], '')).toThrow('collision')
+    expect(() => fileTree([file('a'), file('a/b')])).toThrow('collision')
   })
   it('reuses nested catalogs and refreshes expired metadata without reviving deleted files', async () => {
     const accessor = new WandbAccessor(normalizeWandbConfig({ entities: ['lab'] }))

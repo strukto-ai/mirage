@@ -15,7 +15,7 @@
 import { vfsStateRequiresOverride } from '@struktoai/mirage-core/vfs/secrets'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
-import { normMountPrefix } from '@struktoai/mirage-core/workspace/snapshot/utils'
+import { normDir } from '@struktoai/mirage-core/utils/slash'
 import type { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
@@ -60,7 +60,7 @@ export async function buildOverrideMounts(
   const out: Record<string, Mount> = {}
   for (const [prefix, block] of blocks) {
     const vfs = await buildVfs(block.vfs, block.config ?? {}, sources)
-    out[normMountPrefix(prefix)] = new Mount(vfs, {
+    out[normDir(prefix)] = new Mount(vfs, {
       vfsRef: block.vfs,
       ...(block.write != null ? { write: coerceWritePolicy(block.write) } : {}),
     })
@@ -75,11 +75,11 @@ function existingRedactedMounts(
 ): Record<string, BaseVFS> {
   const prefixToVfs: Record<string, BaseVFS> = {}
   for (const m of src.mounts()) {
-    prefixToVfs[normMountPrefix(m.prefix)] = m.vfs
+    prefixToVfs[normDir(m.prefix)] = m.vfs
   }
   const out: Record<string, BaseVFS> = {}
   for (const m of state.mounts) {
-    const prefix = normMountPrefix(m.prefix)
+    const prefix = normDir(m.prefix)
     if (skip.has(prefix)) continue
     const vfs = prefixToVfs[prefix]
     if (vfs !== undefined && vfsStateRequiresOverride(m.vfs_state)) {

@@ -22,10 +22,6 @@ import type { RuntimeOptions } from './config.ts'
 import { WorkspaceRuntime } from './workspace.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 
-// One source of truth, preference order. The command -> runtime mapping
-// is derived from each class's captures, never hand-maintained.
-export const RUNTIMES = [PyodideRuntime, MontyRuntime, QuickJsRuntime] as const
-
 // Null prototype: runtime names come from config, and a name like
 // `constructor` must miss instead of resolving an `Object.prototype`
 // member as a runtime class.

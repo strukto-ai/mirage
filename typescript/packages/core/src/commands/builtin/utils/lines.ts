@@ -21,6 +21,21 @@ export function splitLines(text: string, sep = '\n'): string[] {
   return stripped.split(sep)
 }
 
+// Split text into newline-terminated lines, each keeping its newline; a
+// last line with none is kept as it is. Mirrors Python's split_lines_keepends.
+export function splitLinesKeepends(text: string): string[] {
+  const lines: string[] = []
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\n') {
+      lines.push(text.slice(start, i + 1))
+      start = i + 1
+    }
+  }
+  if (start < text.length) lines.push(text.slice(start))
+  return lines
+}
+
 // Apply `fn` to each line of `text`, keeping its line ends. A GNU line
 // filter (rev, fold) writes a newline where its input had one and nowhere
 // else, so a last line with none ends the output without one too: `rev` of

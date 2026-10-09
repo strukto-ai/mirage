@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.readdir import make_readdir
@@ -50,18 +52,25 @@ from mirage.core.render.json import jsonl_bytes_by_created_at
 TEAM_DIRS = ("members", "issues", "projects", "cycles", "documents")
 
 
+async def filtered_teams(accessor: LinearAccessor) -> list[dict[str, Any]]:
+    """The teams the mount shows: all of them, or those in ``team_ids``.
+
+    Args:
+        accessor (LinearAccessor): linear accessor.
+    """
+    teams = await list_teams(accessor.config, session=accessor.pool)
+    if not accessor.config.team_ids:
+        return teams
+    return [
+        team for team in teams if team.get("id") in accessor.config.team_ids
+    ]
+
+
 async def _list_teams_dir(
     accessor: LinearAccessor, match: ScopeMatch
 ) -> list[tuple[str, IndexEntry]]:
-    teams = await list_teams(accessor.config, session=accessor.pool)
-    if accessor.config.team_ids:
-        teams = [
-            team
-            for team in teams
-            if team.get("id") in accessor.config.team_ids
-        ]
     entries = []
-    for team in teams:
+    for team in await filtered_teams(accessor):
         dirname = team_dirname(team)
         # team.json renders the team object this listing already fetched,
         # so its exact size rides the directory entry, and the key/name

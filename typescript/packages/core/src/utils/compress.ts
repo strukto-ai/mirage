@@ -474,13 +474,6 @@ export async function gunzipPartial(
   return [concat(parts), null]
 }
 
-/** Materialize checked gzip for consumers that need the whole decoded file. */
-export async function gunzipChecked(bytes: Uint8Array): Promise<Uint8Array> {
-  const [decoded, failure] = await gunzipPartial(bytes)
-  if (failure !== null) throw failure
-  return decoded
-}
-
 export async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   return runThrough(bytes, new CompressionStream('deflate-raw'))
 }

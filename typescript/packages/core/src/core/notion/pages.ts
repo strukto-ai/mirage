@@ -192,10 +192,6 @@ export async function searchPages(
   return paginateTool(transport, 'API-post-search', baseArgs, maxResults)
 }
 
-export async function createComment(transport: NotionTransport, body: Json): Promise<Json> {
-  return transport.callTool('API-create-a-comment', body)
-}
-
 export interface CreatePageInput {
   parent: { type: 'workspace' } | { type: 'page_id'; page_id: string }
   title: string

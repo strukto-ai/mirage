@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../types.ts'
-import { childSpec, normalize } from './key_prefix.ts'
+import { childSpec, normalize, rawPathOf, sameMountSpec } from './key_prefix.ts'
 
 // The one key-prefix rule, mirrored by python/tests/utils/test_key_prefix.py.
 // A root-spelled prefix is no prefix: '/' used to normalize to '/', and every
@@ -43,5 +43,28 @@ describe('childSpec', () => {
     expect(child.vfsPath).toBe('d/x')
     const root = new PathSpec({ virtual: '/m', directory: '/', vfsPath: '' })
     expect(childSpec(root, 'x').vfsPath).toBe('x')
+  })
+})
+
+describe('sameMountSpec', () => {
+  it('keys a virtual path on the template mount', () => {
+    const template = new PathSpec({ virtual: '/m/d', directory: '/m', vfsPath: 'd' })
+    const spec = sameMountSpec('/m/e/f', template)
+    expect(spec.virtual).toBe('/m/e/f')
+    expect(spec.directory).toBe('/m/e/f')
+    expect(spec.vfsPath).toBe('e/f')
+    expect(spec.resolved).toBe(false)
+  })
+})
+
+describe('rawPathOf', () => {
+  it.each([
+    ['/nc/docs/a.txt', 'docs/a.txt', '/docs/a.txt'],
+    ['/nc', '', '/'],
+    ['/nc/', '', '/'],
+    ['/nc/docs/', 'docs', '/docs/'],
+    ['/a.txt', 'a.txt', '/a.txt'],
+  ])('%s (key %s) keeps the typed spelling below the mount', (virtual, vfsPath, raw) => {
+    expect(rawPathOf(new PathSpec({ virtual, directory: virtual, vfsPath }))).toBe(raw)
   })
 })

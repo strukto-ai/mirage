@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Literal
-
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -21,8 +19,6 @@ from pydantic import (
     SecretStr,
     model_validator,
 )
-
-ScopeKind = Literal["user", "agent", "run"]
 
 
 class Mem0Config(BaseModel):
@@ -49,16 +45,6 @@ class Mem0Config(BaseModel):
                 f"user_id, agent_id, run_id; got {present or 'none'}"
             )
         return self
-
-    @property
-    def scope_kind(self) -> ScopeKind:
-        if self.user_id is not None:
-            return "user"
-        if self.agent_id is not None:
-            return "agent"
-        if self.run_id is not None:
-            return "run"
-        raise RuntimeError("validated Mem0Config has no scope")
 
     @property
     def scope_filter(self) -> dict[str, str]:

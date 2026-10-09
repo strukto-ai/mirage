@@ -25,7 +25,8 @@ import type { GitError } from './errors.ts'
 import { short } from './format.ts'
 import { configValues } from './fs.ts'
 import { parseFlags, select } from './history.ts'
-import { basename, readNames, readOptional } from './io.ts'
+import { readNames, readOptional } from './io.ts'
+import { entryName } from '../../../../utils/remnants.ts'
 
 import { loadMailmap } from './mailmap.ts'
 import { abbreviationRequests, needsObject } from './ref_fields.ts'
@@ -313,7 +314,7 @@ async function withUpstreams(
 
 /** The names at the top of this checkout's git directory. */
 async function rootNames(repo: Repo): Promise<string[]> {
-  return (await readNames(repo.dispatch, repo.location.gitdir)).map((entry) => basename(entry))
+  return (await readNames(repo.dispatch, repo.location.gitdir)).map((entry) => entryName(entry))
 }
 
 /**
@@ -335,11 +336,12 @@ async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
   }
   let main = worktree.virtual
   if (gitdir.virtual !== commondir.virtual)
-    main = basename(commondir.virtual) === '.git' ? commondir.virtual.slice(0, -'/.git'.length) : ''
+    main =
+      entryName(commondir.virtual) === '.git' ? commondir.virtual.slice(0, -'/.git'.length) : ''
   await note(commondir, main)
   const root = commondir.join(WORKTREES)
   for (const entry of await readNames(repo.dispatch, root)) {
-    const linked = root.join(basename(entry))
+    const linked = root.join(entryName(entry))
     const data = await readOptional(repo.dispatch, linked.join(GITDIR_FILE))
     if (data === null) continue
     const path = DEC.decode(data).trim()

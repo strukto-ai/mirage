@@ -25,10 +25,6 @@ from mirage.utils.path import respell_raw
 logger = logging.getLogger(__name__)
 
 
-def _path_components(virtual: str) -> list[str]:
-    return virtual.split("/")
-
-
 async def narrow_paths(
     accessor: DropboxAccessor,
     query: str,
@@ -86,7 +82,7 @@ async def narrow_paths(
             scoped.append(
                 f"{mount_prefix}/{key}" if key else mount_prefix or "/"
             )
-        scoped.sort(key=_path_components)
+        scoped.sort(key=lambda virtual: virtual.split("/"))
         for virtual in scoped:
             narrowed.append(
                 PathSpec(

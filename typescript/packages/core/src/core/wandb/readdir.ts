@@ -38,9 +38,6 @@ export function fileTree(files: FileMetadata[]): Map<string, [string, IndexEntry
   }
   return new Map([...directories].map(([parent, children]) => [parent, [...children]]))
 }
-export function fileEntries(files: FileMetadata[], prefix: string): [string, IndexEntry][] {
-  return fileTree(files).get(rstripSlash(prefix)) ?? []
-}
 export async function listing(
   accessor: WandbAccessor,
   path: PathSpec,

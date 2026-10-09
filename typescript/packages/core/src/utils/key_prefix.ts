@@ -132,6 +132,18 @@ export function mountPrefixOf(virtual: string, vfsPath: string): string {
   return rstripSlash(virtual.slice(0, prefixLen))
 }
 
+/**
+ * The path below the mount prefix, spelled as the virtual path is: `/` for
+ * the mount root, else the slash-led remainder with any trailing slash kept.
+ * Mirrors Python's `raw_path_of`.
+ */
+export function rawPathOf(path: PathSpec): string {
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+  return prefix !== '' && path.virtual.startsWith(prefix)
+    ? path.virtual.slice(prefix.length) || '/'
+    : path.virtual
+}
+
 // A PathSpec for a mount-local key, addressed like `root`. Rebuilds the
 // virtual path from the mount prefix `root` sits behind, so a backend holding
 // only a key (an ancestor it walked to, say) can name it the way the user
@@ -170,5 +182,15 @@ export function childSpec(spec: PathSpec, name: string): PathSpec {
     virtual: `${base}/${name}`,
     directory: spec.virtual,
     vfsPath: key === '' ? name : `${key}/${name}`,
+  })
+}
+
+/** The unresolved path `virtual` names on the mount `template` sits on. */
+export function sameMountSpec(virtual: string, template: PathSpec): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: virtual,
+    resolved: false,
+    vfsPath: mountKey(virtual, mountPrefixOf(template.virtual, template.vfsPath)),
   })
 }

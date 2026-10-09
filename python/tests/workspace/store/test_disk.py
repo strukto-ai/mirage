@@ -21,7 +21,9 @@ from mirage.workspace.store.disk import DiskWorkspaceStateStore
 async def test_meta_roundtrip_and_layout(tmp_path):
     store = DiskWorkspaceStateStore(str(tmp_path))
     assert await store.load_meta("ws1") is None
-    await store.set_meta("ws1", {"workspace_id": "ws1", "generation": 1})
+    await store.cas_set_meta(
+        "ws1", {"workspace_id": "ws1", "generation": 1}, 0
+    )
     meta = await store.load_meta("ws1")
     assert meta is not None and meta["workspace_id"] == "ws1"
     assert (tmp_path / "workspaces" / "ws1" / "workspace.json").is_file()
@@ -109,7 +111,9 @@ async def test_namespace_and_observer_planes_on_disk(tmp_path):
 @pytest.mark.asyncio
 async def test_two_stores_share_state_via_the_directory(tmp_path):
     writer = DiskWorkspaceStateStore(str(tmp_path))
-    await writer.set_meta("ws1", {"workspace_id": "ws1", "generation": 1})
+    await writer.cas_set_meta(
+        "ws1", {"workspace_id": "ws1", "generation": 1}, 0
+    )
     await writer.sessions("ws1").set("s", {"session_id": "s", "cwd": "/x"})
     await writer.close()
 
@@ -126,8 +130,8 @@ async def test_drop_removes_the_workspace_directory(tmp_path):
     await store.namespace("ws1").set("/a", {"mode": 0o600})
     await store.observer("ws1").append("d/s1.jsonl", b"{}\n")
     await store.sessions("ws1").set("s1", {"session_id": "s1"})
-    await store.set_meta("ws1", {"workspace_id": "ws1"})
-    await store.set_meta("ws2", {"workspace_id": "ws2"})
+    await store.cas_set_meta("ws1", {"workspace_id": "ws1"}, 0)
+    await store.cas_set_meta("ws2", {"workspace_id": "ws2"}, 0)
     await store.drop("ws1")
     assert not (tmp_path / "workspaces" / "ws1").exists()
     assert await store.load_meta("ws1") is None

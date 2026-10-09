@@ -199,23 +199,6 @@ async def test_closing_a_session_drops_its_tool_table():
 
 
 @pytest.mark.asyncio
-async def test_closing_all_sessions_drops_their_tool_tables():
-    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("echo one > /a.txt")
-    agent = await ws.session("agent")
-    try:
-        await agent.tools.call("read", {"path": "/a.txt"})
-        await ws.close_all_sessions()
-        again = await ws.session("agent")
-        refused = await again.tools.call(
-            "write", {"path": "/a.txt", "content": "two\n"}
-        )
-    finally:
-        await ws.close()
-    assert refused.is_error
-
-
-@pytest.mark.asyncio
 async def test_the_default_tool_table_follows_a_restored_default():
     source = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     await source.shell("echo one > /a.txt")

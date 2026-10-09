@@ -20,7 +20,8 @@ import { synthDirs } from '../../watch/walk.ts'
 import type { PathSpec, WalkEntry } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { loadS3Module, rawPathOf, s3Key, stripKeyPrefix, withClient } from './client.ts'
+import { rawPathOf } from '../../utils/key_prefix.ts'
+import { loadS3Module, s3Key, stripKeyPrefix, withClient } from './client.ts'
 
 interface ListedObject {
   Key?: string

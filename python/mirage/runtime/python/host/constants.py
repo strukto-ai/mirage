@@ -20,11 +20,12 @@ from mirage.runtime.constants import HARD_LINK_REFUSAL
 # The `os` functions this patch answers, keyed by name. ROUTED_CALLS
 # names the ops each goes through: several share one op and a few need
 # two (lstat reads the node table before the mount), so a value is a
-# tuple. REFUSED_CALLS answers with a condition, and PASSTHROUGH_CALLS
-# keeps the host function, because nothing it takes is a path a mount
-# could serve. A path-taking name in none of the three keeps the host
-# function with a mounted path in hand, which is why the coverage test
-# in tests/runtime/python/host/test_constants.py fails on any such name.
+# tuple. REFUSED_CALLS answers with a condition. Any other name keeps the
+# host function, so the coverage test in
+# tests/runtime/python/host/test_constants.py lists the ones that keep it
+# on purpose, because nothing they take is a path a mount could serve,
+# and fails on any other path-taking name, which would keep the host
+# function with a mounted path in hand.
 ROUTED_CALLS: Mapping[str, tuple[str, ...]] = {
     "access": ("stat",),
     "chmod": ("setattr",),
@@ -84,49 +85,6 @@ REFUSED_CALLS: Mapping[str, FsCondition] = {
     "open": FsCondition.ENOTSUP,
     "statvfs": FsCondition.ENOTSUP,
 }
-
-# Names whose path-shaped argument is not a mount-addressable path:
-# string conversions, environment and sysconf keys, descriptor-to-
-# descriptor transfers, and the exec and spawn families, which name a
-# program for the host to run rather than a file to serve. They keep
-# host behavior even when a mounted path is spelled, so a surface must
-# not route or refuse them.
-
-PASSTHROUGH_CALLS: frozenset[str] = frozenset(
-    {
-        "confstr",
-        "copy_file_range",
-        "execl",
-        "execle",
-        "execlp",
-        "execlpe",
-        "execv",
-        "execve",
-        "execvp",
-        "execvpe",
-        "fpathconf",
-        "fsdecode",
-        "fsencode",
-        "fspath",
-        "memfd_create",
-        "pathconf",
-        "posix_spawn",
-        "posix_spawnp",
-        "putenv",
-        "spawnl",
-        "spawnle",
-        "spawnlp",
-        "spawnlpe",
-        "spawnv",
-        "spawnve",
-        "spawnvp",
-        "spawnvpe",
-        "splice",
-        "sysconf",
-        "unsetenv",
-    }
-)
-
 
 # The block size every mirage stat translator reports; a backend has no
 # block size of its own, and 4 KiB is what the FUSE adapters already

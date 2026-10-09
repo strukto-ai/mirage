@@ -12,19 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import replace
+from mirage.commands.builtin.generic_bind import generic_commands, walked
 
-from mirage.commands.builtin.generic_bind import generic_commands
-from mirage.commands.config import CommandIO
-
-
-def _walked(io: CommandIO) -> CommandIO:
-    return replace(io, find=None, du=None)
-
-
-# Shell traversals need partial results and per-directory errors; the
-# shared readdir/stat walker owns those. The VFS's own find and du remain
-# strict.
 COMMANDS = [
-    *generic_commands("disk", table=_walked, local=True),
+    *generic_commands("disk", table=walked, local=True),
 ]

@@ -79,18 +79,6 @@ def wrap_cachable_streams(
     return stdout, io
 
 
-async def exit_on_empty(
-    stream: AsyncIterator[bytes],
-    io: IOResult,
-) -> AsyncIterator[bytes]:
-    yielded = False
-    async for chunk in stream:
-        yielded = True
-        yield chunk
-    if not yielded:
-        io.exit_code = 1
-
-
 async def drain(stream: ByteSource | None) -> None:
     if stream is None or isinstance(stream, bytes):
         return

@@ -14,11 +14,30 @@
 
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { LISTENED_CALLS, PASSTHROUGH_CALLS, REFUSED_CALLS, ROUTED_CALLS } from './constants.ts'
+import { LISTENED_CALLS, REFUSED_CALLS, ROUTED_CALLS } from './constants.ts'
 
 const fs = createRequire(import.meta.url)('node:fs') as Record<string, unknown> & {
   promises: Record<string, unknown>
 }
+
+// Descriptor calls take an fd, which a mounted path never opens, and
+// unwatchFile undoes a watch that could not have started on a mount.
+const PASSTHROUGH_CALLS: ReadonlySet<string> = new Set([
+  '_toUnixTimestamp',
+  'close',
+  'fchmod',
+  'fchown',
+  'fdatasync',
+  'fstat',
+  'fsync',
+  'ftruncate',
+  'futimes',
+  'read',
+  'readv',
+  'unwatchFile',
+  'write',
+  'writev',
+])
 
 function functions(target: Record<string, unknown>): string[] {
   return Object.keys(target).filter(

@@ -80,11 +80,6 @@ export abstract class WorkspaceStateStore {
     return (this.workspaceOverride ?? this).readMeta(workspaceId)
   }
 
-  /** Insert or update one workspace's metadata record. */
-  setMeta(workspaceId: string, fields: WorkspaceFields): Promise<void> {
-    return (this.workspaceOverride ?? this).writeMeta(workspaceId, fields)
-  }
-
   /**
    * Write the metadata record iff its stored generation matches.
    *
@@ -155,7 +150,6 @@ export abstract class WorkspaceStateStore {
   protected abstract makeObserver(workspaceId: string): ObserverStore
   protected abstract makeSessions(workspaceId: string): SessionStore
   protected abstract readMeta(workspaceId: string): Promise<WorkspaceFields | null>
-  protected abstract writeMeta(workspaceId: string, fields: WorkspaceFields): Promise<void>
   protected abstract casWriteMeta(
     workspaceId: string,
     fields: WorkspaceFields,

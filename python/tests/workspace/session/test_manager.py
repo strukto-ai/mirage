@@ -130,16 +130,6 @@ def test_manager_close_missing_raises():
         _run(mgr.close("nonexistent"))
 
 
-def test_manager_close_all():
-    mgr = SessionManager("default")
-    mgr.create("s1")
-    mgr.create("s2")
-    _run(mgr.close_all())
-    sessions = mgr.list()
-    assert len(sessions) == 1
-    assert sessions[0].session_id == "default"
-
-
 def test_manager_sessions_isolated():
     mgr = SessionManager("default")
     s1 = mgr.create("s1")
@@ -323,10 +313,6 @@ async def test_manager_default_adopts_stored_path_axis():
     assert default.hide_reasons == (
         HideReason(patterns=("/repo",), reason="keep the bulk out of context"),
     )
-    assert mgr.hide_reasons_of("default") == default.hide_reasons
-    # An id this manager does not know reads the default profile's
-    # table, the same fallback commands_of makes.
-    assert mgr.hide_reasons_of("stranger") == ()
 
 
 @pytest.mark.asyncio

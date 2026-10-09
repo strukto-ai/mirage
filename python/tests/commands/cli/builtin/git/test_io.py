@@ -16,7 +16,6 @@ import pytest
 
 from mirage.commands.cli.builtin.git.errors import MountInWayError
 from mirage.commands.cli.builtin.git.io import (
-    basename,
     blocking_ancestor,
     refuse_mount,
     remove_empty_parents,
@@ -27,13 +26,6 @@ from mirage.view.types import MountView
 
 REPO = PathSpec.from_str_path("/repo")
 SLOT = PathSpec.from_str_path("/repo/slot")
-
-
-@pytest.mark.parametrize(
-    "entry", ["pack", "pack/", "/repo/.git/objects/pack", "objects/pack//"]
-)
-def test_basename_is_the_final_segment_of_any_entry_spelling(entry):
-    assert basename(entry) == "pack"
 
 
 class Links:

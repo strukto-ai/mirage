@@ -13,9 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '../../types.ts'
-import { apiRequest } from '../api/client.ts'
+import { apiRequest, buildUrl } from '../api/client.ts'
 import { enoent } from '../../errors/fs.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 
 export class LangfuseApiError extends Error {
   constructor(
@@ -60,22 +59,6 @@ function encodeBasicAuth(publicKey: string, secretKey: string): string {
     .Buffer
   if (buf !== undefined) return buf.from(raw).toString('base64')
   throw new LangfuseApiError('no base64 encoder available')
-}
-
-function buildUrl(
-  base: string,
-  path: string,
-  query: Record<string, string | number | undefined>,
-): string {
-  const trimmed = rstripSlash(base)
-  const cleanPath = path.startsWith('/') ? path : `/${path}`
-  const params: string[] = []
-  for (const [k, v] of Object.entries(query)) {
-    if (v === undefined) continue
-    params.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
-  }
-  const qs = params.length > 0 ? `?${params.join('&')}` : ''
-  return `${trimmed}${cleanPath}${qs}`
 }
 
 // The parse comes before the status check, so a non-JSON error body reports

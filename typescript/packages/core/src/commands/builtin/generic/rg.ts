@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { mountPrefixOf, sameMountSpec } from '../../../utils/key_prefix.ts'
 import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { MountView } from '../../../view/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
@@ -598,15 +598,6 @@ export function sortHaystacks(found: Haystack[], f: RgFlags): Haystack[] {
   return f.sortReverse ? [...unknown, ...known] : [...known, ...unknown]
 }
 
-function makeSpec(path: string, template: PathSpec): PathSpec {
-  return new PathSpec({
-    virtual: path,
-    directory: path,
-    resolved: false,
-    vfsPath: mountKey(path, mountPrefixOf(template.virtual, template.vfsPath)),
-  })
-}
-
 function usage(message: string, exitCode = 2): CommandFnResult {
   return [null, new IOResult({ exitCode, stderr: ENC.encode(`${message}\n`) })]
 }
@@ -660,8 +651,8 @@ export async function rgGeneric(
   const [first = STDIN_OPERAND] = paths
   const mounts = opts.ns?.mounts
   const home = mountPrefixOf(first.virtual, first.vfsPath)
-  const rd = mountParentReaddir((p: string) => readdir(makeSpec(p, first)), mounts, home)
-  const st = mountParentStat((p: string) => stat(makeSpec(p, first)), mounts)
+  const rd = mountParentReaddir((p: string) => readdir(sameMountSpec(p, first)), mounts, home)
+  const st = mountParentStat((p: string) => stat(sameMountSpec(p, first)), mounts)
   if (pat !== null && paths.length === 1) {
     const single = await searchSingle(first, pat, f, st, rd, stream, opts.signal)
     if (single !== null) return single
@@ -956,7 +947,7 @@ async function searchAll(
       const source =
         h.spec === null && h.resolver !== null
           ? h.resolver.read(h.virtual)
-          : stream(h.spec ?? makeSpec(h.virtual, template))
+          : stream(h.spec ?? sameMountSpec(h.virtual, template))
       const pipe = h.spec !== null && isStdin(h.spec)
       for await (const c of searchHaystack(
         source,

@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 from mirage.cli import credentials
 from mirage.cli.credentials import Login, remove_login, write_login
 from mirage.cli.main import app
-from mirage.cli.mcp import MCP_ENV_NAMES, relay_workspace, resolve_mcp_config
+from mirage.cli.mcp import MCP_ENV_NAMES, relay_workspace
 
 MINIMAL = "mounts:\n  /:\n    vfs: ram\n    mode: WRITE\n"
 
@@ -67,28 +67,6 @@ def test_a_config_and_a_workspace_are_exclusive(tree, flag):
     )
     assert result.exit_code == 2
     assert "pass a config or --workspace, not both" in result.stderr
-
-
-def test_resolve_prefers_the_mcp_env_name(tree):
-    found = resolve_mcp_config(
-        cwd=tree,
-        env={
-            "MIRAGE_MCP_CONFIG": "other.yaml",
-            "MIRAGE_CONFIG": "workspace.yaml",
-        },
-    )
-    assert found.name == "other.yaml"
-
-
-def test_resolve_falls_back_to_the_shared_env_name(tree):
-    found = resolve_mcp_config(cwd=tree, env={"MIRAGE_CONFIG": "other.yaml"})
-    assert found.name == "other.yaml"
-
-
-def test_resolve_discovers_by_walking_up(tree):
-    deep = tree / "a" / "b"
-    deep.mkdir(parents=True)
-    assert resolve_mcp_config(cwd=deep, env={}) == tree / "workspace.yaml"
 
 
 def test_env_names_are_mcp_then_shared():

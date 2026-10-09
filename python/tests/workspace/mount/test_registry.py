@@ -293,76 +293,6 @@ def test_mounts_count(multi_registry):
     assert len(multi_registry.mounts()) == 4
 
 
-# ── group_by_mount ─────────────────────────────
-
-
-def test_group_by_mount(multi_registry):
-    groups = multi_registry.group_by_mount(
-        ["/s3/a.txt", "/s3/b.txt", "/disk/c.txt"]
-    )
-    assert len(groups) == 2
-    s3_group = [g for g in groups if g[0].prefix == "/s3/"][0]
-    assert len(s3_group[1]) == 2
-    disk_group = [g for g in groups if g[0].prefix == "/disk/"][0]
-    assert len(disk_group[1]) == 1
-
-
-def test_group_by_mount_single(multi_registry):
-    groups = multi_registry.group_by_mount(["/ram/hello.txt"])
-    assert len(groups) == 1
-
-
-# ── get_resource_type ──────────────────────────
-
-
-def test_get_resource_type_s3(multi_registry):
-    assert multi_registry.get_resource_type("/s3/file.txt") == "s3"
-
-
-def test_get_resource_type_disk(multi_registry):
-    assert multi_registry.get_resource_type("/disk/file.txt") == "disk"
-
-
-def test_get_resource_type_ram(multi_registry):
-    assert multi_registry.get_resource_type("/ram/file.txt") == "ram"
-
-
-def test_get_resource_type_none(multi_registry):
-    assert multi_registry.get_resource_type(None) is None
-
-
-def test_get_resource_type_unknown(multi_registry):
-    assert multi_registry.get_resource_type("/unknown/f") is None
-
-
-# ── find_vfs_by_name ──────────────────────
-
-
-def test_find_vfs_s3(multi_registry):
-    prov = multi_registry.find_vfs_by_name("s3")
-    assert prov is not None
-    assert prov.name == "s3"
-
-
-def test_find_vfs_disk(multi_registry):
-    prov = multi_registry.find_vfs_by_name("disk")
-    assert prov is not None
-    assert prov.name == "disk"
-
-
-def test_find_vfs_ram(multi_registry):
-    prov = multi_registry.find_vfs_by_name("ram")
-    assert prov is not None
-
-
-def test_find_vfs_none(multi_registry):
-    assert multi_registry.find_vfs_by_name(None) is None
-
-
-def test_find_vfs_missing(multi_registry):
-    assert multi_registry.find_vfs_by_name("nonexistent") is None
-
-
 # ── mount_for_command ──────────────────────────
 
 
@@ -506,11 +436,6 @@ def test_try_mount_for_prefix_normalizes_the_spelling(registry):
         mount = registry.try_mount_for_prefix(spelling)
         assert mount is not None
         assert mount.prefix == "/data/"
-
-
-def test_group_by_mount_propagates_miss(registry):
-    with pytest.raises(NoMountError):
-        registry.group_by_mount(["/data/a.txt", "/unknown/b.txt"])
 
 
 def test_mount_for_command_never_answers_dev():

@@ -12,10 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.core.google.constants import CORPUS
 from mirage.core.hierarchy.codec import Codec
 from mirage.core.hierarchy.scope import Scope, Slot
 from mirage.types import ContentType
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length, sanitize_label
+
+TITLE_MAX_CHARS = 100
+DATE_LEN = 10
+
+sanitize_title = partial(
+    sanitize_label, fallback="Untitled", max_len=TITLE_MAX_CHARS
+)
 
 
 def app_scopes(file_name: Codec) -> tuple[Scope, ...]:
@@ -41,3 +51,34 @@ def app_scopes(file_name: Codec) -> tuple[Scope, ...]:
             filetype=ContentType.JSON,
         ),
     )
+
+
+def app_filename(
+    title: str, file_id: str, modified_time: str = "", *, suffix: str
+) -> str:
+    """Build an app file's name from its title, id and modified date.
+
+    The title takes whatever of the 255-byte NAME_MAX the date, the id and
+    the suffix leave, rather than a flat character count: those are the same
+    number only for ASCII, and a 100-character CJK title rendered a name ext4
+    and APFS reject outright. The id never gives, so the name keeps
+    addressing the file -- same rule as gcal's event filenames. Sheets, Docs
+    and Slides differ only in the suffix.
+
+    Args:
+        title (str): raw file title.
+        file_id (str): the Drive file ID.
+        modified_time (str): ISO 8601 timestamp.
+        suffix (str): the app's file suffix, e.g. ``.gdoc.json``.
+
+    Returns:
+        str: filename in format "YYYY-MM-DD_Sanitized_Title__id<suffix>".
+    """
+    lead = (
+        f"{modified_time[:DATE_LEN]}_"
+        if len(modified_time) >= DATE_LEN
+        else ""
+    )
+    fixed = byte_length(lead) + len("__") + byte_length(file_id) + len(suffix)
+    label = sanitize_title(title, max_bytes=NAME_MAX_BYTES - fixed)
+    return f"{lead}{label}__{file_id}{suffix}"

@@ -471,15 +471,3 @@ def gunzip_partial(
     except GzipDataError as exc:
         return b"".join(parts), exc
     return b"".join(parts), None
-
-
-def gunzip_checked(data: bytes) -> bytes:
-    """Materialize a checked archive for consumers that need all its bytes.
-
-    Args:
-        data (bytes): Compressed input, with no trailing garbage.
-    """
-    decoded, failure = gunzip_partial(data)
-    if failure is not None:
-        raise failure
-    return decoded

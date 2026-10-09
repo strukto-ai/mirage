@@ -18,7 +18,7 @@ from typing import Any
 
 from mirage.cache.index.config import IndexEntry
 from mirage.core.discord.history import DISCORD_EPOCH
-from mirage.core.discord.render import member_json_bytes
+from mirage.core.render.json import compact_json_bytes
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.naming import make_id_name
 
@@ -95,7 +95,7 @@ def member_entry(m: dict[str, Any]) -> IndexEntry:
         name=user.get("username", ""),
         resource_type=DiscordResourceType.MEMBER,
         vfs_name=member_filename(m),
-        size=len(member_json_bytes(m)),
+        size=len(compact_json_bytes(m)),
     )
 
 

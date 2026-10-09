@@ -570,21 +570,3 @@ def op_ruling(
     if verb == ASK_SECOND and rule in granted:
         return None
     return rule, verb == ASK_SECOND
-
-
-def op_refusal(
-    rules: AdmissionRules | None,
-    ctx: VfsContext,
-    granted: Collection[CommandRule],
-) -> str | None:
-    """The reason an op may not run, None when it may: the reason of
-    :func:`op_ruling`'s rule, an ask read as a refusal.
-
-    Args:
-        rules (AdmissionRules | None): the session's admission rules.
-        ctx (VfsContext): the op about to run.
-        granted (Collection[CommandRule]): the ask rules the running
-            line holds a grant under, empty when no command is bound.
-    """
-    ruled = op_ruling(rules, ctx, granted)
-    return ruled[0].reason if ruled is not None else None
