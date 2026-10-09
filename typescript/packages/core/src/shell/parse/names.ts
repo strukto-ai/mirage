@@ -13,13 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TSNodeLike } from '../types.ts'
-import {
-  ARITH_OPEN_TOKEN,
-  ARITH_TEST_OPERATORS,
-  DECLARING_NODES,
-  IDENTIFIER_RE,
-  TARGET_NAME_FIELDS,
-} from './constants.ts'
+import * as constants from './constants.ts'
 
 /**
  * Whether two facade nodes name the same tree node. Web-tree-sitter
@@ -37,13 +31,13 @@ function collectNames(node: TSNodeLike, out: Set<string>): void {
     if (node.text !== '') out.add(node.text)
     return
   }
-  if (DECLARING_NODES.has(node.type)) {
+  if (constants.DECLARING_NODES.has(node.type)) {
     for (const child of node.children) {
       if (child.type !== 'variable_name') collectNames(child, out)
     }
     return
   }
-  const field = TARGET_NAME_FIELDS[node.type]
+  const field = constants.TARGET_NAME_FIELDS[node.type]
   let target = field !== undefined ? (node.childForFieldName?.(field) ?? null) : null
   // `+=` reads the target before writing it (`TOKEN+=x` starts from
   // the existing value), so an append's name is a read here too.
@@ -114,7 +108,7 @@ export function commandWords(
   for (const current of walkNamedOutsideDefs(node, skip)) {
     if (current.type === 'command_name') {
       if (current.text !== '') out.add(current.text)
-    } else if (DECLARING_NODES.has(current.type)) {
+    } else if (constants.DECLARING_NODES.has(current.type)) {
       const head = current.children[0]
       if (head !== undefined && head.text !== '') out.add(head.text)
     }
@@ -191,7 +185,7 @@ export function commandInvocations(node: TSNodeLike): [string | null, (string | 
  * nothing.
  */
 export function identifierNames(text: string): ReadonlySet<string> {
-  return new Set(text.match(IDENTIFIER_RE) ?? [])
+  return new Set(text.match(constants.IDENTIFIER_RE) ?? [])
 }
 
 /**
@@ -236,7 +230,7 @@ function testArithNames(test: TSNodeLike, out: Set<string>): void {
   for (const current of walkNamedOutsideDefs(test)) {
     if (current.type !== 'binary_expression') continue
     const operator = current.namedChildren.find((child) => child.type === 'test_operator')
-    if (operator === undefined || !ARITH_TEST_OPERATORS.has(operator.text)) continue
+    if (operator === undefined || !constants.ARITH_TEST_OPERATORS.has(operator.text)) continue
     for (const child of current.namedChildren) {
       if (!sameNode(child, operator)) arithRegionNames(child, out)
     }
@@ -263,7 +257,7 @@ export function arithReads(node: TSNodeLike): ReadonlySet<string> {
       arithRegionNames(current, out)
     } else if (
       current.type === 'compound_statement' &&
-      current.children[0]?.type === ARITH_OPEN_TOKEN
+      current.children[0]?.type === constants.ARITH_OPEN_TOKEN
     ) {
       arithRegionNames(current, out)
     } else if (current.type === 'c_style_for_statement') {

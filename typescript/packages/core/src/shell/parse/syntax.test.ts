@@ -41,6 +41,9 @@ const CORPUS = (
 ).lines
 
 const encode = (text: string): number[] => [...new TextEncoder().encode(text)]
+const hostOverflow = (): boolean => {
+  throw new RangeError('Invalid array length')
+}
 
 describe('checkSyntax', () => {
   it('reads every line as bash reads it', () => {
@@ -94,10 +97,9 @@ describe('checkSyntax', () => {
       status: 2,
     })
     expect(heredocPlan(bangs)).toBeNull()
-    const own = (): boolean => {
-      throw new RangeError('Invalid array length')
-    }
-    expect(() => checkSyntax('echo F; fi', new Set(['fi']), own)).toThrow('Invalid array length')
+    expect(() => checkSyntax('echo F; fi', new Set(['fi']), hostOverflow)).toThrow(
+      'Invalid array length',
+    )
   })
 
   it('reads a substitution once however often its word is', () => {

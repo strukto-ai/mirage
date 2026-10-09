@@ -15,13 +15,7 @@
 from collections.abc import Iterator
 
 from mirage.shell.bytes import decode_text
-from mirage.shell.parse.constants import (
-    ARITH_OPEN_TOKEN,
-    ARITH_TEST_OPERATORS,
-    DECLARING_NODES,
-    IDENTIFIER_RE,
-    TARGET_NAME_FIELDS,
-)
+from mirage.shell.parse import constants
 from mirage.shell.types import TSNodeLike
 
 
@@ -33,12 +27,12 @@ def _collect_names(node: TSNodeLike, out: set[str]) -> None:
         if text:
             out.add(decode_text(text))
         return
-    if node.type in DECLARING_NODES:
+    if node.type in constants.DECLARING_NODES:
         for child in node.children:
             if child.type != "variable_name":
                 _collect_names(child, out)
         return
-    field = TARGET_NAME_FIELDS.get(node.type)
+    field = constants.TARGET_NAME_FIELDS.get(node.type)
     target = node.child_by_field_name(field) if field else None
     # `+=` reads the target before writing it (`TOKEN+=x` starts from
     # the existing value), so an append's name is a read here too.
@@ -118,7 +112,7 @@ def command_words(
             text = n.text
             if text:
                 out.add(decode_text(text))
-        elif n.type in DECLARING_NODES and n.children:
+        elif n.type in constants.DECLARING_NODES and n.children:
             text = n.children[0].text
             if text:
                 out.add(decode_text(text))
@@ -209,7 +203,7 @@ def identifier_names(text: str) -> frozenset[str]:
     Args:
         text (str): an expression or value string.
     """
-    return frozenset(IDENTIFIER_RE.findall(text))
+    return frozenset(constants.IDENTIFIER_RE.findall(text))
 
 
 def _arith_region_names(region: TSNodeLike, out: set[str]) -> None:
@@ -273,7 +267,7 @@ def _test_arith_names(test: TSNodeLike, out: set[str]) -> None:
         if operator is None:
             continue
         text = operator.text
-        if not text or decode_text(text) not in ARITH_TEST_OPERATORS:
+        if not text or decode_text(text) not in constants.ARITH_TEST_OPERATORS:
             continue
         for child in n.named_children:
             if child.id != operator.id:
@@ -303,7 +297,7 @@ def arith_reads(node: TSNodeLike) -> frozenset[str]:
         elif (
             n.type == "compound_statement"
             and n.children
-            and n.children[0].type == ARITH_OPEN_TOKEN
+            and n.children[0].type == constants.ARITH_OPEN_TOKEN
         ):
             _arith_region_names(n, out)
         elif n.type == "c_style_for_statement":
