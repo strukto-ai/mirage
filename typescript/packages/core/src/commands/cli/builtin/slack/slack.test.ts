@@ -78,12 +78,14 @@ const VERBS = [
 
 describe('slack tree', () => {
   it('matches the OpenClaw vocabulary and registers itself', () => {
-    expect(SLACK.subcommands.map((v) => v.name)).toEqual(VERBS)
+    expect(SLACK.spec.subcommands.map((v) => v.name)).toEqual(VERBS)
     expect(cliSpecFor('slack')).toBe(SLACK)
   })
 
   it('classifies writers', () => {
-    const writers = new Set(SLACK.subcommands.filter((v) => v.write).map((v) => v.name))
+    const writers = new Set(
+      SLACK.spec.subcommands.filter((v) => SLACK.handlers[v.name]?.write).map((v) => v.name),
+    )
     expect(writers).toEqual(new Set(['send-message', 'react', 'pin-message', 'unpin-message']))
   })
 })

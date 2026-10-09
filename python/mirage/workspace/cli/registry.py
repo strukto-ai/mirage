@@ -16,7 +16,7 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ValidationError
 
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI
 from mirage.commands.spec import SPECS
 from mirage.secrets.summary import error_summary
 from mirage.types import JsonValue
@@ -57,7 +57,7 @@ class CLIRegistry:
     def install(
         self,
         name: str,
-        spec: CLISpec,
+        spec: CLI,
         config: Mapping[str, JsonValue] | BaseModel | None = None,
     ) -> CLIInstall:
         """Install a CLI under a head word.
@@ -67,7 +67,7 @@ class CLIRegistry:
                 word and must not collide with another installed CLI, a
                 shell builtin, or a general command (a runtime capture
                 of the same name is fine: the policy steers per line).
-            spec (CLISpec): the program tree.
+            spec (CLI): the program tree.
             config (Mapping[str, JsonValue] | BaseModel | None):
                 installation config: a mapping, validated through the
                 spec's ``config_model``, or an instance of that model.
@@ -89,14 +89,14 @@ class CLIRegistry:
                 f"CLI name {name!r} collides with a general command"
             )
         validated = self._validate_config(name, spec, config)
-        install = CLIInstall(name=name, spec=spec, config=validated)
+        install = CLIInstall(name=name, cli=spec, config=validated)
         self._installs[name] = install
         return install
 
     def _validate_config(
         self,
         name: str,
-        spec: CLISpec,
+        spec: CLI,
         config: Mapping[str, JsonValue] | BaseModel | None,
     ) -> BaseModel | dict[str, JsonValue] | None:
         """Validate an installation config against the spec's model.
@@ -108,7 +108,7 @@ class CLIRegistry:
 
         Args:
             name (str): installed head word, for error attribution.
-            spec (CLISpec): the program tree carrying ``config_model``.
+            spec (CLI): the program tree carrying ``config_model``.
             config (Mapping[str, JsonValue] | BaseModel | None): a raw
                 config mapping, or an instance of ``config_model``.
         """
@@ -133,7 +133,7 @@ class CLIRegistry:
             if config:
                 raise ValueError(
                     f"CLI {name!r}: config given but "
-                    f"{spec.name!r} declares no config_model"
+                    f"{spec.spec.name!r} declares no config_model"
                 )
             return None
         # Unknown keys fail loud (a typo'd YAML key must not be

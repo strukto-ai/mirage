@@ -66,10 +66,9 @@ from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_command, parse_to_kwargs
 from mirage.commands.spec.types import (
+    Argument,
     CommandSpec,
     FlagValue,
-    Operand,
-    Option,
     UsageStyle,
 )
 from mirage.io.types import ByteSource, IOResult
@@ -85,16 +84,18 @@ GIT_DIR_OPTION = "--git-dir"
 MIN_ABBREV = 4
 HEX_LENGTH = 40
 GET_URL = CommandSpec(
-    options=(
-        Option(
-            long="--push", description="query push URLs rather than fetch URLs"
+    arguments=(
+        Argument(
+            "--push",
+            action="store_true",
+            help="query push URLs rather than fetch URLs",
         ),
-        Option(long="--all", description="return all URLs"),
-        Option(long="--no-push"),
-        Option(long="--no-all"),
-    ),
-    positional=(Operand(type="str", name="name", required=True),),
-    rest=Operand(type="str"),
+        Argument("--all", action="store_true", help="return all URLs"),
+        Argument("--no-push", action="store_true"),
+        Argument("--no-all", action="store_true"),
+        Argument("name"),
+        Argument("texts", nargs="*", metavar=""),
+    )
 )
 
 

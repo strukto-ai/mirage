@@ -1,5 +1,8 @@
-import { Operand } from '../commands/spec/types.ts'
-import { CLISpec } from '../commands/cli/types.ts'
+import { CommandSpec } from '../commands/spec/types.ts'
+import { CLIHandler } from '../commands/cli/types.ts'
+
+import { Argument } from '../commands/spec/types.ts'
+import { CLI } from '../commands/cli/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
@@ -107,12 +110,18 @@ it('keeps the stdin operand on an installed CLI before an fd redirect', async ()
   try {
     ws.registerCli(
       'consume',
-      new CLISpec({
-        name: 'consume',
-        rest: new Operand({ type: 'str' }),
-        fn: async (inv) => {
-          seen.push(...inv.texts)
-          return [await materialize(inv.stdin), new IOResult()]
+      new CLI({
+        spec: new CommandSpec({
+          name: 'consume',
+          arguments: [new Argument('texts', { metavar: '', nargs: '*' })],
+        }),
+        handlers: {
+          '': new CLIHandler({
+            fn: async (inv) => {
+              seen.push(...inv.texts)
+              return [await materialize(inv.stdin), new IOResult()]
+            },
+          }),
         },
       }),
     )

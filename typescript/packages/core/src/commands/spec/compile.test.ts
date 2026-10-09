@@ -11,24 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { describe, expect, it } from 'vitest'
 import { compileSpec, expandGitLong, expandLong, expandTableLong } from './compile.ts'
 import { TAR_LONG_OPTIONS } from './constants.ts'
-import { CommandSpec, Option } from './types.ts'
+import { CommandSpec, Argument } from './types.ts'
 
 describe('compileSpec — count/choices/required/default tables', () => {
   it('collects the new tables keyed by canonical spelling', () => {
     const spec = new CommandSpec({
-      options: [
-        new Option({ short: '-v', long: '--verbose', count: true }),
-        new Option({
-          long: '--mode',
-          type: 'str',
-          choices: ['a', 'b'],
-          default: 'a',
-        }),
-        new Option({ long: '--out', type: 'str', required: true }),
+      arguments: [
+        new Argument(['-v', '--verbose'], { action: 'count' }),
+        new Argument('--mode', { choices: ['a', 'b'], default: 'a' }),
+        new Argument('--out', { required: true }),
       ],
     })
     const cs = compileSpec(spec)
@@ -40,47 +34,40 @@ describe('compileSpec — count/choices/required/default tables', () => {
 
   it('rejects count on a value flag', () => {
     const spec = new CommandSpec({
-      options: [new Option({ long: '--level', type: 'str', count: true })],
+      arguments: [new Argument('--level', { action: 'count', type: 'int' })],
     })
-    expect(() => compileSpec(spec)).toThrow(/count requires a boolean flag/)
+    expect(() => compileSpec(spec)).toThrow(/do not take a type or nargs/)
   })
 
   it('rejects choices or default on a boolean flag', () => {
     const spec = new CommandSpec({
-      options: [new Option({ long: '--quiet', choices: ['a', 'b'] })],
+      arguments: [new Argument('--quiet', { action: 'store_true', choices: ['a', 'b'] })],
     })
     expect(() => compileSpec(spec)).toThrow(/require a value flag/)
   })
 
   it('rejects a default outside the choices set', () => {
     const spec = new CommandSpec({
-      options: [
-        new Option({
-          long: '--mode',
-          type: 'str',
-          choices: ['a', 'b'],
-          default: 'c',
-        }),
-      ],
+      arguments: [new Argument('--mode', { choices: ['a', 'b'], default: 'c' })],
     })
     expect(() => compileSpec(spec)).toThrow(/not one of its choices/)
   })
 
   it('caches per spec object', () => {
-    const spec = new CommandSpec({ options: [new Option({ short: '-x' })] })
+    const spec = new CommandSpec({ arguments: [new Argument('-x', { action: 'store_true' })] })
     expect(compileSpec(spec)).toBe(compileSpec(spec))
   })
 
   it('requires an option spelling', () => {
-    const spec = new CommandSpec({ options: [new Option()] })
-    expect(() => compileSpec(spec)).toThrow(/requires a short or long spelling/)
+    const spec = new CommandSpec({ arguments: [new Argument([], { action: 'store_true' })] })
+    expect(() => compileSpec(spec)).toThrow(/requires a name or option spelling/)
   })
 
   it.each([
-    [new Option({ short: '-m' }), new Option({ short: '-m', type: 'str' })],
-    [new Option({ long: '--mode' }), new Option({ long: '--mode', type: 'str' })],
+    [new Argument('-m', { action: 'store_true' }), new Argument('-m')],
+    [new Argument('--mode', { action: 'store_true' }), new Argument('--mode')],
   ])('rejects duplicate option spellings', (first, second) => {
-    const spec = new CommandSpec({ options: [first, second] })
+    const spec = new CommandSpec({ arguments: [first, second] })
     expect(() => compileSpec(spec)).toThrow(/duplicate option spelling/)
   })
 })
@@ -90,7 +77,7 @@ describe('type int validation', () => {
     expect(() =>
       compileSpec(
         new CommandSpec({
-          options: [new Option({ long: '--ratio', type: 'float', default: 'fast' })],
+          arguments: [new Argument('--ratio', { type: 'float', default: 'fast' })],
         }),
       ),
     ).toThrow(/is not a number/)
@@ -99,15 +86,7 @@ describe('type int validation', () => {
   it('requires an integer default', () => {
     expect(() =>
       compileSpec(
-        new CommandSpec({
-          options: [
-            new Option({
-              long: '--port',
-              type: 'int',
-              default: 'auto',
-            }),
-          ],
-        }),
+        new CommandSpec({ arguments: [new Argument('--port', { type: 'int', default: 'auto' })] }),
       ),
     ).toThrow(/is not an integer/)
   })
@@ -117,10 +96,10 @@ describe('expandLong', () => {
   it('handles exact, prefix, ambiguous, and unknown spellings', () => {
     const cs = compileSpec(
       new CommandSpec({
-        options: [
-          new Option({ long: '--binary' }),
-          new Option({ long: '--binary-files', type: 'str' }),
-          new Option({ long: '--count' }),
+        arguments: [
+          new Argument('--binary', { action: 'store_true' }),
+          new Argument('--binary-files'),
+          new Argument('--count', { action: 'store_true' }),
         ],
       }),
     )
@@ -136,10 +115,10 @@ describe('expandLong', () => {
   it('resolves a shared prefix only across named synonyms', () => {
     const cs = compileSpec(
       new CommandSpec({
-        options: [
-          new Option({ long: '--color' }),
-          new Option({ long: '--colour' }),
-          new Option({ long: '--count' }),
+        arguments: [
+          new Argument('--color', { action: 'store_true' }),
+          new Argument('--colour', { action: 'store_true' }),
+          new Argument('--count', { action: 'store_true' }),
         ],
       }),
     )
@@ -155,34 +134,10 @@ describe('expandLong', () => {
 
 describe('pair options', () => {
   it('refuses a boolean flag', () => {
-    const spec = new CommandSpec({ options: [new Option({ long: '--arg', pair: true })] })
-    expect(() => compileSpec(spec)).toThrow(/pair requires a value flag/)
-  })
-
-  it('refuses a short spelling', () => {
     const spec = new CommandSpec({
-      options: [new Option({ short: '-a', long: '--arg', type: 'str', pair: true })],
+      arguments: [new Argument('--arg', { action: 'store_true', nargs: 2 })],
     })
-    expect(() => compileSpec(spec)).toThrow(/pair requires a long spelling/)
-  })
-
-  it('types only the value of a path pair', () => {
-    // jq --rawfile name file: the name is text, the file is a path.
-    const spec = new CommandSpec({
-      options: [new Option({ long: '--rawfile', type: 'path', pair: true })],
-    })
-    const compiled = compileSpec(spec)
-    expect(compiled.kindByDest.get('--rawfile')).toBe('path')
-    expect(compiled.pairDests.has('--rawfile')).toBe(true)
-  })
-
-  it('accumulates like multiple', () => {
-    const spec = new CommandSpec({
-      options: [new Option({ long: '--arg', type: 'str', pair: true })],
-    })
-    const compiled = compileSpec(spec)
-    expect(compiled.pairDests.has('--arg')).toBe(true)
-    expect(compiled.multipleDests.has('--arg')).toBe(true)
+    expect(() => compileSpec(spec)).toThrow(/do not take a type or nargs/)
   })
 })
 

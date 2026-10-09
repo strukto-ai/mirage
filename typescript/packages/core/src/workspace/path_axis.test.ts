@@ -14,7 +14,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { MountMode } from '../types.ts'
+import { MountMode, type PathSpec } from '../types.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
 import type { Action, VfsContext, VfsResultContext, Policy } from '../policy/index.ts'
 import { runWithSession } from '../context/session_context.ts'
@@ -35,6 +36,22 @@ class DenyRemnantUnlink implements Policy {
 class DenyUnlinkAfter implements Policy {
   postVfs(ctx: VfsResultContext): Action | null {
     return ctx.op === 'unlink' ? { kind: 'deny', reason: 'too late' } : null
+  }
+}
+
+// A RAM VFS whose listing or deletion fails with an error of its own type
+// once armed, as an API backend's can (box throws its own).
+class FailingRAM extends RAMVFS {
+  failing: 'readdir' | 'unlink' | null = null
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    if (this.failing === 'readdir') return Promise.reject(new Error('api exploded'))
+    return super.readdir(path, index)
+  }
+
+  override unlink(path: PathSpec): Promise<void> {
+    if (this.failing === 'unlink') return Promise.reject(new Error('api exploded'))
+    return super.unlink(path)
   }
 }
 
@@ -537,6 +554,23 @@ describe('subtree mutations against hides', () => {
     expect(gone.exitCode).toBe(1)
   })
 
+  it('a command rule on a hidden remnant keeps the refusal', async () => {
+    // `rmdir -p` reaches the parent after its operand, so the rule that
+    // admitted the line judged neither the parent nor what the cascade
+    // finds under it; a rule naming rmdir on the hidden file refuses its
+    // deletion, so the parent's refusal stands and the file stays.
+    const ws = await boxed({
+      paths: { hide: ['/repo/only/h'] },
+      commands: { deny: [{ reason: 'kept', commands: { rmdir: ['/repo/only/h'] } }] },
+    })
+    expect((await ws.shell('mkdir /repo/only/leaf')).exitCode).toBe(0)
+    const refused = await ws.shell('rmdir -p /repo/only/leaf', { sessionId: 'rev' })
+    expect(refused.exitCode).toBe(1)
+    expect(stderrStr(refused)).toContain('Directory not empty')
+    const kept = await ws.shell('cat /repo/only/h')
+    expect(stdoutStr(kept)).toBe('h\n')
+  })
+
   it('rmdir with a visible child keeps the refusal', async () => {
     const ws = await boxed({ paths: { hide: ['/repo/box/sec'] } })
     const refused = await ws.shell('rmdir /repo/box', { sessionId: 'rev' })
@@ -682,6 +716,33 @@ describe('ws.vfs against hides', () => {
     const kept = await ws.shell('cat /a/d/sec/k')
     expect(stdoutStr(kept)).toBe('k\n')
   })
+
+  it.each(['readdir', 'unlink'] as const)(
+    'a remnant cascade failing at %s with no errno keeps the refusal',
+    async (failing) => {
+      // A listing or deletion that fails with no errno still answers with
+      // the backend's not-empty refusal: the raw failure would reveal
+      // exactly what the refusal exists to hide.
+      const parser = await getTestParser()
+      const a = new FailingRAM()
+      const ws = new Workspace(
+        { '/a': [a, MountMode.WRITE] as const },
+        { mode: MountMode.WRITE, shellParser: parser },
+      )
+      open.push(ws)
+      const io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
+      expect(io.exitCode).toBe(0)
+      const sess = ws.createSession('rev', {
+        profile: parseSessionProfile({ paths: { hide: ['/a/d/sec'] } }),
+      })
+      a.failing = failing
+      await runWithSession(sess, async () => {
+        await expect(ws.dispatch('rmdir', '/a/d')).rejects.toMatchObject({
+          code: 'ENOTEMPTY',
+        })
+      })
+    },
+  )
 
   it('a postVfs deny does not strand the cascade', async () => {
     // A deletion is done by the time postVfs could speak, so the cascade

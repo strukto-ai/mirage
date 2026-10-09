@@ -83,6 +83,10 @@ _GENERIC_OUT = [
 # Redirects open before echo runs: `>` records its empty open and output
 # write. RAM and Redis skip recording an empty append; disk and SSH record it.
 # ram, disk and redis record nothing for same-mount cp/mv/rm/rmdir/rm -r.
+# A caching mount serves each read of what the line just wrote from the
+# bytes the write kept, so only the writes reach the backend.
+_WARM_OUT = [op for op in _GENERIC_OUT[1:] if op[0] == "write"]
+
 _NATIVE_APPEND = [
     ("write", K),
     ("write", K),
@@ -117,7 +121,7 @@ _S3 = [
     ("rmdir", "/m/m/e"),
     ("write", DF),
     ("rm_r", "/m/m/d"),
-    *_GENERIC_OUT[1:],
+    *_WARM_OUT,
     ("create", C),
     ("read", C),
     ("write", C),
@@ -134,8 +138,7 @@ _SSH = [
     ("write", NEW),
     ("truncate", NEW),
     ("write", DF),
-    *_GENERIC_OUT[1:4],
-    *_GENERIC_OUT[5:],
+    *_WARM_OUT,
     ("create", C),
     ("append", C),
 ]

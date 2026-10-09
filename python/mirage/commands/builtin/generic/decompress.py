@@ -427,8 +427,6 @@ async def decompress_inputs(
                 if existed:
                     continue
                 return
-            if link is None:
-                io.writes[out.mount_path] = data
             if not keep:
                 await (
                     unlink(path)

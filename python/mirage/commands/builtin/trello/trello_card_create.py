@@ -22,7 +22,7 @@ from mirage.commands.builtin.trello._input import (
 from mirage.commands.builtin.trello._scope import require_list
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import CommandSpec, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.context import require_mount_writable
 from mirage.core.trello.client import card_create
 from mirage.core.trello.normalize import normalize_card
@@ -31,12 +31,12 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(
-    options=(
-        Option(long="--list_id", type="str"),
-        Option(long="--name", type="str"),
-        Option(long="--desc", type="str"),
-        Option(long="--desc_file", type="path"),
-    ),
+    arguments=(
+        Argument("--list_id", type="str"),
+        Argument("--name", type="str"),
+        Argument("--desc", type="str"),
+        Argument("--desc_file", type="path"),
+    )
 )
 
 

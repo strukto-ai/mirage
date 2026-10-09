@@ -116,7 +116,6 @@ async def rmdir(
     links = opts.ns.links if opts.ns is not None else None
     verbose_parts: list[str] = []
     errors: list[str] = []
-    removed: dict[str, ByteSource] = {}
 
     async def remove(p: PathSpec) -> str | None:
         # rmdir(2) never follows, so a link operand never reaches the
@@ -154,7 +153,6 @@ async def rmdir(
             if reason is None:
                 raise
             return reason
-        removed[p.mount_path] = b""
         return None
 
     for p in paths:
@@ -184,10 +182,7 @@ async def rmdir(
             if (
                 reason == posix_phrase(FsCondition.ENOENT)
                 and ancestor is not None
-            ):
-                removed[ancestor.mount_path] = b""
-                continue
-            if reason is None:
+            ) or reason is None:
                 continue
             if not (ignore and reason == posix_phrase(FsCondition.ENOTEMPTY)):
                 what = (
@@ -201,9 +196,7 @@ async def rmdir(
             break
     output = format_optional_records(verbose_parts) if v else None
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
-    return output, IOResult(
-        writes=removed, stderr=stderr, exit_code=1 if errors else 0
-    )
+    return output, IOResult(stderr=stderr, exit_code=1 if errors else 0)
 
 
 BUILDER = GenericCommand("rmdir", rmdir, write=True)

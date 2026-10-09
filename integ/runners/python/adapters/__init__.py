@@ -49,7 +49,7 @@ from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.commands.cli.specs import cli_spec_for
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI
 from mirage.core.databricks_volume.path import configured_root
 from mirage.core.email.config import EmailConfig
 from mirage.core.github.client import GitHubApiError, github_request
@@ -830,7 +830,7 @@ class GwsService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
         config: dict[str, object] = {
             "client_id": "integ",
             "refresh_token": GWS_TOKEN,
@@ -907,7 +907,7 @@ class EmailService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
         # h1 and h2 are the same spec installed twice: two head words,
         # two accounts, and neither shares the mount's account, so a
         # line's behavior proves which config it ran under.
@@ -1178,7 +1178,7 @@ class HfHubService:
         )
         return self.KINDS[kind](config)
 
-    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
         return {
             "hf": (
                 cli_spec_for("hf"),
@@ -1403,7 +1403,7 @@ class SlackService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
         return {
             "slack": (
                 cli_spec_for("slack"),
@@ -1457,7 +1457,7 @@ class GitHubService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
         return {
             "gh": (
                 cli_spec_for("gh"),
@@ -1585,7 +1585,7 @@ class DiscordService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
         return {
             "discord": (
                 cli_spec_for("discord"),
@@ -1628,7 +1628,7 @@ class LinearService:
             LinearConfig(api_key="integ-key", base_url=self.graphql)
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
         return {
             "linear": (
                 cli_spec_for("linear"),
@@ -1838,7 +1838,7 @@ class AirtableService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
         # The same bounds as the mount, scoped to two of the fixture's three
         # bases so the battery can show a refused one (the Archive).
         return {
@@ -1916,7 +1916,7 @@ class NotionService:
             config=NotionConfig(api_key=self.token, base_url=f"{self.base}/v1")
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
         return {
             "ntn": (
                 cli_spec_for("ntn"),
@@ -2985,7 +2985,7 @@ async def build_mounts(
 
 def cli_install(
     service: "Service | None", cli_name: str
-) -> tuple[CLISpec, dict[str, object] | None]:
+) -> tuple[CLI, dict[str, object] | None]:
     """The spec and config to install one CLI under its head word.
 
     Every CLI here so far talks to an API, so its mock service hands
@@ -3026,6 +3026,9 @@ async def mutate_write(
     shadow_ws: Workspace, path: str, content: bytes
 ) -> None:
     await shadow_ws.vfs.write(path, content)
+    # The shadow is another client with no memory: a write keeps its bytes,
+    # and a later shadow line would read them stale.
+    await shadow_ws.cache.clear()
 
 
 async def mutate_line(shadow_ws: Workspace, command: str) -> None:
@@ -3040,6 +3043,7 @@ async def mutate_line(shadow_ws: Workspace, command: str) -> None:
         command (str): the line to run.
     """
     result = await shadow_ws.shell(command)
+    await shadow_ws.cache.clear()
     if result.exit_code != 0:
         raise RuntimeError(f"{command}: {await result.stderr_str()}")
 

@@ -20,7 +20,8 @@ from functools import partial
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.policy import resolve_producer
 from mirage.policy.builtin import output_cap as sg
@@ -337,7 +338,11 @@ async def test_a_killed_subshell_stops_its_exit_action():
     reached: list[str] = []
     for name in ("started", "reached"):
         ws.register_cli(
-            name, CLISpec(name=name, fn=partial(_record, reached, name))
+            name,
+            CLI(
+                spec=CommandSpec(name=name),
+                handlers={"": CLIHandler(fn=partial(_record, reached, name))},
+            ),
         )
     running = asyncio.create_task(
         ws.shell('(trap "started; sleep 0.3; reached" EXIT; true); echo after')

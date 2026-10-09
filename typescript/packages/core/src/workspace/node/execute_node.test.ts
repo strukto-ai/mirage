@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { EvaluationContext } from '../evaluation.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -24,7 +23,7 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { SessionState } from '../session/session.ts'
-import { CommandSpec, Operand, Option } from '../../commands/spec/types.ts'
+import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
 import { specWordKinds } from '../expand/spec_hints.ts'
 
@@ -450,8 +449,10 @@ describe('executeNode dispatcher', () => {
 
 describe('specWordKinds — numericShorthand', () => {
   const headSpec = new CommandSpec({
-    options: [new Option({ short: '-n', type: 'str', numericShorthand: true })],
-    rest: new Operand({ type: 'path' }),
+    arguments: [
+      new Argument('-n', { numericShorthand: true }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+    ],
   })
 
   it('treats -3 as a flag value, not a path (head/tail GNU shorthand)', () => {
@@ -460,8 +461,10 @@ describe('specWordKinds — numericShorthand', () => {
 
   it('falls back to treating -3 as a positional when spec lacks numericShorthand', () => {
     const noShortcut = new CommandSpec({
-      options: [new Option({ short: '-n', type: 'str' })],
-      rest: new Operand({ type: 'path' }),
+      arguments: [
+        new Argument('-n'),
+        new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      ],
     })
     expect(specWordKinds(noShortcut, ['-3', '/ram/file'])).toEqual(['path', 'path'])
   })

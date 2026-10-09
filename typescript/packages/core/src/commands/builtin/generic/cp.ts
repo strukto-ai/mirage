@@ -361,7 +361,6 @@ export async function copyTreeLinks(
   lines: string[] | undefined,
   policy: TransferPolicy,
   writes: Record<string, ByteSource>,
-  reads: Record<string, Uint8Array>,
   seen: readonly string[] = [],
 ): Promise<void> {
   const base = rstripSlash(src.virtual) || '/'
@@ -413,7 +412,7 @@ export async function copyTreeLinks(
         [{ path: entry.virtual, isDir: false }],
         errors,
         undefined,
-        { policy, writes, reads, lines, copies },
+        { policy, writes, lines, copies },
       )
       continue
     }
@@ -445,7 +444,6 @@ export async function copyTreeLinks(
       {
         policy,
         writes,
-        reads,
         ...(lines !== undefined ? { lines } : {}),
         copies,
       },
@@ -459,7 +457,6 @@ export async function copyTreeLinks(
       lines,
       policy,
       writes,
-      reads,
       [...seen, base],
     )
   }
@@ -945,7 +942,7 @@ export async function cpWalk(
 // missing the needed op reports `Operation not supported` instead of
 // aborting the command. `policy` applies -n/--update/--backup per file
 // entry, like GNU during a recursive merge (null overwrites
-// unconditionally); `writes`/`reads`/`lines` are optional per-entry sinks.
+// unconditionally); `writes`/`lines` are optional per-entry sinks.
 // Returns whether every entry landed and whether the destination changed
 // at all.
 export async function copyEntries(
@@ -960,7 +957,6 @@ export async function copyEntries(
   opts: {
     policy?: TransferPolicy
     writes?: Record<string, ByteSource>
-    reads?: Record<string, Uint8Array>
     lines?: string[] | undefined
     copies?: TransferLinks | undefined
   } = {},
@@ -1058,7 +1054,6 @@ export async function copyEntries(
       continue
     }
     wroteAny = true
-    if (opts.reads !== undefined) opts.reads[entrySpec.mountPath] = data
     if (opts.writes !== undefined) opts.writes[entryDstSpec.mountPath] = new Uint8Array()
     if (opts.lines !== undefined) opts.lines.push(transferLine(entrySpec, entryDstSpec, backup))
   }
@@ -1070,9 +1065,7 @@ export async function copyEntries(
 // PrimitiveCopy handles cross-mount copies by walking via readdir/stat and
 // applying mkdir or write(readBytes(...)) to each entry. --update/--backup
 // force the per-entry native loop (a whole-tree dirCopy cannot honor
-// per-file decisions). Sources that streamed through the client are
-// recorded as reads so applyIo can populate the file cache: a cp is also a
-// full read.
+// per-file decisions).
 export async function cpGeneric(
   paths: PathSpec[],
   stat: StatFn,
@@ -1133,7 +1126,6 @@ export async function cpGeneric(
     updateGates(flags.update) ||
     backupDisplaces(flags.backup)
   const writes: Record<string, ByteSource> = {}
-  const reads: Record<string, Uint8Array> = {}
   const lines: string[] = []
   let warned = 0
   const seen = new Set<string>()
@@ -1262,7 +1254,6 @@ export async function cpGeneric(
         await copyEntries('cp', strategy, stat, src, target, entries, errors, index, {
           policy,
           writes,
-          reads,
           lines: flags.verbose ? lines : undefined,
           copies,
         })
@@ -1276,7 +1267,6 @@ export async function cpGeneric(
             flags.verbose ? lines : undefined,
             policy,
             writes,
-            reads,
           )
         }
         continue
@@ -1300,7 +1290,6 @@ export async function cpGeneric(
             flags.verbose ? lines : undefined,
             policy,
             writes,
-            reads,
           )
         }
         continue
@@ -1356,7 +1345,6 @@ export async function cpGeneric(
           flags.verbose ? lines : undefined,
           policy,
           writes,
-          reads,
         )
       }
       continue
@@ -1400,7 +1388,6 @@ export async function cpGeneric(
         )
         continue
       }
-      reads[src.mountPath] = data
     } else {
       try {
         await strategy.copy(src, target)
@@ -1421,8 +1408,6 @@ export async function cpGeneric(
     output,
     new IOResult({
       writes,
-      reads: { ...reads },
-      cache: Object.keys(reads),
       stderr: stderrOf(errors),
       exitCode: errors.length > warned + accepted.length ? 1 : 0,
     }),

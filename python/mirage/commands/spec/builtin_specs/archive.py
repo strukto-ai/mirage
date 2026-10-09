@@ -12,137 +12,143 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import CommandSpec, Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 
 SPECS: dict[str, CommandSpec] = {
     "tar": CommandSpec(
-        # Each option under GNU tar's own long name. Its aliases (--get,
-        # --gunzip, --ungzip) and every abbreviation resolve through
-        # LONG_OPTION_TABLES, tar's whole table, which also knows the
-        # options mirage does not declare.
-        options=(
-            Option(short="-c", long="--create"),
-            Option(short="-x", long="--extract"),
-            Option(short="-t", long="--list"),
-            Option(short="-z", long="--gzip"),
-            Option(short="-j", long="--bzip2"),
-            Option(short="-J", long="--xz"),
-            Option(short="-v", long="--verbose"),
-            # -h archives what a symlink points at instead of the link.
-            Option(short="-h", long="--dereference"),
-            Option(short="-O", long="--to-stdout"),
-            Option(short="-f", long="--file", type="path"),
-            # Every occurrence is kept, in order: GNU chdirs at each
-            # one and fails at the first it cannot enter, so the
-            # planner has to see them all, not just the last.
-            Option(short="-C", long="--directory", type="path", multiple=True),
-            Option(long="--strip-components", type="str"),
-            Option(long="--exclude", type="str"),
-            Option(long="--one-file-system"),
-        ),
-        # Only -c reads the rest operands from the filesystem. Under -t
-        # and -x each one is a member selector matched against names
-        # inside the archive (the same mode split MountRootPolicy keys
-        # on), so those lines keep them textual, exactly as unzip's
-        # member patterns are.
-        rest=Operand(type="path", text_when=("-x", "-t")),
         # `tar xzf a.tgz` is the spelling everyone types.
         old_option_style=True,
         # -C is a chdir for the operands after it, not a flag the command
         # reads once: `tar -cf a.tar -C d x` archives d/x as `x`.
         operand_base="-C",
+        arguments=(
+            # Each option under GNU tar's own long name. Its aliases (--get,
+            # --gunzip, --ungzip) and every abbreviation resolve through
+            # LONG_OPTION_TABLES, tar's whole table, which also knows the
+            # options mirage does not declare.
+            Argument("-c", "--create", action="store_true"),
+            Argument("-x", "--extract", action="store_true"),
+            Argument("-t", "--list", action="store_true"),
+            Argument("-z", "--gzip", action="store_true"),
+            Argument("-j", "--bzip2", action="store_true"),
+            Argument("-J", "--xz", action="store_true"),
+            Argument("-v", "--verbose", action="store_true"),
+            # -h archives what a symlink points at instead of the link.
+            Argument("-h", "--dereference", action="store_true"),
+            Argument("-O", "--to-stdout", action="store_true"),
+            Argument("-f", "--file", type="path"),
+            # Every occurrence is kept, in order: GNU chdirs at each
+            # one and fails at the first it cannot enter, so the
+            # planner has to see them all, not just the last.
+            Argument("-C", "--directory", type="path", action="append"),
+            Argument("--strip-components"),
+            Argument("--exclude"),
+            Argument("--one-file-system", action="store_true"),
+            # Only -c reads the rest operands from the filesystem. Under -t
+            # and -x each one is a member selector matched against names
+            # inside the archive (the same mode split MountRootPolicy keys
+            # on), so those lines keep them textual, exactly as unzip's
+            # member patterns are.
+            Argument(
+                "paths",
+                type="path",
+                nargs="*",
+                metavar="",
+                text_when=("-x", "-t"),
+            ),
+        ),
     ),
     "gzip": CommandSpec(
-        options=(
-            Option(short="-d"),
-            Option(short="-k"),
-            Option(short="-f"),
-            Option(short="-c"),
-            Option(short="-q"),
-            Option(short="-S", type="str"),
-            Option(short="-1"),
-            Option(short="-2"),
-            Option(short="-3"),
-            Option(short="-4"),
-            Option(short="-5"),
-            Option(short="-6"),
-            Option(short="-7"),
-            Option(short="-8"),
-            Option(short="-9"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-d", action="store_true"),
+            Argument("-k", action="store_true"),
+            Argument("-f", action="store_true"),
+            Argument("-c", action="store_true"),
+            Argument("-q", action="store_true"),
+            Argument("-S"),
+            Argument("-1", action="store_true"),
+            Argument("-2", action="store_true"),
+            Argument("-3", action="store_true"),
+            Argument("-4", action="store_true"),
+            Argument("-5", action="store_true"),
+            Argument("-6", action="store_true"),
+            Argument("-7", action="store_true"),
+            Argument("-8", action="store_true"),
+            Argument("-9", action="store_true"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "gunzip": CommandSpec(
-        options=(
-            Option(short="-k"),
-            Option(short="-f"),
-            Option(short="-c"),
-            Option(short="-t"),
-            Option(short="-q"),
-            Option(short="-S", type="str"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-k", action="store_true"),
+            Argument("-f", action="store_true"),
+            Argument("-c", action="store_true"),
+            Argument("-t", action="store_true"),
+            Argument("-q", action="store_true"),
+            Argument("-S"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "zip": CommandSpec(
-        options=(
-            Option(short="-r"),
-            Option(short="-j"),
-            Option(short="-q"),
+        arguments=(
+            Argument("-r", action="store_true"),
+            Argument("-j", action="store_true"),
+            Argument("-q", action="store_true"),
             # -y stores a symlink as a symlink; without it zip archives
             # what the link points at, which is tar's -h inverted.
-            Option(short="-y"),
+            Argument("-y", action="store_true"),
             # Info-ZIP reads -x as a variadic list of patterns; mirage
             # takes one per occurrence, since its spec has no variadic
             # option value and `-x a -x b` says the same thing.
-            Option(short="-x", type="str", multiple=True),
-        ),
-        rest=Operand(type="path"),
+            Argument("-x", action="append"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "unzip": CommandSpec(
-        options=(
-            Option(short="-o"),
-            Option(short="-n"),
-            Option(short="-l"),
-            Option(short="-d", type="path"),
-            Option(short="-q"),
-            Option(short="-p"),
-            Option(short="-t"),
+        arguments=(
+            Argument("-o", action="store_true"),
+            Argument("-n", action="store_true"),
+            Argument("-l", action="store_true"),
+            Argument("-d", type="path"),
+            Argument("-q", action="store_true"),
+            Argument("-p", action="store_true"),
+            Argument("-t", action="store_true"),
             # -v is -l's verbose table, or the version banner when no
             # archive is named. zipinfo's own -v (a per-entry technical
             # dump) is not rendered: under -Z the letter is ignored.
-            Option(short="-v"),
+            Argument("-v", action="store_true"),
             # Info-ZIP reads -x as a variadic list of patterns; mirage
             # takes one per occurrence, since its spec has no variadic
             # option value and `-x a -x b` says the same thing (zip's -x
             # has the same shape).
-            Option(short="-x", type="str", multiple=True),
+            Argument("-x", action="append"),
             # -Z is ZipInfo mode: the archive is listed from its central
             # directory instead of extracted, and the other letters are
             # read as zipinfo's (-1/-2 names only, -s short, -m medium and
             # -l long rows, -h header, -t totals). Info-ZIP demands -Z
             # first; the flag bag has no order, so mirage takes it
             # anywhere in the cluster.
-            Option(short="-Z"),
-            Option(short="-1"),
-            Option(short="-2"),
-            Option(short="-s"),
-            Option(short="-m"),
-            Option(short="-h"),
-        ),
-        # The archive is the only path operand; everything after it is an
-        # Info-ZIP member pattern matched against archive entry names,
-        # never a filesystem path.
-        positional=(Operand(type="path"),),
-        rest=Operand(type="str"),
+            Argument("-Z", action="store_true"),
+            Argument("-1", action="store_true"),
+            Argument("-2", action="store_true"),
+            Argument("-s", action="store_true"),
+            Argument("-m", action="store_true"),
+            Argument("-h", action="store_true"),
+            # The archive is the only path operand; everything after it is an
+            # Info-ZIP member pattern matched against archive entry names,
+            # never a filesystem path.
+            Argument("path", type="path", nargs="?", metavar=""),
+            Argument("texts", nargs="*", metavar=""),
+        )
     ),
     # zcat is `gzip -cd`: -f copies input that is not gzip, -q drops
     # the warnings, and -S names the suffix a missing name is retried with.
     "zcat": CommandSpec(
-        options=(
-            Option(short="-f"),
-            Option(short="-q"),
-            Option(short="-S", type="str"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-f", action="store_true"),
+            Argument("-q", action="store_true"),
+            Argument("-S"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
 }

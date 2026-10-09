@@ -11,8 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-import { CommandSpec, Operand, Option } from '../types.ts'
+import { CommandSpec, Argument } from '../types.ts'
 
 // CPython's own option table, minus four switches that describe a
 // process mirage does not have: -i (drop to an interactive prompt), -d
@@ -30,77 +29,58 @@ import { CommandSpec, Operand, Option } from '../types.ts'
 // by whichever engine can; -u is a structural no-op, since mirage
 // buffers every stream and returns it whole. Pinned against CPython
 // 3.12.11.
-const PYTHON_OPTIONS: readonly Option[] = [
-  new Option({
-    short: '-c',
-    type: 'str',
-
-    description: 'Run the next argument as a program.',
+const PYTHON_OPTIONS: readonly Argument[] = [
+  new Argument('-c', { help: 'Run the next argument as a program.' }),
+  new Argument('-m', { help: 'Run the named module as __main__.' }),
+  new Argument('-u', {
+    action: 'store_true',
+    help: '(Ignored) Unbuffered output. Mirage buffers every stream and returns it whole.',
   }),
-  new Option({
-    short: '-m',
-    type: 'str',
-
-    description: 'Run the named module as __main__.',
+  new Argument('-b', {
+    action: 'count',
+    help: 'Warn on str(bytes) and on comparing bytes with str; -bb raises instead.',
   }),
-  new Option({
-    short: '-u',
-    description: '(Ignored) Unbuffered output. Mirage buffers every stream and returns it whole.',
+  new Argument('-B', { action: 'store_true', help: 'Do not write .pyc files on import.' }),
+  new Argument('-E', { action: 'store_true', help: 'Ignore PYTHON* environment variables.' }),
+  new Argument('-I', { action: 'store_true', help: 'Isolated mode: implies -E and -s.' }),
+  new Argument('-O', {
+    action: 'count',
+    help: 'Remove assert and __debug__ blocks; -OO also strips docstrings.',
   }),
-  new Option({
-    short: '-b',
-    count: true,
-    description: 'Warn on str(bytes) and on comparing bytes with str; -bb raises instead.',
+  new Argument('-P', {
+    action: 'store_true',
+    help: "Do not prepend the script's directory to sys.path.",
   }),
-  new Option({ short: '-B', description: 'Do not write .pyc files on import.' }),
-  new Option({ short: '-E', description: 'Ignore PYTHON* environment variables.' }),
-  new Option({ short: '-I', description: 'Isolated mode: implies -E and -s.' }),
-  new Option({
-    short: '-O',
-    count: true,
-    description: 'Remove assert and __debug__ blocks; -OO also strips docstrings.',
+  new Argument('-q', {
+    action: 'store_true',
+    help: '(Ignored) Suppress the version banner. Mirage prints none.',
   }),
-  new Option({
-    short: '-P',
-    description: "Do not prepend the script's directory to sys.path.",
+  new Argument('-s', {
+    action: 'store_true',
+    help: 'Do not add the user site directory to sys.path.',
   }),
-  new Option({
-    short: '-q',
-    description: '(Ignored) Suppress the version banner. Mirage prints none.',
+  new Argument('-S', { action: 'store_true', help: "Do not run 'import site' on initialization." }),
+  new Argument('-W', { action: 'append', help: 'Set a warning control filter.' }),
+  new Argument('-x', {
+    action: 'store_true',
+    help: "Skip the script file's first line, for a non-Unix #! form.",
   }),
-  new Option({ short: '-s', description: 'Do not add the user site directory to sys.path.' }),
-  new Option({ short: '-S', description: "Do not run 'import site' on initialization." }),
-  new Option({
-    short: '-W',
-    type: 'str',
-    multiple: true,
-    description: 'Set a warning control filter.',
-  }),
-  new Option({
-    short: '-x',
-    description: "Skip the script file's first line, for a non-Unix #! form.",
-  }),
-  new Option({
-    short: '-X',
-    type: 'str',
-    multiple: true,
-    description: 'Set an implementation-specific option.',
-  }),
+  new Argument('-X', { action: 'append', help: 'Set an implementation-specific option.' }),
   // CPython parses this one by hand and so rejects the --opt=value
   // spelling it accepts everywhere else; mirage's parser takes both,
   // which is the harmless direction to diverge in.
-  new Option({
-    long: '--check-hash-based-pycs',
-    type: 'str',
+  new Argument('--check-hash-based-pycs', {
     choices: ['always', 'default', 'never'],
-    description: 'How to validate hash-based .pyc files.',
+    help: 'How to validate hash-based .pyc files.',
   }),
   // -VV shares the concise version line; build details are not exposed.
-  new Option({ short: '-h', long: '--help', description: 'Show this help message and exit.' }),
-  new Option({
-    short: '-V',
-    long: '--version',
-    description: 'Show version information and exit.',
+  new Argument(['-h', '--help'], {
+    action: 'store_true',
+    help: 'Show this help message and exit.',
+  }),
+  new Argument(['-V', '--version'], {
+    action: 'store_true',
+    help: 'Show version information and exit.',
   }),
 ]
 
@@ -110,127 +90,130 @@ const PYTHON_OPTIONS: readonly Option[] = [
 // argv. The slot has to say so, because a runtime that reads the script
 // itself (a sandbox, a host process) is outside every dispatcher, so the
 // admission gate is the one place a path rule can see the file.
-const PYTHON_SCRIPT = new Operand({ type: 'path', providedBy: ['-c', '-m'] })
+const PYTHON_SCRIPT = new Argument('path', {
+  metavar: '',
+  type: 'path',
+  nargs: '?',
+  providedBy: ['-c', '-m'],
+})
 
 // node's `[script.js | -e "script" | -] [arguments]`, the same shape.
-const JS_SCRIPT = new Operand({ type: 'path', providedBy: ['-e'] })
+const JS_SCRIPT = new Argument('path', {
+  metavar: '',
+  type: 'path',
+  nargs: '?',
+  providedBy: ['-e'],
+})
 
 export const SPECS: Record<string, CommandSpec> = {
   bash: new CommandSpec({
     description:
       'Run a program in a nested Mirage shell: the text after `-c`, a script file, or standard input. `bash` and `sh` are aliases.',
-    options: [
-      new Option({
-        short: '-c',
-        type: 'str',
-        description: 'Read commands from the next argument and execute them.',
+    arguments: [
+      new Argument('-c', { help: 'Read commands from the next argument and execute them.' }),
+      new Argument('-s', {
+        action: 'store_true',
+        help: 'Read commands from stdin instead of from an argument.',
       }),
-      new Option({
-        short: '-s',
-        description: 'Read commands from stdin instead of from an argument.',
+      new Argument('-l', {
+        action: 'store_true',
+        help: '(Ignored) Login shell. Mirage does not source profile files.',
       }),
-      new Option({
-        short: '-l',
-        description: '(Ignored) Login shell. Mirage does not source profile files.',
+      new Argument('-i', {
+        action: 'store_true',
+        help: '(Ignored) Interactive flag. Mirage shells are non-interactive.',
       }),
-      new Option({
-        short: '-i',
-        description: '(Ignored) Interactive flag. Mirage shells are non-interactive.',
+      new Argument('-e', { action: 'store_true', help: 'Exit on first error.' }),
+      new Argument('-u', { action: 'store_true', help: 'Treat unset variables as errors.' }),
+      new Argument('-x', { action: 'store_true', help: 'Print commands as they execute.' }),
+      new Argument('--debug', { action: 'store_true', help: '(Ignored) Debugging mode.' }),
+      new Argument('--init-file', { help: '(Ignored) Read this file instead of ~/.bashrc.' }),
+      new Argument('--login', { action: 'store_true', help: '(Ignored) Login shell.' }),
+      new Argument('--noediting', { action: 'store_true', help: '(Ignored) No line editing.' }),
+      new Argument('--noprofile', { action: 'store_true', help: '(Ignored) Skip profile files.' }),
+      new Argument('--norc', { action: 'store_true', help: '(Ignored) Skip rc files.' }),
+      new Argument('--posix', { action: 'store_true', help: '(Ignored) POSIX-conformant mode.' }),
+      new Argument('--rcfile', { help: '(Ignored) Read this file instead of ~/.bashrc.' }),
+      new Argument('--verbose', {
+        action: 'store_true',
+        help: 'Print input lines as they are read.',
       }),
-      new Option({ short: '-e', description: 'Exit on first error.' }),
-      new Option({ short: '-u', description: 'Treat unset variables as errors.' }),
-      new Option({ short: '-x', description: 'Print commands as they execute.' }),
-      new Option({ long: '--debug', description: '(Ignored) Debugging mode.' }),
-      new Option({
-        long: '--init-file',
-        type: 'str',
-        description: '(Ignored) Read this file instead of ~/.bashrc.',
-      }),
-      new Option({ long: '--login', description: '(Ignored) Login shell.' }),
-      new Option({ long: '--noediting', description: '(Ignored) No line editing.' }),
-      new Option({ long: '--noprofile', description: '(Ignored) Skip profile files.' }),
-      new Option({ long: '--norc', description: '(Ignored) Skip rc files.' }),
-      new Option({ long: '--posix', description: '(Ignored) POSIX-conformant mode.' }),
-      new Option({
-        long: '--rcfile',
-        type: 'str',
-        description: '(Ignored) Read this file instead of ~/.bashrc.',
-      }),
-      new Option({ long: '--verbose', description: 'Print input lines as they are read.' }),
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'str' }),
   }),
   bc: new CommandSpec({
     description: 'Arbitrary precision calculator language.',
-    options: [
-      new Option({ short: '-l', description: 'Load the standard math library.' }),
-      new Option({ short: '-q', description: 'Suppress the welcome banner.' }),
+    arguments: [
+      new Argument('-l', { action: 'store_true', help: 'Load the standard math library.' }),
+      new Argument('-q', { action: 'store_true', help: 'Suppress the welcome banner.' }),
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'str' }),
   }),
   date: new CommandSpec({
     description: 'Print or set the system date and time.',
-    options: [
-      new Option({
-        short: '-d',
-        long: '--date',
-        type: 'str',
-        description: 'Display the time described by the given date string.',
+    arguments: [
+      new Argument(['-d', '--date'], {
+        help: 'Display the time described by the given date string.',
       }),
-      // GNU -I[FMT]: the precision rides attached (-Is) or after `=`, never
-      // as the next word, and matches by prefix in GNU's own table order.
-      new Option({
-        short: '-I',
-        long: '--iso-8601',
-        type: 'str',
-        valueOptional: true,
+      new Argument(['-I', '--iso-8601'], {
+        nargs: '?',
+        attachedOnly: true,
         choices: ['hours', 'minutes', 'date', 'seconds', 'ns'],
-        description: 'Output date/time in ISO 8601 format, to the given precision (default date).',
+        help: 'Output date/time in ISO 8601 format, to the given precision (default date).',
       }),
-      new Option({
-        short: '-R',
-        long: '--rfc-email',
-        description: 'Output date in RFC 5322 email format.',
+      new Argument(['-R', '--rfc-email'], {
+        action: 'store_true',
+        help: 'Output date in RFC 5322 email format.',
       }),
-      new Option({
-        long: '--rfc-3339',
-        type: 'str',
+      new Argument('--rfc-3339', {
         choices: ['date', 'seconds', 'ns'],
-        description: 'Output date/time in RFC 3339 format, to the given precision.',
+        help: 'Output date/time in RFC 3339 format, to the given precision.',
       }),
-      new Option({
-        short: '-u',
-        long: '--utc',
-        description: 'Use Coordinated Universal Time (UTC).',
+      new Argument(['-u', '--utc'], {
+        action: 'store_true',
+        help: 'Use Coordinated Universal Time (UTC).',
       }),
-      new Option({ long: '--universal', description: 'Use Coordinated Universal Time (UTC).' }),
+      new Argument('--universal', {
+        action: 'store_true',
+        help: 'Use Coordinated Universal Time (UTC).',
+      }),
+      new Argument('text', { metavar: '', nargs: '?' }),
     ],
-    positional: [new Operand({ type: 'str' })],
   }),
   expr: new CommandSpec({
     description: 'Evaluate expressions.',
-    rest: new Operand({ type: 'str' }),
+    arguments: [new Argument('texts', { metavar: '', nargs: '*' })],
   }),
   history: new CommandSpec({
     description: 'Show command history for the session.',
-    options: [
-      new Option({ short: '-c', description: 'Clear the command history.' }),
-      new Option({
-        short: '-d',
-        type: 'str',
-        description: 'Delete the entry at the given position; negative counts back from the end.',
+    arguments: [
+      new Argument('-c', { action: 'store_true', help: 'Clear the command history.' }),
+      new Argument('-d', {
+        help: 'Delete the entry at the given position; negative counts back from the end.',
       }),
-      new Option({
-        short: '-s',
-        description: 'Append the args to the history as a single entry without executing them.',
+      new Argument('-s', {
+        action: 'store_true',
+        help: 'Append the args to the history as a single entry without executing them.',
       }),
-      new Option({ short: '-p', description: 'Print the args without storing them.' }),
-      new Option({ short: '-a', description: 'Append: no-op (file and store are the same).' }),
-      new Option({ short: '-r', description: 'Read: no-op (file and store are the same).' }),
-      new Option({ short: '-w', description: 'Write: no-op (file and store are the same).' }),
-      new Option({ short: '-n', description: 'Read-new: no-op (file and store are the same).' }),
+      new Argument('-p', { action: 'store_true', help: 'Print the args without storing them.' }),
+      new Argument('-a', {
+        action: 'store_true',
+        help: 'Append: no-op (file and store are the same).',
+      }),
+      new Argument('-r', {
+        action: 'store_true',
+        help: 'Read: no-op (file and store are the same).',
+      }),
+      new Argument('-w', {
+        action: 'store_true',
+        help: 'Write: no-op (file and store are the same).',
+      }),
+      new Argument('-n', {
+        action: 'store_true',
+        help: 'Read-new: no-op (file and store are the same).',
+      }),
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'str' }),
   }),
   // js and node take the remainder for the same reason python does: the
   // first operand is a program, so the words after it are that program's
@@ -239,208 +222,186 @@ export const SPECS: Record<string, CommandSpec> = {
   // Pinned against node 22.8.0.
   js: new CommandSpec({
     description: 'Run JavaScript on a sandboxed quickjs engine.',
-    options: [
-      new Option({
-        short: '-v',
-        long: '--version',
-        description: 'Show runtime version information and exit.',
+    arguments: [
+      new Argument(['-v', '--version'], {
+        action: 'store_true',
+        help: 'Show runtime version information and exit.',
       }),
-      new Option({
-        short: '-e',
-        type: 'str',
-        description: 'Evaluate the next argument as a script.',
+      new Argument('-e', { help: 'Evaluate the next argument as a script.' }),
+      new Argument(['-m', '--module'], {
+        action: 'store_true',
+        help: 'Run as an ES module (top-level import/export/await); .mjs files select this automatically.',
       }),
-      new Option({
-        short: '-m',
-        long: '--module',
-        description:
-          'Run as an ES module (top-level import/export/await); .mjs files select this automatically.',
-      }),
+      JS_SCRIPT,
+      new Argument('texts', { metavar: '', nargs: 'REMAINDER' }),
     ],
-    positional: [JS_SCRIPT],
-    rest: new Operand({ type: 'str', remainder: true }),
   }),
   mktemp: new CommandSpec({
-    options: [
-      new Option({ short: '-d', long: '--directory' }),
-      new Option({ short: '-p', type: 'path' }),
-      new Option({ long: '--tmpdir', type: 'path', valueOptional: true }),
-      new Option({ short: '-t' }),
-      new Option({ short: '-u', long: '--dry-run' }),
-      new Option({ short: '-q', long: '--quiet' }),
-      new Option({ long: '--suffix', type: 'str' }),
+    arguments: [
+      new Argument(['-d', '--directory'], { action: 'store_true' }),
+      new Argument('-p', { type: 'path' }),
+      new Argument('--tmpdir', { type: 'path', nargs: '?', attachedOnly: true }),
+      new Argument('-t', { action: 'store_true' }),
+      new Argument(['-u', '--dry-run'], { action: 'store_true' }),
+      new Argument(['-q', '--quiet'], { action: 'store_true' }),
+      new Argument('--suffix'),
+      new Argument('text', { metavar: '', nargs: '?' }),
     ],
-    positional: [new Operand({ type: 'str' })],
   }),
   // An alias of js, remainder included; see the note there.
   node: new CommandSpec({
     description: 'Run JavaScript on a sandboxed quickjs engine.',
-    options: [
-      new Option({
-        short: '-v',
-        long: '--version',
-        description: 'Show runtime version information and exit.',
+    arguments: [
+      new Argument(['-v', '--version'], {
+        action: 'store_true',
+        help: 'Show runtime version information and exit.',
       }),
-      new Option({
-        short: '-e',
-        type: 'str',
-        description: 'Evaluate the next argument as a script.',
+      new Argument('-e', { help: 'Evaluate the next argument as a script.' }),
+      new Argument(['-m', '--module'], {
+        action: 'store_true',
+        help: 'Run as an ES module (top-level import/export/await); .mjs files select this automatically.',
       }),
-      new Option({
-        short: '-m',
-        long: '--module',
-        description:
-          'Run as an ES module (top-level import/export/await); .mjs files select this automatically.',
-      }),
+      JS_SCRIPT,
+      new Argument('texts', { metavar: '', nargs: 'REMAINDER' }),
     ],
-    positional: [JS_SCRIPT],
-    rest: new Operand({ type: 'str', remainder: true }),
   }),
   python: new CommandSpec({
     description: "Run Python on the workspace's bound runtime.",
-    options: PYTHON_OPTIONS,
-    positional: [PYTHON_SCRIPT],
-    rest: new Operand({ type: 'str', remainder: true }),
+    arguments: [
+      ...PYTHON_OPTIONS,
+      PYTHON_SCRIPT,
+      new Argument('texts', { metavar: '', nargs: 'REMAINDER' }),
+    ],
   }),
   python3: new CommandSpec({
     description: "Run Python on the workspace's bound runtime.",
-    options: PYTHON_OPTIONS,
-    positional: [PYTHON_SCRIPT],
-    rest: new Operand({ type: 'str', remainder: true }),
+    arguments: [
+      ...PYTHON_OPTIONS,
+      PYTHON_SCRIPT,
+      new Argument('texts', { metavar: '', nargs: 'REMAINDER' }),
+    ],
   }),
   uname: new CommandSpec({
     description: 'Print certain system information.',
-    options: [
-      new Option({
-        short: '-a',
-        long: '--all',
-        description: 'Print all information, omitting -p and -i if unknown.',
+    arguments: [
+      new Argument(['-a', '--all'], {
+        action: 'store_true',
+        help: 'Print all information, omitting -p and -i if unknown.',
       }),
-      new Option({ short: '-s', long: '--kernel-name', description: 'Print the kernel name.' }),
-      new Option({
-        short: '-n',
-        long: '--nodename',
-        description: 'Print the network node hostname.',
+      new Argument(['-s', '--kernel-name'], {
+        action: 'store_true',
+        help: 'Print the kernel name.',
       }),
-      new Option({
-        short: '-r',
-        long: '--kernel-release',
-        description: 'Print the kernel release.',
+      new Argument(['-n', '--nodename'], {
+        action: 'store_true',
+        help: 'Print the network node hostname.',
       }),
-      new Option({
-        short: '-v',
-        long: '--kernel-version',
-        description: 'Print the kernel version.',
+      new Argument(['-r', '--kernel-release'], {
+        action: 'store_true',
+        help: 'Print the kernel release.',
       }),
-      new Option({
-        short: '-m',
-        long: '--machine',
-        description: 'Print the machine hardware name.',
+      new Argument(['-v', '--kernel-version'], {
+        action: 'store_true',
+        help: 'Print the kernel version.',
       }),
-      new Option({
-        short: '-p',
-        long: '--processor',
-        description: 'Print the processor type.',
+      new Argument(['-m', '--machine'], {
+        action: 'store_true',
+        help: 'Print the machine hardware name.',
       }),
-      new Option({
-        short: '-i',
-        long: '--hardware-platform',
-        description: 'Print the hardware platform.',
+      new Argument(['-p', '--processor'], {
+        action: 'store_true',
+        help: 'Print the processor type.',
       }),
-      new Option({
-        short: '-o',
-        long: '--operating-system',
-        description: 'Print the operating system.',
+      new Argument(['-i', '--hardware-platform'], {
+        action: 'store_true',
+        help: 'Print the hardware platform.',
       }),
+      new Argument(['-o', '--operating-system'], {
+        action: 'store_true',
+        help: 'Print the operating system.',
+      }),
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'str' }),
   }),
   hostname: new CommandSpec({
     description: "Show or set the system's host name.",
-    options: [
-      new Option({ short: '-a', long: '--alias', description: 'Alias names.' }),
-      new Option({ short: '-A', long: '--all-fqdns', description: 'All long host names (FQDNs).' }),
-      new Option({
-        short: '-b',
-        long: '--boot',
-        description: 'Set default hostname if none available.',
+    arguments: [
+      new Argument(['-a', '--alias'], { action: 'store_true', help: 'Alias names.' }),
+      new Argument(['-A', '--all-fqdns'], {
+        action: 'store_true',
+        help: 'All long host names (FQDNs).',
       }),
-      new Option({ short: '-d', long: '--domain', description: 'DNS domain name.' }),
-      new Option({ short: '-f', long: '--fqdn', description: 'Long host name (FQDN).' }),
-      new Option({ long: '--long', description: 'Long host name (FQDN).' }),
-      new Option({
-        short: '-F',
-        long: '--file',
-        type: 'str',
-        description: 'Read host name or NIS domain name from given file.',
+      new Argument(['-b', '--boot'], {
+        action: 'store_true',
+        help: 'Set default hostname if none available.',
       }),
-      new Option({
-        short: '-i',
-        long: '--ip-address',
-        description: 'Addresses for the host name.',
+      new Argument(['-d', '--domain'], { action: 'store_true', help: 'DNS domain name.' }),
+      new Argument(['-f', '--fqdn'], { action: 'store_true', help: 'Long host name (FQDN).' }),
+      new Argument('--long', { action: 'store_true', help: 'Long host name (FQDN).' }),
+      new Argument(['-F', '--file'], {
+        help: 'Read host name or NIS domain name from given file.',
       }),
-      new Option({
-        short: '-I',
-        long: '--all-ip-addresses',
-        description: 'All addresses for the host.',
+      new Argument(['-i', '--ip-address'], {
+        action: 'store_true',
+        help: 'Addresses for the host name.',
       }),
-      new Option({ short: '-s', long: '--short', description: 'Short host name.' }),
-      new Option({ short: '-y', long: '--yp', description: 'NIS/YP domain name.' }),
-      new Option({ long: '--nis', description: 'NIS/YP domain name.' }),
+      new Argument(['-I', '--all-ip-addresses'], {
+        action: 'store_true',
+        help: 'All addresses for the host.',
+      }),
+      new Argument(['-s', '--short'], { action: 'store_true', help: 'Short host name.' }),
+      new Argument(['-y', '--yp'], { action: 'store_true', help: 'NIS/YP domain name.' }),
+      new Argument('--nis', { action: 'store_true', help: 'NIS/YP domain name.' }),
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'str' }),
   }),
   id: new CommandSpec({
     description:
       'Print user and group information for each specified USER, or (when USER omitted) for the current process.',
-    options: [
-      new Option({ short: '-a', description: 'Ignore, for compatibility with other versions.' }),
-      new Option({
-        short: '-Z',
-        long: '--context',
-        description: 'Print only the security context of the process.',
+    arguments: [
+      new Argument('-a', {
+        action: 'store_true',
+        help: 'Ignore, for compatibility with other versions.',
       }),
-      new Option({
-        short: '-g',
-        long: '--group',
-        description: 'Print only the effective group ID.',
+      new Argument(['-Z', '--context'], {
+        action: 'store_true',
+        help: 'Print only the security context of the process.',
       }),
-      new Option({ short: '-G', long: '--groups', description: 'Print all group IDs.' }),
-      new Option({
-        short: '-n',
-        long: '--name',
-        description: 'Print a name instead of a number, for -u,-g,-G.',
+      new Argument(['-g', '--group'], {
+        action: 'store_true',
+        help: 'Print only the effective group ID.',
       }),
-      new Option({
-        short: '-r',
-        long: '--real',
-        description: 'Print the real ID instead of the effective ID, with -u,-g,-G.',
+      new Argument(['-G', '--groups'], { action: 'store_true', help: 'Print all group IDs.' }),
+      new Argument(['-n', '--name'], {
+        action: 'store_true',
+        help: 'Print a name instead of a number, for -u,-g,-G.',
       }),
-      new Option({ short: '-u', long: '--user', description: 'Print only the effective user ID.' }),
-      new Option({
-        short: '-z',
-        long: '--zero',
-        description:
-          'Delimit entries with NUL characters, not whitespace; not permitted in default format.',
+      new Argument(['-r', '--real'], {
+        action: 'store_true',
+        help: 'Print the real ID instead of the effective ID, with -u,-g,-G.',
       }),
+      new Argument(['-u', '--user'], {
+        action: 'store_true',
+        help: 'Print only the effective user ID.',
+      }),
+      new Argument(['-z', '--zero'], {
+        action: 'store_true',
+        help: 'Delimit entries with NUL characters, not whitespace; not permitted in default format.',
+      }),
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'str' }),
   }),
   getconf: new CommandSpec({
     description:
       'Get the configuration value for variable VAR, or for variable PATH_VAR for path PATH.',
-    options: [
-      new Option({ short: '-a', description: 'Print every variable and its value.' }),
-      new Option({
-        short: '-v',
-        type: 'str',
-        description: 'Give values for compilation environment SPEC.',
-      }),
+    arguments: [
+      new Argument('-a', { action: 'store_true', help: 'Print every variable and its value.' }),
+      new Argument('-v', { help: 'Give values for compilation environment SPEC.' }),
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'str' }),
   }),
   sleep: new CommandSpec({
     description: 'Delay for a specified amount of time.',
-    rest: new Operand({ type: 'str' }),
+    arguments: [new Argument('texts', { metavar: '', nargs: '*' })],
   }),
 }

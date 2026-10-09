@@ -31,7 +31,6 @@ const touch: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const exists = requireOp(ops.exists, 'exists')
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
   const createOnly = new FlagView(opts.flags, specOf('touch')).asBool('no_create')
-  const writes: Record<string, Uint8Array> = {}
   const errors: string[] = []
   for (const p of resolved) {
     if (createOnly) continue
@@ -43,12 +42,10 @@ const touch: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
       // and still touches the remaining ones.
       if (!isFsError(err)) throw err
       errors.push(`touch: cannot touch '${p.virtual}': ${String(fsStrerror(err))}`)
-      continue
     }
-    writes[p.mountPath] = new Uint8Array(0)
   }
   const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null
-  return [null, new IOResult({ writes, stderr, exitCode: errors.length > 0 ? 1 : 0 })]
+  return [null, new IOResult({ stderr, exitCode: errors.length > 0 ? 1 : 0 })]
 }
 
 export const BUILDER: GenericCommand = {

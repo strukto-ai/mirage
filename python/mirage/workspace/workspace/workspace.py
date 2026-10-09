@@ -40,7 +40,7 @@ from mirage.bridge.sync import run_async_from_sync
 from mirage.cache.file.config import CacheConfig
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
-from mirage.commands.cli import CLISpec
+from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.concurrency.limiter import run_blocking
 from mirage.context import (
@@ -264,8 +264,7 @@ class Workspace:
         profile: str | None = None,
         policies: list[Policy] | None = None,
         on_ask: AskHandler | None = None,
-        clis: dict[str, tuple[str | CLISpec, dict[str, Any] | None]]
-        | None = None,
+        clis: dict[str, tuple[str | CLI, dict[str, Any] | None]] | None = None,
         env: Mapping[str, str | EnvVar | Mapping[str, Any]] | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         io: IOConfig | Mapping[str, Any] | None = None,
@@ -550,7 +549,7 @@ class Workspace:
             for cli_name, (spec_or_key, cli_config) in clis.items():
                 cli_spec = (
                     spec_or_key
-                    if isinstance(spec_or_key, CLISpec)
+                    if isinstance(spec_or_key, CLI)
                     else cli_spec_for(spec_or_key)
                 )
                 self._registry.clis.install(cli_name, cli_spec, cli_config)
@@ -978,7 +977,7 @@ class Workspace:
     def register_cli(
         self,
         name: str,
-        spec: CLISpec,
+        spec: CLI,
         config: Mapping[str, JsonValue] | BaseModel | None = None,
     ) -> CLIInstall:
         """Install a CLI under a head word, fully separate from mounts.
@@ -987,7 +986,7 @@ class Workspace:
             name (str): head word to install under (the dispatch key;
                 two installs of one spec under different names are two
                 accounts).
-            spec (CLISpec): the program tree.
+            spec (CLI): the program tree.
             config (Mapping[str, JsonValue] | BaseModel | None):
                 installation config: a mapping, validated through the
                 spec's ``config_model`` (fail loud at install time), or
@@ -1837,7 +1836,7 @@ class Workspace:
         """
         return {
             name: frozenset(
-                child.name for child in (install.spec.subcommands or ())
+                child.name for child in (install.cli.spec.subcommands or ())
             )
             for name, install in self._registry.clis.items().items()
         }

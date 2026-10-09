@@ -126,7 +126,7 @@ export function writtenVerdict(
  * `IOResult.writes` value when `data` was written, null when a read produced
  * it.
  */
-async function setCached(
+export async function setCached(
   cache: FileCache,
   path: string,
   data: Uint8Array,

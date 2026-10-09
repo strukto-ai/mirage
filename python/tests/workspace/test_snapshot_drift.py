@@ -20,7 +20,8 @@ from typing import Any
 import pytest
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.types import DriftPolicy, MountMode, PathSpec
@@ -377,7 +378,13 @@ async def test_snapshot_fingerprints_keep_read_mount_ownership(
             await release.wait()
             return None, IOResult()
 
-        ws.register_cli("gate", CLISpec(name="gate", fn=gate))
+        ws.register_cli(
+            "gate",
+            CLI(
+                spec=CommandSpec(name="gate"),
+                handlers={"": CLIHandler(fn=gate)},
+            ),
+        )
         reading = None
         try:
             await ws.shell("cat /data/nested/file")

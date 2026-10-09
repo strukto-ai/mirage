@@ -13,10 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.runtime.types import ScriptSource
 from mirage.workspace.snapshot.keys import StateKey
 from mirage.workspace.snapshot.state import apply_state_dict, to_state_dict
 
@@ -30,8 +34,34 @@ def workspace():
 
 
 @pytest.mark.asyncio
-async def test_a_preview_opens_no_session_and_each_reader_renders_its_own():
+@pytest.mark.parametrize(
+    ("script", "arguments", "owns_argv"),
+    [
+        (None, (), False),
+        (
+            None,
+            (
+                Argument("--output"),
+                Argument("PATH", type="path", help="Destination document"),
+            ),
+            False,
+        ),
+        (ScriptSource("1"), (Argument("--output"),), False),
+        (ScriptSource("1"), (), True),
+    ],
+)
+async def test_a_preview_opens_no_session_and_each_reader_renders_its_own(
+    script, arguments, owns_argv
+):
     ws = workspace()
+    ws.register_cli(
+        "tool",
+        CLI(
+            CommandSpec(name="tool", arguments=arguments, add_help=False),
+            script=script,
+            handlers={} if script else {"": CLIHandler(AsyncMock())},
+        ),
+    )
     await ws.session("a", profile="reader")
     await ws.session("b")
     preview = await ws.vfs_md(profile="reader")
@@ -42,6 +72,16 @@ async def test_a_preview_opens_no_session_and_each_reader_renders_its_own():
         ws.vfs.read("/VFS.md", session_id="b"),
     )
     assert restricted == preview.encode() and b"/secret" in full
+    skill = await ws.skill_md()
+    assert "## `tool`" in skill
+    assert ("This program parses its own arguments" in skill) == owns_argv
+    assert ("--output OUTPUT" in skill) == bool(arguments)
+    authored_help = any(argument.help for argument in arguments)
+    assert ("Destination document" in skill) == authored_help
+    manual = await ws.shell("man tool")
+    assert manual.exit_code == 0
+    assert (b"Destination document" in manual.stdout) == authored_help
+    assert len(ws.list_sessions()) == 3
     await ws.close()
 
 

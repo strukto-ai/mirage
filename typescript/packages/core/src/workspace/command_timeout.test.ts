@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../commands/spec/types.ts'
+import { CLIHandler } from '../commands/cli/types.ts'
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -22,7 +24,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
-import { CLISpec } from '../commands/cli/types.ts'
+import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 
 class SignalProbeRuntime extends LanguageRuntime {
@@ -280,11 +282,15 @@ describe('background job kill', () => {
     for (const name of ['started', 'reached'])
       ws.registerCli(
         name,
-        new CLISpec({
-          name,
-          fn: () => {
-            reached.push(name)
-            return Promise.resolve([null, new IOResult()])
+        new CLI({
+          spec: new CommandSpec({ name }),
+          handlers: {
+            '': new CLIHandler({
+              fn: () => {
+                reached.push(name)
+                return Promise.resolve([null, new IOResult()])
+              },
+            }),
           },
         }),
       )

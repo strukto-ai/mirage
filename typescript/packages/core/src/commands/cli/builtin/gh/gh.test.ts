@@ -110,7 +110,7 @@ function reset(reply: unknown = {}): void {
 describe('gh tree', () => {
   it('registers itself under the grammar gh uses', () => {
     expect(cliSpecFor('gh')).toBe(GH)
-    expect(GH.subcommands.map((c) => c.name)).toEqual([
+    expect(GH.spec.subcommands.map((c) => c.name)).toEqual([
       'auth',
       'help',
       'version',
@@ -123,7 +123,7 @@ describe('gh tree', () => {
       'workflow',
       'search',
     ])
-    const repo = GH.subcommands.find((c) => c.name === 'repo')
+    const repo = GH.spec.subcommands.find((c) => c.name === 'repo')
     expect(repo?.subcommands.map((c) => c.name)).toEqual([
       'list',
       'clone',
@@ -134,15 +134,11 @@ describe('gh tree', () => {
       'edit',
       'delete',
     ])
-    expect(repo?.subcommands.filter((c) => c.write).map((c) => c.name)).toEqual([
-      'create',
-      'fork',
-      'rename',
-      'edit',
-      'delete',
-    ])
+    expect(
+      repo?.subcommands.filter((c) => GH.handlers[`repo ${c.name}`]?.write).map((c) => c.name),
+    ).toEqual(['create', 'fork', 'rename', 'edit', 'delete'])
     const groups = Object.fromEntries(
-      GH.subcommands.map((group) => [group.name, group.subcommands.map((leaf) => leaf.name)]),
+      GH.spec.subcommands.map((group) => [group.name, group.subcommands.map((leaf) => leaf.name)]),
     )
     expect(groups.issue).toEqual(['list', 'view', 'create', 'edit', 'close', 'reopen', 'comment'])
     expect(groups.pr).toEqual([

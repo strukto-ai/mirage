@@ -17,7 +17,8 @@ from pydantic import BaseModel
 
 from mirage.commands.cli.builtin.discord import DISCORD
 from mirage.commands.cli.builtin.slack import SLACK
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.workspace.cli.registry import CLIRegistry
 
@@ -30,11 +31,11 @@ async def noop(config, paths, *texts, **flags):
     return None, IOResult()
 
 
-def tree(config_model=None) -> CLISpec:
-    return CLISpec(
-        name="prog",
+def tree(config_model=None) -> CLI:
+    return CLI(
+        spec=CommandSpec(name="prog", subcommands=(CommandSpec(name="run"),)),
+        handlers={"run": CLIHandler(fn=noop)},
         config_model=config_model,
-        subcommands=(CLISpec(name="run", fn=noop),),
     )
 
 

@@ -359,7 +359,6 @@ export async function decompressInputs(
         if (existed) continue
         return
       }
-      if (link === null) io.writes[out.mountPath] = data
       if (options.keep !== true) {
         if (link === null || resolver === null) await options.unlink(path)
         else await resolver.unlink(link)

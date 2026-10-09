@@ -309,7 +309,7 @@ def program_tokens(
     """
     install = registry.clis.get(name)
     if install is not None:
-        result = walk(name, install.spec, argv, cwd)
+        result = walk(name, install.cli.spec, argv, cwd)
         if result.leaf is not None:
             program = (name, *result.path)
             return (*program, *result.argv), program

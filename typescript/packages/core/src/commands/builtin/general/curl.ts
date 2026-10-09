@@ -522,7 +522,6 @@ async function curl(
   // -i, -I and -D all show every hop's header block (curl 8.14.1); the body
   // a redirect carried is never written, only the final one.
   const blocks = ENC.encode(hops.map((hop) => dump(responseLines(hop))).join(''))
-  const writes: Record<string, Uint8Array> = {}
   // -D writes the headers as they arrive, so before -f judges the status and
   // before -o writes the body: a file both name ends up holding the body.
   if (dumpFile !== null) {
@@ -541,7 +540,6 @@ async function curl(
         )
       }
     }
-    writes[dumpFile instanceof PathSpec ? dumpFile.virtual : dumpFile] = blocks
   }
   const headerOut = dumpToStdout ? blocks : null
   // Only -f makes an error status an error, and then no body is written; the
@@ -553,7 +551,6 @@ async function curl(
       new IOResult({
         exitCode: EXIT_HTTP_ERROR,
         stderr: concat([trace, quiet ? new Uint8Array() : ENC.encode(line)]),
-        writes,
       }),
       resp,
     )
@@ -577,16 +574,14 @@ async function curl(
           new IOResult({
             exitCode: EXIT_WRITE,
             stderr: concat([trace, quiet ? new Uint8Array() : ENC.encode(line)]),
-            writes,
           }),
           resp,
         )
       }
     }
-    writes[output instanceof PathSpec ? output.virtual : output] = result
     // Real curl writes the body to the file and prints nothing else on
     // stdout, the headers -D sends there aside.
-    return await finish(headerOut, new IOResult({ writes, stderr: trace }), resp)
+    return await finish(headerOut, new IOResult({ stderr: trace }), resp)
   }
   if (dumpToStdout) {
     result =
@@ -594,7 +589,7 @@ async function curl(
         ? concat([ENC.encode(doubled(hops)), head ? new Uint8Array() : resp.body])
         : concat([blocks, result])
   }
-  return await finish(result, new IOResult({ writes, stderr: trace }), resp)
+  return await finish(result, new IOResult({ stderr: trace }), resp)
 }
 
 export const GENERAL_CURL = command({

@@ -11,10 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { describe, expect, it } from 'vitest'
 import { Command } from '../commands/config.ts'
-import { CommandSpec, Operand } from '../commands/spec/types.ts'
+import { CommandSpec, Argument } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, VFSName } from '../types.ts'
@@ -23,7 +22,9 @@ import type { ExecuteResult } from './workspace/workspace.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
-const SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
+const SPEC = new CommandSpec({
+  arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+})
 
 const noopFn = (): Promise<[Uint8Array, IOResult]> =>
   Promise.resolve([ENC.encode('ok'), new IOResult()])

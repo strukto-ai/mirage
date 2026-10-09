@@ -20,6 +20,7 @@ from mirage import Workspace
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.tree import tree_entries
 from mirage.commands.cli.specs import cli_spec_for
+from mirage.commands.spec.compile import compile_spec
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 
@@ -44,12 +45,12 @@ def leaf(name: str):
     Args:
         name (str): the verb's name.
     """
-    return next(c for c in GIT.subcommands if c.name == name)
+    return next(c for c in GIT.spec.subcommands if c.name == name)
 
 
 def test_tree_shape():
-    assert GIT.name == "git"
-    assert [v.name for v in GIT.subcommands] == [
+    assert GIT.spec.name == "git"
+    assert [v.name for v in GIT.spec.subcommands] == [
         "reflog",
         "for-each-ref",
         "cat-file",
@@ -100,7 +101,7 @@ def test_resolvable_by_name_from_yaml():
 
 
 def test_directory_option_is_a_path_defaulting_to_cwd():
-    option = next(o for o in GIT.options if o.short == "-C")
+    option = next(o for o in compile_spec(GIT.spec).options if "-C" in o.names)
     assert option.type == "path"
     # The default is load-bearing: a PATH default lands as if typed, so
     # an absent -C resolves to the session cwd and no leaf needs a
@@ -109,7 +110,7 @@ def test_directory_option_is_a_path_defaulting_to_cwd():
 
 
 def test_status_only_reads():
-    assert not leaf("status").write
+    assert not GIT.handlers["status"].write
 
 
 @pytest.mark.asyncio

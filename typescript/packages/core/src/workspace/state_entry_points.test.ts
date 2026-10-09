@@ -11,12 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { seedVar, setAttr } from '../workspace/session/state.ts'
 import { VarAttr } from '../shell/variable.ts'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Command } from '../commands/config.ts'
-import { CommandSpec, Operand } from '../commands/spec/types.ts'
+import { CommandSpec, Argument } from '../commands/spec/types.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { IOResult } from '../io/types.ts'
 import { BaseVFS } from '../vfs/base.ts'
@@ -267,7 +266,9 @@ class DenySecretEnv implements Policy {
   }
 }
 
-const CMD_SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
+const CMD_SPEC = new CommandSpec({
+  arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+})
 
 describe('session-state writes go through the view', () => {
   it('export fires the state gate', async () => {

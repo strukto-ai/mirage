@@ -123,7 +123,6 @@ def _copy_result(io: IOResult, outcome: IOResult) -> None:
     io.reads.update(outcome.reads)
     io.writes.update(outcome.writes)
     io.cache[:] = outcome.cache
-    io.renames[:] = outcome.renames
     io.matched_runs = outcome.matched_runs
     io.sized_runs = outcome.sized_runs
     io.counted_runs = outcome.counted_runs

@@ -4,7 +4,7 @@ import { GitHubApiError } from '../../../../core/github/client.ts'
 import { search } from '../../../../core/github/search.ts'
 import { invoke } from '../../../../io/stdio.ts'
 import { materialize } from '../../../../io/types.ts'
-import { searchSpec } from './search.ts'
+import { searchSpec, searchHandlers } from './search.ts'
 import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
 
 vi.mock('../../../../core/github/search.ts', () => ({ search: vi.fn(() => Promise.resolve([])) }))
@@ -45,8 +45,9 @@ const cases: [string, Record<string, FlagValue>, string][] = [
 describe('search qualifiers match native gh', () => {
   it.each(cases)('%s', async (kind, flags, expected) => {
     const leaf = searchSpec().subcommands.find((item) => item.name === kind)
-    if (!leaf?.fn) throw new Error('missing search handler')
-    await leaf.fn(
+    const handler = searchHandlers()[`search ${leaf?.name ?? ''}`]
+    if (!leaf || !handler?.fn) throw new Error('missing search handler')
+    await handler.fn(
       cliInvocation({
         config: { token: 't' },
         argv: ['search', kind, 'two words'],
@@ -86,10 +87,11 @@ describe('a failed search reads as gh words it', () => {
   ] as const)('%s %s', async (status, message, body, stderr) => {
     vi.mocked(search).mockRejectedValueOnce(new GitHubApiError(message, status, body, URL))
     const leaf = searchSpec().subcommands.find((item) => item.name === 'issues')
-    if (!leaf?.fn) throw new Error('missing search handler')
-    const handler = leaf.fn
+    const handler = searchHandlers()[`search ${leaf?.name ?? ''}`]
+    if (!leaf || !handler?.fn) throw new Error('missing search handler')
+    const fn = handler.fn
     const result = await invoke(() =>
-      handler(
+      fn(
         cliInvocation({
           config: { token: 't' },
           argv: ['search', 'issues', 'needle'],

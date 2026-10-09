@@ -15,7 +15,7 @@
 import re
 
 from mirage.commands.spec.long_options import GNU_LONG_OPTIONS
-from mirage.commands.spec.types import Option
+from mirage.commands.spec.types import Argument
 
 # The two options every registered command answers, as GNU coreutils
 # does. They live here rather than beside the wrapper that injects them
@@ -24,16 +24,12 @@ from mirage.commands.spec.types import Option
 # same way. Shared SINGLETONS, so `o is HELP_OPTION` identifies one
 # through any copy of a spec, which is what tells a builtin's grammar
 # apart from a registered command that borrowed its name.
-HELP_OPTION = Option(
-    long="--help",
-    type="bool",
-    description="Show this help and exit",
+HELP_OPTION = Argument(
+    "--help", action="store_true", help="Show this help and exit"
 )
 
-VERSION_OPTION = Option(
-    long="--version",
-    type="bool",
-    description="Show version information and exit",
+VERSION_OPTION = Argument(
+    "--version", action="store_true", help="Show version information and exit"
 )
 
 AMBIGUOUS_NAMES = {"l": "args_l", "O": "args_O", "I": "args_I", "1": "args_1"}
@@ -637,7 +633,7 @@ STANDARD_BEFORE_SCAN = frozenset({"zgrep"})
 # -- `--backup`, `ls --sort`, `ls --time`, `sort --check`, `cp
 # --update`, `tail --follow`, `wc --total`, `uniq`, `cut` -- call
 # `argmatch` from the command with their own candidate list, and never
-# reach the parser's `Option.choices` at all. The entries below are the
+# reach the parser's `Argument.choices` at all. The entries below are the
 # whole of what does. Measured on coreutils 9.7: `tee
 # --output-error=exit-n` resolves to `exit-nopipe` while `=w` and `=e`
 # are ambiguous, `numfmt --to=s` resolves to `si` and `--to=ie` is
@@ -645,7 +641,7 @@ STANDARD_BEFORE_SCAN = frozenset({"zgrep"})
 # and `date --rfc-3339=` is ambiguous.
 #
 # Written as (command, canonical long spelling) because that is how the
-# measurement reads, but it NAMES the builtin `Option` objects
+# measurement reads, but it NAMES the builtin `Argument` objects
 # rather than keying on the two strings: the parser resolves each pair
 # once and then asks whether the option declaring a set IS one of them.
 # A name is not identity, and a mount may register its own `tee`
@@ -654,7 +650,7 @@ STANDARD_BEFORE_SCAN = frozenset({"zgrep"})
 # only signal that survives registration, which hands the parser an
 # enriched COPY of the spec (config.py appends --help/--version), so
 # `spec is SPECS[name]` is False for every builtin by the time a line is
-# parsed while every declared Option is still the same object.
+# parsed while every declared Argument is still the same object.
 ARGMATCH_CHOICE_OPTIONS = frozenset(
     {
         ("tee", "--output-error"),

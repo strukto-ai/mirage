@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.slack import SLACK
+from mirage.commands.spec.compile import compile_spec
 from mirage.core.slack.config import SlackConfig
 
 VERBS = [
@@ -31,17 +32,19 @@ VERBS = [
 
 
 def leaf(name: str):
-    return next(c for c in SLACK.subcommands if c.name == name)
+    return next(c for c in SLACK.spec.subcommands if c.name == name)
 
 
 def test_tree_shape_matches_the_openclaw_vocabulary():
-    assert SLACK.name == "slack"
+    assert SLACK.spec.name == "slack"
     assert SLACK.config_model is SlackConfig
-    assert [v.name for v in SLACK.subcommands] == VERBS
+    assert [v.name for v in SLACK.spec.subcommands] == VERBS
 
 
 def test_write_classification():
-    writers = {v.name for v in SLACK.subcommands if v.write}
+    writers = {
+        v.name for v in SLACK.spec.subcommands if SLACK.handlers[v.name].write
+    }
     assert writers == {
         "send-message",
         "react",
@@ -51,6 +54,12 @@ def test_write_classification():
 
 
 def test_required_flags():
-    required = {o.long for o in leaf("send-message").options if o.required}
+    required = {
+        o.names[-1]
+        for o in compile_spec(leaf("send-message")).options
+        if o.required
+    }
     assert required == {"--channel", "--text"}
-    assert not any(o.required for o in leaf("emoji-list").options)
+    assert not any(
+        o.required for o in compile_spec(leaf("emoji-list")).options
+    )

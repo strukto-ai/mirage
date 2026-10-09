@@ -63,13 +63,9 @@ export async function teeGeneric(
 }
 
 /**
- * Write one operand, returning its new content when that is known.
- *
- * `null` means "written, but the resulting bytes are not in hand" — the native
- * append case. The caller then lists the path in `writes` without listing it in
- * `cache`, which is how the cache layer is told to drop the stale entry instead
- * of caching a wrong one. That costs one read on the next access and saves
- * reading and re-uploading the whole object on this one.
+ * Write one operand. A native append sends only the new bytes, which costs
+ * one read on the next access and saves reading and re-uploading the whole
+ * object on this one.
  */
 async function writeOne(
   path: PathSpec,
@@ -78,14 +74,14 @@ async function writeOne(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   append: ((p: PathSpec, data: Uint8Array) => Promise<void>) | undefined,
-): Promise<Uint8Array | null> {
+): Promise<void> {
   if (!parsed.append) {
     await write(path, raw)
-    return raw
+    return
   }
   if (append !== undefined) {
     await append(path, raw)
-    return null
+    return
   }
   let existing: Uint8Array = new Uint8Array(0)
   try {
@@ -101,7 +97,6 @@ async function writeOne(
   data.set(existing, 0)
   data.set(raw, existing.byteLength)
   await write(path, data)
-  return data
 }
 
 /**
@@ -154,8 +149,6 @@ export async function writeOutput(
   append?: (p: PathSpec, data: Uint8Array) => Promise<void>,
   stat?: StatFn,
 ): Promise<[ByteSource | null, IOResult]> {
-  const writes: Record<string, ByteSource> = {}
-  const cache: string[] = []
   const errors: string[] = []
   // GNU opens every output before it reads a byte: under exit the first open
   // failure ends the run with nothing written, the outputs before it made
@@ -182,8 +175,6 @@ export async function writeOutput(
         try {
           if (!(parsed.append && (await entryKind(stat, prior)).exists)) {
             await write(prior, new Uint8Array(0))
-            writes[prior.mountPath] = new Uint8Array(0)
-            cache.push(prior.mountPath)
           }
         } catch (err) {
           failed = prior
@@ -194,8 +185,7 @@ export async function writeOutput(
       }
       if (refusal === null) {
         try {
-          const data = await writeOne(path, new Uint8Array(0), parsed, stream, write, append)
-          writes[path.mountPath] = data ?? new Uint8Array(0)
+          await writeOne(path, new Uint8Array(0), parsed, stream, write, append)
           opened.add(path.mountPath)
           continue
         } catch (err) {
@@ -203,7 +193,7 @@ export async function writeOutput(
         }
       }
       const stderr = encodeText(errorLine(failed, refusal))
-      return [null, new IOResult({ exitCode: 1, stderr, writes, cache })]
+      return [null, new IOResult({ exitCode: 1, stderr })]
     }
   }
   for (const [index, path] of paths.entries()) {
@@ -223,19 +213,15 @@ export async function writeOutput(
       errors.push(errorLine(path, refusal))
       continue
     }
-    let data: Uint8Array | null
     try {
-      data = await writeOne(path, raw, parsed, stream, write, append)
+      await writeOne(path, raw, parsed, stream, write, append)
     } catch (err) {
       errors.push(errorLine(path, err))
       if (parsed.stopOnError) break
-      continue
     }
-    writes[path.mountPath] = data ?? raw
-    if (data !== null && !cache.includes(path.mountPath)) cache.push(path.mountPath)
   }
   if (errors.length > 0) {
-    return [raw, new IOResult({ exitCode: 1, stderr: encodeText(errors.join('')), writes, cache })]
+    return [raw, new IOResult({ exitCode: 1, stderr: encodeText(errors.join('')) })]
   }
-  return [raw, new IOResult({ writes, cache })]
+  return [raw, new IOResult()]
 }

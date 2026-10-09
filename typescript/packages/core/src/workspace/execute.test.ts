@@ -1,4 +1,4 @@
-import { CLISpec } from '../commands/cli/types.ts'
+import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { command } from '../commands/config.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
@@ -406,7 +406,13 @@ describe('native writer handlers', () => {
       return new IOResult({ exitCode: 7 })
     }
     if (kind === 'cli')
-      ws.registerCli('writer', new CLISpec({ name: 'writer', fn: (inv) => write(inv.stdio) }))
+      ws.registerCli(
+        'writer',
+        new CLI({
+          spec: new CommandSpec({ name: 'writer' }),
+          handlers: { '': new CLIHandler({ fn: (inv) => write(inv.stdio) }) },
+        }),
+      )
     else
       ws.mount('/ram').registerCommands(
         command({
@@ -443,15 +449,19 @@ describe('native writer handlers', () => {
     let closed = false
     ws.registerCli(
       'writer',
-      new CLISpec({
-        name: 'writer',
-        fn: async (inv) => {
-          try {
-            if (inv.stdio === undefined) throw new Error('expected handler stdio')
-            for (;;) await inv.stdio.stdout.write(new Uint8Array(16384).fill(120))
-          } finally {
-            closed = true
-          }
+      new CLI({
+        spec: new CommandSpec({ name: 'writer' }),
+        handlers: {
+          '': new CLIHandler({
+            fn: async (inv) => {
+              try {
+                if (inv.stdio === undefined) throw new Error('expected handler stdio')
+                for (;;) await inv.stdio.stdout.write(new Uint8Array(16384).fill(120))
+              } finally {
+                closed = true
+              }
+            },
+          }),
         },
       }),
     )

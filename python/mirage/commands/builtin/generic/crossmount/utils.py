@@ -64,24 +64,17 @@ async def relay(
     return data
 
 
-async def read_file(
-    dispatch: DispatchFn, io: IOResult, path: PathSpec
-) -> bytes:
-    """Read a relayed file and retain its cache/accounting envelope.
+async def read_file(dispatch: DispatchFn, path: PathSpec) -> bytes:
+    """Read a relayed file.
 
     Args:
         dispatch (DispatchFn): Workspace operation dispatcher.
-        io (IOResult): Input accounting to merge with the generic's result.
         path (PathSpec): Full virtual input path.
     """
     info = await relay(dispatch, "stat", path)
     if info.type is FileType.DIRECTORY:
         raise eisdir(path.virtual)
-    data = cast(bytes, await relay(dispatch, "read", path))
-    io.reads[path.virtual] = data
-    if path.virtual not in io.cache:
-        io.cache.append(path.virtual)
-    return data
+    return cast(bytes, await relay(dispatch, "read", path))
 
 
 async def _relay_write(
@@ -321,7 +314,6 @@ async def stream_operands(
                 io.reads.update(branch.reads)
                 io.writes.update(branch.writes)
                 io.cache.extend(branch.cache)
-                io.renames.extend(branch.renames)
                 io.stderr = await materialize(io.stderr) + await materialize(
                     branch.stderr
                 )

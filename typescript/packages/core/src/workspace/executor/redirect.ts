@@ -531,8 +531,6 @@ export async function handleRedirect(
             await createFile(dispatch, session, file.scope, data, file.append)
             file.offset += data.byteLength
           } else await writeDescription(dispatch, session, file, data)
-          io.writes[file.scope.virtual] = data
-          io.cache = io.cache.filter((p) => p !== file.scope.virtual)
         } catch (error) {
           if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
           const [out, refusal] = await failed(redirectFailure(file.scope, error), file)

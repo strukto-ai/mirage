@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import type { TrelloAccessor } from '../../../accessor/trello.ts'
 import { requireMountWritable } from '../../../context/session_context.ts'
 import { commentCreate } from '../../../core/trello/client.ts'
@@ -19,7 +18,7 @@ import { normalizeComment } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, Option } from '../../spec/types.ts'
+import { CommandSpec, Argument } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { resolveTextInput } from './_input.ts'
 import { requireCard } from './_scope.ts'
@@ -27,10 +26,10 @@ import { requireCard } from './_scope.ts'
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
-  options: [
-    new Option({ long: '--card_id', type: 'str' }),
-    new Option({ long: '--text', type: 'str' }),
-    new Option({ long: '--text_file', type: 'path' }),
+  arguments: [
+    new Argument('--card_id'),
+    new Argument('--text'),
+    new Argument('--text_file', { type: 'path' }),
   ],
 })
 

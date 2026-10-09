@@ -574,11 +574,7 @@ async def iconv(
     encoded = bytes(out)
     if output_path is not None:
         await write_bytes(output_path, encoded)
-        return None, IOResult(
-            exit_code=int(failed),
-            stderr=stderr,
-            writes={output_path.mount_path: encoded},
-        )
+        return None, IOResult(exit_code=int(failed), stderr=stderr)
     return encoded, IOResult(exit_code=int(failed), stderr=stderr)
 
 

@@ -15,9 +15,9 @@
 import asyncio
 from unittest.mock import MagicMock
 
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Command
-from mirage.commands.spec.types import CommandSpec, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.policy.types import AdmissionRules
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.executor.builtins.man import (
@@ -119,9 +119,9 @@ def test_render_page_no_options():
 def test_render_page_with_options():
     spec = CommandSpec(
         description="Print a sequence.",
-        options=(
-            Option(short="-s", type="str", description="separator"),
-            Option(short="-w", description="zero-pad"),
+        arguments=(
+            Argument("-s", help="separator"),
+            Argument("-w", action="store_true", help="zero-pad"),
         ),
     )
     out = _render_page(ManEntry(name="seq", spec=spec))
@@ -199,25 +199,27 @@ def test_render_man_index_skips_dev_and_is_empty_with_nothing_to_list():
     assert _render_man_index(_mk_registry([]), _SESSION) == ""
 
 
-def _cli_tree() -> CLISpec:
-    return CLISpec(
-        name="linear",
-        description="Linear API client",
-        subcommands=(
-            CLISpec(
-                name="issue",
-                description="Manage issues",
-                aliases=("i",),
-                subcommands=(
-                    CLISpec(
-                        name="create",
-                        description="Create one",
-                        fn=lambda: None,
+def _cli_tree() -> CLI:
+    return CLI(
+        spec=CommandSpec(
+            name="linear",
+            description="Linear API client",
+            subcommands=(
+                CommandSpec(
+                    name="issue",
+                    description="Manage issues",
+                    aliases=("i",),
+                    subcommands=(
+                        CommandSpec(name="create", description="Create one"),
                     ),
                 ),
+                CommandSpec(name="team", description="Manage one"),
             ),
-            CLISpec(name="team", description="Manage one", fn=lambda: None),
         ),
+        handlers={
+            "issue create": CLIHandler(fn=lambda: None),
+            "team": CLIHandler(fn=lambda: None),
+        },
     )
 
 

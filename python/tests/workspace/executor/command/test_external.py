@@ -20,9 +20,9 @@ import pytest
 import yaml
 
 from mirage import EXTERNAL_COMMANDS, RAMVFS, Limit, MountMode, Workspace
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
-from mirage.commands.spec.types import CommandSpec, Operand
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.config import _build_runtime_entries
 from mirage.io import IOResult
 from mirage.policy import CommandRule
@@ -341,7 +341,12 @@ class ShellProbe(Runtime, LineExecutorMixin):
 @command(
     "trello board list",
     vfs="ram",
-    spec=CommandSpec(positional=(Operand(),), rest=Operand(type="str")),
+    spec=CommandSpec(
+        arguments=(
+            Argument("path", type="path", nargs="?", metavar=""),
+            Argument("texts", nargs="*", metavar=""),
+        )
+    ),
 )
 async def board_list(accessor, paths, texts, opts):
     return b"ok\n", IOResult()
@@ -490,7 +495,12 @@ async def test_external_script_sees_first_unresolved_stage(head):
         ws.mount("/").register_commands([board_list])
         ws.register_cli(
             "custom-cli",
-            CLISpec(name="custom-cli", fn=lambda inv: (b"ok\n", IOResult())),
+            CLI(
+                spec=CommandSpec(name="custom-cli"),
+                handlers={
+                    "": CLIHandler(fn=lambda inv: (b"ok\n", IOResult()))
+                },
+            ),
         )
         await ws.shell("echo ok > /input")
         await ws.shell("custom-stage() { echo ok; }")

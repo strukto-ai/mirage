@@ -24,45 +24,38 @@ from mirage.commands.cli.builtin.ntn.pages.edit import edit
 from mirage.commands.cli.builtin.ntn.pages.get import get
 from mirage.commands.cli.builtin.ntn.pages.trash import trash
 from mirage.commands.cli.builtin.ntn.whoami import whoami
-from mirage.commands.cli.types import CLISpec
-from mirage.commands.spec.types import Operand, Option, UsageStyle
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.core.notion.config import NotionConfig
 
 # Operand names are upstream's, verbatim: they are what the refusal for
 # a missing one prints, so they are part of the grammar rather than
 # documentation. Each verb names its own, which is why there is no one
 # shared ID slot.
-PAGE_ID = Operand(type="str", name="PAGE_ID", required=True)
-DATA_SOURCE_ID = Operand(type="str", name="ID_OR_URL", required=True)
-DATABASE_ID = Operand(type="str", name="ID", required=True)
-API_PATH = Operand(type="str", name="PATH")
-JSON_OUT = Option(
-    long="--json",
-    type="bool",
-    description="Output the raw API response as JSON",
+PAGE_ID = Argument("PAGE_ID")
+DATA_SOURCE_ID = Argument("ID_OR_URL")
+DATABASE_ID = Argument("ID")
+API_PATH = Argument("PATH", nargs="*")
+JSON_OUT = Argument(
+    "--json", action="store_true", help="Output the raw API response as JSON"
 )
-PLAIN = Option(
-    long="--plain",
-    type="bool",
-    description="Output as tab-separated values with no headers",
+PLAIN = Argument(
+    "--plain",
+    action="store_true",
+    help="Output as tab-separated values with no headers",
 )
 # NOTION_API_VERSION is upstream's own environment fallback, and naming
 # it here is what makes the flag real: the executor fills the value from
 # the session, so a leaf reads one flag rather than a flag and a
 # fallback, and a usage line counts the option as supplied the way clap
 # does.
-NOTION_VERSION = Option(
-    long="--notion-version",
-    type="str",
+NOTION_VERSION = Argument(
+    "--notion-version",
     metavar="VERSION",
     env="NOTION_API_VERSION",
-    description="Override the Notion-Version header",
+    help="Override the Notion-Version header",
 )
-CONTENT = Option(
-    long="--content",
-    type="str",
-    description="Markdown body (also read from stdin)",
-)
+CONTENT = Argument("--content", help="Markdown body (also read from stdin)")
 
 # The ntn program tree, matching the official Notion CLI's grammar verb
 # for verb: ids are positional, `pages get` renders Markdown with a
@@ -73,163 +66,170 @@ CONTENT = Option(
 # Upstream's interactive and deploy verbs (`login`, `logout`, `update`,
 # `workers`, `notion-as-code`, `doctor`, `files`) are out of scope for a
 # virtualized CLI. Install with a NotionConfig.
-NTN = CLISpec(
-    name="ntn",
-    description="Notion CLI (Beta)",
-    config_model=NotionConfig,
-    # Upstream is a clap program, so this one answers in clap's voice:
-    # its help layout and its refusal for a missing operand are pinned
-    # against the real binary by integ/ntn_conformance.ts.
-    usage_style=UsageStyle.CLAP,
-    subcommands=(
-        CLISpec(
-            name="api",
-            description="Call the public Notion API (beta)",
-            fn=partial(guarded, api),
-            write=True,
-            rest=API_PATH,
-            options=(
-                Option(
-                    long="--data",
-                    short="-d",
-                    type="str",
-                    description="Use a JSON string as the request body",
-                ),
-                Option(
-                    long="--method",
-                    short="-X",
-                    type="str",
-                    description="Override the inferred HTTP method",
-                ),
-                NOTION_VERSION,
-            ),
-        ),
-        CLISpec(
-            name="auth",
-            description="Inspect authentication credentials",
-            subcommands=(
-                CLISpec(
-                    name="token",
-                    description="Print the current authentication token",
-                    fn=partial(guarded, token),
+NTN = CLI(
+    spec=CommandSpec(
+        name="ntn",
+        description="Notion CLI (Beta)",
+        # Upstream is a clap program, so this one answers in clap's voice:
+        # its help layout and its refusal for a missing operand are pinned
+        # against the real binary by integ/ntn_conformance.ts.
+        usage_style=UsageStyle.CLAP,
+        subcommands=(
+            CommandSpec(
+                name="api",
+                description="Call the public Notion API (beta)",
+                arguments=(
+                    API_PATH,
+                    Argument(
+                        "-d",
+                        "--data",
+                        help="Use a JSON string as the request body",
+                    ),
+                    Argument(
+                        "-X",
+                        "--method",
+                        help="Override the inferred HTTP method",
+                    ),
+                    NOTION_VERSION,
                 ),
             ),
-        ),
-        CLISpec(
-            name="datasources",
-            description="Manage data sources",
-            subcommands=(
-                CLISpec(
-                    name="query",
-                    description="Query pages in a data source",
-                    fn=partial(guarded, query),
-                    positional=(DATA_SOURCE_ID,),
-                    options=(
-                        Option(
-                            long="--limit",
-                            type="int",
-                            description="Maximum rows to return",
-                        ),
-                        Option(
-                            long="--start-cursor",
-                            type="str",
-                            description="Cursor to resume from",
-                        ),
-                        Option(
-                            long="--sort",
-                            short="-s",
-                            type="str",
-                            multiple=True,
-                            metavar="SPEC",
-                            description="'<property> [asc|desc]'",
-                        ),
-                        Option(
-                            long="--filter",
-                            type="str",
-                            metavar="JSON",
-                            description="Filter as a JSON object",
-                        ),
-                        Option(
-                            long="--filter-file",
-                            type="path",
-                            metavar="PATH",
-                            description="Read the filter from a file",
-                        ),
-                        JSON_OUT,
-                        PLAIN,
-                        NOTION_VERSION,
+            CommandSpec(
+                name="auth",
+                description="Inspect authentication credentials",
+                subcommands=(
+                    CommandSpec(
+                        name="token",
+                        description="Print the current authentication token",
                     ),
                 ),
-                CLISpec(
-                    name="resolve",
-                    description=(
-                        "Resolve a Notion database ID to its data source IDs"
-                    ),
-                    fn=partial(guarded, resolve),
-                    positional=(DATABASE_ID,),
-                    options=(JSON_OUT, NOTION_VERSION),
-                ),
             ),
-        ),
-        CLISpec(
-            name="pages",
-            description="Manage pages",
-            subcommands=(
-                CLISpec(
-                    name="get",
-                    description="Retrieve a page as Markdown",
-                    fn=partial(guarded, get),
-                    positional=(PAGE_ID,),
-                    options=(JSON_OUT, NOTION_VERSION),
-                ),
-                CLISpec(
-                    name="create",
-                    description="Create a page from Markdown content",
-                    fn=partial(guarded, create),
-                    write=True,
-                    options=(
-                        CONTENT,
-                        Option(
-                            long="--parent",
-                            type="str",
-                            description=(
-                                "page:<id>, database:<id>, or data-source:<id>"
+            CommandSpec(
+                name="datasources",
+                description="Manage data sources",
+                subcommands=(
+                    CommandSpec(
+                        name="query",
+                        description="Query pages in a data source",
+                        arguments=(
+                            DATA_SOURCE_ID,
+                            Argument(
+                                "--limit",
+                                type="int",
+                                help="Maximum rows to return",
                             ),
+                            Argument(
+                                "--start-cursor",
+                                help="Cursor to resume from",
+                            ),
+                            Argument(
+                                "-s",
+                                "--sort",
+                                action="append",
+                                metavar="SPEC",
+                                help="'<property> [asc|desc]'",
+                            ),
+                            Argument(
+                                "--filter",
+                                metavar="JSON",
+                                help="Filter as a JSON object",
+                            ),
+                            Argument(
+                                "--filter-file",
+                                type="path",
+                                metavar="PATH",
+                                help="Read the filter from a file",
+                            ),
+                            JSON_OUT,
+                            PLAIN,
+                            NOTION_VERSION,
                         ),
-                        JSON_OUT,
-                        NOTION_VERSION,
                     ),
-                ),
-                CLISpec(
-                    name="edit",
-                    description="Edit a page's content from Markdown",
-                    fn=partial(guarded, edit),
-                    write=True,
-                    positional=(PAGE_ID,),
-                    options=(CONTENT, JSON_OUT, NOTION_VERSION),
-                ),
-                CLISpec(
-                    name="trash",
-                    description="Trash a page",
-                    fn=partial(guarded, trash),
-                    write=True,
-                    positional=(PAGE_ID,),
-                    options=(
-                        Option(
-                            long="--yes",
-                            type="bool",
-                            description="Skip the confirmation prompt",
+                    CommandSpec(
+                        name="resolve",
+                        description=(
+                            "Resolve a Notion database ID "
+                            "to its data source IDs"
                         ),
-                        NOTION_VERSION,
+                        arguments=(
+                            DATABASE_ID,
+                            JSON_OUT,
+                            NOTION_VERSION,
+                        ),
                     ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="whoami",
-            description="Show the authenticated Notion user",
-            fn=partial(guarded, whoami),
-            options=(JSON_OUT, PLAIN, NOTION_VERSION),
+            CommandSpec(
+                name="pages",
+                description="Manage pages",
+                subcommands=(
+                    CommandSpec(
+                        name="get",
+                        description="Retrieve a page as Markdown",
+                        arguments=(
+                            PAGE_ID,
+                            JSON_OUT,
+                            NOTION_VERSION,
+                        ),
+                    ),
+                    CommandSpec(
+                        name="create",
+                        description="Create a page from Markdown content",
+                        arguments=(
+                            CONTENT,
+                            Argument(
+                                "--parent",
+                                help="page:<id>, database:<id>, or data-source:<id>",
+                            ),
+                            JSON_OUT,
+                            NOTION_VERSION,
+                        ),
+                    ),
+                    CommandSpec(
+                        name="edit",
+                        description="Edit a page's content from Markdown",
+                        arguments=(
+                            PAGE_ID,
+                            CONTENT,
+                            JSON_OUT,
+                            NOTION_VERSION,
+                        ),
+                    ),
+                    CommandSpec(
+                        name="trash",
+                        description="Trash a page",
+                        arguments=(
+                            PAGE_ID,
+                            Argument(
+                                "--yes",
+                                action="store_true",
+                                help="Skip the confirmation prompt",
+                            ),
+                            NOTION_VERSION,
+                        ),
+                    ),
+                ),
+            ),
+            CommandSpec(
+                name="whoami",
+                description="Show the authenticated Notion user",
+                arguments=(
+                    JSON_OUT,
+                    PLAIN,
+                    NOTION_VERSION,
+                ),
+            ),
         ),
     ),
+    handlers={
+        "api": CLIHandler(fn=partial(guarded, api), write=True),
+        "auth token": CLIHandler(fn=partial(guarded, token)),
+        "datasources query": CLIHandler(fn=partial(guarded, query)),
+        "datasources resolve": CLIHandler(fn=partial(guarded, resolve)),
+        "pages get": CLIHandler(fn=partial(guarded, get)),
+        "pages create": CLIHandler(fn=partial(guarded, create), write=True),
+        "pages edit": CLIHandler(fn=partial(guarded, edit), write=True),
+        "pages trash": CLIHandler(fn=partial(guarded, trash), write=True),
+        "whoami": CLIHandler(fn=partial(guarded, whoami)),
+    },
+    config_model=NotionConfig,
 )

@@ -11,12 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
+import { CLIHandler } from '../../commands/cli/types.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
 import { describe, expect, it } from 'vitest'
 
 import { z } from 'zod'
 
-import { CLISpec, type CLIConfigModel } from '../../commands/cli/types.ts'
+import { CLI, type CLIConfigModel } from '../../commands/cli/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { DISCORD } from '../../commands/cli/builtin/discord/index.ts'
 import { GIT } from '../../commands/cli/builtin/git/index.ts'
@@ -44,11 +45,11 @@ function noop(): [null, IOResult] {
   return [null, new IOResult()]
 }
 
-function tree(configModel: CLIConfigModel | null = null): CLISpec {
-  return new CLISpec({
-    name: 'prog',
+function tree(configModel: CLIConfigModel | null = null): CLI {
+  return new CLI({
     configModel,
-    subcommands: [new CLISpec({ name: 'run', fn: noop })],
+    spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
+    handlers: { run: new CLIHandler({ fn: noop }) },
   })
 }
 
@@ -244,7 +245,7 @@ describe('CLIRegistry zod config schemas', () => {
 // acronym like `baseURL` camelizes from `base_url` as `baseUrl`). This
 // walks the shipped specs instead, so a CLI added later is covered
 // without editing the mechanism's tests.
-const BUILTIN_CLIS: readonly (readonly [string, CLISpec])[] = [
+const BUILTIN_CLIS: readonly (readonly [string, CLI])[] = [
   ['gws', GWS],
   ['slack', SLACK],
   ['discord', DISCORD],

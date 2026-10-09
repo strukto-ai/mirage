@@ -25,7 +25,8 @@
         "box",
         "opfs"
       ],
-      "command": "printf '0123456789\\nabc\\n' > {mount}/stream.txt",
+      "command": "printf '0123456789\\nabc\\n' >> {mount}/stream.txt",
+      "note": "Appended, not written whole: a whole write keeps its bytes in the file cache, and the read would be served from there instead of streamed from the backend.",
       "check": {
         "read": "{mount}/stream.txt",
         "stream": true
@@ -62,7 +63,8 @@
         "box",
         "opfs"
       ],
-      "command": "printf '' > {mount}/stream_empty.txt",
+      "command": "printf '' >> {mount}/stream_empty.txt",
+      "note": "Appended, not written whole: a whole write keeps its bytes in the file cache, and the read would be served from there instead of streamed from the backend.",
       "check": {
         "read": "{mount}/stream_empty.txt",
         "stream": true

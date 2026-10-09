@@ -11,9 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
+import {
+  compileSpec,
+  argumentDest,
+  optionSpellings,
+  positionalName,
+  positionalRequired,
+} from './compile.ts'
 import { ARG_PLACEHOLDER } from './constants.ts'
-import { type CommandSpec, type Operand, type Option, UsageStyle } from './types.ts'
+import { type Argument, type CommandSpec, UsageStyle } from './types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 /**
@@ -23,9 +29,9 @@ import { compareCodePoints } from '../../utils/sort.ts'
  * `value_name`: dashes to underscores, uppercased. Deriving it the same way
  * means only the options that actually override it have to say so.
  */
-export function optionMetavar(opt: Option): string {
+export function optionMetavar(opt: Argument): string {
   if (opt.metavar !== null) return opt.metavar
-  const spelling = opt.long ?? opt.short ?? ''
+  const spelling = argumentDest(opt)
   return spelling.replace(/^-+/, '').replaceAll('-', '_').toUpperCase()
 }
 
@@ -34,17 +40,17 @@ export function optionMetavar(opt: Option): string {
  * and optional ones square, which is the only thing clap's usage line says
  * about arity besides the trailing ellipsis on a variadic.
  */
-export function operandSlot(operand: Operand, ellipsis = false): string {
-  const name = operand.name === '' ? ARG_PLACEHOLDER : operand.name
-  const slot = operand.required ? `<${name}>` : `[${name}]`
+export function operandSlot(operand: Argument, ellipsis = false): string {
+  const name = positionalName(operand) === '' ? ARG_PLACEHOLDER : positionalName(operand)
+  const slot = positionalRequired(operand) ? `<${name}>` : `[${name}]`
   return ellipsis ? `${slot}...` : slot
 }
 
-function valueLabel(opt: Option): string {
-  if (opt.type === 'bool') return ''
-  // A pair option takes two tokens, and the first one names the value.
-  const value = opt.type === 'path' ? '<path>' : '<text>'
-  return opt.pair ? ` <name> ${value}` : ` ${value}`
+function valueLabel(opt: Argument): string {
+  if (opt.action === 'store_true' || opt.action === 'count') return ''
+  const value = `<${opt.metavar ?? (opt.type === 'path' ? 'path' : 'text')}>`
+  if (opt.valueTypes.length > 0) return ` <name> ${value}`
+  return ` ${value}`.repeat(typeof opt.nargs === 'number' ? opt.nargs : 1)
 }
 
 // Python's rstrip('\n'). A `/\n+$/` regex is a polynomial ReDoS on a long
@@ -55,16 +61,13 @@ function trimTrailingNewlines(text: string): string {
   return text.slice(0, end)
 }
 
-function flagDisplay(opt: Option): string {
-  const parts: string[] = []
-  if (opt.short !== null) parts.push(opt.short)
-  if (opt.long !== null) parts.push(opt.long)
-  return parts.join(', ') + valueLabel(opt)
+function flagDisplay(opt: Argument): string {
+  return opt.names.join(', ') + valueLabel(opt)
 }
 
 /** Display rows [flag spelling, description] for a spec's options. */
 function flagRows(spec: CommandSpec): [string, string][] {
-  return spec.options.map((o) => [flagDisplay(o), o.description ?? ''])
+  return compileSpec(spec).options.map((o) => [flagDisplay(o), o.help ?? ''])
 }
 
 /**
@@ -76,8 +79,8 @@ function flagRows(spec: CommandSpec): [string, string][] {
  * difference between `gh api [flags] <text>` and upstream's
  * `gh api <endpoint>`.
  */
-function slot(operand: Operand): string {
-  if (operand.name !== '') return `<${operand.name}>`
+function slot(operand: Argument): string {
+  if (positionalName(operand) !== '') return `<${positionalName(operand)}>`
   return operand.type === 'path' ? '<path>' : '<text>'
 }
 
@@ -97,16 +100,17 @@ function usageLine(
   // The builtin that mimics a real program answers with that program's
   // own first line rather than one synthesized from its slots.
   if (synopsis !== undefined) return `Usage: ${synopsis}`
+  const cs = compileSpec(spec)
   const clap = style === UsageStyle.CLAP
   const bits = [name]
-  if (spec.options.length > 0) bits.push(clap ? '[OPTIONS]' : '[flags]')
+  if (compileSpec(spec).options.length > 0) bits.push(clap ? '[OPTIONS]' : '[flags]')
   if (subcommands.length > 0) bits.push(clap ? '<COMMAND>' : '<command> [<args>]')
-  for (const op of spec.positional) {
+  for (const op of cs.positional) {
     bits.push(clap ? operandSlot(op) : slot(op))
   }
-  if (spec.rest !== null) {
-    if (clap) bits.push(operandSlot(spec.rest, !spec.rest.required))
-    else bits.push(`[${slot(spec.rest)}...]`)
+  if (cs.rest !== null) {
+    if (clap) bits.push(operandSlot(cs.rest, !positionalRequired(cs.rest)))
+    else bits.push(`[${slot(cs.rest)}...]`)
   }
   return `Usage: ${bits.join(' ')}`
 }
@@ -147,7 +151,7 @@ export function renderHelp(
     }
   }
 
-  if (spec.options.length > 0) {
+  if (compileSpec(spec).options.length > 0) {
     lines.push('')
     lines.push(clap ? 'Options:' : 'Flags:')
     const rows = flagRows(spec)
@@ -155,6 +159,16 @@ export function renderHelp(
     for (const [flag, desc] of rows) {
       lines.push(desc === '' ? `  ${flag}` : `  ${flag.padEnd(width, ' ')}  ${desc}`)
     }
+  }
+
+  const operands = spec.arguments.filter(
+    (argument) => !argument.names[0]?.startsWith('-') && argument.help,
+  )
+  if (operands.length > 0) {
+    lines.push('', 'Arguments:')
+    const width = Math.max(...operands.map((operand) => slot(operand).length))
+    for (const operand of operands)
+      lines.push(`  ${slot(operand).padEnd(width)}  ${operand.help ?? ''}`)
   }
 
   if (spec.epilog !== null && spec.epilog !== '') {
@@ -193,33 +207,32 @@ export function argparseHelp(
   spec: CommandSpec,
   subcommands: readonly [string, string][] = [],
 ): string {
+  const cs = compileSpec(spec)
   const usage = [name]
   const rows: [string, string][] = []
-  for (const opt of spec.options) {
+  for (const opt of compileSpec(spec).options) {
     const value =
       opt.metavar ?? (opt.choices.length > 0 ? `{${opt.choices.join(',')}}` : optionMetavar(opt))
-    let suffix = opt.type === 'bool' ? '' : ` ${value}`
-    if (opt.pair) suffix = ` NAME ${value}`
-    if (opt.valueOptional) suffix = `[=${value}]`
-    const flags = [opt.short, opt.long]
-      .filter((flag) => flag !== null)
-      .map((flag) => `${flag}${suffix}`)
-      .join(', ')
-    const slot = `${opt.short ?? opt.long ?? ''}${suffix}`
+    let suffix = opt.action === 'store_true' || opt.action === 'count' ? '' : ` ${value}`
+    if (opt.valueTypes.length > 0) suffix = ` NAME ${value}`
+    else if (typeof opt.nargs === 'number') suffix = ` ${value}`.repeat(opt.nargs)
+    if (opt.nargs === '?') suffix = opt.attachedOnly ? `[=${value}]` : ` [${value}]`
+    const flags = opt.names.map((flag) => `${flag}${suffix}`).join(', ')
+    const slot = `${optionSpellings(opt)[0] ?? argumentDest(opt)}${suffix}`
     usage.push(opt.required ? slot : `[${slot}]`)
-    const details = [opt.description ?? '']
+    const details = [opt.help ?? '']
     if (opt.default !== null) details.push(`(default: ${opt.default})`)
     if (opt.env !== null) details.push(`(env: ${opt.env})`)
     if (opt.required) details.push('(required)')
-    if (opt.multiple) details.push('(repeatable)')
+    if (opt.action === 'append' || opt.action === 'extend') details.push('(repeatable)')
     rows.push([flags, details.filter(Boolean).join(' ')])
   }
   const operands: [string, string][] = []
-  for (const operand of [...spec.positional, ...(spec.rest === null ? [] : [spec.rest])]) {
-    const label = operand.name || (operand.type === 'path' ? 'PATH' : 'ARG')
-    const slot = label + (operand === spec.rest ? ' ...' : '')
-    usage.push(operand.required ? slot : `[${slot}]`)
-    operands.push([label, operand.type === 'path' ? 'Virtual path' : ''])
+  for (const operand of [...cs.positional, ...(cs.rest === null ? [] : [cs.rest])]) {
+    const label = positionalName(operand) || (operand.type === 'path' ? 'PATH' : 'ARG')
+    const slot = label + (operand === cs.rest ? ' ...' : '')
+    usage.push(positionalRequired(operand) ? slot : `[${slot}]`)
+    operands.push([label, operand.help ?? (operand.type === 'path' ? 'Virtual path' : '')])
   }
   if (subcommands.length > 0) usage.push(`{${subcommands.map(([sub]) => sub).join(',')}} ...`)
   const lines = [`usage: ${usage.join(' ')}`]

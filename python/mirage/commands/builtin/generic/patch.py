@@ -584,7 +584,6 @@ async def patch(
     patch_text = patch_data.decode(errors="replace")
     sections = _parse_patch(patch_text, strip_count)
     orig = paths[0] if paths else None
-    writes: dict[str, ByteSource] = {}
     report: list[str] = []
     failed = False
     written: set[str] = set()
@@ -606,12 +605,11 @@ async def patch(
             read_bytes=read_bytes,
             write_bytes=write_bytes,
             report=report,
-            writes=writes,
             written=written,
         )
         failed = failed or refused
     out = "".join(f"{line}\n" for line in report).encode() if report else None
-    return out, IOResult(writes=writes, exit_code=1 if failed else 0)
+    return out, IOResult(exit_code=1 if failed else 0)
 
 
 async def _patch_file(
@@ -624,7 +622,6 @@ async def _patch_file(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     report: list[str],
-    writes: dict[str, ByteSource],
     written: set[str],
 ) -> bool:
     """Apply one section to its file, GNU patch's way; True when a hunk
@@ -644,7 +641,6 @@ async def _patch_file(
         read_bytes (Callable): bound reader.
         write_bytes (Callable): bound writer.
         report (list[str]): the lines printed so far, extended here.
-        writes (dict[str, ByteSource]): the bytes written, by mount path.
         written (set[str]): the files this run has written already.
     """
     original: bytes | None = None
@@ -663,7 +659,6 @@ async def _patch_file(
             reverse,
             write_bytes,
             report,
-            writes,
         )
         return True
     except FileNotFoundError:
@@ -683,11 +678,9 @@ async def _patch_file(
             else:
                 backup = _companion(spec, ".orig")
                 await write_bytes(backup, original)
-                writes[backup.mount_path] = original
         if original is not None or len(outcome.rejected) < len(section.hunks):
             data = "".join(f"{line}\n" for line in outcome.lines).encode()
             await write_bytes(spec, data)
-            writes[spec.mount_path] = data
             written.add(spec.virtual)
     if not outcome.rejected:
         return False
@@ -700,7 +693,6 @@ async def _patch_file(
         reverse,
         write_bytes,
         report,
-        writes,
     )
     return True
 
@@ -714,7 +706,6 @@ async def _save_rejects(
     reverse: bool,
     write_bytes: Callable[..., Awaitable[None]],
     report: list[str],
-    writes: dict[str, ByteSource],
 ) -> None:
     """Write the hunks that did not go in to ``.rej``, and say so.
 
@@ -728,7 +719,6 @@ async def _save_rejects(
         reverse (bool): ``-R``.
         write_bytes (Callable): bound writer.
         report (list[str]): the lines printed so far, extended here.
-        writes (dict[str, ByteSource]): the bytes written, by mount path.
     """
     total = len(section.hunks)
     report.append(
@@ -739,7 +729,6 @@ async def _save_rejects(
     reject = _companion(spec, ".rej")
     data = _reject_text(section, rejected, reverse)
     await write_bytes(reject, data)
-    writes[reject.mount_path] = data
 
 
 __all__ = ["patch"]

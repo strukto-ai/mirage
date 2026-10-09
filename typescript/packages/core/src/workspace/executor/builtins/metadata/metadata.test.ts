@@ -310,6 +310,25 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     await ws.close()
   })
 
+  it.each(['mv /data/a.txt /data/b.txt', null])(
+    'a rename keeps the times the node table holds (%s)',
+    async (line) => {
+      // rename(2) leaves a file's times alone, so a time only the node
+      // table holds moves with the name, whether a command or the
+      // dispatcher's own caller (FUSE, ws.vfs) renames it.
+      const [ws] = await makeOverlayWs({ '/a.txt': 'x' })
+      await run(ws, 'touch -t 202603041200 /data/a.txt')
+      const before = await statOf(ws, '/data/a.txt')
+      if (line === null) await ws.vfs.rename('/data/a.txt', '/data/b.txt')
+      else {
+        const [code, , err] = await run(ws, line)
+        expect(code, err).toBe(0)
+      }
+      expect((await statOf(ws, '/data/b.txt')).modified).toBe(before.modified)
+      await ws.close()
+    },
+  )
+
   it('mv into a symlinked directory keys meta under the real path', async () => {
     const [ws] = await makeOverlayWs({ '/f.txt': 'hi' })
     await run(ws, 'mkdir /data/sub')

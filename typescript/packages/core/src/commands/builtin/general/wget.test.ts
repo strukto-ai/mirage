@@ -14,7 +14,7 @@
 
 import { invoke } from '../../../io/stdio.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { materialize } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { GENERAL_WGET } from './wget.ts'
 
@@ -45,14 +45,20 @@ async function runWget(
   const vfs = new RAMVFS()
   const cmd = GENERAL_WGET[0]
   if (cmd === undefined) throw new Error('wget not registered')
+  // What each write sent through the dispatcher, by path.
+  const writes: Record<string, Uint8Array> = {}
   const result = await invoke(() =>
     cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
       stdin: null,
       flags,
       cwd: '/',
+      dispatch: (_op, path, args) => {
+        writes[path.virtual] = args?.[0] as Uint8Array
+        return Promise.resolve([null, new IOResult()])
+      },
     }),
   )
-  if (result === null) return { out: '', err: '', exitCode: -1, writes: {} }
+  if (result === null) return { out: '', err: '', exitCode: -1, writes }
   const [out, ioResult] = result
   const buf =
     out === null
@@ -64,7 +70,7 @@ async function runWget(
     out: DEC.decode(buf),
     err: await ioResult.stderrStr(),
     exitCode: ioResult.exitCode,
-    writes: ioResult.writes,
+    writes,
   }
 }
 
@@ -80,7 +86,7 @@ describe('wget', () => {
   // Real wget puts its progress report on stderr and nothing on stdout.
   it('saves URL basename by default and reports on stderr', async () => {
     const r = await runWget(['https://x.test/path/doc.pdf'])
-    expect(r.writes['doc.pdf']).toBeInstanceOf(Uint8Array)
+    expect(r.writes['/doc.pdf']).toBeInstanceOf(Uint8Array)
     expect(r.out).toBe('')
     expect(r.err).toContain("'doc.pdf' saved [9/9]")
   })

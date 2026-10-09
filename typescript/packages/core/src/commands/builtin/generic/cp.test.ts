@@ -240,7 +240,8 @@ describe('cpGeneric guards', () => {
     expect(io.cache).toEqual([])
   })
 
-  it('a primitive copy records source reads', async () => {
+  it('a primitive copy reports no reads', async () => {
+    // Its reads went through the dispatcher, which keeps what it fetched.
     const files = new Map<string, Uint8Array>([['/a.txt', new Uint8Array([1])]])
     const { stat } = makeBackend(files, new Set())
     const readBytes = (p: PathSpec): Promise<Uint8Array> => {
@@ -261,8 +262,8 @@ describe('cpGeneric guards', () => {
       cpFlags(),
     )
     expect(files.get('/copy.txt')).toEqual(new Uint8Array([1]))
-    expect(io.reads).toEqual({ '/a.txt': new Uint8Array([1]) })
-    expect(io.cache).toEqual(['/a.txt'])
+    expect(io.reads).toEqual({})
+    expect(io.cache).toEqual([])
   })
 })
 

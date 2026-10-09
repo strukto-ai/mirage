@@ -19,26 +19,29 @@ from mirage.commands.spec.builtins import (
     registered_spec,
 )
 from mirage.commands.spec.constants import HELP_OPTION, VERSION_OPTION
-from mirage.commands.spec.types import CommandSpec, Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 
 
 def test_help_spec_appends_the_two_standard_options():
-    spec = CommandSpec(rest=Operand(type="str"))
+    spec = CommandSpec(arguments=(Argument("texts", nargs="*", metavar=""),))
     enriched = help_spec(spec)
-    assert enriched.options == (HELP_OPTION, VERSION_OPTION)
-    assert enriched.rest is spec.rest
+    assert enriched.arguments == (*spec.arguments, HELP_OPTION, VERSION_OPTION)
+    assert enriched.arguments[0] is spec.arguments[0]
 
 
 def test_help_spec_leaves_a_declared_option_alone():
-    own = Option(long="--version", description="mine")
-    spec = CommandSpec(options=(own,))
+    own = Argument("--version", action="store_true", help="mine")
+    spec = CommandSpec(arguments=(own,))
     enriched = help_spec(spec)
-    assert enriched.options == (own, HELP_OPTION)
+    assert enriched.arguments == (own, HELP_OPTION)
 
 
 def test_help_spec_returns_the_same_spec_when_both_are_declared():
     spec = CommandSpec(
-        options=(Option(long="--help"), Option(long="--version"))
+        arguments=(
+            Argument("--help", action="store_true"),
+            Argument("--version", action="store_true"),
+        )
     )
     assert help_spec(spec) is spec
 
@@ -52,7 +55,7 @@ def test_registered_spec_shares_one_copy_per_builtin():
 
 
 def test_registered_spec_builds_a_fresh_copy_for_a_custom_spec():
-    spec = CommandSpec(rest=Operand(type="str"))
+    spec = CommandSpec(arguments=(Argument("texts", nargs="*", metavar=""),))
     assert registered_spec("tee", spec) is not registered_spec("tee", spec)
 
 
@@ -66,14 +69,18 @@ def test_a_builtin_grammar_is_recognized_declared_or_registered():
 # per-program rules must not follow the name.
 def test_a_borrowed_name_is_not_the_builtin_grammar():
     spec = CommandSpec(
-        options=(Option(long="--mode", type="str"),), rest=Operand(type="str")
+        arguments=(
+            Argument("--mode"),
+            Argument("texts", nargs="*", metavar=""),
+        )
     )
     assert not is_builtin_grammar("expr", spec)
     assert not is_builtin_grammar("expr", registered_spec("expr", spec))
     # A spec that reproduces expr's field for field is still its own
     # object: CommandSpec is a frozen dataclass, so `==` would say yes.
     twin = CommandSpec(
-        description=SPECS["expr"].description, rest=Operand(type="str")
+        description=SPECS["expr"].description,
+        arguments=(Argument("texts", nargs="*", metavar=""),),
     )
     assert twin == SPECS["expr"]
     assert not is_builtin_grammar("expr", twin)

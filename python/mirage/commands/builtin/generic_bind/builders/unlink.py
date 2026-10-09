@@ -86,7 +86,7 @@ async def unlink(
                 f"unlink: cannot unlink '{p.raw_path}': {fs_strerror(exc)}\n"
             ).encode(),
         )
-    return None, IOResult(writes={p.mount_path: b""})
+    return None, IOResult()
 
 
 BUILDER = GenericCommand("unlink", unlink, write=True)

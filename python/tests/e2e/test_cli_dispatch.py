@@ -18,9 +18,10 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from mirage import CLIInvocation, CLISpec, Workspace
+from mirage import CLI, CLIInvocation, Workspace
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
-from mirage.commands.spec.types import Operand, Option
+from mirage.commands.cli.types import CLIHandler
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.config import load_config
 from mirage.io import IOResult
 from mirage.io.types import materialize
@@ -41,31 +42,27 @@ async def send(inv: CLIInvocation[TokenConfig]):
     return f"sent[{inv.config.token}] to={to}: {body}\n".encode(), IOResult()
 
 
-def make_tree() -> CLISpec:
-    return CLISpec(
-        name="slackish",
-        config_model=TokenConfig,
-        subcommands=(
-            CLISpec(
-                name="message",
-                subcommands=(
-                    CLISpec(
-                        name="send",
-                        fn=send,
-                        write=True,
-                        options=(
-                            Option(
-                                short="-t",
-                                long="--to",
-                                type="str",
-                                required=True,
+def make_tree() -> CLI:
+    return CLI(
+        spec=CommandSpec(
+            name="slackish",
+            subcommands=(
+                CommandSpec(
+                    name="message",
+                    subcommands=(
+                        CommandSpec(
+                            name="send",
+                            arguments=(
+                                Argument("-t", "--to", required=True),
+                                Argument("texts", nargs="*", metavar=""),
                             ),
                         ),
-                        rest=Operand(type="str"),
                     ),
                 ),
             ),
         ),
+        handlers={"message send": CLIHandler(fn=send, write=True)},
+        config_model=TokenConfig,
     )
 
 
@@ -224,18 +221,22 @@ async def test_yaml_clis_section_installs_through_load_config():
 @pytest.mark.asyncio
 async def test_yaml_cli_reference_form_installs(tmp_path):
     # `cli:` points at code like `vfs:` does: a ./file.py:ATTR
-    # reference loads the CLISpec straight from the script.
+    # reference loads the CLI straight from the script.
     script = tmp_path / "slackish.py"
     script.write_text(
-        "from mirage import CLIInvocation, CLISpec\n"
+        "from mirage import CLIInvocation, CLI, CLIHandler, CommandSpec\n"
         "from mirage.io import IOResult\n"
         "from pydantic import BaseModel\n\n\n"
         "class TokenConfig(BaseModel):\n"
         "    token: str\n\n\n"
         "async def send(inv: CLIInvocation[TokenConfig]):\n"
         "    return f'sent[{inv.config.token}]\\n'.encode(), IOResult()\n\n\n"
-        "TREE = CLISpec(name='slackish', config_model=TokenConfig,\n"
-        "               subcommands=(CLISpec(name='send', fn=send), ))\n"
+        "TREE = CLI(\n"
+        "    spec=CommandSpec(name='slackish',\n"
+        "                     subcommands=(CommandSpec(name='send'),)),\n"
+        "    config_model=TokenConfig,\n"
+        "    handlers={'send': CLIHandler(fn=send)},\n"
+        ")\n"
     )
     cfg = load_config(
         {
@@ -303,9 +304,10 @@ live_quickjs = pytest.mark.skipif(
 )
 
 
-def pager_spec(source: str, language: str = "python") -> CLISpec:
-    return CLISpec(
-        name="pager", script=ScriptSource(source, language=language)
+def pager_spec(source: str, language: str = "python") -> CLI:
+    return CLI(
+        spec=CommandSpec(name="pager"),
+        script=ScriptSource(source, language=language),
     )
 
 
@@ -373,8 +375,8 @@ async def test_script_cli_pinned_to_local_runs_on_the_host(ws):
     # sys.argv only exists on a host interpreter (monty has no sys
     # bridge), so output proves the runtime: pin escalated to local.
     ws.add_runtime("local")
-    spec = CLISpec(
-        name="pager",
+    spec = CLI(
+        spec=CommandSpec(name="pager"),
         script=ScriptSource("import sys\nprint('local', sys.argv[1])"),
         runtime="local",
     )

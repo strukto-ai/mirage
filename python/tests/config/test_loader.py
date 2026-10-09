@@ -604,7 +604,7 @@ clis:
     cfg = load_config(cfg_file)
     kwargs = cfg.to_workspace_kwargs()
     spec, config = kwargs["clis"]["pager"]
-    assert spec.name == "pager"
+    assert spec.spec.name == "pager"
     assert spec.script == ScriptSource("print('page')")
     assert spec.runtime == "monty"
     assert config == {"page_size": 20}
@@ -658,9 +658,13 @@ async def test_clis_path_form_reference_rebases_on_the_config_dir(
     # build-context rule script: follows; without rebasing it resolves
     # against the process cwd and only works by luck.
     (tmp_path / "tool.py").write_text(
-        "from mirage import CLISpec\n"
-        "TREE = CLISpec(name='tool', subcommands=(CLISpec(name='run',\n"
-        "               fn=lambda inv: None), ))\n"
+        "from mirage import CLI, CLIHandler, CommandSpec, IOResult\n"
+        "TREE = CLI(\n"
+        "    spec=CommandSpec(name='tool',\n"
+        "        subcommands=(CommandSpec(name='run'),)),\n"
+        "    handlers={'run': CLIHandler(\n"
+        "        fn=lambda inv: (b'loaded\\n', IOResult()))},\n"
+        ")\n"
     )
     cfg_file = tmp_path / "ws.yaml"
     cfg_file.write_text("""\
@@ -673,8 +677,17 @@ clis:
 """)
     monkeypatch.chdir(tmp_path.parent)
     cfg = load_config(cfg_file)
-    ref, _ = cfg.to_workspace_kwargs()["clis"]["tool"]
+    kwargs = cfg.to_workspace_kwargs()
+    ref, _ = kwargs["clis"]["tool"]
     assert ref == f"{tmp_path / 'tool.py'}:TREE"
+    ws = Workspace(**kwargs)
+    try:
+        result = await ws.shell("tool run")
+        assert result.exit_code == 0
+        assert await result.stdout_str() == "loaded\n"
+        assert await result.stderr_str() == ""
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

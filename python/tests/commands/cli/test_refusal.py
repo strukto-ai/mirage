@@ -22,7 +22,7 @@ from mirage.commands.cli.refusal import (
     git_usage,
     leaf_refusal,
 )
-from mirage.commands.spec.types import CommandSpec, Operand, Option, UsageStyle
+from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.workspace.executor.command.types import ParsedCommand
 
 ARGPARSE_MESSAGE = b"gws gmail: unrecognized option '--nosuch'\n"
@@ -53,20 +53,23 @@ def _parsed(invalid: list[str]) -> ParsedCommand:
 
 
 SPEC = CommandSpec(
-    options=(
-        Option(short="-q", long="--quiet", description="be quiet"),
-        Option(long="--no-quiet", description="be loud"),
-        Option(short="-m", type="str", metavar="msg", description="message"),
-        Option(long="--count", type="int", description="how many"),
-        Option(
-            long="--abbrev",
+    arguments=(
+        Argument("-q", "--quiet", action="store_true", help="be quiet"),
+        Argument("--no-quiet", action="store_true", help="be loud"),
+        Argument("-m", metavar="msg", help="message"),
+        Argument("--count", type="int", help="how many"),
+        Argument(
+            "--abbrev",
             type="int",
-            value_optional=True,
-            description="abbreviate",
+            nargs="?",
+            attached_only=True,
+            help="abbreviate",
         ),
-        Option(long="--ignore-unmatch", description="exit zero"),
-        Option(long="--no-ignore-unmatch", description="fail"),
-        Option(short="-i", long="--interactive-mode", description="too long"),
+        Argument("--ignore-unmatch", action="store_true", help="exit zero"),
+        Argument("--no-ignore-unmatch", action="store_true", help="fail"),
+        Argument(
+            "-i", "--interactive-mode", action="store_true", help="too long"
+        ),
     )
 )
 USAGE = (
@@ -202,11 +205,11 @@ def test_clap_names_the_empty_slot_and_echoes_what_was_supplied():
     # heading, the usage line carries the options the line actually
     # typed, and the footer points at --help.
     spec = CommandSpec(
-        options=(
-            Option(long="--json", type="bool"),
-            Option(long="--limit", type="int"),
-        ),
-        positional=(Operand(type="str", name="PAGE_ID", required=True),),
+        arguments=(
+            Argument("--json", action="store_true"),
+            Argument("--limit", type="int"),
+            Argument("PAGE_ID"),
+        )
     )
     msg = clap_missing_operands(
         "ntn pages get", spec, ["PAGE_ID"], ["--json"], {}
@@ -221,11 +224,11 @@ def test_clap_names_the_empty_slot_and_echoes_what_was_supplied():
 
 def test_clap_usage_echoes_typed_options_in_the_order_typed():
     spec = CommandSpec(
-        options=(
-            Option(long="--limit", type="int"),
-            Option(long="--sort", type="str"),
-        ),
-        positional=(Operand(type="str", name="ID", required=True),),
+        arguments=(
+            Argument("--limit", type="int"),
+            Argument("--sort"),
+            Argument("ID"),
+        )
     )
     # No metavar declared, so both names derive from the long spelling.
     assert clap_supplied(spec, ["--limit", "--sort"], {}) == [
@@ -242,16 +245,13 @@ def test_clap_usage_appends_env_sourced_options_after_the_typed_ones():
     # An env-sourced option counts as supplied and lands last, which is
     # what the real binary prints with NOTION_API_VERSION set.
     spec = CommandSpec(
-        options=(
-            Option(long="--json", type="bool"),
-            Option(
-                long="--notion-version",
-                type="str",
-                metavar="VERSION",
-                env="NOTION_API_VERSION",
+        arguments=(
+            Argument("--json", action="store_true"),
+            Argument(
+                "--notion-version", metavar="VERSION", env="NOTION_API_VERSION"
             ),
-        ),
-        positional=(Operand(type="str", name="PAGE_ID", required=True),),
+            Argument("PAGE_ID"),
+        )
     )
     env = {"NOTION_API_VERSION": "2025-09-03"}
     assert clap_supplied(spec, ["--json"], env) == [
@@ -267,8 +267,10 @@ def test_clap_usage_omits_a_merely_defaulted_option():
     # the line carried (or an env supplied) is echoed. The parser hands
     # over typed dests precisely so this stays true.
     spec = CommandSpec(
-        options=(Option(long="--limit", type="int", default="25"),),
-        positional=(Operand(type="str", name="ID", required=True),),
+        arguments=(
+            Argument("--limit", type="int", default="25"),
+            Argument("ID"),
+        )
     )
     assert clap_supplied(spec, [], {}) == []
 

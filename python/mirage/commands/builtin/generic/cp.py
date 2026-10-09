@@ -448,7 +448,6 @@ async def copy_tree_links(
     lines: list[str] | None,
     policy: TransferPolicy,
     writes: dict[str, ByteSource],
-    reads: dict[str, ByteSource],
     seen: tuple[str, ...] = (),
 ) -> None:
     """Recreate the links below a copied directory, which its copy could
@@ -471,7 +470,6 @@ async def copy_tree_links(
         lines (list[str] | None): ``-v``'s lines, None without ``-v``.
         policy (TransferPolicy): Per-entry overwrite and backup policy.
         writes (dict[str, ByteSource]): Completed destination writes.
-        reads (dict[str, ByteSource]): Content read while following links.
         seen (tuple[str, ...]): the directories being copied above this
             one, which a followed link must not lead back into.
     """
@@ -526,7 +524,6 @@ async def copy_tree_links(
                 errors,
                 policy=policy,
                 writes=writes,
-                reads=reads,
                 lines=lines,
                 copies=copies,
             )
@@ -558,7 +555,6 @@ async def copy_tree_links(
             errors,
             policy=policy,
             writes=writes,
-            reads=reads,
             lines=lines,
             copies=copies,
         )
@@ -571,7 +567,6 @@ async def copy_tree_links(
             lines,
             policy,
             writes,
-            reads,
             (*seen, base),
         )
 
@@ -1240,7 +1235,6 @@ async def copy_entries(
     *,
     policy: TransferPolicy | None = None,
     writes: dict[str, ByteSource] | None = None,
-    reads: dict[str, ByteSource] | None = None,
     lines: list[str] | None = None,
     copies: TransferLinks | None = None,
 ) -> tuple[bool, bool]:
@@ -1270,8 +1264,6 @@ async def copy_entries(
             overwrites unconditionally.
         writes (dict[str, ByteSource] | None): Per-entry write sink keyed
             by mount path; None skips recording.
-        reads (dict[str, ByteSource] | None): Per-entry read sink keyed by
-            virtual path; None skips recording.
         lines (list[str] | None): Verbose ``'src' -> 'dst'`` sink; None
             keeps the copy silent.
         copies (TransferLinks | None): Namespace links to preserve verbatim.
@@ -1366,8 +1358,6 @@ async def copy_entries(
             copied_all = False
             continue
         wrote_any = True
-        if reads is not None:
-            reads[entry.mount_path] = data
         if writes is not None:
             writes[entry_dst.mount_path] = b""
         if lines is not None:
@@ -1462,7 +1452,6 @@ async def cp_generic(
         or backup_displaces(flags.backup)
     )
     writes: dict[str, ByteSource] = {}
-    reads: dict[str, ByteSource] = {}
     lines: list[str] = []
     warned = 0
     seen: set[str] = set()
@@ -1655,7 +1644,6 @@ async def cp_generic(
                     errors,
                     policy=policy,
                     writes=writes,
-                    reads=reads,
                     lines=lines if flags.verbose else None,
                     copies=copies,
                 )
@@ -1669,7 +1657,6 @@ async def cp_generic(
                         lines if flags.verbose else None,
                         policy,
                         writes,
-                        reads,
                     )
                 continue
             if (
@@ -1699,7 +1686,6 @@ async def cp_generic(
                         lines if flags.verbose else None,
                         policy,
                         writes,
-                        reads,
                     )
                 continue
             # Per-entry policy forfeits dir_copy, so the tree's directories
@@ -1758,7 +1744,6 @@ async def cp_generic(
                     lines if flags.verbose else None,
                     policy,
                     writes,
-                    reads,
                 )
             continue
         if guards_created and key_of(target) in created:
@@ -1797,7 +1782,6 @@ async def cp_generic(
                     f"'{target.raw_path}': {fs_strerror(exc)}"
                 )
                 continue
-            reads[src.mount_path] = data
         else:
             try:
                 await strategy.copy(src, target)
@@ -1812,12 +1796,8 @@ async def cp_generic(
         if flags.verbose:
             lines.append(transfer_line(src, target, backup))
     output = "\n".join(lines) + "\n" if lines else None
-    # Sources that streamed through the client are recorded as reads so
-    # apply_io can populate the file cache: a cp is also a full read.
     return output.encode() if output else None, IOResult(
         writes=writes,
-        reads=dict(reads),
-        cache=list(reads),
         stderr=stderr_of(errors),
         exit_code=1 if len(errors) > warned + len(accepted) else 0,
     )

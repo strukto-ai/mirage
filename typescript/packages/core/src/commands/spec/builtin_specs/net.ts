@@ -11,168 +11,99 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-import { CommandSpec, Operand, Option } from '../types.ts'
+import { CommandSpec, Argument } from '../types.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   curl: new CommandSpec({
     description: 'Transfer data from or to a server.',
-    options: [
-      new Option({
-        short: '-H',
-        long: '--header',
-        type: 'str',
-        multiple: true,
-        description: 'Add a custom header to the request.',
+    arguments: [
+      new Argument(['-H', '--header'], {
+        action: 'append',
+        help: 'Add a custom header to the request.',
       }),
-      new Option({
-        short: '-A',
-        long: '--user-agent',
-        type: 'str',
-        description: 'Set the User-Agent header.',
+      new Argument(['-A', '--user-agent'], { help: 'Set the User-Agent header.' }),
+      new Argument(['-X', '--request'], { help: 'Specify the HTTP request method.' }),
+      new Argument(['-d', '--data'], {
+        action: 'append',
+        help: 'Send the given data as the request body.',
       }),
-      new Option({
-        short: '-X',
-        long: '--request',
-        type: 'str',
-        description: 'Specify the HTTP request method.',
+      new Argument('--data-binary', {
+        action: 'append',
+        help: 'Send the data exactly as given, a file unchanged.',
       }),
-      new Option({
-        short: '-d',
-        long: '--data',
-        type: 'str',
-        multiple: true,
-        description: 'Send the given data as the request body.',
+      new Argument('--data-raw', {
+        action: 'append',
+        help: 'Send the data with no special meaning for @.',
       }),
-      new Option({
-        long: '--data-binary',
-        type: 'str',
-        multiple: true,
-        description: 'Send the data exactly as given, a file unchanged.',
-      }),
-      new Option({
-        long: '--data-raw',
-        type: 'str',
-        multiple: true,
-        description: 'Send the data with no special meaning for @.',
-      }),
-      new Option({
-        long: '--data-urlencode',
-        type: 'str',
-        multiple: true,
-        description: 'Send the data URL-encoded.',
-      }),
-      new Option({
-        long: '--json',
-        type: 'str',
-        multiple: true,
-        description: 'Send the data as JSON.',
-      }),
-      new Option({
-        short: '-u',
-        long: '--user',
-        type: 'str',
-        description: 'Send the user and password for basic auth.',
-      }),
-      new Option({
-        short: '-F',
-        long: '--form',
-        type: 'str',
-        description: 'Submit a multipart/form-data field.',
-      }),
-      new Option({
-        short: '-o',
-        long: '--output',
+      new Argument('--data-urlencode', { action: 'append', help: 'Send the data URL-encoded.' }),
+      new Argument('--json', { action: 'append', help: 'Send the data as JSON.' }),
+      new Argument(['-u', '--user'], { help: 'Send the user and password for basic auth.' }),
+      new Argument(['-F', '--form'], { help: 'Submit a multipart/form-data field.' }),
+      new Argument(['-o', '--output'], {
         type: 'path',
-        description: 'Write response body to the given file.',
+        help: 'Write response body to the given file.',
       }),
-      new Option({
-        short: '-D',
-        long: '--dump-header',
+      new Argument(['-D', '--dump-header'], {
         type: 'path',
-        description: 'Write the received headers to the given file, - for stdout.',
+        help: 'Write the received headers to the given file, - for stdout.',
       }),
-      new Option({ short: '-L', long: '--location', description: 'Follow HTTP redirects.' }),
-      new Option({
-        short: '-f',
-        long: '--fail',
-        description: 'Fail with exit 22 on an HTTP error status.',
+      new Argument(['-L', '--location'], { action: 'store_true', help: 'Follow HTTP redirects.' }),
+      new Argument(['-f', '--fail'], {
+        action: 'store_true',
+        help: 'Fail with exit 22 on an HTTP error status.',
       }),
-      new Option({
-        short: '-s',
-        long: '--silent',
-        description: 'Run silently with no progress or messages.',
+      new Argument(['-s', '--silent'], {
+        action: 'store_true',
+        help: 'Run silently with no progress or messages.',
       }),
-      new Option({
-        short: '-S',
-        long: '--show-error',
-        description: 'Show errors even when silent.',
+      new Argument(['-S', '--show-error'], {
+        action: 'store_true',
+        help: 'Show errors even when silent.',
       }),
-      new Option({
-        short: '-v',
-        long: '--verbose',
-        description: 'Dump the request and response headers on stderr.',
+      new Argument(['-v', '--verbose'], {
+        action: 'store_true',
+        help: 'Dump the request and response headers on stderr.',
       }),
-      new Option({
-        short: '-i',
-        long: '--include',
-        description: 'Include the response headers in the output.',
+      new Argument(['-i', '--include'], {
+        action: 'store_true',
+        help: 'Include the response headers in the output.',
       }),
-      new Option({ short: '-I', long: '--head', description: 'Fetch the headers only.' }),
-      new Option({
-        short: '-4',
-        long: '--ipv4',
-        description: 'Accept IPv4 preference (transport selects the address family).',
+      new Argument(['-I', '--head'], { action: 'store_true', help: 'Fetch the headers only.' }),
+      new Argument(['-4', '--ipv4'], {
+        action: 'store_true',
+        help: 'Accept IPv4 preference (transport selects the address family).',
       }),
-      new Option({
-        short: '-6',
-        long: '--ipv6',
-        description: 'Accept IPv6 preference (transport selects the address family).',
+      new Argument(['-6', '--ipv6'], {
+        action: 'store_true',
+        help: 'Accept IPv6 preference (transport selects the address family).',
       }),
-      new Option({
-        short: '-w',
-        long: '--write-out',
-        type: 'str',
-        description: 'Print transfer information after completion.',
-      }),
-      new Option({
-        short: '-m',
-        long: '--max-time',
+      new Argument(['-w', '--write-out'], { help: 'Print transfer information after completion.' }),
+      new Argument(['-m', '--max-time'], {
         type: 'float',
-        description: 'Give up after this many seconds.',
+        help: 'Give up after this many seconds.',
       }),
-      new Option({
-        short: '-k',
-        long: '--insecure',
-        description: 'Skip verification of the server certificate.',
+      new Argument(['-k', '--insecure'], {
+        action: 'store_true',
+        help: 'Skip verification of the server certificate.',
       }),
+      new Argument('text', { metavar: '', nargs: '?' }),
     ],
-    // A URL slot, not a free-text rest: a textual rest makes the parser keep
-    // unknown dash words as operands (the echo/git-log shape), and
-    // `curl -sv URL` then fetched "-sv" (#1065).
-    positional: [new Operand({ type: 'str' })],
   }),
   wget: new CommandSpec({
     description: 'Retrieve files from the web.',
-    options: [
-      new Option({
-        short: '-O',
-        type: 'path',
-        description: 'Write the downloaded content to the given file.',
-      }),
-      new Option({ short: '-q', description: 'Run quietly with no output.' }),
-      new Option({
-        short: '-T',
-        long: '--timeout',
+    arguments: [
+      new Argument('-O', { type: 'path', help: 'Write the downloaded content to the given file.' }),
+      new Argument('-q', { action: 'store_true', help: 'Run quietly with no output.' }),
+      new Argument(['-T', '--timeout'], {
         type: 'float',
-        description: 'Set the network timeout in seconds (zero disables it).',
+        help: 'Set the network timeout in seconds (zero disables it).',
       }),
-      new Option({
-        long: '--spider',
-        description: 'Check that the URL exists without downloading it.',
+      new Argument('--spider', {
+        action: 'store_true',
+        help: 'Check that the URL exists without downloading it.',
       }),
+      new Argument('text', { metavar: '', nargs: '?' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    positional: [new Operand({ type: 'str' })],
-    rest: new Operand({ type: 'path' }),
   }),
 }

@@ -25,17 +25,23 @@ from mirage.commands.builtin.utils.limit import (
 )
 from mirage.commands.cli.constants import CLI_CONFIG_ENV, GIT_LONG_OPTIONS
 from mirage.commands.cli.refusal import (
+    ARGPARSE_EXIT,
     CLAP_EXIT,
     clap_missing_operands,
     directory_refusal,
     leaf_refusal,
 )
-from mirage.commands.cli.types import CLIInvocation, CLISpec, CLIView
+from mirage.commands.cli.types import CLI, CLIInvocation, CLIView
 from mirage.commands.cli.walk import listed_node, node_help, owns_argv, walk
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagBag
-from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
+from mirage.commands.spec.types import (
+    Argument,
+    CommandSpec,
+    FlagValue,
+    UsageStyle,
+)
 from mirage.concurrency.limiter import run_blocking
 from mirage.errors.types import CommandTimeoutError, FsCondition
 from mirage.io import IOResult
@@ -72,7 +78,7 @@ from mirage.workspace.types import ExecutionNode
 # reads the rest kind this way: a GNU command's textual rest is a list
 # of operands, which is why basename has one and still refuses an option
 # it does not know.
-PASSTHROUGH_REST = Operand(type="str")
+PASSTHROUGH_REST = Argument("args", nargs="*", metavar="")
 
 
 async def call_leaf(fn: Callable[..., Any], inv: CLIInvocation[Any]) -> Any:
@@ -98,37 +104,31 @@ async def call_leaf(fn: Callable[..., Any], inv: CLIInvocation[Any]) -> Any:
 
 
 def parse_spec_for(
-    leaf: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE
-) -> tuple[CLISpec, bool]:
-    """The spec a leaf's argv parses against, and who answers ``--help``.
-
-    Usually mirage: a leaf declares its grammar, the parser enforces it,
-    and ``--help`` is injected the way argparse's add_help does. Two
-    nodes answer for themselves instead. A leaf that declares ``--help``
-    asked for the flag, so it is delivered rather than intercepted. And
-    a script root that declares no grammar (owns_argv) has the whole
-    line forwarded: refusing ``--width`` on behalf of a program that
-    accepts it would make the tier unusable, since a YAML ``clis:``
-    entry cannot declare options at all.
+    leaf: CommandSpec,
+    style: UsageStyle = UsageStyle.ARGPARSE,
+    passthrough: bool = False,
+) -> tuple[CommandSpec, bool]:
+    """Add help or the script's pass-through grammar before parsing.
 
     Args:
-        leaf (CLISpec): the resolved leaf node.
-        style (UsageStyle): the root's voice; argparse also takes ``-h``.
-
-    Returns:
-        tuple[CLISpec, bool]: the spec to parse with, and whether the
-        injected ``--help`` is mirage's to answer.
+        leaf (CommandSpec): selected grammar.
+        style (UsageStyle): root help dialect.
+        passthrough (bool): whether a script owns raw argv.
     """
-    if owns_argv(leaf):
-        return replace(leaf, rest=PASSTHROUGH_REST), False
-    if any(option.long == "--help" for option in leaf.options):
+    if passthrough:
+        return replace(
+            leaf, arguments=(*leaf.arguments, PASSTHROUGH_REST)
+        ), False
+    if not leaf.add_help or any(
+        "--help" in arg.names for arg in leaf.arguments
+    ):
         return leaf, False
-    return replace(leaf, options=listed_node(leaf, style).options), True
+    return listed_node(leaf, style), True
 
 
 def _select_runtime(
     prog: str,
-    leaf: CLISpec,
+    leaf: CLI,
     entries: list[Runtime],
     routing: RouteDecision[Runtime] | None = None,
 ) -> tuple[LanguageRuntime | None, IOResult | None]:
@@ -150,7 +150,7 @@ def _select_runtime(
 
     Args:
         prog (str): display path for message attribution.
-        leaf (CLISpec): the script-bearing node.
+        leaf (CLI): the script-bearing node.
         entries (list[Runtime]): the workspace's ordered world.
         routing (RouteDecision[Runtime] | None): the line's placement, None
             outside a routed line.
@@ -296,7 +296,7 @@ class CLIContext:
     routing: RouteDecision[Runtime] | None = None
 
 
-def drops_mount_caches(spec: CLISpec) -> bool:
+def drops_mount_caches(spec: CLI) -> bool:
     """Whether a write verb of this CLI leaves every mount's caches stale.
 
     A CLI that reaches a service writes past the dispatcher's per-path
@@ -309,7 +309,7 @@ def drops_mount_caches(spec: CLISpec) -> bool:
     other mount a reload.
 
     Args:
-        spec (CLISpec): the installed root.
+        spec (CLI): the installed root.
     """
     return spec.config_model is not None or spec.script is not None
 
@@ -328,8 +328,8 @@ async def handle_cli(
     validated config; no mount is consulted and no operand path picks a
     backend (the one executor divergence from mount commands). The walk
     consumes subcommand words and group options; the leaf's own argv
-    rides the ordinary spec machinery because a CLISpec IS a
-    CommandSpec. The leaf handler renders the line's one CLIInvocation,
+    uses the shared CommandSpec parser. The leaf handler renders the line's
+    one CLIInvocation,
     built here and nowhere else: an fn leaf runs as ``fn(inv)``, a
     script leaf runs its embedded program on a workspace runtime
     (_script_output), so usage refusals, limits, and classification all
@@ -371,11 +371,11 @@ async def handle_cli(
     stdout: ByteSource | None
 
     # The walk takes the same environment the leaf parse below does, so
-    # a group-level option declaring ``Option.env`` fills at its own
+    # a group-level option declaring ``Argument.env`` fills at its own
     # level; without it the fetched credential never enters group_flags.
     result = walk(
         install.name,
-        install.spec,
+        install.cli.spec,
         argv,
         session.cwd,
         env_snapshot(session),
@@ -404,7 +404,10 @@ async def handle_cli(
                 else FsCondition.ENOTDIR
             )
             stderr, code = directory_refusal(
-                install.name, base.raw_path, reason, install.spec.usage_style
+                install.name,
+                base.raw_path,
+                reason,
+                install.cli.spec.usage_style,
             )
             return (
                 None,
@@ -414,14 +417,17 @@ async def handle_cli(
 
     prog = " ".join((install.name,) + result.path)
     leaf = result.leaf
+    binding = install.cli.handlers[" ".join(result.path)]
     # argparse add_help, minus the two nodes that answer for themselves
     # (parse_spec_for). No injected --version: that is a GNU coreutils
     # convention, not an argparse one.
-    parse_spec, mirage_help = parse_spec_for(leaf, install.spec.usage_style)
+    parse_spec, mirage_help = parse_spec_for(
+        leaf, install.cli.spec.usage_style, owns_argv(install.cli)
+    )
 
     # The dialect is the root's, not the leaf's: a program answers in
     # one voice at every level.
-    style = install.spec.usage_style
+    style = install.cli.spec.usage_style
     # The environment goes into the parse, not on top of it: an option
     # declaring one is coerced, choice-checked, path-resolved and
     # credited against required exactly as a typed value is.
@@ -430,7 +436,7 @@ async def handle_cli(
     # only.
     abbreviations = (
         GIT_LONG_OPTIONS.get(" ".join(result.path), ())
-        if install.spec.name == "git"
+        if install.cli.spec.name == "git"
         else None
     )
     parsed = parse_flags(
@@ -459,9 +465,6 @@ async def handle_cli(
             style, refusal[0], parsed, " ".join(result.path), leaf
         )
     elif parsed.missing_required_operands and style is UsageStyle.CLAP:
-        # Only clap names the empty slots. Under every other style a
-        # required operand stays the leaf's own business, worded by the
-        # command, which is what every mirage CLI did before this.
         msg = clap_missing_operands(
             prog,
             parse_spec,
@@ -470,6 +473,14 @@ async def handle_cli(
             session.env,
         )
         code = CLAP_EXIT
+    elif parsed.missing_required_operands and style is UsageStyle.ARGPARSE:
+        usage = node_help(prog, parse_spec, style=style).split("\n", 1)[0]
+        names = ", ".join(dict.fromkeys(parsed.missing_required_operands))
+        msg = encode_text(
+            f"{usage}\n{prog}: error: "
+            f"the following arguments are required: {names}\n"
+        )
+        code = ARGPARSE_EXIT
     if msg is not None:
         refusal_io = IOResult(exit_code=code, stderr=msg or None)
         refusal_node = ExecutionNode(
@@ -478,7 +489,7 @@ async def handle_cli(
         return shown, refusal_io, refusal_node
 
     # Group flags merge into the one bag: ancestor/descendant collisions
-    # are a build-time CLISpec error, so a group flag can never shadow a
+    # are a build-time CLI error, so a group flag can never shadow a
     # leaf flag.
     kw: FlagBag[FlagValue] = FlagBag(
         {
@@ -537,16 +548,16 @@ async def handle_cli(
     # TypeScript forwards an explicit deadline and abort signal instead.
     limit = resolve_limit(
         prog,
-        command_default=leaf.limit,
+        command_default=binding.limit,
         workspace_limits=context.command_limits,
         profile_limits=session.command_limits,
     )
     timeout = limit.timeout_seconds if limit is not None else None
     body: Awaitable[CommandOutput | None]
-    native = leaf.script is None
-    if leaf.script is not None:
+    native = install.cli.script is None
+    if install.cli.script is not None:
         runtime, refused = _select_runtime(
-            prog, leaf, entries or [], context.routing
+            prog, install.cli, entries or [], context.routing
         )
         if runtime is None:
             # The interpreter is missing, not the command: 127 like an
@@ -564,12 +575,12 @@ async def handle_cli(
             )
         body = _script_output(
             inv,
-            leaf.script,
+            install.cli.script,
             runtime,
             prog,
         )
     else:
-        fn = leaf.fn
+        fn = binding.fn
         if fn is None:
             # _validate_cli guarantees fn XOR subcommands XOR script and
             # walk only returns handler-bearing nodes as leaf; reaching
@@ -589,7 +600,7 @@ async def handle_cli(
                 )
             finally:
                 active = False
-                if leaf.write and drop_caches is not None:
+                if binding.write and drop_caches is not None:
                     await drop_caches()
 
         body = invoke(run, stdin, buffer_bytes=context.buffer_bytes)
@@ -620,7 +631,7 @@ async def handle_cli(
         # (exit 124), not here. The cancelled leaf may already have sent
         # its request, and a service that accepted it will not roll it
         # back, so the mounts stop trusting their caches now.
-        if not native and leaf.write and drop_caches is not None:
+        if not native and binding.write and drop_caches is not None:
             await drop_caches()
         raise
     except Exception as exc:
@@ -632,7 +643,7 @@ async def handle_cli(
         # request (a PUT whose --jq program fails filters a response the
         # service already applied); without the drop a github mount keeps
         # serving its pre-write bytes.
-        if not native and leaf.write and drop_caches is not None:
+        if not native and binding.write and drop_caches is not None:
             await drop_caches()
         err_stderr = encode_text(f"{prog}: {exc}\n")
         err_io = IOResult(exit_code=1, stderr=err_stderr)
@@ -652,9 +663,9 @@ async def handle_cli(
     # The spec's `write` is the one answer: what policy calls a write,
     # the cache does too, so a verb that can mutate (`gh api` under any
     # method) costs the mounts a reload rather than a stale read.
-    if not native and leaf.write and drop_caches is not None:
+    if not native and binding.write and drop_caches is not None:
         await drop_caches()
-    io.producer = Producer(command=prog, declared=leaf.limit)
+    io.producer = Producer(command=prog, declared=binding.limit)
 
     if parsed.warnings:
         warn = encode_text("".join(f"{prog}: {w}\n" for w in parsed.warnings))

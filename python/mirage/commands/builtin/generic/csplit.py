@@ -131,7 +131,6 @@ async def csplit_generic(
     prefix: str | PathSpec = "xx",
     mount_prefix: str = "",
     cwd: str = "/",
-    relay: bool = False,
     digits: int = 2,
     suffix_format: str | None = None,
     keep_on_error: bool = False,
@@ -163,7 +162,6 @@ async def csplit_generic(
     text = raw.decode(errors="replace")
     lines = split_lines(text)
     parts, error = _split_by_patterns(lines, list(patterns), suppress_matched)
-    writes: dict[str, ByteSource] = {}
     sizes: list[str] = []
     created: list[tuple[str, PathSpec]] = []
     for part in parts:
@@ -180,11 +178,6 @@ async def csplit_generic(
             error = f"csplit: {name}: {fs_strerror(exc)}\n"
             break
         created.append((name, spec))
-        if not relay:
-            # Relay writes land on whichever mount owns each path and
-            # invalidate through the dispatcher; keying them here would
-            # have the runner prefix them onto this mount.
-            writes[spec.mount_path] = data
         sizes.append(str(len(data)))
     if error is not None:
         diagnostics += error
@@ -198,7 +191,6 @@ async def csplit_generic(
                 diagnostics += f"csplit: {name}: {fs_strerror(exc)}\n"
     output = "" if silent or not sizes else "\n".join(sizes) + "\n"
     return output.encode(), IOResult(
-        writes=writes,
         stderr=diagnostics.encode() or None,
         exit_code=0 if error is None else 1,
     )

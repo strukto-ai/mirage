@@ -22,7 +22,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS } from './constants.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
-import { enoent } from '../../errors/fs.ts'
+import { enoent, erofs } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { LimitExceededError } from '../../commands/errors.ts'
 import type { Policy } from '../../policy/base.ts'
@@ -477,14 +477,85 @@ describe('the turf mode gates the node table', () => {
     }
   })
 
-  it.each([...POLICY_WRITE_OPS])('%s refuses before backend support and I/O', async (op) => {
-    const ws = new Workspace({ '/ro': [new RAMVFS(), MountMode.READ] })
+  // mkdir looks its name up first (a read-only mkdir answers what its name holds).
+  it.each([...POLICY_WRITE_OPS].filter((op) => op !== 'mkdir'))(
+    '%s refuses before backend support and I/O',
+    async (op) => {
+      const ws = new Workspace({ '/ro': [new RAMVFS(), MountMode.READ] })
+      try {
+        const mount = ws.namespace.mountFor('/ro/file')
+        const ready = vi.spyOn(mount, 'ensureReady').mockRejectedValue(new Error('backend reached'))
+        await expect(ws.dispatch(op, '/ro/file')).rejects.toMatchObject({ code: 'EROFS' })
+        expect(ready).not.toHaveBeenCalled()
+        expect(ws.namespace.isLink('/ro/file')).toBe(false)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it.each([
+    ['/ro/d', false, 'EEXIST'],
+    ['/ro/d', true, null],
+    ['/ro/f', false, 'EEXIST'],
+    ['/ro/f/x', false, 'ENOTDIR'],
+    ['/ro/gone/x', false, 'ENOENT'],
+    ['/ro/gone/x', true, 'EROFS'],
+    ['/ro/new', false, 'EROFS'],
+  ] as const)('a read-only mkdir of %s (parents %s) answers %s', async (path, parents, code) => {
+    // mkdir(2) on a read-only filesystem refuses only a create it would
+    // really make: a taken name is EEXIST, a file in the chain ENOTDIR, and
+    // `mkdir -p` of a directory already there succeeds.
+    const ram = new RAMVFS()
+    ram.store.files.set('/f', ENC.encode('x'))
+    ram.store.dirs.add('/d')
+    const ws = new Workspace({ '/ro': [ram, MountMode.READ] })
     try {
-      const mount = ws.namespace.mountFor('/ro/file')
-      const ready = vi.spyOn(mount, 'ensureReady').mockRejectedValue(new Error('backend reached'))
-      await expect(ws.dispatch(op, '/ro/file')).rejects.toMatchObject({ code: 'EROFS' })
-      expect(ready).not.toHaveBeenCalled()
-      expect(ws.namespace.isLink('/ro/file')).toBe(false)
+      const call = ws.dispatch('mkdir', path, [], { parents })
+      if (code === null) await call
+      else await expect(call).rejects.toMatchObject({ code })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a policy refusal stands on a read-only mkdir', async () => {
+    // The lookup answers for the mount's mode, never for a policy: a
+    // policy's own read-only refusal stands where the directory exists.
+    const refuse: Policy = {
+      preVfs: (ctx: VfsContext) =>
+        ctx.op === 'mkdir'
+          ? { kind: 'deny', reason: 'no dirs', error: erofs(ctx.path.virtual) }
+          : null,
+    }
+    const ram = new RAMVFS()
+    ram.store.dirs.add('/d')
+    const ws = new Workspace({ '/ro': [ram, MountMode.READ] }, { policies: [refuse] })
+    try {
+      await expect(ws.dispatch('mkdir', '/ro/d', [], { parents: true })).rejects.toMatchObject({
+        code: 'EROFS',
+      })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a read-only mkdir the lookup answers completes', async () => {
+    // `mkdir -p` of a directory already there succeeds, through postVfs
+    // like any op that succeeds.
+    const done: string[] = []
+    const seen: Policy = {
+      postVfs: (ctx: VfsResultContext) => {
+        if (ctx.op === 'mkdir') done.push(ctx.path.virtual)
+        return null
+      },
+    }
+    const ram = new RAMVFS()
+    ram.store.dirs.add('/d')
+    const ws = new Workspace({ '/ro': [ram, MountMode.READ] }, { policies: [seen] })
+    try {
+      await ws.dispatch('mkdir', '/ro/d', [], { parents: true })
+      expect(done).toEqual(['/ro/d'])
     } finally {
       await ws.close()
     }
@@ -542,7 +613,8 @@ describe('a rename moves what the node table holds', () => {
 
   it('replaces the node at the landing', async () => {
     // rename(2) replaces the destination, so the overlay it carried
-    // goes with it rather than staying to shadow what just landed.
+    // goes with it rather than staying to shadow what just landed; what
+    // lands there is the moved file's own node, its write time included.
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/a': new RAMVFS() },
@@ -551,8 +623,9 @@ describe('a rename moves what the node table holds', () => {
     try {
       await ws.shell('printf one > /a/f.txt && printf two > /a/g.txt')
       await ws.namespace.setAttrs('/a/g.txt', { mode: 0o400 })
+      const moved = ws.namespace.metaFor('/a/f.txt')
       await ws.dispatch('rename', '/a/f.txt', [PathSpec.fromStrPath('/a/g.txt')])
-      expect(ws.namespace.metaFor('/a/g.txt')).toBeNull()
+      expect(ws.namespace.metaFor('/a/g.txt')).toEqual(moved)
     } finally {
       await ws.close()
     }
@@ -939,6 +1012,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
     // and the whole read, are served from it.
     const { ws, fetched } = counted()
     await ws.vfs.write('/data/f.count', 'STORED')
+    await ws.cache.remove('/data/f.count')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 2 }))).toBe('BO')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 2, size: 2 }))).toBe('DY')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 0 }))).toBe('')
@@ -978,18 +1052,21 @@ describe('a cold read keeps its bytes for the next reader', () => {
     // A store that serves a range itself moved only that range.
     const { ws } = counted(false, '.count')
     await ws.vfs.write('/data/f.txt', '0123456789')
+    await ws.cache.remove('/data/f.txt')
     expect(DEC.decode(await ws.vfs.read('/data/f.txt', { offset: 2, size: 3 }))).toBe('234')
     expect(await ws.cache.exists('/data/f.txt')).toBe(false)
   })
 
   it('keeps nothing when a write races the fetch', async () => {
     // The write lands after the fetch began, so the bytes it read may be
-    // older than the file; keeping them would serve the old file.
+    // older than the file; keeping them would serve the old file. The
+    // write keeps its own bytes, which the next read is served.
     const { ws, fetched } = counted(true)
     await ws.vfs.write('/data/f.count', 'STORED')
+    await ws.cache.remove('/data/f.count')
     await ws.vfs.read('/data/f.count')
-    await ws.vfs.read('/data/f.count')
-    expect(fetched).toHaveLength(2)
+    expect(await ws.vfs.cat('/data/f.count')).toBe('NEWER')
+    expect(fetched).toHaveLength(1)
   })
 
   it.each([
@@ -1004,6 +1081,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
       // with no native range fills the whole file too.
       const { ws } = counted()
       await ws.vfs.write('/data/f.count', 'STORED')
+      await ws.cache.remove('/data/f.count')
       const mount = ws.mount('/data')
       const probe = ws.cache.get.bind(ws.cache)
       const ready = mount.ensureReady.bind(mount)
@@ -1049,6 +1127,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
     // renderer read returns.
     const { ws, fetched } = counted(false, '.count')
     await ws.vfs.write('/data/f.count', 'STORED')
+    await ws.cache.remove('/data/f.count')
     expect(DEC.decode(await ws.vfs.read('/data/f.count'))).toBe('BODY')
     expect(await ws.cache.exists('/data/f.count')).toBe(false)
     expect(DEC.decode((await ws.shell('cat /data/f.count')).stdout)).toBe('STORED')
@@ -1676,7 +1755,7 @@ describe('a streamed read', () => {
       await ws.dispatch('write', TAPE, [ENC.encode('new')])
       expect((await pullAll(stream))[0]).toBe('0123456789')
       expect(DEC.decode((await ws.dispatch('read', TAPE)) as Uint8Array)).toBe('new')
-      expect(tape.reads).toBe(1)
+      expect(tape.reads).toBe(0)
     } finally {
       await ws.close()
     }
@@ -1730,6 +1809,23 @@ describe('a command reads at the dispatcher', () => {
       const out = await ws.shell(line)
       expect(out.exitCode).toBe(0)
       expect(seen).toContainEqual(['read', '/d/a.txt'])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('a whole write keeps its bytes', () => {
+  it('as a copy, so the caller can reuse its buffer', async () => {
+    class Kept extends RAMVFS {
+      override readonly cachesReads = true
+    }
+    const ws = new Workspace({ '/r': new Kept() }, { mode: MountMode.WRITE })
+    try {
+      const data = new TextEncoder().encode('sent')
+      await ws.vfs.write('/r/f', data)
+      data.fill(0)
+      expect(await ws.cache.get('/r/f')).toEqual(new TextEncoder().encode('sent'))
     } finally {
       await ws.close()
     }

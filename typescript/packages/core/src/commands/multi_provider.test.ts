@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
+import { compileSpec } from './spec/compile.ts'
 import { invoke } from '../io/stdio.ts'
 import { describe, expect, it } from 'vitest'
 import { command, Command } from './config.ts'
@@ -70,7 +70,9 @@ describe('command() registers multiple mounts', () => {
       spec: new CommandSpec(),
       fn: noopFn,
     })
-    const helpOpt = cmds[0]?.spec.options.find((o) => o.long === '--help')
+    const first = cmds[0]
+    if (first === undefined) throw new Error('missing registered command')
+    const helpOpt = compileSpec(first.spec).options.find((o) => o.names.includes('--help'))
     expect(helpOpt).toBeDefined()
   })
 
@@ -109,7 +111,9 @@ describe('command() registers multiple mounts', () => {
       spec: new CommandSpec(),
       fn: noopFn,
     })
-    const versionOpt = cmds[0]?.spec.options.find((o) => o.long === '--version')
+    const first = cmds[0]
+    if (first === undefined) throw new Error('missing registered command')
+    const versionOpt = compileSpec(first.spec).options.find((o) => o.names.includes('--version'))
     expect(versionOpt).toBeDefined()
   })
 

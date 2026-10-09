@@ -11,9 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 export { BUILTIN_SPECS as SPECS, specOf } from './builtins.ts'
 
 export { parseCommand } from './parser.ts'
-export { CommandSpec, type FlagValue, Operand, Option } from './types.ts'
+export { CommandSpec, type FlagValue, Argument } from './types.ts'
 export { FlagView, specFlagNames } from './flag_view.ts'

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import CommandSpec, Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 
 # CPython's own option table, minus four switches that describe a
 # process mirage does not have: -i (drop to an interactive prompt), -d
@@ -30,94 +30,86 @@ from mirage.commands.spec.types import CommandSpec, Operand, Option
 # by whichever engine can; -u is a structural no-op, since mirage
 # buffers every stream and returns it whole. Pinned against CPython
 # 3.12.11.
-_PYTHON_OPTIONS: tuple[Option, ...] = (
-    Option(
-        short="-c",
-        type="str",
-        description="Run the next argument as a program.",
+_PYTHON_OPTIONS: tuple[Argument, ...] = (
+    Argument("-c", help="Run the next argument as a program."),
+    Argument("-m", help="Run the named module as __main__."),
+    Argument(
+        "-u",
+        action="store_true",
+        help="(Ignored) Unbuffered output. Mirage buffers "
+        "every stream and returns it whole.",
     ),
-    Option(
-        short="-m", type="str", description="Run the named module as __main__."
+    Argument(
+        "-b",
+        action="count",
+        help="Warn on str(bytes) and on comparing bytes with "
+        "str; -bb raises instead.",
     ),
-    Option(
-        short="-u",
-        description=(
-            "(Ignored) Unbuffered output. Mirage buffers "
-            "every stream and returns it whole."
-        ),
+    Argument(
+        "-B", action="store_true", help="Do not write .pyc files on import."
     ),
-    Option(
-        short="-b",
-        count=True,
-        description=(
-            "Warn on str(bytes) and on comparing bytes with "
-            "str; -bb raises instead."
-        ),
+    Argument(
+        "-E", action="store_true", help="Ignore PYTHON* environment variables."
     ),
-    Option(short="-B", description="Do not write .pyc files on import."),
-    Option(short="-E", description="Ignore PYTHON* environment variables."),
-    Option(short="-I", description="Isolated mode: implies -E and -s."),
-    Option(
-        short="-O",
-        count=True,
-        description=(
-            "Remove assert and __debug__ blocks; -OO also strips docstrings."
-        ),
+    Argument(
+        "-I", action="store_true", help="Isolated mode: implies -E and -s."
     ),
-    Option(
-        short="-P",
-        description=("Do not prepend the script's directory to sys.path."),
+    Argument(
+        "-O",
+        action="count",
+        help="Remove assert and __debug__ blocks; -OO also strips docstrings.",
     ),
-    Option(
-        short="-q",
-        description=(
-            "(Ignored) Suppress the version banner. Mirage prints none."
-        ),
+    Argument(
+        "-P",
+        action="store_true",
+        help="Do not prepend the script's directory to sys.path.",
     ),
-    Option(
-        short="-s",
-        description="Do not add the user site directory to sys.path.",
+    Argument(
+        "-q",
+        action="store_true",
+        help="(Ignored) Suppress the version banner. Mirage prints none.",
     ),
-    Option(
-        short="-S", description="Do not run 'import site' on initialization."
+    Argument(
+        "-s",
+        action="store_true",
+        help="Do not add the user site directory to sys.path.",
     ),
-    Option(
-        short="-W",
-        type="str",
-        multiple=True,
-        description="Set a warning control filter.",
+    Argument(
+        "-S",
+        action="store_true",
+        help="Do not run 'import site' on initialization.",
     ),
-    Option(
-        short="-x",
-        description=(
-            "Skip the script file's first line, for a non-Unix #! form."
-        ),
+    Argument("-W", action="append", help="Set a warning control filter."),
+    Argument(
+        "-x",
+        action="store_true",
+        help="Skip the script file's first line, for a non-Unix #! form.",
     ),
-    Option(
-        short="-X",
-        type="str",
-        multiple=True,
-        description="Set an implementation-specific option.",
+    Argument(
+        "-X",
+        action="append",
+        help="Set an implementation-specific option.",
     ),
     # CPython parses this one by hand and so rejects the --opt=value
     # spelling it accepts everywhere else; mirage's parser takes both,
     # which is the harmless direction to diverge in.
-    Option(
-        long="--check-hash-based-pycs",
-        type="str",
+    Argument(
+        "--check-hash-based-pycs",
         choices=("always", "default", "never"),
-        description="How to validate hash-based .pyc files.",
+        help="How to validate hash-based .pyc files.",
     ),
     # -VV shares the concise version line; build details are not exposed.
-    Option(
-        short="-h",
-        long="--help",
-        description="Show this help message and exit.",
+    Argument(
+        "-h",
+        "--help",
+        action="store_true",
+        help="Show this help message and exit.",
     ),
-    Option(
-        short="-V",
-        long="--version",
-        description="Show version information and exit.",
+    Argument(
+        "-V",
+        "--version",
+        action="store_true",
+        help="Show version information and exit.",
     ),
 )
 
@@ -127,23 +119,31 @@ _PYTHON_OPTIONS: tuple[Option, ...] = (
 # argv. The slot has to say so, because a runtime that reads the script
 # itself (a sandbox, a host process) is outside every dispatcher, so the
 # admission gate is the one place a path rule can see the file.
-_PYTHON_SCRIPT = Operand(type="path", provided_by=("-c", "-m"))
+_PYTHON_SCRIPT = Argument(
+    "path", type="path", nargs="?", metavar="", provided_by=("-c", "-m")
+)
 
 # node's `[script.js | -e "script" | -] [arguments]`, the same shape.
-_JS_SCRIPT = Operand(type="path", provided_by=("-e",))
+_JS_SCRIPT = Argument(
+    "path", type="path", nargs="?", metavar="", provided_by=("-e",)
+)
 
 SPECS: dict[str, CommandSpec] = {
     "python": CommandSpec(
         description="Run Python on the workspace's bound runtime.",
-        options=_PYTHON_OPTIONS,
-        positional=(_PYTHON_SCRIPT,),
-        rest=Operand(type="str", remainder=True),
+        arguments=(
+            *_PYTHON_OPTIONS,
+            _PYTHON_SCRIPT,
+            Argument("texts", nargs="REMAINDER", metavar=""),
+        ),
     ),
     "python3": CommandSpec(
         description="Run Python on the workspace's bound runtime.",
-        options=_PYTHON_OPTIONS,
-        positional=(_PYTHON_SCRIPT,),
-        rest=Operand(type="str", remainder=True),
+        arguments=(
+            *_PYTHON_OPTIONS,
+            _PYTHON_SCRIPT,
+            Argument("texts", nargs="REMAINDER", metavar=""),
+        ),
     ),
     # js and node take the remainder for the same reason python does: the
     # first operand is a program, so the words after it are that program's
@@ -152,406 +152,444 @@ SPECS: dict[str, CommandSpec] = {
     # Pinned against node 22.8.0.
     "js": CommandSpec(
         description="Run JavaScript on a sandboxed quickjs engine.",
-        options=(
-            Option(
-                short="-v",
-                long="--version",
-                description="Show runtime version information and exit.",
+        arguments=(
+            Argument(
+                "-v",
+                "--version",
+                action="store_true",
+                help="Show runtime version information and exit.",
             ),
-            Option(
-                short="-e",
-                type="str",
-                description="Evaluate the next argument as a script.",
+            Argument(
+                "-e",
+                help="Evaluate the next argument as a script.",
             ),
-            Option(
-                short="-m",
-                long="--module",
-                description=(
-                    "Run as an ES module (top-level "
-                    "import/export/await); .mjs files "
-                    "select this automatically."
-                ),
+            Argument(
+                "-m",
+                "--module",
+                action="store_true",
+                help="Run as an ES module (top-level "
+                "import/export/await); .mjs files "
+                "select this automatically.",
             ),
+            _JS_SCRIPT,
+            Argument("texts", nargs="REMAINDER", metavar=""),
         ),
-        positional=(_JS_SCRIPT,),
-        rest=Operand(type="str", remainder=True),
     ),
     "node": CommandSpec(
         description="Run JavaScript on a sandboxed quickjs engine.",
-        options=(
-            Option(
-                short="-v",
-                long="--version",
-                description="Show runtime version information and exit.",
+        arguments=(
+            Argument(
+                "-v",
+                "--version",
+                action="store_true",
+                help="Show runtime version information and exit.",
             ),
-            Option(
-                short="-e",
-                type="str",
-                description="Evaluate the next argument as a script.",
+            Argument(
+                "-e",
+                help="Evaluate the next argument as a script.",
             ),
-            Option(
-                short="-m",
-                long="--module",
-                description=(
-                    "Run as an ES module (top-level "
-                    "import/export/await); .mjs files "
-                    "select this automatically."
-                ),
+            Argument(
+                "-m",
+                "--module",
+                action="store_true",
+                help="Run as an ES module (top-level "
+                "import/export/await); .mjs files "
+                "select this automatically.",
             ),
+            _JS_SCRIPT,
+            Argument("texts", nargs="REMAINDER", metavar=""),
         ),
-        positional=(_JS_SCRIPT,),
-        rest=Operand(type="str", remainder=True),
     ),
     "mktemp": CommandSpec(
-        options=(
-            Option(short="-d", long="--directory"),
-            Option(short="-p", type="path"),
-            Option(long="--tmpdir", type="path", value_optional=True),
-            Option(short="-t"),
-            Option(short="-u", long="--dry-run"),
-            Option(short="-q", long="--quiet"),
-            Option(long="--suffix", type="str"),
-        ),
-        positional=(Operand(type="str"),),
+        arguments=(
+            Argument("-d", "--directory", action="store_true"),
+            Argument("-p", type="path"),
+            Argument("--tmpdir", type="path", nargs="?", attached_only=True),
+            Argument("-t", action="store_true"),
+            Argument("-u", "--dry-run", action="store_true"),
+            Argument("-q", "--quiet", action="store_true"),
+            Argument("--suffix"),
+            Argument("text", nargs="?", metavar=""),
+        )
     ),
     "bc": CommandSpec(
         description="Arbitrary precision calculator language.",
-        options=(
-            Option(short="-l", description="Load the standard math library."),
-            Option(short="-q", description="Suppress the welcome banner."),
+        arguments=(
+            Argument(
+                "-l",
+                action="store_true",
+                help="Load the standard math library.",
+            ),
+            Argument(
+                "-q", action="store_true", help="Suppress the welcome banner."
+            ),
+            Argument("texts", nargs="*", metavar=""),
         ),
-        rest=Operand(type="str"),
     ),
     "expr": CommandSpec(
         description="Evaluate expressions.",
-        rest=Operand(type="str"),
+        arguments=(Argument("texts", nargs="*", metavar=""),),
     ),
     "history": CommandSpec(
         description="Show command history for the session.",
-        options=(
-            Option(short="-c", description="Clear the command history."),
-            Option(
-                short="-d",
-                type="str",
-                description=(
-                    "Delete the entry at the given position; "
-                    "negative counts back from the end."
-                ),
+        arguments=(
+            Argument(
+                "-c", action="store_true", help="Clear the command history."
             ),
-            Option(
-                short="-s",
-                description=(
-                    "Append the args to the history as a "
-                    "single entry without executing them."
-                ),
+            Argument(
+                "-d",
+                help="Delete the entry at the given position; "
+                "negative counts back from the end.",
             ),
-            Option(
-                short="-p", description="Print the args without storing them."
+            Argument(
+                "-s",
+                action="store_true",
+                help="Append the args to the history as a "
+                "single entry without executing them.",
             ),
-            Option(
-                short="-a",
-                description=("Append: no-op (file and store are the same)."),
+            Argument(
+                "-p",
+                action="store_true",
+                help="Print the args without storing them.",
             ),
-            Option(
-                short="-r",
-                description=("Read: no-op (file and store are the same)."),
+            Argument(
+                "-a",
+                action="store_true",
+                help="Append: no-op (file and store are the same).",
             ),
-            Option(
-                short="-w",
-                description=("Write: no-op (file and store are the same)."),
+            Argument(
+                "-r",
+                action="store_true",
+                help="Read: no-op (file and store are the same).",
             ),
-            Option(
-                short="-n",
-                description=("Read-new: no-op (file and store are the same)."),
+            Argument(
+                "-w",
+                action="store_true",
+                help="Write: no-op (file and store are the same).",
             ),
+            Argument(
+                "-n",
+                action="store_true",
+                help="Read-new: no-op (file and store are the same).",
+            ),
+            Argument("texts", nargs="*", metavar=""),
         ),
-        rest=Operand(type="str"),
     ),
     "date": CommandSpec(
         description="Print or set the system date and time.",
-        options=(
-            Option(
-                short="-d",
-                long="--date",
-                type="str",
-                description=(
-                    "Display the time described by the given date string."
-                ),
+        arguments=(
+            Argument(
+                "-d",
+                "--date",
+                help="Display the time described by the given date string.",
             ),
             # GNU -I[FMT]: the precision rides attached (-Is) or after
             # `=`, never as the next word, and matches by prefix in
             # GNU's own table order.
-            Option(
-                short="-I",
-                long="--iso-8601",
-                type="str",
-                value_optional=True,
+            Argument(
+                "-I",
+                "--iso-8601",
+                nargs="?",
+                attached_only=True,
                 choices=("hours", "minutes", "date", "seconds", "ns"),
-                description=(
-                    "Output date/time in ISO 8601 format, to "
-                    "the given precision (default date)."
-                ),
+                help="Output date/time in ISO 8601 format, to "
+                "the given precision (default date).",
             ),
-            Option(
-                short="-R",
-                long="--rfc-email",
-                description="Output date in RFC 5322 email format.",
+            Argument(
+                "-R",
+                "--rfc-email",
+                action="store_true",
+                help="Output date in RFC 5322 email format.",
             ),
-            Option(
-                long="--rfc-3339",
-                type="str",
+            Argument(
+                "--rfc-3339",
                 choices=("date", "seconds", "ns"),
-                description=(
-                    "Output date/time in RFC 3339 format, to "
-                    "the given precision."
-                ),
+                help="Output date/time in RFC 3339 format, to "
+                "the given precision.",
             ),
-            Option(
-                short="-u",
-                long="--utc",
-                description="Use Coordinated Universal Time (UTC).",
+            Argument(
+                "-u",
+                "--utc",
+                action="store_true",
+                help="Use Coordinated Universal Time (UTC).",
             ),
-            Option(
-                long="--universal",
-                description="Use Coordinated Universal Time (UTC).",
+            Argument(
+                "--universal",
+                action="store_true",
+                help="Use Coordinated Universal Time (UTC).",
             ),
+            Argument("text", nargs="?", metavar=""),
         ),
-        positional=(Operand(type="str"),),
     ),
     "uname": CommandSpec(
         description="Print certain system information.",
-        options=(
-            Option(
-                short="-a",
-                long="--all",
-                description=(
-                    "Print all information, omitting -p and -i if unknown."
-                ),
+        arguments=(
+            Argument(
+                "-a",
+                "--all",
+                action="store_true",
+                help="Print all information, omitting -p and -i if unknown.",
             ),
-            Option(
-                short="-s",
-                long="--kernel-name",
-                description="Print the kernel name.",
+            Argument(
+                "-s",
+                "--kernel-name",
+                action="store_true",
+                help="Print the kernel name.",
             ),
-            Option(
-                short="-n",
-                long="--nodename",
-                description="Print the network node hostname.",
+            Argument(
+                "-n",
+                "--nodename",
+                action="store_true",
+                help="Print the network node hostname.",
             ),
-            Option(
-                short="-r",
-                long="--kernel-release",
-                description="Print the kernel release.",
+            Argument(
+                "-r",
+                "--kernel-release",
+                action="store_true",
+                help="Print the kernel release.",
             ),
-            Option(
-                short="-v",
-                long="--kernel-version",
-                description="Print the kernel version.",
+            Argument(
+                "-v",
+                "--kernel-version",
+                action="store_true",
+                help="Print the kernel version.",
             ),
-            Option(
-                short="-m",
-                long="--machine",
-                description="Print the machine hardware name.",
+            Argument(
+                "-m",
+                "--machine",
+                action="store_true",
+                help="Print the machine hardware name.",
             ),
-            Option(
-                short="-p",
-                long="--processor",
-                description="Print the processor type.",
+            Argument(
+                "-p",
+                "--processor",
+                action="store_true",
+                help="Print the processor type.",
             ),
-            Option(
-                short="-i",
-                long="--hardware-platform",
-                description="Print the hardware platform.",
+            Argument(
+                "-i",
+                "--hardware-platform",
+                action="store_true",
+                help="Print the hardware platform.",
             ),
-            Option(
-                short="-o",
-                long="--operating-system",
-                description="Print the operating system.",
+            Argument(
+                "-o",
+                "--operating-system",
+                action="store_true",
+                help="Print the operating system.",
             ),
+            Argument("texts", nargs="*", metavar=""),
         ),
-        rest=Operand(type="str"),
     ),
     "hostname": CommandSpec(
         description="Show or set the system's host name.",
-        options=(
-            Option(short="-a", long="--alias", description="Alias names."),
-            Option(
-                short="-A",
-                long="--all-fqdns",
-                description="All long host names (FQDNs).",
+        arguments=(
+            Argument(
+                "-a", "--alias", action="store_true", help="Alias names."
             ),
-            Option(
-                short="-b",
-                long="--boot",
-                description="Set default hostname if none available.",
+            Argument(
+                "-A",
+                "--all-fqdns",
+                action="store_true",
+                help="All long host names (FQDNs).",
             ),
-            Option(
-                short="-d", long="--domain", description="DNS domain name."
+            Argument(
+                "-b",
+                "--boot",
+                action="store_true",
+                help="Set default hostname if none available.",
             ),
-            Option(
-                short="-f",
-                long="--fqdn",
-                description="Long host name (FQDN).",
+            Argument(
+                "-d", "--domain", action="store_true", help="DNS domain name."
             ),
-            Option(long="--long", description="Long host name (FQDN)."),
-            Option(
-                short="-F",
-                long="--file",
-                type="str",
-                description="Read host name or NIS domain name from given "
-                "file.",
+            Argument(
+                "-f",
+                "--fqdn",
+                action="store_true",
+                help="Long host name (FQDN).",
             ),
-            Option(
-                short="-i",
-                long="--ip-address",
-                description="Addresses for the host name.",
+            Argument(
+                "--long", action="store_true", help="Long host name (FQDN)."
             ),
-            Option(
-                short="-I",
-                long="--all-ip-addresses",
-                description="All addresses for the host.",
+            Argument(
+                "-F",
+                "--file",
+                help="Read host name or NIS domain name from given file.",
             ),
-            Option(short="-s", long="--short", description="Short host name."),
-            Option(short="-y", long="--yp", description="NIS/YP domain name."),
-            Option(long="--nis", description="NIS/YP domain name."),
+            Argument(
+                "-i",
+                "--ip-address",
+                action="store_true",
+                help="Addresses for the host name.",
+            ),
+            Argument(
+                "-I",
+                "--all-ip-addresses",
+                action="store_true",
+                help="All addresses for the host.",
+            ),
+            Argument(
+                "-s", "--short", action="store_true", help="Short host name."
+            ),
+            Argument(
+                "-y", "--yp", action="store_true", help="NIS/YP domain name."
+            ),
+            Argument("--nis", action="store_true", help="NIS/YP domain name."),
+            Argument("texts", nargs="*", metavar=""),
         ),
-        rest=Operand(type="str"),
     ),
     "id": CommandSpec(
         description="Print user and group information for each specified "
         "USER, or (when USER omitted) for the current process.",
-        options=(
-            Option(
-                short="-a",
-                description="Ignore, for compatibility with other versions.",
+        arguments=(
+            Argument(
+                "-a",
+                action="store_true",
+                help="Ignore, for compatibility with other versions.",
             ),
-            Option(
-                short="-Z",
-                long="--context",
-                description="Print only the security context of the process.",
+            Argument(
+                "-Z",
+                "--context",
+                action="store_true",
+                help="Print only the security context of the process.",
             ),
-            Option(
-                short="-g",
-                long="--group",
-                description="Print only the effective group ID.",
+            Argument(
+                "-g",
+                "--group",
+                action="store_true",
+                help="Print only the effective group ID.",
             ),
-            Option(
-                short="-G", long="--groups", description="Print all group IDs."
+            Argument(
+                "-G",
+                "--groups",
+                action="store_true",
+                help="Print all group IDs.",
             ),
-            Option(
-                short="-n",
-                long="--name",
-                description="Print a name instead of a number, for -u,-g,-G.",
+            Argument(
+                "-n",
+                "--name",
+                action="store_true",
+                help="Print a name instead of a number, for -u,-g,-G.",
             ),
-            Option(
-                short="-r",
-                long="--real",
-                description="Print the real ID instead of the effective ID, "
+            Argument(
+                "-r",
+                "--real",
+                action="store_true",
+                help="Print the real ID instead of the effective ID, "
                 "with -u,-g,-G.",
             ),
-            Option(
-                short="-u",
-                long="--user",
-                description="Print only the effective user ID.",
+            Argument(
+                "-u",
+                "--user",
+                action="store_true",
+                help="Print only the effective user ID.",
             ),
-            Option(
-                short="-z",
-                long="--zero",
-                description="Delimit entries with NUL characters, not "
+            Argument(
+                "-z",
+                "--zero",
+                action="store_true",
+                help="Delimit entries with NUL characters, not "
                 "whitespace; not permitted in default format.",
             ),
+            Argument("texts", nargs="*", metavar=""),
         ),
-        rest=Operand(type="str"),
     ),
     "getconf": CommandSpec(
         description="Get the configuration value for variable VAR, or for "
         "variable PATH_VAR for path PATH.",
-        options=(
-            Option(
-                short="-a",
-                description="Print every variable and its value.",
+        arguments=(
+            Argument(
+                "-a",
+                action="store_true",
+                help="Print every variable and its value.",
             ),
-            Option(
-                short="-v",
-                type="str",
-                description="Give values for compilation environment SPEC.",
+            Argument(
+                "-v",
+                help="Give values for compilation environment SPEC.",
             ),
+            Argument("texts", nargs="*", metavar=""),
         ),
-        rest=Operand(type="str"),
     ),
     "sleep": CommandSpec(
         description="Delay for a specified amount of time.",
-        rest=Operand(type="str"),
+        arguments=(Argument("texts", nargs="*", metavar=""),),
     ),
     "bash": CommandSpec(
-        description=(
-            "Run a program in a nested Mirage shell: the text after `-c`, "
-            "a script file, or standard input. `bash` and `sh` are aliases."
+        description="Run a program in a nested Mirage shell: the text after `-c`, "
+        "a script file, or standard input. `bash` and `sh` are aliases.",
+        arguments=(
+            Argument(
+                "-c",
+                help="Read commands from the next argument and execute them.",
+            ),
+            Argument(
+                "-s",
+                action="store_true",
+                help="Read commands from stdin instead of from an argument.",
+            ),
+            Argument(
+                "-l",
+                action="store_true",
+                help="(Ignored) Login shell. Mirage does "
+                "not source profile files.",
+            ),
+            Argument(
+                "-i",
+                action="store_true",
+                help="(Ignored) Interactive flag. Mirage "
+                "shells are non-interactive.",
+            ),
+            Argument("-e", action="store_true", help="Exit on first error."),
+            Argument(
+                "-u",
+                action="store_true",
+                help="Treat unset variables as errors.",
+            ),
+            Argument(
+                "-x",
+                action="store_true",
+                help="Print commands as they execute.",
+            ),
+            Argument(
+                "--debug",
+                action="store_true",
+                help="(Ignored) Debugging mode.",
+            ),
+            Argument(
+                "--init-file",
+                help="(Ignored) Read this file instead of ~/.bashrc.",
+            ),
+            Argument(
+                "--login", action="store_true", help="(Ignored) Login shell."
+            ),
+            Argument(
+                "--noediting",
+                action="store_true",
+                help="(Ignored) No line editing.",
+            ),
+            Argument(
+                "--noprofile",
+                action="store_true",
+                help="(Ignored) Skip profile files.",
+            ),
+            Argument(
+                "--norc", action="store_true", help="(Ignored) Skip rc files."
+            ),
+            Argument(
+                "--posix",
+                action="store_true",
+                help="(Ignored) POSIX-conformant mode.",
+            ),
+            Argument(
+                "--rcfile",
+                help="(Ignored) Read this file instead of ~/.bashrc.",
+            ),
+            Argument(
+                "--verbose",
+                action="store_true",
+                help="Print input lines as they are read.",
+            ),
+            Argument("texts", nargs="*", metavar=""),
         ),
-        options=(
-            Option(
-                short="-c",
-                type="str",
-                description=(
-                    "Read commands from the next argument and execute them."
-                ),
-            ),
-            Option(
-                short="-s",
-                description=(
-                    "Read commands from stdin instead of from an argument."
-                ),
-            ),
-            Option(
-                short="-l",
-                description=(
-                    "(Ignored) Login shell. Mirage does "
-                    "not source profile files."
-                ),
-            ),
-            Option(
-                short="-i",
-                description=(
-                    "(Ignored) Interactive flag. Mirage "
-                    "shells are non-interactive."
-                ),
-            ),
-            Option(short="-e", description="Exit on first error."),
-            Option(
-                short="-u",
-                description="Treat unset variables as errors.",
-            ),
-            Option(
-                short="-x",
-                description="Print commands as they execute.",
-            ),
-            Option(long="--debug", description="(Ignored) Debugging mode."),
-            Option(
-                long="--init-file",
-                type="str",
-                description="(Ignored) Read this file instead of ~/.bashrc.",
-            ),
-            Option(long="--login", description="(Ignored) Login shell."),
-            Option(
-                long="--noediting", description="(Ignored) No line editing."
-            ),
-            Option(
-                long="--noprofile", description="(Ignored) Skip profile files."
-            ),
-            Option(long="--norc", description="(Ignored) Skip rc files."),
-            Option(
-                long="--posix", description="(Ignored) POSIX-conformant mode."
-            ),
-            Option(
-                long="--rcfile",
-                type="str",
-                description="(Ignored) Read this file instead of ~/.bashrc.",
-            ),
-            Option(
-                long="--verbose",
-                description="Print input lines as they are read.",
-            ),
-        ),
-        rest=Operand(type="str"),
     ),
 }

@@ -13,14 +13,14 @@ it.each([
   [['--date-order', '--graph'], 'date'],
   [['-S', '--topo-order', '--date-order'], 'date'],
 ])('honors the last ordering option in %j', (argv, expected) => {
-  const spec = GIT.subcommands.find((node) => node.name === 'log')
+  const spec = GIT.spec.subcommands.find((node) => node.name === 'log')
   if (spec === undefined) throw new Error('missing log spec')
   const parsed = parseCommand(spec, argv, '/')
   expect(parseFlags(new FlagView(parseToKwargs(parsed))).order).toBe(expected)
 })
 
 function logFlags(argv: string[]): ReturnType<typeof parseFlags> {
-  const spec = GIT.subcommands.find((node) => node.name === 'log')
+  const spec = GIT.spec.subcommands.find((node) => node.name === 'log')
   if (spec === undefined) throw new Error('missing log spec')
   return parseFlags(new FlagView(parseToKwargs(parseCommand(spec, argv, '/'))))
 }

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec } from '@struktoai/mirage-core/commands/spec/compile'
 import type * as ClientModule from '../../../../core/email/client.ts'
 import {
   fetchHeaders,
@@ -129,7 +130,7 @@ afterEach(() => {
 })
 
 function leaf(...path: string[]) {
-  let node = HIMALAYA
+  let node = HIMALAYA.spec
   for (const name of path) {
     const child = node.subcommands.find((c) => c.name === name)
     if (child === undefined) throw new Error(`no subcommand ${name}`)
@@ -159,8 +160,8 @@ function inv(fields: Partial<CLIInvocation<EmailConfig>> = {}): CLIInvocation<Em
 
 describe('himalaya tree', () => {
   it('matches the himalaya vocabulary', () => {
-    expect(HIMALAYA.name).toBe('himalaya')
-    expect(HIMALAYA.subcommands.map((g) => g.name)).toEqual(['envelope', 'message'])
+    expect(HIMALAYA.spec.name).toBe('himalaya')
+    expect(HIMALAYA.spec.subcommands.map((g) => g.name)).toEqual(['envelope', 'message'])
     expect(leaf('envelope').subcommands.map((v) => v.name)).toEqual(['list', 'search'])
     expect(leaf('message').subcommands.map((v) => v.name)).toEqual([
       'read',
@@ -181,20 +182,22 @@ describe('himalaya tree', () => {
   it('takes the message id as an operand and the mailbox as -m', () => {
     for (const verb of ['read', 'reply', 'forward']) {
       const node = leaf('message', verb)
-      expect(node.rest).not.toBeNull()
-      expect(node.options.find((o) => o.long === '--mailbox')?.short).toBe('-m')
+      expect(compileSpec(node).rest).not.toBeNull()
+      expect(compileSpec(node).options.find((o) => o.names.includes('--mailbox'))?.names).toContain(
+        '-m',
+      )
     }
-    expect(leaf('message', 'compose').rest).toBeNull()
+    expect(compileSpec(leaf('message', 'compose')).rest).toBeNull()
   })
 
   it('classifies writes and requires no composer flag', () => {
-    expect(leaf('envelope', 'list').write).toBe(false)
-    expect(leaf('envelope', 'search').write).toBe(false)
-    expect(leaf('message', 'read').write).toBe(false)
+    expect(HIMALAYA.handlers[['envelope', 'list'].join(' ')]?.write).toBe(false)
+    expect(HIMALAYA.handlers[['envelope', 'search'].join(' ')]?.write).toBe(false)
+    expect(HIMALAYA.handlers[['message', 'read'].join(' ')]?.write).toBe(false)
     for (const verb of ['compose', 'send', 'reply', 'forward']) {
-      expect(leaf('message', verb).write).toBe(true)
+      expect(HIMALAYA.handlers[['message', verb].join(' ')]?.write).toBe(true)
     }
-    expect(leaf('message', 'compose').options.every((o) => !o.required)).toBe(true)
+    expect(compileSpec(leaf('message', 'compose')).options.every((o) => !o.required)).toBe(true)
   })
 
   it('registers itself for YAML resolution at import time', () => {

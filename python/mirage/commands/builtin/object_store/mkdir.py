@@ -58,7 +58,6 @@ def _build(io: CommandIO) -> Callable[..., Any]:
         paths = await resolve_glob(accessor, paths, opts.index)
         lines: list[str] = []
         errors: list[str] = []
-        writes: dict[str, ByteSource] = {}
         links = opts.ns.links if opts.ns is not None else None
         for path in paths:
             # A symlink occupying the name is EEXIST; the shared helper
@@ -79,13 +78,10 @@ def _build(io: CommandIO) -> Callable[..., Any]:
             if failed is not None:
                 errors.append(failed)
                 continue
-            writes[path.mount_path] = b""
             lines.extend(created_lines(names))
         output = ("\n".join(lines) + "\n").encode() if lines else None
         stderr = ("\n".join(errors) + "\n").encode() if errors else None
-        return output, IOResult(
-            writes=writes, stderr=stderr, exit_code=1 if errors else 0
-        )
+        return output, IOResult(stderr=stderr, exit_code=1 if errors else 0)
 
     return mkdir
 

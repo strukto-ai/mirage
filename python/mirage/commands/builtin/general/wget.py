@@ -140,13 +140,11 @@ async def wget(
             return None, IOResult(exit_code=EXIT_GENERIC, stderr=err)
     if resp.is_error:
         err = b"" if q else (f"ERROR {resp.status}: {resp.reason}.\n").encode()
-        return None, IOResult(
-            exit_code=EXIT_SERVER_ERROR, stderr=err, writes={dest_str: data}
-        )
+        return None, IOResult(exit_code=EXIT_SERVER_ERROR, stderr=err)
     # Real wget puts its progress report on stderr and nothing on stdout.
     err = (
         b""
         if q
         else (f"'{dest_str}' saved [{len(data)}/{len(data)}]\n").encode()
     )
-    return None, IOResult(stderr=err, writes={dest_str: data})
+    return None, IOResult(stderr=err)

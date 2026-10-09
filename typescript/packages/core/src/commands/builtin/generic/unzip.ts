@@ -757,7 +757,6 @@ export async function unzipGeneric(
       if (stat !== undefined) await ensureDir(dir, makePathSpec, mkdir, stat, made)
       else await mkdir(makePathSpec(dir), true)
     }
-    const writes: Record<string, Uint8Array> = {}
     const outputLines: string[] = quiet ? [] : [`Archive:  ${archivePath.rawPath}`]
     const errors: string[] = []
     const made = new Set<string>()
@@ -924,11 +923,7 @@ export async function unzipGeneric(
         )
         continue
       }
-      // Relay writes land on whichever mount owns each path and
-      // invalidate through the dispatcher; keying them here would have
-      // the runner prefix them onto this mount.
       extracted.add(target)
-      if (!relay) writes[target] = content
       if (!quiet) outputLines.push(extractedLine(e.method, shown(target)))
     }
     const allStderr = ENC.encode(cautions + errors.join(''))
@@ -937,7 +932,6 @@ export async function unzipGeneric(
       new IOResult({
         exitCode: createFailed ? CREATE_EXIT : checkdirFailed ? CHECKDIR_EXIT : exitCode,
         stderr: allStderr.byteLength > 0 ? allStderr : null,
-        writes,
       }),
     ]
   }
@@ -962,7 +956,6 @@ export async function unzipGeneric(
     new IOResult({
       exitCode: Math.max(io.exitCode, floor),
       stderr: merged.byteLength > 0 ? merged : null,
-      writes: io.writes,
     }),
   ]
 }

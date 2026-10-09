@@ -29,8 +29,10 @@ from mirage.commands.cli.refusal import (
     git_option_refusal,
     git_usage,
 )
-from mirage.commands.cli.types import CLIInvocation, CLISpec, CLIView
+from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.types import CommandSpec
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -175,9 +177,10 @@ def switches(inv: CLIInvocation[None]) -> frozenset[str]:
     if inv.spec is None:
         return frozenset()
     return frozenset(
-        option.short[1:]
-        for option in inv.spec.options
-        if option.short is not None and len(option.short) == 2
+        name[1:]
+        for option in compile_spec(inv.spec).options
+        for name in option.names
+        if len(name) == 2
     )
 
 
@@ -296,7 +299,7 @@ def verb_usage(inv: CLIInvocation[None]) -> str:
     Args:
         inv (CLIInvocation): the invocation, carrying its leaf.
     """
-    spec = inv.spec or CLISpec(name="")
+    spec = inv.spec or CommandSpec()
     return git_usage(spec.name, spec)
 
 
@@ -315,7 +318,7 @@ def check_switches(inv: CLIInvocation[None], texts: tuple[str, ...]) -> None:
     """
     word = offending(texts, escaped(inv.argv), switches(inv))
     if word is not None:
-        spec = inv.spec or CLISpec(name="")
+        spec = inv.spec or CommandSpec()
         raise UsageError(*git_option_refusal(word, spec.name, spec))
 
 

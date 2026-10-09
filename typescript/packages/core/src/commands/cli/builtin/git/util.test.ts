@@ -75,7 +75,7 @@ describe('gitBool', () => {
 })
 
 it('lands a later relative -C under the one before it', () => {
-  const result = walk('git', GIT, ['-C', '/repo', '-C', 'docs', 'status'], '/')
+  const result = walk('git', GIT.spec, ['-C', '/repo', '-C', 'docs', 'status'], '/')
   expect(result.groupFlags['-C']).toMatchObject({ virtual: '/repo/docs' })
 })
 

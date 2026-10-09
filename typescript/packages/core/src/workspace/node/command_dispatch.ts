@@ -87,7 +87,6 @@ import {
   handleTouch,
   followDirectoryLinks,
   prepareMv,
-  settleMoves,
   stripLinkOperands,
 } from '../executor/builtins/index.ts'
 import { BUILTINS } from '../executor/builtins/table.ts'
@@ -1006,7 +1005,6 @@ async function routeArgv(
       }
     }
   }
-  if (name === 'mv' && io.renames.length > 0) await settleMoves(namespace, io.renames)
   if (linkErrors.length > 0) {
     // A refused link operand fails the line the way a refused backend
     // operand does: its lines lead (they were reported first) and any

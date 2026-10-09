@@ -11,17 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { resolvePath } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { type ArgmatchChoices, argmatch, valueClasses } from './argmatch.ts'
 import { BUILTIN_SPECS, isBuiltinGrammar } from './builtins.ts'
 import {
   type CompiledSpec,
+  argumentDest,
   compileSpec,
   expandGitLong,
   expandLong,
   expandTableLong,
+  positionalName,
+  positionalRequired,
 } from './compile.ts'
 import {
   ARG_PLACEHOLDER,
@@ -52,10 +54,10 @@ import {
 } from './constants.ts'
 import { flagOccurrences } from './flag_view.ts'
 import { expandOldStyle } from './oldstyle.ts'
-import type { CommandSpec, Option, ValueType, ParsedFlagValue } from './types.ts'
+import type { CommandSpec, Argument, ValueType, ParsedFlagValue } from './types.ts'
 
 /**
- * The builtin `Option` objects whose choices are gnulib ARGMATCH tables.
+ * The builtin `Argument` objects whose choices are gnulib ARGMATCH tables.
  *
  * ARGMATCH_CHOICE_OPTIONS names them as "<command> <spelling>" because that
  * is how the measurement reads; this resolves each entry to the one object
@@ -63,14 +65,14 @@ import type { CommandSpec, Option, ValueType, ParsedFlagValue } from './types.ts
  * compare strings. An entry naming no option is a rotted table and throws
  * here, at module load. `_argmatch_options` in parser.py is the twin.
  */
-function argmatchOptions(): readonly Option[] {
-  const found: Option[] = []
+function argmatchOptions(): readonly Argument[] {
+  const found: Argument[] = []
   for (const key of [...ARGMATCH_CHOICE_OPTIONS].sort(compareCodePoints)) {
     const sep = key.indexOf(' ')
     const name = key.slice(0, sep)
     const spelling = key.slice(sep + 1)
-    const options = (BUILTIN_SPECS[name]?.options ?? []).filter(
-      (o) => (o.long ?? o.short) === spelling,
+    const options = (BUILTIN_SPECS[name]?.arguments ?? []).filter(
+      (o) => (o.names.find((name) => name.startsWith('--')) ?? o.names[0]) === spelling,
     )
     if (options.length === 0) {
       throw new Error(
@@ -87,11 +89,11 @@ const ARGMATCH_OPTIONS = argmatchOptions()
 /**
  * Which of this spec's choice sets are gnulib ARGMATCH tables.
  *
- * Decided by `Option` identity, not by the command's name: a mount may
+ * Decided by `Argument` identity, not by the command's name: a mount may
  * register its own `tee` (commands/registry.ts), and a name is not an
  * identity. Identity is also the only signal that survives registration,
  * which parses an enriched COPY of the spec (config.ts appends
- * --help/--version, once per backend), while every declared Option stays the
+ * --help/--version, once per backend), while every declared Argument stays the
  * same object.
  *
  * Read off the spec rather than cached on its CompiledSpec so that the two
@@ -104,9 +106,9 @@ const ARGMATCH_OPTIONS = argmatchOptions()
  */
 function argmatchDests(spec: CommandSpec): ReadonlySet<string> {
   const dests = new Set<string>()
-  for (const o of spec.options) {
+  for (const o of spec.arguments) {
     if (o.choices.length === 0) continue
-    if (ARGMATCH_OPTIONS.some((table) => table === o)) dests.add(o.long ?? o.short ?? '')
+    if (ARGMATCH_OPTIONS.some((table) => table === o)) dests.add(argumentDest(o))
   }
   return dests
 }
@@ -277,7 +279,7 @@ interface Refusals {
 // parser owns, in which case an unambiguous prefix resolves to its
 // candidate. The returned word is what the caller stores, so a command reads
 // `none` where the line typed `non` and never learns the difference. Which
-// sets those are was settled by `compileSpec`, by `Option` identity rather
+// sets those are was settled by `compileSpec`, by `Argument` identity rather
 // than by the command's name, so a registered command that borrows the name
 // `tee` still compares the whole word. `_check_value` in parser.py is the
 // twin.
@@ -337,21 +339,22 @@ function setValueFlag(
   cs: CompiledSpec,
   argmatchDestSet: ReadonlySet<string>,
   spelling: string,
-  value: string,
+  value: string | string[],
 ): void {
   const name = cs.destOf(spelling)
-  const stored = checkValue(refusals, cs, argmatchDestSet, name, value)
-  flagOccurrences(flags).push([name, stored])
+  const stored = (typeof value === 'string' ? [value] : value).map((part) =>
+    checkValue(refusals, cs, argmatchDestSet, name, part),
+  )
+  flagOccurrences(flags).push(...stored.map((part): [string, ParsedFlagValue] => [name, part]))
   if (cs.multipleDests.has(name)) {
-    const prev = flags[name]
-    if (Array.isArray(prev)) {
-      prev.push(stored)
-    } else {
-      flags[name] = [stored]
-    }
+    const previous = flags[name]
+    if (Array.isArray(previous)) previous.push(...stored)
+    else flags[name] = stored
+  } else if (Array.isArray(value)) {
+    flags[name] = stored
   } else {
     Reflect.deleteProperty(flags, name)
-    flags[name] = stored
+    flags[name] = stored[0] ?? ''
   }
 }
 
@@ -459,6 +462,9 @@ function matchMixedCluster(tok: string, cs: CompiledSpec): MixedCluster | null {
     const rest = chars.slice(idx + 1)
     if (rest.length > 0 && cs.attachSpellings.includes(name)) {
       return { bools, valueFlag: name, attached: rest }
+    }
+    if (cs.detachedOptionalSpellings.has(name)) {
+      return { bools, valueFlag: name, attached: rest.length > 0 ? rest : null }
     }
     if (cs.boolSpellings.has(name)) {
       bools.push(name)
@@ -670,6 +676,25 @@ export function parseCommand(
     if (inOrderOperands || ownLoop) flagOccurrences(flags).push([OPERAND, word])
   }
 
+  const recordValues = (
+    spelling: string,
+    arity: number,
+    attachedValue: string | null = null,
+  ): number => {
+    const detached = arity - (attachedValue === null ? 0 : 1)
+    const values = [
+      ...(attachedValue === null ? [] : [attachedValue]),
+      ...scanArgv.slice(i + 1, i + detached + 1),
+    ]
+    setValueFlag(flags, refusals, cs, argmatchDestSet, spelling, values)
+    const kinds = cs.valueTypesByDest.get(cs.destOf(spelling)) ?? []
+    for (let offset = 0; offset < detached; offset++) {
+      wordKinds[scanOrigins[i + offset + 1] ?? -1] =
+        kinds[offset + (attachedValue === null ? 0 : 1)] ?? cs.kindOf.get(spelling) ?? 'str'
+    }
+    return detached + 1
+  }
+
   while (i < scanArgv.length) {
     const tok = scanArgv[i]
     if (tok === undefined) break
@@ -758,34 +783,44 @@ export function parseCommand(
         }
       }
       const etok = eqPos === -1 ? spelling : spelling + tok.slice(eqPos)
-      const isPair = cs.pairDests.has(cs.destOf(spelling))
+      const dest = cs.destOf(spelling)
+      const width = cs.nargsByDest.get(dest)
       if (cs.longBoolSpellings.has(etok)) {
-        setBoolFlag(flags, cs, etok)
-        i += 1
-      } else if (isPair && eqPos === -1 && i + 2 < scanArgv.length) {
-        // Two tokens, both recorded under the one dest, so the command
-        // reads the accumulated list in twos.
-        setValueFlag(flags, refusals, cs, argmatchDestSet, spelling, scanArgv[i + 1] ?? '')
-        setValueFlag(flags, refusals, cs, argmatchDestSet, spelling, scanArgv[i + 2] ?? '')
-        // The first token names the value and is always textual; the
-        // option's own kind describes the second.
-        wordKinds[scanOrigins[i + 1] ?? -1] = 'str'
-        wordKinds[scanOrigins[i + 2] ?? -1] = cs.kindOf.get(spelling) ?? null
-        i += 3
-      } else if (!isPair && cs.longValueSpellings.has(etok) && i + 1 < scanArgv.length) {
+        const next = scanArgv[i + 1]
+        if (
+          cs.detachedOptionalSpellings.has(etok) &&
+          next !== undefined &&
+          (!next.startsWith('-') || next === '-' || NEGATIVE_NUMBER.test(next))
+        ) {
+          setValueFlag(flags, refusals, cs, argmatchDestSet, etok, next)
+          wordKinds[scanOrigins[i + 1] ?? -1] = cs.kindOf.get(etok) ?? null
+          i += 2
+        } else {
+          setBoolFlag(flags, cs, etok)
+          i += 1
+        }
+      } else if (width === 1 && eqPos !== -1) {
+        i += recordValues(spelling, width, tok.slice(eqPos + 1))
+      } else if (width !== undefined && eqPos === -1 && i + width < scanArgv.length) {
+        i += recordValues(spelling, width)
+      } else if (
+        width === undefined &&
+        cs.longValueSpellings.has(etok) &&
+        i + 1 < scanArgv.length
+      ) {
         setValueFlag(flags, refusals, cs, argmatchDestSet, etok, scanArgv[i + 1] ?? '')
         wordKinds[scanOrigins[i + 1] ?? -1] = cs.kindOf.get(etok) ?? null
         if (cs.destOf(etok) === cs.baseDest) wordBases[scanOrigins[i + 1] ?? -1] = base
         base = rebase(flags, cs, etok, scanArgv[i + 1] ?? '', base)
         i += 2
-      } else if (isPair) {
+      } else if (width !== undefined) {
         if (eqPos === -1) {
           if (!refusedOnTape(spelling)) {
             needsValueOptions.push(spelling)
             optionErrorKinds.push('needs_value')
           }
         } else if (!refusedOnTape(tok)) {
-          // A two-token option has no `=` form (jq refuses `--arg=name`
+          // Multi-value options have no `=` form (jq refuses `--arg=name`
           // as an unknown option).
           invalidOptions.push(tok)
           optionErrorKinds.push('invalid')
@@ -856,6 +891,22 @@ export function parseCommand(
       if (matchedOptional) continue
       let matchedValue = false
       for (const vf of cs.valueSpellings) {
+        const dest = cs.destOf(vf)
+        const width = cs.nargsByDest.get(dest)
+        if (width !== undefined && tok.startsWith(vf)) {
+          const attachedValue =
+            tok.length > vf.length ? attached(tok.slice(vf.length), equalsValues) : null
+          const detached = width - (attachedValue === null ? 0 : 1)
+          if (i + detached >= scanArgv.length) {
+            needsValueOptions.push(vf.slice(1))
+            optionErrorKinds.push('needs_value')
+            i += 1
+          } else {
+            i += recordValues(vf, width, attachedValue)
+          }
+          matchedValue = true
+          break
+        }
         if (tok === vf && i + 1 < scanArgv.length) {
           setValueFlag(flags, refusals, cs, argmatchDestSet, vf, scanArgv[i + 1] ?? '')
           wordKinds[scanOrigins[i + 1] ?? -1] = cs.kindOf.get(vf) ?? null
@@ -879,8 +930,19 @@ export function parseCommand(
       }
 
       if (cs.boolSpellings.has(tok)) {
-        setBoolFlag(flags, cs, tok)
-        i += 1
+        const next = scanArgv[i + 1]
+        if (
+          cs.detachedOptionalSpellings.has(tok) &&
+          next !== undefined &&
+          (!next.startsWith('-') || next === '-' || NEGATIVE_NUMBER.test(next))
+        ) {
+          setValueFlag(flags, refusals, cs, argmatchDestSet, tok, next)
+          wordKinds[scanOrigins[i + 1] ?? -1] = cs.kindOf.get(tok) ?? null
+          i += 2
+        } else {
+          setBoolFlag(flags, cs, tok)
+          i += 1
+        }
         continue
       }
 
@@ -896,7 +958,7 @@ export function parseCommand(
 
       let allBool = true
       for (const ch of tok.slice(1)) {
-        if (!cs.boolSpellings.has(`-${ch}`)) {
+        if (!cs.boolSpellings.has(`-${ch}`) || cs.detachedOptionalSpellings.has(`-${ch}`)) {
           allBool = false
           break
         }
@@ -909,6 +971,35 @@ export function parseCommand(
 
       const mixed = matchMixedCluster(tok, cs)
       if (mixed !== null) {
+        const dest = cs.destOf(mixed.valueFlag)
+        const arity = cs.nargsByDest.get(dest)
+        if (arity !== undefined) {
+          const remaining = arity - (mixed.attached === null ? 0 : 1)
+          if (i + remaining >= scanArgv.length) {
+            needsValueOptions.push(mixed.valueFlag.slice(1))
+            optionErrorKinds.push('needs_value')
+            i += 1
+          } else {
+            for (const name of mixed.bools) setBoolFlag(flags, cs, name)
+            i += recordValues(
+              mixed.valueFlag,
+              arity,
+              mixed.attached === null ? null : attached(mixed.attached, equalsValues),
+            )
+          }
+          continue
+        }
+        const next = scanArgv[i + 1]
+        if (
+          mixed.attached === null &&
+          cs.detachedOptionalSpellings.has(mixed.valueFlag) &&
+          (next === undefined ||
+            (next.startsWith('-') && next !== '-' && !NEGATIVE_NUMBER.test(next)))
+        ) {
+          for (const name of [...mixed.bools, mixed.valueFlag]) setBoolFlag(flags, cs, name)
+          i += 1
+          continue
+        }
         if (mixed.attached !== null) {
           const attachedValue = attached(mixed.attached, equalsValues)
           for (const name of mixed.bools) setBoolFlag(flags, cs, name)
@@ -1030,19 +1121,31 @@ export function parseCommand(
 
   const missingRequiredOptions = cs.requiredDests.filter((destName) => !(destName in flags))
 
-  const supplying = spec.positional.filter(
+  const slots = cs.positional.filter(
     (op) => !op.providedBy.some((name) => cs.destOf(name) in flags),
   )
+  let required =
+    slots.filter(positionalRequired).length +
+    Number(cs.rest !== null && positionalRequired(cs.rest))
+  // An optional slot can consume only words not needed by required slots.
+  const supplying: Argument[] = []
+  for (const op of slots) {
+    if (positionalRequired(op)) required -= 1
+    else if (rawArgs.length - supplying.length <= required) continue
+    supplying.push(op)
+  }
   const positional: ValueType[] = supplying.map((op) => op.type)
 
   // A required slot the line left empty. Counted against the surviving slots
   // rather than the declared ones, so a flag standing in for a slot
   // (providedBy) satisfies it the same way a word would.
   const missingRequiredOperands = supplying
-    .filter((op, index) => op.required && rawArgs.length <= index)
-    .map((op) => (op.name === '' ? ARG_PLACEHOLDER : op.name))
-  if (spec.rest !== null && spec.rest.required && rawArgs.length <= supplying.length) {
-    missingRequiredOperands.push(spec.rest.name === '' ? ARG_PLACEHOLDER : spec.rest.name)
+    .filter((op, index) => positionalRequired(op) && rawArgs.length <= index)
+    .map((op) => (positionalName(op) === '' ? ARG_PLACEHOLDER : positionalName(op)))
+  if (cs.rest !== null && positionalRequired(cs.rest) && rawArgs.length <= supplying.length) {
+    missingRequiredOperands.push(
+      positionalName(cs.rest) === '' ? ARG_PLACEHOLDER : positionalName(cs.rest),
+    )
   }
 
   // A flag can turn the rest slot textual for this line only: tar's -x makes
@@ -1051,7 +1154,7 @@ export function parseCommand(
   // classification moves: unknown dash tokens stay as strict as the declared
   // kind makes them.
   const textFrom =
-    spec.rest === null ? null : firstTextOperand(flags, cs, spec.rest.textWhen, inOrderOperands)
+    cs.rest === null ? null : firstTextOperand(flags, cs, cs.rest.textWhen, inOrderOperands)
 
   // Overflow operands past the declared positional slots pass through
   // classified like the last slot (TEXT when there is none), so a
@@ -1065,6 +1168,10 @@ export function parseCommand(
   for (let j = 0; j < rawArgs.length; j++) {
     const arg = rawArgs[j]
     if (arg === undefined) continue
+    const operand = supplying[j] ?? cs.rest
+    if (operand !== null && !spec.ignoreTokens.has(arg)) {
+      checkValue(refusals, cs, new Set(), operand.names[0] ?? '', arg)
+    }
     let kind: ValueType
     if (j < positional.length) {
       kind = positional[j] ?? 'str'
@@ -1099,11 +1206,14 @@ export function parseCommand(
     if (kind !== 'path' || !(flagName in flags)) continue
     const val = flags[flagName]
     if (val !== undefined) rawPathFlags[flagKwargName(flagName)] = val
-    if (Array.isArray(val) && cs.pairDests.has(flagName)) {
+    if (Array.isArray(val) && cs.valueTypesByDest.has(flagName)) {
       // Only the odd slots are the paths: the even ones name them.
-      const paired = val.map((part, index) => (index % 2 ? resolvePath(part, cwd) : part))
+      const kinds = cs.valueTypesByDest.get(flagName) ?? []
+      const paired = val.map((part, index) =>
+        kinds[index % kinds.length] === 'path' ? resolvePath(part, cwd) : part,
+      )
       flags[flagName] = paired
-      pathFlagValues.push(...paired.filter((_, index) => index % 2 === 1))
+      pathFlagValues.push(...paired.filter((_, index) => kinds[index % kinds.length] === 'path'))
     } else if (Array.isArray(val)) {
       const resolvedList = val.map((part) =>
         part === '-' &&

@@ -476,7 +476,7 @@ async def shuf_generic(
                 exit_code=1,
                 stderr=f"shuf: {output.raw_path}: {fs_strerror(exc)}\n".encode(),
             )
-        return None, IOResult(writes={output.mount_path: rendered})
+        return None, IOResult()
     return rendered, IOResult()
 
 

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec } from '../../../../commands/spec/compile.ts'
 import { specOf } from '../../../../commands/spec/index.ts'
 
 // Startup letters bash has that `set` does not. `c` takes the program text
@@ -34,8 +35,10 @@ export const BASH_UNSUPPORTED_LONG_OPTIONS = new Set([
 // True means the next word is a value. Derive supported options from the
 // spec so the parser and help cannot drift; Bash accepts one or two dashes.
 export const BASH_LONG_OPTIONS: ReadonlyMap<string, boolean> = new Map([
-  ...specOf('bash').options.flatMap(({ long, type }): [string, boolean][] =>
-    long === null ? [] : [[long.slice(2), type === 'str']],
+  ...compileSpec(specOf('bash')).options.flatMap((option) =>
+    option.names
+      .filter((name) => name.startsWith('--'))
+      .map((name): [string, boolean] => [name.slice(2), option.action === 'store']),
   ),
   ...[...BASH_UNSUPPORTED_LONG_OPTIONS, 'help', 'version'].map((name): [string, boolean] => [
     name,

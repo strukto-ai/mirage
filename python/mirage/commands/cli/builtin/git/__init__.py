@@ -59,9 +59,9 @@ from mirage.commands.cli.builtin.git.symbolic_ref import (
 )
 from mirage.commands.cli.builtin.git.tag import tag, tag_read_only
 from mirage.commands.cli.builtin.git.util import check_switches, fatal
-from mirage.commands.cli.types import CLIInvocation, CLISpec, UsageStyle
+from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
 from mirage.commands.cli.walk import find_node, node_help
-from mirage.commands.spec.types import Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.io.types import ByteSource, IOResult
 
 # `-C` is git's own before-anything-else option, so it sits on the root
@@ -69,264 +69,299 @@ from mirage.io.types import ByteSource, IOResult
 # default lands as if typed, so an absent -C resolves to the session cwd
 # and the leaves need no separate working-directory fact. The root names it
 # its operand base, so a later relative -C lands under the one before it.
-DIRECTORY_OPTION = Option(
-    short="-C",
-    type="path",
-    default=".",
-    description="Run as if git was started in <path>",
+DIRECTORY_OPTION = Argument(
+    "-C", type="path", default=".", help="Run as if git was started in <path>"
 )
 
-REVISION = Operand(type="str")
+REVISION = Argument("text", nargs="*", metavar="")
 
 # --pretty and --format set the same variable in git; both take git's
 # optional-value form, so a bare --pretty means medium and a detached
 # next word is a revision, never a format. A bare --format stays
 # parseable too, but only so pretty_format can answer it with git's own
 # fatal (pretty.c reads --format in its =value form alone).
-PRETTY_OPTION = Option(
-    long="--pretty",
-    type="str",
-    value_optional=True,
-    description="Commit display format: oneline, short, "
+PRETTY_OPTION = Argument(
+    "--pretty",
+    nargs="?",
+    attached_only=True,
+    help="Commit display format: oneline, short, "
     "medium, full, fuller, or a format:/tformat:/%-string",
 )
-FORMAT_OPTION = Option(
-    long="--format",
-    type="str",
-    value_optional=True,
-    description="Alias of --pretty (requires =value)",
+FORMAT_OPTION = Argument(
+    "--format",
+    nargs="?",
+    attached_only=True,
+    help="Alias of --pretty (requires =value)",
 )
 
 # Free text, read by parse_date_mode: git names a style it lacks in its
 # own fatal, and format:<strftime> is no fixed word.
-DATE_OPTION = Option(
-    long="--date",
-    type="str",
-    description="Date display format: default, relative, "
+DATE_OPTION = Argument(
+    "--date",
+    help="Date display format: default, relative, "
     "local, iso, iso-strict, rfc, short, raw, unix, human "
     "or format:<strftime>",
 )
 
 DIFF_OPTIONS = (
-    Option(
-        short="-a", long="--text", description="Treat binary files as text"
+    Argument(
+        "-a", "--text", action="store_true", help="Treat binary files as text"
     ),
-    Option(
-        short="-W",
-        long="--function-context",
-        description="Show whole functions as diff context",
+    Argument(
+        "-W",
+        "--function-context",
+        action="store_true",
+        help="Show whole functions as diff context",
     ),
-    Option(
-        short="-U",
-        long="--unified",
-        type="int",
-        description="Number of context lines",
+    Argument("-U", "--unified", type="int", help="Number of context lines"),
+    Argument(
+        "--name-status",
+        action="store_true",
+        help="Show changed paths and status",
     ),
-    Option(long="--name-status", description="Show changed paths and status"),
-    Option(
-        long="--name-only",
-        description="Show changed paths instead of the patch",
+    Argument(
+        "--name-only",
+        action="store_true",
+        help="Show changed paths instead of the patch",
     ),
-    Option(
-        long="--stat",
-        description="Show the diffstat table instead of the patch",
+    Argument(
+        "--stat",
+        action="store_true",
+        help="Show the diffstat table instead of the patch",
     ),
-    Option(
-        long="--numstat",
-        description="Show added and deleted line counts per path",
+    Argument(
+        "--numstat",
+        action="store_true",
+        help="Show added and deleted line counts per path",
     ),
-    Option(
-        long="--shortstat", description="Show only the diffstat summary line"
+    Argument(
+        "--shortstat",
+        action="store_true",
+        help="Show only the diffstat summary line",
     ),
-    Option(
-        long="--summary",
-        description="Summarize creations, deletions and mode changes",
+    Argument(
+        "--summary",
+        action="store_true",
+        help="Summarize creations, deletions and mode changes",
     ),
-    Option(short="-p", long="--patch", description="Show the patch"),
-    Option(
-        short="-s", long="--no-patch", description="Suppress all diff output"
+    Argument("-p", "--patch", action="store_true", help="Show the patch"),
+    Argument(
+        "-s",
+        "--no-patch",
+        action="store_true",
+        help="Suppress all diff output",
     ),
-    Option(
-        long="--no-ext-diff",
-        description="Accepted for compatibility; there are no external "
+    Argument(
+        "--no-ext-diff",
+        action="store_true",
+        help="Accepted for compatibility; there are no external "
         "diff drivers to disable",
     ),
-    Option(
-        short="-M",
-        long="--find-renames",
-        type="str",
-        value_optional=True,
-        description="Detect renames with an optional similarity threshold",
+    Argument(
+        "-M",
+        "--find-renames",
+        nargs="?",
+        attached_only=True,
+        help="Detect renames with an optional similarity threshold",
     ),
-    Option(long="--no-renames", description="Turn off rename detection"),
-    Option(long="--raw", description="Show the raw diff format"),
+    Argument(
+        "--no-renames", action="store_true", help="Turn off rename detection"
+    ),
+    Argument("--raw", action="store_true", help="Show the raw diff format"),
 )
 
 # git's optional-value form: a bare --decorate is short, and a detached
 # next word is a revision, never a style.
 DECORATE_OPTIONS = (
-    Option(
-        long="--decorate",
-        type="str",
-        value_optional=True,
-        description="Print ref names on commits: short (the default), full, "
+    Argument(
+        "--decorate",
+        nargs="?",
+        attached_only=True,
+        help="Print ref names on commits: short (the default), full, "
         "auto or no",
     ),
-    Option(long="--no-decorate", description="Print no ref names on commits"),
+    Argument(
+        "--no-decorate",
+        action="store_true",
+        help="Print no ref names on commits",
+    ),
 )
 
 MERGE_OPTIONS = (
-    Option(
-        short="-m",
-        description="Show merge diffs separately against each parent",
+    Argument(
+        "-m",
+        action="store_true",
+        help="Show merge diffs separately against each parent",
     ),
-    Option(short="-c", description="Show combined merge diffs"),
-    Option(long="--cc", description="Show dense combined merge diffs"),
-    Option(
-        long="--first-parent",
-        description="Follow and compare only the first parent",
+    Argument("-c", action="store_true", help="Show combined merge diffs"),
+    Argument(
+        "--cc", action="store_true", help="Show dense combined merge diffs"
     ),
-    Option(
-        long="--diff-merges", type="str", description="Select merge diff mode"
+    Argument(
+        "--first-parent",
+        action="store_true",
+        help="Follow and compare only the first parent",
     ),
+    Argument("--diff-merges", help="Select merge diff mode"),
 )
 
 LOG_OPTIONS = (
-    Option(
-        short="-E",
-        long="--extended-regexp",
-        description="Use extended regular expressions",
+    Argument(
+        "-E",
+        "--extended-regexp",
+        action="store_true",
+        help="Use extended regular expressions",
     ),
-    Option(
-        short="-F",
-        long="--fixed-strings",
-        description="Match patterns literally",
+    Argument(
+        "-F",
+        "--fixed-strings",
+        action="store_true",
+        help="Match patterns literally",
     ),
-    Option(
-        short="-P",
-        long="--perl-regexp",
-        description="Use Perl-compatible regular expressions",
+    Argument(
+        "-P",
+        "--perl-regexp",
+        action="store_true",
+        help="Use Perl-compatible regular expressions",
     ),
-    Option(long="--basic-regexp", description="Use basic regular expressions"),
-    Option(
-        long="--committer",
-        type="str",
-        multiple=True,
-        description="Limit commits to matching committers",
+    Argument(
+        "--basic-regexp",
+        action="store_true",
+        help="Use basic regular expressions",
     ),
-    Option(
-        long="--author",
-        type="str",
-        multiple=True,
-        description="Limit commits to matching authors",
+    Argument(
+        "--committer",
+        action="append",
+        help="Limit commits to matching committers",
     ),
-    Option(
-        long="--grep",
-        type="str",
-        multiple=True,
-        description="Limit commits to ones with a message line that matches",
+    Argument(
+        "--author",
+        action="append",
+        help="Limit commits to matching authors",
     ),
-    Option(
-        short="-i",
-        long="--regexp-ignore-case",
-        description="Match --grep, --author and -S without regard to case",
+    Argument(
+        "--grep",
+        action="append",
+        help="Limit commits to ones with a message line that matches",
+    ),
+    Argument(
+        "-i",
+        "--regexp-ignore-case",
+        action="store_true",
+        help="Match --grep, --author and -S without regard to case",
     ),
     *MERGE_OPTIONS,
-    Option(
-        long="--after",
-        type="str",
-        description="Commits more recent than a date, like --since",
+    Argument(
+        "--after",
+        help="Commits more recent than a date, like --since",
     ),
-    Option(
-        long="--before",
-        type="str",
-        description="Commits older than a date, like --until",
-    ),
-    Option(
-        long="--max-parents",
+    Argument("--before", help="Commits older than a date, like --until"),
+    Argument(
+        "--max-parents",
         type="int",
-        description="Show only commits with at most this many parents",
+        help="Show only commits with at most this many parents",
     ),
-    Option(
-        long="--min-parents",
+    Argument(
+        "--min-parents",
         type="int",
-        description="Show only commits with at least this many parents",
+        help="Show only commits with at least this many parents",
     ),
-    Option(long="--merges", description="Show only merge commits"),
-    Option(long="--no-merges", description="Leave out merge commits"),
+    Argument("--merges", action="store_true", help="Show only merge commits"),
+    Argument(
+        "--no-merges", action="store_true", help="Leave out merge commits"
+    ),
     DATE_OPTION,
     *DECORATE_OPTIONS,
-    Option(
-        short="-n",
-        long="--max-count",
+    Argument(
+        "-n",
+        "--max-count",
         type="int",
         numeric_shorthand=True,
-        description="Limit the number of commits shown",
+        help="Limit the number of commits shown",
     ),
-    Option(long="--oneline", description="One abbreviated line per commit"),
-    Option(long="--reverse", description="Print commits oldest first"),
-    Option(
-        long="--graph",
-        description="Draw the commit history beside the log "
-        "(implies --topo-order)",
+    Argument(
+        "--oneline",
+        action="store_true",
+        help="One abbreviated line per commit",
     ),
-    Option(
-        long="--topo-order",
-        description="Show no parent before all its children, one line "
+    Argument(
+        "--reverse", action="store_true", help="Print commits oldest first"
+    ),
+    Argument(
+        "--graph",
+        action="store_true",
+        help="Draw the commit history beside the log (implies --topo-order)",
+    ),
+    Argument(
+        "--topo-order",
+        action="store_true",
+        help="Show no parent before all its children, one line "
         "of history at a time",
     ),
-    Option(
-        long="--date-order",
-        description="Show no parent before all its children, otherwise "
-        "newest first",
+    Argument(
+        "--date-order",
+        action="store_true",
+        help="Show no parent before all its children, otherwise newest first",
     ),
-    Option(
-        long="--all",
-        description="Start from every ref as well as the revision",
+    Argument(
+        "--all",
+        action="store_true",
+        help="Start from every ref as well as the revision",
     ),
     PRETTY_OPTION,
     FORMAT_OPTION,
     # The pickaxe, and the reason `git log -S <name> --reverse` answers
     # "which commit introduced this": it selects commits that changed
     # how many times the string occurs, not commits that mention it.
-    Option(
-        short="-S",
-        type="str",
-        description="Show commits that change the number of occurrences "
+    Argument(
+        "-S",
+        help="Show commits that change the number of occurrences "
         "of the string",
     ),
-    Option(
-        short="-G",
-        type="str",
-        description="Show commits whose diff adds or removes a line that "
+    Argument(
+        "-G",
+        help="Show commits whose diff adds or removes a line that "
         "matches the extended regular expression",
     ),
-    Option(
-        long="--pickaxe-regex",
-        description="Treat the -S string as an extended regular expression",
+    Argument(
+        "--pickaxe-regex",
+        action="store_true",
+        help="Treat the -S string as an extended regular expression",
     ),
-    Option(
-        long="--since",
-        type="str",
-        description="Commits more recent than a date (ISO-8601 or epoch)",
+    Argument(
+        "--since",
+        help="Commits more recent than a date (ISO-8601 or epoch)",
     ),
-    Option(
-        long="--until",
-        type="str",
-        description="Commits older than a date (ISO-8601 or epoch)",
+    Argument(
+        "--until",
+        help="Commits older than a date (ISO-8601 or epoch)",
     ),
 )
 
 MAILMAP_OPTIONS = (
-    Option(long="--mailmap", description="Apply mailmap to identities"),
-    Option(long="--use-mailmap", description="Apply mailmap to identities"),
-    Option(long="--no-mailmap", description="Use recorded identities"),
-    Option(long="--no-use-mailmap", description="Use recorded identities"),
+    Argument(
+        "--mailmap", action="store_true", help="Apply mailmap to identities"
+    ),
+    Argument(
+        "--use-mailmap",
+        action="store_true",
+        help="Apply mailmap to identities",
+    ),
+    Argument(
+        "--no-mailmap", action="store_true", help="Use recorded identities"
+    ),
+    Argument(
+        "--no-use-mailmap", action="store_true", help="Use recorded identities"
+    ),
 )
 
 SHOW_OPTIONS = (
     *MAILMAP_OPTIONS,
-    Option(long="--oneline", description="One abbreviated line per commit"),
+    Argument(
+        "--oneline",
+        action="store_true",
+        help="One abbreviated line per commit",
+    ),
     *DIFF_OPTIONS,
     *MERGE_OPTIONS,
     DATE_OPTION,
@@ -343,141 +378,164 @@ SHOW_OPTIONS = (
 # and `filter_words` reattaches a detached value from the verbatim argv.
 # `--points-at` always takes a value.
 REF_FILTER_OPTIONS = (
-    Option(
-        long="--contains",
-        type="str",
-        value_optional=True,
-        multiple=True,
+    Argument(
+        "--contains",
+        action="append",
+        nargs="?",
+        attached_only=True,
         metavar="commit",
-        description="List only refs that contain the commit (HEAD if omitted)",
+        help="List only refs that contain the commit (HEAD if omitted)",
     ),
-    Option(
-        long="--no-contains",
-        type="str",
-        value_optional=True,
-        multiple=True,
+    Argument(
+        "--no-contains",
+        action="append",
+        nargs="?",
+        attached_only=True,
         metavar="commit",
-        description="List only refs that don't contain the commit "
-        "(HEAD if omitted)",
+        help="List only refs that don't contain the commit (HEAD if omitted)",
     ),
-    Option(
-        long="--merged",
-        type="str",
-        value_optional=True,
-        multiple=True,
+    Argument(
+        "--merged",
+        action="append",
+        nargs="?",
+        attached_only=True,
         metavar="commit",
-        description="List only refs reachable from the commit (HEAD if "
-        "omitted)",
+        help="List only refs reachable from the commit (HEAD if omitted)",
     ),
-    Option(
-        long="--no-merged",
-        type="str",
-        value_optional=True,
-        multiple=True,
+    Argument(
+        "--no-merged",
+        action="append",
+        nargs="?",
+        attached_only=True,
         metavar="commit",
-        description="List only refs not reachable from the commit (HEAD "
-        "if omitted)",
+        help="List only refs not reachable from the commit (HEAD if omitted)",
     ),
-    Option(
-        long="--points-at",
-        type="str",
-        multiple=True,
+    Argument(
+        "--points-at",
+        action="append",
         metavar="object",
-        description="List only refs that point at the object",
+        help="List only refs that point at the object",
     ),
 )
 
 # git's ref-format options, which `for-each-ref`, `branch` and `tag`
 # share. --sort repeats, the last key given sorting first, and --no-sort
 # drops every key before it, the default refname included.
-FORMAT_OPTION_REF = Option(
-    long="--format",
-    type="str",
+FORMAT_OPTION_REF = Argument(
+    "--format",
     metavar="format",
-    description="Format each ref: %(fieldname) "
-    "placeholders, as git for-each-ref",
+    help="Format each ref: %(fieldname) placeholders, as git for-each-ref",
 )
 SORT_OPTIONS = (
-    Option(
-        long="--sort",
-        type="str",
-        multiple=True,
+    Argument(
+        "--sort",
+        action="append",
         metavar="key",
-        description="Sort on a field, - reversing it and version: "
+        help="Sort on a field, - reversing it and version: "
         "comparing as versions",
     ),
-    Option(long="--no-sort", description="Drop the sort keys given so far"),
+    Argument(
+        "--no-sort",
+        action="store_true",
+        help="Drop the sort keys given so far",
+    ),
 )
-OMIT_EMPTY_OPTION = Option(
-    long="--omit-empty",
-    description="Print nothing, not even a newline, for an empty row",
+OMIT_EMPTY_OPTION = Argument(
+    "--omit-empty",
+    action="store_true",
+    help="Print nothing, not even a newline, for an empty row",
 )
-IGNORE_CASE_OPTION = Option(
-    short="-i",
-    long="--ignore-case",
-    description="Sort and match patterns case-insensitively",
+IGNORE_CASE_OPTION = Argument(
+    "-i",
+    "--ignore-case",
+    action="store_true",
+    help="Sort and match patterns case-insensitively",
 )
 
 FOR_EACH_REF_OPTIONS = (
-    Option(
-        short="-s",
-        long="--shell",
-        description="Quote fields suitably for shells",
+    Argument(
+        "-s",
+        "--shell",
+        action="store_true",
+        help="Quote fields suitably for shells",
     ),
-    Option(
-        short="-p", long="--perl", description="Quote fields suitably for perl"
+    Argument(
+        "-p",
+        "--perl",
+        action="store_true",
+        help="Quote fields suitably for perl",
     ),
-    Option(long="--python", description="Quote fields suitably for python"),
-    Option(long="--tcl", description="Quote fields suitably for Tcl"),
+    Argument(
+        "--python",
+        action="store_true",
+        help="Quote fields suitably for python",
+    ),
+    Argument(
+        "--tcl", action="store_true", help="Quote fields suitably for Tcl"
+    ),
     OMIT_EMPTY_OPTION,
-    Option(
-        long="--count",
-        type="int",
-        metavar="n",
-        description="Show only the first <n> refs",
+    Argument(
+        "--count", type="int", metavar="n", help="Show only the first <n> refs"
     ),
     FORMAT_OPTION_REF,
-    Option(
-        long="--exclude",
-        type="str",
-        multiple=True,
+    Argument(
+        "--exclude",
+        action="append",
         metavar="pattern",
-        description="Leave out refs matching the pattern",
+        help="Leave out refs matching the pattern",
     ),
     *SORT_OPTIONS,
     *REF_FILTER_OPTIONS,
-    Option(
-        long="--ignore-case",
-        description="Sort and match patterns case-insensitively",
+    Argument(
+        "--ignore-case",
+        action="store_true",
+        help="Sort and match patterns case-insensitively",
     ),
-    Option(long="--stdin", description="Read ref patterns from stdin"),
-    Option(
-        long="--include-root-refs",
-        description="Also list HEAD and the other root refs",
+    Argument(
+        "--stdin", action="store_true", help="Read ref patterns from stdin"
+    ),
+    Argument(
+        "--include-root-refs",
+        action="store_true",
+        help="Also list HEAD and the other root refs",
     ),
 )
 
 BRANCH_OPTIONS = (
-    Option(long="--show-current", description="Show the current branch name"),
-    Option(
-        short="-q", long="--quiet", description="Suppress feedback messages"
+    Argument(
+        "--show-current",
+        action="store_true",
+        help="Show the current branch name",
     ),
-    Option(
-        short="-v",
-        long="--verbose",
-        count=True,
-        description="Show commit and upstream details",
+    Argument(
+        "-q", "--quiet", action="store_true", help="Suppress feedback messages"
     ),
-    Option(short="-a", description="List local and remote-tracking branches"),
-    Option(short="-r", description="List remote-tracking branches"),
-    Option(
-        short="-d", long="--delete", description="Delete a fully merged branch"
+    Argument(
+        "-v",
+        "--verbose",
+        action="count",
+        help="Show commit and upstream details",
     ),
-    Option(short="-D", description="Delete a branch even if not merged"),
-    Option(
-        short="-l",
-        long="--list",
-        description="List branches matching the patterns",
+    Argument(
+        "-a",
+        action="store_true",
+        help="List local and remote-tracking branches",
+    ),
+    Argument("-r", action="store_true", help="List remote-tracking branches"),
+    Argument(
+        "-d",
+        "--delete",
+        action="store_true",
+        help="Delete a fully merged branch",
+    ),
+    Argument(
+        "-D", action="store_true", help="Delete a branch even if not merged"
+    ),
+    Argument(
+        "-l",
+        "--list",
+        action="store_true",
+        help="List branches matching the patterns",
     ),
     *REF_FILTER_OPTIONS,
     *SORT_OPTIONS,
@@ -486,145 +544,149 @@ BRANCH_OPTIONS = (
     IGNORE_CASE_OPTION,
 )
 
-PATHSPEC = Operand(type="str")
+PATHSPEC = Argument("text", nargs="*", metavar="")
 
 ADD_OPTIONS = (
-    Option(short="-A", long="--all", description="Stage every change"),
-    Option(
-        short="-u",
-        long="--update",
-        description="Stage changes to tracked files only",
+    Argument("-A", "--all", action="store_true", help="Stage every change"),
+    Argument(
+        "-u",
+        "--update",
+        action="store_true",
+        help="Stage changes to tracked files only",
     ),
-    Option(
-        short="-f",
-        long="--force",
-        description="Stage paths an ignore rule covers",
+    Argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Stage paths an ignore rule covers",
     ),
-    Option(
-        short="-v",
-        long="--verbose",
-        description="Name each path as it is added or removed",
+    Argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Name each path as it is added or removed",
     ),
 )
 
 COMMIT_OPTIONS = (
-    Option(
-        short="-q", long="--quiet", description="Suppress feedback messages"
+    Argument(
+        "-q", "--quiet", action="store_true", help="Suppress feedback messages"
     ),
-    Option(
-        short="-a",
-        long="--all",
-        description="Stage modified and deleted tracked files first",
+    Argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="Stage modified and deleted tracked files first",
     ),
     # Required, not defaulted: git would open an editor without it, and
     # a mount has none to open.
-    Option(
-        short="-m", long="--message", type="str", description="Commit message"
-    ),
-    Option(
-        long="--author", type="str", description="Override the recorded author"
-    ),
-    Option(
-        long="--allow-empty",
-        description="Record a commit that changes nothing from its parent",
+    Argument("-m", "--message", help="Commit message"),
+    Argument("--author", help="Override the recorded author"),
+    Argument(
+        "--allow-empty",
+        action="store_true",
+        help="Record a commit that changes nothing from its parent",
     ),
 )
 
 CHECKOUT_OPTIONS = (
-    Option(short="-b", description="Create the branch and switch to it"),
-    Option(long="--detach", description="Leave HEAD on the commit itself"),
-    Option(
-        short="-q", long="--quiet", description="Suppress feedback messages"
+    Argument(
+        "-b", action="store_true", help="Create the branch and switch to it"
+    ),
+    Argument(
+        "--detach", action="store_true", help="Leave HEAD on the commit itself"
+    ),
+    Argument(
+        "-q", "--quiet", action="store_true", help="Suppress feedback messages"
     ),
 )
 
 SWITCH_OPTIONS = (
-    Option(
-        short="-q", long="--quiet", description="Suppress feedback messages"
+    Argument(
+        "-q", "--quiet", action="store_true", help="Suppress feedback messages"
     ),
-    Option(
-        short="-c",
-        long="--create",
-        type="str",
-        description="Create the branch and switch to it",
-    ),
-    Option(
-        short="-d",
-        long="--detach",
-        description="Detach HEAD at the named commit",
+    Argument("-c", "--create", help="Create the branch and switch to it"),
+    Argument(
+        "-d",
+        "--detach",
+        action="store_true",
+        help="Detach HEAD at the named commit",
     ),
 )
 
 RESTORE_OPTIONS = (
-    Option(short="-S", long="--staged", description="Restore the index"),
-    Option(
-        short="-W",
-        long="--worktree",
-        description="Restore the working tree (default)",
+    Argument("-S", "--staged", action="store_true", help="Restore the index"),
+    Argument(
+        "-W",
+        "--worktree",
+        action="store_true",
+        help="Restore the working tree (default)",
     ),
-    Option(
-        short="-s",
-        long="--source",
-        type="str",
-        description="Which tree-ish to restore from",
-    ),
+    Argument("-s", "--source", help="Which tree-ish to restore from"),
 )
 
 RM_OPTIONS = (
-    Option(short="-r", description="Allow recursive removal"),
-    Option(
-        long="--cached",
-        description="Only remove from the index, keeping the file",
+    Argument("-r", action="store_true", help="Allow recursive removal"),
+    Argument(
+        "--cached",
+        action="store_true",
+        help="Only remove from the index, keeping the file",
     ),
-    Option(
-        short="-f", long="--force", description="Override the up-to-date check"
+    Argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Override the up-to-date check",
     ),
-    Option(
-        short="-q", long="--quiet", description="Do not list removed files"
+    Argument(
+        "-q", "--quiet", action="store_true", help="Do not list removed files"
     ),
-    Option(
-        long="--ignore-unmatch",
-        description="Exit with a zero status even if nothing matched",
+    Argument(
+        "--ignore-unmatch",
+        action="store_true",
+        help="Exit with a zero status even if nothing matched",
     ),
 )
 
 MV_OPTIONS = (
-    Option(
-        short="-f",
-        long="--force",
-        description="Force move/rename even if target exists",
+    Argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Force move/rename even if target exists",
     ),
-    Option(short="-k", description="Skip move/rename errors"),
-    Option(short="-n", long="--dry-run", description="Dry run"),
-    Option(short="-v", long="--verbose", description="Be verbose"),
+    Argument("-k", action="store_true", help="Skip move/rename errors"),
+    Argument("-n", "--dry-run", action="store_true", help="Dry run"),
+    Argument("-v", "--verbose", action="store_true", help="Be verbose"),
 )
 
 TAG_OPTIONS = (
-    Option(short="-l", long="--list", description="List tag names"),
+    Argument("-l", "--list", action="store_true", help="List tag names"),
     # git spells the count attached (`-n2`) or not at all, never as a
     # separate token, which is what value_optional says: a bare -n means
     # one line and the next word is left alone to be a pattern.
-    Option(
-        short="-n",
+    Argument(
+        "-n",
         type="int",
-        value_optional=True,
-        description="Print <n> lines of each tag message",
+        nargs="?",
+        attached_only=True,
+        help="Print <n> lines of each tag message",
     ),
-    Option(short="-d", long="--delete", description="Delete tags"),
-    Option(
-        short="-a",
-        long="--annotate",
-        description="Annotated tag, needs a message",
+    Argument("-d", "--delete", action="store_true", help="Delete tags"),
+    Argument(
+        "-a",
+        "--annotate",
+        action="store_true",
+        help="Annotated tag, needs a message",
     ),
-    Option(
-        short="-m",
-        long="--message",
-        type="str",
-        multiple=True,
-        description="Tag message (repeatable, one paragraph each)",
+    Argument(
+        "-m",
+        "--message",
+        action="append",
+        help="Tag message (repeatable, one paragraph each)",
     ),
-    Option(
-        short="-f", long="--force", description="Replace the tag if exists"
+    Argument(
+        "-f", "--force", action="store_true", help="Replace the tag if exists"
     ),
     *REF_FILTER_OPTIONS,
     *SORT_OPTIONS,
@@ -634,33 +696,35 @@ TAG_OPTIONS = (
 )
 
 STATUS_OPTIONS = (
-    Option(long="--ignored", description="Show ignored files"),
-    Option(
-        long="--porcelain",
-        type="str",
-        value_optional=True,
-        description="Machine-readable output, stable across versions",
+    Argument("--ignored", action="store_true", help="Show ignored files"),
+    Argument(
+        "--porcelain",
+        nargs="?",
+        attached_only=True,
+        help="Machine-readable output, stable across versions",
     ),
-    Option(
-        short="-s",
-        long="--short",
-        description="Give the output in the short format",
+    Argument(
+        "-s",
+        "--short",
+        action="store_true",
+        help="Give the output in the short format",
     ),
-    Option(
-        short="-b",
-        long="--branch",
-        description="Show the branch line even in short format",
+    Argument(
+        "-b",
+        "--branch",
+        action="store_true",
+        help="Show the branch line even in short format",
     ),
     # git spells the mode attached (`-uall`) or not at all, never as a
     # separate token, which is what value_optional says: a bare -u means
     # "all" and the next word is left alone to be an operand.
-    Option(
-        short="-u",
-        long="--untracked-files",
-        type="str",
-        value_optional=True,
+    Argument(
+        "-u",
+        "--untracked-files",
+        nargs="?",
+        attached_only=True,
         choices=("no", "normal", "all"),
-        description="Show untracked files: no, normal or all",
+        help="Show untracked files: no, normal or all",
     ),
 )
 
@@ -677,7 +741,7 @@ async def help_cmd(
         check_switches(inv, inv.texts)
     except GitError as exc:
         return fatal(exc)
-    found = find_node(GIT, inv.texts)
+    found = find_node(GIT.spec, inv.texts)
     if found is None:
         return None, IOResult(
             exit_code=1,
@@ -688,693 +752,813 @@ async def help_cmd(
         )
     node, path = found
     return node_help(
-        " ".join(("git", *path)), node, GIT.usage_style
+        " ".join(("git", *path)), node, GIT.spec.usage_style
     ).encode(), IOResult()
 
 
 # The git program tree. No config_model: local git needs no credentials,
 # which is what makes it installable with a bare `cli: git`.
-GIT = CLISpec(
-    name="git",
-    description="Content tracker",
-    usage_style=UsageStyle.GIT,
-    operand_base="-C",
-    options=(
-        DIRECTORY_OPTION,
-        Option(
-            long="--git-dir",
-            type="path",
-            env="GIT_DIR",
-            description="Use the repository at <path>",
+GIT = CLI(
+    spec=CommandSpec(
+        name="git",
+        description="Content tracker",
+        usage_style=UsageStyle.GIT,
+        operand_base="-C",
+        subcommands=(
+            CommandSpec(
+                name="reflog",
+                description="Show reference history",
+                arguments=(
+                    Argument(
+                        "-n",
+                        "--max-count",
+                        type="int",
+                        numeric_shorthand=True,
+                        help="Limit the number of entries",
+                    ),
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="for-each-ref",
+                description="List references with a format",
+                arguments=(
+                    *FOR_EACH_REF_OPTIONS,
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="cat-file",
+                description="Provide contents or details of repository objects",
+                arguments=(
+                    Argument(
+                        "-t", action="store_true", help="Show the object type"
+                    ),
+                    Argument(
+                        "-s", action="store_true", help="Show the object size"
+                    ),
+                    Argument(
+                        "-e",
+                        action="store_true",
+                        help="Check if <object> exists",
+                    ),
+                    Argument(
+                        "-p",
+                        action="store_true",
+                        help="Pretty-print <object> content",
+                    ),
+                    Argument(
+                        "--batch",
+                        nargs="?",
+                        attached_only=True,
+                        help="Show full <object> or <rev> contents",
+                    ),
+                    Argument(
+                        "--batch-check",
+                        nargs="?",
+                        attached_only=True,
+                        help="Like --batch, but don't emit <contents>",
+                    ),
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="hash-object",
+                description="Compute object ID and optionally create an object "
+                "from a file",
+                arguments=(
+                    Argument("-t", help="Object type"),
+                    Argument(
+                        "-w",
+                        action="store_true",
+                        help="Write the object into the object database",
+                    ),
+                    Argument(
+                        "--stdin",
+                        action="store_true",
+                        help="Read the object from stdin",
+                    ),
+                    Argument(
+                        "--stdin-paths",
+                        action="store_true",
+                        help="Read file names from stdin",
+                    ),
+                    Argument(
+                        "--no-filters",
+                        action="store_true",
+                        help="Store file as is without filters",
+                    ),
+                    Argument(
+                        "--literally",
+                        action="store_true",
+                        help="Just hash any random garbage to create "
+                        "corrupt objects for debugging Git",
+                    ),
+                    Argument(
+                        "--path",
+                        help="Process file as it were from this path",
+                    ),
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="grep",
+                description=(
+                    "Search tracked files in the working tree, "
+                    "index or named trees"
+                ),
+                arguments=(
+                    Argument(
+                        "--cached",
+                        action="store_true",
+                        help="Search index blobs instead of working files",
+                    ),
+                    Argument(
+                        "-n",
+                        "--line-number",
+                        action="store_true",
+                        help="Show line numbers",
+                    ),
+                    Argument(
+                        "-i",
+                        "--ignore-case",
+                        action="store_true",
+                        help="Match without regard to case",
+                    ),
+                    Argument(
+                        "-F",
+                        "--fixed-strings",
+                        action="store_true",
+                        help="Match literal strings",
+                    ),
+                    Argument(
+                        "-E",
+                        "--extended-regexp",
+                        action="store_true",
+                        help="Use extended regular expressions",
+                    ),
+                    Argument(
+                        "-G",
+                        "--basic-regexp",
+                        action="store_true",
+                        help="Use basic regular expressions",
+                    ),
+                    Argument(
+                        "-w",
+                        "--word-regexp",
+                        action="store_true",
+                        help="Match at word boundaries",
+                    ),
+                    Argument(
+                        "-v",
+                        "--invert-match",
+                        action="store_true",
+                        help="Select nonmatching lines",
+                    ),
+                    Argument(
+                        "-c",
+                        "--count",
+                        action="store_true",
+                        help="Count selected lines in each matching file",
+                    ),
+                    Argument(
+                        "-l",
+                        "--files-with-matches",
+                        action="store_true",
+                        help="Show only matching filenames",
+                    ),
+                    Argument(
+                        "-L",
+                        "--files-without-match",
+                        action="store_true",
+                        help="Show only nonmatching filenames",
+                    ),
+                    Argument(
+                        "-q",
+                        "--quiet",
+                        action="store_true",
+                        help="Report matches through exit status",
+                    ),
+                    Argument(
+                        "-e",
+                        action="append",
+                        help="Match an additional pattern",
+                    ),
+                    Argument(
+                        "-a",
+                        "--text",
+                        action="store_true",
+                        help="Treat binary files as text",
+                    ),
+                    Argument(
+                        "-I", action="store_true", help="Skip binary files"
+                    ),
+                    Argument(
+                        "-z",
+                        "--null",
+                        action="store_true",
+                        help="Terminate filename fields with NUL",
+                    ),
+                    Argument(
+                        "-h",
+                        action="store_true",
+                        help="Omit filenames from matching lines",
+                    ),
+                    Argument(
+                        "-H",
+                        action="store_true",
+                        help="Show filenames with matching lines",
+                    ),
+                    Argument("texts", nargs="REMAINDER", metavar=""),
+                ),
+            ),
+            CommandSpec(
+                name="ls-tree",
+                description="List the contents of a tree object",
+                arguments=(
+                    Argument(
+                        "-r", action="store_true", help="Recurse into subtrees"
+                    ),
+                    Argument(
+                        "-t",
+                        action="store_true",
+                        help="Show trees when recursing",
+                    ),
+                    Argument(
+                        "-d", action="store_true", help="Only show trees"
+                    ),
+                    Argument(
+                        "-z",
+                        action="store_true",
+                        help="Terminate entries with NUL",
+                    ),
+                    Argument(
+                        "--name-only",
+                        action="store_true",
+                        help="Show only filenames",
+                    ),
+                    Argument(
+                        "--name-status",
+                        action="store_true",
+                        help="Alias of --name-only",
+                    ),
+                    Argument(
+                        "--full-name",
+                        action="store_true",
+                        help="Show paths relative to the repository root",
+                    ),
+                    Argument(
+                        "--full-tree",
+                        action="store_true",
+                        help="List the whole tree, ignoring the current directory",
+                    ),
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="ls-files",
+                description="Show files in the index",
+                arguments=(
+                    Argument(
+                        "-z",
+                        action="store_true",
+                        help="Terminate paths with NUL",
+                    ),
+                    Argument(
+                        "-s",
+                        "--stage",
+                        action="store_true",
+                        help="Show staged object metadata",
+                    ),
+                    Argument(
+                        "-c",
+                        "--cached",
+                        action="store_true",
+                        help="Show cached files",
+                    ),
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="fetch",
+                description="Download objects and refs from another repository",
+                arguments=(
+                    Argument(
+                        "-q",
+                        "--quiet",
+                        action="store_true",
+                        help="Print nothing but errors",
+                    ),
+                    Argument(
+                        "-v",
+                        "--verbose",
+                        action="store_true",
+                        help="Also list unchanged refs",
+                    ),
+                    Argument(
+                        "-p",
+                        "--prune",
+                        action="store_true",
+                        help="Remove remote-tracking refs the "
+                        "remote no longer has",
+                    ),
+                    Argument(
+                        "-t",
+                        "--tags",
+                        action="store_true",
+                        help="Fetch every tag",
+                    ),
+                    Argument(
+                        "-n",
+                        "--no-tags",
+                        action="store_true",
+                        help="Follow no tags",
+                    ),
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="clone",
+                description="Clone a repository into a new directory",
+                arguments=(
+                    Argument(
+                        "-q",
+                        "--quiet",
+                        action="store_true",
+                        help="Print nothing but errors",
+                    ),
+                    Argument(
+                        "-b",
+                        "--branch",
+                        help="Check out this branch or tag",
+                    ),
+                    Argument(
+                        "-o",
+                        "--origin",
+                        help="Name the remote this instead of origin",
+                    ),
+                    Argument(
+                        "-n",
+                        "--no-checkout",
+                        action="store_true",
+                        help="Leave the working tree empty",
+                    ),
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="help",
+                description="Show command help",
+                arguments=(Argument("texts", nargs="*", metavar=""),),
+            ),
+            CommandSpec(
+                name="init",
+                description="Create an empty Git repository or reinitialize an "
+                "existing one",
+                arguments=(
+                    Argument("-q", "--quiet", action="store_true"),
+                    Argument("--bare", action="store_true"),
+                    Argument("-b", "--initial-branch"),
+                    Argument("directory", nargs="?"),
+                ),
+            ),
+            CommandSpec(
+                name="fsck",
+                description="Verify object hashes and connectivity",
+                arguments=(
+                    Argument("--full", action="store_true"),
+                    Argument("--no-dangling", action="store_true"),
+                    Argument("--unreachable", action="store_true"),
+                ),
+            ),
+            CommandSpec(
+                name="stash",
+                description="Inspect saved working trees",
+                subcommands=(
+                    CommandSpec(
+                        name="list", description="List stashed changes"
+                    ),
+                    CommandSpec(
+                        name="show",
+                        description="Show stashed changes",
+                        arguments=(
+                            *DIFF_OPTIONS,
+                            Argument("stash", nargs="?"),
+                        ),
+                    ),
+                ),
+            ),
+            CommandSpec(
+                name="version",
+                aliases=("--version", "-v"),
+                description="Show the Mirage Git implementation version",
+            ),
+            CommandSpec(
+                name="remote",
+                description="List remotes and inspect their URLs",
+                arguments=(
+                    Argument("texts", nargs="REMAINDER", metavar=""),
+                    Argument(
+                        "-v",
+                        "--verbose",
+                        action="store_true",
+                        help="Show remote URLs",
+                    ),
+                ),
+            ),
+            CommandSpec(
+                name="config",
+                description="Read repository configuration",
+                arguments=(
+                    Argument(
+                        "--global",
+                        action="store_true",
+                        help="Read global configuration",
+                    ),
+                    Argument(
+                        "--get",
+                        action="store_true",
+                        help="Get a configuration value",
+                    ),
+                    Argument(
+                        "-l",
+                        "--list",
+                        action="store_true",
+                        help="List every variable and value",
+                    ),
+                    Argument(
+                        "--show-origin",
+                        action="store_true",
+                        help="Show the file each value comes from",
+                    ),
+                    Argument(
+                        "--get-regexp",
+                        action="store_true",
+                        help="Get the variables whose names "
+                        "match a regular expression",
+                    ),
+                    Argument("name", nargs="?"),
+                ),
+            ),
+            CommandSpec(
+                name="show-ref",
+                description="List references",
+                arguments=(REVISION,),
+            ),
+            # symbolic-ref has every option git's has, so its rows carry git's
+            # own help and its usage block reads exactly as git's.
+            CommandSpec(
+                name="symbolic-ref",
+                description="Read, change or delete a symbolic ref",
+                arguments=(
+                    Argument(
+                        "-q",
+                        "--quiet",
+                        action="store_true",
+                        help="suppress error message for non-symbolic "
+                        "(detached) refs",
+                    ),
+                    Argument(
+                        "--no-quiet",
+                        action="store_true",
+                        help="Refuse a ref that is not symbolic aloud",
+                    ),
+                    Argument(
+                        "-d",
+                        "--delete",
+                        action="store_true",
+                        help="delete symbolic ref",
+                    ),
+                    Argument(
+                        "--no-delete",
+                        action="store_true",
+                        help="Read or change the ref instead",
+                    ),
+                    Argument(
+                        "--short",
+                        action="store_true",
+                        help="shorten ref output",
+                    ),
+                    Argument(
+                        "--no-short",
+                        action="store_true",
+                        help="Print the full name it points at",
+                    ),
+                    Argument(
+                        "--recurse",
+                        action="store_true",
+                        help="recursively dereference (default)",
+                    ),
+                    Argument(
+                        "--no-recurse",
+                        action="store_true",
+                        help="Print only the ref this one points at directly",
+                    ),
+                    Argument(
+                        "-m",
+                        metavar="reason",
+                        help="reason of the update",
+                    ),
+                    Argument("texts", nargs="*", metavar=""),
+                ),
+            ),
+            # shortlog's -n is --numbered, so the count keeps only its long
+            # spelling.
+            CommandSpec(
+                name="shortlog",
+                description="Summarize commit history",
+                arguments=(
+                    *(opt for opt in LOG_OPTIONS if "-n" not in opt.names),
+                    Argument(
+                        "--max-count",
+                        type="int",
+                        help="Limit the number of commits",
+                    ),
+                    Argument(
+                        "-s",
+                        "--summary",
+                        action="store_true",
+                        help="Show only commit counts",
+                    ),
+                    Argument(
+                        "-e",
+                        "--email",
+                        action="store_true",
+                        help="Show author email addresses",
+                    ),
+                    Argument(
+                        "-n",
+                        "--numbered",
+                        action="store_true",
+                        help="Sort by commit count",
+                    ),
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="rev-parse",
+                description="Resolve revisions",
+                arguments=(
+                    Argument(
+                        "--show-toplevel",
+                        action="store_true",
+                        help="Show the worktree root",
+                    ),
+                    Argument(
+                        "--abbrev-ref",
+                        nargs="?",
+                        attached_only=True,
+                        help="Show abbreviated reference names, strict or loose",
+                    ),
+                    Argument(
+                        "--show-prefix",
+                        action="store_true",
+                        help="Show the current directory relative to the "
+                        "worktree root",
+                    ),
+                    Argument(
+                        "--is-shallow-repository",
+                        action="store_true",
+                        help="Print whether the repository is shallow",
+                    ),
+                    Argument(
+                        "--is-inside-work-tree",
+                        action="store_true",
+                        help="Print whether the current directory is "
+                        "inside the work tree",
+                    ),
+                    Argument(
+                        "--verify",
+                        action="store_true",
+                        help="Require exactly one revision that names an object",
+                    ),
+                    Argument(
+                        "--short",
+                        nargs="?",
+                        attached_only=True,
+                        help="Abbreviate the object name; implies --verify",
+                    ),
+                    Argument(
+                        "-q",
+                        "--quiet",
+                        action="store_true",
+                        help="With --verify, exit 1 without a message",
+                    ),
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="rev-list",
+                description="List reachable commits",
+                arguments=(
+                    *LOG_OPTIONS,
+                    Argument(
+                        "--count",
+                        action="store_true",
+                        help="Print commit count",
+                    ),
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="diff-tree",
+                description="Compare a commit with its parent",
+                arguments=(
+                    *SHOW_OPTIONS,
+                    Argument(
+                        "--no-commit-id",
+                        action="store_true",
+                        help="Suppress commit ID",
+                    ),
+                    Argument(
+                        "-r", action="store_true", help="Recurse into subtrees"
+                    ),
+                    Argument("commit"),
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="status",
+                description="Show the working tree status",
+                arguments=(*STATUS_OPTIONS,),
+            ),
+            CommandSpec(
+                name="log",
+                description="Show commit logs",
+                arguments=(
+                    *LOG_OPTIONS,
+                    *MAILMAP_OPTIONS,
+                    *DIFF_OPTIONS,
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="show",
+                description="Show a commit and its diff",
+                arguments=(
+                    *SHOW_OPTIONS,
+                    *DECORATE_OPTIONS,
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="diff",
+                description="Show changes between commits",
+                arguments=(
+                    *DIFF_OPTIONS,
+                    Argument(
+                        "--cached",
+                        action="store_true",
+                        help="Compare the index with a commit",
+                    ),
+                    Argument(
+                        "--staged",
+                        action="store_true",
+                        help="Alias of --cached",
+                    ),
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="branch",
+                description="List, create or delete branches",
+                arguments=(
+                    *BRANCH_OPTIONS,
+                    Argument("texts", nargs="*", metavar=""),
+                ),
+            ),
+            CommandSpec(
+                name="add",
+                description="Stage working tree content",
+                arguments=(
+                    *ADD_OPTIONS,
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="reset",
+                description="Unstage, putting the index back to HEAD",
+                arguments=(
+                    Argument(
+                        "-q",
+                        "--quiet",
+                        action="store_true",
+                        help="Only report errors",
+                    ),
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="commit",
+                description="Record the index as a new commit",
+                arguments=(*COMMIT_OPTIONS,),
+            ),
+            CommandSpec(
+                name="checkout",
+                description="Switch branches",
+                arguments=(
+                    *CHECKOUT_OPTIONS,
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="switch",
+                description="Switch branches",
+                arguments=(
+                    *SWITCH_OPTIONS,
+                    REVISION,
+                ),
+            ),
+            CommandSpec(
+                name="restore",
+                description="Restore working tree files",
+                arguments=(
+                    *RESTORE_OPTIONS,
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="rm",
+                description="Remove files from the working tree and the index",
+                arguments=(
+                    *RM_OPTIONS,
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="mv",
+                description="Move or rename a file, a directory, or a symlink",
+                arguments=(
+                    *MV_OPTIONS,
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="tag",
+                description="Create, list or delete a tag",
+                arguments=(
+                    *TAG_OPTIONS,
+                    Argument("texts", nargs="*", metavar=""),
+                ),
+            ),
         ),
-        Option(
-            long="--work-tree",
-            type="path",
-            env="GIT_WORK_TREE",
-            description="Use <path> as the working tree",
+        arguments=(
+            DIRECTORY_OPTION,
+            Argument(
+                "--git-dir",
+                type="path",
+                env="GIT_DIR",
+                help="Use the repository at <path>",
+            ),
+            Argument(
+                "--work-tree",
+                type="path",
+                env="GIT_WORK_TREE",
+                help="Use <path> as the working tree",
+            ),
         ),
     ),
-    subcommands=(
-        CLISpec(
-            name="reflog",
-            fn=verb(reflog),
-            description="Show reference history",
-            options=(
-                Option(
-                    short="-n",
-                    long="--max-count",
-                    type="int",
-                    numeric_shorthand=True,
-                    description="Limit the number of entries",
-                ),
-            ),
-            rest=REVISION,
+    handlers={
+        "reflog": CLIHandler(fn=verb(reflog)),
+        "for-each-ref": CLIHandler(fn=verb(for_each_ref)),
+        "cat-file": CLIHandler(fn=verb(cat_file)),
+        "hash-object": CLIHandler(fn=verb(hash_object, hash_object_read_only)),
+        "grep": CLIHandler(fn=verb(grep)),
+        "ls-tree": CLIHandler(fn=verb(ls_tree)),
+        "ls-files": CLIHandler(fn=verb(ls_files)),
+        "fetch": CLIHandler(fn=verb(fetch, fetch_read_only)),
+        "clone": CLIHandler(fn=verb(clone, clone_read_only)),
+        "help": CLIHandler(fn=verb(help_cmd)),
+        "init": CLIHandler(fn=verb(init), write=True),
+        "fsck": CLIHandler(fn=verb(fsck)),
+        "stash list": CLIHandler(fn=verb(stash_list)),
+        "stash show": CLIHandler(fn=verb(stash_show)),
+        "version": CLIHandler(fn=verb(version)),
+        "remote": CLIHandler(fn=verb(remote)),
+        "config": CLIHandler(fn=verb(config)),
+        "show-ref": CLIHandler(fn=verb(show_ref)),
+        "symbolic-ref": CLIHandler(
+            fn=verb(symbolic_ref, symbolic_ref_read_only), write=True
         ),
-        CLISpec(
-            name="for-each-ref",
-            fn=verb(for_each_ref),
-            description="List references with a format",
-            options=FOR_EACH_REF_OPTIONS,
-            rest=REVISION,
+        "shortlog": CLIHandler(fn=verb(shortlog)),
+        "rev-parse": CLIHandler(fn=verb(rev_parse)),
+        "rev-list": CLIHandler(fn=verb(rev_list)),
+        "diff-tree": CLIHandler(fn=verb(diff_tree)),
+        "status": CLIHandler(fn=verb(status)),
+        "log": CLIHandler(fn=verb(log)),
+        "show": CLIHandler(fn=verb(show)),
+        "diff": CLIHandler(fn=verb(diff)),
+        "branch": CLIHandler(fn=verb(branch, branch_read_only), write=True),
+        "add": CLIHandler(fn=verb(add, index_locked), write=True),
+        "reset": CLIHandler(fn=verb(reset, index_locked), write=True),
+        "commit": CLIHandler(fn=verb(commit, index_locked), write=True),
+        "checkout": CLIHandler(
+            fn=verb(checkout, checkout_read_only), write=True
         ),
-        CLISpec(
-            name="cat-file",
-            fn=verb(cat_file),
-            description="Provide contents or details of repository objects",
-            options=(
-                Option(short="-t", description="Show the object type"),
-                Option(short="-s", description="Show the object size"),
-                Option(
-                    short="-e",
-                    description="Check if <object> exists",
-                ),
-                Option(
-                    short="-p",
-                    description="Pretty-print <object> content",
-                ),
-                Option(
-                    long="--batch",
-                    type="str",
-                    value_optional=True,
-                    description="Show full <object> or <rev> contents",
-                ),
-                Option(
-                    long="--batch-check",
-                    type="str",
-                    value_optional=True,
-                    description="Like --batch, but don't emit <contents>",
-                ),
-            ),
-            rest=REVISION,
-        ),
-        CLISpec(
-            name="hash-object",
-            fn=verb(hash_object, hash_object_read_only),
-            description="Compute object ID and optionally create an object "
-            "from a file",
-            options=(
-                Option(short="-t", type="str", description="Object type"),
-                Option(
-                    short="-w",
-                    description="Write the object into the object database",
-                ),
-                Option(
-                    long="--stdin",
-                    description="Read the object from stdin",
-                ),
-                Option(
-                    long="--stdin-paths",
-                    description="Read file names from stdin",
-                ),
-                Option(
-                    long="--no-filters",
-                    description="Store file as is without filters",
-                ),
-                Option(
-                    long="--literally",
-                    description="Just hash any random garbage to create "
-                    "corrupt objects for debugging Git",
-                ),
-                Option(
-                    long="--path",
-                    type="str",
-                    description="Process file as it were from this path",
-                ),
-            ),
-            rest=PATHSPEC,
-        ),
-        CLISpec(
-            name="grep",
-            fn=verb(grep),
-            description=(
-                "Search tracked files in the working tree, index or named trees"
-            ),
-            options=(
-                Option(
-                    long="--cached",
-                    description="Search index blobs instead of working files",
-                ),
-                Option(
-                    short="-n",
-                    long="--line-number",
-                    description="Show line numbers",
-                ),
-                Option(
-                    short="-i",
-                    long="--ignore-case",
-                    description="Match without regard to case",
-                ),
-                Option(
-                    short="-F",
-                    long="--fixed-strings",
-                    description="Match literal strings",
-                ),
-                Option(
-                    short="-E",
-                    long="--extended-regexp",
-                    description="Use extended regular expressions",
-                ),
-                Option(
-                    short="-G",
-                    long="--basic-regexp",
-                    description="Use basic regular expressions",
-                ),
-                Option(
-                    short="-w",
-                    long="--word-regexp",
-                    description="Match at word boundaries",
-                ),
-                Option(
-                    short="-v",
-                    long="--invert-match",
-                    description="Select nonmatching lines",
-                ),
-                Option(
-                    short="-c",
-                    long="--count",
-                    description="Count selected lines in each matching file",
-                ),
-                Option(
-                    short="-l",
-                    long="--files-with-matches",
-                    description="Show only matching filenames",
-                ),
-                Option(
-                    short="-L",
-                    long="--files-without-match",
-                    description="Show only nonmatching filenames",
-                ),
-                Option(
-                    short="-q",
-                    long="--quiet",
-                    description="Report matches through exit status",
-                ),
-                Option(
-                    short="-e",
-                    type="str",
-                    multiple=True,
-                    description="Match an additional pattern",
-                ),
-                Option(
-                    short="-a",
-                    long="--text",
-                    description="Treat binary files as text",
-                ),
-                Option(short="-I", description="Skip binary files"),
-                Option(
-                    short="-z",
-                    long="--null",
-                    description="Terminate filename fields with NUL",
-                ),
-                Option(
-                    short="-h",
-                    description="Omit filenames from matching lines",
-                ),
-                Option(
-                    short="-H",
-                    description="Show filenames with matching lines",
-                ),
-            ),
-            rest=Operand(type="str", remainder=True),
-        ),
-        CLISpec(
-            name="ls-tree",
-            fn=verb(ls_tree),
-            description="List the contents of a tree object",
-            options=(
-                Option(short="-r", description="Recurse into subtrees"),
-                Option(short="-t", description="Show trees when recursing"),
-                Option(short="-d", description="Only show trees"),
-                Option(short="-z", description="Terminate entries with NUL"),
-                Option(long="--name-only", description="Show only filenames"),
-                Option(
-                    long="--name-status", description="Alias of --name-only"
-                ),
-                Option(
-                    long="--full-name",
-                    description="Show paths relative to the repository root",
-                ),
-                Option(
-                    long="--full-tree",
-                    description="List the whole tree, ignoring the current directory",
-                ),
-            ),
-            rest=REVISION,
-        ),
-        CLISpec(
-            name="ls-files",
-            fn=verb(ls_files),
-            description="Show files in the index",
-            options=(
-                Option(short="-z", description="Terminate paths with NUL"),
-                Option(
-                    short="-s",
-                    long="--stage",
-                    description="Show staged object metadata",
-                ),
-                Option(
-                    short="-c",
-                    long="--cached",
-                    description="Show cached files",
-                ),
-            ),
-            rest=REVISION,
-        ),
-        CLISpec(
-            name="fetch",
-            fn=verb(fetch, fetch_read_only),
-            description="Download objects and refs from another repository",
-            options=(
-                Option(
-                    short="-q",
-                    long="--quiet",
-                    description="Print nothing but errors",
-                ),
-                Option(
-                    short="-v",
-                    long="--verbose",
-                    description="Also list unchanged refs",
-                ),
-                Option(
-                    short="-p",
-                    long="--prune",
-                    description="Remove remote-tracking refs the "
-                    "remote no longer has",
-                ),
-                Option(
-                    short="-t", long="--tags", description="Fetch every tag"
-                ),
-                Option(
-                    short="-n", long="--no-tags", description="Follow no tags"
-                ),
-            ),
-            rest=REVISION,
-        ),
-        CLISpec(
-            name="clone",
-            fn=verb(clone, clone_read_only),
-            description="Clone a repository into a new directory",
-            options=(
-                Option(
-                    short="-q",
-                    long="--quiet",
-                    description="Print nothing but errors",
-                ),
-                Option(
-                    short="-b",
-                    long="--branch",
-                    type="str",
-                    description="Check out this branch or tag",
-                ),
-                Option(
-                    short="-o",
-                    long="--origin",
-                    type="str",
-                    description="Name the remote this instead of origin",
-                ),
-                Option(
-                    short="-n",
-                    long="--no-checkout",
-                    description="Leave the working tree empty",
-                ),
-            ),
-            rest=REVISION,
-        ),
-        CLISpec(
-            name="help",
-            fn=verb(help_cmd),
-            description="Show command help",
-            rest=Operand(type="str"),
-        ),
-        CLISpec(
-            name="init",
-            fn=verb(init),
-            description=(
-                "Create an empty Git repository or reinitialize an "
-                "existing one"
-            ),
-            write=True,
-            options=(
-                Option(short="-q", long="--quiet"),
-                Option(long="--bare"),
-                Option(short="-b", long="--initial-branch", type="str"),
-            ),
-            positional=(Operand(type="str", name="directory"),),
-        ),
-        CLISpec(
-            name="fsck",
-            fn=verb(fsck),
-            description="Verify object hashes and connectivity",
-            options=(
-                Option(long="--full"),
-                Option(long="--no-dangling"),
-                Option(long="--unreachable"),
-            ),
-        ),
-        CLISpec(
-            name="stash",
-            description="Inspect saved working trees",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    fn=verb(stash_list),
-                    description="List stashed changes",
-                ),
-                CLISpec(
-                    name="show",
-                    fn=verb(stash_show),
-                    description="Show stashed changes",
-                    options=DIFF_OPTIONS,
-                    positional=(Operand(type="str", name="stash"),),
-                ),
-            ),
-        ),
-        CLISpec(
-            name="version",
-            aliases=("--version", "-v"),
-            fn=verb(version),
-            description="Show the Mirage Git implementation version",
-        ),
-        CLISpec(
-            name="remote",
-            description="List remotes and inspect their URLs",
-            fn=verb(remote),
-            rest=Operand(type="str", remainder=True),
-            options=(
-                Option(
-                    short="-v",
-                    long="--verbose",
-                    description="Show remote URLs",
-                ),
-            ),
-        ),
-        CLISpec(
-            name="config",
-            description="Read repository configuration",
-            fn=verb(config),
-            options=(
-                Option(
-                    long="--global", description="Read global configuration"
-                ),
-                Option(long="--get", description="Get a configuration value"),
-                Option(
-                    short="-l",
-                    long="--list",
-                    description="List every variable and value",
-                ),
-                Option(
-                    long="--show-origin",
-                    description="Show the file each value comes from",
-                ),
-                Option(
-                    long="--get-regexp",
-                    description="Get the variables whose names "
-                    "match a regular expression",
-                ),
-            ),
-            positional=(Operand(type="str", name="name"),),
-        ),
-        CLISpec(
-            name="show-ref",
-            description="List references",
-            fn=verb(show_ref),
-            rest=REVISION,
-        ),
-        # symbolic-ref has every option git's has, so its rows carry git's
-        # own help and its usage block reads exactly as git's.
-        CLISpec(
-            name="symbolic-ref",
-            description="Read, change or delete a symbolic ref",
-            fn=verb(symbolic_ref, symbolic_ref_read_only),
-            options=(
-                Option(
-                    short="-q",
-                    long="--quiet",
-                    description="suppress error message for non-symbolic "
-                    "(detached) refs",
-                ),
-                Option(
-                    long="--no-quiet",
-                    description="Refuse a ref that is not symbolic aloud",
-                ),
-                Option(
-                    short="-d",
-                    long="--delete",
-                    description="delete symbolic ref",
-                ),
-                Option(
-                    long="--no-delete",
-                    description="Read or change the ref instead",
-                ),
-                Option(
-                    long="--short",
-                    description="shorten ref output",
-                ),
-                Option(
-                    long="--no-short",
-                    description="Print the full name it points at",
-                ),
-                Option(
-                    long="--recurse",
-                    description="recursively dereference (default)",
-                ),
-                Option(
-                    long="--no-recurse",
-                    description="Print only the ref this one points at "
-                    "directly",
-                ),
-                Option(
-                    short="-m",
-                    type="str",
-                    metavar="reason",
-                    description="reason of the update",
-                ),
-            ),
-            rest=Operand(type="str"),
-            write=True,
-        ),
-        # shortlog's -n is --numbered, so the count keeps only its long
-        # spelling.
-        CLISpec(
-            name="shortlog",
-            fn=verb(shortlog),
-            description="Summarize commit history",
-            options=(
-                *(opt for opt in LOG_OPTIONS if opt.short != "-n"),
-                Option(
-                    long="--max-count",
-                    type="int",
-                    description="Limit the number of commits",
-                ),
-                Option(
-                    short="-s",
-                    long="--summary",
-                    description="Show only commit counts",
-                ),
-                Option(
-                    short="-e",
-                    long="--email",
-                    description="Show author email addresses",
-                ),
-                Option(
-                    short="-n",
-                    long="--numbered",
-                    description="Sort by commit count",
-                ),
-            ),
-            rest=REVISION,
-        ),
-        CLISpec(
-            name="rev-parse",
-            fn=verb(rev_parse),
-            description="Resolve revisions",
-            options=(
-                Option(
-                    long="--show-toplevel",
-                    description="Show the worktree root",
-                ),
-                Option(
-                    long="--abbrev-ref",
-                    type="str",
-                    value_optional=True,
-                    description="Show abbreviated reference names, strict "
-                    "or loose",
-                ),
-                Option(
-                    long="--show-prefix",
-                    description="Show the current directory relative to the "
-                    "worktree root",
-                ),
-                Option(
-                    long="--is-shallow-repository",
-                    description="Print whether the repository is shallow",
-                ),
-                Option(
-                    long="--is-inside-work-tree",
-                    description="Print whether the current directory is "
-                    "inside the work tree",
-                ),
-                Option(
-                    long="--verify",
-                    description="Require exactly one revision that names an "
-                    "object",
-                ),
-                Option(
-                    long="--short",
-                    type="str",
-                    value_optional=True,
-                    description="Abbreviate the object name; implies --verify",
-                ),
-                Option(
-                    short="-q",
-                    long="--quiet",
-                    description="With --verify, exit 1 without a message",
-                ),
-            ),
-            rest=REVISION,
-        ),
-        CLISpec(
-            name="rev-list",
-            description="List reachable commits",
-            fn=verb(rev_list),
-            options=(
-                *LOG_OPTIONS,
-                Option(long="--count", description="Print commit count"),
-            ),
-            rest=REVISION,
-        ),
-        CLISpec(
-            name="diff-tree",
-            description="Compare a commit with its parent",
-            fn=verb(diff_tree),
-            options=(
-                *SHOW_OPTIONS,
-                Option(
-                    long="--no-commit-id", description="Suppress commit ID"
-                ),
-                Option(short="-r", description="Recurse into subtrees"),
-            ),
-            positional=(Operand(type="str", name="commit", required=True),),
-            rest=PATHSPEC,
-        ),
-        CLISpec(
-            name="status",
-            description="Show the working tree status",
-            fn=verb(status),
-            options=STATUS_OPTIONS,
-        ),
-        CLISpec(
-            name="log",
-            description="Show commit logs",
-            fn=verb(log),
-            options=(*LOG_OPTIONS, *MAILMAP_OPTIONS, *DIFF_OPTIONS),
-            rest=REVISION,
-        ),
-        CLISpec(
-            name="show",
-            description="Show a commit and its diff",
-            fn=verb(show),
-            options=(*SHOW_OPTIONS, *DECORATE_OPTIONS),
-            rest=REVISION,
-        ),
-        CLISpec(
-            name="diff",
-            description="Show changes between commits",
-            fn=verb(diff),
-            options=(
-                *DIFF_OPTIONS,
-                Option(
-                    long="--cached",
-                    description="Compare the index with a commit",
-                ),
-                Option(long="--staged", description="Alias of --cached"),
-            ),
-            rest=REVISION,
-        ),
-        CLISpec(
-            name="branch",
-            description="List, create or delete branches",
-            fn=verb(branch, branch_read_only),
-            options=BRANCH_OPTIONS,
-            rest=Operand(type="str"),
-            write=True,
-        ),
-        CLISpec(
-            name="add",
-            description="Stage working tree content",
-            fn=verb(add, index_locked),
-            options=ADD_OPTIONS,
-            rest=PATHSPEC,
-            write=True,
-        ),
-        CLISpec(
-            name="reset",
-            description="Unstage, putting the index back to HEAD",
-            fn=verb(reset, index_locked),
-            options=(
-                Option(
-                    short="-q",
-                    long="--quiet",
-                    description="Only report errors",
-                ),
-            ),
-            rest=PATHSPEC,
-            write=True,
-        ),
-        CLISpec(
-            name="commit",
-            description="Record the index as a new commit",
-            fn=verb(commit, index_locked),
-            options=COMMIT_OPTIONS,
-            write=True,
-        ),
-        CLISpec(
-            name="checkout",
-            description="Switch branches",
-            fn=verb(checkout, checkout_read_only),
-            options=CHECKOUT_OPTIONS,
-            rest=REVISION,
-            write=True,
-        ),
-        CLISpec(
-            name="switch",
-            description="Switch branches",
-            fn=verb(switch, switch_read_only),
-            options=SWITCH_OPTIONS,
-            rest=REVISION,
-            write=True,
-        ),
-        CLISpec(
-            name="restore",
-            description="Restore working tree files",
-            fn=verb(restore, index_locked),
-            options=RESTORE_OPTIONS,
-            rest=PATHSPEC,
-            write=True,
-        ),
-        CLISpec(
-            name="rm",
-            description="Remove files from the working tree and the index",
-            fn=verb(rm, index_locked),
-            options=RM_OPTIONS,
-            rest=PATHSPEC,
-            write=True,
-        ),
-        CLISpec(
-            name="mv",
-            description="Move or rename a file, a directory, or a symlink",
-            fn=verb(mv, index_locked),
-            options=MV_OPTIONS,
-            rest=PATHSPEC,
-            write=True,
-        ),
-        CLISpec(
-            name="tag",
-            description="Create, list or delete a tag",
-            fn=verb(tag, tag_read_only),
-            options=TAG_OPTIONS,
-            rest=Operand(type="str"),
-            write=True,
-        ),
-    ),
+        "switch": CLIHandler(fn=verb(switch, switch_read_only), write=True),
+        "restore": CLIHandler(fn=verb(restore, index_locked), write=True),
+        "rm": CLIHandler(fn=verb(rm, index_locked), write=True),
+        "mv": CLIHandler(fn=verb(mv, index_locked), write=True),
+        "tag": CLIHandler(fn=verb(tag, tag_read_only), write=True),
+    },
 )

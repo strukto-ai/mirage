@@ -22,6 +22,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.constants import ROOT_CWD
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.builtins import is_builtin_grammar, registered_spec
+from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.constants import OWN_OPTION_LOOP
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
@@ -318,7 +319,9 @@ def _answer_standard_options(
         tuple[CommandSpec, CommandFn]: The grammar with both options,
             and the handler that answers them.
     """
-    own_version = any(o.long == "--version" for o in spec.options)
+    own_version = any(
+        "--version" in o.names for o in compile_spec(spec).options
+    )
     own_help = is_builtin_grammar(name, spec) and name in OWN_OPTION_LOOP
     help_text = help_page(name, spec)
     version_text = version_line(name)

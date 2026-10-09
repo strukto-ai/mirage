@@ -11,11 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { describe, expect, it, vi } from 'vitest'
 import * as abort from '../utils/abort.ts'
 import { Command } from '../commands/config.ts'
-import { CommandSpec, Operand } from '../commands/spec/types.ts'
+import { CommandSpec, Argument } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMObserverStore } from '../observe/store.ts'
 import type { Action, VfsContext } from '../policy/index.ts'
@@ -394,7 +393,9 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     const ws = await makeWs()
     const late = new Command({
       name: 'latecmd',
-      spec: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
+      spec: new CommandSpec({
+        arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+      }),
       vfs: VFSName.RAM,
       fn: () => [
         (async function* () {

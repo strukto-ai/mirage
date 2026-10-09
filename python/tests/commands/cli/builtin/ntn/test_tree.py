@@ -17,6 +17,7 @@ import pytest
 from mirage import Workspace
 from mirage.commands.cli.builtin.ntn import NTN
 from mirage.commands.cli.builtin.ntn.pages import create as pages_create
+from mirage.commands.spec.compile import compile_spec
 from mirage.core.notion.config import NotionConfig
 from mirage.io.types import materialize
 
@@ -37,7 +38,7 @@ OUT_OF_SCOPE = (
 
 
 def leaf(*path: str):
-    node = NTN
+    node = NTN.spec
     for name in path:
         node = next(c for c in node.subcommands if c.name == name)
     return node
@@ -54,13 +55,13 @@ def verb(*path: str):
     Args:
         path (str): the subcommand words under the root.
     """
-    return leaf(*path).fn.args[0]
+    return NTN.handlers[" ".join((*path,))].fn.args[0]
 
 
 def test_tree_shape_matches_the_official_grammar():
-    assert NTN.name == "ntn"
+    assert NTN.spec.name == "ntn"
     assert NTN.config_model is NotionConfig
-    assert [g.name for g in NTN.subcommands] == [
+    assert [g.name for g in NTN.spec.subcommands] == [
         "api",
         "auth",
         "datasources",
@@ -83,7 +84,7 @@ def test_tree_shape_matches_the_official_grammar():
 def test_no_invented_groups():
     # blocks, comments and search were mirage inventions; the official
     # CLI reaches those endpoints through `ntn api`, and so does mirage.
-    names = {g.name for g in NTN.subcommands}
+    names = {g.name for g in NTN.spec.subcommands}
     assert names.isdisjoint({"blocks", "comments", "search"})
     assert names.isdisjoint(OUT_OF_SCOPE)
 
@@ -101,11 +102,11 @@ def test_ids_are_positional():
     }
     for path, slot in named.items():
         node = leaf(*path)
-        assert node.rest is None, path
-        assert len(node.positional) == 1, path
-        assert node.positional[0].name == slot, path
-        assert node.positional[0].required, path
-        spellings = {opt.long for opt in node.options}
+        assert compile_spec(node).rest is None, path
+        assert len(compile_spec(node).positional) == 1, path
+        assert compile_spec(node).positional[0].names[0] == slot, path
+        assert compile_spec(node).positional[0].nargs is None, path
+        spellings = {opt.names[-1] for opt in compile_spec(node).options}
         assert "--page" not in spellings
         assert "--datasource" not in spellings
 
@@ -114,9 +115,9 @@ def test_api_path_is_optional():
     # `ntn api` with no operand prints its help rather than refusing, so
     # its slot is the one that must not be required.
     node = leaf("api")
-    assert node.rest is not None
-    assert node.rest.name == "PATH"
-    assert not node.rest.required
+    assert compile_spec(node).rest is not None
+    assert compile_spec(node).rest.names[0] == "PATH"
+    assert compile_spec(node).rest.nargs == "*"
 
 
 def test_notion_version_is_env_backed():
@@ -125,21 +126,28 @@ def test_notion_version_is_env_backed():
     for path in (("pages", "get"), ("datasources", "query"), ("whoami",)):
         option = next(
             opt
-            for opt in leaf(*path).options
-            if opt.long == "--notion-version"
+            for opt in compile_spec(leaf(*path)).options
+            if "--notion-version" in opt.names
         )
         assert option.env == "NOTION_API_VERSION", path
         assert option.metavar == "VERSION", path
 
 
 def test_write_classification():
-    assert not leaf("pages", "get").write
+    assert not NTN.handlers["pages get"].write
     for verb in ("create", "edit", "trash"):
-        assert leaf("pages", verb).write
-    assert not leaf("datasources", "query").write
-    assert not leaf("datasources", "resolve").write
-    assert not leaf("whoami").write
-    assert not leaf("auth", "token").write
+        assert NTN.handlers[
+            " ".join(
+                (
+                    "pages",
+                    verb,
+                )
+            )
+        ].write
+    assert not NTN.handlers["datasources query"].write
+    assert not NTN.handlers["datasources resolve"].write
+    assert not NTN.handlers["whoami"].write
+    assert not NTN.handlers["auth token"].write
 
 
 @pytest.mark.asyncio

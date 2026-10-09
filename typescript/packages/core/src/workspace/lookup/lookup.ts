@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec } from '../../commands/spec/compile.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
@@ -317,7 +318,10 @@ export function programNote(
   }
   const spec =
     consumer === Consumer.MOUNT ? (registry.mountForCommand(name)?.specFor(name) ?? null) : null
-  if (spec?.options.some((option) => option.long === '--help') === true) {
+  if (
+    spec !== null &&
+    compileSpec(spec).options.some((option) => option.names.includes('--help'))
+  ) {
     return `${name} is built into mirage.${helpLine}`
   }
   return `${name} is built into mirage.`

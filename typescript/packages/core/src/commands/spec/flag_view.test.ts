@@ -11,12 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { PathSpec } from '../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { specOf } from './builtins.ts'
 import { flagKwargName, OPERAND, REFUSED } from './constants.ts'
-import { CommandSpec, Option } from './types.ts'
+import { CommandSpec, Argument } from './types.ts'
 
 import { FlagView, specFlagNames } from './flag_view.ts'
 import { parseCommand, parseToKwargs } from './parser.ts'
@@ -110,10 +109,10 @@ describe('FlagView', () => {
 describe('specFlagNames', () => {
   it('returns canonical names only, ambiguous spellings mapped', () => {
     const spec = new CommandSpec({
-      options: [
-        new Option({ short: 'l' }),
-        new Option({ short: 'm', long: '--max-count', type: 'str' }),
-        new Option({ long: '--hidden' }),
+      arguments: [
+        new Argument('-l', { action: 'store_true' }),
+        new Argument(['-m', '--max-count']),
+        new Argument('--hidden', { action: 'store_true' }),
       ],
     })
     // One name per option: the long spelling wins when both exist, so a

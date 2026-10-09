@@ -480,7 +480,6 @@ async def split_generic(
     separator: bytes = b"\n",
     mount_prefix: str = "",
     cwd: str = "/",
-    relay: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
         raise extra_operand_error(
@@ -519,7 +518,6 @@ async def split_generic(
     else:
         source = resolve_source(stdin)
 
-    writes: dict[str, ByteSource] = {}
     file_idx = 0
 
     async def emit(name: str, data: bytes) -> None:
@@ -533,11 +531,6 @@ async def split_generic(
             raise UsageError(
                 f"split: {typed_prefix + name}: {fs_strerror(exc)}", 1
             ) from exc
-        if not relay:
-            # Relay writes land on whichever mount owns each path and
-            # invalidate through the dispatcher; keying them here would
-            # have the runner prefix them onto this mount.
-            writes[spec.mount_path] = data
 
     # A write that fails ends the split mid-input, and `async for` leaves
     # the source it stopped in open.
@@ -592,7 +585,7 @@ async def split_generic(
         if close is not None:
             await close()
 
-    return None, IOResult(writes=writes)
+    return None, IOResult()
 
 
 async def _record_iterator(

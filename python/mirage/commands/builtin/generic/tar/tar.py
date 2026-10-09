@@ -346,11 +346,7 @@ async def _write_archive(
             archive_path.raw_path, exc, mode_suffix, False
         )
     stdout = ("\n".join(names) + "\n").encode() if verbose and names else None
-    return stdout, IOResult(
-        writes={archive_path.mount_path: archive},
-        stderr=_stderr_of(notices),
-        exit_code=exit_code,
-    )
+    return stdout, IOResult(stderr=_stderr_of(notices), exit_code=exit_code)
 
 
 def _voiced(line: str, who: str) -> str:
@@ -517,14 +513,12 @@ async def _extract_archive(
     verbose: bool,
     to_stdout: bool,
     selectors: list[str],
-    relay: bool,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
     stat: StatFn,
     is_dir: DirProbe,
 ) -> tuple[ByteSource | None, IOResult]:
-    writes: dict[str, ByteSource] = {}
     names: list[str] = []
     notices: list[str] = []
     made: set[str] = set()
@@ -631,11 +625,6 @@ async def _extract_archive(
                     )
                     failed = True
                     continue
-                if not relay:
-                    # Relay writes land on whichever mount owns each path
-                    # and invalidate through the dispatcher; keying them here
-                    # would have the runner prefix them onto this mount.
-                    writes[out_path] = content
                 names.append(member.name)
     notices[:0] = result.notices
     failed = failed or bool(result.notices)
@@ -654,20 +643,17 @@ async def _extract_archive(
         return stdout, IOResult(
             exit_code=2,
             stderr=_cut_short(failure, stderr_lines),
-            writes=writes,
         )
     if failure is not None:
         return stdout, IOResult(
             exit_code=2,
             stderr=_child_failure(failure, stderr_lines),
-            writes=writes,
         )
     if misses or failed:
         stderr_lines = stderr_lines + misses + [ERROR_TRAILER]
     return stdout, IOResult(
         exit_code=2 if misses or failed else 0,
         stderr=_stderr_of(stderr_lines),
-        writes=writes,
     )
 
 
@@ -756,7 +742,6 @@ async def tar(
             v,
             to_stdout,
             chosen,
-            relay,
             stdin_bytes(read_bytes, stdin),
             write_bytes,
             mkdir_fn,

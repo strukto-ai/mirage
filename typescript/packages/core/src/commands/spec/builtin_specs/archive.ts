@@ -11,136 +11,100 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-import { CommandSpec, Operand, Option } from '../types.ts'
+import { CommandSpec, Argument } from '../types.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   gunzip: new CommandSpec({
-    options: [
-      new Option({ short: '-k' }),
-      new Option({ short: '-f' }),
-      new Option({ short: '-c' }),
-      new Option({ short: '-t' }),
-      new Option({ short: '-q' }),
-      new Option({ short: '-S', type: 'str' }),
+    arguments: [
+      new Argument('-k', { action: 'store_true' }),
+      new Argument('-f', { action: 'store_true' }),
+      new Argument('-c', { action: 'store_true' }),
+      new Argument('-t', { action: 'store_true' }),
+      new Argument('-q', { action: 'store_true' }),
+      new Argument('-S'),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   gzip: new CommandSpec({
-    options: [
-      new Option({ short: '-d' }),
-      new Option({ short: '-k' }),
-      new Option({ short: '-f' }),
-      new Option({ short: '-c' }),
-      new Option({ short: '-q' }),
-      new Option({ short: '-S', type: 'str' }),
-      new Option({ short: '-1' }),
-      new Option({ short: '-2' }),
-      new Option({ short: '-3' }),
-      new Option({ short: '-4' }),
-      new Option({ short: '-5' }),
-      new Option({ short: '-6' }),
-      new Option({ short: '-7' }),
-      new Option({ short: '-8' }),
-      new Option({ short: '-9' }),
+    arguments: [
+      new Argument('-d', { action: 'store_true' }),
+      new Argument('-k', { action: 'store_true' }),
+      new Argument('-f', { action: 'store_true' }),
+      new Argument('-c', { action: 'store_true' }),
+      new Argument('-q', { action: 'store_true' }),
+      new Argument('-S'),
+      new Argument('-1', { action: 'store_true' }),
+      new Argument('-2', { action: 'store_true' }),
+      new Argument('-3', { action: 'store_true' }),
+      new Argument('-4', { action: 'store_true' }),
+      new Argument('-5', { action: 'store_true' }),
+      new Argument('-6', { action: 'store_true' }),
+      new Argument('-7', { action: 'store_true' }),
+      new Argument('-8', { action: 'store_true' }),
+      new Argument('-9', { action: 'store_true' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   tar: new CommandSpec({
-    // Each option under GNU tar's own long name. Its aliases (--get,
-    // --gunzip, --ungzip) and every abbreviation resolve through
-    // LONG_OPTION_TABLES, tar's whole table, which also knows the options
-    // mirage does not declare.
-    options: [
-      new Option({ short: '-c', long: '--create' }),
-      new Option({ short: '-x', long: '--extract' }),
-      new Option({ short: '-t', long: '--list' }),
-      new Option({ short: '-z', long: '--gzip' }),
-      new Option({ short: '-j', long: '--bzip2' }),
-      new Option({ short: '-J', long: '--xz' }),
-      new Option({ short: '-v', long: '--verbose' }),
-      // -h archives what a symlink points at instead of the link.
-      new Option({ short: '-h', long: '--dereference' }),
-      new Option({ short: '-O', long: '--to-stdout' }),
-      new Option({ short: '-f', long: '--file', type: 'path' }),
-      // Every occurrence is kept, in order: GNU chdirs at each one and
-      // fails at the first it cannot enter, so the planner has to see
-      // them all, not just the last.
-      new Option({ short: '-C', long: '--directory', type: 'path', multiple: true }),
-      new Option({ long: '--strip-components', type: 'str' }),
-      new Option({ long: '--exclude', type: 'str' }),
-      new Option({ long: '--one-file-system' }),
+    arguments: [
+      new Argument(['-c', '--create'], { action: 'store_true' }),
+      new Argument(['-x', '--extract'], { action: 'store_true' }),
+      new Argument(['-t', '--list'], { action: 'store_true' }),
+      new Argument(['-z', '--gzip'], { action: 'store_true' }),
+      new Argument(['-j', '--bzip2'], { action: 'store_true' }),
+      new Argument(['-J', '--xz'], { action: 'store_true' }),
+      new Argument(['-v', '--verbose'], { action: 'store_true' }),
+      new Argument(['-h', '--dereference'], { action: 'store_true' }),
+      new Argument(['-O', '--to-stdout'], { action: 'store_true' }),
+      new Argument(['-f', '--file'], { type: 'path' }),
+      new Argument(['-C', '--directory'], { action: 'append', type: 'path' }),
+      new Argument('--strip-components'),
+      new Argument('--exclude'),
+      new Argument('--one-file-system', { action: 'store_true' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*', textWhen: ['-x', '-t'] }),
     ],
-    // Only -c reads the rest operands from the filesystem. Under -t
-    // and -x each one is a member selector matched against names
-    // inside the archive (the same mode split MountRootPolicy keys
-    // on), so those lines keep them textual, exactly as unzip's
-    // member patterns are.
-    rest: new Operand({ type: 'path', textWhen: ['-x', '-t'] }),
-    // `tar xzf a.tgz` is the spelling everyone types.
     oldOptionStyle: true,
-    // -C is a chdir for the operands after it, not a flag the command
-    // reads once: `tar -cf a.tar -C d x` archives d/x as `x`.
     operandBase: '-C',
   }),
   unzip: new CommandSpec({
-    options: [
-      new Option({ short: '-o' }),
-      new Option({ short: '-n' }),
-      new Option({ short: '-l' }),
-      new Option({ short: '-d', type: 'path' }),
-      new Option({ short: '-q' }),
-      new Option({ short: '-p' }),
-      new Option({ short: '-t' }),
-      // -v is -l's verbose table, or the version banner when no archive is
-      // named. zipinfo's own -v (a per-entry technical dump) is not
-      // rendered: under -Z the letter is ignored.
-      new Option({ short: '-v' }),
-      // Info-ZIP reads -x as a variadic list of patterns; mirage takes
-      // one per occurrence, since its spec has no variadic option value
-      // and `-x a -x b` says the same thing (zip's -x has the same shape).
-      new Option({ short: '-x', type: 'str', multiple: true }),
-      // -Z is ZipInfo mode: the archive is listed from its central
-      // directory instead of extracted, and the other letters are read as
-      // zipinfo's (-1/-2 names only, -s short, -m medium and -l long rows,
-      // -h header, -t totals). Info-ZIP demands -Z first; the flag bag has
-      // no order, so mirage takes it anywhere in the cluster.
-      new Option({ short: '-Z' }),
-      new Option({ short: '-1' }),
-      new Option({ short: '-2' }),
-      new Option({ short: '-s' }),
-      new Option({ short: '-m' }),
-      new Option({ short: '-h' }),
+    arguments: [
+      new Argument('-o', { action: 'store_true' }),
+      new Argument('-n', { action: 'store_true' }),
+      new Argument('-l', { action: 'store_true' }),
+      new Argument('-d', { type: 'path' }),
+      new Argument('-q', { action: 'store_true' }),
+      new Argument('-p', { action: 'store_true' }),
+      new Argument('-t', { action: 'store_true' }),
+      new Argument('-v', { action: 'store_true' }),
+      new Argument('-x', { action: 'append' }),
+      new Argument('-Z', { action: 'store_true' }),
+      new Argument('-1', { action: 'store_true' }),
+      new Argument('-2', { action: 'store_true' }),
+      new Argument('-s', { action: 'store_true' }),
+      new Argument('-m', { action: 'store_true' }),
+      new Argument('-h', { action: 'store_true' }),
+      new Argument('path', { metavar: '', type: 'path', nargs: '?' }),
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    // The archive is the only path operand; everything after it is an
-    // Info-ZIP member pattern matched against archive entry names, never
-    // a filesystem path.
-    positional: [new Operand({ type: 'path' })],
-    rest: new Operand({ type: 'str' }),
   }),
   // zcat is `gzip -cd`: -f copies input that is not gzip, -q drops the
   // warnings, and -S names the suffix a missing name is retried with.
   zcat: new CommandSpec({
-    options: [
-      new Option({ short: '-f' }),
-      new Option({ short: '-q' }),
-      new Option({ short: '-S', type: 'str' }),
+    arguments: [
+      new Argument('-f', { action: 'store_true' }),
+      new Argument('-q', { action: 'store_true' }),
+      new Argument('-S'),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   zip: new CommandSpec({
-    options: [
-      new Option({ short: '-r' }),
-      new Option({ short: '-j' }),
-      new Option({ short: '-q' }),
-      // -y stores a symlink as a symlink; without it zip archives what
-      // the link points at, which is tar's -h inverted.
-      new Option({ short: '-y' }),
-      // Info-ZIP reads -x as a variadic list of patterns; mirage takes
-      // one per occurrence, since its spec has no variadic option value
-      // and `-x a -x b` says the same thing.
-      new Option({ short: '-x', type: 'str', multiple: true }),
+    arguments: [
+      new Argument('-r', { action: 'store_true' }),
+      new Argument('-j', { action: 'store_true' }),
+      new Argument('-q', { action: 'store_true' }),
+      new Argument('-y', { action: 'store_true' }),
+      new Argument('-x', { action: 'append' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
 }

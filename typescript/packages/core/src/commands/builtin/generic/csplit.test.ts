@@ -52,8 +52,7 @@ async function runCsplit(
   return [specs, io]
 }
 
-// With no -f, `xx` in the working directory names every output (GNU), and
-// the writes keys stay mount-relative so the executor can prefix them.
+// With no -f, `xx` in the working directory names every output (GNU).
 // Mirrors test_csplit.py.
 describe('csplit names outputs in the working directory', () => {
   it.each<[CommandOpts['flags'], string, string[]]>([
@@ -70,9 +69,8 @@ describe('csplit names outputs in the working directory', () => {
       [`/data/${prefix}00`, `/data/${prefix}01`],
     ]),
   ])('addresses stdin outputs with %j under %s', async (flags, cwd, named) => {
-    const [specs, io] = await runCsplit(flags, cwd)
+    const [specs] = await runCsplit(flags, cwd)
     expect(specs.map((p) => p.virtual)).toEqual(named)
-    expect(Object.keys(io.writes)).toEqual(named.map((n) => n.slice('/data'.length)))
   })
 })
 

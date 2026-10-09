@@ -21,12 +21,11 @@ import * as Node from '@struktoai/mirage-node'
 
 import {
   CommandSpec as SpecClass,
-  Operand as OperandClass,
-  Option as OptionClass,
+  Argument as ArgumentClass,
   SPECS,
 } from '@struktoai/mirage-core/commands/spec/index'
 
-import type { CommandSpec, Operand, Option } from '@struktoai/mirage-core/commands/spec/index'
+import type { Argument, CommandSpec } from '@struktoai/mirage-core/commands/spec/index'
 import type { Command } from '@struktoai/mirage-core/commands/config'
 
 import {
@@ -191,62 +190,41 @@ function prune(
 ): Record<string, unknown> {
   const kept: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(full)) {
-    if (key !== 'type' && JSON.stringify(value) === JSON.stringify(defaults[key])) continue
+    if (
+      key !== 'type' &&
+      key !== 'names' &&
+      JSON.stringify(value) === JSON.stringify(defaults[key])
+    )
+      continue
     kept[key] = value
   }
   return kept
 }
 
-function operandFields(op: Operand): Record<string, unknown> {
-  return {
-    name: op.name,
-    provided_by: [...op.providedBy],
-    remainder: op.remainder,
-    required: op.required,
-    text_when: [...op.textWhen],
-    type: op.type,
-  }
+function snakeFields(value: Argument | CommandSpec): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).map(([key, field]) => [
+      key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+      field instanceof Set ? [...field].sort(compareCodePoints) : field,
+    ]),
+  )
 }
 
-function serializeOperand(op: Operand): Record<string, unknown> {
-  return prune(operandFields(op), operandFields(new OperandClass({})))
-}
-
-function optionFields(o: Option): Record<string, unknown> {
-  return {
-    choices: o.choices,
-    count: o.count,
-    default: o.default,
-    description: o.description,
-    env: o.env,
-    long: o.long,
-    metavar: o.metavar,
-    multiple: o.multiple,
-    numeric_shorthand: o.numericShorthand,
-    pair: o.pair,
-    required: o.required,
-    short: o.short,
-    short_value: o.shortValue,
-    type: o.type,
-    value_optional: o.valueOptional,
-  }
-}
-
-function serializeOption(o: Option): Record<string, unknown> {
-  return prune(optionFields(o), optionFields(new OptionClass({})))
+function serializeArgument(argument: Argument): Record<string, unknown> {
+  return prune(snakeFields(argument), snakeFields(new ArgumentClass('__default__')))
 }
 
 function specFields(spec: CommandSpec): Record<string, unknown> {
   return {
-    allow_abbrev: spec.allowAbbrev,
-    description: spec.description,
-    epilog: spec.epilog,
+    ...snakeFields(spec),
     ignore_tokens: [...spec.ignoreTokens].sort(compareCodePoints),
-    old_option_style: spec.oldOptionStyle,
-    operand_base: spec.operandBase,
-    options: spec.options.map(serializeOption),
-    positional: spec.positional.map(serializeOperand),
-    rest: spec.rest === null ? null : serializeOperand(spec.rest),
+    // Parsing and help preserve order within the option/positional partitions.
+    arguments: [...spec.arguments]
+      .sort((a, b) => Number(!a.names[0]?.startsWith('-')) - Number(!b.names[0]?.startsWith('-')))
+      .map(serializeArgument),
+    subcommands: spec.subcommands.map((child) =>
+      prune(specFields(child), specFields(new SpecClass({}))),
+    ),
   }
 }
 
@@ -255,6 +233,37 @@ function serializeSpec(spec: CommandSpec, rcs: Command[]): Record<string, unknow
     ...prune(specFields(spec), specFields(new SpecClass({}))),
     _meta: metaFor(rcs),
   }
+}
+
+function cliSpecs(module: ModuleBag): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.values(module)
+      .filter((value): value is Node.CLI => value instanceof Node.CLI)
+      .map((cli) => [
+        cli.spec.name,
+        {
+          grammar: prune(specFields(cli.spec), specFields(new SpecClass({}))),
+          handlers: Object.fromEntries(
+            Object.entries(cli.handlers).map(([path, handler]) => [
+              path,
+              {
+                write: handler.write,
+                limit:
+                  handler.limit === null
+                    ? null
+                    : {
+                        max_bytes: handler.limit.maxBytes,
+                        max_lines: handler.limit.maxLines,
+                        timeout_seconds: handler.limit.timeoutSeconds,
+                        on_exceed: handler.limit.onExceed,
+                      },
+              },
+            ]),
+          ),
+          config_model: cli.configModel !== null,
+        },
+      ]),
+  )
 }
 
 // Codepoint compare, not `localeCompare` and not the default comparator:
@@ -314,6 +323,7 @@ function emitVfsNames(
   registry: Record<string, Command[]>,
   capabilities: Record<string, Capabilities | null>,
   configs: Record<string, ConfigFacts | null>,
+  programs: Record<string, unknown>,
 ): void {
   const commandVfsNames = new Set<string>()
   for (const rcs of Object.values(registry)) {
@@ -324,6 +334,7 @@ function emitVfsNames(
     command_vfs_names: [...commandVfsNames].sort(compareCodePoints),
     capabilities,
     configs,
+    cli_specs: programs,
   }
   const path = resolve(SPEC_ROOT, name, 'vfs.json')
   writeFileSync(path, sortedStringify(payload) + '\n')
@@ -400,6 +411,7 @@ function emitVariant(
       resolve(PACKAGES, pkgs[pkgs.length - 1] as string, 'src', 'vfs', 'registry.ts'),
       PACKAGES,
     ),
+    cliSpecs(modules[modules.length - 1] as ModuleBag),
   )
 }
 

@@ -11,12 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { describe, expect, it } from 'vitest'
 
 import { cliSpecFor } from '../../../commands/cli/specs.ts'
 import { specOf } from '../../../commands/spec/builtins.ts'
-import { CommandSpec, Option } from '../../../commands/spec/types.ts'
+import { CommandSpec, Argument } from '../../../commands/spec/types.ts'
 import { DeviceInput } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
@@ -45,7 +44,9 @@ describe('optionLoopExits', () => {
   })
 
   it('does not apply builtin exit rules to custom grammars', () => {
-    const spec = new CommandSpec({ options: [new Option({ long: '--version' })] })
+    const spec = new CommandSpec({
+      arguments: [new Argument('--version', { action: 'store_true' })],
+    })
     expect(optionLoopExits('jq', spec, ['--version'], '/')).toBe(false)
     expect(optionLoopExits('jq', null, ['--version'], '/')).toBe(false)
   })

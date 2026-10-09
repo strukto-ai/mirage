@@ -15,15 +15,15 @@
 import importlib.metadata
 import logging
 
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI
 from mirage.vfs.loader import load_attr
 
 logger = logging.getLogger(__name__)
 
-# Named CLISpec trees the YAML ``clis:`` section resolves against
+# Named CLI trees the YAML ``clis:`` section resolves against
 # (``cli: slack`` looks up "slack" here). User programs register through
 # register_cli_spec before the workspace loads.
-CLI_SPECS: dict[str, CLISpec] = {}
+CLI_SPECS: dict[str, CLI] = {}
 
 # Bundled program trees, resolved lazily like the VFS registry:
 # the modules pull optional extras (himalaya needs the email stack), so
@@ -46,7 +46,7 @@ BUILTIN_CLI_SPECS: dict[str, str] = {
 #     [project.entry-points."mirage.clis"]
 #     jira = "mypackage.clis:JIRA"
 #
-# The entry point must resolve to a CLISpec tree. Builtin and
+# The entry point must resolve to a CLI tree. Builtin and
 # explicitly registered names win over entry points, mirroring the
 # ``mirage.vfs`` group.
 ENTRY_POINT_GROUP = "mirage.clis"
@@ -54,10 +54,10 @@ _ENTRY_POINT_SPECS: dict[str, str] = {}
 _entry_points_loaded = False
 
 
-def _load_ref(ref: str) -> CLISpec:
+def _load_ref(ref: str) -> CLI:
     spec = load_attr(ref)
-    if not isinstance(spec, CLISpec):
-        raise TypeError(f"CLI ref {ref!r} is not a CLISpec")
+    if not isinstance(spec, CLI):
+        raise TypeError(f"CLI ref {ref!r} is not a CLI")
     return spec
 
 
@@ -73,19 +73,19 @@ def _load_entry_point_clis() -> None:
         _ENTRY_POINT_SPECS[ep.name] = ep.value
 
 
-def register_cli_spec(spec: CLISpec) -> None:
-    """Make a CLISpec resolvable by name from YAML.
+def register_cli_spec(spec: CLI) -> None:
+    """Make a CLI resolvable by name from YAML.
 
     Args:
-        spec (CLISpec): a program tree; its root ``name`` is the key.
+        spec (CLI): a program tree; its root ``name`` is the key.
     """
-    if spec.name in CLI_SPECS or spec.name in BUILTIN_CLI_SPECS:
-        raise ValueError(f"CLI spec {spec.name!r} is already registered")
-    CLI_SPECS[spec.name] = spec
+    if spec.spec.name in CLI_SPECS or spec.spec.name in BUILTIN_CLI_SPECS:
+        raise ValueError(f"CLI spec {spec.spec.name!r} is already registered")
+    CLI_SPECS[spec.spec.name] = spec
 
 
 def unregister_cli_spec(name: str) -> None:
-    """Remove a named CLISpec from the YAML lookup.
+    """Remove a named CLI from the YAML lookup.
 
     Args:
         name (str): the spec's root name.
@@ -95,13 +95,13 @@ def unregister_cli_spec(name: str) -> None:
     del CLI_SPECS[name]
 
 
-def cli_spec_for(name: str) -> CLISpec:
+def cli_spec_for(name: str) -> CLI:
     """Resolve a YAML ``cli:`` value to its program tree, fail loud.
 
     Resolution order mirrors ``build_vfs``: registered names, then
     builtins, then a direct loader reference, then ``mirage.clis``
     entry points from installed packages. A value containing ``:`` is
-    the reference form, pointing straight at a CLISpec attribute as
+    the reference form, pointing straight at a CLI attribute as
     ``"./my_cli.py:PAGER"`` (script file) or ``"mypackage.clis:JIRA"``
     (module dotpath).
 

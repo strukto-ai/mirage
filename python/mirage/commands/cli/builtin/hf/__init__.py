@@ -18,85 +18,79 @@ from mirage.commands.cli.builtin.hf import files as files_commands
 from mirage.commands.cli.builtin.hf import repo as repo_commands
 from mirage.commands.cli.builtin.hf.download import download_cmd
 from mirage.commands.cli.builtin.hf.upload import upload_cmd
-from mirage.commands.cli.types import CLISpec
-from mirage.commands.spec.types import Operand, Option
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.hf_hub.config import HfConfig
 
 # Upstream `hf` is argparse, not clap, so the default UsageStyle already
 # words its refusals ("hf: error: argument ...: invalid choice: 'x'",
 # exit 2). There is no dialect to add for this one.
 
-REPO_TYPE = Option(
-    long="--repo-type",
-    type="str",
+REPO_TYPE = Argument(
+    "--repo-type",
     choices=("model", "dataset", "space"),
     default="model",
     metavar="REPO_TYPE",
-    description="Type of repo (defaults to 'model')",
+    help="Type of repo (defaults to 'model')",
 )
-REVISION = Option(
-    long="--revision",
-    type="str",
+REVISION = Argument(
+    "--revision",
     metavar="REVISION",
-    description="A branch name, a tag, or a commit hash",
+    help="A branch name, a tag, or a commit hash",
 )
-INCLUDE = Option(
-    long="--include",
-    type="str",
-    multiple=True,
+INCLUDE = Argument(
+    "--include",
+    action="append",
     metavar="INCLUDE",
-    description="Glob patterns to match files",
+    help="Glob patterns to match files",
 )
-EXCLUDE = Option(
-    long="--exclude",
-    type="str",
-    multiple=True,
+EXCLUDE = Argument(
+    "--exclude",
+    action="append",
     metavar="EXCLUDE",
-    description="Glob patterns to exclude files",
+    help="Glob patterns to exclude files",
 )
-COMMIT_MESSAGE = Option(
-    long="--commit-message",
-    type="str",
+COMMIT_MESSAGE = Argument(
+    "--commit-message",
     metavar="COMMIT_MESSAGE",
-    description="The summary of the generated commit",
+    help="The summary of the generated commit",
 )
-COMMIT_DESCRIPTION = Option(
-    long="--commit-description",
-    type="str",
+COMMIT_DESCRIPTION = Argument(
+    "--commit-description",
     metavar="COMMIT_DESCRIPTION",
-    description="The description of the generated commit",
+    help="The description of the generated commit",
 )
-CREATE_PR = Option(
-    long="--create-pr", description="Upload the content as a new Pull Request"
+CREATE_PR = Argument(
+    "--create-pr",
+    action="store_true",
+    help="Upload the content as a new Pull Request",
 )
-QUIET = Option(
-    long="--quiet", description="Print only the path to the downloaded files"
+QUIET = Argument(
+    "--quiet",
+    action="store_true",
+    help="Print only the path to the downloaded files",
 )
-PRIVATE = Option(
-    long="--private",
-    description="Create a private repo if it does not exist yet",
+PRIVATE = Argument(
+    "--private",
+    action="store_true",
+    help="Create a private repo if it does not exist yet",
 )
 
-REPO_ID = Operand(type="str", name="REPO_ID", required=True)
+REPO_ID = Argument("REPO_ID")
 
 
-def _auth() -> CLISpec:
-    return CLISpec(
+def _auth() -> CommandSpec:
+    return CommandSpec(
         name="auth",
         description="Manage authentication (login, logout, etc.).",
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="whoami",
-                description=(
-                    "Find out which huggingface.co account you are "
-                    "logged in as."
-                ),
-                fn=auth_commands.whoami_cmd,
+                description="Find out which huggingface.co account you are "
+                "logged in as.",
             ),
-            CLISpec(
-                name="list",
-                description="List all stored access tokens",
-                fn=auth_commands.list_cmd,
+            CommandSpec(
+                name="list", description="List all stored access tokens"
             ),
         ),
     )
@@ -104,58 +98,56 @@ def _auth() -> CLISpec:
 
 # Upstream spells this one with an underscore, alone among hf's
 # options. Mimicking a program means mimicking its typos.
-SPACE_SDK = Option(
-    long="--space_sdk",
-    type="str",
+SPACE_SDK = Argument(
+    "--space_sdk",
     choices=("gradio", "streamlit", "docker", "static"),
     metavar="SPACE_SDK",
-    description=("The SDK a Space runs on; required for --repo-type space"),
+    help="The SDK a Space runs on; required for --repo-type space",
 )
 
-TAG = Operand(type="str", name="TAG", required=True)
+TAG = Argument("TAG")
 
 
-def _repo_tag() -> CLISpec:
-    return CLISpec(
+def _repo_tag() -> CommandSpec:
+    return CommandSpec(
         name="tag",
         description="Manage tags for a repo on the Hub.",
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="create",
                 description="Create a tag for a repo.",
-                fn=repo_commands.tag_create_cmd,
-                write=True,
-                positional=(REPO_ID, TAG),
-                options=(
-                    Option(
-                        short="-m",
-                        long="--message",
-                        type="str",
+                arguments=(
+                    REPO_ID,
+                    TAG,
+                    Argument(
+                        "-m",
+                        "--message",
                         metavar="MESSAGE",
-                        description=("The description of the tag to create"),
+                        help="The description of the tag to create",
                     ),
                     REVISION,
                     REPO_TYPE,
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="list",
                 description="List tags for a repo.",
-                fn=repo_commands.tag_list_cmd,
-                positional=(REPO_ID,),
-                options=(REPO_TYPE,),
+                arguments=(
+                    REPO_ID,
+                    REPO_TYPE,
+                ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="delete",
                 description="Delete a tag from a repo.",
-                fn=repo_commands.tag_delete_cmd,
-                write=True,
-                positional=(REPO_ID, TAG),
-                options=(
-                    Option(
-                        short="-y",
-                        long="--yes",
-                        description=("Answer Yes to prompts automatically"),
+                arguments=(
+                    REPO_ID,
+                    TAG,
+                    Argument(
+                        "-y",
+                        "--yes",
+                        action="store_true",
+                        help="Answer Yes to prompts automatically",
                     ),
                     REPO_TYPE,
                 ),
@@ -164,37 +156,31 @@ def _repo_tag() -> CLISpec:
     )
 
 
-def _repo() -> CLISpec:
-    return CLISpec(
+def _repo() -> CommandSpec:
+    return CommandSpec(
         name="repo",
         description="Manage repos on the Hub.",
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="create",
                 description="Create a new repo on huggingface.co",
-                fn=repo_commands.create_cmd,
-                write=True,
-                positional=(REPO_ID,),
-                options=(
+                arguments=(
+                    REPO_ID,
                     REPO_TYPE,
                     PRIVATE,
                     SPACE_SDK,
-                    Option(
-                        long="--exist-ok",
-                        description=(
-                            "Do not raise an error if repo already exists"
-                        ),
+                    Argument(
+                        "--exist-ok",
+                        action="store_true",
+                        help="Do not raise an error if repo already exists",
                     ),
-                    Option(
-                        long="--resource-group-id",
-                        type="str",
+                    Argument(
+                        "--resource-group-id",
                         metavar="RESOURCE_GROUP_ID",
-                        description=(
-                            "Resource group in which to create "
-                            "the repo. Resource groups is only "
-                            "available for Enterprise Hub "
-                            "organizations."
-                        ),
+                        help="Resource group in which to create "
+                        "the repo. Resource groups is only "
+                        "available for Enterprise Hub "
+                        "organizations.",
                     ),
                 ),
             ),
@@ -203,26 +189,17 @@ def _repo() -> CLISpec:
     )
 
 
-def _repo_files() -> CLISpec:
-    return CLISpec(
+def _repo_files() -> CommandSpec:
+    return CommandSpec(
         name="repo-files",
         description="Manage files in a repo on the Hub.",
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="delete",
                 description="Delete files from a repo on the Hub",
-                fn=files_commands.delete_cmd,
-                write=True,
-                positional=(
+                arguments=(
                     REPO_ID,
-                    Operand(
-                        type="str",
-                        name="PATTERNS",
-                        required=True,
-                        remainder=True,
-                    ),
-                ),
-                options=(
+                    Argument("PATTERNS", nargs="+"),
                     REPO_TYPE,
                     REVISION,
                     COMMIT_MESSAGE,
@@ -234,109 +211,108 @@ def _repo_files() -> CLISpec:
     )
 
 
-HF = CLISpec(
-    name="hf",
-    description="hf command helpers",
-    config_model=HfConfig,
-    subcommands=(
-        _auth(),
-        _repo(),
-        _repo_files(),
-        CLISpec(
-            name="download",
-            description="Download files from the Hub",
-            fn=download_cmd,
-            write=True,
-            positional=(
-                REPO_ID,
-                Operand(type="str", name="FILENAMES", remainder=True),
-            ),
-            options=(
-                REPO_TYPE,
-                REVISION,
-                INCLUDE,
-                EXCLUDE,
-                Option(
-                    long="--cache-dir",
-                    type="path",
-                    metavar="CACHE_DIR",
-                    description=(
-                        "Workspace directory to hold the cache; "
+HF = CLI(
+    spec=CommandSpec(
+        name="hf",
+        description="hf command helpers",
+        subcommands=(
+            _auth(),
+            _repo(),
+            _repo_files(),
+            CommandSpec(
+                name="download",
+                description="Download files from the Hub",
+                arguments=(
+                    REPO_ID,
+                    Argument("FILENAMES", nargs="*"),
+                    REPO_TYPE,
+                    REVISION,
+                    INCLUDE,
+                    EXCLUDE,
+                    Argument(
+                        "--cache-dir",
+                        type="path",
+                        metavar="CACHE_DIR",
+                        help="Workspace directory to hold the cache; "
                         "defaults to HF_HUB_CACHE or HF_HOME/hub "
-                        "from the session"
+                        "from the session",
                     ),
-                ),
-                Option(
-                    long="--force-download",
-                    description=(
-                        "Download even when the cache already holds the file"
+                    Argument(
+                        "--force-download",
+                        action="store_true",
+                        help="Download even when the cache already holds the file",
                     ),
-                ),
-                Option(
-                    long="--local-dir",
-                    type="path",
-                    metavar="LOCAL_DIR",
-                    description=(
-                        "Download straight into this directory, "
-                        "with no cache in between"
+                    Argument(
+                        "--local-dir",
+                        type="path",
+                        metavar="LOCAL_DIR",
+                        help="Download straight into this directory, "
+                        "with no cache in between",
                     ),
-                ),
-                Option(
-                    long="--max-workers",
-                    type="int",
-                    metavar="MAX_WORKERS",
-                    description=(
-                        "Maximum number of workers to use for "
-                        "downloading files. Default is 8."
+                    Argument(
+                        "--max-workers",
+                        type="int",
+                        metavar="MAX_WORKERS",
+                        help="Maximum number of workers to use for "
+                        "downloading files. Default is 8.",
                     ),
+                    QUIET,
                 ),
-                QUIET,
             ),
-        ),
-        CLISpec(
-            name="upload",
-            description=(
-                "Upload a file or a folder to the Hub. "
-                "Recommended for single-commit uploads."
-            ),
-            fn=upload_cmd,
-            write=True,
-            positional=(
-                REPO_ID,
-                Operand(type="path", name="LOCAL_PATH"),
-                Operand(type="str", name="PATH_IN_REPO"),
-            ),
-            options=(
-                REPO_TYPE,
-                REVISION,
-                PRIVATE,
-                INCLUDE,
-                EXCLUDE,
-                Option(
-                    long="--delete",
-                    type="str",
-                    multiple=True,
-                    metavar="DELETE",
-                    description=(
-                        "Glob patterns for files to delete "
-                        "from the repo while committing"
+            CommandSpec(
+                name="upload",
+                description="Upload a file or a folder to the Hub. "
+                "Recommended for single-commit uploads.",
+                arguments=(
+                    REPO_ID,
+                    Argument("LOCAL_PATH", type="path", nargs="?"),
+                    Argument("PATH_IN_REPO", nargs="?"),
+                    REPO_TYPE,
+                    REVISION,
+                    PRIVATE,
+                    INCLUDE,
+                    EXCLUDE,
+                    Argument(
+                        "--delete",
+                        action="append",
+                        metavar="DELETE",
+                        help="Glob patterns for files to delete "
+                        "from the repo while committing",
                     ),
+                    COMMIT_MESSAGE,
+                    COMMIT_DESCRIPTION,
+                    CREATE_PR,
+                    QUIET,
                 ),
-                COMMIT_MESSAGE,
-                COMMIT_DESCRIPTION,
-                CREATE_PR,
-                QUIET,
             ),
-        ),
-        CLISpec(
-            name="env",
-            description="Print information about the environment.",
-            fn=env_commands.env_cmd,
-        ),
-        CLISpec(
-            name="version",
-            description="Print information about the hf version.",
-            fn=env_commands.version_cmd,
+            CommandSpec(
+                name="env",
+                description="Print information about the environment.",
+            ),
+            CommandSpec(
+                name="version",
+                description="Print information about the hf version.",
+            ),
         ),
     ),
+    handlers={
+        "auth whoami": CLIHandler(fn=auth_commands.whoami_cmd),
+        "auth list": CLIHandler(fn=auth_commands.list_cmd),
+        "repo create": CLIHandler(fn=repo_commands.create_cmd, write=True),
+        "repo tag create": CLIHandler(
+            fn=repo_commands.tag_create_cmd, write=True
+        ),
+        "repo tag list": CLIHandler(fn=repo_commands.tag_list_cmd),
+        "repo tag delete": CLIHandler(
+            fn=repo_commands.tag_delete_cmd, write=True
+        ),
+        "repo-files delete": CLIHandler(
+            fn=files_commands.delete_cmd, write=True
+        ),
+        "download": CLIHandler(fn=download_cmd, write=True),
+        "upload": CLIHandler(fn=upload_cmd, write=True),
+        "env": CLIHandler(fn=env_commands.env_cmd),
+        "version": CLIHandler(fn=env_commands.version_cmd),
+    },
+    config_model=HfConfig,
 )

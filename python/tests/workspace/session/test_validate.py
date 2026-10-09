@@ -15,7 +15,8 @@
 import pytest
 
 from mirage import Workspace
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.policy.errors import PolicyError
 from mirage.policy.types import AdmissionRules, CommandRule
 from mirage.types import MountMode
@@ -230,7 +231,12 @@ def test_create_session_reads_the_verbs_of_an_installed_cli():
     try:
         ws.register_cli(
             "prog",
-            CLISpec(name="prog", subcommands=(CLISpec(name="run", fn=_noop),)),
+            CLI(
+                spec=CommandSpec(
+                    name="prog", subcommands=(CommandSpec(name="run"),)
+                ),
+                handlers={"run": CLIHandler(fn=_noop)},
+            ),
         )
         doc = {
             "commands": {

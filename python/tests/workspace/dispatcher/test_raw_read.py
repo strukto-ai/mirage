@@ -68,14 +68,9 @@ async def test_raw_read_is_served_from_the_file_cache():
     # The file cache holds the stored bytes commands read, never a
     # rendering, which is what a raw read asks for.
     ws = _workspace(_CachingRAM())
-    await ws.vfs.write("/data/books.tally", b"STORED")
     # Distinct from both the stored and the rendered bytes, so a warm hit
     # is distinguishable from either op running.
-    await ws.apply_io(
-        IOResult(
-            reads={"/data/books.tally": b"CACHED"}, cache=["/data/books.tally"]
-        )
-    )
+    await _seed(ws, "/data/books.tally")
     assert await ws.vfs.read("/data/books.tally", raw=True) == b"CACHED"
 
 
@@ -107,7 +102,7 @@ class _RenderingRAM(_CachingRAM):
 
 async def _seed(ws: Workspace, path: str) -> None:
     await ws.vfs.write(path, b"STORED")
-    await ws.apply_io(IOResult(reads={path: b"CACHED"}, cache=[path]))
+    await ws.cache.set(path, b"CACHED", ttl=ws.mount("/data/").read.ttl)
 
 
 @pytest.mark.asyncio
@@ -151,6 +146,7 @@ async def test_a_cross_mount_relay_never_keeps_a_render(line):
     )
     await ws.vfs.write("/data/books.tally", b"STORED\n")
     await ws.vfs.write("/other/notes", b"N\n")
+    await ws.cache.remove("/data/books.tally")
     result = await ws.shell(line)
     assert "RENDERED" in await result.stdout_str()
     assert not await ws.cache.exists("/data/books.tally")

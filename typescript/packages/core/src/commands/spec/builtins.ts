@@ -11,10 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
+import { compileSpec } from './compile.ts'
 import { SPECS as SPEC_TABLE } from './builtin_specs/index.ts'
 import { HELP_OPTION, VERSION_OPTION } from './constants.ts'
-import { CommandSpec, type Option } from './types.ts'
+import { CommandSpec, type Argument } from './types.ts'
 
 export function specOf(name: string): CommandSpec {
   const spec = BUILTIN_SPECS[name]
@@ -37,16 +37,17 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
  * its own. `help_spec` in builtin_specs/__init__.py is the twin.
  */
 export function helpSpec(spec: CommandSpec): CommandSpec {
-  const extras: Option[] = []
-  if (!spec.options.some((o) => o.long === '--help')) extras.push(HELP_OPTION)
-  if (!spec.options.some((o) => o.long === '--version')) extras.push(VERSION_OPTION)
+  const extras: Argument[] = []
+  if (!compileSpec(spec).options.some((o) => o.names.includes('--help'))) extras.push(HELP_OPTION)
+  if (!compileSpec(spec).options.some((o) => o.names.includes('--version')))
+    extras.push(VERSION_OPTION)
   if (extras.length === 0) return spec
   // Instance spread mirrors Python's dataclasses.replace: every CommandSpec
   // field rides along, including ones added after this code was written.
   // The prototype loss the lint warns about is the point: init wants a plain
   // field bag, and the constructor rebuilds the class.
   // eslint-disable-next-line @typescript-eslint/no-misused-spread
-  return new CommandSpec({ ...spec, options: [...spec.options, ...extras] })
+  return new CommandSpec({ ...spec, arguments: [...spec.arguments, ...extras] })
 }
 
 // The builtin specs in the form the registry actually parses. Built once so

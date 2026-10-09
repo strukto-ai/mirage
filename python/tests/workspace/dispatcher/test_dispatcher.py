@@ -23,6 +23,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.errors import LimitExceededError
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, posix_errno
+from mirage.errors.fs import erofs
 from mirage.errors.types import CommandTimeoutError, ReadOnlyError
 from mirage.io import OpReport
 from mirage.policy import (
@@ -82,6 +83,42 @@ class DenyRemnantUnlink(Policy):
 class DenyUnlinkAfter(Policy):
     async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         return Deny("too late") if ctx.op == "unlink" else None
+
+
+class RefuseMkdirReadOnly(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if ctx.op == "mkdir":
+            return Deny("no dirs", error=erofs(ctx.path.virtual))
+        return None
+
+
+class SeenMkdirs(Policy):
+    def __init__(self) -> None:
+        self.done: list[str] = []
+
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
+        if ctx.op == "mkdir":
+            self.done.append(ctx.path.virtual)
+        return None
+
+
+class _FailingRAM(RAMVFS):
+    """A RAM VFS whose listing or deletion fails with an error of its own
+    type once armed, as an API backend's can (box raises its own)."""
+
+    failing: str | None = None
+
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        if self.failing == "readdir":
+            raise RuntimeError("api exploded")
+        return await super().readdir(path, index)
+
+    async def unlink(self, path: PathSpec) -> None:
+        if self.failing == "unlink":
+            raise RuntimeError("api exploded")
+        await super().unlink(path)
 
 
 def _path(virtual: str) -> PathSpec:
@@ -518,7 +555,8 @@ async def test_a_read_grant_refuses_link_writes_like_file_writes():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("op", sorted(POLICY_WRITE_OPS))
+# mkdir looks its name up first (test_a_read_only_mkdir_answers_what_its_name_holds).
+@pytest.mark.parametrize("op", sorted(POLICY_WRITE_OPS - {"mkdir"}))
 async def test_read_only_admission_precedes_backend_support_and_io(op):
     with Workspace({"/ro": (RAMVFS(), MountMode.READ)}) as ws:
         mount = ws.namespace.mount_for("/ro/file")
@@ -530,6 +568,68 @@ async def test_read_only_admission_precedes_backend_support_and_io(op):
         assert exc.value.errno == errno.EROFS
         mount.ensure_ready.assert_not_awaited()
         assert not ws.namespace.is_link("/ro/file")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "parents", "errno_"),
+    [
+        ("/ro/d", False, errno.EEXIST),
+        ("/ro/d", True, None),
+        ("/ro/f", False, errno.EEXIST),
+        ("/ro/f/x", False, errno.ENOTDIR),
+        ("/ro/gone/x", False, errno.ENOENT),
+        ("/ro/gone/x", True, errno.EROFS),
+        ("/ro/new", False, errno.EROFS),
+    ],
+)
+async def test_a_read_only_mkdir_answers_what_its_name_holds(
+    path, parents, errno_
+):
+    # mkdir(2) on a read-only filesystem refuses only a create it would
+    # really make: a taken name is EEXIST, a file in the chain ENOTDIR,
+    # and `mkdir -p` of a directory already there succeeds.
+    ram = RAMVFS()
+    ram._store.files["/f"] = b"x"
+    ram._store.dirs.add("/d")
+    with Workspace({"/ro": (ram, MountMode.READ)}) as ws:
+        spec = PathSpec.from_str_path(path)
+        if errno_ is None:
+            await ws.dispatch("mkdir", spec, parents=parents)
+            return
+        with pytest.raises(OSError) as exc:
+            await ws.dispatch("mkdir", spec, parents=parents)
+        assert exc.value.errno == errno_
+
+
+@pytest.mark.asyncio
+async def test_a_policy_refusal_stands_on_a_read_only_mkdir():
+    # The lookup answers for the mount's mode, never for a policy: a
+    # policy's own read-only refusal stands where the directory exists.
+    ram = RAMVFS()
+    ram._store.dirs.add("/d")
+    with Workspace(
+        {"/ro": (ram, MountMode.READ)}, policies=[RefuseMkdirReadOnly()]
+    ) as ws:
+        with pytest.raises(OSError) as exc:
+            await ws.dispatch(
+                "mkdir", PathSpec.from_str_path("/ro/d"), parents=True
+            )
+    assert exc.value.errno == errno.EROFS
+
+
+@pytest.mark.asyncio
+async def test_a_read_only_mkdir_the_lookup_answers_completes():
+    # `mkdir -p` of a directory already there succeeds, through post_vfs
+    # like any op that succeeds.
+    seen = SeenMkdirs()
+    ram = RAMVFS()
+    ram._store.dirs.add("/d")
+    with Workspace({"/ro": (ram, MountMode.READ)}, policies=[seen]) as ws:
+        await ws.dispatch(
+            "mkdir", PathSpec.from_str_path("/ro/d"), parents=True
+        )
+    assert seen.done == ["/ro/d"]
 
 
 @pytest.mark.asyncio
@@ -730,7 +830,7 @@ async def test_the_remnant_channel_invalidates_each_deletion():
     boundary = MagicMock()
     boundary.admit = admit
     boundary.complete = AsyncMock()
-    channel = _MountChannel(mount, boundary, invalidate)
+    channel = _MountChannel(mount, boundary, invalidate, None)
     await channel.readdir(_path("/data/d"))
     await channel.stat(_path("/data/d/h"))
     assert seen == []
@@ -801,6 +901,29 @@ async def test_a_policy_denied_remnant_keeps_the_refusal():
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
     kept = await ws.shell("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing", ["readdir", "unlink"])
+async def test_a_remnant_cascade_failing_any_other_way_keeps_the_refusal(
+    failing,
+):
+    # A listing or deletion that fails with no errno still answers with the
+    # backend's not-empty refusal: the raw failure would reveal exactly
+    # what the refusal exists to hide.
+    vfs = _FailingRAM()
+    ws = Workspace({"/a": vfs}, mode=MountMode.WRITE)
+    io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
+    assert io.exit_code == 0, io.stderr
+    sess = ws.create_session("rev", profile={"paths": {"hide": ["/a/d/sec"]}})
+    vfs.failing = failing
+    token = set_current_session(sess)
+    try:
+        with pytest.raises(OSError) as exc:
+            await ws.vfs.rmdir("/a/d")
+    finally:
+        reset_current_session(token)
+    assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
 
 
 @pytest.mark.asyncio
@@ -1219,6 +1342,7 @@ async def test_ranges_of_an_unranged_read_come_from_one_kept_read():
     # the rest, and the whole read, are served from it.
     ws, fetched = _counted_workspace()
     await ws.vfs.write("/data/f.count", b"STORED")
+    await ws.cache.remove("/data/f.count")
     assert await ws.vfs.read("/data/f.count", 0, 2) == b"BO"
     assert await ws.vfs.read("/data/f.count", 2, 2) == b"DY"
     assert await ws.vfs.read("/data/f.count", 0, 0) == b""
@@ -1261,6 +1385,7 @@ async def test_a_natively_ranged_read_keeps_nothing():
     # A store that serves a range itself moved only that range.
     ws, _ = _counted_workspace(filetype=".count")
     await ws.vfs.write("/data/f.txt", b"0123456789")
+    await ws.cache.remove("/data/f.txt")
     assert await ws.vfs.read("/data/f.txt", 2, 3) == b"234"
     assert not await ws.cache.exists("/data/f.txt")
 
@@ -1268,12 +1393,14 @@ async def test_a_natively_ranged_read_keeps_nothing():
 @pytest.mark.asyncio
 async def test_a_write_racing_the_fetch_keeps_the_read_out_of_the_cache():
     # The write lands after the fetch began, so the bytes it read may be
-    # older than the file; keeping them would serve the old file.
+    # older than the file; keeping them would serve the old file. The
+    # write keeps its own bytes, which the next read is served.
     ws, fetched = _counted_workspace(race=True)
     await ws.vfs.write("/data/f.count", b"STORED")
+    await ws.cache.remove("/data/f.count")
     await ws.vfs.read("/data/f.count")
-    await ws.vfs.read("/data/f.count")
-    assert len(fetched) == 2
+    assert await ws.vfs.read("/data/f.count") == b"NEWER"
+    assert len(fetched) == 1
 
 
 @pytest.mark.asyncio
@@ -1283,6 +1410,7 @@ async def test_a_render_is_neither_kept_nor_served_to_a_command():
     # renderer read returns.
     ws, fetched = _counted_workspace(filetype=".count")
     await ws.vfs.write("/data/f.count", b"STORED")
+    await ws.cache.remove("/data/f.count")
     assert await ws.vfs.read("/data/f.count") == b"BODY"
     assert not await ws.cache.exists("/data/f.count")
     out = await ws.shell("cat /data/f.count")
@@ -1328,6 +1456,7 @@ async def test_a_renderer_registered_after_the_probe_is_not_kept(
     # store with no native range fills the whole file too.
     ws, _ = _counted_workspace()
     await ws.vfs.write("/data/f.count", b"STORED")
+    await ws.cache.remove("/data/f.count")
     mount = ws.mount("/data/")
     probe, ready = ws.cache.get, mount.ensure_ready
     probed = False
@@ -1769,7 +1898,7 @@ async def test_a_write_during_a_stream_keeps_none_of_it():
         await ws.dispatch("write", TAPE, data=b"new")
         assert [chunk async for chunk in stream][0] == b"0123456789"
         got, _ = await ws.dispatch("read", TAPE)
-        assert (got, tape.reads) == (b"new", 1)
+        assert (got, tape.reads) == (b"new", 0)
 
 
 @pytest.mark.asyncio

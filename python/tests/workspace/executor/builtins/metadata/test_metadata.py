@@ -152,6 +152,26 @@ async def test_mv_carries_source_meta_over_destination_meta():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["mv /data/a.txt /data/b.txt", None])
+async def test_a_rename_keeps_the_times_the_node_table_holds(line):
+    # rename(2) leaves a file's times alone, so a time only the node
+    # table holds moves with the name, whether a command or the
+    # dispatcher's own caller (FUSE, ws.vfs) renames it.
+    ws, _ = _make_overlay_ws({"/a.txt": b"x"})
+    await _run(ws, "touch -d 2026-03-04T12:00:00 /data/a.txt")
+    before, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path("/data/a.txt")
+    )
+    if line is None:
+        await ws.vfs.rename("/data/a.txt", "/data/b.txt")
+    else:
+        code, _, err = await _run(ws, line)
+        assert code == 0, err
+    after, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/b.txt"))
+    assert after.modified == before.modified
+
+
+@pytest.mark.asyncio
 async def test_mv_into_linked_dir_keys_meta_under_real_path():
     ws, _ = _make_overlay_ws({"/f.txt": b"hi"})
     await _run(ws, "mkdir /data/sub")

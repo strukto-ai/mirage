@@ -413,11 +413,5 @@ export async function zipGeneric(
   }
   const stdout: ByteSource | null =
     !quiet && outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
-  return [
-    stdout,
-    new IOResult({
-      writes: { [archivePath.mountPath]: archive },
-      stderr: ENC.encode(warningText(plan.warnings, quiet)),
-    }),
-  ]
+  return [stdout, new IOResult({ stderr: ENC.encode(warningText(plan.warnings, quiet)) })]
 }

@@ -591,7 +591,6 @@ async def curl(
     # -i, -I and -D all show every hop's header block (curl 8.14.1); the
     # body a redirect carried is never written, only the final one.
     blocks = "".join(_dump(response_lines(hop)) for hop in hops).encode()
-    writes: dict[str, ByteSource] = {}
     # -D writes the headers as they arrive, so before -f judges the
     # status and before -o writes the body: a file both name ends up
     # holding the body.
@@ -612,7 +611,6 @@ async def curl(
                     IOResult(exit_code=EXIT_WRITE, stderr=trace + err),
                     resp,
                 )
-        writes[_path_str(dump_file)] = blocks
     header_out = blocks if dump_to_stdout else None
     # Only -f makes an error status an error, and then no body is
     # written; the headers -D already dumped stay dumped.
@@ -627,9 +625,7 @@ async def curl(
         )
         return await finish(
             header_out,
-            IOResult(
-                exit_code=EXIT_HTTP_ERROR, stderr=trace + err, writes=writes
-            ),
+            IOResult(exit_code=EXIT_HTTP_ERROR, stderr=trace + err),
             resp,
         )
     result = resp.body
@@ -656,19 +652,14 @@ async def curl(
                 err = b"" if quiet else _write_failure(o_str, exc).encode()
                 return await finish(
                     header_out,
-                    IOResult(
-                        exit_code=EXIT_WRITE, stderr=trace + err, writes=writes
-                    ),
+                    IOResult(exit_code=EXIT_WRITE, stderr=trace + err),
                     resp,
                 )
-        writes[o_str] = result
         # Real curl writes the body to the file and prints nothing else
         # on stdout, the headers -D sends there aside.
-        return await finish(
-            header_out, IOResult(writes=writes, stderr=trace), resp
-        )
+        return await finish(header_out, IOResult(stderr=trace), resp)
     if dump_to_stdout and (head or include):
         result = _doubled(hops).encode() + (b"" if head else resp.body)
     elif dump_to_stdout:
         result = blocks + result
-    return await finish(result, IOResult(writes=writes, stderr=trace), resp)
+    return await finish(result, IOResult(stderr=trace), resp)

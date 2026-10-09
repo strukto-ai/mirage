@@ -31,6 +31,8 @@ from mirage.commands.spec.compile import (
     expand_git_long,
     expand_long,
     expand_table_long,
+    positional_name,
+    positional_required,
 )
 from mirage.commands.spec.constants import (
     ARG_PLACEHOLDER,
@@ -45,16 +47,16 @@ from mirage.commands.spec.constants import (
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.oldstyle import expand_old_style
 from mirage.commands.spec.types import (
+    Argument,
     CommandSpec,
-    Option,
     ParsedFlagValue,
     ValueType,
 )
 from mirage.utils.path import resolve_path
 
 
-def _argmatch_options() -> tuple[Option, ...]:
-    """The builtin ``Option`` objects whose choices are ARGMATCH tables.
+def _argmatch_options() -> tuple[Argument, ...]:
+    """The builtin ``Argument`` objects whose choices are ARGMATCH tables.
 
     ARGMATCH_CHOICE_OPTIONS names them as (command, spelling) pairs
     because that is how the measurement reads; this resolves each pair
@@ -62,13 +64,9 @@ def _argmatch_options() -> tuple[Option, ...]:
     can test ``is`` rather than compare strings. A pair that names no
     option is a rotted entry and fails loudly here, at import.
     """
-    found: list[Option] = []
+    found: list[Argument] = []
     for name, spelling in sorted(ARGMATCH_CHOICE_OPTIONS):
-        options = [
-            o
-            for o in SPECS[name].options
-            if (o.long if o.long else o.short) == spelling
-        ]
+        options = [o for o in SPECS[name].arguments if spelling in o.names]
         if not options:
             raise ValueError(
                 f"ARGMATCH_CHOICE_OPTIONS names {name} "
@@ -84,12 +82,12 @@ _ARGMATCH_OPTIONS = _argmatch_options()
 def _argmatch_dests(spec: CommandSpec) -> frozenset[str]:
     """Which of this spec's choice sets are gnulib ARGMATCH tables.
 
-    Decided by ``Option`` identity, not by the command's name: a mount
+    Decided by ``Argument`` identity, not by the command's name: a mount
     may register its own `tee` (commands/config.py), and a name is not
     an identity. Identity is also the only signal that survives
     registration, which parses an enriched COPY of the spec (config.py
     appends --help/--version, once per backend), while every declared
-    Option stays the same object.
+    Argument stays the same object.
 
     Read off the spec rather than cached on its CompiledSpec because
     ``compile_spec`` keys on a frozen dataclass, so its cache is
@@ -101,8 +99,8 @@ def _argmatch_dests(spec: CommandSpec) -> frozenset[str]:
         spec (CommandSpec): the grammar being parsed.
     """
     return frozenset(
-        (o.long if o.long else o.short) or ""
-        for o in spec.options
+        next((name for name in o.names if name.startswith("--")), o.names[0])
+        for o in spec.arguments
         if o.choices and any(o is table for table in _ARGMATCH_OPTIONS)
     )
 
@@ -236,7 +234,7 @@ def _check_value(
     to its candidate. The resolved word is what the caller stores, so a
     command reads `none` where the line typed `non` and never learns the
     difference. Which sets those are was settled by ``compile_spec``, by
-    ``Option`` identity rather than by the command's name, so a
+    ``Argument`` identity rather than by the command's name, so a
     registered command that borrows the name `tee` still compares the
     whole word. ``_argmatch_dests`` settled which they are.
 
@@ -288,7 +286,7 @@ def _set_value_flag(
     cs: CompiledSpec,
     argmatch_dests: frozenset[str],
     spelling: str,
-    value: str,
+    value: str | list[str],
 ) -> None:
     """Record a value flag occurrence under its canonical dest.
 
@@ -309,21 +307,26 @@ def _set_value_flag(
         cs (CompiledSpec): compiled spec tables.
         argmatch_dests (frozenset[str]): this spec's ARGMATCH sets.
         spelling (str): dashed spelling as typed.
-        value (str): the flag's value.
+        value (str | list[str]): one scalar or a fixed-width group.
     """
     name = cs.dest_of(spelling)
-    stored = _check_value(refusals, cs, argmatch_dests, name, value)
+    stored = [
+        _check_value(refusals, cs, argmatch_dests, name, part)
+        for part in ([value] if isinstance(value, str) else value)
+    ]
     if isinstance(flags, FlagBag):
-        flags.occurrences.append((name, stored))
+        flags.occurrences.extend((name, part) for part in stored)
     if name in cs.multiple_dests:
-        prev = flags.get(name)
-        if isinstance(prev, list):
-            prev.append(stored)
+        previous = flags.get(name)
+        if isinstance(previous, list):
+            previous.extend(stored)
         else:
-            flags[name] = [stored]
+            flags[name] = stored
+    elif isinstance(value, list):
+        flags[name] = stored
     else:
         flags.pop(name, None)
-        flags[name] = stored
+        flags[name] = stored[0]
 
 
 def _bag_values(
@@ -480,6 +483,8 @@ def _match_mixed_cluster(
     for idx, ch in enumerate(chars):
         name = f"-{ch}"
         rest = chars[idx + 1 :]
+        if name in cs.detached_optional_spellings:
+            return bools, name, rest or None
         if rest and name in cs.attach_spellings:
             return bools, name, rest
         if name in cs.bool_spellings:
@@ -714,6 +719,24 @@ def parse_command(
         if in_order_operands or own_loop:
             flags.occurrences.append((constants.OPERAND, word))
 
+    def record_values(
+        spelling: str, arity: int, attached: str | None = None
+    ) -> int:
+        """Store a complete fixed-width value and classify its detached words."""
+        detached = arity - (attached is not None)
+        values = ([attached] if attached is not None else []) + scan_argv[
+            i + 1 : i + detached + 1
+        ]
+        _set_value_flag(flags, refusals, cs, argmatch_dests, spelling, values)
+        kinds = cs.value_types_by_dest.get(
+            cs.dest_of(spelling), (cs.kind_of[spelling],) * arity
+        )
+        for offset in range(detached):
+            word_kinds[scan_origins[i + offset + 1]] = kinds[
+                offset + (attached is not None)
+            ]
+        return detached + 1
+
     i = 0
     end_of_flags = False
 
@@ -797,36 +820,36 @@ def parse_command(
                     i += 1
                     continue
             etok = spelling if eq == -1 else spelling + tok[eq:]
-            is_pair = cs.dest_of(spelling) in cs.pair_dests
+            arity = cs.nargs_by_dest.get(cs.dest_of(spelling))
             if etok in cs.long_bool_spellings:
-                _set_bool_flag(flags, cs, etok)
-                i += 1
-            elif is_pair and eq == -1 and i + 2 < len(scan_argv):
-                # Two tokens, both recorded under the one dest, so the
-                # command reads the accumulated list in twos.
-                _set_value_flag(
-                    flags,
-                    refusals,
-                    cs,
-                    argmatch_dests,
-                    spelling,
-                    scan_argv[i + 1],
-                )
-                _set_value_flag(
-                    flags,
-                    refusals,
-                    cs,
-                    argmatch_dests,
-                    spelling,
-                    scan_argv[i + 2],
-                )
-                # The first token names the value and is always textual;
-                # the option's own kind describes the second.
-                word_kinds[scan_origins[i + 1]] = "str"
-                word_kinds[scan_origins[i + 2]] = cs.kind_of[spelling]
-                i += 3
+                if (
+                    etok in cs.detached_optional_spellings
+                    and i + 1 < len(scan_argv)
+                    and (
+                        not scan_argv[i + 1].startswith("-")
+                        or scan_argv[i + 1] == "-"
+                        or constants.NEGATIVE_NUMBER.match(scan_argv[i + 1])
+                    )
+                ):
+                    _set_value_flag(
+                        flags,
+                        refusals,
+                        cs,
+                        argmatch_dests,
+                        etok,
+                        scan_argv[i + 1],
+                    )
+                    word_kinds[scan_origins[i + 1]] = cs.kind_of[etok]
+                    i += 2
+                else:
+                    _set_bool_flag(flags, cs, etok)
+                    i += 1
+            elif arity == 1 and eq != -1:
+                i += record_values(spelling, arity, tok[eq + 1 :])
+            elif arity is not None and eq == -1 and i + arity < len(scan_argv):
+                i += record_values(spelling, arity)
             elif (
-                not is_pair
+                arity is None
                 and etok in cs.long_value_spellings
                 and i + 1 < len(scan_argv)
             ):
@@ -838,13 +861,13 @@ def parse_command(
                     word_bases[scan_origins[i + 1]] = base
                 base = _rebase(flags, cs, etok, scan_argv[i + 1], base)
                 i += 2
-            elif is_pair:
+            elif arity is not None:
                 if eq == -1:
                     if not refused_on_tape(spelling):
                         needs_value_options.append(spelling)
                         option_error_kinds.append("needs_value")
                 elif not refused_on_tape(tok):
-                    # A two-token option has no `=` form (jq refuses
+                    # Multi-value options have no `=` form (jq refuses
                     # `--arg=name` as an unknown option).
                     invalid_options.append(tok)
                     option_error_kinds.append("invalid")
@@ -923,6 +946,18 @@ def parse_command(
                 continue
             matched_value = False
             for vf in cs.value_spellings:
+                arity = cs.nargs_by_dest.get(cs.dest_of(vf))
+                if arity is not None and tok.startswith(vf):
+                    fixed_attached = tok[len(vf) :]
+                    remaining = arity - bool(fixed_attached)
+                    if i + remaining < len(scan_argv):
+                        i += record_values(vf, arity, fixed_attached or None)
+                    else:
+                        needs_value_options.append(vf[1:])
+                        option_error_kinds.append("needs_value")
+                        i += 1
+                    matched_value = True
+                    break
                 if tok == vf and i + 1 < len(scan_argv):
                     _set_value_flag(
                         flags,
@@ -952,8 +987,28 @@ def parse_command(
                 continue
 
             if tok in cs.bool_spellings:
-                _set_bool_flag(flags, cs, tok)
-                i += 1
+                if (
+                    tok in cs.detached_optional_spellings
+                    and i + 1 < len(scan_argv)
+                    and (
+                        not scan_argv[i + 1].startswith("-")
+                        or scan_argv[i + 1] == "-"
+                        or constants.NEGATIVE_NUMBER.match(scan_argv[i + 1])
+                    )
+                ):
+                    _set_value_flag(
+                        flags,
+                        refusals,
+                        cs,
+                        argmatch_dests,
+                        tok,
+                        scan_argv[i + 1],
+                    )
+                    word_kinds[scan_origins[i + 1]] = cs.kind_of[tok]
+                    i += 2
+                else:
+                    _set_bool_flag(flags, cs, tok)
+                    i += 1
                 continue
 
             count_dest = cs.numeric_dest if digit_options else None
@@ -972,7 +1027,10 @@ def parse_command(
 
             all_bool = True
             for ch in tok[1:]:
-                if f"-{ch}" not in cs.bool_spellings:
+                if (
+                    f"-{ch}" not in cs.bool_spellings
+                    or f"-{ch}" in cs.detached_optional_spellings
+                ):
                     all_bool = False
                     break
             if all_bool and len(tok) > 1:
@@ -984,6 +1042,36 @@ def parse_command(
             mixed = _match_mixed_cluster(tok, cs)
             if mixed is not None:
                 cluster_bools, vflag, attached = mixed
+                arity = cs.nargs_by_dest.get(cs.dest_of(vflag))
+                if arity is not None:
+                    remaining = arity - (attached is not None)
+                    for name in cluster_bools:
+                        _set_bool_flag(flags, cs, name)
+                    if i + remaining < len(scan_argv):
+                        i += record_values(vflag, arity, attached)
+                    else:
+                        needs_value_options.append(vflag[1:])
+                        option_error_kinds.append("needs_value")
+                        i += 1
+                    continue
+                if (
+                    vflag in cs.detached_optional_spellings
+                    and attached is None
+                    and (
+                        i + 1 >= len(scan_argv)
+                        or (
+                            scan_argv[i + 1].startswith("-")
+                            and scan_argv[i + 1] != "-"
+                            and not constants.NEGATIVE_NUMBER.match(
+                                scan_argv[i + 1]
+                            )
+                        )
+                    )
+                ):
+                    for name in (*cluster_bools, vflag):
+                        _set_bool_flag(flags, cs, name)
+                    i += 1
+                    continue
                 if attached is not None:
                     attached = _attached(attached, equals_values)
                     for name in cluster_bools:
@@ -1126,31 +1214,39 @@ def parse_command(
         dest_name for dest_name in cs.required_dests if dest_name not in flags
     ]
 
-    positional: tuple[ValueType, ...] = tuple(
-        op.type
-        for op in spec.positional
-        if not any(cs.dest_of(name) in flags for name in op.provided_by)
-    )
-
     # A required slot the line left empty. Counted against the surviving
     # slots rather than the declared ones, so a flag standing in for a
     # slot (provided_by) satisfies it the same way a word would.
-    supplying = [
+    slots = [
         op
-        for op in spec.positional
+        for op in cs.positional
         if not any(cs.dest_of(name) in flags for name in op.provided_by)
     ]
+    required = sum(positional_required(op) for op in slots) + (
+        cs.rest is not None and positional_required(cs.rest)
+    )
+    # An optional slot can consume only words not needed by required slots.
+    supplying: list[Argument] = []
+    for op in slots:
+        if positional_required(op):
+            required -= 1
+        elif len(raw_args) - len(supplying) <= required:
+            continue
+        supplying.append(op)
+    positional = tuple(op.type for op in supplying)
     missing_required_operands = [
-        op.name or ARG_PLACEHOLDER
+        positional_name(op) or ARG_PLACEHOLDER
         for index, op in enumerate(supplying)
-        if op.required and len(raw_args) <= index
+        if positional_required(op) and len(raw_args) <= index
     ]
     if (
-        spec.rest is not None
-        and spec.rest.required
+        cs.rest is not None
+        and positional_required(cs.rest)
         and len(raw_args) <= len(supplying)
     ):
-        missing_required_operands.append(spec.rest.name or ARG_PLACEHOLDER)
+        missing_required_operands.append(
+            positional_name(cs.rest) or ARG_PLACEHOLDER
+        )
 
     # A flag can turn the rest slot textual for this line only: tar's -x
     # makes every operand a member name rather than a file, and jq's
@@ -1158,8 +1254,8 @@ def parse_command(
     # than input files. Only classification moves: unknown dash tokens stay
     # as strict as the declared kind makes them.
     text_from = (
-        _first_text_operand(flags, cs, spec.rest.text_when, in_order_operands)
-        if spec.rest is not None
+        _first_text_operand(flags, cs, cs.rest.text_when, in_order_operands)
+        if cs.rest is not None
         else None
     )
 
@@ -1176,6 +1272,9 @@ def parse_command(
     classified: list[tuple[str, ValueType]] = []
     raw_operands: list[tuple[str, ValueType]] = []
     for j, arg in enumerate(raw_args):
+        slot = supplying[j] if j < len(supplying) else cs.rest
+        if slot is not None and arg not in spec.ignore_tokens:
+            _check_value(refusals, cs, frozenset(), slot.names[0], arg)
         kind: ValueType
         if arg in spec.ignore_tokens:
             # Expression syntax, never an operand of the declared kind:
@@ -1213,14 +1312,20 @@ def parse_command(
             continue
         value = flags[flag_name]
         raw_path_flags[flag_kwarg_name(flag_name)] = value
-        if isinstance(value, list) and flag_name in cs.pair_dests:
-            # Only the odd slots are the paths: the even ones name them.
+        if isinstance(value, list) and flag_name in cs.value_types_by_dest:
+            kinds = cs.value_types_by_dest[flag_name]
             paired = [
-                resolve_path(part, cwd) if index % 2 else part
+                resolve_path(part, cwd)
+                if kinds[index % len(kinds)] == "path"
+                else part
                 for index, part in enumerate(value)
             ]
             flags[flag_name] = paired
-            path_flag_values.extend(paired[1::2])
+            path_flag_values.extend(
+                part
+                for index, part in enumerate(paired)
+                if kinds[index % len(kinds)] == "path"
+            )
         elif isinstance(value, list):
             resolved_list = [
                 "-"

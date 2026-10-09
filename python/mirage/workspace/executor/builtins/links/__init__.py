@@ -18,7 +18,6 @@ from mirage.workspace.executor.builtins.links.links import (
     follow_parent,
     follow_paths,
     prepare_mv,
-    settle_moves,
     strip_link_operands,
 )
 from mirage.workspace.executor.builtins.links.ln import handle_ln, operand_abs
@@ -33,6 +32,5 @@ __all__ = [
     "handle_readlink",
     "operand_abs",
     "prepare_mv",
-    "settle_moves",
     "strip_link_operands",
 ]

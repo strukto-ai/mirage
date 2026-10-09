@@ -22,7 +22,7 @@ from mirage.commands.builtin.trello._input import (
 from mirage.commands.builtin.trello._scope import require_card
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import CommandSpec, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.context import require_mount_writable
 from mirage.core.trello.client import comment_update
 from mirage.core.trello.normalize import normalize_comment
@@ -31,12 +31,12 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(
-    options=(
-        Option(long="--card_id", type="str"),
-        Option(long="--comment_id", type="str"),
-        Option(long="--text", type="str"),
-        Option(long="--text_file", type="path"),
-    ),
+    arguments=(
+        Argument("--card_id", type="str"),
+        Argument("--comment_id", type="str"),
+        Argument("--text", type="str"),
+        Argument("--text_file", type="path"),
+    )
 )
 
 
