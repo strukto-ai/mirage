@@ -128,7 +128,7 @@ A cached listing is reused across commands only when the backend can show the fo
 | --- | --- |
 | GitHub, Hugging Face models, datasets and spaces | One small check for the whole mount; none for a GitHub mount pinned to a full commit sha. A new commit lists the mount again. |
 | Disk | One local stat per folder. |
-| Every other backend | One listing request per cached folder. |
+| Every other backend | One listing operation per cached folder; it may send several requests. |
 
 Disk detects a changed folder by its change time, which moves reliably only on a local POSIX filesystem. For an NFS, SMB, rclone, s3fs or mirage FUSE root, set `folder_versions: false` in the mount's `config:` so the mount lists folders again instead:
 
