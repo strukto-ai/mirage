@@ -2508,6 +2508,19 @@
         "stdout": "1\n1\n1\n",
         "stderr": "gh repo clone: cannot clone: repository argument required\ngh repo clone: error connecting to other.example\ncheck your internet connection or https://githubstatus.com\n"
       }
+    },
+    {
+      "id": "gh_auth_token_help_describes_refusal",
+      "seq": 569948,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh auth token --help",
+      "expect": {
+        "exit": 0,
+        "stdout": "usage: gh auth token [--hostname HOSTNAME] [-u USER] [-h]\n\nToken display is unavailable in Mirage\n\noptions:\n  --hostname HOSTNAME   The hostname of the GitHub instance authenticated with\n  -u USER, --user USER  The account selector; tokens are never printed\n  -h, --help            Show this help and exit\n",
+        "stderr": ""
+      }
     }
   ]
 }

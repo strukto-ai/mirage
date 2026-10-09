@@ -1,127 +1,112 @@
 ---
 title: hf
-description: "Act on the Hugging Face Hub in the official CLI's vocabulary, alongside hf_models, hf_datasets and hf_spaces mounts that read a repo as files."
+description: "Supported Hugging Face Hub commands for downloads, commits, repositories and tags."
 icon: /images/huggingface-logo.svg
 ---
 
-Act on the [Hugging Face Hub](https://huggingface.co) in the official
-[CLI](https://github.com/huggingface/huggingface_hub)'s vocabulary. A repo is
-a tree, so mirage already reads one as files: the
-[`hf_models`](/python/vfs/hf_models),
-[`hf_datasets`](/python/vfs/hf_datasets) and
-[`hf_spaces`](/python/vfs/hf_spaces) mounts are the read half, and `ls`,
-`cat` and `grep` are how an agent explores one without downloading it. `hf` is
-the write half.
+Download Hugging Face Hub files into the workspace and upload files or directories as a single commit. Mirage also supports repository creation, tags and file deletion using the [official `hf` vocabulary](https://github.com/huggingface/huggingface_hub).
 
-**Licenses:** The upstream `huggingface_hub` project uses
-[Apache-2.0](https://github.com/huggingface/huggingface_hub/blob/main/LICENSE);
-Mirage's independent implementation uses
-[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
+## Setup
 
-## The three tiers
-
-A Hub write is a **commit**, and a POSIX write cannot say where a commit ends,
-so the mount does not take one. That is the same split `github` and `git`
-already draw, and it gives three places rather than two:
-
-| Tier | What it does | Example |
-| --- | --- | --- |
-| Hub mount | reads a remote repo, downloading nothing | `cat /m/config.json` |
-| Local mount | holds the writable copy | `echo x > /work/f.txt` |
-| `hf` CLI | moves between them, one commit per invocation | `hf upload acme/m /work/f.txt f.txt` |
-
-So editing a Hub file is download, edit, upload:
-
-```bash
-hf download acme/model config.json --local-dir /work
-sed -i 's/1024/2048/' /work/config.json
-hf upload acme/model /work/config.json config.json --commit-message "widen"
-```
-
-`hf upload` batches every file of one invocation into a single commit carrying
-the message the line gave it, which is exactly what a `cp -r` onto a mount
-could not express.
-
-## Install
+Create a token using [Hugging Face setup](/home/setup/hf_models). TypeScript imports `HF` from the Node package. The Hub API needs no Python extra; `hf-buckets` is a separate storage backend.
 
 ```python
-import os
-
-from mirage import Mount, MountMode, Workspace
+from mirage import MountMode, RAMVFS, Workspace
 from mirage.commands.cli.builtin.hf import HF
 from mirage.core.hf_hub.config import HfConfig
-from mirage.vfs.hf_models import HfModelsConfig, HfModelsVFS
-from mirage.vfs.ram import RAMVFS
 
-token = os.environ["HF_TOKEN"]
-ws = Workspace({
-    "/m": HfModelsVFS(HfModelsConfig(repo_id="acme/model", token=token)),
-    "/work": Mount(RAMVFS(), mode=MountMode.WRITE),
-})
-ws.register_cli("hf", HF, {"token": token})
-
-await ws.shell("hf auth whoami")
+config = HfConfig(token="hf_...")
+ws = Workspace({"/work": RAMVFS()}, mode=MountMode.WRITE)
+ws.register_cli("hf", HF, config)
 ```
 
-`/m` keeps the default read mode, which is all a Hub mount can offer. `/work`
-is the mount that takes `MountMode.WRITE`, and that asymmetry is the workflow
-above rather than an oversight: the Hub half is read-only, the local half is
-where edits live.
+No service mount is required. For YAML and multiple accounts, see the
+[CLI overview](/python/cli/index#register-a-cli).
 
-The Hub VFS need no extra: they speak the Hub API over `aiohttp`, which
-mirage already depends on. `mirage-ai[hf-buckets]` is a different product, the
-Xet object store behind [HF Buckets](/python/vfs/hf_buckets).
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
 
-## Commands
+Run `hf <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
 
-| Verb | What it does |
+| Command | Description |
 | --- | --- |
-| `hf auth whoami` | the account the token names |
-| `hf auth list` | the stored tokens |
-| `hf repo create <id>` | create a repo; `--repo-type`, `--private`, `--space_sdk`, `--exist-ok` |
-| `hf repo tag create\|list\|delete` | git tags on a repo |
-| `hf repo-files delete <id> <glob>...` | delete the files the globs match, in one commit |
-| `hf download <id> [file...]` | fetch to `--local-dir` or the cache |
-| `hf upload <id> [local] [path]` | upload a file or directory as one commit |
-| `hf env`, `hf version` | the endpoint and version in use |
+| `hf auth whoami` | Find out which huggingface.co account you are logged in as |
+| `hf auth list` | List all stored access tokens |
+| `hf repo create` | Create a new repo on huggingface.co |
+| `hf repo tag create` | Create a tag for a repo |
+| `hf repo tag list` | List tags for a repo |
+| `hf repo tag delete` | Delete a tag from a repo |
+| `hf repo-files delete` | Delete files from a repo on the Hub |
+| `hf download` | Download files from the Hub |
+| `hf upload` | Upload a file or a folder to the Hub. Recommended for single-commit uploads |
+| `hf env` | Print information about the environment |
+| `hf version` | Print information about the hf version |
+{/* END GENERATED CLI COMMANDS */}
 
-There is no `hf auth login` or `logout`, and that is deliberate rather than
-missing: the token comes from the config the embedding program registers, so
-there is nothing to log in to.
+## Download, edit and upload
 
-## Downloads
+```bash
+hf auth whoami
+hf download acme/model config.json --local-dir /work
+sed -i 's/1024/2048/' /work/config.json
+hf upload acme/model /work/config.json config.json --commit-message 'Widen the model'
+```
 
-`--local-dir` writes the files as themselves. Without it, `hf download` builds
-upstream's cache layout under `--cache-dir`, byte for byte:
+`/work` must be a writable workspace mount. Each upload is one commit,
+including all files selected from a directory. `--repo-type` selects models,
+datasets or spaces; `--revision` selects a branch, tag or commit.
+
+Local paths resolve against the shell's working directory. With no source,
+`hf upload acme/model` reads `./model`. Downloads, uploads and cache files
+use workspace operations rather than the host filesystem.
+
+## Repositories and tags
+
+```bash
+hf repo create acme/new-model --private
+hf repo tag create acme/model v1.0
+hf repo tag list acme/model
+hf repo tag delete acme/model v1.0
+hf repo-files delete acme/model '*.tmp'
+```
+
+For spaces, use `--repo-type space` and `--space_sdk`. `--exist-ok` accepts
+an existing repository. Deleting matching files creates one commit.
+
+## Select files and cache downloads
+
+`--include`, `--exclude`, `--delete` and `repo-files delete` use Hub glob
+semantics: `*` crosses `/`, `[!a]` negates a character class, and a trailing
+`/` names a folder. Directory uploads exclude `.git` and `.cache/huggingface`.
+Single-file uploads ignore the include/exclude/delete filters with warnings.
+
+Deletion globs match the remote listing; `--delete` is relative to the upload
+destination and spares files re-added by the same commit. `.gitattributes`
+is never deleted. An empty change is skipped with a warning.
+
+Without `--local-dir`, downloads use the cache layout under `--cache-dir`:
 
 ```text
 models--acme--model/
   blobs/<etag>
-  refs/main                 ← only for a symbolic revision
-  snapshots/<sha>/config.json → ../../blobs/<etag>
+  refs/main
+  snapshots/<sha>/config.json -> ../../blobs/<etag>
 ```
 
-`refs/<name>` is written only when the revision is a branch or tag. A
-sha-pinned download writes no ref, which is what the real binary does.
+A branch or tag download writes its ref; a commit-pinned download does not.
+`--force-download` refetches a blob. Relative cache paths, including
+`HF_HUB_CACHE` and `HF_HOME`, resolve against the session's working directory.
 
-`--revision` takes a branch, a tag or a commit sha. `--include` and
-`--exclude` take globs, and `--force-download` refetches rather than reusing
-the cached blob.
+## VFS and limits
 
-## Paths and globs
+The [model](/python/vfs/hf_models), [dataset](/python/vfs/hf_datasets) and
+[space](/python/vfs/hf_spaces) VFS adapters expose remote repository files
+without creating a local checkout. They are read-only. Use a writable mount
+for editing and `hf upload` to choose the commit boundary.
 
-A local path (`hf upload`'s source, `--local-dir`, `--cache-dir`, a relative
-`HF_HUB_CACHE` or `HF_HOME`) resolves against the working directory, so
-`cd /work && hf upload acme/model checkpoints` reads `/work/checkpoints`.
-With no source, `hf upload acme/model` reads `./model`, as upstream does.
-
-`--include`, `--exclude`, `--delete` and `repo-files delete` take upstream's
-globs: Python's fnmatch over the whole repo path, so `*` crosses `/`, `[!a]`
-negates a class while `^` is an ordinary character, and a pattern ending in
-`/` names a folder. A folder upload never sends `.git` or
-`.cache/huggingface`; a single-file upload ignores the three flags, with a
-warning for each. The deletion globs match the repo's listing (`--delete`
-relative to the upload's path in the repo, sparing the files the commit
-re-adds), so `hf repo-files delete acme/model '*.txt'` deletes every text
-file. `.gitattributes` is never deleted, and a commit that would change
-nothing is skipped with upstream's warning.
+There is no interactive `auth login` or `auth logout`; the registered config
+supplies the token. Only the listed commands are implemented. Upstream
+`huggingface_hub` uses [Apache-2.0](https://github.com/huggingface/huggingface_hub/blob/main/LICENSE),
+as does Mirage's command implementation. See
+[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
