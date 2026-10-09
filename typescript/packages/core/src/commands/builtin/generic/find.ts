@@ -21,7 +21,7 @@ import { fsStrerror, isEnoent, isEnotdir, isMissError, walkRefusal } from '../..
 import { dotRefusal, linkFollow, statOrEnoent } from '../utils/paths.ts'
 import { failureText } from '../../../errors/classify.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { FindOptions } from '../../../vfs/base.ts'
+import type { FindOptions } from '../../../vfs/types.ts'
 import { FindParseError } from '../../errors.ts'
 import { parseDepth, parseFindExpression, parseMtime, parseSize } from '../find_parse.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'

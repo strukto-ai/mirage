@@ -16,15 +16,15 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import Callable
-from typing import Any
 
-from qdrant_client import models
+from qdrant_client import AsyncQdrantClient, models
+from qdrant_client.conversions.common_types import PointId
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from mirage.accessor.qdrant import QdrantAccessor
 from mirage.core.qdrant.naming import group_name, row_stem
 from mirage.core.qdrant.payload import field_value
+from mirage.core.qdrant.types import PointTest, QdrantPoint, QdrantRow
 from mirage.core.render.json import value_text
 
 logger = logging.getLogger(__name__)
@@ -94,14 +94,16 @@ def _filter(filters: dict[str, str]) -> models.Filter | None:
     )
 
 
-def _point_to_row(point: Any, id_field: str) -> dict[str, Any]:
+def _point_to_row(point: QdrantPoint, id_field: str) -> QdrantRow:
     payload = point.payload if isinstance(point.payload, dict) else {}
-    row = dict(payload)
-    row[id_field] = point.id
+    row: QdrantRow = dict(payload)
+    row[id_field] = (
+        str(point.id) if isinstance(point.id, uuid.UUID) else point.id
+    )
     return row
 
 
-def _candidate_ids(row_id: str) -> list[Any]:
+def _candidate_ids(row_id: str) -> list[int | str]:
     if re.fullmatch(r"-?[0-9]+", row_id):
         return [int(row_id)]
     try:
@@ -111,9 +113,6 @@ def _candidate_ids(row_id: str) -> list[Any]:
     return [row_id]
 
 
-PointTest = Callable[[Any], bool]
-
-
 def id_prefix_test(prefix: str) -> PointTest:
     """Keep points whose id starts with a literal name prefix.
 
@@ -121,7 +120,7 @@ def id_prefix_test(prefix: str) -> PointTest:
         prefix (str): the literal prefix a leaf glob asked for.
     """
 
-    def keep(point: Any) -> bool:
+    def keep(point: QdrantPoint) -> bool:
         return str(point.id).startswith(prefix)
 
     return keep
@@ -138,7 +137,7 @@ def value_prefix_test(
         basename (bool): compare against the rendered path basename.
     """
 
-    def keep(point: Any) -> bool:
+    def keep(point: QdrantPoint) -> bool:
         value = field_value(point.payload or {}, column)
         return value is not None and group_name(
             value, basename=basename
@@ -159,7 +158,7 @@ def exact_name_test(
         seen (set[str]): raw values already kept, shared across pages.
     """
 
-    def keep(point: Any) -> bool:
+    def keep(point: QdrantPoint) -> bool:
         value = field_value(point.payload or {}, column)
         if value is None:
             return False
@@ -173,20 +172,20 @@ def exact_name_test(
 
 
 async def _scroll_raw(
-    client: Any,
+    client: AsyncQdrantClient,
     collection: str,
     flt: models.Filter | None,
     limit: int,
     keep: PointTest | None = None,
-) -> list[Any]:
+) -> list[models.Record]:
     # Without a test the limit bounds the scroll, which is the ordinary
     # capped listing. With one it bounds the MATCHES, because qdrant has
     # no prefix condition for a point id or a keyword field: the only
     # way to answer a glob for a row past the cap is to keep scrolling
     # and test each page here. A glob is a targeted request, so it pays
     # a scan of the collection where the plain listing pays one page.
-    points: list[Any] = []
-    offset: Any = None
+    points: list[models.Record] = []
+    offset: PointId | None = None
     while len(points) < limit:
         batch, offset = await client.scroll(
             collection_name=collection,
@@ -211,7 +210,7 @@ def _is_index_required(exc: UnexpectedResponse) -> bool:
 
 
 async def _ensure_indexes(
-    client: Any, accessor: QdrantAccessor, collection: str
+    client: AsyncQdrantClient, accessor: QdrantAccessor, collection: str
 ) -> None:
     if collection in accessor.indexes_ensured:
         return
@@ -219,7 +218,7 @@ async def _ensure_indexes(
         await client.create_payload_index(
             collection_name=collection,
             field_name=field,
-            field_schema="keyword",
+            field_schema=models.PayloadSchemaType.KEYWORD,
         )
     accessor.indexes_ensured.add(collection)
 
@@ -230,7 +229,7 @@ async def _scroll_all(
     filters: dict[str, str],
     limit: int,
     keep: PointTest | None = None,
-) -> list[Any]:
+) -> list[models.Record]:
     client = await accessor.client()
     if not filters:
         return await _scroll_raw(client, collection, None, limit, keep)
@@ -319,11 +318,11 @@ async def rows_matching(
     filters: dict[str, str],
     limit: int,
     prefix: str = "",
-) -> list[dict[str, Any]]:
+) -> list[QdrantRow]:
     keep: PointTest | None
     if prefix and accessor.config.name_field:
 
-        def keep(point: Any) -> bool:
+        def keep(point: QdrantPoint) -> bool:
             return row_stem(
                 _point_to_row(point, accessor.config.id_field), accessor.config
             ).startswith(prefix)
@@ -335,7 +334,7 @@ async def rows_matching(
 
 async def row_record(
     accessor: QdrantAccessor, table: str, id_field: str, row_id: str
-) -> dict[str, Any] | None:
+) -> QdrantRow | None:
     ids = _candidate_ids(row_id)
     if not ids:
         return None
@@ -350,7 +349,7 @@ async def row_record(
 
 async def search_rows(
     accessor: QdrantAccessor, table: str, query_text: str, limit: int
-) -> list[dict[str, Any]]:
+) -> list[QdrantRow]:
     key = (table, query_text, limit)
     cached = accessor.search_cache.get(key)
     if cached is not None:
@@ -364,7 +363,7 @@ async def search_rows(
         limit=limit,
         with_payload=True,
     )
-    rows: list[dict[str, Any]] = []
+    rows: list[QdrantRow] = []
     for point in response.points:
         row = _point_to_row(point, accessor.config.id_field)
         row["_score"] = point.score

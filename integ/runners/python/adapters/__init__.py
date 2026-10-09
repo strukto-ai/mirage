@@ -2042,6 +2042,23 @@ class QdrantService:
                             payload={"label": "all", "name": f"row {i}"},
                         )
                         for i in range(1, QDRANT_WIDE_POINTS + 1)
+                    ]
+                    + [
+                        models.PointStruct(
+                            id="11111111-1111-1111-1111-111111111111",
+                            vector=[0.1] * QDRANT_EMBED_DIM,
+                            payload={"label": "uuid", "name": "uuid point"},
+                        ),
+                        models.PointStruct(
+                            id=QDRANT_WIDE_POINTS + 1,
+                            vector=[0.1] * QDRANT_EMBED_DIM,
+                            payload={
+                                "label": "keys",
+                                "__proto__": {"keep": "value"},
+                                "constructor": "constructor value",
+                                "toString": "toString value",
+                            },
+                        ),
                     ],
                 )
             else:

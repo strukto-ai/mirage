@@ -39,7 +39,7 @@ import { MountRegistry } from '../mount/registry.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { SessionState } from '../session/session.ts'
-import type { ResolveFn } from '../dispatcher/index.ts'
+import type { ResolveFn } from '../mount/namespace/namespace.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import {
   handleCd,
@@ -1087,7 +1087,7 @@ describe('handleSleep', () => {
   // A total that stays representable is still slept, however large: only the
   // overflow is refused, not a big number. node's setTimeout holds a 32-bit
   // delay and clamps anything longer to 1ms, so `sleep 1e308` returned at once
-  // where python waited; `sleep()` (workspace/abort.ts) re-arms instead.
+  // where python waited; `sleep()` (utils/abort.ts) re-arms instead.
   // Mirrors test_sleep.py.
   //
   // The assertion is that the wait has NOT settled, never on the elapsed time:

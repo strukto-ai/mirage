@@ -28,7 +28,8 @@ import {
 import { runWithOpPolicies } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
-import { guardDispatch, mergeSignals } from '../abort.ts'
+import { guardDispatch } from '../abort.ts'
+import { mergeSignals } from '../../utils/abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
@@ -144,7 +145,7 @@ export async function executeCommand(
   callStack: CallStack | null,
   jobTable: JobTable | null,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RouteDecision,
+  routingDecision?: RouteDecision<Runtime>,
   signal?: AbortSignal,
   // The line's parse scope; only alias expansion needs it, and each
   // expansion parses in a fork released when it ends. Absent means an
@@ -397,7 +398,7 @@ async function runCommandBody(
   callStack: CallStack | null,
   jobTable: JobTable | null,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RouteDecision,
+  routingDecision?: RouteDecision<Runtime>,
   signalIn?: AbortSignal,
   agentId = '',
   handed?: HandOff,
@@ -578,7 +579,7 @@ async function runArgv(
   callStack: CallStack | null,
   jobTable: JobTable | null,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RouteDecision,
+  routingDecision?: RouteDecision<Runtime>,
   signal?: AbortSignal,
   // The row the shell began reading the command on within its parse
   // (`readRow`), which only `alias`, `unalias` and `shopt` read: the
@@ -745,7 +746,7 @@ async function routeArgv(
   callStack: CallStack | null,
   jobTable: JobTable | null,
   runtimeBindings: Record<string, Runtime> | undefined,
-  routingDecision: RouteDecision | undefined,
+  routingDecision: RouteDecision<Runtime> | undefined,
   signal: AbortSignal | undefined,
   row: number,
   agentId: string,

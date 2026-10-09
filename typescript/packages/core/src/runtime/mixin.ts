@@ -12,8 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Runtime } from './base.ts'
-import type { EvalResult, EvalValue, ProcessExecution, RunResult } from './types.ts'
+import type {
+  EvalResult,
+  EvalValue,
+  ProcessExecution,
+  RunResult,
+  RuntimeIdentity,
+} from './types.ts'
 
 /**
  * The nominal evaluator brand (python's EvaluatorMixin inheritance).
@@ -58,7 +63,7 @@ export interface Evaluator {
 }
 
 /** Whether this runtime carries the evaluator capability. */
-export function isEvaluator(runtime: Runtime): runtime is Runtime & Evaluator {
+export function isEvaluator<T extends RuntimeIdentity>(runtime: T): runtime is T & Evaluator {
   return (runtime as Partial<Evaluator>)[EVALUATOR] === true
 }
 
@@ -96,7 +101,7 @@ export interface LineExecutor {
 }
 
 /** Whether this runtime carries the whole-line capability. */
-export function isLineExecutor(runtime: Runtime): runtime is Runtime & LineExecutor {
+export function isLineExecutor<T extends RuntimeIdentity>(runtime: T): runtime is T & LineExecutor {
   return (runtime as Partial<LineExecutor>)[LINE_EXECUTOR] === true
 }
 
@@ -109,6 +114,8 @@ export interface ProcessExecutor {
   runProcess(request: ProcessExecution): Promise<RunResult>
 }
 
-export function isProcessExecutor(runtime: Runtime): runtime is Runtime & ProcessExecutor {
+export function isProcessExecutor<T extends RuntimeIdentity>(
+  runtime: T,
+): runtime is T & ProcessExecutor {
   return (runtime as Partial<ProcessExecutor>)[PROCESS_EXECUTOR] === true
 }

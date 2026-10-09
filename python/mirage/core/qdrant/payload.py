@@ -13,10 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping
-from typing import Any
+
+from mirage.types import JsonValue
 
 
-def field_value(row: Mapping[str, Any], field: str | None) -> Any:
+def field_value(row: Mapping[str, JsonValue], field: str | None) -> JsonValue:
     """Read a Qdrant payload field, including dotted nested keys.
 
     Qdrant spells nested payload paths with dots in filters. Mirroring that
@@ -24,26 +25,27 @@ def field_value(row: Mapping[str, Any], field: str | None) -> Any:
     ``{"metadata": {"source": ...}}`` everywhere the mount reads a field.
 
     Args:
-        row (Mapping[str, Any]): point payload plus Mirage's synthetic fields.
+        row (Mapping[str, JsonValue]): payload plus synthetic fields.
         field (str | None): configured payload path.
     """
     if not field:
         return None
-    if "." not in field:
-        return row.get(field)
-    value: Any = row
-    for part in field.split("."):
+    head, *tail = field.split(".")
+    value = row.get(head)
+    for part in tail:
         if not isinstance(value, Mapping) or part not in value:
             return None
         value = value[part]
     return value
 
 
-def without_field(row: Mapping[str, Any], field: str | None) -> dict[str, Any]:
+def without_field(
+    row: Mapping[str, JsonValue], field: str | None
+) -> dict[str, JsonValue]:
     """Copy a payload while removing one dotted field path.
 
     Args:
-        row (Mapping[str, Any]): point payload plus Mirage's synthetic fields.
+        row (Mapping[str, JsonValue]): payload plus synthetic fields.
         field (str | None): configured payload path to drop.
     """
     copied = dict(row)
@@ -53,8 +55,8 @@ def without_field(row: Mapping[str, Any], field: str | None) -> dict[str, Any]:
     if len(parts) == 1:
         copied.pop(field, None)
         return copied
-    source: Any = row
-    target: dict[str, Any] = copied
+    source: Mapping[str, JsonValue] = row
+    target: dict[str, JsonValue] = copied
     for part in parts[:-1]:
         if not isinstance(source, Mapping):
             return copied

@@ -44,7 +44,6 @@ import {
   normalizeLineEndings,
   restoreLineEndings,
 } from './text.ts'
-import type {} from './service.ts'
 
 type LinksSeam = NonNullable<Files['links']>
 type Host = Awaited<Context['mirage']['ready']>

@@ -45,7 +45,7 @@ import type {
 import type { Workspace } from '@struktoai/mirage-node'
 import { StreamTail, TailBuffer } from './text.ts'
 import { SpillSink, ensureDirPath, type SpillTarget } from './spill.ts'
-import type {} from './service.ts'
+
 import type { Refusal } from '@struktoai/mirage-core/types'
 import { refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'

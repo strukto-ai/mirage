@@ -23,9 +23,9 @@ from mirage.policy.profile import SessionProfile
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.types import MountMode, PathSpec
+from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.jobs import (
     handle_disown,
     handle_fg,

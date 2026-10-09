@@ -16,7 +16,8 @@ import { describe, expect, it } from 'vitest'
 import { IOResult } from '../io/types.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { PathSpec } from '../types.ts'
-import { abortable, guardDispatch, joinOrAbort, makeAbortError, sleep } from './abort.ts'
+import { abortable, joinOrAbort, makeAbortError, sleep } from '../utils/abort.ts'
+import { guardDispatch } from './abort.ts'
 
 function never(): Promise<never> {
   return new Promise<never>(() => undefined)

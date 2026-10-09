@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import * as abort from './abort.ts'
+import * as abort from '../utils/abort.ts'
 import { Command } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'

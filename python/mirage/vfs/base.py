@@ -14,7 +14,7 @@
 
 from collections.abc import AsyncIterator, Callable, Mapping
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Unpack
 
 from pydantic import BaseModel
 
@@ -33,7 +33,13 @@ from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.vfs.call import vfs_call
 from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
 from mirage.vfs.secrets import redacted_config_dump
-from mirage.vfs.types import DuEntries, Effect, SearchQuery, Target
+from mirage.vfs.types import (
+    DuEntries,
+    Effect,
+    FindOptions,
+    SearchQuery,
+    Target,
+)
 from mirage.watch.base import DeltaHook
 
 
@@ -345,14 +351,14 @@ class BaseVFS:
         self,
         path: PathSpec,
         index: IndexCacheStore = NULL_INDEX,
-        **predicates: Any,
+        **predicates: Unpack[FindOptions],
     ) -> list[str]:
         """Answer ``find`` natively instead of walking ``readdir``.
 
         Args:
             path (PathSpec): where the search starts.
             index (IndexCacheStore): the mount's index.
-            **predicates (Any): the parsed ``find`` expression.
+            **predicates (Unpack[FindOptions]): the parsed ``find`` expression.
         """
         raise enotsup(self.name, "find", path)
 

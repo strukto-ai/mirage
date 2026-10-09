@@ -19,7 +19,8 @@ import type {
   SearchQuery,
   StatOp,
 } from '../../../vfs/types.ts'
-import type { BaseVFS, FindOptions } from '../../../vfs/base.ts'
+import type { BaseVFS } from '../../../vfs/base.ts'
+import type { FindOptions } from '../../../vfs/types.ts'
 import { getExtension } from '../../../utils/filetype.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
 import { ensureStream } from '../../../io/stream.ts'
@@ -40,7 +41,7 @@ import { pathsScoped } from '../../../view/namespace_view.ts'
 import { METADATA_OPS } from '../../../policy/constants.ts'
 import { preVfsGate, type Policies, getOpPolicies } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { hasAborted, makeAbortError } from '../../../workspace/abort.ts'
+import { hasAborted, makeAbortError } from '../../../utils/abort.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../../utils/remnants.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
@@ -1056,13 +1057,7 @@ export function withAbortGuard<A extends Accessor = Accessor>(
   if (ops.rename !== undefined) guarded.rename = refusedAfterAbort(signal, ops.rename)
   if (ops.copy !== undefined) guarded.copy = refusedAfterAbort(signal, ops.copy)
   if (ops.dirCopy !== undefined) guarded.dirCopy = refusedAfterAbort(signal, ops.dirCopy)
-  const sa = ops.setAttrs
-  if (sa !== undefined) {
-    guarded.setAttrs = (accessor: A, path: PathSpec, ...rest: unknown[]) => {
-      if (hasAborted(signal)) throw makeAbortError(signal)
-      return sa(accessor, path, ...rest)
-    }
-  }
+  if (ops.setAttrs !== undefined) guarded.setAttrs = refusedAfterAbort(signal, ops.setAttrs)
   return guarded
 }
 

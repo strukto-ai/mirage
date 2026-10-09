@@ -22,9 +22,10 @@ import { resolveQdrantConfig, type QdrantConfig } from '../../vfs/qdrant/config.
 import { PathSpec } from '../../types.ts'
 import { blobBytes } from '../vector/read.ts'
 import { fieldValue } from './payload.ts'
-import { pointToRow, type QdrantPoint } from './query.ts'
+import { pointToRow } from './query.ts'
 import { renderJson, renderText } from './render.ts'
 import { readdir } from './tree.ts'
+import type { QdrantPoint } from './types.ts'
 
 interface Condition {
   key?: string

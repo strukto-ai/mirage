@@ -196,6 +196,22 @@ backend, CLI or package belongs in the filter that tests it, a module joins
 the drop list only when nothing kept imports it, and a runtime case that
 starts mounting a dropped backend takes that name off the list.
 
+Qdrant's shared query shapes (`core/qdrant/types.py` and `types.ts`) are
+covered by the Python backend glob and the broad TypeScript filter, so
+changes to those types also select the database job.
+
+LanceDB's shared query shapes (`core/lancedb/types.py` and `types.ts`) stay
+under the whole-host `core` and `ts` filters, whose jobs run the embedded
+LanceDB corpus.
+
+S3's shared `core/s3/types` modules and the consolidated `vfs/types` find
+options also select the whole-host jobs. Pyodide's `runtime/python/pyodide/config.ts`
+stays in the broad TypeScript and runtime filters.
+
+The shared `utils/abort` cancellation primitives remain in both whole-host
+filters and the runtime filters, alongside the `workspace/abort` line
+orchestration that consumes them.
+
 The shared YAML config readers (`python/mirage/utils/yaml.py` and
 `typescript/packages/node/src/utils/yaml.ts`) use the broad language filters
 above, including `runtime`. The CLI exit-code workflow also covers both

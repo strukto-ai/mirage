@@ -39,7 +39,7 @@ import { VarAttr, withValue } from '../../shell/variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { varHidden } from '../../utils/hidden.ts'
-import { abortable, makeAbortError } from '../abort.ts'
+import { abortable, makeAbortError } from '../../utils/abort.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -169,7 +169,7 @@ export function lineNodes(
  */
 export function guestBound(
   nodes: TSNodeLike[],
-  decision: RouteDecision | null,
+  decision: RouteDecision<Runtime> | null,
   staticBindings: Record<string, Runtime | null>,
 ): boolean {
   const bindings = decision !== null ? decision.bindings : staticBindings

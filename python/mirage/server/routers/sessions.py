@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import secrets
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
@@ -61,8 +63,6 @@ def _require_entry(request: Request, workspace_id: str):
 async def create_session(
     workspace_id: str, req: CreateSessionRequest, request: Request
 ) -> SessionResponse:
-    import secrets
-
     entry = _require_entry(request, workspace_id)
     sid = req.session_id or f"sess_{secrets.token_hex(6)}"
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())

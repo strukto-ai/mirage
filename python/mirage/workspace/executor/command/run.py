@@ -82,7 +82,9 @@ def admission_denial(cmd_name: str) -> IOResult:
 
 
 def line_runtime_for(
-    cmd_name: str, registry: MountRegistry, routing: RouteDecision | None
+    cmd_name: str,
+    registry: MountRegistry,
+    routing: RouteDecision[Runtime] | None,
 ) -> tuple[Runtime | None, IOResult | None]:
     """Resolve a command against the line's routing decision.
 
@@ -273,7 +275,7 @@ async def run_on_mount(
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     argv: tuple[str, ...] = (),
     execute_fn: ExecuteLine | None = None,
 ) -> tuple[ByteSource | None, IOResult]:

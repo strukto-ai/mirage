@@ -509,7 +509,7 @@ async def test_python3_mount_limit_follows_script_path(restore_defaults):
     "command", ["wc /big", "grep -c line /big", "cat /big | wc"]
 )
 async def test_large_ram_command_honors_caller_cancel(command):
-    from mirage.workspace.abort import MirageAbortError
+    from mirage.utils.abort import MirageAbortError
 
     ram = RAMVFS()
     ram.accessor.store.files["/big"] = b"line\n" * 200_000

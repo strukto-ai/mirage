@@ -22,6 +22,7 @@ from typing import (
     Any,
     ClassVar,
     Literal,
+    Protocol,
     TypeAlias,
 )
 
@@ -230,9 +231,16 @@ PolymorphicReadResult: TypeAlias = (
 PolymorphicReadFn: TypeAlias = Callable[..., PolymorphicReadResult]
 CopyFn: TypeAlias = Callable[..., Awaitable[None]]
 MoveFn: TypeAlias = Callable[..., Awaitable[None]]
-FindFn: TypeAlias = Callable[..., Awaitable[list[str]]]
 ReaddirFn: TypeAlias = Callable[..., Awaitable[list[str]]]
 StatFn: TypeAlias = Callable[..., Awaitable["FileStat"]]
+
+
+class FindFn(Protocol):
+    """The file-or-directory enumeration native copy needs from a backend."""
+
+    def __call__(
+        self, path: "PathSpec", /, *, type: Literal["f", "d"]
+    ) -> Awaitable[list[str]]: ...
 
 
 @dataclass(frozen=True, slots=True)

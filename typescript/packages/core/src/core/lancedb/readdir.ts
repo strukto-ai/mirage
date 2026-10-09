@@ -22,7 +22,8 @@ import type { DirListing, Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { dirEntry } from '../vector/readdir.ts'
 import { filtersOf, tableOf } from '../vector/scope.ts'
-import { tableExists, type LanceRow, type ValueTest } from './query.ts'
+import { tableExists } from './query.ts'
+import type { LanceRow, ValueTest } from './types.ts'
 import { cellText, renderCard } from './render.ts'
 
 function rowEntries(rows: LanceRow[], config: LanceDBConfigResolved): [string, IndexEntry][] {

@@ -16,7 +16,6 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.shell.parse import parse
-from mirage.workspace.abort import StatusWriter
 from mirage.workspace.executor.statement import (
     assignment_status,
     errexit_acts,
@@ -27,6 +26,7 @@ from mirage.workspace.executor.statement import (
 )
 from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.session import SessionState
+from mirage.workspace.types import StatusWriter
 
 
 @pytest.mark.asyncio

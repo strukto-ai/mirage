@@ -15,7 +15,8 @@
 import { EXTERNAL_COMMANDS } from '../constants.ts'
 import { Runtime } from '../base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../mixin.ts'
-import type { RunResult, RuntimeOptions } from '../types.ts'
+import type { RunResult } from '../types.ts'
+import type { RuntimeOptions } from '../config.ts'
 import { BASE_CONFIG_KEYS, type NormalizedSandboxConfig, type SandboxConfig } from './config.ts'
 
 /**

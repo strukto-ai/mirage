@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { LanguageRuntime } from '../language.ts'
-import type { RuntimeLanguage, RuntimeOptions } from '../types.ts'
+import type { RuntimeLanguage } from '../types.ts'
+import type { RuntimeOptions } from '../config.ts'
 
 /**
  * The js tier: every runtime that interprets JavaScript source.

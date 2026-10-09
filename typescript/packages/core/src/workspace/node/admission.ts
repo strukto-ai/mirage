@@ -44,7 +44,7 @@ import { PathSpec, type Refusal } from '../../types.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { makeAbortError } from '../abort.ts'
+import { makeAbortError } from '../../utils/abort.ts'
 import { toScope } from '../executor/builtins/scope.ts'
 import { followPaths } from '../executor/builtins/links/links.ts'
 import {

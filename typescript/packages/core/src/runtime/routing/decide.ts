@@ -259,7 +259,7 @@ export async function decideLine(
   ctx: RouteContext,
   staticBindings: Record<string, Runtime>,
   externalCommands: readonly string[] = [],
-): Promise<RouteDecision> {
+): Promise<RouteDecision<Runtime>> {
   if (policy !== null) {
     const name = await evaluatePolicy(policy, ctx, entries)
     if (name !== null) {

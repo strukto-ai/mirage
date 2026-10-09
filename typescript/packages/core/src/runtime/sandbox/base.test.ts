@@ -19,7 +19,8 @@ import { Limit, MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RemoteSandbox } from './base.ts'
 import { isLineExecutor } from '../mixin.ts'
-import type { RunResult, RuntimeOptions } from '../types.ts'
+import type { RunResult } from '../types.ts'
+import type { RuntimeOptions } from '../config.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

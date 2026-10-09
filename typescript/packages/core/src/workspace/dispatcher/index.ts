@@ -12,4 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { Dispatcher, type ResolveFn } from './dispatcher.ts'
+export { Dispatcher } from './dispatcher.ts'

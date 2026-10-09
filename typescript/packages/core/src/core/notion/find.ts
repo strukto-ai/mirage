@@ -14,7 +14,7 @@
 
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../../vfs/base.ts'
+import type { FindOptions } from '../../vfs/types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import { walkFind } from '../generic/find.ts'

@@ -268,7 +268,7 @@ async def decide_line(
     ctx: RouteContext,
     static_bindings: dict[str, Runtime],
     external_commands: Container[str] = (),
-) -> RouteDecision:
+) -> RouteDecision[Runtime]:
     """Resolve the policy ladder for one line: policy, then scripts.
 
     A policy verdict overlays the named runtime's captures on the

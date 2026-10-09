@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from './cache/index/store.ts'
-import type { FindOptions } from './vfs/base.ts'
 import { rstripSlash, stripSlash } from './utils/slash.ts'
 import { dottedSpelling, resolvePath } from './utils/path.ts'
 
@@ -845,7 +844,8 @@ export type MoveFn<Args extends unknown[] = [src: PathSpec, target: PathSpec]> =
   ...args: Args
 ) => Promise<void>
 
-export type FindFn<Args extends unknown[] = [src: PathSpec, options: FindOptions]> = (
+/** Native copy only asks for files or directories; backend ops supply their full arguments. */
+export type FindFn<Args extends unknown[] = [src: PathSpec, options: { type: 'f' | 'd' }]> = (
   ...args: Args
 ) => Promise<string[]>
 

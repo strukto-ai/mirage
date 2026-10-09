@@ -18,7 +18,7 @@ import type { SharedInput } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { formatFsError } from '../../errors/render.ts'
-import type { ExecutionNode } from '../types.ts'
+import type { ExecutionNode, StatusWriter } from '../types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import {
   ENCLOSING,
@@ -34,7 +34,8 @@ import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
-import { abortedLine, lineStatusWriter, makeAbortError, type StatusWriter } from '../abort.ts'
+import { abortedLine, lineStatusWriter } from '../abort.ts'
+import { makeAbortError } from '../../utils/abort.ts'
 
 /**
  * Run a test, the left of `&&`/`||` or a negated command where bash ignores

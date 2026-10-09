@@ -34,10 +34,10 @@ from mirage.shell.descriptors import (
 )
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import TSNodeLike
-from mirage.workspace.abort import StatusWriter, line_status_writer
+from mirage.workspace.abort import line_status_writer
 from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.session import SessionState
-from mirage.workspace.types import ExecutionNode
+from mirage.workspace.types import ExecutionNode, StatusWriter
 
 
 def record_status(

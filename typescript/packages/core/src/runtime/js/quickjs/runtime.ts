@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { HOME_CONFIG_KEYS } from '../../config.ts'
+import { HOME_CONFIG_KEYS, type RuntimeOptions } from '../../config.ts'
 import { EvalError } from '../../errors.ts'
 import { JsRuntime } from '../base.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
-import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../../types.ts'
+import type { EvalResult, EvalValue, RunArgs, RunResult } from '../../types.ts'
 import type { RuntimeContext } from '../../binding.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'

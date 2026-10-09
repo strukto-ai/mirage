@@ -24,8 +24,8 @@ from mirage.commands.spec import CommandSpec
 from mirage.io.types import IOResult
 from mirage.observe.store import RAMObserverStore
 from mirage.policy import Action, CommandContext, Deny, Policy
+from mirage.utils.abort import ABORT_JOIN_SECONDS, MirageAbortError
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.abort import ABORT_JOIN_SECONDS, MirageAbortError
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.store import SessionFields
 from tests.fixtures.apply_marks import caching_ram_workspace, capture_marks

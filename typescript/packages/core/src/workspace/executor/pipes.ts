@@ -62,7 +62,7 @@ import { Recorder } from '../../shell/descriptors.ts'
 import { Channel } from '../../shell/console/types.ts'
 
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { abortable, makeAbortError, mergeSignals } from '../abort.ts'
+import { abortable, makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { encodeText } from '../../shell/bytes.ts'
 

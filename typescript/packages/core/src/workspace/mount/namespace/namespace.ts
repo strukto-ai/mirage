@@ -24,12 +24,13 @@ import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import { epochToIso } from '../../../utils/dates.ts'
 import { ancestors, globPrefixMatch, resolveSymlinks } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import type { ResolveFn } from '../../dispatcher/index.ts'
 import type { MountEntry } from '../mount.ts'
 import { RAMNamespaceStore } from './ram.ts'
 import type { NamespaceStore, NodeFields } from './store.ts'
 import type { MountRegistry } from '../registry.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+
+export type ResolveFn = (path: string) => Promise<[BaseVFS, PathSpec, MountMode]>
 
 // Per-path namespace metadata. Two roles, distinguished by `target`: a
 // target-bearing entry is an authoritative symlink (the link exists only

@@ -73,7 +73,7 @@ import {
 import { type WriteContext } from '../../cache/types.ts'
 import { captureCommandScope } from '../../cache/index/scope.ts'
 import type { CacheManager } from '../../cache/manager.ts'
-import { mergeSignals } from '../abort.ts'
+import { mergeSignals } from '../../utils/abort.ts'
 import {
   captureRecordingContext,
   runWithMountContext,

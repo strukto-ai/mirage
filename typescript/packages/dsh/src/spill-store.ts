@@ -19,7 +19,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import { SpillLocator, SpillStore } from '@deepseek-ai/dsh-spill'
 import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
 import { ensureDirPath } from './spill.ts'
-import type {} from './service.ts'
 
 /** The workspace directory spill artifacts land under when none is configured. */
 const DEFAULT_SPILL_DIR = '/tmp/dsh-spill'

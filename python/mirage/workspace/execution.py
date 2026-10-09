@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from mirage.io.yield_budget import YieldBudget
-from mirage.workspace.abort import MirageAbortError
+from mirage.utils.abort import MirageAbortError
 
 
 class ExecutionScope:
