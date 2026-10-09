@@ -234,8 +234,7 @@ describe('ShellExecution', () => {
     ws.policies.add(new ApproveOutput())
     const execution = await ws.shell('seq 1 20000', { stream: true })
     try {
-      while (execution['output'].pipe.bufferedBytes < CHUNK_SIZE)
-        await new Promise((resolve) => setTimeout(resolve, 10))
+      await new Promise((resolve) => setTimeout(resolve, 200))
       expect(await ws.cancel()).toBe(1)
       await expect(execution.wait()).rejects.toMatchObject({ name: 'AbortError' })
     } finally {
