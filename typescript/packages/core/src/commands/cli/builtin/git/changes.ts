@@ -346,6 +346,9 @@ async function differs(
     data = await entryBytes(dispatch, worktree.join(path), info)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return true
+    // git counts a file it cannot read as changed; a command that needs its
+    // bytes then refuses it (UnhashableFileError).
+    if (isEacces(err)) return true
     throw err
   }
   const oid = await git.hashBlob({ object: data })

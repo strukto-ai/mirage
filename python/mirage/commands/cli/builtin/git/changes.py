@@ -391,6 +391,10 @@ async def _differs(
         data = await entry_bytes(dispatch, worktree.join(path), info)
     except MISS_ERRORS:
         return True
+    except PermissionError:
+        # git counts a file it cannot read as changed; a command that
+        # needs its bytes then refuses it (UnhashableFileError).
+        return True
     return Blob.from_string(data).id != entry.sha
 
 

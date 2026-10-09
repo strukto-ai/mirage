@@ -37,12 +37,15 @@ function onHostPath(name: string): string {
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
     const candidate = resolve(dir, name)
     try {
-      if (statSync(candidate).isFile()) {
-        accessSync(candidate, constants.X_OK)
-        return candidate
-      }
+      if (statSync(candidate, { throwIfNoEntry: false })?.isFile() !== true) continue
+      accessSync(candidate, constants.X_OK)
+      return candidate
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === undefined) throw err
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === undefined) throw err
+      // Not usable here (not executable, an unreadable entry): the next
+      // entry may be.
+      console.debug(`local: ${candidate} is not a usable interpreter: ${code}`)
     }
   }
   return name

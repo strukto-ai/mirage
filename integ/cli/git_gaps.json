@@ -1290,6 +1290,184 @@
           }
         }
       }
+    },
+    {
+      "id": "git_unreadable_clone_setup",
+      "seq": 568090,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git clone -q /repo /repo/sealed && printf 'new\\n' > /repo/sealed/numbers.txt && printf 'new\\n' > /repo/sealed/fresh.txt && echo ready",
+      "expect": {
+        "exit": 0,
+        "stdout": "ready\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_add_unreadable_tracked",
+      "seq": 568091,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/sealed add numbers.txt; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n",
+        "stderr": "error: open(\"numbers.txt\"): Permission denied\nerror: unable to index file 'numbers.txt'\nfatal: updating files failed\n"
+      },
+      "session": "sealed-clone",
+      "session_profiles": {
+        "sealed-clone": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/repo/sealed/numbers.txt",
+                  "/repo/sealed/fresh.txt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_add_unreadable_untracked",
+      "seq": 568092,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/sealed add fresh.txt; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n",
+        "stderr": "error: open(\"fresh.txt\"): Permission denied\nerror: unable to index file 'fresh.txt'\nfatal: adding files failed\n"
+      },
+      "session": "sealed-clone",
+      "session_profiles": {
+        "sealed-clone": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/repo/sealed/numbers.txt",
+                  "/repo/sealed/fresh.txt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_commit_all_unreadable",
+      "seq": 568093,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/sealed commit -a -m x; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n",
+        "stderr": "error: open(\"numbers.txt\"): Permission denied\nerror: unable to index file 'numbers.txt'\nfatal: updating files failed\n"
+      },
+      "session": "sealed-clone",
+      "session_profiles": {
+        "sealed-clone": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/repo/sealed/numbers.txt",
+                  "/repo/sealed/fresh.txt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_diff_unreadable",
+      "seq": 568094,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/sealed diff; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n",
+        "stderr": "error: open(\"numbers.txt\"): Permission denied\nfatal: cannot hash numbers.txt\n"
+      },
+      "session": "sealed-clone",
+      "session_profiles": {
+        "sealed-clone": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/repo/sealed/numbers.txt",
+                  "/repo/sealed/fresh.txt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_status_unreadable",
+      "seq": 568095,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/sealed status --short; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": " M numbers.txt\n?? fresh.txt\n0\n",
+        "stderr": ""
+      },
+      "session": "sealed-clone",
+      "session_profiles": {
+        "sealed-clone": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/repo/sealed/numbers.txt",
+                  "/repo/sealed/fresh.txt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_unreadable_clone_cleanup",
+      "seq": 568096,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm -rf /repo/sealed && echo gone",
+      "expect": {
+        "exit": 0,
+        "stdout": "gone\n",
+        "stderr": ""
+      }
     }
   ]
 }
