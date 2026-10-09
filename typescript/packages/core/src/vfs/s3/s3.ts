@@ -33,7 +33,8 @@ import { truncate as s3Truncate } from '../../core/s3/truncate.ts'
 import { unlink as s3Unlink } from '../../core/s3/unlink.ts'
 import { write as s3Write } from '../../core/s3/write.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
-import { BaseVFS, type FindOptions } from '../base.ts'
+import { BaseVFS } from '../base.ts'
+import type { FindOptions } from '../types.ts'
 import type { DuEntries } from '../types.ts'
 
 /**

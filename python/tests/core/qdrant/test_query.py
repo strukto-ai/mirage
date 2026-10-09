@@ -1,10 +1,12 @@
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 from qdrant_client import models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from mirage.core.qdrant import query
+from mirage.core.qdrant.render import render_json
 from mirage.vfs.qdrant.config import QdrantConfig
 
 
@@ -53,6 +55,20 @@ def test_candidate_ids_by_type():
     assert query._candidate_ids("__nf_missing__") == []
     assert query._candidate_ids("-3") == [-3]
     assert query._candidate_ids("--5") == []
+
+
+@pytest.mark.parametrize("id_field", ["id", "__proto__"])
+def test_uuid_point_id_renders_as_json_text(id_field):
+    point_id = UUID("11111111-1111-1111-1111-111111111111")
+    point = models.Record(id=point_id, payload={"label": "cat"})
+    row = query._point_to_row(point, id_field)
+    assert row == {"label": "cat", id_field: str(point_id)}
+    assert (
+        render_json(row, QdrantConfig())
+        == (
+            f'{{"label":"cat","{id_field}":"11111111-1111-1111-1111-111111111111"}}\n'
+        ).encode()
+    )
 
 
 class _StrictClient:

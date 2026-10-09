@@ -19,7 +19,7 @@ import type { Reader } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { blobBytes } from '../vector/read.ts'
 import { tableOf } from '../vector/scope.ts'
-import type { LanceRow } from './query.ts'
+import type { LanceRow } from './types.ts'
 import { renderCard } from './render.ts'
 
 async function rowOf(

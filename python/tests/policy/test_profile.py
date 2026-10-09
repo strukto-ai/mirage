@@ -48,9 +48,9 @@ from mirage.types import (
     PathSpec,
     ShowEntry,
 )
+from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.session.state import seed_var
 from mirage.workspace.tools.io_text import with_refusal
 

@@ -27,7 +27,7 @@ from mirage.commands.builtin.utils.http import (
     _with_default_ua,
     http_request,
 )
-from mirage.workspace.abort import MirageAbortError
+from mirage.utils.abort import MirageAbortError
 
 
 @pytest.mark.asyncio

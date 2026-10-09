@@ -33,6 +33,7 @@ from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff
 from mirage.process.supervisor import ProcessSupervisor
+from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision, RouteError
 from mirage.runtime.types import DispatchFn
 from mirage.secrets.types import ResolvedSource
@@ -49,11 +50,8 @@ from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
-from mirage.workspace.abort import (
-    MirageAbortError,
-    StatusWriter,
-    set_line_writer,
-)
+from mirage.utils.abort import MirageAbortError
+from mirage.workspace.abort import set_line_writer
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
@@ -91,6 +89,7 @@ from mirage.workspace.session import (
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.snapshot import ContentDriftError
 from mirage.workspace.snapshot.drift import DriftQueue
+from mirage.workspace.types import StatusWriter
 from mirage.workspace.workspace.failure import (
     failure_result,
     placement_refused,
@@ -185,7 +184,7 @@ async def recurse(
     handed: HandOff | None = None,
     *,
     cancel: asyncio.Event | None,
-    routing_decision: RouteDecision | None,
+    routing_decision: RouteDecision[Runtime] | None,
     agent_id: str | None,
     nested: NestedRefusal,
     execution_scope: ExecutionScope,
@@ -428,7 +427,7 @@ async def execute_line(
     cancel: asyncio.Event | None,
     record: bool,
     runtime: str | None,
-    routing_decision: RouteDecision | None,
+    routing_decision: RouteDecision[Runtime] | None,
     handed: HandOff | None = None,
     frame: LineFrame | None = None,
     argv: tuple[str, ...] | None = None,
@@ -608,7 +607,7 @@ async def run_prepared_line(
     cancel: asyncio.Event | None,
     record: bool,
     runtime: str | None,
-    routing_decision: RouteDecision | None,
+    routing_decision: RouteDecision[Runtime] | None,
     handed: HandOff | None,
     frame: LineFrame | None,
     argv: tuple[str, ...] | None,

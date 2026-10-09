@@ -20,7 +20,7 @@ import type {
   ObjectStoreDriver,
   TreeEntry,
 } from '@struktoai/mirage-core/core/object_store/driver'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { toIsoZ } from '@struktoai/mirage-core/utils/dates'
 import type { ObjectId } from 'mongodb'

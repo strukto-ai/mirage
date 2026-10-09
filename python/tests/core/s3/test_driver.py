@@ -11,7 +11,8 @@ from packaging.version import Version
 
 from mirage.cache.types import WriteCondition
 from mirage.core.object_store.errors import ConditionLostError
-from mirage.core.s3.driver import DRIVER, S3Conn
+from mirage.core.s3.driver import DRIVER
+from mirage.core.s3.types import S3Conn
 from mirage.vfs.s3.config import S3Config
 from tests.core.s3.conftest import LOST_CODES, client_error
 

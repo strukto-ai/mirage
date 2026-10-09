@@ -18,7 +18,7 @@ import type { JobTable } from '../../shell/job_table/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
-import { ABORT_JOIN_MS } from '../abort.ts'
+import { ABORT_JOIN_MS } from '../../utils/abort.ts'
 import type { WatchManager } from './watch.ts'
 
 export interface CloseDeps {

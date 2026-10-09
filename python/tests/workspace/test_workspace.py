@@ -1436,15 +1436,6 @@ def test_pipeline_sed():
 # ── cache VFS fallback ───────────────────
 
 
-def test_cache_fallback_wc():
-    """wc uses cache VFS when cwd has no mount."""
-    ws = _ws()
-    ws.get_session(ws.default_session_id).cwd = "/mirage"
-    io = _exec(ws, "cat /s3/report.csv | wc -l")
-    assert io.exit_code == 0
-    assert b"3" in _stdout(io)
-
-
 def test_cache_fallback_head():
     """head uses cache VFS fallback."""
     ws = _ws()

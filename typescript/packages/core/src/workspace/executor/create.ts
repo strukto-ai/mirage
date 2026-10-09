@@ -21,7 +21,7 @@ import type { PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 import type { SessionState } from '../session/session.ts'
-import { hasAborted, makeAbortError } from '../abort.ts'
+import { hasAborted, makeAbortError } from '../../utils/abort.ts'
 
 /**
  * Write or append, giving a newly created file the umask's mode.

@@ -20,7 +20,8 @@ import { readdir as notionReaddir } from '../../core/notion/readdir.ts'
 import { stat as notionStat } from '../../core/notion/stat.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
-import { BaseVFS, type FindOptions } from '../base.ts'
+import { BaseVFS } from '../base.ts'
+import type { FindOptions } from '../types.ts'
 
 /**
  * Notion's functions over its accessor, which the node and browser

@@ -12,23 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
 
 from mirage.core.qdrant.payload import field_value, without_field
+from mirage.core.qdrant.types import QdrantRow
 from mirage.core.render.json import compact_json_text, value_text
 from mirage.vfs.qdrant.config import QdrantConfig
 
 _SKIP_KEYS = {"_distance", "_rowid", "_score"}
 
 
-def render_json(row: dict[str, Any], config: QdrantConfig) -> bytes:
+def render_json(row: QdrantRow, config: QdrantConfig) -> bytes:
     data = {key: value for key, value in row.items() if key not in _SKIP_KEYS}
     data = without_field(data, config.vector_field)
     data = without_field(data, config.blob_field)
     return (compact_json_text(data) + "\n").encode()
 
 
-def render_text(row: dict[str, Any], config: QdrantConfig) -> bytes:
+def render_text(row: QdrantRow, config: QdrantConfig) -> bytes:
     value = field_value(row, config.text_field)
     if value is None:
         return b""

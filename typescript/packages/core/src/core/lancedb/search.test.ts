@@ -19,7 +19,7 @@ import { LANCEDB_COMMANDS } from '../../commands/builtin/lancedb/index.ts'
 import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
 import { searchRowsOutput } from '../vector/search.ts'
-import type { LanceDriver } from './query.ts'
+import type { LanceDriver } from './types.ts'
 import { TREE } from './tree.ts'
 
 it('spells a group value in the canonical path the way the listing does', async () => {

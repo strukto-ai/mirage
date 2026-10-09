@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RunArgs, EvalValue, RunResult, EvalResult, BridgeDispatchFn } from '../../../types.ts'
-import type { PyodideConfig } from '../runtime.ts'
+import type { PyodideConfig } from '../config.ts'
 import type { MirageMutation } from '../fs/journal.ts'
 
 export type ReadOperation = 'read' | 'stat' | 'readdir' | 'readlink'

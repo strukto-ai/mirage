@@ -31,7 +31,7 @@ import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
-import { makeAbortError, mergeSignals } from '../abort.ts'
+import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { literalText } from '../../shell/parse/names.ts'
 import { BASH_BUILTINS } from '../lookup/constants.ts'
@@ -823,7 +823,7 @@ export interface ExecuteNodeDeps {
   workspaceId: string
   registerCloser: (fn: () => Promise<void>) => void
   runtimeBindings?: Record<string, Runtime>
-  routingDecision?: RouteDecision
+  routingDecision?: RouteDecision<Runtime>
   signal?: AbortSignal
   /**
    * The hand-off this subtree runs on, carried to every command's gate

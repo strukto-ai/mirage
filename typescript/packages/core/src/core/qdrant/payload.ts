@@ -12,12 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { QdrantRow } from './query.ts'
+import type { QdrantRow } from './types.ts'
 
 /** Read a Qdrant payload field, including `metadata.source`-style nested keys. */
 export function fieldValue(row: QdrantRow, field: string | null): unknown {
   if (field === null || field === '') return undefined
-  if (!field.includes('.')) return row[field]
   let value: unknown = row
   for (const part of field.split('.')) {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
@@ -36,16 +35,14 @@ export function withoutField(row: QdrantRow, field: string | null): QdrantRow {
 
 function omitPath(row: QdrantRow, parts: string[]): QdrantRow {
   const [head, ...tail] = parts
-  const copied: QdrantRow = {}
-  for (const [key, value] of Object.entries(row)) {
-    if (key !== head) {
-      copied[key] = value
-    } else if (tail.length > 0) {
-      copied[key] =
-        typeof value === 'object' && value !== null && !Array.isArray(value)
+  return Object.fromEntries(
+    Object.entries(row)
+      .filter(([key]) => key !== head || tail.length > 0)
+      .map(([key, value]) => [
+        key,
+        key === head && typeof value === 'object' && value !== null && !Array.isArray(value)
           ? omitPath(value as QdrantRow, tail)
-          : value
-    }
-  }
-  return copied
+          : value,
+      ]),
+  )
 }

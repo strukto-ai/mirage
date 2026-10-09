@@ -12,21 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
-
 from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.codec import PATH_SAFE
 from mirage.core.hierarchy.readdir import DirListing, Listed
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.lancedb.query import (
-    ValueTest,
     distinct_values,
     rows_matching,
     table_columns,
     table_exists,
 )
 from mirage.core.lancedb.render import cell_text, render_card
+from mirage.core.lancedb.types import LanceRow, ValueTest
 from mirage.core.vector.readdir import dir_entry
 from mirage.core.vector.scope import filters_of, table_of
 from mirage.utils.glob_walk import glob_prefix, glob_stem_prefix
@@ -34,7 +32,7 @@ from mirage.vfs.lancedb.config import LanceDBConfig
 
 
 def _row_entries(
-    rows: list[dict[str, Any]], config: LanceDBConfig
+    rows: list[LanceRow], config: LanceDBConfig
 ) -> list[tuple[str, IndexEntry]]:
     # The widened select carries every rendered column, so each card's exact
     # size is free here; blob values are deliberately not fetched at listing

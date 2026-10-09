@@ -13,7 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-def reject_config_script(kind: str, value: object) -> None:
+from mirage.runtime.routing.types import RoutePolicy, RouteScript
+
+
+def reject_config_script(
+    kind: str, value: RoutePolicy | RouteScript | str | None
+) -> None:
     """Guard the code API: script source strings belong to config.
 
     In code, scripts and policies are callables; a plain string is
@@ -24,7 +29,7 @@ def reject_config_script(kind: str, value: object) -> None:
 
     Args:
         kind (str): what carried the string, for the error message.
-        value (object): the suspect script value.
+        value (RoutePolicy | RouteScript | str | None): the suspect script value.
 
     Raises:
         TypeError: the value is a plain string.

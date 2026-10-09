@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.commands.spec.types import CommandSpec, ValueType
 from mirage.policy.match import scopes_paths
+from mirage.runtime.base import Runtime
 from mirage.runtime.routing.types import RouteDecision
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import TSNodeLike
@@ -109,7 +110,7 @@ async def expand_argv(
     registry: MountRegistry,
     namespace: Namespace | None = None,
     view: SessionView | None = None,
-    routing: RouteDecision | None = None,
+    routing: RouteDecision[Runtime] | None = None,
 ) -> Argv:
     """Expand, classify, and glob-resolve a command's word nodes.
 

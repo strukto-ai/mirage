@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Runtime } from './base.ts'
-import type { RuntimeOptions } from './types.ts'
+import type { RuntimeOptions } from './config.ts'
 
 /**
  * The workspace's built-in command engine as a routing marker.

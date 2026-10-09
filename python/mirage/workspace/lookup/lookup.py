@@ -16,6 +16,7 @@ from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING
 
 from mirage.policy.match import head_visible, node_visible
+from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
@@ -115,7 +116,7 @@ def runtime_refused(
     name: str,
     session: SessionState,
     registry: "MountRegistry",
-    routing: RouteDecision | None = None,
+    routing: RouteDecision[Runtime] | None = None,
 ) -> bool:
     """Whether routing explicitly refused the external runtime for ``name``."""
     if routing is None:
@@ -133,7 +134,7 @@ def _layers(
     name: str,
     session: SessionState,
     registry: "MountRegistry",
-    routing: RouteDecision | None = None,
+    routing: RouteDecision[Runtime] | None = None,
 ) -> Iterator[Consumer]:
     """Yield every layer holding the name, most-preferred first.
 
@@ -210,7 +211,7 @@ def lookup(
     name: str,
     session: SessionState,
     registry: "MountRegistry",
-    routing: RouteDecision | None = None,
+    routing: RouteDecision[Runtime] | None = None,
 ) -> Consumer:
     """Route a command name to the layer that consumes it.
 

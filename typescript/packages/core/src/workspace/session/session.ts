@@ -52,7 +52,7 @@ import { DEFAULT_VISIBILITY, type ShowEntry, type Visibility } from '../../types
 import { type JobOutput, Terminal } from '../../shell/console/index.ts'
 import type { JobWaits } from '../../shell/job_table/index.ts'
 import type { MountMode } from '../../types.ts'
-import type { StatusWriter } from '../abort.ts'
+import type { StatusWriter } from '../types.ts'
 import type { AliasExpansion } from '../../shell/types.ts'
 
 /**

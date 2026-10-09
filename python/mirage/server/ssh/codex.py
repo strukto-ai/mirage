@@ -64,7 +64,7 @@ from mirage.server.ssh.stream import (
     encode,
 )
 from mirage.types import JsonValue
-from mirage.workspace.abort import MirageAbortError
+from mirage.utils.abort import MirageAbortError
 
 logger = logging.getLogger(__name__)
 

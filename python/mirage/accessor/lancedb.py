@@ -22,6 +22,7 @@ import lancedb
 
 from mirage.accessor.base import Accessor
 from mirage.accessor.pool import LoopClientCache
+from mirage.core.lancedb.types import LanceRow
 from mirage.vfs.lancedb.config import LanceDBConfig
 from mirage.vfs.secrets import reveal_secret
 
@@ -31,12 +32,12 @@ class _Connection:
     """One loop's open database and the tables opened on it.
 
     Args:
-        db (Any): the open ``AsyncConnection``.
-        tables (dict[str, Any]): the tables opened so far, by name.
+        db (lancedb.AsyncConnection): the open ``AsyncConnection``.
+        tables (dict[str, lancedb.AsyncTable]): the tables opened so far, by name.
     """
 
-    db: Any
-    tables: dict[str, Any] = field(default_factory=dict)
+    db: lancedb.AsyncConnection
+    tables: dict[str, lancedb.AsyncTable] = field(default_factory=dict)
 
 
 @asynccontextmanager
@@ -60,22 +61,17 @@ async def _open(config: LanceDBConfig) -> AsyncIterator[_Connection]:
 class LanceDBAccessor(Accessor):
     def __init__(self, config: LanceDBConfig) -> None:
         self.config = config
-        self._connections = LoopClientCache("lancedb")
-        self.search_cache: dict[
-            tuple[str, str, int], list[dict[str, Any]]
-        ] = {}
+        self._connections = LoopClientCache[_Connection]("lancedb")
+        self.search_cache: dict[tuple[str, str, int], list[LanceRow]] = {}
 
     async def _connection(self) -> _Connection:
-        conn: _Connection = await self._connections.get(
-            partial(_open, self.config)
-        )
-        return conn
+        return await self._connections.get(partial(_open, self.config))
 
-    async def db(self) -> Any:
+    async def db(self) -> lancedb.AsyncConnection:
         """Return this loop's database, connecting when there is none."""
         return (await self._connection()).db
 
-    async def table(self, name: str) -> Any:
+    async def table(self, name: str) -> lancedb.AsyncTable:
         """Return one table, opened once per loop.
 
         Args:

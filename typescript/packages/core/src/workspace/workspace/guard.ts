@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { scriptStringError } from '../../runtime/base.ts'
+import type { RoutePolicy, RouteScript } from '../../runtime/routing/types.ts'
 
 /**
  * Guard the code API: script source strings belong to config.
@@ -30,6 +31,9 @@ import { scriptStringError } from '../../runtime/base.ts'
  * @param kind what carried the string, for the error message
  * @param value the suspect script value
  */
-export function rejectConfigScript(kind: string, value: unknown): void {
+export function rejectConfigScript(
+  kind: string,
+  value: RoutePolicy | RouteScript | string | null | undefined,
+): void {
   if (typeof value === 'string') throw scriptStringError(kind)
 }

@@ -36,6 +36,7 @@ from mirage.io.async_line_iterator import share
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
+from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
@@ -1035,7 +1036,7 @@ async def execute_node(
     stdin: Any = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     sink: JobConsole | None = None,
     handed: HandOff | None = None,
     execution_scope: ExecutionScope | None = None,
@@ -1161,7 +1162,7 @@ async def _execute_node(
     stdin: Any = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     sink: JobConsole | None = None,
     handed: HandOff | None = None,
     execution_scope: ExecutionScope | None = None,

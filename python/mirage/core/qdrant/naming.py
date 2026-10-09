@@ -14,17 +14,17 @@
 
 import hashlib
 from collections.abc import Mapping
-from typing import Any
 
 from mirage.core.hierarchy.codec import PATH_SAFE
 from mirage.core.qdrant.payload import field_value
 from mirage.core.render.json import value_text
+from mirage.types import JsonValue
 from mirage.utils.naming import fit_id_name, parse_id_name
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length, path_safe_name
 from mirage.vfs.qdrant.config import QdrantConfig
 
 
-def group_name(value: Any, *, basename: bool = False) -> str:
+def group_name(value: JsonValue, *, basename: bool = False) -> str:
     """Render one payload value as a VFS directory segment.
 
     A non-string value spells the way the point's ``.json`` spells it,
@@ -39,7 +39,7 @@ def group_name(value: Any, *, basename: bool = False) -> str:
     two directories.
 
     Args:
-        value (Any): the raw payload value.
+        value (JsonValue): the raw payload value or point id.
         basename (bool): render only the value's URL/path leaf.
     """
     name = value_text(value)
@@ -56,11 +56,11 @@ def group_name(value: Any, *, basename: bool = False) -> str:
     )
 
 
-def row_stem(row: Mapping[str, Any], config: QdrantConfig) -> str:
+def row_stem(row: Mapping[str, JsonValue], config: QdrantConfig) -> str:
     """Return the stable, human-readable stem for a point's files.
 
     Args:
-        row (Mapping[str, Any]): point payload plus Mirage's synthetic fields.
+        row (Mapping[str, JsonValue]): payload plus synthetic fields.
         config (QdrantConfig): the mount's config.
     """
     # The point id is synthetic rather than payload data: _point_to_row stores

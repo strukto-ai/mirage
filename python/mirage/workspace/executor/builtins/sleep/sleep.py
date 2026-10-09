@@ -29,7 +29,7 @@ from mirage.io import IOResult
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
-from mirage.workspace.abort import cancellable_sleep
+from mirage.utils.abort import cancellable_sleep
 from mirage.workspace.executor.builtins.sleep.constants import (
     SLEEP_INTERVAL,
     SLEEP_SUFFIXES,

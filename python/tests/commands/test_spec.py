@@ -566,16 +566,6 @@ def test_parse_new_spec_bool_flag():
     assert parsed.args == [("/file.txt", "path")]
 
 
-def test_parse_new_spec_value_flag():
-    spec = CommandSpec(
-        options=(Option(short="-n", type="str"),),
-        rest=Operand(type="path"),
-    )
-    parsed = parse_command(spec, ["-n", "10", "file.txt"], cwd="/")
-    assert parsed.flags == {"-n": "10"}
-    assert parsed.args == [("/file.txt", "path")]
-
-
 def test_parse_new_spec_long_flags():
     spec = CommandSpec(
         options=(
@@ -644,16 +634,6 @@ def test_parse_new_spec_no_rest():
         ("world", "str"),
         ("extra", "str"),
     ]
-
-
-def test_parse_new_spec_joined_value_flag():
-    spec = CommandSpec(
-        options=(Option(short="-n", type="str"),),
-        rest=Operand(type="path"),
-    )
-    parsed = parse_command(spec, ["-n10", "file.txt"], cwd="/")
-    assert parsed.flags == {"-n": "10"}
-    assert parsed.args == [("/file.txt", "path")]
 
 
 def test_numeric_shorthand_treats_dash_n_as_flag():

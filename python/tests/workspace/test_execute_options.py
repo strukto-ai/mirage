@@ -17,8 +17,8 @@ import asyncio
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.utils.abort import MirageAbortError, cancellable_sleep
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.abort import MirageAbortError, cancellable_sleep
 from mirage.workspace.executor.builtins.sleep.sleep import handle_sleep
 
 

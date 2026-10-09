@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { QdrantPoint } from './types.ts'
 import type { QdrantClient } from '@qdrant/js-client-rest'
 import { expect, it, vi } from 'vitest'
 
@@ -22,7 +23,7 @@ import { searchResources } from '../../vfs/search.ts'
 import { resolveQdrantConfig, type QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { PathSpec } from '../../types.ts'
 import { searchRowsOutput } from '../vector/search.ts'
-import type { QdrantPoint } from './query.ts'
+
 import { TREE } from './tree.ts'
 
 function accessorOf(config: QdrantConfig, points: QdrantPoint[]) {

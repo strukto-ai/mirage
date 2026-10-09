@@ -21,6 +21,7 @@ from typing import Any, Protocol, cast, get_args
 
 from pydantic import BaseModel
 
+from mirage.cache.file.entry import CacheEntry
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.commands.cli.types import CLISpec
@@ -781,8 +782,6 @@ def _restore_cache(ws: WorkspaceLike, state: dict[str, Any]) -> None:
         # Non-RAM cache backend (e.g. Redis) — skip; its content lives
         # outside the workspace and isn't part of the snapshot anyway.
         return
-    from mirage.cache.file.entry import CacheEntry
-
     # A snapshot is a third entry point into the entry table, and a document is
     # not obliged to spell "no token" the way this version does, so each
     # token is folded the way the live write entry points fold it.

@@ -14,7 +14,8 @@
 
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RunResult, RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
+import type { RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { DOCKER_CONFIG_KEYS, type DockerConfig } from './config.ts'
 import { DOCKER_CLI_HINT } from './constants.ts'
 import { type CliResult, runCli } from '../cli.ts'

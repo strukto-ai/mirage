@@ -57,7 +57,6 @@ from mirage.types import (
     ShownPaths,
     Visibility,
 )
-from mirage.workspace.abort import StatusWriter
 from mirage.workspace.session.constants import (
     INHERITED_FIELDS,
     STARTUP_VALUES,
@@ -74,6 +73,7 @@ from mirage.workspace.session.serialize import (
     script_from_dict,
     script_to_dict,
 )
+from mirage.workspace.types import StatusWriter
 
 
 def copy_state(value: Any) -> Any:

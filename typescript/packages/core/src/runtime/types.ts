@@ -14,8 +14,12 @@
 
 import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
 import type { PathSpec, SetAttrFields } from '../types.ts'
-import type { RuntimeConfig } from './config.ts'
-import type { RouteScript } from './routing/types.ts'
+
+/** The runtime metadata shared by routing and capability checks. */
+export interface RuntimeIdentity {
+  readonly name: string
+  readonly captures: readonly string[]
+}
 
 /**
  * The languages a runtime can interpret, one name for both entry points (run
@@ -280,29 +284,6 @@ export interface EvalResult {
   exitCode: number
   /** Console verdict; always "complete" outside session mode. */
   status: EvalStatus
-}
-
-/** Constructor options every runtime accepts (a yaml entry's keys). */
-export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown>> {
-  /**
-   * Commands this runtime claims; EXTERNAL_COMMANDS captures unresolved
-   * program names. ["*"]
-   * claims every line for a line-executing runtime.
-   */
-  captures?: readonly string[]
-  /**
-   * The runtime's implementation knobs (a yaml entry's `config`
-   * block), coerced against the runtime's own key list so a field the
-   * runtime does not have fails loud.
-   */
-  config?: C
-  /**
-   * Per-line admission script for the routing ladder, answering "do I
-   * want this line": a function taking a RouteContext, or a
-   * config-borne ScriptSource. Absent = always willing. Policy, not
-   * capability: it can only refuse lines the captures already allow.
-   */
-  script?: RouteScript
 }
 
 /**

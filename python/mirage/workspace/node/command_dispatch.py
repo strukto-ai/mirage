@@ -37,6 +37,7 @@ from mirage.io.types import ByteSource, materialize
 from mirage.policy import PolicyDenied, resolve_limit, resolve_producer
 from mirage.policy.policies import reset_op_policies, set_op_policies
 from mirage.policy.types import Claimant, HandOff, SessionContext
+from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console import Channel, JobConsole
@@ -146,7 +147,7 @@ async def execute_command(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
@@ -402,7 +403,7 @@ async def _dispatch_command_body(
     job_table,
     seed_prefix: Callable[[str], None],
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
@@ -576,7 +577,7 @@ async def _run_argv(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     row: int = 0,
     agent_id: str = "",
     redirects: tuple[PathSpec, ...] = (),
@@ -772,7 +773,7 @@ async def _route_argv(
     call_stack,
     job_table,
     cancel: asyncio.Event | None,
-    routing_decision: RouteDecision | None,
+    routing_decision: RouteDecision[Runtime] | None,
     row: int,
     agent_id: str = "",
     handed: HandOff | None = None,

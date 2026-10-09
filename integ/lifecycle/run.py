@@ -51,10 +51,10 @@ from mirage.server import io_serde
 from mirage.server.vfs_calls import VFS_CALL_BY_NAME
 from mirage.shell.console import Channel, JobConsole
 from mirage.types import MountMode
+from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs, register_vfs
 from mirage.workspace import Session, Workspace
-from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.snapshot import apply_state_dict, to_state_dict
 
 SUITE = Path(__file__).with_name("cases.json")

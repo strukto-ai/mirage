@@ -95,3 +95,14 @@ class ExecutionNode:
         if self.records:
             d["records"] = [r.to_dict() for r in self.records]
         return d
+
+
+class StatusWriter:
+    """Opaque per-line identity for status writes.
+
+    Minted once per ``Workspace.shell`` and carried on the line's
+    ``LineFrame``, so ``record_status`` can say whose ``$?`` the session
+    is holding and a cancelled line puts back only what it overwrote.
+    """
+
+    __slots__ = ()

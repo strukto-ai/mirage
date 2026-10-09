@@ -14,7 +14,6 @@
 
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type { PredNode } from '../core/generic/find_eval.ts'
 import type { Command } from '../commands/config.ts'
 import { enotsup } from '../errors/fs.ts'
 import type { CapacityResult, FileStat, JsonValue, PathSpec, SetAttrFields } from '../types.ts'
@@ -23,24 +22,7 @@ import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
 import type { DeltaHook } from '../watch/base.ts'
 import { vfsCall } from './call.ts'
 import { DEFAULT_MAX_DU_ENTRIES } from './constants.ts'
-import { type DuEntries, Effect, type SearchQuery, Target } from './types.ts'
-
-export interface FindOptions {
-  name?: string | null
-  type?: string | null
-  minSize?: number | null
-  maxSize?: number | null
-  maxDepth?: number | null
-  minDepth?: number | null
-  nameExclude?: string | null
-  orNames?: string[] | null
-  iname?: string | null
-  pathPattern?: string | null
-  empty?: boolean | null
-  tree?: PredNode | null
-  mtimeMin?: number | null
-  mtimeMax?: number | null
-}
+import { type DuEntries, type FindOptions, Effect, type SearchQuery, Target } from './types.ts'
 
 /**
  * The two keys the snapshot machinery reads out of a VFS's state.

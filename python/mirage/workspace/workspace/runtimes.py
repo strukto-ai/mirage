@@ -188,7 +188,7 @@ class Runtimes:
         )
 
     def whole_line(
-        self, decision: RouteDecision | None
+        self, decision: RouteDecision[Runtime] | None
     ) -> LineExecutorMixin | None:
         """The entry taking this whole line, None for the executor.
 

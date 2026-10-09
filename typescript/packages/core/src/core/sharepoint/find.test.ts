@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SharePointAccessor } from '../../accessor/sharepoint.ts'
 import { PathSpec } from '../../types.ts'
-import type { FindOptions } from '../../vfs/base.ts'
+import type { FindOptions } from '../../vfs/types.ts'
 import { find } from './find.ts'
 
 // One site with one library holding `a.txt` and an empty `sub`; the site

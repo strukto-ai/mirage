@@ -24,11 +24,8 @@ import {
   type ProcessExecutor,
 } from '@struktoai/mirage-core/runtime/mixin'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type {
-  ProcessExecution,
-  RunResult,
-  RuntimeOptions,
-} from '@struktoai/mirage-core/runtime/types'
+import type { ProcessExecution, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SANDLOCK_CONFIG_KEYS, type SandlockConfig } from './config.ts'
 import { SANDLOCK_CLI_HINT, SYSTEM_READABLE } from './constants.ts'
 
