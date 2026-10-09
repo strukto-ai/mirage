@@ -101,8 +101,8 @@ async function landed(
 
 /**
  * Copy `item` to `dst`, merging a folder into a folder. `changed` receives each
- * path this copy changed (a destination cleared, a file or a whole folder
- * landed), recorded as it changed, and whether it is a folder; `sent` receives
+ * file or whole folder that landed, recorded as it landed, and whether it is a
+ * folder; `sent` receives
  * each path a request may have gone out for, landed or not, and whether it is
  * a folder. Mirrors Python's `_copy_into`.
  */
@@ -130,7 +130,6 @@ async function copyInto(
   if (dstParent === null) throw enoent(dst.virtual)
   const newName = dstParts[dstParts.length - 1] ?? ''
   let cond: WriteCondition | null = null
-  let cleared = false
   if (existing !== null && existing.id !== item.id) {
     // Folder onto folder already merged above, so what is left is a type
     // mismatch or a file replacing a file. cp refuses either mismatch
@@ -140,8 +139,6 @@ async function copyInto(
     if (item.type === 'folder') throw enotdir(dst.virtual)
     sent.push([dst, false])
     cond = await replaceFile(accessor, dst, existing)
-    await landed(changed, dst, false, timer, upto)
-    cleared = true
   } else if (existing === null && item.type === 'file') {
     cond = await replaceFile(accessor, dst, null)
   }
@@ -153,7 +150,7 @@ async function copyInto(
     } else {
       sent.push([dst, false])
       await copyFile(tm, item.id, dstParent, newName)
-      if (!cleared) await landed(changed, dst, false, timer, upto)
+      await landed(changed, dst, false, timer, upto)
     }
   } catch (err) {
     throw (await retaken(err, cond, dst)) ?? err
@@ -162,13 +159,15 @@ async function copyInto(
 
 /**
  * Copy a file or folder server-side, recording each path it changed. Each path
- * is recorded as it changes, and on a conditional mount evicted with its
- * record; a file is evicted again once the copy ends, since a clear and the
- * copy that lands after it are two steps. The eviction runs also when the copy
- * fails. A conditional mount evicts only what
- * changed, and a request that raised keeps its held version. A folder copied
- * whole also lifts the line's lost marks beneath it; one whose request raised
- * evicts its subtree and records nothing.
+ * is recorded as it lands, and on a conditional mount evicted with its record; a
+ * replaced file only once its copy lands, so through the clear the line keeps
+ * its version and the cached bytes keep meeting it, and no cache step sits
+ * between the delete and the copy. Everything changed is evicted again once the
+ * copy ends, since a listing read while the copy ran may land after the early
+ * eviction. The eviction runs also when the copy fails: a request that raised
+ * keeps its held version, and a folder whose request raised evicts its subtree
+ * and records nothing. A folder copied whole also lifts the line's lost marks
+ * beneath it.
  */
 export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const item = await resolveItem(accessor, pathParts(src))
@@ -183,7 +182,9 @@ export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec):
         await (folder ? invalidateSubtree(dst) : invalidateAfterWrite(dst))
         return
       }
-      for (const [spec, whole] of changed) if (!whole) await invalidateAfterWrite(spec)
+      for (const [spec, whole] of changed) {
+        await (whole ? invalidateSubtree(spec) : invalidateAfterWrite(spec))
+      }
       const done = new Set(changed.map(([spec]) => spec.virtual))
       for (const [spec, whole] of sent) {
         if (done.has(spec.virtual)) continue

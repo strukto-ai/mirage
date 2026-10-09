@@ -113,7 +113,7 @@ async def _landed(
 
     Args:
         changed (list[tuple[PathSpec, bool]]): the copy's changed paths.
-        dst (PathSpec): the path cleared or landed.
+        dst (PathSpec): the path landed.
         whole (bool): a folder copied whole.
         timer (OpTimer): the step's timer.
         upto (int): :func:`lost_count` when the step began.
@@ -143,9 +143,9 @@ async def _copy_into(
         accessor (BoxAccessor): Box accessor.
         item (dict[str, Any]): the source as its lookup found it.
         dst (PathSpec): where it lands.
-        changed (list[tuple[PathSpec, bool]]): receives each path this
-            copy changed (a destination cleared, a file or a whole folder
-            landed), recorded as it changed, and whether it is a folder.
+        changed (list[tuple[PathSpec, bool]]): receives each file or
+            whole folder that landed, recorded as it landed, and whether
+            it is a folder.
         sent (list[tuple[PathSpec, bool]]): receives each path a request
             may have gone out for, landed or not, and whether it is a
             folder.
@@ -172,7 +172,6 @@ async def _copy_into(
         raise enoent(dst.virtual)
     new_name = dst_parts[-1]
     cond: WriteCondition | None = None
-    cleared = False
     if existing is not None and existing["id"] != item["id"]:
         # Folder onto folder already merged above, so what is left is a type
         # mismatch or a file replacing a file. cp refuses either mismatch
@@ -184,8 +183,6 @@ async def _copy_into(
             raise enotdir(dst.virtual)
         sent.append((dst, False))
         cond = await replace_file(accessor, dst, existing)
-        await _landed(changed, dst, False, timer, upto)
-        cleared = True
     elif existing is None and item.get("type") == "file":
         cond = await replace_file(accessor, dst, None)
     try:
@@ -196,8 +193,7 @@ async def _copy_into(
         else:
             sent.append((dst, False))
             await copy_file(tm, item["id"], dst_parent, name=new_name)
-            if not cleared:
-                await _landed(changed, dst, False, timer, upto)
+            await _landed(changed, dst, False, timer, upto)
     except BoxApiError as exc:
         raise (await retaken(exc, cond, dst)) or exc
 
@@ -205,13 +201,16 @@ async def _copy_into(
 async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     """Copy a file or folder server-side, recording each path it changed.
 
-    Each path is recorded as it changes, and on a conditional mount
-    evicted with its record; a file is evicted again once the copy ends,
-    since a clear and the copy that lands after it are two steps. The
-    eviction runs also when the copy fails. A conditional mount evicts
-    only what changed, and a request that raised keeps its held version. A
-    folder copied whole also lifts the line's lost marks beneath it; one
-    whose request raised evicts its subtree and records nothing.
+    Each path is recorded as it lands, and on a conditional mount evicted
+    with its record; a replaced file only once its copy lands, so through
+    the clear the line keeps its version and the cached bytes keep
+    meeting it, and no cache step sits between the delete and the copy.
+    Everything changed is evicted again once the copy ends, since a
+    listing read while the copy ran may land after the early eviction.
+    The eviction runs also when the copy fails: a request that raised
+    keeps its held version, and a folder whose request raised evicts its
+    subtree and records nothing. A folder copied whole also lifts the
+    line's lost marks beneath it.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -233,7 +232,9 @@ async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
                 await invalidate_after_write(dst)
             return
         for spec, whole in changed:
-            if not whole:
+            if whole:
+                await invalidate_subtree(spec)
+            else:
                 await invalidate_after_write(spec)
         landed = {spec.virtual for spec, _whole in changed}
         for spec, whole in sent:

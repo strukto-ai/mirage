@@ -574,6 +574,36 @@ async def test_a_merge_records_and_evicts_each_folder_before_the_next(
 
 
 @pytest.mark.asyncio
+async def test_a_replaced_file_is_recorded_only_once_its_copy_lands(
+    root_accessor,
+):
+    scope = RecordingScope()
+    seen: list[list[tuple[str, str]]] = []
+
+    async def copied(*_args, **_kwargs):
+        seen.append([(r.op, r.path) for r in scope.records])
+        return {}
+
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=_copy_list),
+            patch("mirage.core.box.copy.copy_file", new=copied),
+            patch("mirage.core.box.copy.delete_file", new_callable=AsyncMock),
+            patch(
+                "mirage.core.box.copy.invalidate_after_write",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await copy(
+                root_accessor, _spec("/data/a.txt"), _spec("/data/b.txt")
+            )
+    finally:
+        scope.close()
+    assert seen == [[]]
+    assert [(r.op, r.path) for r in scope.records] == [("copy", "/data/b.txt")]
+
+
+@pytest.mark.asyncio
 async def test_write_records_the_virtual_path(root_accessor):
     # A key named like its mount: neither m/k.txt nor /m/k.txt is virtual.
     spec = PathSpec(
@@ -625,13 +655,14 @@ async def _copy_list(_tm, folder_id, limit=1000):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("src", "dst", "fails", "raised", "expected"),
+    ("src", "dst", "fails", "raised", "conditioned", "expected"),
     [
         (
             "/data/a.txt",
             "/data/c.txt",
             False,
             None,
+            False,
             [
                 ("copy_file", "c.txt"),
                 ("write", "/data/c.txt"),
@@ -642,6 +673,7 @@ async def _copy_list(_tm, folder_id, limit=1000):
             "/data/b.txt",
             True,
             RuntimeError,
+            False,
             [
                 ("delete_file", "210"),
                 ("copy_file", "b.txt"),
@@ -653,6 +685,7 @@ async def _copy_list(_tm, folder_id, limit=1000):
             "/data/new",
             False,
             None,
+            False,
             [
                 ("copy_folder", "new"),
                 ("subtree", "/data/new"),
@@ -663,6 +696,7 @@ async def _copy_list(_tm, folder_id, limit=1000):
             "/data/dst",
             True,
             RuntimeError,
+            False,
             [
                 ("delete_file", "410"),
                 ("copy_file", "x.txt"),
@@ -674,13 +708,47 @@ async def _copy_list(_tm, folder_id, limit=1000):
             "/data/a.txt",
             False,
             NotADirectoryError,
+            False,
             [("subtree", "/data/a.txt")],
         ),
+        (
+            "/data/a.txt",
+            "/data/b.txt",
+            False,
+            None,
+            True,
+            [
+                ("delete_file", "210"),
+                ("copy_file", "b.txt"),
+                ("write", "/data/b.txt"),
+                ("write", "/data/b.txt"),
+            ],
+        ),
+        (
+            "/data/sub",
+            "/data/new",
+            False,
+            None,
+            True,
+            [
+                ("copy_folder", "new"),
+                ("subtree", "/data/new"),
+                ("subtree", "/data/new"),
+            ],
+        ),
     ],
-    ids=["file-ok", "file-fails", "folder-ok", "folder-fails", "refused"],
+    ids=[
+        "file-ok",
+        "file-fails",
+        "folder-ok",
+        "folder-fails",
+        "refused",
+        "conditional-replace",
+        "conditional-folder",
+    ],
 )
 async def test_a_copy_evicts_after_it_ends(
-    root_accessor, src, dst, fails, raised, expected
+    root_accessor, src, dst, fails, raised, conditioned, expected
 ):
     events: list[tuple[str, str]] = []
 
@@ -716,6 +784,10 @@ async def test_a_copy_evicts_after_it_ends(
         patch(
             "mirage.core.box.copy.invalidate_subtree",
             new=AsyncMock(side_effect=dropped),
+        ),
+        patch(
+            "mirage.core.box.copy.writes_conditioned",
+            return_value=conditioned,
         ),
     ):
         if raised is None:
