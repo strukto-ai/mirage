@@ -50,6 +50,15 @@ from mirage.vfs.ram import RAMVFS
 ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 ```
 
+Set the per-queue capacity when creating the workspace:
+
+```python
+from mirage import IOConfig, Workspace
+from mirage.vfs.ram import RAMVFS
+
+ws = Workspace({"/": RAMVFS()}, io=IOConfig(buffer_bytes=262144))
+```
+
 ### ws.session
 
 ```python
@@ -191,11 +200,11 @@ One session's handle, from [`ws.session`](#ws-session). Every call on it answers
 ```python
 await session.shell(
     command, stdin=None, cwd=None, env=None,
-    cancel=None, record=True,
-) -> IOResult
+    cancel=None, record=True, stream=False,
+) -> IOResult | ShellExecution
 ```
 
-Runs a shell line as the session. A non-zero exit is a result, not an exception.
+Runs a shell line as the session. With `stream=False`, it collects the execution’s output and returns an `IOResult`. A non-zero exit is a result, not an exception. `ws.shell` has the same streaming option and accepts `session_id` to select the session.
 
 <ResponseField name="stdin" type="bytes | AsyncIterator[bytes]">
   The line's stdin. An async iterator streams it.
@@ -233,6 +242,29 @@ Runs a shell line as the session. A non-zero exit is a result, not an exception.
 result = await session.shell("wc -l", stdin=b"a\nb\n")
 print(result.exit_code, await result.stdout_str())
 ```
+
+### Streaming execution
+
+`await session.shell(line, stream=True)` returns a running `ShellExecution`. Its `id` identifies this execution; `events` yields ordered `{stream, data}` events with `stream="stdout"` or `stream="stderr"` and raw `bytes`. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through [workspace I/O settings](/home/yaml#io-buffers), with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
+
+Consume `events` while the line runs, then await `wait()` for its final `IOResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. `IOResult` describes a finished result; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
+
+A policy with a `post_execute` hook holds output until it approves the completed invocation. Such calls still use the same events and lifecycle, but their output arrives after that check. This policy buffer is separate from the bounded event queue.
+
+To collect the complete result while observing output, use `await execution.collect(on_event=callback)`. The async callback receives each event and is awaited before the next one is read. Collection owns cleanup, including when the callback fails.
+
+In this example, `send_bytes` is the application's async output sink:
+
+```python
+execution = await session.shell("echo ready; echo warning >&2", stream=True)
+async with execution:
+    async for event in execution.events:
+        await send_bytes(event.stream, event.data)
+    result = await execution.wait()
+print(execution.id, result.exit_code)
+```
+
+Do not await `wait()` before consuming the events: a producer may be waiting for queue space. Call `cancel()` to request cancellation; `wait()` then raises `MirageAbortError`. Use the async context manager, or `await execution.aclose()` in `finally`, to cancel unfinished work and join its cleanup when you stop reading early. Closing an execution that has finished is safe.
 
 ### session.glob
 

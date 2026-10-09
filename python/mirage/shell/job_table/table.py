@@ -265,6 +265,7 @@ class JobTable:
             else:
                 console = self._console_factory(job_id)
                 self._console_owner._factory_consoles.append(console)
+            console.bind_execution(process.info.execution_id)
             job = Job(
                 id=job_id,
                 command=command,

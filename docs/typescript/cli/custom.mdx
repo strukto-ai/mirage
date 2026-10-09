@@ -96,6 +96,28 @@ both the process view (`argv`, `stdin`, `env`) and the parsed view (`config`,
 `paths`, `texts`, `flags`). Use the parsed view for typed trees. Use `argv` when
 wrapping an API whose vocabulary is easier to preserve verbatim.
 
+Handlers can write while they run through `inv.stdio` (mount commands receive
+its twin as `opts.stdio`). `stdio.stdin` is an async byte iterator; stdout and
+stderr expose `await write(Uint8Array)`. Writes apply backpressure with 16 KiB
+chunks and a shared queue (64 KiB by default, set by [workspace I/O settings](/home/yaml#io-buffers)), preserving output order through redirects.
+Return `new IOResult({ exitCode: ... })` after the last write for final metadata.
+The executor owns the writer lifetime: an early pipe consumer or cancellation
+closes the writer and joins handler cleanup. Pass `stdio.signal` to cancellable
+service calls, and keep cleanup in `finally`. Await every write before returning.
+
+```typescript
+async function copy(inv: CLIInvocation): Promise<IOResult> {
+  if (inv.stdio === undefined) throw new Error('stdio is unavailable')
+  for await (const chunk of inv.stdio.stdin) {
+    await inv.stdio.stdout.write(chunk)
+  }
+  return new IOResult()
+}
+```
+
+A `[ByteSource, IOResult]` return is normalized into the same output stream and
+cleanup lifetime. Its lazy status becomes final after its source is drained.
+
 `configModel` is optional. Declare a Zod object schema on the root for an
 account or service CLI, and narrow the already-validated `inv.config` at the
 handler boundary. Omit it for a credential-free CLI whose subject is a

@@ -29,7 +29,11 @@ implementations cannot drift apart.
   the in-app answer, and every other access must give it. `run.py` also
   checks auth per deployment, the CLI's daemon lifecycle and config, and
   gates that every HTTP route and CLI command was exercised. `inapp.ts` is
-  the in-app access on TypeScript.
+  the in-app access on TypeScript. Shell and stdin cases with `output_stream`
+  also exercise HTTP `?stream=true` and the CLI’s default raw output, checking both output
+  channels, bounded byte chunks, Unicode, NUL bytes and the terminal exit status.
+  MCP progress cases wait on a VFS gate released by the first preview, proving
+  that HTTP SSE and the stdio relay deliver progress before the final tool result.
 - `policy/`: the policy corpus. Each case binds sessions to profiles and
   registers coded policies, then drives lines, VFS calls, tools, asks and
   explain, pinning what each refuses, asks or lets through: the allow list,
@@ -39,6 +43,16 @@ implementations cannot drift apart.
   it, given its path.
 - `prisma/`: one schema per kit fake.
 - `fixtures/`: the seed data cases assume.
+
+The streamed read probes in `vfs/ranges/stream.json` accept
+`max_chunk_size` to bound every returned chunk and `take_bytes` to close
+after a prefix. The lifecycle corpus also uses a tracked source that fails
+if `head` or `grep -q` fetches its tail, checks source cleanup and partial
+cache rejection, and feeds UTF-8 through one-byte chunks. These cases run
+through the existing core and TypeScript filters above; the Slack/Discord
+attachment probes run in the chat facet. `unix/gzip/basic.json` pins the
+streamed stdin round trip and early consumer against GNU gzip in
+`debian:stable-slim`.
 
 The `unix/{grep,zgrep,sed,awk,tr}/bytes.json` cases pin C-locale byte
 semantics against `debian:stable-slim` at digest
@@ -195,6 +209,15 @@ backend, CLI or package belongs in the filter that tests it, a module joins
 the drop list only when nothing kept imports it, and a runtime case that
 starts mounting a dropped backend takes that name off the list.
 
+The public `workspace/shell_execution.py` and `.ts` modules and their shared
+`io/output.py` and `.ts` output pipe, plus their `io/config.py` and `.ts`
+workspace buffer settings, belong to the core and TypeScript filters
+explicitly, and to the broad runtime filters.
+Their shared lifecycle cases cover ordered byte events, final status, session
+mutations, output before completion, cancellation and early consumer closure.
+The mirrored `server/mcp/progress` modules also belong to those filters; the
+access corpus checks progress over HTTP SSE and the CLI's stdio relay.
+
 The shared YAML config readers (`python/mirage/utils/yaml.py` and
 `typescript/packages/node/src/utils/yaml.ts`) use the broad language filters
 above, including `runtime`. The CLI exit-code workflow also covers both
@@ -228,6 +251,15 @@ approval/retry decisions and the observer's history view. Completed records
 must remain unchanged after cancellation attempts or approval retries, and
 `record: false` suppresses history while retaining execution tracking. The
 existing `integ/**` filter includes these cases in `integ-hosting`.
+
+Redis execution-record adapters live in `python/mirage/execution/redis/` and
+`typescript/packages/node/src/execution/redis/`; the `core` and `ts` filters
+explicitly include their execution paths. Both hosts also run real Redis store
+contract tests in their unit jobs, covering concurrent revisions, remote waits,
+immutable terminal records, cancellation intent, and completed-only retention.
+The app factories borrow an execution store; its caller closes it after shutdown.
+Sharing records does not transfer ownership of running commands or resume them
+after a worker restart.
 
 The substitution release/cancel cases hold `$(cd /; curl ...)` at that same
 HTTP gate and query the public session API while it is suspended. The parent

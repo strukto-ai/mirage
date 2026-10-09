@@ -108,6 +108,33 @@ The endpoint takes the same bearer token as the [HTTP API](/home/access/http#aut
 
 Their inputs are listed under [Call a tool](/home/access/http#call-a-tool). `read`, `ls`, `grep` and `glob` are marked read-only. A session is offered the ones its [profile](/home/policy/policies#which-door-enforces-what) leaves it: `shell` needs a command the allow list installs, `ls` and `grep` those commands, `write` and `edit` a mount the session may write. A tool it is not offered is `not found`.
 
+MCP uses the workspace's [I/O buffer capacity](/home/yaml#io-buffers).
+Set `io: {buffer_bytes: 262144}` in the YAML passed to
+`mirage mcp workspace.yaml`, or in the config used to create the workspace
+referenced by `-w`. This applies to both SSE and stdio; buffer size is not a
+`shell` tool argument. Progress preview limits remain separate from the byte queue.
+
+## Output progress
+
+A `shell` tool call can receive output previews while it runs. Supply a progress token in the MCP request's metadata:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "tools/call",
+  "params": {
+    "name": "shell",
+    "arguments": { "command": "echo ready; sleep 1; echo done" },
+    "_meta": { "progressToken": "run-7" }
+  }
+}
+```
+
+The existing HTTP endpoint sends `notifications/progress` over its SSE response, using that token and an increasing progress counter. Messages start with `[stdout]` or `[stderr]` and contain bounded UTF-8 previews. Mirage coalesces previews to avoid a notification for every write; their counter is not a percentage or byte count. `mirage mcp` forwards them over stdio too.
+
+The final `CallToolResult` still contains the complete tool output and `isError`. Previews may be truncated, so use the final result when collecting text. Clients that omit a progress token receive the final result as usual. For exact bytes and separate output streams, use [SDK streaming](/python/access/in-app#streaming-execution) or [HTTP streaming](/home/access/http#run-a-shell-line).
+
 ## VFS calls and explain
 
 Add `?calls=all` to the URL, or `--all-calls` to `mirage mcp`, to also list each of the 24 [VFS calls](/home/access/http#call-the-vfs) as a tool named `vfs_<call>` (`vfs_read`, `vfs_is_dir`), with the same arguments. Each answers the route's JSON as text; a failed one answers `{detail, errno, refusal}` with `isError` set. `shell` and every `vfs_<call>` then take `explain: true`, which answers what the call would do and runs nothing; see [Explain](/home/policy/explain).

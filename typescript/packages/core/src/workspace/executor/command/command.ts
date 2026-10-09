@@ -36,7 +36,8 @@ import { Consumer, JOB_BUILTINS, dereferences, lookup } from '../../lookup/index
 import { type Runtime } from '../../../runtime/base.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { SessionState } from '../../session/session.ts'
-import { abortable, mergeSignals } from '../../abort.ts'
+import { mergeSignals } from '../../abort.ts'
+import { abortable } from '../../../concurrency/limiter.ts'
 import { ExecutionNode } from '../../types.ts'
 import { RELAY_COMMANDS } from '../../../commands/builtin/generic/crossmount/constants.ts'
 import { aggregateFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
@@ -288,6 +289,7 @@ export async function handleCommand(
             : {}),
           ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
           commandLimits: registry.commandLimits,
+          bufferBytes: registry.io.bufferBytes,
           entries: registry.runtimeEntries,
           dispatch,
           statPath: (path) => pathStat(dispatch, path, null),

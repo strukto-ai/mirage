@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+export { PipeClosed } from '../io/errors.ts'
+
 import type { ByteSource } from '../io/types.ts'
 import type { ArithWrite } from './types.ts'
 import { encodeText } from './bytes.ts'
@@ -206,5 +208,3 @@ export class ReturnSignal extends Error {
     this.stdout = stdout
   }
 }
-
-export class PipeClosed extends Error {}

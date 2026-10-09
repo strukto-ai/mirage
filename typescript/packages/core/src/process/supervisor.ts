@@ -3,6 +3,7 @@ import type { PathSpec, ProcessScope } from '../types.ts'
 import { ProcessHandle } from './handle.ts'
 import type { ProcessRunner } from './types.ts'
 import type { ProcessView } from './view.ts'
+import { currentExecution, newExecutionId } from '../execution/context.ts'
 
 /** Workspace-owned live runners; exited handles retain their own results. */
 export class ProcessSupervisor {
@@ -25,6 +26,7 @@ export class ProcessSupervisor {
     cancel: () => void
     parentPid?: number | null
     limit?: number | null
+    executionId?: string
   }): ProcessHandle {
     if (this.stopped) throw new Error('process supervisor is stopped')
     if (
@@ -40,9 +42,14 @@ export class ProcessSupervisor {
     )
       throw new Error('parent process is no longer accepting children')
     const pid = this.nextPid++
+    const ambient = currentExecution()
+    const executionId = init.executionId ?? newExecutionId()
     const handle = new ProcessHandle(
       {
         pid,
+        executionId,
+        parentExecutionId: parent?.handle.info.executionId ?? ambient?.id ?? null,
+        rootExecutionId: parent?.handle.info.rootExecutionId ?? ambient?.rootId ?? executionId,
         parentPid: init.parentPid ?? null,
         groupId:
           (init.parentPid == null

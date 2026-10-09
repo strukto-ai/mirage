@@ -34,7 +34,8 @@ import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
-import { abortedLine, lineStatusWriter, makeAbortError, type StatusWriter } from '../abort.ts'
+import { abortedLine, lineStatusWriter, type StatusWriter } from '../abort.ts'
+import { makeAbortError } from '../../concurrency/limiter.ts'
 
 /**
  * Run a test, the left of `&&`/`||` or a negated command where bash ignores

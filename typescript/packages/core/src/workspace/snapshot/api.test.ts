@@ -75,3 +75,19 @@ describe('Workspace.snapshot', () => {
     })
   })
 })
+
+it('preserves the I/O buffer limit through copy and snapshot', async () => {
+  const ws = new Workspace({}, { io: { bufferBytes: 262144 }, runtimes: ['workspace'] })
+  const copies: Workspace[] = []
+  try {
+    copies.push(await ws.copy())
+    copies.push(await Workspace.load(await ws.snapshot()))
+    for (const restored of copies) {
+      expect(restored.io.bufferBytes).toBe(262144)
+      expect(restored.registry.io).toBe(restored.io)
+    }
+  } finally {
+    await Promise.all(copies.map((restored) => restored.close()))
+    await ws.close()
+  }
+})

@@ -31,7 +31,8 @@ import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
-import { makeAbortError, mergeSignals } from '../abort.ts'
+import { mergeSignals } from '../abort.ts'
+import { makeAbortError } from '../../concurrency/limiter.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { literalText } from '../../shell/parse/names.ts'
 import { BASH_BUILTINS } from '../lookup/constants.ts'
@@ -428,6 +429,7 @@ async function runPipeline(
       signal,
       processes,
       executeFn,
+      registry.io.bufferBytes,
     )
   const [stdout, io, execNode] = stages.negated
     ? await ignoringErrexit(context.session, piped)

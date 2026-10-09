@@ -4,11 +4,83 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from mirage.execution.context import current_execution_id
 from mirage.process.config import ProcessPermissions
 from mirage.process.handle import ProcessHandle
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.process.types import ProcessState
 from mirage.types import PathSpec
+
+
+@pytest.mark.asyncio
+async def test_execution_context_isolated_between_concurrent_runners():
+    supervisor = ProcessSupervisor()
+    release = asyncio.Event()
+    seen = []
+
+    async def run():
+        before = current_execution_id()
+        await release.wait()
+        seen.append((before, current_execution_id()))
+        return 0
+
+    handles = [
+        supervisor.start(
+            session_id="same",
+            command="probe",
+            cwd=PathSpec.from_str_path("/"),
+            run=run,
+            execution_id=identity,
+        )
+        for identity in ("first", "second")
+    ]
+    await asyncio.sleep(0)
+    release.set()
+    await asyncio.gather(*(handle.join() for handle in handles))
+    assert sorted(seen) == [("first", "first"), ("second", "second")]
+    assert current_execution_id() is None
+
+
+@pytest.mark.asyncio
+async def test_execution_ancestry_does_not_grant_cancellation_ownership():
+    supervisor = ProcessSupervisor()
+    started, release = asyncio.Event(), asyncio.Event()
+    children = []
+
+    async def child():
+        await release.wait()
+        return 0
+
+    async def parent():
+        children.append(
+            supervisor.start(
+                session_id="a",
+                command="detached",
+                cwd=PathSpec.from_str_path("/"),
+                run=child,
+            )
+        )
+        started.set()
+        await asyncio.Event().wait()
+        return 0
+
+    root = supervisor.start(
+        session_id="a",
+        command="parent",
+        cwd=PathSpec.from_str_path("/"),
+        run=parent,
+        execution_id="request",
+    )
+    await started.wait()
+    child_handle = children[0]
+    assert child_handle.info.parent_execution_id == "request"
+    assert child_handle.info.root_execution_id == "request"
+    assert child_handle.info.parent_pid is None
+    root.terminate()
+    await root.join()
+    assert child_handle.info.state == ProcessState.RUNNING
+    release.set()
+    await child_handle.join()
 
 
 @pytest.mark.asyncio

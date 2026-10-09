@@ -20,6 +20,7 @@ from typing import Any
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.context import reset_current_session, set_current_evaluation
 from mirage.io import IOResult
+from mirage.io.pipe import CAPACITY
 from mirage.io.stream import (
     async_chain,
     close_quietly,
@@ -84,6 +85,7 @@ async def handle_pipe(
     call_stack: CallStack | None = None,
     processes: ProcessSupervisor | None = None,
     execute_fn: Callable[..., Any] | None = None,
+    buffer_bytes: int = CAPACITY,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Connect commands via pipes: stdout -> stdin.
 
@@ -96,7 +98,7 @@ async def handle_pipe(
     # the caller applies this pipeline's own negation after it finishes.
     session.errexit_immune = False
     pipes = [
-        PipeConsole(i < len(stderr_flags) and stderr_flags[i])
+        PipeConsole(i < len(stderr_flags) and stderr_flags[i], buffer_bytes)
         for i in range(len(commands))
     ]
     ios: list[IOResult] = [IOResult() for _ in commands]

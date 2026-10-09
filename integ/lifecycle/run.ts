@@ -14,6 +14,7 @@
 
 import { isDeepStrictEqual } from 'node:util'
 import { readFileSync } from 'node:fs'
+import type { ShellExecution } from '@struktoai/mirage-core'
 import {
   Workspace as NodeWorkspace,
   buildVfs as buildNodeVfs,
@@ -24,7 +25,8 @@ import {
   buildVfs as buildBrowserVfs,
   registerVfsFactory as registerBrowserVfs,
 } from '@struktoai/mirage-browser'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { MountMode, type PathSpec } from '@struktoai/mirage-core/types'
+import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import type {
@@ -55,7 +57,11 @@ import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { answered as answeredCall, checked } from '@struktoai/mirage-server/io_serde'
 import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
-import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
+import { CLISpec, type CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
+import { chunks } from '@struktoai/mirage-core/io/cooperative'
+import { IOResult } from '@struktoai/mirage-core/io/types'
+import { sleep } from '@struktoai/mirage-core/workspace/abort'
+import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { applyStateDict, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
@@ -78,7 +84,7 @@ interface Case {
 
 type Step = (
   | ({ op: 'mount'; path: string; mode?: MountMode } & ResourceConfig)
-  | { op: 'unmount' | 'read' | 'readdir' | 'stat' | 'cached'; path: string }
+  | { op: 'unmount' | 'read' | 'readdir' | 'stat' | 'cached' | 'stream_stats'; path: string }
   | { op: 'write'; path: string; data: string }
   | {
       op: 'exec'
@@ -90,6 +96,12 @@ type Step = (
       cwd?: string
     }
   | { op: 'spawn'; argv: string[]; session?: string }
+  | {
+      op: 'stream_exec'
+      command: string
+      stop?: 'cancel' | 'close'
+      consume_delay_ms?: number
+    }
   | { op: 'set_mode'; path: string; mode: MountMode }
   | { op: 'session'; id: string; profile?: Record<string, unknown> }
   | { op: 'close_session'; id: string }
@@ -101,7 +113,14 @@ type Step = (
       runtime?: string
       config?: Record<string, unknown>
     }
-  | { op: 'unregister_cli' | 'add_runtime' | 'remove_runtime'; name: string }
+  | { op: 'unregister_cli' | 'add_runtime' | 'remove_runtime' | 'stream_cli_stats'; name: string }
+  | {
+      op: 'register_stream_cli'
+      name: string
+      exit_code?: number
+      stderr?: string
+      writer?: boolean
+    }
   | {
       op: 'register_policy'
       id: string
@@ -198,6 +217,84 @@ class CachedRAMVFS extends RAMVFS {
   override readonly cachesReads = true
 }
 
+/** A chunked source whose pull and close counts are shared corpus assertions. */
+class TrackedStreamVFS extends CachedRAMVFS {
+  pulls = 0
+  closed = 0
+
+  constructor(
+    private readonly chunkSize: number,
+    private readonly failAfter?: number,
+    private readonly stallAfter?: number,
+  ) {
+    super()
+  }
+
+  override async *readStream(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    signal?: AbortSignal,
+  ): AsyncIterableIterator<Uint8Array> {
+    const data = await super.read(path, index)
+    try {
+      for (let offset = 0; offset < data.byteLength; offset += this.chunkSize) {
+        this.pulls++
+        if (this.stallAfter !== undefined && offset / this.chunkSize >= this.stallAfter) {
+          await sleep(Infinity, signal)
+        }
+        if (this.failAfter !== undefined && offset / this.chunkSize >= this.failAfter) {
+          throw new Error('stream tail fetched')
+        }
+        yield data.subarray(offset, offset + this.chunkSize)
+      }
+    } finally {
+      this.closed++
+    }
+  }
+}
+
+/** A registered CLI exercising stdin, deferred status, and producer closure. */
+class TrackedStreamCLI {
+  pulls = 0
+  closed = 0
+
+  constructor(
+    readonly exitCode: number,
+    readonly stderr: string,
+    readonly writer: boolean,
+  ) {}
+
+  async invoke(inv: CLIInvocation): Promise<CommandFnResult | IOResult> {
+    if (this.writer) {
+      if (inv.stdio === undefined) throw new Error('expected handler stdio')
+      try {
+        for await (const chunk of inv.stdio.stdin) {
+          this.pulls++
+          await inv.stdio.stdout.write(chunk)
+        }
+        await inv.stdio.stderr.write(ENC.encode(this.stderr))
+        return new IOResult({ exitCode: this.exitCode })
+      } finally {
+        this.closed++
+      }
+    }
+    const result = new IOResult({ stderr: ENC.encode(this.stderr) })
+    return [this.output(inv, result), result]
+  }
+
+  async *output(inv: CLIInvocation, result: IOResult): AsyncIterableIterator<Uint8Array> {
+    try {
+      for await (const chunk of chunks(inv.stdin ?? new Uint8Array())) {
+        this.pulls++
+        yield chunk
+      }
+      result.exitCode = this.exitCode
+    } finally {
+      this.closed++
+    }
+  }
+}
+
 /** A caller streaming a line that takes a while over each chunk. */
 class SlowSink extends JobConsole {
   constructor(readonly delayMs: number) {
@@ -212,6 +309,24 @@ class SlowSink extends JobConsole {
 
 // Register a fixture through the same factory extension point as an embedder.
 for (const register of [registerNodeVfs, registerBrowserVfs]) {
+  register('tracked-stream', (config) => {
+    const vfs = new TrackedStreamVFS(
+      (config.chunk_size as number | undefined) ?? 16384,
+      config.fail_after as number | undefined,
+      config.stall_after as number | undefined,
+    )
+    const files = (config.files ?? {}) as Record<string, string>
+    vfs.loadState({
+      type: 'ram',
+      files: Object.fromEntries(
+        Object.entries(files).map(([path, data]) => [
+          path,
+          ENC.encode(data.repeat((config.repeat as number | undefined) ?? 1)),
+        ]),
+      ),
+    })
+    return Promise.resolve(vfs)
+  })
   register('cached-ram', (config) => {
     const vfs = new CachedRAMVFS()
     const files = (config.files ?? {}) as Record<string, string>
@@ -269,6 +384,7 @@ function commandsOf(node: ShellNode | CommandExplanation): CommandExplanation[] 
 // state dict `checkout` applies.
 interface Held {
   state?: WorkspaceStateDict
+  streamClis?: Map<string, TrackedStreamCLI>
 }
 
 async function action(
@@ -283,6 +399,23 @@ async function action(
     return runWithSession(ws.getSession(session), () => action(host, ws, unbound, policies, held))
   }
   switch (step.op) {
+    case 'register_stream_cli': {
+      const cli = new TrackedStreamCLI(step.exit_code ?? 0, step.stderr ?? '', step.writer ?? false)
+      held.streamClis ??= new Map()
+      held.streamClis.set(step.name, cli)
+      ws.registerCli(step.name, new CLISpec({ name: step.name, fn: (inv) => cli.invoke(inv) }))
+      break
+    }
+    case 'stream_cli_stats': {
+      const cli = held.streamClis?.get(step.name)
+      if (cli === undefined) throw new Error('expected tracked stream CLI')
+      return { pulls: cli.pulls, closed: cli.closed }
+    }
+    case 'stream_stats': {
+      const vfs = ws.mount(step.path).vfs
+      if (!(vfs instanceof TrackedStreamVFS)) throw new Error('expected tracked stream')
+      return { pulls: vfs.pulls, closed: vfs.closed }
+    }
     case 'cached': {
       const value = await ws.cache.get(step.path)
       return value === null ? null : DEC.decode(value)
@@ -370,6 +503,70 @@ async function action(
       const child = ws.spawn({ argv: step.argv }, step.session)
       child.stdin.close()
       return child.pid
+    }
+    case 'stream_exec': {
+      const session = new Session(ws, step.session ?? null)
+      const execution: ShellExecution = await session.shell(step.command, { stream: true })
+      let done = false
+      const completion = execution.wait().then(
+        (result) => {
+          done = true
+          return { result }
+        },
+        (error: unknown) => {
+          done = true
+          return { error }
+        },
+      )
+      const events: { stream: string; data: number[] }[] = []
+      let firstBeforeDone = false
+      let value: Record<string, unknown>
+      try {
+        for await (const event of execution.events) {
+          if (events.length === 0) firstBeforeDone = !done
+          events.push({ stream: event.stream, data: [...event.data] })
+          if (step.consume_delay_ms !== undefined) await sleep(step.consume_delay_ms)
+          if (step.stop === 'cancel') {
+            execution.cancel()
+            break
+          }
+          if (step.stop === 'close') {
+            await execution.close()
+            break
+          }
+        }
+        const outcome = await completion
+        if ('error' in outcome) {
+          if (!(outcome.error instanceof Error) || outcome.error.name !== 'AbortError')
+            throw outcome.error
+          value = { aborted: true }
+        } else {
+          value = {
+            exit_code: outcome.result.exitCode,
+            stdout: outcome.result.stdoutText,
+            stderr: outcome.result.stderrText,
+            refusal: outcome.result.refusal?.reason ?? null,
+          }
+        }
+      } finally {
+        await execution.close()
+        await completion
+      }
+      return {
+        has_id: execution.id.length > 0,
+        events,
+        bounded: events.every((event) => event.data.length <= 16384),
+        stdout_bytes: events.reduce(
+          (total, event) => total + (event.stream === 'stdout' ? event.data.length : 0),
+          0,
+        ),
+        stderr_bytes: events.reduce(
+          (total, event) => total + (event.stream === 'stderr' ? event.data.length : 0),
+          0,
+        ),
+        first_before_done: firstBeforeDone,
+        ...value,
+      }
     }
     case 'exec': {
       const abort = new AbortController()

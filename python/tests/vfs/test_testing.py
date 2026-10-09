@@ -242,3 +242,23 @@ async def test_the_contract_propagates_a_permission_failure():
     vfs.read = AsyncMock(side_effect=PermissionError("denied"))  # type: ignore[method-assign]
     with pytest.raises(PermissionError, match="denied"):
         await check_read_contract(vfs, FIXTURE)
+
+
+@pytest.mark.asyncio
+async def test_stream_contract_rejects_oversized_chunks_and_closes_source():
+    vfs = await _seeded(Minimal, CONTENT)
+    closed = []
+
+    async def source(path, index):
+        try:
+            yield CONTENT
+        finally:
+            closed.append(True)
+
+    vfs.read_stream = source
+    with pytest.raises(AssertionError, match="max_chunk_size"):
+        await check_read_contract(
+            vfs,
+            ReadFixture(FILE, DIRECTORY, MISSING, CONTENT, max_chunk_size=1),
+        )
+    assert closed == [True]

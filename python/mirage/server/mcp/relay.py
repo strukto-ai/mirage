@@ -59,8 +59,7 @@ class McpRelay:
         """Report the endpoint's tool table.
 
         Args:
-            ctx (ServerRequestContext[dict[str, Any]]): the request
-                context; unused.
+            ctx (ServerRequestContext[dict[str, Any]]): The request context.
             params (PaginatedRequestParams | None): the page cursor.
 
         Returns:
@@ -85,8 +84,23 @@ class McpRelay:
             CallToolResult: the endpoint's answer; its protocol errors
                 propagate as this server's.
         """
+        token = (
+            ctx.meta.get("progress_token") if ctx.meta is not None else None
+        )
+        callback = None
+        if isinstance(token, (str, int)):
+
+            async def forward(
+                progress: float, total: float | None, message: str | None
+            ) -> None:
+                await ctx.session.report_progress(progress, total, message)
+
+            callback = forward
         return await self._upstream.call_tool(
-            params.name, params.arguments or {}
+            params.name,
+            params.arguments or {},
+            progress_callback=callback,
+            meta=ctx.meta,
         )
 
 

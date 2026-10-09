@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { abortable } from '../../../../workspace/abort.ts'
+import { abortable } from '../../../../concurrency/limiter.ts'
 import { discardStreams } from '../../../../io/stream.ts'
 import { chunks } from '../../../../io/cooperative.ts'
 import { concat as concatBytes } from '../../../../io/cachable_iterator.ts'

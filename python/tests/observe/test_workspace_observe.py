@@ -15,7 +15,11 @@
 import asyncio
 import json
 
+import pytest
+
 from mirage import MountMode, Workspace
+from mirage.io.cooperative import CHUNK_SIZE
+from mirage.observe.log_entry import STDOUT_TRUNCATE
 from mirage.observe.store import RAMObserverStore
 from mirage.vfs.ram import RAMVFS
 
@@ -99,6 +103,37 @@ def test_execute_records_what_the_line_showed():
 
     commands = asyncio.run(run())
     assert [e["stdout"] for e in commands] == ["hi\n"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_history_keeps_bounded_unicode_stdout_for_both_shell_modes(
+    stream,
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    text = "€" * CHUNK_SIZE
+    payload = text.encode()
+
+    async def source():
+        for offset in range(0, len(payload), 1001):
+            yield payload[offset : offset + 1001]
+
+    try:
+        if stream:
+            execution = await ws.shell(
+                "cat; echo warning >&2", stdin=source(), stream=True
+            )
+            result = await execution.collect()
+            assert await (await execution.wait()).materialize_stdout() == b""
+        else:
+            result = await ws.shell("cat; echo warning >&2", stdin=source())
+        assert result.stdout == payload
+        assert result.stderr == b"warning\n"
+        assert [e["stdout"] for e in await ws.history()] == [
+            text[:STDOUT_TRUNCATE]
+        ]
+    finally:
+        await ws.close()
 
 
 def test_execute_records_op_source():

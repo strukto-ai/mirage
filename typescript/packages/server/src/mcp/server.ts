@@ -38,13 +38,14 @@ import {
   WRITE_DESCRIPTION,
   WRITE_INPUT,
 } from '@struktoai/mirage-core/workspace/tools/tool_descriptions'
-import {
+import type {
+  ToolResult,
   MirageToolOperations,
-  type MirageToolOperationsOptions,
+  MirageToolOperationsOptions,
 } from '@struktoai/mirage-core/workspace/tools/tool_operations'
-import type { ToolResult } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { McpToolOperations, OutputProgress } from './progress.ts'
 import { answered, checked, explanationToDict, failureToDict } from '../io_serde.ts'
 import { VFS_CALLS, schemaOf, type VfsCall } from '../vfs_calls.ts'
 
@@ -157,9 +158,11 @@ export function createMirageMcpServer(
   const session = new Session(workspace, options.sessionId ?? null)
   const operations =
     options.operations ??
-    (options.staleWriteProtection === false
-      ? new MirageToolOperations(session, false)
-      : session.tools)
+    new McpToolOperations(
+      workspace,
+      options.sessionId ?? null,
+      options.staleWriteProtection ?? true,
+    )
   const server = new McpServer({
     name: options.name ?? 'mirage',
     version: options.version ?? VERSION,
@@ -210,6 +213,19 @@ export function createMirageMcpServer(
       }
       if (tool === EXPLAINED_SHELL && explain === true) {
         return json(explanationToDict(await session.explain.shell(String(given.command))))
+      }
+      if (name === 'shell' && operations instanceof McpToolOperations) {
+        const token = ctx.mcpReq._meta?.progressToken
+        const progress =
+          token === undefined
+            ? undefined
+            : new OutputProgress((value, message) =>
+                ctx.mcpReq.notify({
+                  method: 'notifications/progress',
+                  params: { progressToken: token, progress: value, message },
+                }),
+              )
+        return await operations.shell(String(given.command), ctx.mcpReq.signal, progress)
       }
       return await operations.call(name, given, ctx.mcpReq.signal)
     } catch (err) {

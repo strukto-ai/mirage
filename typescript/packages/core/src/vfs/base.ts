@@ -364,7 +364,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * Stream a file's bytes as the caller pulls them. A VFS that does not
    * define it is read whole instead.
    */
-  readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  readStream(
+    path: PathSpec,
+    _index?: IndexCacheStore,
+    _signal?: AbortSignal,
+  ): AsyncIterable<Uint8Array> {
     throw enotsup(this.name, 'readStream', path)
   }
 

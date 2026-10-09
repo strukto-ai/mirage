@@ -62,7 +62,7 @@ YML
 
 run_line() {
   local cli="$1" id="$2" line="$3"
-  $cli shell -w "$id" -c "$line" </dev/null | sout | tr -d '\n'
+  $cli shell --json -w "$id" -c "$line" </dev/null | sout | tr -d '\n'
 }
 
 # The routed half: create from the refs, then one line per tier plus one

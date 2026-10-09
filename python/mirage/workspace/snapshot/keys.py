@@ -24,6 +24,7 @@ class StateKey(StrEnum):
     DEFAULT_SESSION_ID = "default_session_id"
     DEFAULT_AGENT_ID = "default_agent_id"
     CURRENT_AGENT_ID = "current_agent_id"
+    IO = "io"
     CACHE = "cache"
     HISTORY = "history"
     JOBS = "jobs"
@@ -60,6 +61,7 @@ class CacheKey(StrEnum):
 
 
 class JobKey(StrEnum):
+    EXECUTION_ID = "execution_id"
     ID = "id"
     COMMAND = "command"
     CWD = "cwd"

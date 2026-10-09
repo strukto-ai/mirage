@@ -22,7 +22,7 @@ import { mountedPath } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
-import { gzip } from '../../../utils/compress.ts'
+import { gzip, gzipCompressStream } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { linkDoor } from '../utils/links.ts'
 import { resolveSource, stdinStream } from '../utils/stream.ts'
@@ -109,7 +109,7 @@ export async function gzipGeneric(
       door,
     })
   if (paths.length === 0) {
-    const result: ByteSource = await gzip(await materialize(resolveSource(opts.stdin)), '', level)
+    const result: ByteSource = gzipCompressStream(resolveSource(opts.stdin), level)
     return [result, new IOResult()]
   }
   const read = stdinStream(stream, opts.stdin)

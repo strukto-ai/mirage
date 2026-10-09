@@ -90,6 +90,27 @@ both the process view (`argv`, `stdin`, `env`) and the parsed view (`config`,
 `paths`, `texts`, `flags`). Use the parsed view for typed trees. Use `argv` when
 wrapping an API whose vocabulary is easier to preserve verbatim.
 
+Handlers can write while they run through `inv.stdio` (mount commands receive
+its twin as `opts.stdio`). `stdio.stdin` is an async byte iterator; stdout and
+stderr expose `await write(bytes)`. Writes apply backpressure with 16 KiB chunks
+and a shared queue (64 KiB by default, set by [workspace I/O settings](/home/yaml#io-buffers)), and preserve output order through redirects.
+Return `IOResult(exit_code=...)` after the last write to report final metadata.
+The executor owns the writer lifetime: an early pipe consumer or cancellation
+closes the writer and joins the handler's cleanup. Python cancellation reaches
+awaits; `stdio.cancelled` and `await stdio.wait_cancelled()` are also available.
+Keep cleanup in `finally`, and await every write before returning.
+
+```python
+async def copy(inv: CLIInvocation[None]):
+    assert inv.stdio is not None
+    async for chunk in inv.stdio.stdin:
+        await inv.stdio.stdout.write(chunk)
+    return IOResult()
+```
+
+A `(ByteSource, IOResult)` return is normalized into the same output stream and
+cleanup lifetime. Its lazy status becomes final after its source is drained.
+
 `config_model` is optional. Declare it on the root for an account or service
 CLI, and read the validated model from `inv.config`. Omit it for a
 credential-free CLI whose subject is a workspace file tree. A missing model is
@@ -338,7 +359,8 @@ The tables below explain how an author should use that surface.
 | `paths` | Cwd-resolved path operands. |
 | `texts` | Textual and numeric operands in declaration order. |
 | `flags` | Group and leaf flags keyed by normalized kwarg name. |
-| `stdin` | Piped bytes, or `None`. |
+| `stdin` | Piped bytes or an async byte source, or `None`. |
+| `stdio` | Input iterator, async stdout/stderr writers, and cancellation lifetime. |
 | `env` | Frozen environment snapshot for this invocation. |
 | `doors` | Optional workspace state-plane access for verbs that explicitly need it. |
 

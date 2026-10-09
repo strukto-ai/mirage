@@ -53,6 +53,18 @@ const ws = new Workspace(
 )
 ```
 
+Set the per-queue capacity when creating the workspace:
+
+```ts
+import { IOConfig } from '@struktoai/mirage-core'
+import { RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/': new RAMVFS() },
+  { io: new IOConfig({ bufferBytes: 262144 }) },
+)
+```
+
 ### ws.session
 
 ```ts
@@ -195,11 +207,11 @@ One session's handle, from [`ws.session`](#ws-session). Every call on it answers
 
 ```ts
 session.shell(
-  command, { stdin?, cwd?, env?, signal?, record? },
-): Promise<ExecuteResult>
+  command, { stdin?, cwd?, env?, signal?, record?, stream? },
+): Promise<ExecuteResult | ShellExecution>
 ```
 
-Runs a shell line as the session. A non-zero exit is a result, not an exception.
+Runs a shell line as the session. With `stream: false` (the default), it collects the execution’s output and returns an `ExecuteResult`. A non-zero exit is a result, not an exception. `ws.shell` has the same streaming option and accepts `sessionId` to select the session.
 
 <ResponseField name="stdin" type="Uint8Array | AsyncIterable<Uint8Array>">
   The line's stdin. An async iterable streams it.
@@ -238,6 +250,35 @@ const stdin = new TextEncoder().encode('a\nb\n')
 const result = await session.shell('wc -l', { stdin })
 console.log(result.exitCode, result.stdoutText)
 ```
+
+### Streaming execution
+
+`await session.shell(line, { stream: true })` returns a running `ShellExecution`. Its `id` identifies this execution; `events` yields ordered `{stream, data}` events with `stream: "stdout"` or `stream: "stderr"` and raw `Uint8Array` bytes. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through [workspace I/O settings](/home/yaml#io-buffers), with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
+
+Consume `events` while the line runs, then await `wait()` for its final `ExecuteResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. The result describes finished work; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
+
+A policy with a `postExecute` hook holds output until it approves the completed invocation. Such calls still use the same events and lifecycle, but their output arrives after that check. This policy buffer is separate from the bounded event queue.
+
+To collect the complete result while observing output, use `await execution.collect(callback)`. The async callback receives each event and is awaited before the next one is read. Collection owns cleanup, including when the callback fails.
+
+In this example, `sendBytes` is the application's async output sink:
+
+```ts
+const execution = await session.shell('echo ready; echo warning >&2', { stream: true })
+try {
+  for await (const event of execution.events) {
+    await sendBytes(event.stream, event.data)
+  }
+  const result = await execution.wait()
+  console.log(execution.id, result.exitCode)
+} finally {
+  await execution.close()
+}
+```
+
+Do not await `wait()` before consuming the events: a producer may be waiting for queue space. Call `cancel()` to request cancellation; `wait()` then rejects with `AbortError`. Call `await execution.close()` in `finally` to cancel unfinished work and join its cleanup when you stop reading early. Closing an execution that has finished is safe.
+
+Closing follows the workspace's cancellation grace. An uncooperative provider may remain tracked as stopping after that grace expires.
 
 ### session.glob
 

@@ -84,6 +84,30 @@ def io_answer(reply: dict[str, Any]) -> Answer:
     )
 
 
+async def streamed_answer(reply: httpx.Response) -> Answer:
+    streams: dict[str, list[bytes]] = {"stdout": [], "stderr": []}
+    completed: dict[str, Any] | None = None
+    reply.raise_for_status()
+    assert reply.headers["content-type"].startswith("application/x-ndjson")
+    assert reply.headers["x-mirage-job-id"]
+    async for line in reply.aiter_lines():
+        record = json.loads(line)
+        assert completed is None, "output arrived after the completion record"
+        if "stream" in record:
+            data = base64.b64decode(record["data"], validate=True)
+            assert len(data) <= 16 * 1024
+            streams[record["stream"]].append(data)
+        else:
+            completed = record
+    assert completed is not None, "stream ended without completion"
+    assert completed["status"] == "done", completed
+    return shell_answer(
+        b"".join(streams["stdout"]).decode(),
+        b"".join(streams["stderr"]).decode(),
+        int(completed["result"]["exit_code"]),
+    )
+
+
 def tool_answer(reply: dict[str, Any]) -> Answer:
     return {"text": reply["text"], "is_error": bool(reply["is_error"])}
 
@@ -635,7 +659,7 @@ class CliSteps:
     async def shell(
         self, wid: str, command: str, session: str | None
     ) -> Answer:
-        args = ["shell", "-w", wid, "-c", command]
+        args = ["shell", "-w", wid, "-c", command, "--json"]
         if session is not None:
             args += ["-s", session]
         code, out, err = await run(
@@ -1467,7 +1491,17 @@ class Http:
     ) -> Answer:
         base = f"/v1/workspaces/{wid}"
         params = {"session_id": session} if session else {}
+        if step.get("output_stream"):
+            params["stream"] = "true"
         if op in ("shell", "session"):
+            if step.get("output_stream"):
+                async with http.stream(
+                    "POST",
+                    f"{base}/shell",
+                    json={"command": step["command"]},
+                    params=params,
+                ) as reply:
+                    return await streamed_answer(reply)
             reply = await http.post(
                 f"{base}/shell",
                 json={"command": step["command"]},
@@ -1513,6 +1547,8 @@ class Http:
                 },
             )
             reply.raise_for_status()
+            if step.get("output_stream"):
+                return await streamed_answer(reply)
             return io_answer(reply.json())
         if op == "stdin":
             return await self.stream(http, wid, step)
@@ -1628,8 +1664,11 @@ class Cli:
                 *self._session(session),
                 "-c",
                 step["command"],
+                *([] if step.get("output_stream") else ["--json"]),
             )
             code, out, err = await run(argv, env, tty=True)
+            if step.get("output_stream"):
+                return shell_answer(out, err, code)
             return (
                 io_answer(json.loads(out))
                 if out.strip()
@@ -1672,10 +1711,19 @@ class Cli:
                 )
             return explain_answer(json.loads(out))
         if op == "stdin" and "stream" not in step:
-            argv = self.server.cli("shell", "-w", wid, "-c", step["command"])
+            argv = self.server.cli(
+                "shell",
+                "-w",
+                wid,
+                "-c",
+                step["command"],
+                *([] if step.get("output_stream") else ["--json"]),
+            )
             code, out, err = await run(
                 argv, env, stdin=stdin_bytes(step["stdin"])
             )
+            if step.get("output_stream"):
+                return shell_answer(out, err, code)
             return (
                 io_answer(json.loads(out))
                 if out.strip()
@@ -1692,7 +1740,9 @@ class Cli:
     ) -> Answer:
         first, *rest = step["stream"]
         process = await asyncio.create_subprocess_exec(
-            *self.server.cli("shell", "-w", wid, "-c", step["command"]),
+            *self.server.cli(
+                "shell", "-w", wid, "-c", step["command"], "--json"
+            ),
             cwd=ROOT,
             env=env,
             stdin=asyncio.subprocess.PIPE,
@@ -1852,11 +1902,79 @@ async def mcp_case(
         }
     else:
         raise ValueError(op)
-    result = await client.call_tool(tool, arguments)
+    if step.get("progress"):
+        result = await mcp_progress(server, client, wid, tool, arguments, step)
+    else:
+        result = await client.call_tool(tool, arguments)
     return {
         "text": result.content[0].text if result.content else "",
         "is_error": bool(result.is_error),
     }
+
+
+async def mcp_progress(
+    server: Server,
+    client: Any,
+    wid: str,
+    tool: str,
+    arguments: dict[str, Any],
+    step: dict[str, Any],
+) -> Any:
+    """Require streamed progress before releasing a waiting shell line.
+
+    Args:
+        server (Server): the HTTP server for the independent VFS gate.
+        client (Any): the connected MCP client.
+        wid (str): the case's workspace id.
+        tool (str): the tool name.
+        arguments (dict[str, Any]): the tool's arguments.
+        step (dict[str, Any]): the expected previews and optional gate.
+    """
+    updates: list[tuple[float, float | None, str | None]] = []
+    first = asyncio.Event()
+
+    async def progress(
+        value: float, total: float | None, message: str | None
+    ) -> None:
+        updates.append((value, total, message))
+        first.set()
+
+    pending = asyncio.create_task(
+        client.call_tool(tool, arguments, progress_callback=progress)
+    )
+    try:
+        if gate := step.get("progress_gate"):
+            await asyncio.wait_for(first.wait(), STREAM_WAIT)
+            assert not pending.done(), (
+                "progress arrived after command completion"
+            )
+            async with server.client() as http:
+                reply = await http.post(
+                    f"/v1/workspaces/{wid}/vfs/write",
+                    json={"path": gate, "data_base64": "cmVhZHk="},
+                )
+                reply.raise_for_status()
+        result = await asyncio.wait_for(pending, STREAM_WAIT)
+        assert updates, (
+            "the MCP call supplied a progress token but received no previews"
+        )
+        messages = ""
+        previous = -1.0
+        for value, total, message in updates:
+            assert total is None
+            assert message is not None
+            assert message.startswith(("[stdout] ", "[stderr] "))
+            assert len(message) <= 2200
+            assert value > previous
+            previous = value
+            messages += message
+        for preview in step.get("progress_contains", []):
+            assert preview in messages, (preview, messages)
+        return result
+    finally:
+        if not pending.done():
+            pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
 
 
 class Rpc:

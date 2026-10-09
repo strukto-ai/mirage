@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { abortable, makeAbortError } from '../concurrency/limiter.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { SessionState } from './session/session.ts'
@@ -63,6 +64,12 @@ export function lineStatusWriter(session: SessionState): StatusWriter | null {
   return frames.length === 1 ? (frames[0]?.writer ?? null) : null
 }
 
+/** The active line's cancellation channel, when it can be attributed to this session. */
+export function lineSignal(session: SessionState): AbortSignal | undefined {
+  const frames = lineAbortContext.liveStores().filter((frame) => frame.sessions.includes(session))
+  return frames.length === 1 ? frames[0]?.signal : undefined
+}
+
 /**
  * The aborted signal of the line stamping on `session`, or undefined
  * when that line is still wanted, or when no line is running at all (a
@@ -83,23 +90,6 @@ export function abortedLine(session: SessionState): AbortSignal | undefined {
   if (frames.length === 0) return undefined
   const aborted = frames.filter((f) => f.signal?.aborted === true)
   return aborted.length === frames.length ? aborted[0]?.signal : undefined
-}
-
-/**
- * The one error an aborted invocation rejects with. A signal's own reason
- * rides along as `cause` (a caller's `abort(x)`, a timeout's TimeoutError)
- * so every gate keys on one name and the caller still sees why.
- */
-export function makeAbortError(signal?: AbortSignal): DOMException {
-  const reason: unknown = signal?.aborted === true ? signal.reason : undefined
-  // Always a fresh wrapper, even when the reason is itself an AbortError
-  // (a plain `abort()`): the contract is one name and the reason under
-  // `cause`, and a caller reading `cause` must find it on every path.
-  const error = new DOMException('execute aborted', 'AbortError')
-  if (reason !== undefined) {
-    Object.defineProperty(error, 'cause', { value: reason, configurable: true, writable: true })
-  }
-  return error
 }
 
 /**
@@ -154,26 +144,6 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     }
     arm()
     signal?.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
-/** Settle with `promise`, or reject as an abort as soon as `signal` fires. */
-export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (signal === undefined) return promise
-  if (signal.aborted) {
-    // The promise is still ours to settle; a later rejection with no
-    // listener would surface as an unhandled error.
-    void promise.catch(() => undefined)
-    return Promise.reject(makeAbortError(signal))
-  }
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
-      reject(makeAbortError(signal))
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-    promise.then(resolve, reject).finally(() => {
-      signal.removeEventListener('abort', onAbort)
-    })
   })
 }
 

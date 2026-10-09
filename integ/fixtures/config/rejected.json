@@ -1,5 +1,5 @@
 {
-  "note": "Workspace configs both loaders must refuse. Python forbids extra keys on every config block (config.py's ConfigDict(extra='forbid')); the TypeScript loader mirrors those tables in server/src/config.ts. A config that loads in one language and not the other is the bug this fixture exists to catch, so the spellings here are Python's canonical snake_case ones — a camelCase alias TypeScript would otherwise accept for free is just as unportable as a typo. A case may name an `error`: a phrase both loaders' refusals must contain.",
+  "note": "Workspace configs both loaders must refuse. Python forbids extra keys on every config block (config.py's ConfigDict(extra='forbid')); the TypeScript loader mirrors those tables in server/src/config.ts. A config that loads in one language and not the other is the bug this fixture exists to catch, so the spellings here are Python's canonical snake_case ones \u2014 a camelCase alias TypeScript would otherwise accept for free is just as unportable as a typo. A case may name an `error`: a phrase both loaders' refusals must contain.",
   "cases": [
     {
       "name": "mount block: mount_point for mountpoint",
@@ -1232,6 +1232,84 @@
           "p": {
             "cwd": "/d"
           }
+        }
+      }
+    },
+    {
+      "name": "io block: smaller than one chunk",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "io": {
+          "buffer_bytes": 16383
+        }
+      }
+    },
+    {
+      "name": "io block: fractional capacity",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "io": {
+          "buffer_bytes": 65536.5
+        }
+      }
+    },
+    {
+      "name": "io block: boolean capacity",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "io": {
+          "buffer_bytes": true
+        }
+      }
+    },
+    {
+      "name": "io block: string capacity",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "io": {
+          "buffer_bytes": "262144"
+        }
+      }
+    },
+    {
+      "name": "io block: unsafe integer capacity",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "io": {
+          "buffer_bytes": 9007199254740992
+        }
+      }
+    },
+    {
+      "name": "io block: unknown key",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "io": {
+          "buffer_size": 262144
         }
       }
     }

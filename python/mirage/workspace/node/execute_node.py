@@ -497,6 +497,7 @@ async def _run_pipeline(
             call_stack,
             processes,
             execute_fn,
+            registry.io.buffer_bytes,
         )
     if stages.negated:
         io = IOResult(

@@ -323,6 +323,7 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
 
     return {
         StateKey.VERSION: FORMAT_VERSION,
+        StateKey.IO: ws.registry.io.model_dump(),
         StateKey.WRITE: ws._write_default.value,
         StateKey.MIRAGE_VERSION: __version__,
         StateKey.MOUNTS: mounts_state,
@@ -824,6 +825,7 @@ async def _job_to_dict(job) -> dict[str, Any]:
         JobKey.CREATED_AT: job.created_at,
         JobKey.AGENT: job.agent,
         JobKey.SESSION_ID: job.session_id,
+        JobKey.EXECUTION_ID: job.execution_id,
     }
 
 
@@ -863,7 +865,10 @@ def _restored_console(
             data=outcome.encode(),
         )
     )
-    return JobConsole(RAMConsoleStore(chunks=chunks), finished=True)
+    console = JobConsole(RAMConsoleStore(chunks=chunks), finished=True)
+    if execution_id := d.get(JobKey.EXECUTION_ID):
+        console.bind_execution(execution_id)
+    return console
 
 
 def _job_from_dict(d: dict[str, Any]):

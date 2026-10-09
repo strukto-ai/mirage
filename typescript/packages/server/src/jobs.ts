@@ -148,7 +148,10 @@ export class JobTable {
     let error: string | null = null
     try {
       control.controller.signal.throwIfAborted()
-      result = await factory(control.controller.signal, new ExecutionScope(() => this.started(id)))
+      result = await factory(
+        control.controller.signal,
+        new ExecutionScope(() => this.started(id), id),
+      )
     } catch (err) {
       // The job's own cancel aborts its controller; the workspace's (a
       // session or workspace cancel) rejects the line with the abort error.
@@ -208,17 +211,26 @@ export class JobTable {
   }
 
   async cancel(id: string): Promise<boolean> {
-    const [, accepted] = await this.change(id, (r) =>
-      r.cancelRequested
-        ? null
-        : {
-            ...r,
-            cancelRequested: true,
-            status: JobStatus.STOPPING,
-          },
-    )
-    if (accepted) this.live.get(id)?.controller.abort()
-    return accepted
+    const control = this.live.get(id)
+    try {
+      const [, accepted] = await this.change(id, (r) =>
+        r.cancelRequested
+          ? null
+          : {
+              ...r,
+              cancelRequested: true,
+              status: JobStatus.STOPPING,
+            },
+      )
+      return accepted
+    } finally {
+      control?.controller.abort()
+    }
+  }
+
+  /** Join locally owned cleanup independently of record-store health. */
+  async drain(id: string): Promise<void> {
+    await this.live.get(id)?.completion
   }
 
   close(): Promise<void> {

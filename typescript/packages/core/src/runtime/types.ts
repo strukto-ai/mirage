@@ -201,7 +201,7 @@ export interface CodeExecution extends RunArgs {
 }
 
 /** A whole shell line interpreted entirely by the selected runtime. */
-export interface ShellExecution {
+export interface ShellRequest {
   kind: 'shell'
   line: string
   cwd: PathSpec
@@ -220,7 +220,7 @@ export interface ProcessExecution {
   signal?: AbortSignal
 }
 
-export type ExecutionRequest = CodeExecution | ShellExecution | ProcessExecution
+export type ExecutionRequest = CodeExecution | ShellRequest | ProcessExecution
 
 /** Guest APIs for workspace files; policy and backend support still apply per operation. */
 export type FilesystemOperation = 'read' | 'write' | 'list' | 'stat' | 'glob'

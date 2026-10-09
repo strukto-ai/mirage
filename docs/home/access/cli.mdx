@@ -53,10 +53,20 @@ mirage workspace delete demo
 
 | Command | Does |
 | --- | --- |
-| `mirage shell -w ID [-s SESSION] -c LINE [--cwd PATH] [--runtime NAME] [--bg] [--explain]` | Run a line. Piped stdin streams to it, Ctrl-C cancels it, and `--bg` returns a job id at once. |
+| `mirage shell -w ID [-s SESSION] -c LINE [--cwd PATH] [--runtime NAME] [--bg] [--explain] [--json]` | Stream a line's stdout and stderr. Piped stdin streams to it, Ctrl-C cancels it, and `--bg` returns a job id at once. |
 | `mirage vfs CALL ARGS -w ID [-s SESSION] [--explain]` | One of the 24 [VFS calls](/home/access/http#call-the-vfs): its required arguments in order, the rest as `--name VALUE`, bytes from `--data` / `--value` or stdin. Calls are spelled with dashes: `mirage vfs is-dir`. |
 | `mirage glob PATTERN -w ID [-s SESSION]` | Every path a pattern matches. |
 | `mirage tools TOOL ARGS -w ID [-s SESSION]` | One of the [agent tools](/home/access/mcp#tools): `shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`. |
+
+Foreground shell execution writes the line's raw bytes to stdout and stderr as they arrive. Input and output progress together, so a line can answer before piped stdin ends. The CLI waits for the final status and exits with the line's code; Ctrl-C cancels the job.
+
+Use `--json` to collect a single `{kind, exit_code, stdout, stderr, refusal}` result for a script to parse. It uses the same streaming connection and collects at the CLI boundary; stdout and stderr in the JSON result are decoded as UTF-8, replacing invalid bytes. `--bg` still returns a job record and `--explain` still describes the line without executing it. With `--explain`, `--json` also selects JSON when stdout is a terminal.
+
+```bash
+mirage shell -w demo -c 'cat /data/archive.gz' > archive.gz
+cat events.txt | mirage shell -w demo -c 'head -n 10'
+mirage shell -w demo -c 'ls /data' --json | jq .stdout
+```
 
 ### `mirage mcp`
 

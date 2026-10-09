@@ -1,3 +1,5 @@
+import { OutputStream, invoke } from '../../io/stdio.ts'
+import { closeQuietly } from '../../io/stream.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +17,8 @@
 import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
+  getCurrentEvaluation,
+  getCurrentSession,
   effectiveMountMode,
   requirePathsWritable,
   runWithMountGate,
@@ -73,7 +77,7 @@ import {
 import { type WriteContext } from '../../cache/types.ts'
 import { captureCommandScope } from '../../cache/index/scope.ts'
 import type { CacheManager } from '../../cache/manager.ts'
-import { mergeSignals } from '../abort.ts'
+import { lineSignal, mergeSignals } from '../abort.ts'
 import {
   captureRecordingContext,
   runWithMountContext,
@@ -777,9 +781,14 @@ export class MountEntry {
       captureCommandScope(),
       (fn) => runWithRevisions(revisions, async () => await fn()),
     ])
+    const session = getCurrentSession()
+    const signal = mergeSignals(
+      getCurrentEvaluation()?.frame.abortSignal,
+      session === null ? undefined : lineSignal(session),
+    )
     const stream = withMountContext(
       withPullTimeout(
-        this.vfs.readStream(scope, this.index),
+        this.vfs.readStream(scope, this.index, signal),
         limit?.timeoutSeconds ?? null,
         'read',
       ),
@@ -997,6 +1006,7 @@ export class MountEntry {
   ): CommandOpts {
     return {
       stdin: context.stdin ?? null,
+      ...(context.bufferBytes !== undefined ? { bufferBytes: context.bufferBytes } : {}),
       flags,
       mountPrefix: rstripSlash(this.prefix),
       command: cmdName,
@@ -1118,11 +1128,39 @@ export class MountEntry {
             ...(cmdTimeout !== null && cmdTimeout > 0 ? { timeoutSeconds: cmdTimeout } : {}),
           }
         : cmdOpts
+    const scope = new ContextScope([
+      ...captureSessionContext(),
+      ...captureOpPolicies(),
+      ...captureRecordingContext(),
+      captureCacheContext(),
+      captureCommandScope(),
+    ])
     try {
-      return await runWithTimeout(
-        Promise.resolve(cmd.fn(this.vfs.accessor, paths, texts, runOpts)),
-        cmdTimeout,
-        cmdName,
+      return await invoke(
+        (stdio) =>
+          scope.run(() =>
+            this.inCommandScope(context, async () => {
+              const running = Promise.resolve(
+                cmd.fn(this.vfs.accessor, paths, texts, {
+                  ...runOpts,
+                  stdio,
+                  signal: stdio.signal,
+                }),
+              )
+              try {
+                return await runWithTimeout(running, cmdTimeout, cmdName)
+              } catch (error) {
+                if (error instanceof CommandTimeoutError) {
+                  stdio.cancel()
+                  if (stdio.writing) await running.catch(() => undefined)
+                }
+                throw error
+              }
+            }),
+          ),
+        cmdOpts.stdin,
+        runSignal,
+        context.bufferBytes,
       )
     } catch (err) {
       if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
@@ -1146,7 +1184,10 @@ export class MountEntry {
     const [stdout, io] = wrapMountStreams(result, this.mountId, this.activity)
     return [
       stdout !== null && !(stdout instanceof Uint8Array)
-        ? commandOutput(stdout, io, cmdName, paths)
+        ? new OutputStream(commandOutput(stdout, io, cmdName, paths), async () => {
+            await closeQuietly(result[0])
+            await closeQuietly(stdout)
+          })
         : stdout,
       io,
     ]
@@ -1206,7 +1247,7 @@ async function* commandOutput(
   io: IOResult,
   command: string,
   paths: PathSpec[],
-): AsyncIterable<Uint8Array> {
+): AsyncGenerator<Uint8Array> {
   try {
     yield* source
   } catch (err) {

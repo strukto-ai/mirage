@@ -1,3 +1,5 @@
+import type { Stdio } from '../io/stdio.ts'
+import type { CommandOutput, HandlerResult } from '../io/types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -62,6 +64,7 @@ import type { CommandSpec, FlagValue } from './spec/types.ts'
  */
 export interface ExecContext {
   stdin?: ByteSource | null
+  bufferBytes?: number
   cwd?: string
   dispatch?: DispatchFn
   sessionId?: string
@@ -142,7 +145,9 @@ export interface CommandIO<A extends Accessor = Accessor> {
  */
 export interface CommandOpts {
   /** Piped standard input, if any. */
+  stdio?: Stdio
   stdin: ByteSource | null
+  bufferBytes?: number
   /** The parsed flags. Read them through a spec-bound `FlagView`. */
   flags: Record<string, FlagValue>
   /** The prefix of the mount running the command. */
@@ -195,18 +200,18 @@ export interface CommandOpts {
   argv?: readonly string[]
 }
 
-export type CommandFnResult = [ByteSource | null, IOResult] | null
+export type CommandFnResult = CommandOutput | null
 
 /**
  * A command handler: `(accessor, paths, texts, opts)`. Generic on the
  * accessor so a backend's handler can take its own accessor type.
  */
-export type CommandFn<A extends Accessor = Accessor> = (
+export type CommandFn<A extends Accessor = Accessor, Result = CommandFnResult> = (
   accessor: A,
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
-) => Promise<CommandFnResult> | CommandFnResult
+) => Promise<Result> | Result
 
 export type AggregateFn = (results: AggregateResult[]) => Uint8Array
 
@@ -215,7 +220,7 @@ export interface CommandInit {
   spec: CommandSpec
   vfs: string | null
   filetype?: string | null
-  fn: CommandFn
+  fn: CommandFn<Accessor, HandlerResult>
   aggregate?: AggregateFn | null
   write?: boolean
   limit?: Limit | null
@@ -223,7 +228,7 @@ export interface CommandInit {
 }
 
 export interface CommandOverrides {
-  fn?: CommandFn
+  fn?: CommandFn<Accessor, HandlerResult>
 }
 
 /**
@@ -238,7 +243,7 @@ export class Command {
   readonly spec: CommandSpec
   readonly vfs: string | null
   readonly filetype: string | null
-  readonly fn: CommandFn
+  readonly fn: CommandFn<Accessor, HandlerResult>
   readonly aggregate: AggregateFn | null
   readonly write: boolean
   readonly pathGuarded: boolean
@@ -320,7 +325,7 @@ export interface CommandOptions<A extends Accessor = Accessor> {
   name: string
   vfs: string | string[] | null
   spec: CommandSpec
-  fn: CommandFn<A>
+  fn: CommandFn<A, HandlerResult>
   filetype?: string | null
   aggregate?: AggregateFn | null
   write?: boolean
@@ -340,18 +345,18 @@ const ENC = new TextEncoder()
 function answerStandardOptions(
   name: string,
   spec: CommandSpec,
-  fn: CommandFn,
-): { spec: CommandSpec; fn: CommandFn } {
+  fn: CommandFn<Accessor, HandlerResult>,
+): { spec: CommandSpec; fn: CommandFn<Accessor, HandlerResult> } {
   const ownVersion = spec.options.some((o) => o.long === '--version')
   const ownHelp = isBuiltinGrammar(name, spec) && OWN_OPTION_LOOP.has(name)
   const helpText = helpPage(name, spec)
   const versionText = versionLine(name)
-  const wrapped: CommandFn = async (accessor, paths, texts, opts) => {
+  const wrapped: CommandFn<Accessor, HandlerResult> = async (accessor, paths, texts, opts) => {
     if (!ownHelp && opts.flags.help === true) return [ENC.encode(helpText), new IOResult()]
     if (!ownVersion && opts.flags.version === true) {
       return [ENC.encode(versionText), new IOResult()]
     }
-    return fn(accessor, paths, texts, opts)
+    return await fn(accessor, paths, texts, opts)
   }
   return { spec: registeredSpec(name, spec), fn: wrapped }
 }
@@ -363,7 +368,11 @@ function answerStandardOptions(
  */
 export function command<A extends Accessor = Accessor>(options: CommandOptions<A>): Command[] {
   const vfsNames = Array.isArray(options.vfs) ? options.vfs : [options.vfs]
-  const { spec, fn } = answerStandardOptions(options.name, options.spec, options.fn as CommandFn)
+  const { spec, fn } = answerStandardOptions(
+    options.name,
+    options.spec,
+    options.fn as CommandFn<Accessor, HandlerResult>,
+  )
   return vfsNames.map(
     (vfs) =>
       new Command({

@@ -4,6 +4,7 @@ import time
 from collections.abc import Callable
 from threading import RLock
 
+from mirage.execution.context import current_execution, new_execution_id
 from mirage.process.config import ProcessPermissions, ProcessScope
 from mirage.process.handle import ProcessHandle
 from mirage.process.types import ProcessInfo, ProcessRunner
@@ -34,6 +35,7 @@ class ProcessSupervisor:
         run: ProcessRunner,
         parent_pid: int | None = None,
         limit: int | None = None,
+        execution_id: str | None = None,
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -46,6 +48,8 @@ class ProcessSupervisor:
             limit (int | None): the most runners the session may hold,
                 this one included; None for no cap. Stopping runners count
                 until they finish cleanup and leave the live registry.
+            execution_id (str | None): external execution identity for
+                an admitted root; children receive a fresh identity.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -78,6 +82,22 @@ class ProcessSupervisor:
                     "parent process is no longer accepting children"
                 )
             group_id = parent[1].info.group_id if parent is not None else pid
+            ambient = current_execution()
+            identity = execution_id or new_execution_id()
+            parent_identity = (
+                parent[1].info.execution_id
+                if parent is not None
+                else ambient.id
+                if ambient is not None
+                else None
+            )
+            root_identity = (
+                parent[1].info.root_execution_id
+                if parent is not None
+                else ambient.root_id
+                if ambient is not None
+                else identity
+            )
             handle = ProcessHandle(
                 ProcessInfo(
                     pid,
@@ -85,6 +105,9 @@ class ProcessSupervisor:
                     command,
                     cwd,
                     time.time(),
+                    execution_id=identity,
+                    parent_execution_id=parent_identity,
+                    root_execution_id=root_identity,
                     parent_pid=parent_pid,
                     group_id=group_id,
                 ),

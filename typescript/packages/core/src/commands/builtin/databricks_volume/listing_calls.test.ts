@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invoke } from '../../../io/stdio.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
@@ -112,13 +113,15 @@ async function findText(
 ): Promise<string> {
   const cmd = cmdOf('find')
   const accessor = makeAccessor()
-  const result = await cmd.fn(accessor, paths, texts, {
-    stdin: null,
-    flags: {},
-    io: ioFor(DatabricksVolumeVFSBase, accessor),
-    cwd: '/',
-    index,
-  })
+  const result = await invoke(() =>
+    cmd.fn(accessor, paths, texts, {
+      stdin: null,
+      flags: {},
+      io: ioFor(DatabricksVolumeVFSBase, accessor),
+      cwd: '/',
+      index,
+    }),
+  )
   if (result === null) return ''
   const [out] = result
   if (out === null) return ''
@@ -135,13 +138,15 @@ async function runCmd(
 ): Promise<void> {
   const cmd = cmdOf(name)
   const accessor = makeAccessor()
-  const result = await cmd.fn(accessor, paths, texts, {
-    stdin: null,
-    flags,
-    io: ioFor(DatabricksVolumeVFSBase, accessor),
-    cwd: '/',
-    index,
-  })
+  const result = await invoke(() =>
+    cmd.fn(accessor, paths, texts, {
+      stdin: null,
+      flags,
+      io: ioFor(DatabricksVolumeVFSBase, accessor),
+      cwd: '/',
+      index,
+    }),
+  )
   if (result !== null) await materialize(result[0])
 }
 

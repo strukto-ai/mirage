@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invoke } from '../../../io/stdio.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -68,12 +69,14 @@ async function head(n: number, maxReadRows?: number): Promise<[string[], number,
       ...(maxReadRows === undefined ? {} : { maxReadRows }),
     }),
   )
-  const result = await cmd.fn(accessor, [ROWS], [], {
-    stdin: null,
-    flags: { lines: String(n) },
-    io: ioFor(PostgresVFSBase, accessor),
-    cwd: '/',
-  })
+  const result = await invoke(() =>
+    cmd.fn(accessor, [ROWS], [], {
+      stdin: null,
+      flags: { lines: String(n) },
+      io: ioFor(PostgresVFSBase, accessor),
+      cwd: '/',
+    }),
+  )
   if (result === null) throw new Error('head returned nothing')
   const [out, io] = result
   const dec = new TextDecoder()

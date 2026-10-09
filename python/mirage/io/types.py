@@ -12,14 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Literal
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.cooperative import chunks
 from mirage.types import PathSpec, Producer, Refusal
 
 ByteSource = bytes | AsyncIterator[bytes]
+StreamName = Literal["stdout", "stderr"]
+
+
+@dataclass(frozen=True, slots=True)
+class OutputEvent:
+    stream: StreamName
+    data: bytes
 
 
 class DeviceInput(bytes):
@@ -35,6 +43,21 @@ class DeviceInput(bytes):
 # The shape every command returns: a live stdout stream (None when
 # buffered into the result) and the command's outcome.
 CommandOutput = tuple["ByteSource | None", "IOResult"]
+
+
+@dataclass(slots=True)
+class OutputState:
+    """Routing and settlement shared by a live handler's result and drain."""
+
+    stderr: Callable[[bytes], Awaitable[None]] | None = None
+    settled: bool = False
+    callbacks: list[Callable[[], None]] = field(default_factory=list)
+
+    def finish(self) -> None:
+        self.settled = True
+        for callback in self.callbacks:
+            callback()
+        self.callbacks.clear()
 
 
 async def materialize(stream: ByteSource | None) -> bytes:
@@ -226,6 +249,7 @@ class IOResult:
             writes if writes is not None else {}
         )
         self.cache: list[str] = cache if cache is not None else []
+        self.output: OutputState | None = None
         self.output_finalized = False
         self.producer = producer
         self.refusal = refusal
@@ -291,6 +315,10 @@ class IOResult:
                 other.refusal if other.refusal is not None else self.refusal
             ),
         )
+        result.output = other.output
         result.output_finalized = other.output_finalized
         result._stream_source = other
         return result
+
+
+HandlerResult = CommandOutput | IOResult | None

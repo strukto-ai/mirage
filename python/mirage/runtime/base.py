@@ -32,7 +32,7 @@ from mirage.runtime.types import (
     RuntimeCapabilities,
     RuntimeReach,
     ScriptSource,
-    ShellExecution,
+    ShellRequest,
 )
 from mirage.utils.activity import Activity
 
@@ -184,7 +184,7 @@ class Runtime(ABC):
             if not request.argv:
                 raise ValueError("process argv must not be empty")
             return await self.run_process(request)
-        if isinstance(request, ShellExecution) and isinstance(
+        if isinstance(request, ShellRequest) and isinstance(
             self, LineExecutorMixin
         ):
             return await self.run_line(

@@ -12,9 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
+
 from mirage.accessor.discord import DiscordAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.core.discord.files import download_file
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.discord.files import download_file, download_file_stream
 from mirage.core.discord.history import get_history_jsonl
 from mirage.core.discord.members import list_members
 from mirage.core.discord.readdir import readdir
@@ -25,6 +28,7 @@ from mirage.core.hierarchy.read import make_read, make_read_range
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.time_range import day_channel_id, guard_day
 from mirage.errors.fs import enoent
+from mirage.io.cooperative import chunks
 from mirage.types import PathSpec
 
 
@@ -122,3 +126,25 @@ read_range = make_read_range(
     read,
     ranged={"file_blob": _read_blob_range},
 )
+
+
+async def read_stream(
+    accessor: DiscordAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> AsyncGenerator[bytes, None]:
+    """Stream attachments; preserve the rendered order of JSON records.
+
+    Args:
+        accessor (DiscordAccessor): backend accessor.
+        path (PathSpec): file to read.
+        index (IndexCacheStore): cached directory entries.
+    """
+    if detect_scope(path).kind == "file_blob":
+        url = await _blob_url(accessor, path, index)
+        source = download_file_stream(url, session=accessor.pool)
+    else:
+        source = chunks(await read(accessor, path, index))
+    async with aclosing(source):
+        async for chunk in source:
+            yield chunk

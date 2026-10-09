@@ -80,6 +80,8 @@
    "op": "shell",
    "setup": ["mkdir -p /src", "printf 'Needle\\nhay\\n' > /src/a.py", "echo key > /vault/key.txt"],
    "cases": [
+    {"id": "mcp_progress_precedes_completion", "accesses": ["mcp", "mcp_stdio"], "input": {"command": "echo preview; while [ ! -e /progress-ready ]; do sleep 0.01; done; echo error >&2; exit 7", "progress": true, "progress_gate": "/progress-ready", "progress_contains": ["[stdout] preview", "[stderr] error"]}, "expect": {"text": "preview\n\nerror\n", "is_error": true}},
+    {"id": "mcp_progress_keeps_unicode_and_final_output", "accesses": ["mcp", "mcp_stdio"], "input": {"command": "echo 'α 世界'; echo tail >&2", "progress": true, "progress_contains": ["[stdout] α 世界", "[stderr] tail"]}, "expect": {"text": "α 世界\n\ntail\n", "is_error": false}},
     {"id": "runs_a_line", "input": {"command": "echo hi"}, "expect": {"text": "hi\n", "is_error": false}},
     {"id": "runs_a_pipeline", "input": {"command": "printf 'a\\nb\\nc\\n' | wc -l"}, "expect": {"text": "3\n", "is_error": false}},
     {"id": "reports_a_failure", "input": {"command": "cat /src/none.txt"}, "expect": {"text": "cat: /src/none.txt: No such file or directory\n", "is_error": true}},
@@ -87,7 +89,10 @@
     {"id": "keeps_stdout_and_stderr", "input": {"command": "echo out; echo err >&2"}, "expect": {"text": "out\n\nerr\n", "is_error": false}},
     {"id": "keeps_unicode", "input": {"command": "echo 'α β'"}, "expect": {"text": "α β\n", "is_error": false}},
     {"id": "reads_a_file", "input": {"command": "grep -c e /src/a.py"}, "expect": {"text": "1\n", "is_error": false}},
-    {"id": "sees_every_mount", "input": {"command": "cat /vault/key.txt"}, "expect": {"text": "key\n", "is_error": false}}
+    {"id": "sees_every_mount", "input": {"command": "cat /vault/key.txt"}, "expect": {"text": "key\n", "is_error": false}},
+    {"id": "streams_both_output_channels", "accesses": ["inapp", "http", "cli"], "input": {"command": "echo out; echo err >&2", "output_stream": true}, "expect": {"text": "out\n\nerr\n", "is_error": false}},
+    {"id": "streams_unicode_and_nul", "accesses": ["inapp", "http", "cli"], "input": {"command": "printf 'hé\\000世界\\n'", "output_stream": true}, "expect": {"text": "hé\u0000世界\n", "is_error": false}},
+    {"id": "stream_preserves_terminal_exit_status", "accesses": ["inapp", "http", "cli"], "input": {"command": "echo prefix; exit 7", "output_stream": true}, "expect": {"text": "prefix\n", "is_error": true}}
    ]
   },
   {
@@ -101,7 +106,8 @@
     {"id": "keeps_every_byte", "input": {"command": "md5sum", "stdin": {"repeat": "α\u0000\r\n", "times": 240000}}, "expect": {"text": "87b85f6a2c70337c90a0a5f0a7a8fe10  -\n", "is_error": false}},
     {"id": "matches_unicode_in_bulk", "input": {"command": "grep -o α | wc -l", "stdin": {"repeat": "α x\n", "times": 16000}}, "expect": {"text": "16000\n", "is_error": false}},
     {"id": "streams_into_a_running_line", "accesses": ["inapp", "http", "cli", "ssh"], "input": {"command": "head -n 1", "stream": ["first\n", "second\n"]}, "expect": {"text": "first\n", "is_error": false}},
-    {"id": "starts_before_its_stdin_sends_a_byte", "accesses": ["inapp", "http", "cli", "ssh"], "input": {"command": "echo started", "stream": ["", "unread\n"]}, "expect": {"text": "started\n", "is_error": false}}
+    {"id": "starts_before_its_stdin_sends_a_byte", "accesses": ["inapp", "http", "cli", "ssh"], "input": {"command": "echo started", "stream": ["", "unread\n"]}, "expect": {"text": "started\n", "is_error": false}},
+    {"id": "streams_stdin_through_stdout_and_stderr", "accesses": ["inapp", "http", "cli"], "input": {"command": "cat; echo err >&2", "stdin": "hé\u0000世界\n", "output_stream": true}, "expect": {"text": "hé\u0000世界\n\nerr\n", "is_error": false}}
    ]
   },
   {

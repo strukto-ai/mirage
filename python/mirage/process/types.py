@@ -21,6 +21,9 @@ class ProcessInfo:
     command: str
     cwd: PathSpec
     started_at: float
+    execution_id: str
+    parent_execution_id: str | None
+    root_execution_id: str
     state: ProcessState = ProcessState.RUNNING
     cancellation_requested: bool = False
     exit_code: int | None = None

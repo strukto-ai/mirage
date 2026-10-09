@@ -1,16 +1,20 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
+from mirage.execution.context import new_execution_id
 from mirage.io.yield_budget import YieldBudget
 from mirage.workspace.abort import MirageAbortError
 
 
 class ExecutionScope:
-    """One scheduling budget shared by a foreground call and its evaluations."""
+    """Identity and scheduling budget shared by a call and its evaluations."""
 
     def __init__(
-        self, on_start: Callable[[], Awaitable[None]] | None = None
+        self,
+        on_start: Callable[[], Awaitable[None]] | None = None,
+        execution_id: str | None = None,
     ) -> None:
+        self.id = execution_id or new_execution_id()
         self._budget = YieldBudget()
         self._on_start = on_start
 

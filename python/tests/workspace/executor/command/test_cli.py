@@ -18,6 +18,7 @@ import pytest
 from pydantic import BaseModel
 
 from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.config import command
 from mirage.commands.errors import PartialOutputError
 from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import CommandSpec, Operand, Option, UsageStyle
@@ -1089,3 +1090,82 @@ async def test_invocation_shell_is_revoked_after_cancellation():
         await task
     with pytest.raises(RuntimeError, match="no longer active"):
         await saved[0]("echo late")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["cli", "mount"])
+async def test_native_writer_routes_interleaved_channels_and_late_status(kind):
+    async def write(stdio):
+        await stdio.stdout.write(b"a" * 100000)
+        await stdio.stderr.write(b"e" * 100000)
+        await stdio.stdout.write(b"z")
+        return IOResult(exit_code=7)
+
+    async def leaf(inv):
+        return await write(inv.stdio)
+
+    @command("writer", vfs="ram", spec=CommandSpec())
+    async def builtin(accessor, paths, texts, opts):
+        return await write(opts.stdio)
+
+    with Workspace({"/ram": RAMVFS()}, mode="write") as ws:
+        if kind == "cli":
+            ws.register_cli("writer", CLISpec(name="writer", fn=leaf))
+        else:
+            ws.mount("/ram").register_commands([builtin])
+        await ws.shell("cd /ram")
+        result = await ws.shell("writer")
+        assert result.stdout == b"a" * 100000 + b"z"
+        assert result.stderr == b"e" * 100000
+        assert result.exit_code == 7
+        result = await ws.shell("writer 2>&1")
+        assert result.stdout == b"a" * 100000 + b"e" * 100000 + b"z"
+        assert not result.stderr
+        assert result.exit_code == 7
+        await ws.shell("writer > /ram/log 2>&1")
+        result = await ws.shell("cat /ram/log")
+        assert result.stdout == b"a" * 100000 + b"e" * 100000 + b"z"
+
+
+@pytest.mark.asyncio
+async def test_native_writer_closes_on_early_pipeline_consumer_exit():
+    closed = asyncio.Event()
+
+    async def writer(inv):
+        try:
+            while True:
+                await inv.stdio.stdout.write(b"x" * 16384)
+        finally:
+            closed.set()
+
+    with Workspace({"/ram": RAMVFS()}, mode="write") as ws:
+        ws.register_cli("writer", CLISpec(name="writer", fn=writer))
+        result = await asyncio.wait_for(ws.shell("writer | head -c 1"), 2)
+        assert result.stdout == b"x"
+        assert result.exit_code == 0
+        assert closed.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout", [None, 1])
+async def test_native_cli_unstarted_output_close_joins_producer(timeout):
+    closed = asyncio.Event()
+
+    async def writer(inv):
+        try:
+            await inv.stdio.stdout.write(b"prefix")
+            await inv.stdio.wait_cancelled()
+            return IOResult()
+        finally:
+            closed.set()
+
+    spec = CLISpec(
+        name="writer",
+        fn=writer,
+        limit=Limit(timeout_seconds=timeout) if timeout is not None else None,
+    )
+    output, _, _ = await handle_cli(
+        CLIInstall(name="writer", spec=spec), ["writer"], SessionState("test")
+    )
+    await asyncio.wait_for(output.aclose(), 1)
+    assert closed.is_set()

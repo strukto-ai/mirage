@@ -129,6 +129,7 @@ export class RecordIndex {
 }
 
 export interface OpRecordInit {
+  executionId?: string | null
   op: string
   path: string
   source: string
@@ -166,6 +167,7 @@ export interface OpRecordInit {
 }
 
 export class OpRecord {
+  readonly executionId: string | null
   readonly op: string
   readonly path: string
   readonly source: string
@@ -181,6 +183,7 @@ export class OpRecord {
   sealed: boolean
 
   constructor(init: OpRecordInit) {
+    this.executionId = init.executionId ?? null
     this.op = init.op
     this.path = init.path
     this.source = init.source
@@ -208,6 +211,7 @@ export class OpRecord {
       durationMs: this.durationMs,
       fingerprint: this.fingerprint,
       revision: this.revision,
+      ...(this.executionId === null ? {} : { execution_id: this.executionId }),
     }
   }
 }

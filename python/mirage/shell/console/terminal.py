@@ -15,6 +15,7 @@
 import asyncio
 from collections import deque
 
+from mirage.io.cooperative import CHUNK_SIZE
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.types import Channel, OwnedStream
 
@@ -38,6 +39,16 @@ class Terminal(JobConsole):
         self.jobs = JobOutput(JobSide(self))
         self.ended = 0
         self.attaching: asyncio.Event | None = None
+        self._prefix = bytearray()
+
+    @property
+    def stdout_prefix(self) -> bytes:
+        """A bounded prefix of stdout handed to the current line's reader."""
+        return bytes(self._prefix)
+
+    def _remember(self, channel: Channel, data: bytes) -> None:
+        if channel == Channel.STDOUT:
+            self._prefix.extend(data[: max(0, CHUNK_SIZE - len(self._prefix))])
 
     async def emit(self, channel: Channel, data: bytes) -> None:
         """Take what the line wrote.
@@ -60,6 +71,7 @@ class Terminal(JobConsole):
         if not data:
             return
         if self.reader is not None:
+            self._remember(channel, data)
             await self.reader.emit(channel, data)
             return
         self.chunks.append((channel, data, job))
@@ -79,6 +91,7 @@ class Terminal(JobConsole):
             reader (JobConsole | None): where the caller streams the line,
                 None to collect it.
         """
+        self._prefix.clear()
         if reader is None:
             self.reader = None
             return
@@ -87,6 +100,7 @@ class Terminal(JobConsole):
         try:
             while self.chunks:
                 channel, data, _ = self.chunks.popleft()
+                self._remember(channel, data)
                 await reader.emit(channel, data)
                 if self.ended != ended:
                     return
@@ -133,6 +147,7 @@ class Terminal(JobConsole):
         """Detach the line's reader and let go the writers waiting on
         its attach."""
         self.reader = None
+        self._prefix.clear()
         self.ended += 1
         if self.attaching is not None:
             self.attaching.set()

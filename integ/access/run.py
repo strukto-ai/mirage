@@ -466,7 +466,7 @@ async def cross_host(
 ) -> None:
     other = "typescript" if server.host == "python" else "python"
     recorder.command(other, ("shell",))
-    argv = mirage_cli(other, "shell", "-w", SEED, "-c", "echo cross")
+    argv = mirage_cli(other, "shell", "--json", "-w", SEED, "-c", "echo cross")
     code, out, err = await run(argv, server.env(), tty=True)
     got = (
         io_answer(json.loads(out))
@@ -713,7 +713,9 @@ async def lifecycle(
             )
         ) as client:
             await client.call_tool("shell", {"command": "echo kept >> /k"})
-    _, out, _ = await cli("shell", "-w", "named", "-c", "cat /k", tty=True)
+    _, out, _ = await cli(
+        "shell", "--json", "-w", "named", "-c", "cat /k", tty=True
+    )
     got["mcp_named"] = json.loads(out)["stdout"]
     code, _, _ = await cli("mcp", "-w", "e", "-s", "nope")
     got["mcp_unknown_session"] = str(code)

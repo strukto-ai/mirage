@@ -14,14 +14,14 @@
 
 import json
 import os
-import signal
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from httpx._utils import peek_filelike_length
 from typer.testing import CliRunner
 
-from mirage.cli import shell
+from mirage.cli import shell, stream
 
 
 def test_piped_stdin_is_sent_without_a_size(monkeypatch):
@@ -46,8 +46,8 @@ class _Answer:
         return json.loads(self.content)
 
 
-class _InterruptedSubmit:
-    """A server double that takes Ctrl-C while the line is submitted."""
+class _Client:
+    """A daemon double for shell CLI dispatch."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
@@ -64,21 +64,46 @@ class _InterruptedSubmit:
     def request(self, method: str, path: str, **kwargs: Any) -> _Answer:
         self.calls.append((method, path))
         if path.endswith("/shell"):
-            os.kill(os.getpid(), signal.SIGINT)
             return _Answer(202, {"job_id": "j1"})
         if method == "DELETE":
             return _Answer(200, {})
         return _Answer(200, {"finished_at": 1.0, "status": "canceled"})
 
 
-def test_ctrl_c_during_the_submit_cancels_the_job(monkeypatch):
-    client = _InterruptedSubmit()
+@pytest.mark.parametrize("json_output", [False, True])
+@pytest.mark.parametrize("piped", [False, True])
+def test_foreground_always_uses_the_stream_transport(
+    monkeypatch, json_output, piped
+):
+    client = _Client()
+    calls = []
     monkeypatch.setattr(shell, "make_client", lambda: client)
-    tty = SimpleNamespace(isatty=lambda: True)
-    monkeypatch.setattr(shell, "sys", SimpleNamespace(stdin=tty))
-    result = CliRunner().invoke(shell.app, ["-w", "w", "-c", "sleep 20"])
-    assert result.exit_code == 130
-    assert ("DELETE", "/v1/jobs/j1") in client.calls
+    monkeypatch.setattr(
+        shell,
+        "sys",
+        SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: not piped)),
+    )
+
+    async def run(client_arg, path, payload, piped_arg, *, json_output):
+        calls.append((client_arg, path, payload, piped_arg, json_output))
+        return 7
+
+    monkeypatch.setattr(stream, "stream_shell", run)
+    args = ["-w", "space id", "-c", "cat", "-s", "session id"]
+    result = CliRunner().invoke(
+        shell.app, args + (["--json"] if json_output else [])
+    )
+    assert result.exit_code == 7
+    assert calls == [
+        (
+            client,
+            "/v1/workspaces/space%20id/shell?session_id=session+id&stream=true",
+            {"command": "cat"},
+            piped,
+            json_output,
+        )
+    ]
+    assert not client.calls
 
 
 def _command(
@@ -139,3 +164,43 @@ def test_explain_prints_the_line_as_its_tree():
         "      substitution: cat /data/keys/a",
         "        cat /data/keys/a  [deny, exit 1: sealed]  top",
     ]
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_background_returns_structured_job_with_optional_json(
+    monkeypatch, json_output
+):
+    client = _Client()
+    monkeypatch.setattr(shell, "make_client", lambda: client)
+    monkeypatch.setattr(
+        shell,
+        "sys",
+        SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: True)),
+    )
+    result = CliRunner().invoke(
+        shell.app,
+        ["-w", "w", "-c", "cat", "--background"]
+        + (["--json"] if json_output else []),
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"job_id": "j1"}
+    assert client.calls == [("POST", "/v1/workspaces/w/shell")]
+
+
+def test_stream_broken_pipe_exits_141_without_traceback(monkeypatch):
+    client = _Client()
+    monkeypatch.setattr(shell, "make_client", lambda: client)
+    monkeypatch.setattr(
+        shell,
+        "sys",
+        SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: True)),
+    )
+    error = BrokenPipeError("broken pipe")
+
+    async def run(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(stream, "stream_shell", run)
+    result = CliRunner().invoke(shell.app, ["-w", "w", "-c", "cat"])
+    assert result.exit_code == 141
+    assert result.output == ""

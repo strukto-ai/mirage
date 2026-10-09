@@ -34,6 +34,7 @@ from mirage.policy.profile import (
     SessionProfile,
 )
 from mirage.runtime.types import ScriptSource
+from mirage.shell.console.types import Channel
 from mirage.types import Limit, MountMode, OnExceed, Refusal
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session
@@ -761,6 +762,65 @@ class CapBytesHard(Policy):
 class Boom(Policy):
     async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
         raise RuntimeError("boom")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy, command, stdout, stderr, exit_code, failed",
+    [
+        (
+            CapLines,
+            "printf '1\\n2\\n3\\n'; echo fourth",
+            b"1\n2\n",
+            b"output truncated",
+            0,
+            False,
+        ),
+        (
+            CapBytesHard,
+            "echo secret; echo more",
+            b"",
+            b"output truncated",
+            1,
+            False,
+        ),
+        (
+            Boom,
+            "echo secret; echo forbidden >&2",
+            b"",
+            b"forbidden\necho: Permission denied\n",
+            126,
+            True,
+        ),
+    ],
+    ids=["truncate", "hard-limit", "failed-policy"],
+)
+async def test_stream_exposes_only_post_execute_approved_output(
+    policy, command, stdout, stderr, exit_code, failed
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        ws.policies.add(policy())
+        execution = await ws.shell(command, stream=True)
+        output = {Channel.STDOUT: bytearray(), Channel.STDERR: bytearray()}
+        async with execution:
+            async for event in execution.events:
+                output[event.stream].extend(event.data)
+            result = await execution.wait()
+        assert bytes(output[Channel.STDOUT]) == stdout
+        assert stderr in output[Channel.STDERR]
+        assert result.exit_code == exit_code
+        assert await result.materialize_stdout() == b""
+        assert await result.materialize_stderr() == b""
+        if failed:
+            assert bytes(output[Channel.STDERR]) == stderr
+            assert result.refusal == Refusal(
+                kind="failed", reason="Boom failed", policy="Boom"
+            )
+        else:
+            assert result.refusal is None
+    finally:
+        await ws.close()
 
 
 class DenyReads(Policy):

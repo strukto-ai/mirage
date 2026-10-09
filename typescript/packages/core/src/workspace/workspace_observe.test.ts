@@ -15,6 +15,8 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { CHUNK_SIZE } from '../io/cooperative.ts'
+import { STDOUT_TRUNCATE } from '../observe/log_entry.ts'
 import { RAMObserverStore } from '../observe/store.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
@@ -136,6 +138,33 @@ describe('Workspace observer wiring', () => {
     expect(commands.map((e) => e.stdout)).toEqual(['hi\n'])
     await ws.close()
   })
+
+  it.each([false, true])(
+    'keeps bounded Unicode stdout in history with stream=%s',
+    async (stream) => {
+      const ws = buildWorkspace()
+      const text = '€'.repeat(CHUNK_SIZE)
+      const payload = new TextEncoder().encode(text)
+      async function* source(): AsyncGenerator<Uint8Array> {
+        for (let offset = 0; offset < payload.byteLength; offset += 1001)
+          yield await Promise.resolve(payload.subarray(offset, offset + 1001))
+      }
+      try {
+        const result = stream
+          ? await (
+              await ws.shell('cat; echo warning >&2', { stdin: source(), stream: true })
+            ).collect()
+          : await ws.shell('cat; echo warning >&2', { stdin: source() })
+        expect(result.stdout).toEqual(payload)
+        expect(result.stderrText).toBe('warning\n')
+        expect((await ws.history()).map((entry) => entry.stdout)).toEqual([
+          text.slice(0, STDOUT_TRUNCATE),
+        ])
+      } finally {
+        await ws.close()
+      }
+    },
+  )
 
   // Op events name the virtual path, mount prefix included, so two mounts
   // holding the same filename stay distinguishable in the recording. The

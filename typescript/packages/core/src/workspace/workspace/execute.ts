@@ -43,13 +43,8 @@ import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
-import {
-  hasAborted,
-  lineStatusWriter,
-  makeAbortError,
-  mergeSignals,
-  runWithLineAbort,
-} from '../abort.ts'
+import { hasAborted, lineStatusWriter, mergeSignals, runWithLineAbort } from '../abort.ts'
+import { makeAbortError } from '../../concurrency/limiter.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
@@ -82,7 +77,8 @@ import type { SessionManager } from '../session/manager.ts'
 import { type SessionState } from '../session/session.ts'
 import { type StatusWriter, newStatusWriter } from '../abort.ts'
 import { ExecutionNode } from '../types.ts'
-import { abortable, joinOrAbort } from '../abort.ts'
+import { joinOrAbort } from '../abort.ts'
+import { abortable } from '../../concurrency/limiter.ts'
 import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
 import { finishShell, inheritTraps } from '../executor/traps.ts'
@@ -145,9 +141,14 @@ interface NestedRefusal {
  * to take, then what it answers with besides. Mirrors Python's `_shown`.
  */
 async function shown(io: IOResult, sink: JobConsole | undefined): Promise<IOResult> {
-  if (!(sink instanceof Terminal) || sink.reader !== null) return io
-  const [out, err] = sink.drain()
-  sink.putBack(out, err)
+  if (!(sink instanceof Terminal)) return io
+  let out: Uint8Array
+  if (sink.reader !== null) out = sink.stdoutPrefix
+  else {
+    const [stdout, stderr] = sink.drain()
+    sink.putBack(stdout, stderr)
+    out = stdout
+  }
   return new IOResult({
     stdout: concat([out, await io.materializeStdout()]),
     exitCode: io.exitCode,
@@ -284,6 +285,11 @@ async function runLine(
   // Loads nothing the shell observes, so a stalled state store loses to
   // the signal at once rather than holding the caller.
   await abortable(preflight(env), options.signal)
+  // Whole-invocation policies must approve the result before bytes escape.
+  if (env.registry.policies.wants('postExecute')) {
+    options = { ...options }
+    delete options.sink
+  }
   // Evaluator calls carry their exact session, including ephemeral forks.
   // Ambient re-entry is safe only with task-local storage: the browser
   // fallback's newest frame may belong to an unrelated shell call.
@@ -318,6 +324,7 @@ async function runLine(
     let process: ProcessHandle
     try {
       process = env.jobTable.processes.start({
+        executionId: executionScope.id,
         sessionId: targetSession.sessionId,
         limit: targetSession.processes.max,
         command,

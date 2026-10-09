@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../io/cooperative.ts'
 import { dayChannelId, guardDay } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -20,7 +21,7 @@ import { enoent } from '../../errors/fs.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import { makeRead, makeReadRange } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { downloadFile } from './files.ts'
+import { downloadFile, downloadFileStream } from './files.ts'
 import { getHistoryJsonl } from './history.ts'
 import { listMembers } from './members.ts'
 import { readdir } from './readdir.ts'
@@ -101,3 +102,18 @@ export const read = makeRead<DiscordAccessor>(detectScope, {
 export const readRange = makeReadRange<DiscordAccessor>(detectScope, read, {
   file_blob: readBlobRange,
 })
+
+/** Stream attachments; preserve the rendered order of JSON records. */
+export async function* readStream(
+  accessor: DiscordAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array, void> {
+  if (detectScope(path).kind === 'file_blob') {
+    const url = await blobUrl(accessor, path, index)
+    yield* downloadFileStream(url, signal)
+  } else {
+    yield* chunks(await read(accessor, path, index), signal)
+  }
+}

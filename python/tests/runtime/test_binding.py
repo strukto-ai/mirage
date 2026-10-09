@@ -27,7 +27,7 @@ from mirage import (
     ProcessExecution,
     RunResult,
     Runtime,
-    ShellExecution,
+    ShellRequest,
     UnsupportedExecutionError,
     Workspace,
 )
@@ -90,7 +90,7 @@ class DenySecret(Policy):
 @pytest.mark.asyncio
 async def test_execute_capabilities_and_refusals():
     code = CodeExecution(language="python", code="hello")
-    shell = ShellExecution(
+    shell = ShellRequest(
         line="echo hello", cwd=PathSpec.from_str_path("/work"), stdin=b"!"
     )
     process = ProcessExecution(

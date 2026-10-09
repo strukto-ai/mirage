@@ -37,6 +37,8 @@ export interface StatCheck {
   offset?: number
   size?: number | null
   stream?: boolean
+  max_chunk_size?: number
+  take_bytes?: number
 }
 
 export interface Case {
@@ -160,7 +162,8 @@ function checkField(st: HarnessStat, name: string): string {
  * shell command asks for one, because commands read whole files, so the
  * ranged read op is only reachable through the same door FUSE and `ws.vfs`
  * use. `read` with `stream` reads the stored bytes as the door streams them
- * (no command does yet) and fails when they come back whole.
+ * and fails when they come back whole. `max_chunk_size` bounds each chunk;
+ * `take_bytes` closes a read after its prefix to exercise partial consumption.
  */
 export async function statCheck(ws: ExecWorkspace, check: StatCheck): Promise<string> {
   if (check.read !== undefined && check.stream === true) {
@@ -168,8 +171,17 @@ export async function statCheck(ws: ExecWorkspace, check: StatCheck): Promise<st
     if (stream instanceof Uint8Array) throw new Error(`${check.read}: the read was not streamed`)
     const decoder = new TextDecoder()
     let text = ''
+    let remaining = check.take_bytes
     for await (const chunk of stream as AsyncIterable<Uint8Array>) {
-      text += decoder.decode(chunk, { stream: true })
+      if (chunk.byteLength > (check.max_chunk_size ?? Infinity)) {
+        throw new Error('stream exceeded max_chunk_size')
+      }
+      const part = remaining === undefined ? chunk : chunk.subarray(0, remaining)
+      text += decoder.decode(part, { stream: true })
+      if (remaining !== undefined) {
+        remaining -= part.byteLength
+        if (remaining === 0) break
+      }
     }
     return text + decoder.decode()
   }

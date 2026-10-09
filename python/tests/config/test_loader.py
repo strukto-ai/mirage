@@ -1413,3 +1413,31 @@ def test_a_write_policy_reaches_its_mount(workspace, block, expected):
     assert mounts["/a"].read == ReadSpec(policy=ReadPolicy.FRESH, ttl=45)
     assert mounts["/a"].index == IndexConfig(ttl=37)
     assert mounts["/b"].write is WritePolicy.UNCONDITIONAL
+
+
+@pytest.mark.asyncio
+async def test_io_buffer_config_reaches_workspace():
+    cfg = load_config({"mounts": {}, "io": {"buffer_bytes": 262144}})
+    ws = Workspace(**cfg.to_workspace_kwargs())
+    try:
+        assert ws.io.buffer_bytes == 262144
+        assert ws.registry.io is ws.io
+    finally:
+        await ws.close()
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        None,
+        [],
+        {"buffer_bytes": True},
+        {"buffer_bytes": "65536"},
+        {"buffer_bytes": 16383},
+        {"buffer_bytes": 2**53},
+        {"bufferBytes": 262144},
+    ],
+)
+def test_io_buffer_config_rejects_invalid_blocks(block):
+    with pytest.raises(ValueError):
+        load_config({"mounts": {}, "io": block})

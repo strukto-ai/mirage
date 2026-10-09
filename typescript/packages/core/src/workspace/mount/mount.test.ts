@@ -258,7 +258,7 @@ describe('Mount.runCommand', () => {
     m.register(cmd)
     const [stdout, io] = await m.runCommand('cat', [PathSpec.fromStrPath('/x.txt')], [], {})
     expect(io.exitCode).toBe(0)
-    expect(stdout).toBeInstanceOf(Uint8Array)
+    expect(await materialize(stdout)).toEqual(new TextEncoder().encode('ok'))
   })
 
   it('rejects write commands on a READ mount', async () => {
@@ -493,10 +493,42 @@ it('a path-guarded command is still held at its write', async () => {
   mount.register(cmd)
   // The write is refused where it happens and gzip says so in its own words
   // (the fatal write_error form), leaving the store untouched.
-  const [, io] = await mount.runCommand('gzip', [PathSpec.fromStrPath('/ram/a')], [], {})
-  expect([io.exitCode, new TextDecoder().decode(io.stderr as Uint8Array)]).toEqual([
+  const [stdout, io] = await mount.runCommand('gzip', [PathSpec.fromStrPath('/ram/a')], [], {})
+  await materialize(stdout)
+  expect([io.exitCode, new TextDecoder().decode(await io.materializeStderr())]).toEqual([
     1,
     '\ngzip: /ram/a.gz: Read-only file system\n',
   ])
   expect([...vfs.store.files.entries()]).toEqual([['/a', new TextEncoder().encode('original')]])
 })
+
+it.each([false, true])(
+  'closes native output and releases mount admission (started=%s)',
+  async (started) => {
+    let closed = false
+    const [cmd] = command({
+      name: 'writer',
+      vfs: 'ram',
+      spec: new CommandSpec(),
+      fn: async (_accessor, _paths, _texts, opts) => {
+        if (opts.stdio === undefined) throw new Error('missing stdio')
+        try {
+          await opts.stdio.stdout.write(new TextEncoder().encode('prefix'))
+          await opts.stdio.waitCancelled()
+          return new IOResult()
+        } finally {
+          closed = true
+        }
+      },
+    })
+    if (cmd === undefined) throw new Error('missing command')
+    const mount = makeMount()
+    mount.register(cmd)
+    const [output] = await mount.runCommand('writer', [], [], {})
+    const iterator = output as AsyncIterableIterator<Uint8Array>
+    if (started) expect((await iterator.next()).value).toEqual(new TextEncoder().encode('prefix'))
+    await iterator.return?.()
+    expect(closed).toBe(true)
+    await mount.activity.wait()
+  },
+)

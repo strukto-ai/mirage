@@ -1,3 +1,4 @@
+import { concat } from '../../io/cachable_iterator.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +31,8 @@ import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
 import { isProgramInvocation, runWithEvaluation } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { abortable, mergeSignals } from '../abort.ts'
+import { mergeSignals } from '../abort.ts'
+import { abortable } from '../../concurrency/limiter.ts'
 import type { SessionView } from '../../view/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
@@ -91,11 +93,22 @@ export async function drained(
   io: IOResult,
   execNode: ExecutionNode,
 ): Promise<[null, IOResult, ExecutionNode]> {
+  const output = io.output
+  const previous = output?.stderr ?? null
+  if (output !== null) {
+    output.stderr = async (data) => {
+      execNode.stderr = concat([execNode.stderr, data])
+      await sink.emit(Channel.STDERR, data)
+    }
+  }
   try {
     await pump(sink, Channel.STDOUT, stdout)
   } catch (err) {
     await failedRead(io, err, execNode)
+  } finally {
+    if (output !== null) output.stderr = previous
   }
+  if (output !== null) execNode.exitCode = io.exitCode
   const stderr = await io.materializeStderr()
   if (stderr.byteLength > 0) {
     await sink.emit(Channel.STDERR, stderr)
@@ -215,7 +228,7 @@ export async function handleBackground(
         const opts: ExecuteNodeOpts = {
           sink: console_,
           signal: abort.signal,
-          executionScope: new ExecutionScope(),
+          executionScope: new ExecutionScope(undefined, job.executionId ?? undefined),
           endsShell: true,
         }
         if (jobHanded !== null) opts.handed = jobHanded

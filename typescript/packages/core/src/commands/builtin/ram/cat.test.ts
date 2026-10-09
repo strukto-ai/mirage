@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invoke } from '../../../io/stdio.ts'
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
@@ -28,12 +29,14 @@ describe('cat', () => {
     vfs.store.files.set('/tmp/f.bin', data)
     const cmd = RAM_CAT[0]
     if (cmd === undefined) throw new Error('cat not registered')
-    const result = await cmd.fn(vfs.accessor, [PathSpec.fromStrPath('/tmp/f.bin')], [], {
-      stdin: null,
-      flags: {},
-      io: commandIo(vfs),
-      cwd: '/',
-    })
+    const result = await invoke(() =>
+      cmd.fn(vfs.accessor, [PathSpec.fromStrPath('/tmp/f.bin')], [], {
+        stdin: null,
+        flags: {},
+        io: commandIo(vfs),
+        cwd: '/',
+      }),
+    )
     if (result === null) throw new Error('null')
     const [out] = result
     if (out === null) throw new Error('null out')

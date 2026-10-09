@@ -217,3 +217,55 @@ describe('createMirageMcpServer', () => {
     await workspace.close()
   })
 })
+
+it('delivers request-scoped previews before completion and preserves final output', async () => {
+  const workspace = mkWs()
+  const server = createMirageMcpServer(workspace)
+  const client = new Client({ name: 'progress-test', version: '1' })
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  await server.connect(serverTransport)
+  await client.connect(clientTransport)
+  const updates: { progress: number; message?: string | undefined }[] = []
+  let first!: () => void
+  const ready = new Promise<void>((resolve) => {
+    first = resolve
+  })
+  let completed = false
+  try {
+    const task = client
+      .callTool(
+        {
+          name: 'shell',
+          arguments: {
+            command:
+              'echo ready; while [ ! -f /gate ]; do sleep 0.01; done; echo problem >&2; false',
+          },
+        },
+        {
+          onprogress: (update) => {
+            updates.push(update)
+            first()
+          },
+        },
+      )
+      .then((result) => {
+        completed = true
+        return result
+      })
+    await ready
+    expect(completed).toBe(false)
+    await workspace.vfs.write('/gate', new TextEncoder().encode('ready'))
+    const result = await task
+    expect(firstText(result.content)).toBe('ready\n\nproblem\n')
+    expect(result.isError).toBe(true)
+    expect(updates[0]).toEqual({ progress: 1, message: '[stdout] ready\n' })
+    expect(updates.some((update) => update.message === '[stderr] problem\n')).toBe(true)
+    expect(updates.map((update) => update.progress)).toEqual(
+      updates.map((_update, index) => index + 1),
+    )
+  } finally {
+    await client.close()
+    await server.close()
+    await workspace.close()
+  }
+})

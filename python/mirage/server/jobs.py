@@ -44,6 +44,8 @@ class _Run:
         self.settled = asyncio.Event()
 
     def abort(self) -> None:
+        if self.aborted:
+            return
         self.aborted = True
         if self.work is not None:
             self.work.cancel()
@@ -151,7 +153,7 @@ class JobTable:
             if control.aborted:
                 raise asyncio.CancelledError()
             control.work = asyncio.ensure_future(
-                factory(ExecutionScope(started))
+                factory(ExecutionScope(started, execution_id=job_id))
             )
             result = await control.work
         except (asyncio.CancelledError, MirageAbortError):
@@ -217,21 +219,32 @@ class JobTable:
         return entry
 
     async def cancel(self, job_id: str) -> bool:
-        _, accepted = await self._change(
-            job_id,
-            lambda r: (
-                None
-                if r.cancel_requested
-                else replace(
-                    r, cancel_requested=True, status=JobStatus.STOPPING
-                )
-            ),
-        )
-        if accepted:
-            control = self._live.get(job_id)
+        control = self._live.get(job_id)
+        try:
+            _, accepted = await self._change(
+                job_id,
+                lambda r: (
+                    None
+                    if r.cancel_requested
+                    else replace(
+                        r, cancel_requested=True, status=JobStatus.STOPPING
+                    )
+                ),
+            )
+            return accepted
+        finally:
             if control is not None:
                 control.abort()
-        return accepted
+
+    async def drain(self, job_id: str) -> None:
+        """Join locally owned cleanup independently of record-store health.
+
+        Args:
+            job_id (str): execution whose local owner must finish.
+        """
+        control = self._live.get(job_id)
+        if control is not None and control.completion is not None:
+            await settle(control.completion)
 
     async def close(self) -> None:
         self._closed = True

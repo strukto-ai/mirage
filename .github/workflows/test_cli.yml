@@ -193,12 +193,12 @@ jobs:
             echo "PASS"
           }
 
-          check "echo ok succeeds" 0 0 $MIRAGE shell -w smoke -c 'echo ok'
-          check "false exits 1" 1 1 $MIRAGE shell -w smoke -c 'false'
+          check "echo ok succeeds" 0 0 $MIRAGE shell --json -w smoke -c 'echo ok'
+          check "false exits 1" 1 1 $MIRAGE shell --json -w smoke -c 'false'
           check "false | echo: pipefail off => last cmd wins" 0 0 \
-            $MIRAGE shell -w smoke -c 'false | echo done'
+            $MIRAGE shell --json -w smoke -c 'false | echo done'
           check "pipefail on => rightmost failure wins" 1 1 \
-            $MIRAGE shell -w smoke -c 'set -o pipefail; false | echo done'
+            $MIRAGE shell --json -w smoke -c 'set -o pipefail; false | echo done'
 
           echo
           echo "--- background + job wait"
@@ -254,9 +254,9 @@ jobs:
           $MIRAGE shell -w sgerr -c "printf '1\n2\n3\n4\n5\n' > /f.txt" > /dev/null
 
           check "cat over max_lines, on_exceed=truncate => exit 0" 0 0 \
-            $MIRAGE shell -w sg -c 'cat /f.txt'
+            $MIRAGE shell --json -w sg -c 'cat /f.txt'
           echo "+ verify truncated to 2 lines"
-          lines=$($MIRAGE shell -w sg -c 'cat /f.txt' | jq -r '.stdout' | grep -c .)
+          lines=$($MIRAGE shell --json -w sg -c 'cat /f.txt' | jq -r '.stdout' | grep -c .)
           echo "  truncated stdout lines: $lines (expected 2)"
           if [ "$lines" != "2" ]; then
             echo "FAIL: truncate did not cap to 2 lines"
@@ -265,7 +265,7 @@ jobs:
             echo "PASS"
           fi
           check "cat over max_lines, on_exceed=error => exit 1" 1 1 \
-            $MIRAGE shell -w sgerr -c 'cat /f.txt'
+            $MIRAGE shell --json -w sgerr -c 'cat /f.txt'
           $MIRAGE workspace delete sg
           $MIRAGE workspace delete sgerr
 
@@ -297,7 +297,7 @@ jobs:
           fi
           $MIRAGE shell -w cfgkeys -c "printf 'x\ny\n' > /f.txt" > /dev/null
           check "ops work with snake_case cache/index configured => exit 0" 0 0 \
-            $MIRAGE shell -w cfgkeys -c 'cat /f.txt'
+            $MIRAGE shell --json -w cfgkeys -c 'cat /f.txt'
           $MIRAGE workspace delete cfgkeys
 
           curl_check() {
@@ -503,12 +503,12 @@ jobs:
             echo "PASS"
           }
 
-          check "echo ok succeeds" 0 0 $MIRAGE shell -w smoke -c 'echo ok'
-          check "false exits 1" 1 1 $MIRAGE shell -w smoke -c 'false'
+          check "echo ok succeeds" 0 0 $MIRAGE shell --json -w smoke -c 'echo ok'
+          check "false exits 1" 1 1 $MIRAGE shell --json -w smoke -c 'false'
           check "false | echo: pipefail off => last cmd wins" 0 0 \
-            $MIRAGE shell -w smoke -c 'false | echo done'
+            $MIRAGE shell --json -w smoke -c 'false | echo done'
           check "pipefail on => rightmost failure wins" 1 1 \
-            $MIRAGE shell -w smoke -c 'set -o pipefail; false | echo done'
+            $MIRAGE shell --json -w smoke -c 'set -o pipefail; false | echo done'
 
           echo
           echo "--- background + job wait"
@@ -564,9 +564,9 @@ jobs:
           $MIRAGE shell -w sgerr -c "printf '1\n2\n3\n4\n5\n' > /f.txt" > /dev/null
 
           check "cat over max_lines, on_exceed=truncate => exit 0" 0 0 \
-            $MIRAGE shell -w sg -c 'cat /f.txt'
+            $MIRAGE shell --json -w sg -c 'cat /f.txt'
           echo "+ verify truncated to 2 lines"
-          lines=$($MIRAGE shell -w sg -c 'cat /f.txt' | jq -r '.stdout' | grep -c .)
+          lines=$($MIRAGE shell --json -w sg -c 'cat /f.txt' | jq -r '.stdout' | grep -c .)
           echo "  truncated stdout lines: $lines (expected 2)"
           if [ "$lines" != "2" ]; then
             echo "FAIL: truncate did not cap to 2 lines"
@@ -575,7 +575,7 @@ jobs:
             echo "PASS"
           fi
           check "cat over max_lines, on_exceed=error => exit 1" 1 1 \
-            $MIRAGE shell -w sgerr -c 'cat /f.txt'
+            $MIRAGE shell --json -w sgerr -c 'cat /f.txt'
           $MIRAGE workspace delete sg
           $MIRAGE workspace delete sgerr
 
@@ -607,7 +607,7 @@ jobs:
           fi
           $MIRAGE shell -w cfgkeys -c "printf 'x\ny\n' > /f.txt" > /dev/null
           check "ops work with snake_case cache/index configured => exit 0" 0 0 \
-            $MIRAGE shell -w cfgkeys -c 'cat /f.txt'
+            $MIRAGE shell --json -w cfgkeys -c 'cat /f.txt'
           $MIRAGE workspace delete cfgkeys
 
           curl_check() {

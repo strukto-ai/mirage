@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOConfig } from '../../io/config.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { ExecutionScope } from '../execution.ts'
 import type { HandOff } from '../../policy/types.ts'
@@ -50,6 +51,7 @@ export type MountSpec =
   | Mount
 
 export interface WorkspaceOptions {
+  io?: Partial<IOConfig>
   mode?: MountMode
   /**
    * The read policy a mount inherits when it declares none. There is
@@ -213,6 +215,8 @@ export class ExecuteResult {
 }
 
 export interface ExecuteOptions {
+  /** Return a running execution with bounded output events. */
+  stream?: boolean
   /** @internal Scheduling scope; background jobs create their own. */
   executionScope?: ExecutionScope
   stdin?: ByteSource | null
