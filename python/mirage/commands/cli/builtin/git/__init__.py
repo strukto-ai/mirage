@@ -41,8 +41,7 @@ from mirage.commands.cli.builtin.git.inspect import (
     version,
 )
 from mirage.commands.cli.builtin.git.log import log
-from mirage.commands.cli.builtin.git.ls_files import ls_files
-from mirage.commands.cli.builtin.git.ls_tree import ls_tree
+from mirage.commands.cli.builtin.git.ls_files import ls_files, ls_tree
 from mirage.commands.cli.builtin.git.mv import mv
 from mirage.commands.cli.builtin.git.reflog import reflog
 from mirage.commands.cli.builtin.git.reset import reset

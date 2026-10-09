@@ -165,7 +165,7 @@ flowchart LR
 
 The same wiring from the side of a change. Every file under `python/` sets
 `core` and `data`, every file under `typescript/` sets `ts`, `data` and
-`database`, and every file under `integ/` sets `core`, `ts` and `data`. This includes the Git `grep` and `ls_tree` modules: either host
+`database`, and every file under `integ/` sets `core`, `ts` and `data`. This includes the Git `grep` and `ls_files` modules: either host
 change selects the shared Git disk/RAM corpus through these broad filters.
 No per-verb allowlist is needed. The following paths select additional jobs:
 

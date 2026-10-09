@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { lsFiles } from './ls_files.ts'
+import { lsFiles, lsTree } from './ls_files.ts'
 import { forEachRef } from './for_each_ref.ts'
 import { reflog } from './reflog.ts'
 import { fetch, fetchReadOnly } from './fetch.ts'
@@ -23,7 +23,6 @@ import { add } from './add.ts'
 import { init } from './init.ts'
 import { fsck } from './fsck.ts'
 import { grep } from './grep.ts'
-import { lsTree } from './ls_tree.ts'
 import { hashObject, hashObjectReadOnly } from './hash_object.ts'
 import { stashList, stashShow } from './stash.ts'
 import { nodeHelp, findNode } from '../../walk.ts'
