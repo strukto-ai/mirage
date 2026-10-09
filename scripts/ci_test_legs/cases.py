@@ -182,6 +182,60 @@ LEG_CASES = (
 
 TYPECHECK = {"typecheck": ["Typecheck"]}
 EXAMPLES = {"examples": ["Examples"]}
+SHARDED = {
+    "a": f"--filter {CORE} run test --shard=1/2",
+    "b": f"--filter {CORE} run test --shard=2/2",
+    "c": f"--filter {NODE} run test",
+}
+SHARD_CASES = (
+    LegCase(
+        name="complete shards and an unsharded package",
+        scripts=SHARDED,
+        declared=list(SHARDED),
+    ),
+    LegCase(
+        name="space-separated shard flag",
+        scripts={**CLEAN, "a": f"{CLEAN['a']} --shard 1/1"},
+    ),
+    LegCase(
+        name="missing shard",
+        scripts={**CLEAN, "a": SHARDED["a"]},
+        expect="every shard exactly once",
+    ),
+    LegCase(
+        name="duplicated shard",
+        scripts={**SHARDED, "b": SHARDED["a"]},
+        declared=list(SHARDED),
+        expect="every shard exactly once",
+    ),
+    LegCase(
+        name="inconsistent shard totals",
+        scripts={**SHARDED, "b": SHARDED["b"].replace("2/2", "2/3")},
+        declared=list(SHARDED),
+        expect="every shard exactly once",
+    ),
+    LegCase(
+        name="unsharded and sharded runs of the same package",
+        scripts={**SHARDED, "d": CLEAN["a"]},
+        declared=[*SHARDED, "d"],
+        expect="no unsharded run",
+    ),
+    *(
+        LegCase(
+            name=f"invalid shard flag: {flag}",
+            scripts={**CLEAN, "a": f"{CLEAN['a']} {flag}"},
+            expect="--shard",
+        )
+        for flag in (
+            "--shard=0/2",
+            "--shard=3/2",
+            "--shard=1/0",
+            "--shard=one/two",
+            "--shard",
+            "--shard=1/2 --shard=2/2",
+        )
+    ),
+)
 GATE_CASES = (
     GateCase(
         name="every gated key is set",
@@ -274,6 +328,7 @@ PACKAGE_CASES = (
 
 GROUPS: tuple[tuple[str, tuple[Fixture, ...]], ...] = (
     ("leg table", LEG_CASES),
+    ("shard coverage", SHARD_CASES),
     ("matrix gates", GATE_CASES),
     ("invocation", INVOCATION_CASES),
     ("packages", PACKAGE_CASES),

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 import shlex
 from typing import Any
 
@@ -200,6 +201,68 @@ def audit_gates(
     return problems
 
 
+def shard_of(body: str) -> tuple[int, int] | None:
+    """Read the optional Vitest shard, refusing malformed or repeated flags.
+
+    Args:
+        body (str): the leg's pnpm script.
+
+    Returns:
+        The one-based index and total, or None for an unsharded run.
+    """
+    words = shlex.split(body)
+    values = []
+    for index, word in enumerate(words):
+        if word == "--shard":
+            values.append(words[index + 1] if index + 1 < len(words) else "")
+        elif word.startswith("--shard="):
+            values.append(word.removeprefix("--shard="))
+    if not values:
+        return None
+    if len(values) != 1 or not re.fullmatch(r"[0-9]+/[0-9]+", values[0]):
+        raise ValueError("expected one --shard=index/total")
+    index, total = map(int, values[0].split("/"))
+    if not 1 <= index <= total:
+        raise ValueError("--shard needs 1 <= index <= total")
+    return index, total
+
+
+def audit_shards(
+    name: str, legs: list[str], shards: dict[str, tuple[int, int] | None]
+) -> list[str]:
+    """Require a package's legs to cover its full collection exactly once.
+
+    Args:
+        name (str): the claimed package.
+        legs (list[str]): the legs claiming it.
+        shards (dict[str, tuple[int, int] | None]): each leg's shard.
+
+    Returns:
+        A refusal for missing, overlapping or inconsistent shards.
+    """
+    selected = [shards[leg] for leg in legs]
+    parts = [part for part in selected if part is not None]
+    if not parts:
+        return (
+            [DOUBLE_CLAIM.format(name=name, legs=", ".join(sorted(legs)))]
+            if len(legs) > 1
+            else []
+        )
+    totals = {total for _, total in parts}
+    indices = {index for index, _ in parts}
+    if (
+        len(parts) != len(selected)
+        or len(totals) != 1
+        or len(indices) != len(parts)
+        or len(parts) != parts[0][1]
+    ):
+        return [
+            f"{name}: legs {', '.join(legs)} must cover every shard exactly "
+            "once with the same total and no unsharded run"
+        ]
+    return []
+
+
 def audit(
     scripts: dict[str, str],
     declared: list[str],
@@ -239,7 +302,13 @@ def audit(
             problems.append(SCRIPT_UNUSED.format(prefix=LEG_PREFIX, leg=leg))
 
     claims: dict[str, list[str]] = {}
+    shards: dict[str, tuple[int, int] | None] = {}
     for leg in declared:
+        try:
+            shards[leg] = shard_of(scripts.get(leg, ""))
+        except ValueError as exc:
+            problems.append(f"leg {leg!r}: {exc}")
+            shards[leg] = None
         seen: set[str] = set()
         for token in FILTER.findall(scripts.get(leg, "")):
             if "..." in token:
@@ -260,10 +329,8 @@ def audit(
                     why=NO_TEST_WHY if name in known else UNKNOWN_WHY,
                 )
             )
-        elif len(legs) > 1:
-            problems.append(
-                DOUBLE_CLAIM.format(name=name, legs=", ".join(sorted(legs)))
-            )
+        else:
+            problems.extend(audit_shards(name, legs, shards))
     for name in sorted(packages - set(claims)):
         problems.append(UNCLAIMED.format(name=name))
     return problems

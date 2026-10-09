@@ -160,7 +160,7 @@ flowchart LR
     database --> J5["integ-database"]
     observability --> J6["integ-observability"]
     fuse --> J7["integ-fuse · integ-fuse-windows<br/>integ-fskit-macos"]
-    runtime --> J8["integ-runtime · integ-e2b"]
+    runtime --> J8["integ-runtime (3 legs) · integ-e2b"]
 ```
 
 The same wiring from the side of a change. Every file under `python/` sets
