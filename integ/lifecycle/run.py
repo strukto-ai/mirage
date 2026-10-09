@@ -25,7 +25,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI
+from mirage.commands.spec.types import CommandSpec
 from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
@@ -246,8 +247,8 @@ async def action(
     elif op == "register_cli":
         ws.register_cli(
             step["name"],
-            CLISpec(
-                name=step["name"],
+            CLI(
+                spec=CommandSpec(name=step["name"]),
                 script=ScriptSource(**step["script"]),
                 runtime=step.get("runtime"),
             ),

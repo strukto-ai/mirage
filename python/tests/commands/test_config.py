@@ -15,7 +15,8 @@
 import asyncio
 
 from mirage.commands.config import Command, CommandOpts, command
-from mirage.commands.spec import SPECS, CommandSpec, Operand, Option
+from mirage.commands.spec import SPECS, Argument, CommandSpec
+from mirage.commands.spec.compile import compile_spec
 from mirage.version import __version__
 
 _HANDLER_CALLS: list[str] = []
@@ -43,7 +44,11 @@ class TestCommand:
     def test_basic_fields(self):
         rc = Command(
             name="cat",
-            spec=CommandSpec(rest=Operand(type="path")),
+            spec=CommandSpec(
+                arguments=(
+                    Argument("paths", type="path", nargs="*", metavar=""),
+                )
+            ),
             vfs="ram",
             filetype=None,
             fn=lambda: None,
@@ -65,7 +70,9 @@ class TestCommand:
 
 class TestCommandDecorator:
     def test_decorator_attaches_registered_commands(self):
-        spec = CommandSpec(rest=Operand(type="path"))
+        spec = CommandSpec(
+            arguments=(Argument("paths", type="path", nargs="*", metavar=""),)
+        )
 
         @command("mytest", vfs="ram", spec=spec)
         async def my_fn(backend, paths, *texts, **kw):
@@ -92,7 +99,11 @@ class TestCommandDecorator:
     def test_write_defaults_false(self):
         rc = Command(
             name="cat",
-            spec=CommandSpec(rest=Operand(type="path")),
+            spec=CommandSpec(
+                arguments=(
+                    Argument("paths", type="path", nargs="*", metavar=""),
+                )
+            ),
             vfs="ram",
             filetype=None,
             fn=lambda: None,
@@ -139,7 +150,10 @@ class TestVersionSupport:
             _noop_handler
         )
         longs = [
-            o.long for o in registered._registered_commands[0].spec.options
+            o.names[-1]
+            for o in compile_spec(
+                registered._registered_commands[0].spec
+            ).options
         ]
         assert "--version" in longs
         assert "--help" in longs
@@ -178,7 +192,9 @@ class TestVersionSupport:
         registered = command(
             "custom",
             vfs=None,
-            spec=CommandSpec(options=(Option(long="--version"),)),
+            spec=CommandSpec(
+                arguments=(Argument("--version", action="store_true"),)
+            ),
         )(_recording_handler)
         asyncio.run(
             registered._registered_commands[0].fn(

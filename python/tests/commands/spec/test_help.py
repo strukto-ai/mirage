@@ -13,23 +13,29 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.spec.help import option_metavar, render_help
-from mirage.commands.spec.types import CommandSpec, Operand, Option, UsageStyle
+from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 
 
 def test_renders_name_description_usage_and_flags():
     spec = CommandSpec(
         description="Send a thing.",
-        options=(
-            Option(long="--to", type="str", description="Recipient"),
-            Option(long="--help", type="bool", description="Show help"),
+        arguments=(
+            Argument("--to", nargs=3, help="Recipient"),
+            Argument(
+                "-h",
+                "--help",
+                "--usage",
+                action="store_true",
+                help="Show help",
+            ),
         ),
     )
     out = render_help("gws thing send", spec)
     assert "gws thing send: Send a thing." in out
     assert "Usage: gws thing send [flags]" in out
-    assert "--to <text>" in out
+    assert "--to <text> <text> <text>" in out
     assert "Recipient" in out
-    assert "--help" in out
+    assert "-h, --help, --usage" in out
 
 
 def test_falls_back_to_bare_name_without_description():
@@ -40,8 +46,8 @@ def test_falls_back_to_bare_name_without_description():
 
 def test_epilog_trails_the_flag_table_after_a_blank_line():
     spec = CommandSpec(
-        options=(Option(long="--help", type="bool", description="Show help"),),
         epilog="Services:\n  drive\n",
+        arguments=(Argument("--help", action="store_true", help="Show help"),),
     )
     out = render_help("gws", spec)
     assert out.endswith("\n  --help  Show help\n\nServices:\n  drive\n")
@@ -55,14 +61,7 @@ def test_epilog_is_omitted_when_absent():
 def test_render_help_with_subcommands_lists_commands():
     spec = CommandSpec(
         description="Google Workspace",
-        options=(
-            Option(
-                short="-C",
-                long="--cwd",
-                type="str",
-                description="run as if started there",
-            ),
-        ),
+        arguments=(Argument("-C", "--cwd", help="run as if started there"),),
     )
     rows = [("gmail", "Gmail messages\nlong tail ignored"), ("docs", "")]
     assert render_help("gws", spec, subcommands=rows) == (
@@ -100,7 +99,7 @@ def test_clap_heads_the_page_with_a_bare_description():
 def test_clap_usage_line_spells_options_and_command_its_own_way():
     spec = CommandSpec(
         description="Manage pages",
-        options=(Option(long="--json", type="bool"),),
+        arguments=(Argument("--json", action="store_true"),),
     )
     rows = (("get", "Retrieve a page"),)
     text = render_help("ntn pages", spec, rows, UsageStyle.CLAP)
@@ -111,14 +110,13 @@ def test_clap_usage_line_spells_options_and_command_its_own_way():
 
 def test_clap_names_operand_slots_and_marks_optional_ones():
     spec = CommandSpec(
-        description="Retrieve a page",
-        positional=(Operand(type="str", name="PAGE_ID", required=True),),
+        description="Retrieve a page", arguments=(Argument("PAGE_ID"),)
     )
     assert "Usage: ntn pages get <PAGE_ID>" in render_help(
         "ntn pages get", spec, style=UsageStyle.CLAP
     )
     loose = CommandSpec(
-        description="Call the API", rest=Operand(type="str", name="PATH")
+        description="Call the API", arguments=(Argument("PATH", nargs="*"),)
     )
     assert "Usage: ntn api [PATH]..." in render_help(
         "ntn api", loose, style=UsageStyle.CLAP
@@ -144,20 +142,18 @@ def test_clap_keeps_subcommands_in_declaration_order():
 
 def test_clap_heads_the_option_list_options_not_flags():
     spec = CommandSpec(
-        description="x", options=(Option(long="--json", type="bool"),)
+        description="x", arguments=(Argument("--json", action="store_true"),)
     )
     assert "Options:" in render_help("ntn whoami", spec, style=UsageStyle.CLAP)
     assert "Flags:" in render_help("ntn whoami", spec)
 
 
 def test_option_metavar_derives_from_the_long_spelling():
-    derived = Option(long="--start-cursor", type="str")
+    derived = Argument("--start-cursor")
     assert option_metavar(derived) == "START_CURSOR"
     # Declared wins, which is the only reason the field exists: four of
     # ntn's options override the derived name.
     assert (
-        option_metavar(
-            Option(long="--notion-version", type="str", metavar="VERSION")
-        )
+        option_metavar(Argument("--notion-version", metavar="VERSION"))
         == "VERSION"
     )

@@ -15,6 +15,7 @@
 from dataclasses import replace
 
 from mirage.commands.spec.builtin_specs import SPECS
+from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.constants import HELP_OPTION, VERSION_OPTION
 from mirage.commands.spec.types import CommandSpec
 
@@ -35,11 +36,11 @@ def help_spec(spec: CommandSpec) -> CommandSpec:
             (HELP_OPTION, "--help"),
             (VERSION_OPTION, "--version"),
         )
-        if not any(o.long == spelling for o in spec.options)
+        if not any(spelling in o.names for o in compile_spec(spec).options)
     ]
     if not extras:
         return spec
-    return replace(spec, options=spec.options + tuple(extras))
+    return replace(spec, arguments=spec.arguments + tuple(extras))
 
 
 # The builtin specs in the form the registry actually parses. Built once

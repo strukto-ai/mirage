@@ -25,37 +25,32 @@ from mirage.commands.cli.builtin.gh.constants import (
     HELP_TOPICS,
     REPO_EDIT_FIELDS,
 )
-from mirage.commands.cli.builtin.gh.search import search_spec
+from mirage.commands.cli.builtin.gh.search import search_handlers, search_spec
 from mirage.commands.cli.builtin.gh.types import RepoEditField
 from mirage.commands.cli.builtin.gh.version import version
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
 from mirage.commands.cli.walk import find_child, node_help
-from mirage.commands.spec.types import Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.github.config import GhConfig
 from mirage.io.types import IOResult
 
-REPO = Option(
-    short="-R",
-    long="--repo",
-    type="str",
-    description="Select another repository, as [HOST/]OWNER/REPO",
+REPO = Argument(
+    "-R",
+    "--repo",
+    help="Select another repository, as [HOST/]OWNER/REPO",
 )
-JSON = Option(
-    long="--json", type="str", description="Output selected JSON fields"
-)
-JQ = Option(
-    short="-q", long="--jq", type="str", description="Filter JSON output"
-)
-LIMIT_30 = Option(short="-L", long="--limit", type="int", default="30")
-BODY = Option(short="-b", long="--body", type="str")
-BODY_FILE = Option(short="-F", long="--body-file", type="path")
-TITLE = Option(short="-t", long="--title", type="str")
-NUMBER = Operand(type="str", name="NUMBER", required=True)
+JSON = Argument("--json", help="Output selected JSON fields")
+JQ = Argument("-q", "--jq", help="Filter JSON output")
+LIMIT_30 = Argument("-L", "--limit", type="int", default="30")
+BODY = Argument("-b", "--body")
+BODY_FILE = Argument("-F", "--body-file", type="path")
+TITLE = Argument("-t", "--title")
+NUMBER = Argument("NUMBER")
 
 
 def _flag(
     short: str | None = None, long: str = "", description: str | None = None
-) -> Option:
+) -> Argument:
     """One of gh's boolean flags, which are pflag's.
 
     A bare ``--draft`` is true, and ``--draft=true`` or ``--draft=false``
@@ -67,68 +62,65 @@ def _flag(
         long (str): the long spelling.
         description (str | None): the help line.
     """
-    return Option(
-        short=short,
-        long=long,
-        type="str",
-        value_optional=True,
+    names = (short, long) if short is not None else (long,)
+    return Argument(
+        *names,
+        nargs="?",
+        attached_only=True,
         short_value=False,
         choices=BOOLEAN,
-        description=description,
+        help=description,
     )
 
 
-def _repo_edit_option(field: RepoEditField) -> Option:
+def _repo_edit_option(field: RepoEditField) -> Argument:
     """Build the grammar from the setting consumed by the handler.
 
     Args:
         field (RepoEditField): Repository setting definition.
     """
-    return Option(
-        short=field.short,
-        long=field.flag,
-        type="str",
-        value_optional=field.kind != "value",
+    names = (
+        (field.short, field.flag) if field.short is not None else (field.flag,)
+    )
+    return Argument(
+        *names,
+        nargs="?" if field.kind != "value" else None,
+        attached_only=field.kind != "value",
         choices=field.choices if field.kind == "value" else BOOLEAN,
-        description=field.description,
+        help=field.description,
     )
 
 
-def _issue() -> CLISpec:
-    return CLISpec(
+def _issue() -> CommandSpec:
+    return CommandSpec(
         name="issue",
         description="Manage issues",
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="list",
                 aliases=("ls",),
                 description="List issues",
-                fn=issue_commands.list_cmd,
-                options=(
+                arguments=(
                     REPO,
                     JSON,
                     JQ,
                     LIMIT_30,
-                    Option(
-                        short="-s",
-                        long="--state",
-                        type="str",
+                    Argument(
+                        "-s",
+                        "--state",
                         choices=("open", "closed", "all"),
                         default="open",
                     ),
-                    Option(short="-a", long="--assignee", type="str"),
-                    Option(short="-A", long="--author", type="str"),
-                    Option(
-                        short="-l", long="--label", type="str", multiple=True
-                    ),
+                    Argument("-a", "--assignee"),
+                    Argument("-A", "--author"),
+                    Argument("-l", "--label", action="append"),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="view",
                 description="View an issue",
-                fn=issue_commands.view_cmd,
-                positional=(NUMBER,),
-                options=(
+                arguments=(
+                    NUMBER,
                     REPO,
                     JSON,
                     JQ,
@@ -139,107 +131,93 @@ def _issue() -> CLISpec:
                     ),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="create",
                 aliases=("new",),
                 description="Create an issue",
-                fn=issue_commands.create_cmd,
-                write=True,
-                options=(
+                arguments=(
                     REPO,
                     TITLE,
                     BODY,
                     BODY_FILE,
-                    Option(
-                        short="-a",
-                        long="--assignee",
-                        type="str",
-                        multiple=True,
-                    ),
-                    Option(
-                        short="-l", long="--label", type="str", multiple=True
-                    ),
+                    Argument("-a", "--assignee", action="append"),
+                    Argument("-l", "--label", action="append"),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="edit",
                 description="Edit an issue",
-                fn=issue_commands.edit_cmd,
-                write=True,
-                positional=(NUMBER,),
-                options=(
+                arguments=(
+                    NUMBER,
                     REPO,
                     TITLE,
                     BODY,
                     BODY_FILE,
-                    Option(long="--add-assignee", type="str", multiple=True),
-                    Option(
-                        long="--remove-assignee", type="str", multiple=True
-                    ),
-                    Option(long="--add-label", type="str", multiple=True),
-                    Option(long="--remove-label", type="str", multiple=True),
+                    Argument("--add-assignee", action="append"),
+                    Argument("--remove-assignee", action="append"),
+                    Argument("--add-label", action="append"),
+                    Argument("--remove-label", action="append"),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="close",
                 description="Close an issue",
-                fn=issue_commands.close_cmd,
-                write=True,
-                positional=(NUMBER,),
-                options=(REPO,),
+                arguments=(
+                    NUMBER,
+                    REPO,
+                ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="reopen",
                 description="Reopen an issue",
-                fn=issue_commands.reopen_cmd,
-                write=True,
-                positional=(NUMBER,),
-                options=(REPO,),
+                arguments=(
+                    NUMBER,
+                    REPO,
+                ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="comment",
                 description="Add a comment to an issue",
-                fn=issue_commands.comment_cmd,
-                write=True,
-                positional=(NUMBER,),
-                options=(REPO, BODY, BODY_FILE),
+                arguments=(
+                    NUMBER,
+                    REPO,
+                    BODY,
+                    BODY_FILE,
+                ),
             ),
         ),
     )
 
 
-def _pr() -> CLISpec:
-    return CLISpec(
+def _pr() -> CommandSpec:
+    return CommandSpec(
         name="pr",
         description="Manage pull requests",
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="list",
                 aliases=("ls",),
                 description="List pull requests",
-                fn=pull_commands.list_cmd,
-                options=(
+                arguments=(
                     REPO,
                     JSON,
                     JQ,
                     LIMIT_30,
-                    Option(
-                        short="-s",
-                        long="--state",
-                        type="str",
+                    Argument(
+                        "-s",
+                        "--state",
                         choices=("open", "closed", "merged", "all"),
                         default="open",
                     ),
-                    Option(short="-B", long="--base", type="str"),
-                    Option(short="-H", long="--head", type="str"),
+                    Argument("-B", "--base"),
+                    Argument("-H", "--head"),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="view",
                 description="View a pull request",
-                fn=pull_commands.view_cmd,
-                positional=(NUMBER,),
-                options=(
+                arguments=(
+                    NUMBER,
                     REPO,
                     JSON,
                     JQ,
@@ -250,76 +228,71 @@ def _pr() -> CLISpec:
                     ),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="create",
                 aliases=("new",),
                 description="Create a pull request",
-                fn=pull_commands.create_cmd,
-                write=True,
-                options=(
+                arguments=(
                     REPO,
                     TITLE,
                     BODY,
                     BODY_FILE,
-                    Option(short="-H", long="--head", type="str"),
-                    Option(short="-B", long="--base", type="str"),
+                    Argument("-H", "--head"),
+                    Argument("-B", "--base"),
                     _flag(short="-d", long="--draft"),
                     _flag(long="--no-maintainer-edit"),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="edit",
                 description="Edit a pull request",
-                fn=pull_commands.edit_cmd,
-                write=True,
-                positional=(NUMBER,),
-                options=(
+                arguments=(
+                    NUMBER,
                     REPO,
                     TITLE,
                     BODY,
                     BODY_FILE,
-                    Option(short="-B", long="--base", type="str"),
+                    Argument("-B", "--base"),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="merge",
                 description="Merge a pull request",
-                fn=pull_commands.merge_cmd,
-                write=True,
-                positional=(NUMBER,),
-                options=(
+                arguments=(
+                    NUMBER,
                     REPO,
                     BODY,
                     BODY_FILE,
                     _flag(short="-m", long="--merge"),
                     _flag(short="-r", long="--rebase"),
                     _flag(short="-s", long="--squash"),
-                    Option(short="-t", long="--subject", type="str"),
-                    Option(long="--match-head-commit", type="str"),
+                    Argument("-t", "--subject"),
+                    Argument("--match-head-commit"),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="close",
                 description="Close a pull request",
-                fn=pull_commands.close_cmd,
-                write=True,
-                positional=(NUMBER,),
-                options=(REPO,),
+                arguments=(
+                    NUMBER,
+                    REPO,
+                ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="comment",
                 description="Add a comment to a pull request",
-                fn=pull_commands.comment_cmd,
-                write=True,
-                positional=(NUMBER,),
-                options=(REPO, BODY, BODY_FILE),
+                arguments=(
+                    NUMBER,
+                    REPO,
+                    BODY,
+                    BODY_FILE,
+                ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="diff",
                 description="View changes in a pull request",
-                fn=pull_commands.diff_cmd,
-                positional=(NUMBER,),
-                options=(
+                arguments=(
+                    NUMBER,
                     REPO,
                     _flag(
                         long="--name-only",
@@ -327,12 +300,15 @@ def _pr() -> CLISpec:
                     ),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="checks",
                 description="Show CI checks for a pull request",
-                fn=pull_commands.checks_cmd,
-                positional=(NUMBER,),
-                options=(REPO, JSON, JQ),
+                arguments=(
+                    NUMBER,
+                    REPO,
+                    JSON,
+                    JQ,
+                ),
             ),
         ),
     )
@@ -340,17 +316,11 @@ def _pr() -> CLISpec:
 
 REPO_EDIT_OPTIONS = (
     *(_repo_edit_option(field) for field in REPO_EDIT_FIELDS),
-    Option(
-        long="--add-topic",
-        type="str",
-        multiple=True,
-        description="Add repository topic",
-    ),
-    Option(
-        long="--remove-topic",
-        type="str",
-        multiple=True,
-        description="Remove repository topic",
+    Argument("--add-topic", action="append", help="Add repository topic"),
+    Argument(
+        "--remove-topic",
+        action="append",
+        help="Remove repository topic",
     ),
     _flag(
         long="--accept-visibility-change-consequences",
@@ -364,34 +334,33 @@ REPO_DELETE_OPTIONS = (
 )
 
 
-def _repo() -> CLISpec:
-    return CLISpec(
+def _repo() -> CommandSpec:
+    return CommandSpec(
         name="repo",
         description="Manage repositories",
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="list",
                 aliases=("ls",),
                 description="List repositories",
-                fn=repo_commands.list_cmd,
-                positional=(Operand(type="str", name="OWNER"),),
-                options=(JSON, JQ, LIMIT_30),
+                arguments=(
+                    Argument("OWNER", nargs="?"),
+                    JSON,
+                    JQ,
+                    LIMIT_30,
+                ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="clone",
                 description="Clone a repository locally",
-                fn=repo_commands.clone_cmd,
-                positional=(
-                    Operand(type="str", name="REPOSITORY"),
-                    Operand(type="str", name="DIRECTORY"),
-                ),
-                rest=Operand(type="str", name="GITFLAGS"),
-                options=(
-                    Option(
-                        short="-u",
-                        long="--upstream-remote-name",
-                        type="str",
-                        description="Upstream remote name when cloning a fork",
+                arguments=(
+                    Argument("REPOSITORY", nargs="?"),
+                    Argument("DIRECTORY", nargs="?"),
+                    Argument("GITFLAGS", nargs="*"),
+                    Argument(
+                        "-u",
+                        "--upstream-remote-name",
+                        help="Upstream remote name when cloning a fork",
                     ),
                     _flag(
                         long="--no-upstream",
@@ -400,125 +369,124 @@ def _repo() -> CLISpec:
                     ),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="view",
                 description="View a repository",
-                fn=repo_commands.view,
-                positional=(Operand(type="str", name="REPOSITORY"),),
-                options=(REPO, JSON, JQ),
+                arguments=(
+                    Argument("REPOSITORY", nargs="?"),
+                    REPO,
+                    JSON,
+                    JQ,
+                ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="create",
                 description="Create a repository",
-                fn=repo_commands.create_cmd,
-                write=True,
-                positional=(Operand(type="str", name="NAME"),),
-                options=(
+                arguments=(
+                    Argument("NAME", nargs="?"),
                     _flag(long="--public"),
                     _flag(long="--private"),
-                    Option(short="-d", long="--description", type="str"),
-                    Option(short="-h", long="--homepage", type="str"),
+                    Argument("-d", "--description"),
+                    Argument("-h", "--homepage"),
                     _flag(long="--add-readme"),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="fork",
                 description="Create a fork of a repository",
-                fn=repo_commands.fork,
-                write=True,
-                positional=(Operand(type="str", name="REPOSITORY"),),
-                options=(
+                arguments=(
+                    Argument("REPOSITORY", nargs="?"),
                     _flag(long="--clone", description="Clone the fork"),
                     _flag(
                         long="--default-branch-only",
                         description="Only include the default branch in the "
                         "fork",
                     ),
-                    Option(
-                        long="--fork-name",
-                        type="str",
-                        description="Rename the forked repository",
+                    Argument(
+                        "--fork-name",
+                        help="Rename the forked repository",
                     ),
-                    Option(
-                        long="--org",
-                        type="str",
-                        description="Create the fork in an organization",
+                    Argument(
+                        "--org",
+                        help="Create the fork in an organization",
                     ),
                     _flag(
                         long="--remote",
                         description="Add a git remote for the fork",
                     ),
-                    Option(
-                        long="--remote-name",
-                        type="str",
-                        description="Specify the name for the new remote",
+                    Argument(
+                        "--remote-name",
+                        help="Specify the name for the new remote",
                     ),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="rename",
                 description="Rename a repository",
-                fn=repo_commands.rename,
-                write=True,
-                positional=(
-                    Operand(type="str", name="NEW-NAME", required=True),
+                arguments=(
+                    Argument("NEW-NAME"),
+                    REPO,
                 ),
-                options=(REPO,),
             ),
-            CLISpec(
+            CommandSpec(
                 name="edit",
                 description="Edit repository settings",
-                fn=repo_commands.edit_cmd,
-                write=True,
-                positional=(Operand(type="str", name="REPOSITORY"),),
-                options=REPO_EDIT_OPTIONS,
+                arguments=(
+                    Argument("REPOSITORY", nargs="?"),
+                    *REPO_EDIT_OPTIONS,
+                ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="delete",
                 description="Delete a repository",
-                fn=repo_commands.delete_cmd,
-                write=True,
-                positional=(Operand(type="str", name="REPOSITORY"),),
-                options=REPO_DELETE_OPTIONS,
+                arguments=(
+                    Argument("REPOSITORY", nargs="?"),
+                    *REPO_DELETE_OPTIONS,
+                ),
             ),
         ),
     )
 
 
-def _release() -> CLISpec:
-    return CLISpec(
+def _release() -> CommandSpec:
+    return CommandSpec(
         name="release",
         description="Manage releases",
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="list",
                 aliases=("ls",),
                 description="List releases",
-                fn=release_commands.list_cmd,
-                options=(REPO, JSON, JQ, LIMIT_30),
+                arguments=(
+                    REPO,
+                    JSON,
+                    JQ,
+                    LIMIT_30,
+                ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="view",
                 description="View a release",
-                fn=release_commands.view_cmd,
-                positional=(Operand(type="str", name="TAG", required=True),),
-                options=(REPO, JSON, JQ),
+                arguments=(
+                    Argument("TAG"),
+                    REPO,
+                    JSON,
+                    JQ,
+                ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="create",
                 description="Create a release",
-                fn=release_commands.create_cmd,
-                write=True,
-                positional=(Operand(type="str", name="TAG", required=True),),
-                options=(
+                arguments=(
+                    Argument("TAG"),
                     REPO,
-                    Option(short="-n", long="--notes", type="str"),
-                    Option(short="-F", long="--notes-file", type="path"),
+                    Argument("-n", "--notes"),
+                    Argument("-F", "--notes-file", type="path"),
                     TITLE,
                     _flag(short="-d", long="--draft"),
                     _flag(short="-p", long="--prerelease"),
                     _flag(long="--generate-notes"),
-                    Option(long="--target", type="str"),
+                    Argument("--target"),
                 ),
             ),
         ),
@@ -547,119 +515,95 @@ WORKFLOW_VIEW_OPTIONS = (
     _flag(
         short="-y", long="--yaml", description="View the workflow yaml file"
     ),
-    Option(
-        short="-r",
-        long="--ref",
-        type="str",
-        description="The branch or tag name which contains the version of "
+    Argument(
+        "-r",
+        "--ref",
+        help="The branch or tag name which contains the version of "
         "the workflow file you'd like to view",
     ),
 )
 
 
-def _run() -> CLISpec:
-    return CLISpec(
+def _run() -> CommandSpec:
+    return CommandSpec(
         name="run",
         description="View workflow runs",
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="list",
                 aliases=("ls",),
                 description="List workflow runs",
-                fn=action_commands.run_list_cmd,
-                options=(
+                arguments=(
                     REPO,
                     JSON,
                     JQ,
-                    Option(
-                        short="-L", long="--limit", type="int", default="20"
-                    ),
-                    Option(short="-b", long="--branch", type="str"),
-                    Option(short="-c", long="--commit", type="str"),
-                    Option(long="--created", type="str"),
-                    Option(short="-e", long="--event", type="str"),
-                    Option(short="-s", long="--status", type="str"),
-                    Option(short="-u", long="--user", type="str"),
-                    Option(short="-w", long="--workflow", type="str"),
+                    Argument("-L", "--limit", type="int", default="20"),
+                    Argument("-b", "--branch"),
+                    Argument("-c", "--commit"),
+                    Argument("--created"),
+                    Argument("-e", "--event"),
+                    Argument("-s", "--status"),
+                    Argument("-u", "--user"),
+                    Argument("-w", "--workflow"),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="view",
                 description="View a workflow run",
-                fn=action_commands.run_view_cmd,
-                positional=(
-                    Operand(type="str", name="RUN-ID", required=True),
+                arguments=(
+                    Argument("RUN-ID"),
+                    *RUN_VIEW_OPTIONS,
                 ),
-                options=RUN_VIEW_OPTIONS,
             ),
-            CLISpec(
+            CommandSpec(
                 name="rerun",
                 description="Rerun a workflow run",
-                fn=action_commands.run_rerun_cmd,
-                write=True,
-                positional=(
-                    Operand(type="str", name="RUN-ID", required=True),
-                ),
-                options=(
+                arguments=(
+                    Argument("RUN-ID"),
                     REPO,
                     _flag(short="-d", long="--debug"),
                     _flag(long="--failed"),
-                    Option(short="-j", long="--job", type="str"),
+                    Argument("-j", "--job"),
                 ),
             ),
         ),
     )
 
 
-def _workflow() -> CLISpec:
-    return CLISpec(
+def _workflow() -> CommandSpec:
+    return CommandSpec(
         name="workflow",
         description="Manage workflows",
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="list",
                 aliases=("ls",),
                 description="List workflows",
-                fn=action_commands.workflow_list_cmd,
-                options=(
+                arguments=(
                     REPO,
                     JSON,
                     JQ,
-                    Option(
-                        short="-L", long="--limit", type="int", default="50"
-                    ),
+                    Argument("-L", "--limit", type="int", default="50"),
                     _flag(short="-a", long="--all"),
                 ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="view",
                 description="View a workflow",
-                fn=action_commands.workflow_view_cmd,
-                positional=(
-                    Operand(type="str", name="WORKFLOW", required=True),
+                arguments=(
+                    Argument("WORKFLOW"),
+                    *WORKFLOW_VIEW_OPTIONS,
                 ),
-                options=WORKFLOW_VIEW_OPTIONS,
             ),
-            CLISpec(
+            CommandSpec(
                 name="run",
                 description="Run a workflow",
-                fn=action_commands.workflow_run_cmd,
-                write=True,
-                positional=(
-                    Operand(type="str", name="WORKFLOW", required=True),
-                ),
-                options=(
+                arguments=(
+                    Argument("WORKFLOW"),
                     REPO,
-                    Option(short="-r", long="--ref", type="str"),
-                    Option(
-                        short="-f",
-                        long="--raw-field",
-                        type="str",
-                        multiple=True,
-                    ),
-                    Option(
-                        short="-F", long="--field", type="str", multiple=True
-                    ),
+                    Argument("-r", "--ref"),
+                    Argument("-f", "--raw-field", action="append"),
+                    Argument("-F", "--field", action="append"),
                     _flag(long="--json"),
                 ),
             ),
@@ -680,7 +624,7 @@ async def _help_cmd(
     Args:
         inv (CLIInvocation[GhConfig]): the words after ``help``.
     """
-    node = GH
+    node = GH.spec
     path: list[str] = []
     for word in inv.texts:
         child = find_child(node, word)
@@ -694,7 +638,7 @@ async def _help_cmd(
             return topic.encode(), IOResult()
         names = sorted(
             f"  {child.name}\n"
-            for child in GH.subcommands
+            for child in GH.spec.subcommands
             if child.name != "help"
         )
         asked = " ".join(f"`{word}`" for word in inv.texts)
@@ -706,90 +650,126 @@ async def _help_cmd(
             stderr=f"Unknown help topic [{asked}]\n{usage}".encode()
         )
     return node_help(
-        " ".join(("gh", *path)), node, GH.usage_style
+        " ".join(("gh", *path)), node, GH.spec.usage_style
     ).encode(), IOResult()
 
 
-GH = CLISpec(
-    name="gh",
-    description="GitHub CLI",
-    config_model=GhConfig,
-    subcommands=(
-        CLISpec(
-            name="auth",
-            description="Manage authentication",
-            subcommands=(
-                CLISpec(
-                    name="status",
-                    description="Check the configured token",
-                    fn=auth_status,
-                ),
-                CLISpec(
-                    name="token",
-                    description="Token display is unavailable in Mirage",
-                    fn=auth_token,
-                    options=(
-                        Option(
-                            long="--hostname",
-                            type="str",
-                            description="The hostname of the GitHub instance "
-                            "authenticated with",
-                        ),
-                        Option(
-                            short="-u",
-                            long="--user",
-                            type="str",
-                            description="The account selector; tokens are "
-                            "never printed",
+GH = CLI(
+    spec=CommandSpec(
+        name="gh",
+        description="GitHub CLI",
+        subcommands=(
+            CommandSpec(
+                name="auth",
+                description="Manage authentication",
+                subcommands=(
+                    CommandSpec(
+                        name="status", description="Check the configured token"
+                    ),
+                    CommandSpec(
+                        name="token",
+                        description="Token display is unavailable in Mirage",
+                        arguments=(
+                            Argument(
+                                "--hostname",
+                                help="The hostname of the GitHub instance "
+                                "authenticated with",
+                            ),
+                            Argument(
+                                "-u",
+                                "--user",
+                                help="The account selector; tokens are "
+                                "never printed",
+                            ),
                         ),
                     ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="help",
-            fn=_help_cmd,
-            description="Help about any command",
-            rest=Operand(type="str"),
-        ),
-        CLISpec(
-            name="version",
-            aliases=("--version",),
-            fn=version,
-            description="Show the Mirage GitHub CLI implementation version",
-        ),
-        CLISpec(
-            name="api",
-            description="Make an authenticated GitHub API request",
-            fn=api,
-            write=True,
-            positional=(Operand(type="str", name="ENDPOINT", required=True),),
-            options=(
-                Option(short="-X", long="--method", type="str"),
-                Option(
-                    short="-f", long="--raw-field", type="str", multiple=True
-                ),
-                Option(short="-F", long="--field", type="str", multiple=True),
-                Option(short="-H", long="--header", type="str", multiple=True),
-                _flag(
-                    short="-i",
-                    long="--include",
-                    description="Include HTTP response status line "
-                    "and headers in the output",
-                ),
-                Option(long="--input", type="path"),
-                JQ,
-                _flag(long="--paginate"),
-                _flag(long="--slurp"),
-                _flag(long="--silent"),
+            CommandSpec(
+                name="help",
+                description="Help about any command",
+                arguments=(Argument("texts", nargs="*", metavar=""),),
             ),
+            CommandSpec(
+                name="version",
+                aliases=("--version",),
+                description="Show the Mirage GitHub CLI implementation version",
+            ),
+            CommandSpec(
+                name="api",
+                description="Make an authenticated GitHub API request",
+                arguments=(
+                    Argument("ENDPOINT"),
+                    Argument("-X", "--method"),
+                    Argument("-f", "--raw-field", action="append"),
+                    Argument("-F", "--field", action="append"),
+                    Argument("-H", "--header", action="append"),
+                    _flag(
+                        short="-i",
+                        long="--include",
+                        description="Include HTTP response status line "
+                        "and headers in the output",
+                    ),
+                    Argument("--input", type="path"),
+                    JQ,
+                    _flag(long="--paginate"),
+                    _flag(long="--slurp"),
+                    _flag(long="--silent"),
+                ),
+            ),
+            _issue(),
+            _pr(),
+            _repo(),
+            _release(),
+            _run(),
+            _workflow(),
+            search_spec(),
         ),
-        _issue(),
-        _pr(),
-        _repo(),
-        _release(),
-        _run(),
-        _workflow(),
-        search_spec(),
     ),
+    handlers={
+        **search_handlers(),
+        "auth status": CLIHandler(fn=auth_status),
+        "auth token": CLIHandler(fn=auth_token),
+        "help": CLIHandler(fn=_help_cmd),
+        "version": CLIHandler(fn=version),
+        "api": CLIHandler(fn=api, write=True),
+        "issue list": CLIHandler(fn=issue_commands.list_cmd),
+        "issue view": CLIHandler(fn=issue_commands.view_cmd),
+        "issue create": CLIHandler(fn=issue_commands.create_cmd, write=True),
+        "issue edit": CLIHandler(fn=issue_commands.edit_cmd, write=True),
+        "issue close": CLIHandler(fn=issue_commands.close_cmd, write=True),
+        "issue reopen": CLIHandler(fn=issue_commands.reopen_cmd, write=True),
+        "issue comment": CLIHandler(fn=issue_commands.comment_cmd, write=True),
+        "pr list": CLIHandler(fn=pull_commands.list_cmd),
+        "pr view": CLIHandler(fn=pull_commands.view_cmd),
+        "pr create": CLIHandler(fn=pull_commands.create_cmd, write=True),
+        "pr edit": CLIHandler(fn=pull_commands.edit_cmd, write=True),
+        "pr merge": CLIHandler(fn=pull_commands.merge_cmd, write=True),
+        "pr close": CLIHandler(fn=pull_commands.close_cmd, write=True),
+        "pr comment": CLIHandler(fn=pull_commands.comment_cmd, write=True),
+        "pr diff": CLIHandler(fn=pull_commands.diff_cmd),
+        "pr checks": CLIHandler(fn=pull_commands.checks_cmd),
+        "repo list": CLIHandler(fn=repo_commands.list_cmd),
+        "repo clone": CLIHandler(fn=repo_commands.clone_cmd),
+        "repo view": CLIHandler(fn=repo_commands.view),
+        "repo create": CLIHandler(fn=repo_commands.create_cmd, write=True),
+        "repo fork": CLIHandler(fn=repo_commands.fork, write=True),
+        "repo rename": CLIHandler(fn=repo_commands.rename, write=True),
+        "repo edit": CLIHandler(fn=repo_commands.edit_cmd, write=True),
+        "repo delete": CLIHandler(fn=repo_commands.delete_cmd, write=True),
+        "release list": CLIHandler(fn=release_commands.list_cmd),
+        "release view": CLIHandler(fn=release_commands.view_cmd),
+        "release create": CLIHandler(
+            fn=release_commands.create_cmd, write=True
+        ),
+        "run list": CLIHandler(fn=action_commands.run_list_cmd),
+        "run view": CLIHandler(fn=action_commands.run_view_cmd),
+        "run rerun": CLIHandler(fn=action_commands.run_rerun_cmd, write=True),
+        "workflow list": CLIHandler(fn=action_commands.workflow_list_cmd),
+        "workflow view": CLIHandler(fn=action_commands.workflow_view_cmd),
+        "workflow run": CLIHandler(
+            fn=action_commands.workflow_run_cmd, write=True
+        ),
+    },
+    config_model=GhConfig,
 )

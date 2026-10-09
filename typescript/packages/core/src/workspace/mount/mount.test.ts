@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { commandsFor } from '../../commands/builtin/backends.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
@@ -21,7 +20,7 @@ import {
   type CommandOpts,
   type ExecContext,
 } from '../../commands/config.ts'
-import { CommandSpec, Operand, Option } from '../../commands/spec/types.ts'
+import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -37,7 +36,9 @@ class StubVFS extends BaseVFS {
   }
 }
 
-const BASIC_SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
+const BASIC_SPEC = new CommandSpec({
+  arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+})
 
 const OK_CMD: CommandFn = () => [null, new IOResult({ exitCode: 0 })]
 const OK_CMD_STDOUT: CommandFn = () => [new TextEncoder().encode('ok'), new IOResult()]
@@ -203,7 +204,7 @@ describe('Mount.runCommand', () => {
         name: 'mutate',
         vfs: 'ram',
         spec: new CommandSpec({
-          options: declared ? [new Option({ long: '--version', type: 'bool' })] : [],
+          arguments: [...(declared ? [new Argument('--version', { action: 'store_true' })] : [])],
         }),
         write: true,
         fn: (accessor) => {

@@ -17,7 +17,7 @@ import pytest
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.constants import OPERAND, REFUSED
 from mirage.commands.spec.flag_view import FlagBag, FlagView, spec_flag_names
-from mirage.commands.spec.types import CommandSpec, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.types import PathSpec
 
 
@@ -74,10 +74,10 @@ def test_spec_flag_names_are_canonical_and_ambiguous_mapped():
     # stale short-name read raises through FlagView instead of silently
     # reading False after dest unification.
     spec = CommandSpec(
-        options=(
-            Option(short="l"),
-            Option(short="m", long="--max-count", type="str"),
-            Option(long="--hidden"),
+        arguments=(
+            Argument("-l", action="store_true"),
+            Argument("-m", "--max-count"),
+            Argument("--hidden", action="store_true"),
         )
     )
     names = spec_flag_names(spec)

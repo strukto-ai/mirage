@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLISpec } from '../../commands/cli/types.ts'
+import type { CLI } from '../../commands/cli/types.ts'
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
 import { errorSummary } from '../../secrets/summary.ts'
 import { snakeToCamel } from '../../utils/normalize.ts'
@@ -50,7 +50,7 @@ export class CLIRegistry {
    * general command (a runtime capture of the same name is fine: the
    * policy steers per line).
    */
-  install(name: string, spec: CLISpec, config: Record<string, unknown> | null = null): CLIInstall {
+  install(name: string, spec: CLI, config: Record<string, unknown> | null = null): CLIInstall {
     if (name === '' || /\s/.test(name)) {
       throw new Error(`CLI name '${name}' must be a single word`)
     }
@@ -70,18 +70,14 @@ export class CLIRegistry {
     }
     const install: CLIInstall = {
       name,
-      spec,
+      cli: spec,
       config: this.validateConfig(name, spec, config),
     }
     this.installs.set(name, install)
     return install
   }
 
-  private validateConfig(
-    name: string,
-    spec: CLISpec,
-    config: Record<string, unknown> | null,
-  ): unknown {
+  private validateConfig(name: string, spec: CLI, config: Record<string, unknown> | null): unknown {
     // A config that is not an object is refused by type, rather than having
     // its entries read as unknown keys. One the schema already parsed is
     // still an object with the schema's own keys, so it installs as given,
@@ -97,7 +93,9 @@ export class CLIRegistry {
     }
     if (spec.configModel === null) {
       if (config !== null && Object.keys(config).length > 0) {
-        throw new Error(`CLI '${name}': config given but '${spec.name}' declares no configModel`)
+        throw new Error(
+          `CLI '${name}': config given but '${spec.spec.name}' declares no configModel`,
+        )
       }
       return null
     }

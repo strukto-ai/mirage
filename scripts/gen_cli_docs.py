@@ -17,7 +17,8 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from mirage.commands.cli.specs import BUILTIN_CLI_SPECS, cli_spec_for
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI
+from mirage.commands.spec.types import CommandSpec
 
 ROOT = Path(__file__).resolve().parent.parent
 START = "{/* BEGIN GENERATED CLI COMMANDS */}"
@@ -55,16 +56,16 @@ SUMMARIES = {
 
 
 def commands(
-    node: CLISpec, parents: tuple[str, ...] = ()
+    node: CommandSpec, parents: tuple[str, ...] = ()
 ) -> Iterator[tuple[str, str, tuple[str, ...]]]:
     """Walk the same program tree that supplies each CLI's help.
 
     Args:
-        node (CLISpec): The current command or group.
+        node (CommandSpec): The current command or group.
         parents (tuple[str, ...]): Canonical words preceding this node.
     """
     path = (*parents, node.name)
-    if node.fn is not None:
+    if not node.subcommands:
         yield " ".join(path), node.description or "", node.aliases
     for child in node.subcommands:
         yield from commands(child, path)
@@ -86,12 +87,13 @@ def cell(text: str) -> str:
     )
 
 
-def reference(spec: CLISpec) -> str:
+def reference(cli: CLI) -> str:
     """Render the supported handlers, including aliases, from a live spec.
 
     Args:
-        spec (CLISpec): The registered program root.
+        cli (CLI): The registered program and its grammar.
     """
+    spec = cli.spec
     rows = [
         START,
         "## Supported commands",
@@ -125,7 +127,7 @@ def catalog(language: str) -> str:
     ]
     for name in sorted(BUILTIN_CLI_SPECS):
         spec = cli_spec_for(name)
-        count = sum(1 for _ in commands(spec))
+        count = sum(1 for _ in commands(spec.spec))
         rows.append(
             f"| [{name}](/{language}/cli/{name}) | {SUMMARIES[name]} | {count} |"
         )
@@ -148,7 +150,7 @@ def replace_block(text: str, block: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate CLI references from CLISpec trees"
+        description="Generate CLI references from CommandSpec trees"
     )
     parser.add_argument(
         "--check", action="store_true", help="Fail on stale documentation"

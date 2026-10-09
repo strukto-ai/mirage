@@ -23,7 +23,8 @@ from mirage.commands.cli.specs import (
     register_cli_spec,
     unregister_cli_spec,
 )
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 
 
@@ -31,7 +32,10 @@ async def noop(inv: CLIInvocation):
     return None, IOResult()
 
 
-EP_SPEC = CLISpec(name="eptest", subcommands=(CLISpec(name="run", fn=noop),))
+EP_SPEC = CLI(
+    spec=CommandSpec(name="eptest", subcommands=(CommandSpec(name="run"),)),
+    handlers={"run": CLIHandler(fn=noop)},
+)
 
 
 @pytest.fixture
@@ -41,8 +45,11 @@ def clean_entry_points(monkeypatch):
 
 
 def test_register_resolve_unregister():
-    spec = CLISpec(
-        name="spectest", subcommands=(CLISpec(name="run", fn=noop),)
+    spec = CLI(
+        spec=CommandSpec(
+            name="spectest", subcommands=(CommandSpec(name="run"),)
+        ),
+        handlers={"run": CLIHandler(fn=noop)},
     )
     register_cli_spec(spec)
     try:
@@ -54,8 +61,11 @@ def test_register_resolve_unregister():
 
 
 def test_duplicate_registration_is_refused():
-    spec = CLISpec(
-        name="spectest2", subcommands=(CLISpec(name="run", fn=noop),)
+    spec = CLI(
+        spec=CommandSpec(
+            name="spectest2", subcommands=(CommandSpec(name="run"),)
+        ),
+        handlers={"run": CLIHandler(fn=noop)},
     )
     register_cli_spec(spec)
     try:
@@ -77,14 +87,17 @@ def test_unknown_key_names_the_known_specs():
 
 def test_builtin_himalaya_resolves_lazily():
     spec = cli_spec_for("himalaya")
-    assert isinstance(spec, CLISpec)
-    assert spec.name == "himalaya"
+    assert isinstance(spec, CLI)
+    assert spec.spec.name == "himalaya"
     assert spec.config_model is not None
 
 
 def test_builtin_name_cannot_be_shadowed():
-    spec = CLISpec(
-        name="himalaya", subcommands=(CLISpec(name="run", fn=noop),)
+    spec = CLI(
+        spec=CommandSpec(
+            name="himalaya", subcommands=(CommandSpec(name="run"),)
+        ),
+        handlers={"run": CLIHandler(fn=noop)},
     )
     with pytest.raises(ValueError, match="already registered"):
         register_cli_spec(spec)
@@ -104,7 +117,8 @@ def test_reference_form_loads_a_script_file(tmp_path):
     script = tmp_path / "pager.py"
     script.write_text(
         textwrap.dedent("""\
-            from mirage.commands.cli.types import CLIInvocation, CLISpec
+            from mirage.commands.cli.types import CLIInvocation, CLI, CLIHandler
+            from mirage.commands.spec.types import CommandSpec
             from mirage.io import IOResult
 
 
@@ -112,17 +126,19 @@ def test_reference_form_loads_a_script_file(tmp_path):
                 return None, IOResult()
 
 
-            PAGER = CLISpec(name="pager",
-                            subcommands=(CLISpec(name="on", fn=page), ))
+            PAGER = CLI(
+                CommandSpec(name="pager", subcommands=(CommandSpec(name="on"),)),
+                handlers={"on": CLIHandler(page)},
+            )
             """)
     )
     spec = cli_spec_for(f"{script}:PAGER")
-    assert isinstance(spec, CLISpec)
-    assert spec.name == "pager"
+    assert isinstance(spec, CLI)
+    assert spec.spec.name == "pager"
 
 
 def test_reference_to_a_non_spec_fails_loud():
-    with pytest.raises(TypeError, match="is not a CLISpec"):
+    with pytest.raises(TypeError, match="is not a CLI"):
         cli_spec_for("tests.commands.cli.test_specs:noop")
 
 
@@ -152,7 +168,7 @@ def test_entry_point_does_not_shadow_builtin(clean_entry_points, monkeypatch):
     )
     spec = cli_spec_for("himalaya")
     assert spec is not EP_SPEC
-    assert spec.name == "himalaya"
+    assert spec.spec.name == "himalaya"
 
 
 def test_unknown_key_lists_entry_points(clean_entry_points, monkeypatch):

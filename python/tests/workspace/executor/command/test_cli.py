@@ -17,10 +17,10 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
 from mirage.commands.errors import PartialOutputError
 from mirage.commands.spec.parser import parse_command
-from mirage.commands.spec.types import CommandSpec, Operand, Option, UsageStyle
+from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import materialize
@@ -73,41 +73,38 @@ def raise_after_output(inv: CLIInvocation[TokenConfig]):
 
 
 def make_sync_install(fn) -> CLIInstall:
-    spec = CLISpec(
-        name="prog",
+    spec = CLI(
+        spec=CommandSpec(name="prog", subcommands=(CommandSpec(name="go"),)),
+        handlers={"go": CLIHandler(fn=fn)},
         config_model=TokenConfig,
-        subcommands=(CLISpec(name="go", fn=fn),),
     )
-    return CLIInstall(name="prog", spec=spec, config=TokenConfig(token="tok"))
+    return CLIInstall(name="prog", cli=spec, config=TokenConfig(token="tok"))
 
 
 def make_install(name: str = "prog") -> CLIInstall:
-    spec = CLISpec(
-        name="prog",
-        config_model=TokenConfig,
-        options=(Option(short="-v", long="--verbose", count=True),),
-        subcommands=(
-            CLISpec(
-                name="message",
-                subcommands=(
-                    CLISpec(
-                        name="send",
-                        fn=send,
-                        options=(
-                            Option(
-                                short="-t",
-                                long="--to",
-                                type="str",
-                                required=True,
+    spec = CLI(
+        spec=CommandSpec(
+            name="prog",
+            subcommands=(
+                CommandSpec(
+                    name="message",
+                    subcommands=(
+                        CommandSpec(
+                            name="send",
+                            arguments=(
+                                Argument("-t", "--to", required=True),
+                                Argument("texts", nargs="*", metavar=""),
                             ),
                         ),
-                        rest=Operand(type="str"),
                     ),
                 ),
             ),
+            arguments=(Argument("-v", "--verbose", action="count"),),
         ),
+        handlers={"message send": CLIHandler(fn=send)},
+        config_model=TokenConfig,
     )
-    return CLIInstall(name=name, spec=spec, config=TokenConfig(token="tok"))
+    return CLIInstall(name=name, cli=spec, config=TokenConfig(token="tok"))
 
 
 @pytest.mark.asyncio
@@ -233,12 +230,16 @@ async def test_leaf_declaring_help_is_handed_the_flag():
     # Injection is skipped for a leaf that declares --help, so the
     # answer is the leaf's too: intercepting it anyway would make the
     # declaration unreachable.
-    spec = CLISpec(
-        name="prog",
-        fn=own_help,
-        options=(Option(long="--help", description="own help"),),
+    spec = CLI(
+        spec=CommandSpec(
+            name="prog",
+            arguments=(
+                Argument("--help", action="store_true", help="own help"),
+            ),
+        ),
+        handlers={"": CLIHandler(fn=own_help)},
     )
-    install = CLIInstall(name="prog", spec=spec, config=None)
+    install = CLIInstall(name="prog", cli=spec, config=None)
     stdout, io, _ = await handle_cli(
         install, ["prog", "--help"], SessionState("t")
     )
@@ -255,15 +256,13 @@ async def slow_send(inv: CLIInvocation[None]):
 async def test_leaf_limit_bounds_the_handler():
     # The declared limit wraps the handler body like mount
     # dispatch: a blocking leaf times out instead of hanging.
-    spec = CLISpec(
-        name="prog",
-        subcommands=(
-            CLISpec(
-                name="run", fn=slow_send, limit=Limit(timeout_seconds=0.05)
-            ),
-        ),
+    spec = CLI(
+        spec=CommandSpec(name="prog", subcommands=(CommandSpec(name="run"),)),
+        handlers={
+            "run": CLIHandler(fn=slow_send, limit=Limit(timeout_seconds=0.05))
+        },
     )
-    install = CLIInstall(name="prog", spec=spec, config=None)
+    install = CLIInstall(name="prog", cli=spec, config=None)
     with pytest.raises(CommandTimeoutError, match="prog run"):
         await handle_cli(install, ["prog", "run"], SessionState("t"))
 
@@ -277,19 +276,16 @@ async def test_a_timed_out_write_still_drops_the_caches():
     async def drop():
         dropped.append(True)
 
-    spec = CLISpec(
-        name="prog",
+    spec = CLI(
+        spec=CommandSpec(name="prog", subcommands=(CommandSpec(name="run"),)),
+        handlers={
+            "run": CLIHandler(
+                fn=slow_send, write=True, limit=Limit(timeout_seconds=0.05)
+            )
+        },
         config_model=TokenConfig,
-        subcommands=(
-            CLISpec(
-                name="run",
-                fn=slow_send,
-                write=True,
-                limit=Limit(timeout_seconds=0.05),
-            ),
-        ),
     )
-    install = CLIInstall(name="prog", spec=spec, config=TokenConfig(token="t"))
+    install = CLIInstall(name="prog", cli=spec, config=TokenConfig(token="t"))
     with pytest.raises(CommandTimeoutError):
         await handle_cli(
             install, ["prog", "run"], SessionState("t"), drop_caches=drop
@@ -373,15 +369,14 @@ def script_install(
     runtime: str | None = None,
     config: dict | None = None,
     language: str = "python",
-    options: tuple[Option, ...] = (),
+    options: tuple[Argument, ...] = (),
 ) -> CLIInstall:
-    spec = CLISpec(
-        name="pager",
+    spec = CLI(
+        spec=CommandSpec(name="pager", arguments=(*options,)),
         script=ScriptSource("print('hi')", language=language),
         runtime=runtime,
-        options=options,
     )
-    return CLIInstall(name="pager", spec=spec, config=config)
+    return CLIInstall(name="pager", cli=spec, config=config)
 
 
 @pytest.mark.asyncio
@@ -413,9 +408,7 @@ async def test_script_declared_options_still_pass_verbatim():
     # the program still receives the raw tokens, the contract a native
     # binary could also honor.
     py = FakePyRuntime()
-    install = script_install(
-        options=(Option(short="-n", long="--lines", type="int"),)
-    )
+    install = script_install(options=(Argument("-n", "--lines", type="int"),))
     _, io, _ = await handle_cli(
         install,
         ["pager", "-n", "3", "report.txt"],
@@ -431,11 +424,11 @@ async def test_script_module_bit_reaches_the_runtime_as_a_flag():
     # A .mjs source only runs as an ES module if the engine gets
     # flags['module']; without it import and top-level await fail.
     js = FakeJsRuntime()
-    spec = CLISpec(
-        name="pager",
+    spec = CLI(
+        spec=CommandSpec(name="pager"),
         script=ScriptSource("export const x = 1", language="js", module=True),
     )
-    install = CLIInstall(name="pager", spec=spec, config=None)
+    install = CLIInstall(name="pager", cli=spec, config=None)
     _, io, _ = await handle_cli(
         install, ["pager"], SessionState("t"), context=CLIContext(entries=[js])
     )
@@ -494,9 +487,7 @@ async def test_script_is_named_by_its_installed_head_word():
     # The program's own name rides argv slot 0, so its messages read
     # 'pager:' and two installs of one program are distinguishable.
     py = FakePyRuntime()
-    install = CLIInstall(
-        name="renamed", spec=script_install().spec, config=None
-    )
+    install = CLIInstall(name="renamed", cli=script_install().cli, config=None)
     await handle_cli(
         install,
         ["renamed", "report.txt"],
@@ -541,9 +532,7 @@ async def test_script_help_renders_when_the_spec_declares_a_grammar():
     # Declaring options opts back into the entry point, where the
     # rendered page is truthful and the program never runs.
     py = FakePyRuntime()
-    install = script_install(
-        options=(Option(short="-n", long="--lines", type="int"),)
-    )
+    install = script_install(options=(Argument("-n", "--lines", type="int"),))
     stdout, io, _ = await handle_cli(
         install,
         ["pager", "--help"],
@@ -576,9 +565,7 @@ async def test_script_undeclared_flag_reaches_the_program():
 @pytest.mark.asyncio
 async def test_script_with_a_grammar_refuses_an_undeclared_flag():
     py = FakePyRuntime()
-    install = script_install(
-        options=(Option(short="-n", long="--lines", type="int"),)
-    )
+    install = script_install(options=(Argument("-n", "--lines", type="int"),))
     _, io, _ = await handle_cli(
         install,
         ["pager", "--frobnicate"],
@@ -781,12 +768,12 @@ async def test_script_exit_code_and_stderr_surface():
 @pytest.mark.asyncio
 async def test_script_limit_bounds_the_run():
     sleepy = SleepingRuntime()
-    spec = CLISpec(
-        name="pager",
+    spec = CLI(
+        spec=CommandSpec(name="pager"),
+        handlers={"": CLIHandler(limit=Limit(timeout_seconds=0.05))},
         script=ScriptSource("print('hi')"),
-        limit=Limit(timeout_seconds=0.05),
     )
-    install = CLIInstall(name="pager", spec=spec, config=None)
+    install = CLIInstall(name="pager", cli=spec, config=None)
     with pytest.raises(CommandTimeoutError, match="pager"):
         await handle_cli(
             install,
@@ -798,17 +785,13 @@ async def test_script_limit_bounds_the_run():
 
 
 def test_env_fills_an_option_the_line_omitted():
-    spec = CommandSpec(
-        options=(Option(long="--version", type="str", env="X_VERSION"),)
-    )
+    spec = CommandSpec(arguments=(Argument("--version", env="X_VERSION"),))
     parsed = parse_flags([], spec, "x", "/", env={"X_VERSION": "9"})
     assert parsed.flag_kwargs == {"version": "9"}
 
 
 def test_the_typed_value_wins_over_the_environment():
-    spec = CommandSpec(
-        options=(Option(long="--version", type="str", env="X_VERSION"),)
-    )
+    spec = CommandSpec(arguments=(Argument("--version", env="X_VERSION"),))
     parsed = parse_flags(
         ["--version", "typed"], spec, "x", "/", env={"X_VERSION": "9"}
     )
@@ -817,14 +800,7 @@ def test_the_typed_value_wins_over_the_environment():
 
 def test_the_environment_wins_over_a_declared_default():
     spec = CommandSpec(
-        options=(
-            Option(
-                long="--version",
-                type="str",
-                default="fallback",
-                env="X_VERSION",
-            ),
-        )
+        arguments=(Argument("--version", default="fallback", env="X_VERSION"),)
     )
     assert parse_flags(
         [], spec, "x", "/", env={"X_VERSION": "9"}
@@ -838,11 +814,7 @@ def test_env_satisfies_a_required_option_before_it_is_refused():
     # The whole point of filling inside the parse: the option is
     # credited against required, so the line is not refused.
     spec = CommandSpec(
-        options=(
-            Option(
-                long="--version", type="str", env="X_VERSION", required=True
-            ),
-        )
+        arguments=(Argument("--version", env="X_VERSION", required=True),)
     )
     filled = parse_flags([], spec, "x", "/", env={"X_VERSION": "9"})
     assert filled.missing_required_options == []
@@ -851,11 +823,7 @@ def test_env_satisfies_a_required_option_before_it_is_refused():
 
 def test_an_unset_variable_leaves_the_refusal_standing():
     spec = CommandSpec(
-        options=(
-            Option(
-                long="--version", type="str", env="X_VERSION", required=True
-            ),
-        )
+        arguments=(Argument("--version", env="X_VERSION", required=True),)
     )
     same = parse_flags([], spec, "x", "/", env={})
     assert same.missing_required_options == ["--version"]
@@ -866,7 +834,7 @@ def test_an_env_value_is_coerced_and_checked_like_a_typed_one():
     # Filling after the parse left these unchecked: an int stayed a
     # string nobody validated and a choice was never tested.
     ints = CommandSpec(
-        options=(Option(long="--count", type="int", env="X_COUNT"),)
+        arguments=(Argument("--count", type="int", env="X_COUNT"),)
     )
     assert (
         option_error(
@@ -881,11 +849,7 @@ def test_an_env_value_is_coerced_and_checked_like_a_typed_one():
         is None
     )
     picks = CommandSpec(
-        options=(
-            Option(
-                long="--mode", type="str", choices=("a", "b"), env="X_MODE"
-            ),
-        )
+        arguments=(Argument("--mode", choices=("a", "b"), env="X_MODE"),)
     )
     assert (
         option_error(
@@ -905,7 +869,7 @@ def test_an_env_path_becomes_a_pathspec_like_a_typed_one():
     # A raw string here vanished from FlagView.as_paths() and was never
     # routed to a mount.
     spec = CommandSpec(
-        options=(Option(long="--conf", type="path", env="X_CONF"),)
+        arguments=(Argument("--conf", type="path", env="X_CONF"),)
     )
     parsed = parse_flags([], spec, "x", "/work", env={"X_CONF": "rel.json"})
     value = parsed.flag_kwargs["conf"]
@@ -917,9 +881,7 @@ def test_an_env_value_does_not_count_as_typed():
     # clap's usage line echoes what the line carried; an env-supplied
     # option is supplied but not typed, and clap_supplied reads the
     # environment itself for that distinction.
-    spec = CommandSpec(
-        options=(Option(long="--version", type="str", env="X_VERSION"),)
-    )
+    spec = CommandSpec(arguments=(Argument("--version", env="X_VERSION"),))
     parsed = parse_command(spec, [], "/", env={"X_VERSION": "9"})
     assert parsed.flags["--version"] == "9"
     assert parsed.typed_dests == []
@@ -943,7 +905,12 @@ async def stash(inv: CLIInvocation[None]):
     return f"{inv.texts[0]}={view.get(inv.texts[0])}\n".encode(), IOResult()
 
 
-STASH = CLISpec(name="stash", fn=stash, rest=Operand(type="str"))
+STASH = CLI(
+    spec=CommandSpec(
+        name="stash", arguments=(Argument("texts", nargs="*", metavar=""),)
+    ),
+    handlers={"": CLIHandler(fn=stash)},
+)
 
 
 @pytest.mark.asyncio
@@ -1013,14 +980,16 @@ async def test_an_account_cli_write_refreshes_every_mount(tmp_path):
     with _disk_workspace(root) as ws:
         ws.register_cli(
             "acme",
-            CLISpec(
-                name="acme",
-                config_model=TokenConfig,
-                subcommands=(
-                    CLISpec(
-                        name="close", write=True, fn=_out_of_band_writer(root)
-                    ),
+            CLI(
+                spec=CommandSpec(
+                    name="acme", subcommands=(CommandSpec(name="close"),)
                 ),
+                handlers={
+                    "close": CLIHandler(
+                        fn=_out_of_band_writer(root), write=True
+                    )
+                },
+                config_model=TokenConfig,
             ),
             {"token": "t"},
         )
@@ -1035,12 +1004,12 @@ async def test_an_account_cli_read_keeps_every_mount_warm(tmp_path):
     with _disk_workspace(root) as ws:
         ws.register_cli(
             "acme",
-            CLISpec(
-                name="acme",
-                config_model=TokenConfig,
-                subcommands=(
-                    CLISpec(name="peek", fn=_out_of_band_writer(root)),
+            CLI(
+                spec=CommandSpec(
+                    name="acme", subcommands=(CommandSpec(name="peek"),)
                 ),
+                handlers={"peek": CLIHandler(fn=_out_of_band_writer(root))},
+                config_model=TokenConfig,
             ),
             {"token": "t"},
         )
@@ -1058,13 +1027,15 @@ async def test_a_mount_tier_cli_write_drops_nothing(tmp_path):
     with _disk_workspace(root) as ws:
         ws.register_cli(
             "tool",
-            CLISpec(
-                name="tool",
-                subcommands=(
-                    CLISpec(
-                        name="poke", write=True, fn=_out_of_band_writer(root)
-                    ),
+            CLI(
+                spec=CommandSpec(
+                    name="tool", subcommands=(CommandSpec(name="poke"),)
                 ),
+                handlers={
+                    "poke": CLIHandler(
+                        fn=_out_of_band_writer(root), write=True
+                    )
+                },
             ),
         )
         body, listing = await _warm_then_run(ws, root, "tool poke")
@@ -1076,23 +1047,29 @@ def test_a_service_reaching_root_drops_mount_caches():
     # A script root's config is opaque, so it never carries a config
     # model, yet its program may reach a service exactly as an account
     # CLI does; only a root with neither writes through the dispatcher.
-    assert drops_mount_caches(make_install().spec)
-    assert drops_mount_caches(script_install().spec)
+    assert drops_mount_caches(make_install().cli)
+    assert drops_mount_caches(script_install().cli)
     assert not drops_mount_caches(STASH)
 
 
 @pytest.mark.asyncio
 async def test_git_usage_style_does_not_change_custom_cli_option_grammar():
-    spec = CLISpec(
-        name="custom",
-        config_model=TokenConfig,
-        usage_style=UsageStyle.GIT,
-        subcommands=(
-            CLISpec(name="branch", fn=send, options=(Option(long="--topic"),)),
+    spec = CLI(
+        spec=CommandSpec(
+            name="custom",
+            usage_style=UsageStyle.GIT,
+            subcommands=(
+                CommandSpec(
+                    name="branch",
+                    arguments=(Argument("--topic", action="store_true"),),
+                ),
+            ),
         ),
+        handlers={"branch": CLIHandler(fn=send)},
+        config_model=TokenConfig,
     )
     install = CLIInstall(
-        name="custom", spec=spec, config=TokenConfig(token="tok")
+        name="custom", cli=spec, config=TokenConfig(token="tok")
     )
     stdout, io, _ = await handle_cli(
         install, ["custom", "branch", "--top"], SessionState("t")
@@ -1103,8 +1080,11 @@ async def test_git_usage_style_does_not_change_custom_cli_option_grammar():
 
 @pytest.mark.asyncio
 async def test_profile_and_workspace_override_a_cli_deadline():
-    spec = CLISpec(
-        name="prog", fn=slow_send, limit=Limit(timeout_seconds=0.01)
+    spec = CLI(
+        spec=CommandSpec(name="prog"),
+        handlers={
+            "": CLIHandler(fn=slow_send, limit=Limit(timeout_seconds=0.01))
+        },
     )
     with Workspace(
         {"/ram": RAMVFS()},
@@ -1136,9 +1116,11 @@ async def test_invocation_shell_is_revoked_after_handler_settles(fails):
             raise RuntimeError("handler failed")
         return None, IOResult()
 
-    spec = CLISpec(name="probe", fn=probe)
+    spec = CLI(
+        spec=CommandSpec(name="probe"), handlers={"": CLIHandler(fn=probe)}
+    )
     await handle_cli(
-        CLIInstall(name="probe", spec=spec, config=None),
+        CLIInstall(name="probe", cli=spec, config=None),
         ["probe"],
         SessionState(session_id="s"),
         context=CLIContext(shell=evaluate),
@@ -1161,10 +1143,12 @@ async def test_invocation_shell_is_revoked_after_cancellation():
         entered.set()
         await asyncio.Event().wait()
 
-    spec = CLISpec(name="probe", fn=probe)
+    spec = CLI(
+        spec=CommandSpec(name="probe"), handlers={"": CLIHandler(fn=probe)}
+    )
     task = asyncio.create_task(
         handle_cli(
-            CLIInstall(name="probe", spec=spec, config=None),
+            CLIInstall(name="probe", cli=spec, config=None),
             ["probe"],
             SessionState(session_id="s"),
             context=CLIContext(shell=evaluate),
@@ -1176,3 +1160,46 @@ async def test_invocation_shell_is_revoked_after_cancellation():
         await task
     with pytest.raises(RuntimeError, match="no longer active"):
         await saved[0]("echo late")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("nargs", "usage"),
+    [(None, "ID"), ("+", "ID ..."), (2, "ID ID"), ("?", None)],
+)
+async def test_argparse_required_positionals_refuse_before_the_handler(
+    nargs, usage
+):
+    calls = []
+
+    async def handler(inv):
+        calls.append(inv.texts)
+        return b"called", IOResult()
+
+    cli = CLI(
+        CommandSpec(name="tool", arguments=(Argument("ID", nargs=nargs),)),
+        handlers={"": CLIHandler(handler)},
+    )
+    install = CLIInstall(name="tool", cli=cli)
+    stdout, io, _ = await handle_cli(install, ["tool"], SessionState("t"))
+    if usage is None:
+        assert io.exit_code == 0
+        assert await materialize(stdout) == b"called"
+        assert calls == [()]
+    else:
+        assert stdout is None
+        assert io.exit_code == 2
+        assert (
+            await materialize(io.stderr)
+            == (
+                f"usage: tool [-h] {usage}\n"
+                "tool: error: the following arguments are required: ID\n"
+            ).encode()
+        )
+        assert calls == []
+        stdout, io, _ = await handle_cli(
+            install, ["tool", "--help"], SessionState("t")
+        )
+        assert io.exit_code == 0
+        assert b"ID" in await materialize(stdout)
+        assert calls == []

@@ -28,6 +28,7 @@ from mirage.commands.builtin.grep_pushdown import grep_needs_every_file
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.search import make_search_op
@@ -294,8 +295,8 @@ def test_query_carries_the_honored_flags():
             CommandOpts(flags={"i": True}),
         )
     )
-    assert seen[0].options["grep"]["ignore_case"]
-    assert not seen[0].options["grep"]["fixed_string"]
+    assert compile_spec(seen[0]).options["grep"]["ignore_case"]
+    assert not compile_spec(seen[0]).options["grep"]["fixed_string"]
 
 
 def test_stdin_operand_reads_the_pipe_not_the_backend():

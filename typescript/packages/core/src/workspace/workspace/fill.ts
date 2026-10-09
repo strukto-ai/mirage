@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { invokedEnvNames, suppliedEnvNames } from '../../commands/cli/walk.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
@@ -187,7 +186,7 @@ export function guestBound(
 /**
  * Env names the line's installed CLIs are about to read.
  *
- * An installed CLI reads a managed name through `Option.env` with no
+ * An installed CLI reads a managed name through `Argument.env` with no
  * `$NAME` in the line's text, so the fill set has to be told. A head
  * word counts only when dispatch would actually run the CLI (`lookup`):
  * a function, builtin or namespace command shadowing the name wins
@@ -211,13 +210,13 @@ export function cliEnvNames(
       if (install === null) continue
       if (lookup(head, session, registry) !== Consumer.CLI) continue
       if (args.includes(null)) {
-        for (const name of invokedEnvNames(install.spec, null)) out.add(name)
+        for (const name of invokedEnvNames(install.cli.spec, null)) out.add(name)
         continue
       }
       const literal = args.filter((arg): arg is string => arg !== null)
       const words = new Set(literal.filter((arg) => !arg.startsWith('-')))
-      const supplied = suppliedEnvNames(install.spec, literal)
-      for (const name of invokedEnvNames(install.spec, words)) {
+      const supplied = suppliedEnvNames(install.cli.spec, literal)
+      for (const name of invokedEnvNames(install.cli.spec, words)) {
         if (!supplied.has(name)) out.add(name)
       }
     }

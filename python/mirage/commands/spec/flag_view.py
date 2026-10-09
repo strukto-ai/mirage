@@ -15,6 +15,7 @@
 from collections.abc import Mapping, Sequence
 from typing import Generic, TypeVar
 
+from mirage.commands.spec.compile import argument_dest, compile_spec
 from mirage.commands.spec.constants import (
     OPERAND,
     REFUSED,
@@ -243,9 +244,7 @@ def spec_flag_names(spec: CommandSpec) -> frozenset[str]:
     Args:
         spec (CommandSpec): command spec whose options to enumerate.
     """
-    names: set[str] = set()
-    for option in spec.options:
-        canonical = option.long if option.long is not None else option.short
-        if canonical is not None:
-            names.add(flag_kwarg_name(canonical))
-    return frozenset(names)
+    return frozenset(
+        flag_kwarg_name(argument_dest(option))
+        for option in compile_spec(spec).options
+    )

@@ -371,9 +371,7 @@ async def test_an_unreadable_file_is_refused_in_git_words(
     assert await run(git_rw, f"add {name}") == (
         128,
         b"",
-        (
-            f'error: open("{name}"): Permission denied\n'
-            f"error: unable to index file '{name}'\n"
-            f"fatal: {verb} files failed\n"
-        ).encode(),
+        f'error: open("{name}"): Permission denied\n'
+        f"error: unable to index file '{name}'\n"
+        f"fatal: {verb} files failed\n".encode(),
     )

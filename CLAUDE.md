@@ -39,8 +39,8 @@ semantics.
   constant uses the short name (`BUILDER`, `PROMPT`, `IO`); a file needing
   several imports them as namespaces (`import * as column`).
 - `scripts/gen_specs.py` and `typescript/scripts/gen-specs.ts` generate temporary parity manifests
-  (`MIRAGE_SPEC_DIR`, default `.cache/spec/`); `scripts/check_spec_parity.py` diffs command specs, VFS registries
-  and config fields across the two languages.
+  (`MIRAGE_SPEC_DIR`, default `.cache/spec/`); `scripts/check_spec_parity.py` diffs command specs, CLI trees and handler policies,
+  VFS registries and config fields across the two languages.
 - `scripts/check_barrel_surface.py`: every `core` export has a consumer.
 - `integ/`: one JSON case corpus runs on both hosts against the same targets
   and goldens. Any change in observable shell behavior adds a case.
@@ -91,10 +91,10 @@ same PR.
 - **Shell commands** follow POSIX and GNU coreutils. Pin GNU with docker
   (`debian:stable-slim`) before changing semantics and document a divergence
   where it lives. Exit codes and stderr wording are part of the contract.
-- **`CommandSpec`, `Operand`, `Option`** are shared by every command. Add a
+- **`CommandSpec`, `Argument`** are shared by every command. Add a
   field only when POSIX and argparse both already have the concept, named
-  after theirs. `CLISpec` is a `CommandSpec`, so it gets no exemption.
-- **CLIs (`CLISpec`)** are the agent's tools, dispatched by name. An account
+  after theirs. The same grammar describes built-ins and CLI trees.
+- **CLIs (`CLI`)** are the agent's tools, dispatched by name. An account
   CLI declares a `config_model` and consults no mount; `git` declares none
   and reads its repository through `CLIView`. `register_cli` is host-side
   only; there is no install builtin. A CLI that mimics a real program is
@@ -161,15 +161,18 @@ bookkeeping and `seed_var` are exempt.
 
 ### CommandSpec
 
-`commands/spec/`: the argparse-shaped grammar, `parse_command`,
+`commands/spec/`: one `Argument` for options and positionals and one
+`CommandSpec` for flat commands and subcommand trees. `parse_command`,
 `compile_spec`, `FlagView`, help, usage and GNU option prefixes.
 `UsageStyle` (`ARGPARSE`, `GIT`, `CLAP`) on the root spec sets help layout,
 refusal wording and exit code. `operand_base` (tar `-C`) is resolved by the
 parser, before classification.
 
-### CLISpec
+### CLI
 
-`commands/cli/`: a typed program tree bound to a head word. One
+`commands/cli/`: a `CLI` binds a `CommandSpec` tree to `CLIHandler` entries
+keyed by canonical leaf path, plus account config or script/runtime settings.
+A `CLIInstall` supplies the installed name and validated account. One
 `CLIInvocation` per leaf; `inv.view` (`dispatch`, `stat_path`, `ns`,
 `session_view`) is the only way to a mount. `man`, `--help`, `type -t` and
 `which` derive from the spec. `ntn` is the worked example (CLAP voice, a
@@ -220,7 +223,7 @@ flowchart TD
     Exec --> Policy["policy<br/>pre_command · pre_session"]
     Exec --> Runtime["runtime routing<br/>workspace · process · remote"]
     Exec --> Handler["command handler<br/>(accessor, paths, texts, opts)"]
-    Spec["CommandSpec · CLISpec · FlagView"] -.-> Handler
+    Spec["Argument · CommandSpec · CLI · FlagView"] -.-> Handler
     Handler --> Dispatch["op dispatcher<br/>workspace/dispatcher · ops"]
     Runtime -. RuntimeVFS .-> Dispatch
     FUSE["FUSE · FSKit"] --> Dispatch

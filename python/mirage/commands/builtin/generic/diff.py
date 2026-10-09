@@ -15,8 +15,9 @@ from mirage.commands.builtin.utils.stream import (
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import CommandName, FlagValue, Option
+from mirage.commands.spec.types import Argument, CommandName, FlagValue
 from mirage.commands.spec.usage import (
     extra_operand_error,
     missing_operand_error,
@@ -148,8 +149,11 @@ async def _header_time(walk: _Walk, path: PathSpec, absent: bool) -> str:
     return full_iso_time(info.modified, walk.zone)
 
 
-def _takes_value(option: Option) -> bool:
-    return option.type != "bool" and not option.value_optional
+def _takes_value(option: Argument) -> bool:
+    return (
+        option.action not in ("store_true", "count")
+        and not option.nargs == "?"
+    )
 
 
 def switch_words(argv: Sequence[str]) -> list[str]:
@@ -163,9 +167,19 @@ def switch_words(argv: Sequence[str]) -> list[str]:
     Args:
         argv (Sequence[str]): the words after ``diff``.
     """
-    options = SPECS[CommandName.DIFF].options
-    shorts = {o.short[1:]: o for o in options if o.short}
-    longs = {o.long[2:]: o for o in options if o.long}
+    options = compile_spec(SPECS[CommandName.DIFF]).options
+    shorts = {
+        name[1:]: o
+        for o in options
+        for name in o.names
+        if not name.startswith("--")
+    }
+    longs = {
+        name[2:]: o
+        for o in options
+        for name in o.names
+        if name.startswith("--")
+    }
     words: list[str] = []
     i = 0
     while i < len(argv):

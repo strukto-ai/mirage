@@ -37,11 +37,11 @@ def test_declares_a_config_model_because_it_is_an_account_cli():
 def test_uses_the_argparse_dialect():
     """Upstream `hf` is argparse, not clap, so there is no dialect to
     add for it: the default already words its refusals."""
-    assert HF.usage_style is UsageStyle.ARGPARSE
+    assert HF.spec.usage_style is UsageStyle.ARGPARSE
 
 
 def test_the_verb_tree_is_the_one_upstream_offers():
-    assert [c.name for c in HF.subcommands] == [
+    assert [c.name for c in HF.spec.subcommands] == [
         "auth",
         "repo",
         "repo-files",
@@ -53,10 +53,9 @@ def test_the_verb_tree_is_the_one_upstream_offers():
 
 
 def test_write_verbs_are_marked_write():
-    by_name = {c.name: c for c in HF.subcommands}
-    assert by_name["upload"].write is True
-    assert by_name["download"].write is True
-    assert by_name["env"].write is False
+    assert HF.handlers["upload"].write is True
+    assert HF.handlers["download"].write is True
+    assert HF.handlers["env"].write is False
 
 
 def test_repo_type_defaults_to_model():

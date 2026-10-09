@@ -11,191 +11,136 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-import { compileSpec, expandLong } from './compile.ts'
+import { compileSpec, expandLong, optionSpellings } from './compile.ts'
 import { HELP_OPTION, VERSION_OPTION } from './constants.ts'
-import { CommandSpec, Operand, Option } from './types.ts'
+import { CommandSpec, Argument } from './types.ts'
 
 export const SHELL_SPECS = Object.freeze({
   xargs: new CommandSpec({
     description: 'Build and run command lines from standard input.',
-    options: [
-      new Option({
-        short: '-0',
-        long: '--null',
-        description: 'Input items are terminated by NUL.',
+    arguments: [
+      new Argument(['-0', '--null'], {
+        action: 'store_true',
+        help: 'Input items are terminated by NUL.',
       }),
-      new Option({
-        short: '-a',
-        long: '--arg-file',
-        type: 'str',
-        description: 'Read items from this file, not standard input.',
+      new Argument(['-a', '--arg-file'], {
+        help: 'Read items from this file, not standard input.',
       }),
-      new Option({
-        short: '-d',
-        long: '--delimiter',
-        type: 'str',
-        description: 'Input items are separated by this character.',
+      new Argument(['-d', '--delimiter'], { help: 'Input items are separated by this character.' }),
+      new Argument('-E', { help: 'Stop reading at this logical end-of-file string.' }),
+      new Argument(['-e', '--eof'], {
+        nargs: '?',
+        attachedOnly: true,
+        help: 'Same as -E; no string turns it off.',
       }),
-      new Option({
-        short: '-E',
-        type: 'str',
-        description: 'Stop reading at this logical end-of-file string.',
+      new Argument('-I', {
+        help: 'Replace this string in the initial arguments with each input line.',
       }),
-      new Option({
-        short: '-e',
-        long: '--eof',
-        type: 'str',
-        valueOptional: true,
-        description: 'Same as -E; no string turns it off.',
+      new Argument(['-i', '--replace'], {
+        nargs: '?',
+        attachedOnly: true,
+        help: 'Same as -I, with {} when no string is attached.',
       }),
-      new Option({
-        short: '-I',
-        type: 'str',
-        description: 'Replace this string in the initial arguments with each input line.',
+      new Argument('-L', { help: 'Use at most N non-blank input lines per command line.' }),
+      new Argument(['-l', '--max-lines'], {
+        nargs: '?',
+        attachedOnly: true,
+        help: 'Same as -L, with 1 when no count is attached.',
       }),
-      new Option({
-        short: '-i',
-        long: '--replace',
-        type: 'str',
-        valueOptional: true,
-        description: 'Same as -I, with {} when no string is attached.',
+      new Argument(['-n', '--max-args'], { help: 'Use at most N arguments per command line.' }),
+      new Argument(['-o', '--open-tty'], {
+        action: 'store_true',
+        help: 'Reopen stdin as the terminal in each command (there is no terminal, so this fails).',
       }),
-      new Option({
-        short: '-L',
-        type: 'str',
-        description: 'Use at most N non-blank input lines per command line.',
+      new Argument(['-p', '--interactive'], {
+        action: 'store_true',
+        help: 'Prompt before running each command (there is no terminal, so this fails).',
       }),
-      new Option({
-        short: '-l',
-        long: '--max-lines',
-        type: 'str',
-        valueOptional: true,
-        description: 'Same as -L, with 1 when no count is attached.',
+      new Argument(['-r', '--no-run-if-empty'], {
+        action: 'store_true',
+        help: 'Do not run the command on empty input.',
       }),
-      new Option({
-        short: '-n',
-        long: '--max-args',
-        type: 'str',
-        description: 'Use at most N arguments per command line.',
+      new Argument(['-s', '--max-chars'], { help: 'Limit a command line to N bytes.' }),
+      new Argument(['-t', '--verbose'], {
+        action: 'store_true',
+        help: 'Print each command on stderr before running it.',
       }),
-      new Option({
-        short: '-o',
-        long: '--open-tty',
-        description:
-          'Reopen stdin as the terminal in each command (there is no terminal, so this fails).',
+      new Argument('--show-limits', {
+        action: 'store_true',
+        help: 'Show the command-line length limits.',
       }),
-      new Option({
-        short: '-p',
-        long: '--interactive',
-        description: 'Prompt before running each command (there is no terminal, so this fails).',
+      new Argument(['-x', '--exit'], {
+        action: 'store_true',
+        help: 'Exit if a command line exceeds the size limit.',
       }),
-      new Option({
-        short: '-r',
-        long: '--no-run-if-empty',
-        description: 'Do not run the command on empty input.',
+      new Argument(['-P', '--max-procs'], {
+        help: 'Run up to N commands at a time; 0 runs them all at once.',
       }),
-      new Option({
-        short: '-s',
-        long: '--max-chars',
-        type: 'str',
-        description: 'Limit a command line to N bytes.',
-      }),
-      new Option({
-        short: '-t',
-        long: '--verbose',
-        description: 'Print each command on stderr before running it.',
-      }),
-      new Option({
-        long: '--show-limits',
-        description: 'Show the command-line length limits.',
-      }),
-      new Option({
-        short: '-x',
-        long: '--exit',
-        description: 'Exit if a command line exceeds the size limit.',
-      }),
-      new Option({
-        short: '-P',
-        long: '--max-procs',
-        type: 'str',
-        description: 'Run up to N commands at a time; 0 runs them all at once.',
-      }),
-      new Option({
-        long: '--process-slot-var',
-        type: 'str',
-        description: "Set this variable to each command's slot number.",
+      new Argument('--process-slot-var', {
+        help: "Set this variable to each command's slot number.",
       }),
       VERSION_OPTION,
       HELP_OPTION,
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'str' }),
   }),
   timeout: new CommandSpec({
     description: 'Run a command with a time limit.',
-    options: [
-      new Option({
-        short: '-f',
-        long: '--foreground',
-        description: 'Signal only the command, not its process group.',
+    arguments: [
+      new Argument(['-f', '--foreground'], {
+        action: 'store_true',
+        help: 'Signal only the command, not its process group.',
       }),
-      new Option({
-        short: '-k',
-        long: '--kill-after',
-        type: 'str',
-        description: 'Also send KILL this long after the first signal.',
+      new Argument(['-k', '--kill-after'], {
+        help: 'Also send KILL this long after the first signal.',
       }),
-      new Option({
-        short: '-p',
-        long: '--preserve-status',
-        description: "Exit with the command's status even when it times out.",
+      new Argument(['-p', '--preserve-status'], {
+        action: 'store_true',
+        help: "Exit with the command's status even when it times out.",
       }),
-      new Option({
-        short: '-s',
-        long: '--signal',
-        type: 'str',
-        description: 'Signal to send on timeout (default TERM).',
-      }),
-      new Option({
-        short: '-v',
-        long: '--verbose',
-        description: 'Report each signal sent on stderr.',
+      new Argument(['-s', '--signal'], { help: 'Signal to send on timeout (default TERM).' }),
+      new Argument(['-v', '--verbose'], {
+        action: 'store_true',
+        help: 'Report each signal sent on stderr.',
       }),
       HELP_OPTION,
       VERSION_OPTION,
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'str' }),
   }),
   read: new CommandSpec({
     description: 'Read a line from standard input into variables.',
-    options: [
-      new Option({ short: '-r', description: 'Raw mode: backslash is not an escape character.' }),
-      new Option({ short: '-a', type: 'str', description: 'Store the words in the named array.' }),
-      new Option({ short: '-d', type: 'str', description: 'Read up to this character.' }),
-      new Option({ short: '-n', type: 'str', description: 'Return after at most N characters.' }),
-      new Option({ short: '-N', type: 'str', description: 'Return after exactly N characters.' }),
-      new Option({ short: '-t', type: 'str', description: 'Time out after N seconds.' }),
-      new Option({ short: '-p', type: 'str', description: 'Prompt (terminal only).' }),
-      new Option({ short: '-s', description: 'Do not echo (terminal only).' }),
-      new Option({ short: '-e', description: 'Use readline (terminal only).' }),
-      new Option({ short: '-i', type: 'str', description: 'Initial text (terminal only).' }),
-      new Option({ short: '-u', type: 'str', description: 'Read from this descriptor.' }),
+    arguments: [
+      new Argument('-r', {
+        action: 'store_true',
+        help: 'Raw mode: backslash is not an escape character.',
+      }),
+      new Argument('-a', { help: 'Store the words in the named array.' }),
+      new Argument('-d', { help: 'Read up to this character.' }),
+      new Argument('-n', { help: 'Return after at most N characters.' }),
+      new Argument('-N', { help: 'Return after exactly N characters.' }),
+      new Argument('-t', { help: 'Time out after N seconds.' }),
+      new Argument('-p', { help: 'Prompt (terminal only).' }),
+      new Argument('-s', { action: 'store_true', help: 'Do not echo (terminal only).' }),
+      new Argument('-e', { action: 'store_true', help: 'Use readline (terminal only).' }),
+      new Argument('-i', { help: 'Initial text (terminal only).' }),
+      new Argument('-u', { help: 'Read from this descriptor.' }),
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'str' }),
   }),
   mapfile: new CommandSpec({
     description: 'Read lines from standard input into an array.',
-    options: [
-      new Option({ short: '-d', type: 'str', description: 'Line delimiter instead of newline.' }),
-      new Option({ short: '-n', type: 'str', description: 'Copy at most N lines.' }),
-      new Option({ short: '-O', type: 'str', description: 'Start storing at this index.' }),
-      new Option({ short: '-s', type: 'str', description: 'Discard the first N lines.' }),
-      new Option({ short: '-t', description: 'Strip the delimiter.' }),
-      new Option({ short: '-u', type: 'str', description: 'Read from this descriptor.' }),
-      new Option({ short: '-C', type: 'str', description: 'Call this every quantum lines.' }),
-      new Option({ short: '-c', type: 'str', description: 'Lines between callback calls.' }),
+    arguments: [
+      new Argument('-d', { help: 'Line delimiter instead of newline.' }),
+      new Argument('-n', { help: 'Copy at most N lines.' }),
+      new Argument('-O', { help: 'Start storing at this index.' }),
+      new Argument('-s', { help: 'Discard the first N lines.' }),
+      new Argument('-t', { action: 'store_true', help: 'Strip the delimiter.' }),
+      new Argument('-u', { help: 'Read from this descriptor.' }),
+      new Argument('-C', { help: 'Call this every quantum lines.' }),
+      new Argument('-c', { help: 'Lines between callback calls.' }),
+      new Argument('texts', { metavar: '', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'str' }),
   }),
 })
 
@@ -247,16 +192,27 @@ export function parseShellOptions(spec: CommandSpec, argv: readonly string[]): S
   const longValue = new Set<string>()
   const longOptional = new Set<string>()
   const alias = new Map<string, string>()
-  for (const opt of spec.options) {
-    const short = opt.short === null ? null : opt.short.replace(/^-+/, '')
-    const long = opt.long === null ? null : opt.long.replace(/^-+/, '')
+  for (const opt of compileSpec(spec).options) {
+    const [shortName, longName] = optionSpellings(opt)
+    const short = shortName?.replace(/^-+/, '') ?? null
+    const long = longName?.replace(/^-+/, '') ?? null
     const name = short ?? long ?? ''
     if (short !== null) {
-      ;(opt.type === 'bool' ? shortBool : opt.valueOptional ? shortOptional : shortValue).add(short)
+      ;(opt.action === 'store_true' || opt.action === 'count'
+        ? shortBool
+        : opt.nargs === '?'
+          ? shortOptional
+          : shortValue
+      ).add(short)
       alias.set(short, name)
     }
     if (long !== null) {
-      ;(opt.type === 'bool' ? longBool : opt.valueOptional ? longOptional : longValue).add(long)
+      ;(opt.action === 'store_true' || opt.action === 'count'
+        ? longBool
+        : opt.nargs === '?'
+          ? longOptional
+          : longValue
+      ).add(long)
       alias.set(long, name)
     }
   }

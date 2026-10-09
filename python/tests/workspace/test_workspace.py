@@ -16,7 +16,8 @@ import asyncio
 
 import pytest
 
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.runtime.python import LocalRuntime
 from mirage.types import FileType, MountMode, ReadPolicy, ReadSpec
@@ -3139,8 +3140,20 @@ async def test_xargs_overlapping_shell_sessions(procs, named, child_first):
         await other_held.wait()
         return None, IOResult()
 
-    ws.register_cli("holdchild", CLISpec(name="holdchild", fn=hold_child))
-    ws.register_cli("holdother", CLISpec(name="holdother", fn=hold_other))
+    ws.register_cli(
+        "holdchild",
+        CLI(
+            spec=CommandSpec(name="holdchild"),
+            handlers={"": CLIHandler(fn=hold_child)},
+        ),
+    )
+    ws.register_cli(
+        "holdother",
+        CLI(
+            spec=CommandSpec(name="holdother"),
+            handlers={"": CLIHandler(fn=hold_other)},
+        ),
+    )
     try:
         await ws.shell(
             'X=outer; child() { holdchild; eval "X=child"; echo "$X"; }'
@@ -3191,7 +3204,10 @@ async def test_xargs_keeps_foreground_call_queued_until_cancelled():
         await held.wait()
         return None, IOResult()
 
-    ws.register_cli("hold", CLISpec(name="hold", fn=hold))
+    ws.register_cli(
+        "hold",
+        CLI(spec=CommandSpec(name="hold"), handlers={"": CLIHandler(fn=hold)}),
+    )
     child = asyncio.create_task(ws.shell("printf a | xargs -P2 -I{} hold"))
     try:
         await asyncio.wait_for(entered.wait(), 5)

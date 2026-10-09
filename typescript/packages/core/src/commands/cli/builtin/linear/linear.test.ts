@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec } from '../../../spec/compile.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as UtilModule from './util.ts'
 import type { LinearTransport } from '../../../../core/linear/client.ts'
@@ -59,7 +60,7 @@ function makeInv(config: unknown, flags: CLIInvocation['flags']): CLIInvocation 
 }
 
 function leaf(...path: string[]) {
-  let node = LINEAR
+  let node = LINEAR.spec
   for (const name of path) {
     const child = node.subcommands.find((c) => c.name === name)
     if (child === undefined) throw new Error(`no subcommand ${name}`)
@@ -73,7 +74,7 @@ const NO_MORE = { hasNextPage: false, endCursor: null }
 
 describe('linear tree', () => {
   it('keeps the mount grammar and registers itself', () => {
-    expect(LINEAR.subcommands.map((g) => g.name)).toEqual([
+    expect(LINEAR.spec.subcommands.map((g) => g.name)).toEqual([
       'team',
       'issue',
       'project',
@@ -108,11 +109,11 @@ describe('linear tree', () => {
       'set-project',
       'add-label',
     ]) {
-      expect(leaf('issue', verb).write).toBe(true)
+      expect(LINEAR.handlers[['issue', verb].join(' ')]?.write).toBe(true)
     }
-    expect(leaf('issue', 'get').write).toBe(false)
-    expect(leaf('issue', 'get').rest).not.toBeNull()
-    expect(leaf('issue', 'list').rest).toBeNull()
+    expect(LINEAR.handlers[['issue', 'get'].join(' ')]?.write).toBe(false)
+    expect(compileSpec(leaf('issue', 'get')).rest).not.toBeNull()
+    expect(compileSpec(leaf('issue', 'list')).rest).toBeNull()
   })
 })
 

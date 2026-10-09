@@ -60,7 +60,7 @@ def has_injected_help(spec: CommandSpec | None) -> bool:
     Args:
         spec (CommandSpec | None): The registered spec.
     """
-    return spec is not None and any(o is HELP_OPTION for o in spec.options)
+    return spec is not None and any(o is HELP_OPTION for o in spec.arguments)
 
 
 def has_injected_version(spec: CommandSpec | None) -> bool:
@@ -69,7 +69,9 @@ def has_injected_version(spec: CommandSpec | None) -> bool:
     Args:
         spec (CommandSpec | None): The registered spec.
     """
-    return spec is not None and any(o is VERSION_OPTION for o in spec.options)
+    return spec is not None and any(
+        o is VERSION_OPTION for o in spec.arguments
+    )
 
 
 def _parse(name: str, spec: CommandSpec, words: list[str]) -> ParsedArgs:

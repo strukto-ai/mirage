@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLISpec } from '../../commands/cli/types.ts'
+import type { CLI } from '../../commands/cli/types.ts'
 
 /**
  * One installed CLI: a head word bound to a program tree.
@@ -25,6 +25,6 @@ import type { CLISpec } from '../../commands/cli/types.ts'
  */
 export interface CLIInstall {
   readonly name: string
-  readonly spec: CLISpec
+  readonly cli: CLI
   readonly config: unknown
 }

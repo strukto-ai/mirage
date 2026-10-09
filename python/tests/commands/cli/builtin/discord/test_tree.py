@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.discord import DISCORD
+from mirage.commands.spec.compile import compile_spec
 from mirage.core.discord.config import DiscordConfig
 
 VERBS = [
@@ -30,17 +31,21 @@ VERBS = [
 
 
 def leaf(name: str):
-    return next(c for c in DISCORD.subcommands if c.name == name)
+    return next(c for c in DISCORD.spec.subcommands if c.name == name)
 
 
 def test_tree_shape_matches_the_openclaw_vocabulary():
-    assert DISCORD.name == "discord"
+    assert DISCORD.spec.name == "discord"
     assert DISCORD.config_model is DiscordConfig
-    assert [v.name for v in DISCORD.subcommands] == VERBS
+    assert [v.name for v in DISCORD.spec.subcommands] == VERBS
 
 
 def test_write_classification():
-    writers = {v.name for v in DISCORD.subcommands if v.write}
+    writers = {
+        v.name
+        for v in DISCORD.spec.subcommands
+        if DISCORD.handlers[v.name].write
+    }
     assert writers == {
         "send",
         "edit",
@@ -52,6 +57,8 @@ def test_write_classification():
 
 
 def test_poll_answer_flag_is_repeatable():
-    answer = next(o for o in leaf("poll").options if o.long == "--answer")
-    assert answer.multiple
+    answer = next(
+        o for o in compile_spec(leaf("poll")).options if "--answer" in o.names
+    )
+    assert answer.action == "append"
     assert answer.required

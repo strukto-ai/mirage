@@ -11,14 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../commands/spec/types.ts'
+import { CLIHandler } from '../commands/cli/types.ts'
 
 import { Outcome } from '../policy/index.ts'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
-import { Operand, Option } from '../commands/spec/types.ts'
+import { CLI, type CLIInvocation } from '../commands/cli/types.ts'
+import { Argument } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import type { Policy } from '../policy/base.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
@@ -55,24 +57,27 @@ function send(inv: CLIInvocation): [Uint8Array, IOResult] {
   return [new TextEncoder().encode(`sent[${token}] to=${String(to)}: ${body}\n`), new IOResult()]
 }
 
-function makeTree(): CLISpec {
-  return new CLISpec({
-    name: 'slackish',
+function makeTree(): CLI {
+  return new CLI({
+    spec: new CommandSpec({
+      name: 'slackish',
+      subcommands: [
+        new CommandSpec({
+          name: 'message',
+          subcommands: [
+            new CommandSpec({
+              name: 'send',
+              arguments: [
+                new Argument(['-t', '--to'], { required: true }),
+                new Argument('texts', { metavar: '', nargs: '*' }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    }),
+    handlers: { 'message send': new CLIHandler({ fn: send, write: true }) },
     configModel: tokenConfig,
-    subcommands: [
-      new CLISpec({
-        name: 'message',
-        subcommands: [
-          new CLISpec({
-            name: 'send',
-            fn: send,
-            write: true,
-            options: [new Option({ short: '-t', long: '--to', type: 'str', required: true })],
-            rest: new Operand({ type: 'str' }),
-          }),
-        ],
-      }),
-    ],
   })
 }
 
@@ -207,8 +212,11 @@ function buildScriptWorkspace(): Workspace {
   )
 }
 
-function pagerSpec(source: string, language: RuntimeLanguage = 'python'): CLISpec {
-  return new CLISpec({ name: 'pager', script: new ScriptSource(source, language) })
+function pagerSpec(source: string, language: RuntimeLanguage = 'python'): CLI {
+  return new CLI({
+    spec: new CommandSpec({ name: 'pager' }),
+    script: new ScriptSource(source, language),
+  })
 }
 
 describe('script CLI e2e', () => {
@@ -395,7 +403,13 @@ async function stash(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
   return [new TextEncoder().encode(`${name}=${view.get(name) ?? ''}\n`), new IOResult()]
 }
 
-const STASH = new CLISpec({ name: 'stash', fn: stash, rest: new Operand({ type: 'str' }) })
+const STASH = new CLI({
+  spec: new CommandSpec({
+    name: 'stash',
+    arguments: [new Argument('texts', { metavar: '', nargs: '*' })],
+  }),
+  handlers: { '': new CLIHandler({ fn: stash }) },
+})
 
 describe('the session plane reaches a CLI leaf', () => {
   it('a leaf writes the session through its entry point', async () => {
@@ -434,10 +448,10 @@ describe('the session plane reaches a CLI leaf', () => {
 describe('CLI dispatch under an aborted invocation', () => {
   it('releases the caller while the leaf still waits on its service', async () => {
     const ws = buildWorkspace()
-    const stuck = new CLISpec({
-      name: 'stuck',
+    const stuck = new CLI({
+      spec: new CommandSpec({ name: 'stuck', subcommands: [new CommandSpec({ name: 'hang' })] }),
+      handlers: { hang: new CLIHandler({ fn: () => new Promise<never>(() => undefined) }) },
       configModel: tokenConfig,
-      subcommands: [new CLISpec({ name: 'hang', fn: () => new Promise<never>(() => undefined) })],
     })
     ws.registerCli('stuck', stuck, { token: 't' })
     const controller = new AbortController()

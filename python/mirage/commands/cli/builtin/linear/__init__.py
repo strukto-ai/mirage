@@ -24,319 +24,300 @@ from mirage.commands.cli.builtin.linear.issue.set_priority import set_priority
 from mirage.commands.cli.builtin.linear.issue.set_project import set_project
 from mirage.commands.cli.builtin.linear.issue.transition import transition
 from mirage.commands.cli.builtin.linear.issue.update import update
-from mirage.commands.cli.types import CLISpec
-from mirage.commands.spec.types import Operand, Option
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.linear.config import LinearConfig
 
-TEAM_OPTION = Option(
-    long="--team",
-    type="str",
-    required=True,
-    description="Team key, name, or ID",
-)
+TEAM_OPTION = Argument("--team", required=True, help="Team key, name, or ID")
 
-ARG = Operand(type="str")
+ARG = Argument("text", nargs="*", metavar="")
 
 # The linear program tree, keeping the noun/verb grammar the mount
 # commands already spoke (`linear issue create`, `linear team list`).
 # Issues are addressed by positional key or ID (`linear issue get
 # ENG-42`); free text (descriptions, comment bodies) comes from a flag
 # or stdin. Install with a LinearConfig.
-LINEAR = CLISpec(
-    name="linear",
-    description="Linear GraphQL API client",
-    config_model=LinearConfig,
-    subcommands=(
-        CLISpec(
-            name="team",
-            description="Manage teams",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    description="List teams as JSON",
-                    fn=reads.team_list,
-                ),
-                CLISpec(
-                    name="get",
-                    description="Get one team by key, name, or ID",
-                    fn=reads.team_get,
-                    rest=ARG,
-                ),
-                CLISpec(
-                    name="members",
-                    description="List a team's members",
-                    fn=reads.team_members,
-                    rest=ARG,
+LINEAR = CLI(
+    spec=CommandSpec(
+        name="linear",
+        description="Linear GraphQL API client",
+        subcommands=(
+            CommandSpec(
+                name="team",
+                description="Manage teams",
+                subcommands=(
+                    CommandSpec(name="list", description="List teams as JSON"),
+                    CommandSpec(
+                        name="get",
+                        description="Get one team by key, name, or ID",
+                        arguments=(ARG,),
+                    ),
+                    CommandSpec(
+                        name="members",
+                        description="List a team's members",
+                        arguments=(ARG,),
+                    ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="issue",
-            description="Manage issues",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    description="List a team's issues",
-                    fn=reads.issue_list,
-                    options=(TEAM_OPTION,),
-                ),
-                CLISpec(
-                    name="get",
-                    description="Get one issue by key or ID",
-                    fn=reads.issue_get,
-                    rest=ARG,
-                ),
-                CLISpec(
-                    name="create",
-                    description="Create an issue",
-                    fn=create,
-                    write=True,
-                    options=(
-                        TEAM_OPTION,
-                        Option(long="--title", type="str", required=True),
-                        Option(
-                            long="--description",
-                            type="str",
-                            description="Body text (or pipe via stdin)",
+            CommandSpec(
+                name="issue",
+                description="Manage issues",
+                subcommands=(
+                    CommandSpec(
+                        name="list",
+                        description="List a team's issues",
+                        arguments=(TEAM_OPTION,),
+                    ),
+                    CommandSpec(
+                        name="get",
+                        description="Get one issue by key or ID",
+                        arguments=(ARG,),
+                    ),
+                    CommandSpec(
+                        name="create",
+                        description="Create an issue",
+                        arguments=(
+                            TEAM_OPTION,
+                            Argument("--title", required=True),
+                            Argument(
+                                "--description",
+                                help="Body text (or pipe via stdin)",
+                            ),
                         ),
                     ),
-                ),
-                CLISpec(
-                    name="update",
-                    description="Update an issue's title or description",
-                    fn=update,
-                    write=True,
-                    rest=ARG,
-                    options=(
-                        Option(long="--title", type="str"),
-                        Option(
-                            long="--description",
-                            type="str",
-                            description="Body text (or pipe via stdin)",
+                    CommandSpec(
+                        name="update",
+                        description="Update an issue's title or description",
+                        arguments=(
+                            ARG,
+                            Argument("--title"),
+                            Argument(
+                                "--description",
+                                help="Body text (or pipe via stdin)",
+                            ),
                         ),
                     ),
-                ),
-                CLISpec(
-                    name="assign",
-                    description="Assign an issue to a user",
-                    fn=assign,
-                    write=True,
-                    rest=ARG,
-                    options=(
-                        Option(long="--assignee-id", type="str"),
-                        Option(long="--assignee-email", type="str"),
-                    ),
-                ),
-                CLISpec(
-                    name="transition",
-                    description="Move an issue to a workflow state",
-                    fn=transition,
-                    write=True,
-                    rest=ARG,
-                    options=(
-                        Option(long="--state-id", type="str"),
-                        Option(long="--state-name", type="str"),
-                    ),
-                ),
-                CLISpec(
-                    name="set-priority",
-                    description="Set an issue's priority",
-                    fn=set_priority,
-                    write=True,
-                    rest=ARG,
-                    options=(
-                        Option(
-                            long="--priority",
-                            type="int",
-                            required=True,
-                            description="0=none, 1=urgent, 2=high, 3=medium, "
-                            "4=low",
+                    CommandSpec(
+                        name="assign",
+                        description="Assign an issue to a user",
+                        arguments=(
+                            ARG,
+                            Argument("--assignee-id"),
+                            Argument("--assignee-email"),
                         ),
                     ),
-                ),
-                CLISpec(
-                    name="set-project",
-                    description="Attach an issue to a project",
-                    fn=set_project,
-                    write=True,
-                    rest=ARG,
-                    options=(
-                        Option(
-                            long="--project",
-                            type="str",
-                            description="Project ID",
-                        ),
-                        Option(
-                            long="--project-name",
-                            type="str",
-                            description="Project name, looked up on "
-                            "the issue's team",
+                    CommandSpec(
+                        name="transition",
+                        description="Move an issue to a workflow state",
+                        arguments=(
+                            ARG,
+                            Argument("--state-id"),
+                            Argument("--state-name"),
                         ),
                     ),
-                ),
-                CLISpec(
-                    name="add-label",
-                    description="Add a label to an issue",
-                    fn=add_label,
-                    write=True,
-                    rest=ARG,
-                    options=(
-                        Option(
-                            long="--label", type="str", description="Label ID"
+                    CommandSpec(
+                        name="set-priority",
+                        description="Set an issue's priority",
+                        arguments=(
+                            ARG,
+                            Argument(
+                                "--priority",
+                                type="int",
+                                required=True,
+                                help="0=none, 1=urgent, 2=high, 3=medium, "
+                                "4=low",
+                            ),
                         ),
-                        Option(
-                            long="--label-name",
-                            type="str",
-                            description="Label name, looked up on "
-                            "the issue's team",
+                    ),
+                    CommandSpec(
+                        name="set-project",
+                        description="Attach an issue to a project",
+                        arguments=(
+                            ARG,
+                            Argument("--project", help="Project ID"),
+                            Argument(
+                                "--project-name",
+                                help="Project name, looked up on "
+                                "the issue's team",
+                            ),
+                        ),
+                    ),
+                    CommandSpec(
+                        name="add-label",
+                        description="Add a label to an issue",
+                        arguments=(
+                            ARG,
+                            Argument("--label", help="Label ID"),
+                            Argument(
+                                "--label-name",
+                                help="Label name, looked up on "
+                                "the issue's team",
+                            ),
                         ),
                     ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="project",
-            description="Manage projects",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    description="List a team's projects",
-                    fn=reads.project_list,
-                    options=(TEAM_OPTION,),
-                ),
-                CLISpec(
-                    name="get",
-                    description="Get one project by ID",
-                    fn=reads.project_get,
-                    rest=ARG,
-                    options=(TEAM_OPTION,),
-                ),
-            ),
-        ),
-        CLISpec(
-            name="cycle",
-            description="Manage cycles",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    description="List a team's cycles",
-                    fn=reads.cycle_list,
-                    options=(TEAM_OPTION,),
-                ),
-                CLISpec(
-                    name="current",
-                    description="Get a team's current cycle",
-                    fn=reads.cycle_current,
-                    options=(TEAM_OPTION,),
-                ),
-                CLISpec(
-                    name="get",
-                    description="Get one cycle by ID",
-                    fn=reads.cycle_get,
-                    rest=ARG,
-                    options=(TEAM_OPTION,),
-                ),
-            ),
-        ),
-        CLISpec(
-            name="label",
-            description="Manage labels",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    description="List a team's labels",
-                    fn=reads.label_list,
-                    options=(TEAM_OPTION,),
-                ),
-            ),
-        ),
-        CLISpec(
-            name="comment",
-            description="Manage comments",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    description="List an issue's comments",
-                    fn=reads.comment_list,
-                    rest=ARG,
-                ),
-                CLISpec(
-                    name="add",
-                    description="Comment on an issue",
-                    fn=comment_add,
-                    write=True,
-                    rest=ARG,
-                    options=(
-                        Option(
-                            long="--body",
-                            type="str",
-                            description="Comment text (or pipe via stdin)",
-                        ),
+            CommandSpec(
+                name="project",
+                description="Manage projects",
+                subcommands=(
+                    CommandSpec(
+                        name="list",
+                        description="List a team's projects",
+                        arguments=(TEAM_OPTION,),
                     ),
-                ),
-                CLISpec(
-                    name="update",
-                    description="Edit a comment",
-                    fn=comment_update,
-                    write=True,
-                    options=(
-                        Option(
-                            long="--comment",
-                            type="str",
-                            required=True,
-                            description="Comment ID",
-                        ),
-                        Option(
-                            long="--body",
-                            type="str",
-                            description="Comment text (or pipe via stdin)",
+                    CommandSpec(
+                        name="get",
+                        description="Get one project by ID",
+                        arguments=(
+                            ARG,
+                            TEAM_OPTION,
                         ),
                     ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="user",
-            description="Manage users",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    description="List workspace users",
-                    fn=reads.user_list,
-                ),
-                CLISpec(
-                    name="get",
-                    description="Get one user by email",
-                    fn=reads.user_get,
-                    rest=ARG,
-                ),
-            ),
-        ),
-        CLISpec(
-            name="document",
-            description="Manage documents",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    description="List a team's documents",
-                    fn=reads.document_list,
-                    options=(TEAM_OPTION,),
-                ),
-                CLISpec(
-                    name="get",
-                    description="Get one document by ID",
-                    fn=reads.document_get,
-                    rest=ARG,
-                    options=(TEAM_OPTION,),
+            CommandSpec(
+                name="cycle",
+                description="Manage cycles",
+                subcommands=(
+                    CommandSpec(
+                        name="list",
+                        description="List a team's cycles",
+                        arguments=(TEAM_OPTION,),
+                    ),
+                    CommandSpec(
+                        name="current",
+                        description="Get a team's current cycle",
+                        arguments=(TEAM_OPTION,),
+                    ),
+                    CommandSpec(
+                        name="get",
+                        description="Get one cycle by ID",
+                        arguments=(
+                            ARG,
+                            TEAM_OPTION,
+                        ),
+                    ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="search",
-            description="Search issues by text",
-            fn=reads.search,
-            rest=ARG,
-            options=(Option(long="--query", type="str"),),
+            CommandSpec(
+                name="label",
+                description="Manage labels",
+                subcommands=(
+                    CommandSpec(
+                        name="list",
+                        description="List a team's labels",
+                        arguments=(TEAM_OPTION,),
+                    ),
+                ),
+            ),
+            CommandSpec(
+                name="comment",
+                description="Manage comments",
+                subcommands=(
+                    CommandSpec(
+                        name="list",
+                        description="List an issue's comments",
+                        arguments=(ARG,),
+                    ),
+                    CommandSpec(
+                        name="add",
+                        description="Comment on an issue",
+                        arguments=(
+                            ARG,
+                            Argument(
+                                "--body",
+                                help="Comment text (or pipe via stdin)",
+                            ),
+                        ),
+                    ),
+                    CommandSpec(
+                        name="update",
+                        description="Edit a comment",
+                        arguments=(
+                            Argument(
+                                "--comment",
+                                required=True,
+                                help="Comment ID",
+                            ),
+                            Argument(
+                                "--body",
+                                help="Comment text (or pipe via stdin)",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            CommandSpec(
+                name="user",
+                description="Manage users",
+                subcommands=(
+                    CommandSpec(
+                        name="list", description="List workspace users"
+                    ),
+                    CommandSpec(
+                        name="get",
+                        description="Get one user by email",
+                        arguments=(ARG,),
+                    ),
+                ),
+            ),
+            CommandSpec(
+                name="document",
+                description="Manage documents",
+                subcommands=(
+                    CommandSpec(
+                        name="list",
+                        description="List a team's documents",
+                        arguments=(TEAM_OPTION,),
+                    ),
+                    CommandSpec(
+                        name="get",
+                        description="Get one document by ID",
+                        arguments=(
+                            ARG,
+                            TEAM_OPTION,
+                        ),
+                    ),
+                ),
+            ),
+            CommandSpec(
+                name="search",
+                description="Search issues by text",
+                arguments=(
+                    ARG,
+                    Argument("--query"),
+                ),
+            ),
         ),
     ),
+    handlers={
+        "team list": CLIHandler(fn=reads.team_list),
+        "team get": CLIHandler(fn=reads.team_get),
+        "team members": CLIHandler(fn=reads.team_members),
+        "issue list": CLIHandler(fn=reads.issue_list),
+        "issue get": CLIHandler(fn=reads.issue_get),
+        "issue create": CLIHandler(fn=create, write=True),
+        "issue update": CLIHandler(fn=update, write=True),
+        "issue assign": CLIHandler(fn=assign, write=True),
+        "issue transition": CLIHandler(fn=transition, write=True),
+        "issue set-priority": CLIHandler(fn=set_priority, write=True),
+        "issue set-project": CLIHandler(fn=set_project, write=True),
+        "issue add-label": CLIHandler(fn=add_label, write=True),
+        "project list": CLIHandler(fn=reads.project_list),
+        "project get": CLIHandler(fn=reads.project_get),
+        "cycle list": CLIHandler(fn=reads.cycle_list),
+        "cycle current": CLIHandler(fn=reads.cycle_current),
+        "cycle get": CLIHandler(fn=reads.cycle_get),
+        "label list": CLIHandler(fn=reads.label_list),
+        "comment list": CLIHandler(fn=reads.comment_list),
+        "comment add": CLIHandler(fn=comment_add, write=True),
+        "comment update": CLIHandler(fn=comment_update, write=True),
+        "user list": CLIHandler(fn=reads.user_list),
+        "user get": CLIHandler(fn=reads.user_get),
+        "document list": CLIHandler(fn=reads.document_list),
+        "document get": CLIHandler(fn=reads.document_get),
+        "search": CLIHandler(fn=reads.search),
+    },
+    config_model=LinearConfig,
 )

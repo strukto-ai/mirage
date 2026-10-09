@@ -12,9 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.types import CLISpec
-from mirage.commands.cli.walk import node_help, owns_argv
-from mirage.commands.spec.types import UsageStyle
+from mirage.commands.cli.walk import node_help
+from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.context import effective_path_mode
 from mirage.types import MountMode
 from mirage.utils.hidden import is_glob, path_visible
@@ -96,7 +95,7 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
 
 def cli_pages(
     head: str,
-    node: CLISpec,
+    node: CommandSpec,
     session: SessionState,
     style: UsageStyle,
     path: tuple[str, ...] = (),
@@ -119,7 +118,7 @@ def cli_pages(
         + 1,
     )
     pages = [f"## `{name}`\n\n{fence}text\n{help_text}\n{fence}"]
-    if owns_argv(node):
+    if not node.add_help:
         pages.append(
             "This program parses its own arguments; "
             "only its registered description is available here."
@@ -151,7 +150,10 @@ def skill_md(registry: MountRegistry, session: SessionState) -> str:
         if command_visible(head, session):
             parts.extend(
                 cli_pages(
-                    head, install.spec, session, install.spec.usage_style
+                    head,
+                    install.cli.spec,
+                    session,
+                    install.cli.spec.usage_style,
                 )
             )
     if len(parts) == 3:

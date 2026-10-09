@@ -18,7 +18,8 @@ import pytest
 
 from mirage import Mount, Workspace
 from mirage.cache.index import IndexConfig
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_current_session, set_current_session
 from mirage.io.types import IOResult
 from mirage.vfs.dev.dev import DevVFS
@@ -38,7 +39,10 @@ async def test_process_substitution_is_private_to_its_session():
     ws = Workspace({"/data": RAMVFS()}, mode="exec")
     ws.create_session("owner")
     ws.create_session("peer")
-    ws.register_cli("hold", CLISpec(name="hold", fn=hold))
+    ws.register_cli(
+        "hold",
+        CLI(spec=CommandSpec(name="hold"), handlers={"": CLIHandler(fn=hold)}),
+    )
     owner = asyncio.create_task(
         ws.shell(
             'consume() { ls /dev/fd >/dev/null; hold; cat "$1"; }; '
@@ -92,8 +96,20 @@ async def test_process_substitution_cleanup_preserves_reused_descriptor():
     ws = Workspace({"/data": RAMVFS()}, mode="exec")
     ws.create_session("owner")
     ws.create_session("peer")
-    ws.register_cli("hold-old", CLISpec(name="hold-old", fn=hold_old))
-    ws.register_cli("hold-new", CLISpec(name="hold-new", fn=hold_new))
+    ws.register_cli(
+        "hold-old",
+        CLI(
+            spec=CommandSpec(name="hold-old"),
+            handlers={"": CLIHandler(fn=hold_old)},
+        ),
+    )
+    ws.register_cli(
+        "hold-new",
+        CLI(
+            spec=CommandSpec(name="hold-new"),
+            handlers={"": CLIHandler(fn=hold_new)},
+        ),
+    )
     owner = asyncio.create_task(
         ws.shell(
             'consume() { echo "$1"; rm "$1"; hold-old; }; consume <(echo old)',

@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../commands/spec/types.ts'
 
 import { indexConfigDump, restoreIndexConfig } from './config.ts'
 import { tokenOrNull } from '../../cache/file/utils.ts'
@@ -29,7 +30,7 @@ import { narrow } from '../session/resolve.ts'
 import { setCwd } from '../session/shell_dirs.ts'
 import { gateRestoredVars } from '../session/state.ts'
 import type { CLIInstall } from '../cli/types.ts'
-import { CLISpec } from '../../commands/cli/types.ts'
+import { CLI } from '../../commands/cli/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 
 /**
@@ -40,7 +41,7 @@ import { ScriptSource } from '../../runtime/types.ts'
  */
 export type CLIOverrides = Record<
   string,
-  Record<string, unknown> | [CLISpec, Record<string, unknown> | null]
+  Record<string, unknown> | [CLI, Record<string, unknown> | null]
 >
 import { BIN_PREFIX } from '../../shell/constants.ts'
 import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
@@ -192,20 +193,20 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   const clisState: CLISnapshot[] = [...ws.registry.clis.items()].map(([name, install]) => {
     const entry: CLISnapshot = {
       name,
-      spec: install.spec.name,
+      spec: install.cli.spec.name,
       config: captureCliConfig(install),
     }
     // A script install has no name to resolve (the spec is synthesized
     // from a yaml `script:`), so its embedded program rides along and
     // load rebuilds the spec from it.
-    const script = install.spec.script
+    const script = install.cli.script
     if (script !== null) {
       entry.script = {
         source: script.source,
         language: script.language,
         module: script.module,
       }
-      entry.runtime = install.spec.runtime
+      entry.runtime = install.cli.runtime
     }
     return entry
   })
@@ -252,21 +253,21 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
  * carried to the selector, which would report the world's runtimes for
  * a language that never existed.
  */
-function cliSpecFromEntry(entry: CLISnapshot): string | CLISpec {
+function cliSpecFromEntry(entry: CLISnapshot): string | CLI {
   if (entry.script === undefined) return entry.spec
   const language = entry.script.language
   if (language !== 'python' && language !== 'js') {
     throw new Error(`snapshot cli '${entry.spec}': unknown script language '${language}'`)
   }
-  return new CLISpec({
-    name: entry.spec,
+  return new CLI({
+    spec: new CommandSpec({ name: entry.spec }),
     script: new ScriptSource(entry.script.source, language, entry.script.module),
     runtime: entry.runtime ?? null,
   })
 }
 
 function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
-  const model = install.spec.configModel
+  const model = install.cli.configModel
   if (model instanceof z.ZodObject) {
     return redactConfigWithSchema(model, install.config)
   }
@@ -435,7 +436,7 @@ export function buildMountArgs(
         `These CLIs were saved with redacted config secrets.`,
     )
   }
-  const cliArgs: Record<string, [string | CLISpec, Record<string, unknown> | null]> = {}
+  const cliArgs: Record<string, [string | CLI, Record<string, unknown> | null]> = {}
   for (const e of cliEntries) {
     const override = cliOverrides[e.name]
     if (Array.isArray(override)) {

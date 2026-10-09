@@ -256,7 +256,7 @@ export function programTokens(
 ): [readonly string[], readonly string[]] {
   const install = registry.clis.get(name)
   if (install !== null) {
-    const result = walk(name, install.spec, argv, cwd)
+    const result = walk(name, install.cli.spec, argv, cwd)
     if (result.leaf !== null) {
       const program = [name, ...result.path]
       return [[...program, ...result.argv], program]

@@ -137,7 +137,7 @@ def test_since_drops_everything_older(repo_path):
     ],
 )
 def test_order_options_follow_the_last_typed_occurrence(argv, expected):
-    spec = next(node for node in GIT.subcommands if node.name == "log")
+    spec = next(node for node in GIT.spec.subcommands if node.name == "log")
     parsed = parse_command(spec, argv, "/")
     assert parse_flags(FlagView(parse_to_kwargs(parsed))).order == expected
 
@@ -149,7 +149,7 @@ def log_subjects(repo_path, argv: list[str]) -> list[str]:
         repo_path (Path): the repository's working tree.
         argv (list[str]): the words after ``git log``.
     """
-    spec = next(node for node in GIT.subcommands if node.name == "log")
+    spec = next(node for node in GIT.spec.subcommands if node.name == "log")
     return subjects(repo_path, parse_to_kwargs(parse_command(spec, argv, "/")))
 
 
@@ -258,7 +258,7 @@ def test_the_last_pattern_syntax_reads_every_pattern(
     ],
 )
 def test_a_refused_pattern_names_where_it_came_from(argv, message):
-    spec = next(node for node in GIT.subcommands if node.name == "log")
+    spec = next(node for node in GIT.spec.subcommands if node.name == "log")
     kwargs = parse_to_kwargs(parse_command(spec, argv, "/"))
     with pytest.raises(GitError) as caught:
         parse_flags(FlagView(kwargs))

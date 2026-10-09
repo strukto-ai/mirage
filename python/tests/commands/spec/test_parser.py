@@ -18,7 +18,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.builtins import registered_spec
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.parser import parse_command, parse_to_kwargs
-from mirage.commands.spec.types import CommandSpec, Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 
 
 def _registered(name: str) -> CommandSpec:
@@ -89,9 +89,11 @@ def test_non_multiple_value_flag_keeps_last_value():
 
 def test_provided_by_only_skips_slot_when_flag_present():
     spec = CommandSpec(
-        options=(Option(short="-e", type="str"),),
-        positional=(Operand(type="str", provided_by=("-e",)),),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-e"),
+            Argument("text", nargs="?", metavar="", provided_by=("-e",)),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     )
     with_flag = parse_command(spec, ["-e", "pat", "/x"], "/")
     assert with_flag.paths() == ["/x"]
@@ -255,7 +257,10 @@ def test_an_unnamed_parse_is_a_strict_getopt_long_parse():
 # expanded on the program's behalf.
 def test_unknown_is_operand_forwards_dash_words_into_the_rest_slot():
     spec = CommandSpec(
-        options=(Option(long="--width", type="int"),), rest=Operand(type="str")
+        arguments=(
+            Argument("--width", type="int"),
+            Argument("texts", nargs="*", metavar=""),
+        )
     )
     parsed = parse_command(
         spec,
@@ -272,7 +277,7 @@ def test_unknown_is_operand_forwards_dash_words_into_the_rest_slot():
 # With no slot to forward into, the same parse refuses it: the program
 # cannot be handed a word the node has nowhere to put.
 def test_unknown_is_operand_without_a_rest_slot_still_refuses():
-    spec = CommandSpec(options=(Option(long="--width", type="int"),))
+    spec = CommandSpec(arguments=(Argument("--width", type="int"),))
     parsed = parse_command(
         spec, ["--frobnicate"], "/", "pager", unknown_is_operand=True
     )
@@ -284,7 +289,10 @@ def test_unknown_is_operand_without_a_rest_slot_still_refuses():
 # and nothing carried on the spec, tells the two apart.
 def test_the_same_spec_parsed_strictly_refuses_the_dash_word():
     spec = CommandSpec(
-        options=(Option(long="--width", type="int"),), rest=Operand(type="str")
+        arguments=(
+            Argument("--width", type="int"),
+            Argument("texts", nargs="*", metavar=""),
+        )
     )
     parsed = parse_command(spec, ["--widt", "80", "-n", "x"], "/", "pager")
     assert parsed.flags == {"--width": "80"}
@@ -318,8 +326,10 @@ def test_cluster_into_multiple_flag_accumulates():
 
 def test_long_equals_and_separate_multiple_accumulate():
     spec = CommandSpec(
-        options=(Option(long="--tag", type="str", multiple=True),),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("--tag", action="append"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     )
     parsed = parse_command(spec, ["--tag=a", "--tag", "b", "/x"], "/")
     assert parsed.flags["--tag"] == ["a", "b"]
@@ -491,9 +501,9 @@ def test_digit_options_build_split_line_count():
 def test_digit_options_are_the_builtin_programs_own():
     # A mount's own command borrowing the name gets getopt's plain rule.
     spec = CommandSpec(
-        options=(
-            Option(short="-d"),
-            Option(short="-l", type="str", numeric_shorthand=True),
+        arguments=(
+            Argument("-d", action="store_true"),
+            Argument("-l", numeric_shorthand=True),
         )
     )
     parsed = parse_command(spec, ["-d10"], "/", "split")
@@ -502,12 +512,14 @@ def test_digit_options_are_the_builtin_programs_own():
 
 def test_count_flag_accumulates_occurrences():
     spec = CommandSpec(
-        options=(Option(short="-v", long="--verbose", count=True),),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-v", "--verbose", "--chatty", action="count"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     )
     packed = parse_command(spec, ["-vvv", "/f"], "/")
     assert packed.flags["--verbose"] == 3
-    separate = parse_command(spec, ["-v", "--verbose", "-v", "/f"], "/")
+    separate = parse_command(spec, ["-v", "--verbose", "--chatty", "/f"], "/")
     assert separate.flags["--verbose"] == 3
     absent = parse_command(spec, ["/f"], "/")
     assert "--verbose" not in absent.flags
@@ -650,22 +662,21 @@ def test_a_choices_set_outside_the_table_reports_the_empty_word_invalid():
 # A mount author's own command is not a GNU program, so its choices are
 # argparse's: `--mode=rem` is refused rather than resolved to `remove`.
 # Nothing the author can write opts a custom spec into the table, which
-# names three builtin Option OBJECTS and is tested by identity.
-def test_a_custom_spec_never_inherits_argmatch():
-    spec = CommandSpec(
-        options=(
-            Option(long="--mode", type="str", choices=("read", "remove")),
-        )
+# names three builtin Argument OBJECTS and is tested by identity.
+@pytest.mark.parametrize("name", ["--mode", "mode"])
+def test_a_custom_spec_never_inherits_argmatch(name):
+    spec = CommandSpec(arguments=(Argument(name, choices=("read", "remove")),))
+    parsed = parse_command(
+        spec, [name, "rem"] if name.startswith("-") else ["rem"], "/", "mycmd"
     )
-    parsed = parse_command(spec, ["--mode=rem"], "/", "mycmd")
-    assert parsed.flags["--mode"] == "rem"
+    assert (
+        parsed.flags[name] if name.startswith("-") else parsed.texts()[0]
+    ) == "rem"
     assert parsed.invalid_value_options == [
-        ("--mode", "rem", ("read", "remove")),
+        (name, "rem", ("read", "remove")),
     ]
     # Even naming it after a real ARGMATCH option changes nothing.
-    named = CommandSpec(
-        options=(Option(long="--to", type="str", choices=("none", "si")),)
-    )
+    named = CommandSpec(arguments=(Argument("--to", choices=("none", "si")),))
     assert parse_command(
         named, ["--to=s"], "/", "mycmd"
     ).invalid_value_options == [
@@ -677,22 +688,22 @@ def test_a_custom_spec_never_inherits_argmatch():
 # name is not the identity. A custom `tee` that reproduces GNU tee's
 # `--output-error` field for field still compares the whole word: the
 # option it declares is its own object, not the one the builtin spec
-# holds. Option is a frozen dataclass, so this lookalike is `==` to the
+# holds. Argument is a frozen dataclass, so this lookalike is `==` to the
 # builtin's and hashes with it -- only `is` tells them apart, which is
 # why the table is not a frozenset of options.
 def test_a_command_that_borrows_a_builtin_name_does_not_borrow_argmatch():
-    lookalike = Option(
-        long="--output-error",
-        type="str",
-        value_optional=True,
+    lookalike = Argument(
+        "--output-error",
+        nargs="?",
+        attached_only=True,
         choices=("warn", "warn-nopipe", "exit", "exit-nopipe"),
     )
     builtin = next(
-        o for o in SPECS["tee"].options if o.long == "--output-error"
+        o for o in SPECS["tee"].arguments if "--output-error" in o.names
     )
     assert lookalike == builtin and lookalike is not builtin
     parsed = parse_command(
-        CommandSpec(options=(lookalike,)),
+        CommandSpec(arguments=(lookalike,)),
         ["--output-error=exit-n"],
         "/",
         "tee",
@@ -710,7 +721,7 @@ def test_a_command_that_borrows_a_builtin_name_does_not_borrow_argmatch():
 # The registry never hands the parser the spec the builtin declared: it
 # appends --help/--version and parses the COPY (commands/config.py), so
 # `spec is SPECS[name]` is False for every builtin by the time a line is
-# read. Identity of the Option survives that copy, which is the whole
+# read. Identity of the Argument survives that copy, which is the whole
 # reason the table names options rather than specs -- keying on the spec
 # would disable ARGMATCH everywhere while every unit test that passes
 # SPECS[name] straight in kept passing.
@@ -733,12 +744,18 @@ def test_argmatch_survives_the_copy_the_registry_parses():
 def test_a_structural_twin_of_a_builtin_spec_shares_no_argmatch():
     tee = SPECS["tee"]
     twin = CommandSpec(
-        options=tuple(
-            Option(**{f: getattr(o, f) for f in o.__dataclass_fields__})
-            for o in tee.options
-        ),
-        rest=tee.rest,
         description=tee.description,
+        arguments=tuple(
+            Argument(
+                *o.names,
+                **{
+                    f: getattr(o, f)
+                    for f in o.__dataclass_fields__
+                    if f != "names"
+                },
+            )
+            for o in tee.arguments
+        ),
     )
     assert twin == tee and twin is not tee
     assert compile_spec(twin) is compile_spec(tee)
@@ -764,15 +781,11 @@ def test_a_structural_twin_of_a_builtin_spec_shares_no_argmatch():
 # `gh issue list --state=o` is refused where GNU would resolve it. The
 # CLI's group level already enforces its choices exactly
 # (walk._finish_node), so a leaf that prefix-matched would make one
-# Option.choices mean two things inside one tree. unknown_is_operand
+# Argument.choices mean two things inside one tree. unknown_is_operand
 # says nothing about this: it governs the dash word, not the value.
 def test_a_cli_node_compares_the_whole_choice_word():
     spec = CommandSpec(
-        options=(
-            Option(
-                long="--state", type="str", choices=("open", "closed", "all")
-            ),
-        )
+        arguments=(Argument("--state", choices=("open", "closed", "all")),)
     )
     parsed = parse_command(
         spec, ["--state=o"], "/", "gh", unknown_is_operand=True
@@ -802,9 +815,7 @@ def test_choices_exempt_bare_optional_value_form():
 
 def test_choices_check_every_value_of_a_multiple_flag():
     spec = CommandSpec(
-        options=(
-            Option(short="-m", type="str", multiple=True, choices=("x", "y")),
-        )
+        arguments=(Argument("-m", action="append", choices=("x", "y")),)
     )
     parsed = parse_command(spec, ["-m", "x", "-m", "z"], "/")
     assert parsed.invalid_value_options == [("-m", "z", ("x", "y"))]
@@ -843,9 +854,9 @@ def test_the_first_refused_value_on_the_line_is_reported_first():
     # and whatever check refuses it, so the kinds tape carries each
     # refusal's tag in scan order for the reporter to follow.
     spec = CommandSpec(
-        options=(
-            Option(short="-n", type="int"),
-            Option(long="--mode", type="str", choices=("a", "b")),
+        arguments=(
+            Argument("-n", type="int"),
+            Argument("--mode", choices=("a", "b")),
         )
     )
     parsed = parse_command(spec, ["--mode", "bad", "-n", "abc"], "/")
@@ -863,16 +874,14 @@ def test_the_first_refused_value_on_the_line_is_reported_first():
 
 
 def test_int_check_covers_every_occurrence_of_a_scalar_flag():
-    spec = CommandSpec(options=(Option(short="-n", type="int"),))
+    spec = CommandSpec(arguments=(Argument("-n", type="int"),))
     parsed = parse_command(spec, ["-n", "abc", "-n", "3"], "/")
     assert parsed.flags["-n"] == "3"
     assert parsed.invalid_int_options == [("-n", "abc")]
 
 
 def test_required_option_reported_when_absent():
-    spec = CommandSpec(
-        options=(Option(long="--out", type="str", required=True),)
-    )
+    spec = CommandSpec(arguments=(Argument("--out", required=True),))
     missing = parse_command(spec, [], "/")
     assert missing.missing_required_options == ["--out"]
     present = parse_command(spec, ["--out", "x"], "/")
@@ -881,9 +890,7 @@ def test_required_option_reported_when_absent():
 
 def test_default_lands_as_if_typed_and_satisfies_required():
     spec = CommandSpec(
-        options=(
-            Option(long="--mode", type="str", required=True, default="fast"),
-        )
+        arguments=(Argument("--mode", required=True, default="fast"),)
     )
     parsed = parse_command(spec, [], "/")
     assert parsed.flags["--mode"] == "fast"
@@ -894,7 +901,7 @@ def test_default_lands_as_if_typed_and_satisfies_required():
 
 def test_path_default_resolves_and_routes():
     spec = CommandSpec(
-        options=(Option(long="--file", type="path", default="cfg.txt"),)
+        arguments=(Argument("--file", type="path", default="cfg.txt"),)
     )
     parsed = parse_command(spec, [], "/data")
     assert parsed.flags["--file"] == "/data/cfg.txt"
@@ -903,13 +910,9 @@ def test_path_default_resolves_and_routes():
 
 def test_multiple_default_lands_as_one_element_list():
     spec = CommandSpec(
-        options=(
-            Option(
-                short="-f",
-                long="--file",
-                type="path",
-                multiple=True,
-                default="cfg.txt",
+        arguments=(
+            Argument(
+                "-f", "--file", type="path", action="append", default="cfg.txt"
             ),
         )
     )
@@ -922,7 +925,10 @@ def test_multiple_default_lands_as_one_element_list():
 
 def test_unique_long_prefix_expands_like_getopt_long():
     spec = CommandSpec(
-        options=(Option(long="--recursive"), Option(long="--count"))
+        arguments=(
+            Argument("--recursive", action="store_true"),
+            Argument("--count", action="store_true"),
+        )
     )
     parsed = parse_command(spec, ["--rec", "x"], "/")
     assert parsed.flags["--recursive"] is True
@@ -934,7 +940,8 @@ def test_a_spec_without_abbreviations_takes_a_long_only_as_spelled():
     # ripgrep's lexopt: `rg --pcr` is `unrecognized flag --pcr`, never a
     # prefix of --pcre2-unicode.
     spec = CommandSpec(
-        options=(Option(long="--pcre2-unicode"),), allow_abbrev=False
+        allow_abbrev=False,
+        arguments=(Argument("--pcre2-unicode", action="store_true"),),
     )
     parsed = parse_command(spec, ["--pcre2", "x"], "/")
     assert "--pcre2-unicode" not in parsed.flags
@@ -946,10 +953,10 @@ def test_a_spec_without_abbreviations_takes_a_long_only_as_spelled():
 
 def test_ambiguous_long_prefix_reports_possibilities_in_order():
     spec = CommandSpec(
-        options=(
-            Option(long="--context", type="str"),
-            Option(long="--color", value_optional=True, type="str"),
-            Option(long="--count"),
+        arguments=(
+            Argument("--context"),
+            Argument("--color", nargs="?", attached_only=True),
+            Argument("--count", action="store_true"),
         )
     )
     parsed = parse_command(spec, ["--c"], "/")
@@ -961,9 +968,9 @@ def test_ambiguous_long_prefix_reports_possibilities_in_order():
 
 def test_exact_long_wins_over_a_longer_spelling():
     spec = CommandSpec(
-        options=(
-            Option(long="--binary"),
-            Option(long="--binary-files", type="str"),
+        arguments=(
+            Argument("--binary", action="store_true"),
+            Argument("--binary-files"),
         )
     )
     parsed = parse_command(spec, ["--binary"], "/")
@@ -973,14 +980,14 @@ def test_exact_long_wins_over_a_longer_spelling():
 
 def test_abbreviated_long_carries_an_attached_value():
     spec = CommandSpec(
-        options=(Option(long="--color", value_optional=True, type="str"),)
+        arguments=(Argument("--color", nargs="?", attached_only=True),)
     )
     parsed = parse_command(spec, ["--colo=never"], "/")
     assert parsed.flags["--color"] == "never"
 
 
 def test_abbreviated_value_long_takes_the_next_word():
-    spec = CommandSpec(options=(Option(long="--exclude", type="str"),))
+    spec = CommandSpec(arguments=(Argument("--exclude"),))
     parsed = parse_command(spec, ["--excl", "tmp"], "/")
     assert parsed.flags["--exclude"] == "tmp"
 
@@ -1008,14 +1015,20 @@ def test_the_same_line_expands_the_abbreviation_for_a_getopt_command():
 # that, and here the rule would swallow the flag the author declared.
 def test_a_custom_spec_never_inherits_a_per_program_parsing_rule():
     spec = CommandSpec(
-        options=(Option(long="--mode", type="str"),), rest=Operand(type="str")
+        arguments=(
+            Argument("--mode"),
+            Argument("texts", nargs="*", metavar=""),
+        )
     )
     parsed = parse_command(spec, ["--mode=x", "value"], "/", "expr")
     assert parsed.flags == {"--mode": "x"}
     assert parsed.texts() == ["value"]
     # ... and the same spec keeps its long options where echo has none.
     lenient = CommandSpec(
-        options=(Option(long="--verbose"),), rest=Operand(type="str")
+        arguments=(
+            Argument("--verbose", action="store_true"),
+            Argument("texts", nargs="*", metavar=""),
+        )
     )
     assert (
         parse_command(lenient, ["--verb", "hi"], "/", "echo").flags[
@@ -1066,18 +1079,20 @@ def test_dash_dash_puts_the_sole_argument_outside_the_window():
     assert parsed.texts() == ["--help"]
 
 
-def test_int_typed_value_is_reported_not_raised():
-    spec = CommandSpec(options=(Option(long="--port", type="int"),))
-    parsed = parse_command(spec, ["--port", "abc"], "/")
-    assert parsed.invalid_int_options == [("--port", "abc")]
-    ok = parse_command(spec, ["--port", "-42"], "/")
+@pytest.mark.parametrize("name", ["--port", "port"])
+def test_int_typed_value_is_reported_not_raised(name):
+    spec = CommandSpec(arguments=(Argument(name, type="int"),))
+    prefix = [name] if name.startswith("-") else ["--"]
+    parsed = parse_command(spec, [*prefix, "abc"], "/")
+    assert parsed.invalid_int_options == [(name, "abc")]
+    ok = parse_command(spec, [*prefix, "-42"], "/")
     assert ok.invalid_int_options == []
-    assert ok.flags["--port"] == "-42"
+    assert (ok.flags[name] if name.startswith("-") else ok.texts()[0]) == "-42"
 
 
 def test_int_typed_multiple_checks_every_value():
     spec = CommandSpec(
-        options=(Option(long="--id", multiple=True, type="int"),)
+        arguments=(Argument("--id", type="int", action="append"),)
     )
     parsed = parse_command(spec, ["--id", "1", "--id", "x"], "/")
     assert parsed.invalid_int_options == [("--id", "x")]
@@ -1087,10 +1102,10 @@ def test_typed_values_reject_unicode_digits():
     # python's \d also matches Unicode digits (int('١٢') is 12), which
     # JS /\d/ and GNU's C-locale parsers reject — both languages must
     # report the same strings invalid.
-    int_spec = CommandSpec(options=(Option(long="--port", type="int"),))
+    int_spec = CommandSpec(arguments=(Argument("--port", type="int"),))
     parsed = parse_command(int_spec, ["--port", "١٢"], "/")
     assert parsed.invalid_int_options == [("--port", "١٢")]
-    float_spec = CommandSpec(options=(Option(long="--q", type="float"),))
+    float_spec = CommandSpec(arguments=(Argument("--q", type="float"),))
     parsed = parse_command(float_spec, ["--q", "٣.٥"], "/")
     assert parsed.invalid_float_options == [("--q", "٣.٥")]
 
@@ -1131,11 +1146,11 @@ def test_distinct_options_sharing_a_prefix_are_ambiguous():
 
 def test_ambiguity_lists_synonyms_like_gnu():
     spec = CommandSpec(
-        options=(
-            Option(long="--context", type="str"),
-            Option(long="--color", value_optional=True, type="str"),
-            Option(long="--colour", value_optional=True, type="str"),
-            Option(long="--count"),
+        arguments=(
+            Argument("--context"),
+            Argument("--color", nargs="?", attached_only=True),
+            Argument("--colour", nargs="?", attached_only=True),
+            Argument("--count", action="store_true"),
         )
     )
     parsed = parse_command(spec, ["--c"], "/")
@@ -1146,7 +1161,10 @@ def test_ambiguity_lists_synonyms_like_gnu():
 
 def test_option_error_kinds_keep_scan_order():
     spec = CommandSpec(
-        options=(Option(long="--context", type="str"), Option(long="--count"))
+        arguments=(
+            Argument("--context"),
+            Argument("--count", action="store_true"),
+        )
     )
     parsed = parse_command(spec, ["--c", "--bogus"], "/")
     assert parsed.option_error_kinds == ["ambiguous", "invalid"]
@@ -1154,17 +1172,34 @@ def test_option_error_kinds_keep_scan_order():
     assert flipped.option_error_kinds == ["invalid", "ambiguous"]
 
 
-def test_float_typed_value_is_reported_not_raised():
-    spec = CommandSpec(options=(Option(long="--ratio", type="float"),))
-    parsed = parse_command(spec, ["--ratio", "5x"], "/")
-    assert parsed.invalid_float_options == [("--ratio", "5x")]
+@pytest.mark.parametrize("name", ["--ratio", "ratio"])
+def test_float_typed_value_is_reported_not_raised(name):
+    spec = CommandSpec(
+        arguments=(
+            Argument(
+                name, type="float", nargs="+" if name == "ratio" else None
+            ),
+        )
+    )
+    prefix = [name] if name.startswith("-") else ["--"]
+    parsed = parse_command(spec, [*prefix, "5x"], "/")
+    assert parsed.invalid_float_options == [(name, "5x")]
     for good in ("2.5", "-3", ".5", "1e3", "+0.25"):
-        ok = parse_command(spec, ["--ratio", good], "/")
+        ok = parse_command(spec, [*prefix, good], "/")
         assert ok.invalid_float_options == []
-        assert ok.flags["--ratio"] == good
+        assert (
+            ok.flags[name] == good
+            if name.startswith("-")
+            else ok.texts() == [good]
+        )
     for bad in ("inf", "nan", "1_000", "5x", "."):
-        refused = parse_command(spec, ["--ratio", bad], "/")
-        assert refused.invalid_float_options == [("--ratio", bad)]
+        refused = parse_command(spec, [*prefix, bad], "/")
+        assert refused.invalid_float_options == [(name, bad)]
+
+    if name == "ratio":
+        assert parse_command(
+            spec, ["0.5", "bad", "2"], "/"
+        ).invalid_float_options == [(name, "bad")]
 
 
 def test_pair_option_consumes_two_tokens():
@@ -1287,7 +1322,9 @@ def test_operand_tape_is_not_allocated_for_other_commands():
     parsed = parse_command(SPECS["cat"], ["-n", *words], "/", "cat")
     assert len(parsed.paths()) == 1000
     assert len(parsed.flags.occurrences) == 1
-    custom = CommandSpec(rest=Operand(type="path"))
+    custom = CommandSpec(
+        arguments=(Argument("paths", type="path", nargs="*", metavar=""),)
+    )
     assert parse_command(custom, words, "/", "jq").flags.occurrences == []
 
 
@@ -1387,7 +1424,10 @@ def test_jq_reads_a_clusters_letters_before_the_refused_one():
 
 def test_a_borrowed_jq_name_keeps_getopt_long_and_its_refusals():
     spec = CommandSpec(
-        options=(Option(long="--null-input"),), rest=Operand(type="str")
+        arguments=(
+            Argument("--null-input", action="store_true"),
+            Argument("texts", nargs="*", metavar=""),
+        )
     )
     parsed = parse_command(spec, ["--nul", "--bogus"], "/", "jq")
     assert parsed.flags["--null-input"] is True
@@ -1399,7 +1439,12 @@ def test_a_dash_digit_is_an_option_outside_jqs_own_grammar():
     assert parse_command(SPECS["cat"], ["-1"], "/", "cat").invalid_options == [
         "1"
     ]
-    spec = CommandSpec(options=(Option(short="-n"),), rest=Operand(type="str"))
+    spec = CommandSpec(
+        arguments=(
+            Argument("-n", action="store_true"),
+            Argument("texts", nargs="*", metavar=""),
+        )
+    )
     assert parse_command(spec, ["-."], "/", "jq").invalid_options == ["."]
 
 
@@ -1530,9 +1575,7 @@ def test_required_operand_is_reported_not_raised():
     # The parser classifies and reports; the dialect that words the
     # refusal is the caller's choice, which is why this is a list of
     # names rather than an exception.
-    spec = CommandSpec(
-        positional=(Operand(type="str", name="PAGE_ID", required=True),)
-    )
+    spec = CommandSpec(arguments=(Argument("PAGE_ID"),))
     empty = parse_command(spec, [], "/")
     assert empty.missing_required_operands == ["PAGE_ID"]
     filled = parse_command(spec, ["abc"], "/")
@@ -1543,12 +1586,10 @@ def test_a_flag_that_supplies_a_slot_satisfies_required():
     # provided_by is the declarative form of grep's `if (!pattern_given)`:
     # the slot is skipped, so it cannot also be missing.
     spec = CommandSpec(
-        options=(Option(long="--expr", short="-e", type="str"),),
-        positional=(
-            Operand(
-                type="str", name="PATTERN", required=True, provided_by=("-e",)
-            ),
-        ),
+        arguments=(
+            Argument("-e", "--expr"),
+            Argument("PATTERN", provided_by=("-e",)),
+        )
     )
     assert parse_command(spec, [], "/").missing_required_operands == [
         "PATTERN"
@@ -1559,10 +1600,10 @@ def test_a_flag_that_supplies_a_slot_satisfies_required():
 
 def test_typed_dests_exclude_defaults_and_keep_scan_order():
     spec = CommandSpec(
-        options=(
-            Option(long="--limit", type="int", default="25"),
-            Option(long="--sort", type="str"),
-            Option(long="--json", type="bool"),
+        arguments=(
+            Argument("--limit", type="int", default="25"),
+            Argument("--sort"),
+            Argument("--json", action="store_true"),
         )
     )
     # --limit is present in flags (the default landed) but was never
@@ -1619,8 +1660,11 @@ def test_word_bases_are_empty_without_an_operand_base():
 
 
 PYTHON_LIKE = CommandSpec(
-    options=(Option(short="-c", type="str"), Option(short="-u")),
-    rest=Operand(type="str", remainder=True),
+    arguments=(
+        Argument("-c"),
+        Argument("-u", action="store_true"),
+        Argument("texts", nargs="REMAINDER", metavar=""),
+    )
 )
 
 
@@ -1720,7 +1764,9 @@ def test_interpreter_stdin_is_text_but_explicit_dash_filename_is_a_path(
             "str",
         ]
         assert parsed.invalid_options == []
-    custom = CommandSpec(positional=(Operand(type="path"),))
+    custom = CommandSpec(
+        arguments=(Argument("path", type="path", nargs="?", metavar=""),)
+    )
     assert parse_command(custom, ["-"], "/data", cmd).paths() == ["/data/-"]
 
 
@@ -1903,3 +1949,57 @@ def test_seq_options_end_at_its_first_operand(argv, texts):
     parsed = parse_command(SPECS["seq"], argv, "/", "seq")
     assert parsed.texts() == texts
     assert parsed.option_error_kinds == []
+
+
+@pytest.mark.parametrize("spelling", ["-p", "--point", "-vp", "-vp4"])
+def test_fixed_nargs_store_replaces_the_previous_list(spelling):
+    spec = CommandSpec(
+        arguments=(
+            Argument("-p", "--point", nargs=3),
+            Argument("-v", action="store_true"),
+        )
+    )
+    values = ["5", "6"] if spelling.endswith("4") else ["4", "5", "6"]
+    parsed = parse_command(
+        spec, ["--point", "1", "2", "3", spelling, *values], "/"
+    )
+    assert parsed.flags["--point"] == ["4", "5", "6"]
+    assert parsed.flags.get("-v", False) == spelling.startswith("-v")
+
+
+def test_fixed_nargs_extend_and_path_classification():
+    spec = CommandSpec(
+        arguments=(Argument("--files", nargs=2, action="extend", type="path"),)
+    )
+    parsed = parse_command(
+        spec, ["--files", "a", "b", "--files", "c", "d"], "/work"
+    )
+    assert parsed.flags == {
+        "--files": ["/work/a", "/work/b", "/work/c", "/work/d"]
+    }
+    assert parsed.path_flag_values == [
+        "/work/a",
+        "/work/b",
+        "/work/c",
+        "/work/d",
+    ]
+
+
+@pytest.mark.parametrize(
+    "words, expected",
+    [
+        (["--color", "auto"], {"--color": "auto"}),
+        (["-c", "auto"], {"--color": "auto"}),
+        (["-vc", "auto"], {"-v": True, "--color": "auto"}),
+        (["-vc", "-q"], {"-v": True, "--color": True, "-q": True}),
+    ],
+)
+def test_optional_value_inside_a_short_option_cluster(words, expected):
+    spec = CommandSpec(
+        arguments=(
+            Argument("-v", action="store_true"),
+            Argument("-c", "--color", nargs="?"),
+            Argument("-q", action="store_true"),
+        )
+    )
+    assert parse_command(spec, words, "/").flags == expected

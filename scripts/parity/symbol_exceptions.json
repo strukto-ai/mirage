@@ -1,5 +1,5 @@
 {
- "baseline": 3959,
+ "baseline": 3956,
  "modules": {
   "workspace/executor/redirect": {
    "typescript_only": {
@@ -557,6 +557,19 @@
   "core/email/client": {
    "python_only": {
     "_text_lines": "Reads the text lines of an IMAPResponse from mirage's own Python IMAP client (accessor/imap); node's imapflow hands back parsed messages, so its client has no lines to read."
+   }
+  },
+  "commands/cli/types": {
+   "typescript_only": {
+    "CLIHandlerInit": "TypeScript describes constructor keyword objects with an interface; Python declares those fields on the CLIHandler dataclass.",
+    "CLIInit": "TypeScript describes constructor keyword objects with an interface; Python declares those fields on the CLI dataclass."
+   }
+  },
+  "commands/spec/types": {
+   "typescript_only": {
+    "ArgumentInit": "TypeScript describes the Argument constructor options with an interface; Python spells them as constructor keyword parameters.",
+    "ArgumentAction": "TypeScript names the action string union; Python writes the same Literal union on Argument fields and constructor parameters.",
+    "Nargs": "TypeScript names the arity union; Python writes the same integer and Literal union on Argument fields and constructor parameters."
    }
   }
  }

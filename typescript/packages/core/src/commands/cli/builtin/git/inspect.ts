@@ -9,7 +9,7 @@ import { BreError, PosixSyntax, translateEre } from '../../../builtin/utils/bre.
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
-import { CommandSpec, Operand, Option, type FlagValue } from '../../../spec/types.ts'
+import { CommandSpec, Argument, type FlagValue } from '../../../spec/types.ts'
 import { parseCommand, parseToKwargs } from '../../../spec/parser.ts'
 import { UsageStyle } from '../../../spec/types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -55,14 +55,17 @@ const GIT_DIR_OPTION = '--git-dir'
 const MIN_ABBREV = 4
 const HEX_LENGTH = 40
 const GET_URL = new CommandSpec({
-  options: [
-    new Option({ long: '--push', description: 'query push URLs rather than fetch URLs' }),
-    new Option({ long: '--all', description: 'return all URLs' }),
-    new Option({ long: '--no-push' }),
-    new Option({ long: '--no-all' }),
+  arguments: [
+    new Argument('--push', {
+      action: 'store_true',
+      help: 'query push URLs rather than fetch URLs',
+    }),
+    new Argument('--all', { action: 'store_true', help: 'return all URLs' }),
+    new Argument('--no-push', { action: 'store_true' }),
+    new Argument('--no-all', { action: 'store_true' }),
+    new Argument('name'),
+    new Argument('texts', { metavar: '', nargs: '*' }),
   ],
-  positional: [new Operand({ type: 'str', name: 'name', required: true })],
-  rest: new Operand({ type: 'str' }),
 })
 
 export async function remote(inv: CLIInvocation): Promise<CommandFnResult> {

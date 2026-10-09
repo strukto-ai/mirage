@@ -604,7 +604,7 @@ clis:
     cfg = load_config(cfg_file)
     kwargs = cfg.to_workspace_kwargs()
     spec, config = kwargs["clis"]["pager"]
-    assert spec.name == "pager"
+    assert spec.spec.name == "pager"
     assert spec.script == ScriptSource("print('page')")
     assert spec.runtime == "monty"
     assert config == {"page_size": 20}
@@ -658,8 +658,8 @@ async def test_clis_path_form_reference_rebases_on_the_config_dir(
     # build-context rule script: follows; without rebasing it resolves
     # against the process cwd and only works by luck.
     (tmp_path / "tool.py").write_text(
-        "from mirage import CLISpec\n"
-        "TREE = CLISpec(name='tool', subcommands=(CLISpec(name='run',\n"
+        "from mirage import CLI\n"
+        "TREE = CLI(name='tool', subcommands=(CLI(name='run',\n"
         "               fn=lambda inv: None), ))\n"
     )
     cfg_file = tmp_path / "ws.yaml"

@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { compileSpec } from '../../../spec/compile.ts'
+import { CommandSpec } from '../../../spec/types.ts'
 
 import type { CommandFnResult } from '../../../config.ts'
 import { HEAD } from './constants.ts'
@@ -22,7 +24,7 @@ import {
   UnrecognizedArgumentError,
   UsageError,
 } from './errors.ts'
-import { CLISpec, type CLIInvocation } from '../../types.ts'
+import { type CLIInvocation } from '../../types.ts'
 import { HELP_SWITCH, gitOptionRefusal, gitUsage } from '../../refusal.ts'
 
 import { PathSpec } from '../../../../types.ts'
@@ -205,7 +207,7 @@ export function checkOperands(inv: CLIInvocation, texts: readonly string[]): voi
  * @param inv the invocation, carrying its leaf
  */
 export function verbUsage(inv: CLIInvocation): string {
-  const spec = inv.spec ?? new CLISpec({ name: '' })
+  const spec = inv.spec ?? new CommandSpec({ name: '' })
   return gitUsage(spec.name, spec)
 }
 
@@ -223,7 +225,7 @@ export function verbUsage(inv: CLIInvocation): string {
 export function checkSwitches(inv: CLIInvocation, texts: readonly string[]): void {
   const word = offending(texts, escaped(inv.argv), switches(inv))
   if (word !== null) {
-    const spec = inv.spec ?? new CLISpec({ name: '' })
+    const spec = inv.spec ?? new CommandSpec({ name: '' })
     throw new UsageError(...gitOptionRefusal(word, spec.name, spec))
   }
 }
@@ -238,8 +240,8 @@ export function checkSwitches(inv: CLIInvocation, texts: readonly string[]): voi
  */
 export function switches(inv: CLIInvocation): ReadonlySet<string> {
   const letters = new Set<string>()
-  for (const option of inv.spec?.options ?? []) {
-    if (option.short !== null && option.short.length === 2) letters.add(option.short.slice(1))
+  for (const option of inv.spec === undefined ? [] : compileSpec(inv.spec).options) {
+    for (const name of option.names) if (name.length === 2) letters.add(name.slice(1))
   }
   return letters
 }

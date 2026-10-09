@@ -22,7 +22,7 @@ from mirage.commands.cli.types import CLIInvocation
 
 
 def _words(verb: str, *argv: str) -> list[FilterWord]:
-    spec = next(node for node in GIT.subcommands if node.name == verb)
+    spec = next(node for node in GIT.spec.subcommands if node.name == verb)
     return filter_words(
         CLIInvocation(None, argv=(verb, *argv), texts=(), flags={}, spec=spec)
     )

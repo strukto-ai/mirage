@@ -30,7 +30,8 @@ from pydantic import (
 
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI
+from mirage.commands.spec.types import CommandSpec
 from mirage.policy.profile import SessionProfile
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
@@ -301,7 +302,7 @@ class StoreBlock(BaseModel):
 
 
 class CLIBlock(BaseModel):
-    """One ``clis:`` entry: install a named CLISpec with its own config.
+    """One ``clis:`` entry: install a named CLI with its own config.
 
     The section key is the installed head word. Exactly one handler
     source: ``cli`` names a registered spec tree; ``script`` references
@@ -651,11 +652,11 @@ def _build_runtime_entries(
     return out
 
 
-def _cli_entry(name: str, block: CLIBlock) -> str | CLISpec:
+def _cli_entry(name: str, block: CLIBlock) -> str | CLI:
     """Resolve one ``clis:`` entry to a spec key or synthesized spec.
 
     A ``cli`` entry stays the registered name for the workspace to
-    resolve; a ``script`` entry becomes a single-node CLISpec carrying
+    resolve; a ``script`` entry becomes a single-node CLI carrying
     the embedded source, so the install is self-contained (the docker
     build-context model).
 
@@ -664,8 +665,8 @@ def _cli_entry(name: str, block: CLIBlock) -> str | CLISpec:
         block (CLIBlock): the validated entry.
     """
     if block.script is not None:
-        return CLISpec(
-            name=name,
+        return CLI(
+            spec=CommandSpec(name=name),
             script=_load_script_source(block.script),
             runtime=block.runtime,
         )
@@ -680,7 +681,7 @@ class WorkspaceConfig(BaseModel):
     mounts: dict[str, MountBlock]
     command_limits: dict[str, Limit] | None = None
     # Installed CLIs, fully separate from mounts: key = installed head
-    # word, value names a registered CLISpec plus its own config.
+    # word, value names a registered CLI plus its own config.
     clis: dict[str, CLIBlock] | None = None
     # The workspace's ordered runtime world: name strings or maps
     # with a name plus the uniform runtime options ({name: wasi,

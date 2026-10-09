@@ -11,7 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
+import type { Argument } from '../../spec/types.ts'
+import { compileSpec } from '../../spec/compile.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
@@ -28,7 +29,7 @@ import { edScript, normalDiff, unifiedDiff } from '../diff_format.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { isStdin, stdinStat, stdinStream } from '../utils/stream.ts'
 import { UsageError } from '../../errors.ts'
-import { CommandName, type FlagValue, type Option } from '../../spec/types.ts'
+import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { shellQuote } from '../../../utils/quote.ts'
@@ -184,8 +185,8 @@ function splitLinesKeepEnds(text: string): string[] {
   return lines
 }
 
-function takesValue(option: Option): boolean {
-  return option.type !== 'bool' && !option.valueOptional
+function takesValue(option: Argument): boolean {
+  return option.action !== 'store_true' && option.action !== 'count' && !(option.nargs === '?')
 }
 
 /**
@@ -195,9 +196,17 @@ function takesValue(option: Option): boolean {
  * own word, `--` is kept, and every operand is left out.
  */
 export function switchWords(argv: readonly string[]): string[] {
-  const options = specOf(CommandName.DIFF).options
-  const shorts = new Map(options.flatMap((o) => (o.short ? [[o.short.slice(1), o] as const] : [])))
-  const longs = new Map(options.flatMap((o) => (o.long ? [[o.long.slice(2), o] as const] : [])))
+  const options = compileSpec(specOf(CommandName.DIFF)).options
+  const shorts = new Map(
+    options.flatMap((o) =>
+      o.names.filter((name) => !name.startsWith('--')).map((name) => [name.slice(1), o]),
+    ),
+  )
+  const longs = new Map(
+    options.flatMap((o) =>
+      o.names.filter((name) => name.startsWith('--')).map((name) => [name.slice(2), o]),
+    ),
+  )
   const words: string[] = []
   let i = 0
   while (i < argv.length) {

@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../commands/spec/types.ts'
+import { CLIHandler } from '../commands/cli/types.ts'
 
 import { EvaluationContext } from '../workspace/evaluation.ts'
 import { describe, expect, it, vi } from 'vitest'
@@ -34,7 +36,7 @@ import {
   getCurrentEvaluation,
   runWithEvaluation,
 } from './session_context.ts'
-import { CLISpec } from '../commands/cli/types.ts'
+import { CLI } from '../commands/cli/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
 import { handleXargs } from '../workspace/executor/builtins/xargs/xargs.ts'
 import { seedVar, sessionView } from '../workspace/session/state.ts'
@@ -706,13 +708,17 @@ describe('overlapping shell calls beside xargs', () => {
       const ws = new Workspace({}, { shellParser: parser })
       ws.registerCli(
         'again',
-        new CLISpec({
-          name: 'again',
-          fn: async (inv) => {
-            await Promise.resolve()
-            if (inv.shell === undefined) throw new Error('missing invocation shell')
-            const inner = await inv.shell('Z=inner; echo inner')
-            return [inner.stdout, inner]
+        new CLI({
+          spec: new CommandSpec({ name: 'again' }),
+          handlers: {
+            '': new CLIHandler({
+              fn: async (inv) => {
+                await Promise.resolve()
+                if (inv.shell === undefined) throw new Error('missing invocation shell')
+                const inner = await inv.shell('Z=inner; echo inner')
+                return [inner.stdout, inner]
+              },
+            }),
           },
         }),
       )
@@ -738,15 +744,19 @@ describe('overlapping shell calls beside xargs', () => {
       let expired: ((command: string) => Promise<IOResult>) | undefined
       ws.registerCli(
         'again',
-        new CLISpec({
-          name: 'again',
-          fn: async (inv) => {
-            expired = inv.shell
-            enter()
-            await held
-            if (inv.shell === undefined) throw new Error('missing invocation shell')
-            const inner = await inv.shell('X=inner; echo "$X"')
-            return [inner.stdout, inner]
+        new CLI({
+          spec: new CommandSpec({ name: 'again' }),
+          handlers: {
+            '': new CLIHandler({
+              fn: async (inv) => {
+                expired = inv.shell
+                enter()
+                await held
+                if (inv.shell === undefined) throw new Error('missing invocation shell')
+                const inner = await inv.shell('X=inner; echo "$X"')
+                return [inner.stdout, inner]
+              },
+            }),
           },
         }),
       )
@@ -786,12 +796,16 @@ describe('overlapping shell calls beside xargs', () => {
     const [held, release] = gate()
     ws.registerCli(
       'hold',
-      new CLISpec({
-        name: 'hold',
-        fn: async () => {
-          enter()
-          await held
-          return [null, new IOResult()]
+      new CLI({
+        spec: new CommandSpec({ name: 'hold' }),
+        handlers: {
+          '': new CLIHandler({
+            fn: async () => {
+              enter()
+              await held
+              return [null, new IOResult()]
+            },
+          }),
         },
       }),
     )
@@ -827,23 +841,31 @@ describe('overlapping shell calls beside xargs', () => {
     const [otherHeld, releaseOther] = gate()
     ws.registerCli(
       'holdchild',
-      new CLISpec({
-        name: 'holdchild',
-        fn: async () => {
-          enterChild()
-          await childHeld
-          return [null, new IOResult()]
+      new CLI({
+        spec: new CommandSpec({ name: 'holdchild' }),
+        handlers: {
+          '': new CLIHandler({
+            fn: async () => {
+              enterChild()
+              await childHeld
+              return [null, new IOResult()]
+            },
+          }),
         },
       }),
     )
     ws.registerCli(
       'holdother',
-      new CLISpec({
-        name: 'holdother',
-        fn: async () => {
-          enterOther()
-          await otherHeld
-          return [null, new IOResult()]
+      new CLI({
+        spec: new CommandSpec({ name: 'holdother' }),
+        handlers: {
+          '': new CLIHandler({
+            fn: async () => {
+              enterOther()
+              await otherHeld
+              return [null, new IOResult()]
+            },
+          }),
         },
       }),
     )

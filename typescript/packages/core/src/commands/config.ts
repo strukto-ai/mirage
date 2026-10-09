@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec } from './spec/compile.ts'
 import type { ProcessView } from '../process/view.ts'
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/index.ts'
@@ -342,7 +343,7 @@ function answerStandardOptions(
   spec: CommandSpec,
   fn: CommandFn,
 ): { spec: CommandSpec; fn: CommandFn } {
-  const ownVersion = spec.options.some((o) => o.long === '--version')
+  const ownVersion = compileSpec(spec).options.some((o) => o.names.includes('--version'))
   const ownHelp = isBuiltinGrammar(name, spec) && OWN_OPTION_LOOP.has(name)
   const helpText = helpPage(name, spec)
   const versionText = versionLine(name)

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec } from '../../../commands/spec/compile.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { parseCommand, parseToKwargs } from '../../../commands/spec/parser.ts'
 import {
@@ -142,11 +143,15 @@ export function parseFlags(
     // path twice, once as an option's value typed after the operand, swaps
     // the two spellings and nothing else. Mirrors Python's parse_flags.
     const pathKeys = new Map<string, 'single' | 'multiple' | 'pair'>()
-    for (const opt of spec.options) {
+    for (const opt of compileSpec(spec).options) {
       if (opt.type !== 'path') continue
-      const shape = opt.pair ? 'pair' : opt.multiple ? 'multiple' : 'single'
-      for (const name of [opt.short, opt.long]) {
-        if (name !== null) pathKeys.set(flagKwargName(name), shape)
+      const shape = opt.valueTypes.includes('path')
+        ? 'pair'
+        : opt.action === 'append' || opt.action === 'extend' || typeof opt.nargs === 'number'
+          ? 'multiple'
+          : 'single'
+      for (const name of opt.names) {
+        pathKeys.set(flagKwargName(name), shape)
       }
     }
     for (const [key, value] of Object.entries(flagKwargs)) {

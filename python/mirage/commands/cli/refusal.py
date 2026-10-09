@@ -23,6 +23,12 @@ from mirage.commands.cli.constants import (
     GIT_USAGE_WIDTH,
     USAGE_EXIT,
 )
+from mirage.commands.spec.compile import (
+    argument_dest,
+    compile_spec,
+    option_spellings,
+    positional_required,
+)
 from mirage.commands.spec.help import operand_slot, option_metavar
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.errors.posix import posix_phrase
@@ -80,37 +86,39 @@ def _git_rows(path: str, spec: CommandSpec) -> list[str]:
         spec (CommandSpec): the leaf's grammar.
     """
     table = GIT_LONG_OPTIONS.get(path, ())
+    options = compile_spec(spec).options
     negations = {
-        opt.long
-        for opt in spec.options
-        if opt.long is not None
-        and opt.long.startswith(NEGATION)
-        and opt.short is None
-        and opt.type == "bool"
-        and f"[no-]{opt.long[len(NEGATION) :]}" in table
+        long
+        for opt in options
+        for short, long in (option_spellings(opt),)
+        if long is not None
+        and long.startswith(NEGATION)
+        and short is None
+        and opt.action in ("store_true", "count")
+        and f"[no-]{long[len(NEGATION) :]}" in table
     }
     rows: list[str] = []
-    for opt in spec.options:
-        long = opt.long
+    for opt in options:
+        short, long = option_spellings(opt)
         if long in negations:
             continue
         if long is not None and f"{NEGATION}{long[2:]}" in negations:
             long = f"--[no-]{long[2:]}"
-        spelled = ", ".join(name for name in (opt.short, long) if name)
-        if opt.type != "bool":
-            named = opt.long[2:] if opt.long else (opt.short or "-")[1:]
+        spelled = ", ".join(name for name in (short, long) if name)
+        if opt.action not in ("store_true", "count"):
+            named = argument_dest(opt).lstrip("-")
             value = f"<{opt.metavar or named}>"
-            if not opt.value_optional:
+            if opt.nargs != "?":
                 spelled += f" {value}"
             else:
-                spelled += f"[={value}]" if opt.long else f"[{value}]"
+                spelled += f"[={value}]" if long else f"[{value}]"
         left = f"    {spelled}"
         gap = (
             " " * (GIT_USAGE_WIDTH + GIT_USAGE_GAP - len(left))
             if len(left) <= GIT_USAGE_WIDTH + 1
             else "\n" + " " * (GIT_USAGE_WIDTH + GIT_USAGE_GAP)
         )
-        rows.append(f"{left}{gap}{opt.description or ''}\n")
+        rows.append(f"{left}{gap}{opt.help or ''}\n")
     return rows
 
 
@@ -139,8 +147,13 @@ def git_option_refusal(
     if word == HELP_SWITCH:
         return usage, ""
     name, eq, _ = word.partition("=")
-    if eq and any(
-        opt.long == name and opt.type == "bool" for opt in spec.options
+    if (
+        eq
+        and name.startswith(LONG_PREFIX)
+        and any(
+            name in opt.names and opt.action in ("store_true", "count")
+            for opt in compile_spec(spec).options
+        )
     ):
         return "", f"error: option `{name[2:]}' takes no value\n"
     noun = "option" if word.startswith(LONG_PREFIX) else "switch"
@@ -166,13 +179,13 @@ def clap_supplied(
         env (Mapping[str, str]): the session environment, read for the
             options that declare a variable.
     """
-    by_dest = {opt.long or opt.short or "": opt for opt in spec.options}
+    by_dest = {argument_dest(opt): opt for opt in compile_spec(spec).options}
     bits: list[str] = []
     for dest in typed:
         opt = by_dest.get(dest)
         if opt is None:
             continue
-        if opt.type == "bool":
+        if opt.action in ("store_true", "count"):
             bits.append(dest)
         else:
             bits.append(f"{dest} <{option_metavar(opt)}>")
@@ -189,9 +202,13 @@ def clap_operands(spec: CommandSpec) -> list[str]:
     Args:
         spec (CommandSpec): the leaf's grammar.
     """
-    slots = [operand_slot(operand) for operand in spec.positional]
-    if spec.rest is not None:
-        slots.append(operand_slot(spec.rest, ellipsis=not spec.rest.required))
+    compiled = compile_spec(spec)
+    slots = [operand_slot(operand) for operand in compiled.positional]
+    rest = compiled.rest
+    if rest is not None:
+        slots.append(
+            operand_slot(rest, ellipsis=not positional_required(rest))
+        )
     return slots
 
 

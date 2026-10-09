@@ -169,7 +169,7 @@ def _inv(
 
 def test_registers_itself_under_the_grammar_gh_uses():
     assert cli_spec_for("gh") is GH
-    assert [c.name for c in GH.subcommands] == [
+    assert [c.name for c in GH.spec.subcommands] == [
         "auth",
         "help",
         "version",
@@ -182,7 +182,7 @@ def test_registers_itself_under_the_grammar_gh_uses():
         "workflow",
         "search",
     ]
-    repo = next(c for c in GH.subcommands if c.name == "repo")
+    repo = next(c for c in GH.spec.subcommands if c.name == "repo")
     assert [c.name for c in repo.subcommands] == [
         "list",
         "clone",
@@ -193,7 +193,9 @@ def test_registers_itself_under_the_grammar_gh_uses():
         "edit",
         "delete",
     ]
-    assert [c.name for c in repo.subcommands if c.write] == [
+    assert [
+        c.name for c in repo.subcommands if GH.handlers["repo " + c.name].write
+    ] == [
         "create",
         "fork",
         "rename",
@@ -202,7 +204,7 @@ def test_registers_itself_under_the_grammar_gh_uses():
     ]
     groups = {
         c.name: [leaf.name for leaf in c.subcommands]
-        for c in GH.subcommands
+        for c in GH.spec.subcommands
         if c.subcommands
     }
     assert groups["issue"] == [
@@ -328,7 +330,7 @@ async def test_json_output_is_ghs_compact_go_encoding(monkeypatch):
     out, _io = await view(_inv(["o/r"], {"json": "description"}))
     assert (
         await materialize(out)
-        == ('{"description":"a<b>&c\\u2028d\\u2029\\b\u00e9"}\n').encode()
+        == '{"description":"a<b>&c\\u2028d\\u2029\\b\u00e9"}\n'.encode()
     )
 
 

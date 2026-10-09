@@ -1,4 +1,4 @@
-import { CLISpec, IOResult, Operand, z } from '@struktoai/mirage-core'
+import { CLI, CLIHandler, CommandSpec, IOResult, Argument, z } from '@struktoai/mirage-core'
 
 const TallyConfig = z.object({ unit: z.string() })
 
@@ -8,16 +8,18 @@ function total(inv) {
   return [new TextEncoder().encode(line), new IOResult()]
 }
 
-export const TALLY = new CLISpec({
-  name: 'tally',
-  description: 'Add numbers in a unit',
+export const TALLY = new CLI({
+  spec: new CommandSpec({
+    name: 'tally',
+    description: 'Add numbers in a unit',
+    subcommands: [
+      new CommandSpec({
+        name: 'sum',
+        description: 'Sum the operands',
+        arguments: [new Argument('values', { nargs: '*', metavar: '' })],
+      }),
+    ],
+  }),
+  handlers: { sum: new CLIHandler({ fn: total }) },
   configModel: TallyConfig,
-  subcommands: [
-    new CLISpec({
-      name: 'sum',
-      description: 'Sum the operands',
-      fn: total,
-      rest: new Operand({ type: 'str' }),
-    }),
-  ],
 })

@@ -2,18 +2,20 @@ import asyncio
 from types import MappingProxyType
 
 from mirage import (
+    CLI,
     NULL_INDEX,
     Accessor,
+    Argument,
     BaseVFS,
+    CLIHandler,
     CLIInvocation,
-    CLISpec,
+    CommandSpec,
     ContentType,
     FileStat,
     FileType,
     IndexCacheStore,
     IOResult,
     MountMode,
-    Operand,
     PathSpec,
     SearchQuery,
     Workspace,
@@ -192,10 +194,12 @@ async def main() -> None:
     try:
         ws.register_cli(
             "note-info",
-            CLISpec(
-                name="note-info",
-                positional=(Operand(name="path", type="path", required=True),),
-                fn=note_info,
+            CLI(
+                spec=CommandSpec(
+                    name="note-info",
+                    arguments=(Argument("path", type="path"),),
+                ),
+                handlers={"": CLIHandler(fn=note_info)},
             ),
         )
         for line in (

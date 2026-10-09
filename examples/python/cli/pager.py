@@ -18,7 +18,16 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from mirage import RAMVFS, CLIInvocation, CLISpec, Operand, Option, Workspace
+from mirage import (
+    CLI,
+    RAMVFS,
+    Argument,
+    CLIHandler,
+    CLIInvocation,
+    CommandSpec,
+    FlagView,
+    Workspace,
+)
 from mirage.io import IOResult
 
 
@@ -51,8 +60,16 @@ async def list_incidents(
     inv: CLIInvocation[PagerConfig],
 ) -> tuple[bytes, IOResult]:
     incidents = INCIDENTS[inv.config.account]
+    wanted = set(inv.texts)
+    status = FlagView(inv.flags, inv.spec).as_str("state")
     lines = []
     for incident_id, incident in sorted(incidents.items()):
+        if wanted and incident_id not in wanted:
+            continue
+        if status and status != (
+            "open" if incident.acknowledged_by is None else "acknowledged"
+        ):
+            continue
         state = (
             "open"
             if incident.acknowledged_by is None
@@ -61,7 +78,7 @@ async def list_incidents(
         lines.append(
             f"[{inv.config.account}] {incident_id} {state} {incident.summary}"
         )
-    return ("\n".join(lines) + "\n").encode(), IOResult()
+    return ("\n".join(lines) + ("\n" if lines else "")).encode(), IOResult()
 
 
 # A leaf is a plain function or a coroutine function, whichever its body
@@ -71,14 +88,10 @@ async def list_incidents(
 def acknowledge(
     inv: CLIInvocation[PagerConfig],
 ) -> tuple[bytes | None, IOResult]:
-    # Operand.required is enforced by the executor only under the CLAP
-    # dialect; an argparse-style leaf words its own missing-operand refusal.
     if not inv.texts:
         raise ValueError("INCIDENT_ID is required")
     incident_id = inv.texts[0]
-    by = inv.flags["by"]
-    if not isinstance(by, str):
-        raise TypeError("--by must be a string")
+    by = FlagView(inv.flags, inv.spec).as_str("by")
     incident = INCIDENTS[inv.config.account].get(incident_id)
     if incident is None:
         return None, IOResult(
@@ -90,44 +103,47 @@ def acknowledge(
     return message.encode(), IOResult()
 
 
-PAGER = CLISpec(
-    name="pager",
-    description="Task-specific incident CLI",
-    config_model=PagerConfig,
-    subcommands=(
-        CLISpec(
-            name="list",
-            description="List incidents for this installed account",
-            fn=list_incidents,
-        ),
-        CLISpec(
-            name="ack",
-            description="Acknowledge an incident",
-            fn=acknowledge,
-            # write labels the leaf for policy; the handler still owns the
-            # service mutation and its cache/invalidation semantics.
-            write=True,
-            positional=(
-                Operand(name="INCIDENT_ID", type="str", required=True),
+PAGER = CLI(
+    spec=CommandSpec(
+        name="pager",
+        description="Task-specific incident CLI",
+        subcommands=(
+            CommandSpec(
+                name="list",
+                description="List incidents for this installed account",
+                arguments=(
+                    Argument("INCIDENT_ID", nargs="*"),
+                    Argument("--state", choices=("open", "acknowledged")),
+                ),
             ),
-            options=(
-                Option(
-                    long="--by",
-                    type="str",
-                    required=True,
-                    description="Person acknowledging the incident",
+            CommandSpec(
+                name="ack",
+                description="Acknowledge an incident",
+                arguments=(
+                    Argument("INCIDENT_ID"),
+                    Argument(
+                        "--by",
+                        required=True,
+                        help="Person acknowledging the incident",
+                    ),
                 ),
             ),
         ),
     ),
+    handlers={
+        "list": CLIHandler(fn=list_incidents),
+        "ack": CLIHandler(fn=acknowledge, write=True),
+    },
+    config_model=PagerConfig,
 )
 
 
-async def show(ws: Workspace, line: str) -> None:
+async def show(ws: Workspace, line: str, expected_exit: int = 0) -> None:
     print(f"$ {line}")
     result = await ws.shell(line)
     stdout = await result.stdout_str()
     stderr = await result.stderr_str()
+    assert result.exit_code == expected_exit, (line, result.exit_code, stderr)
     if stdout:
         print(stdout, end="" if stdout.endswith("\n") else "\n")
     if stderr:
@@ -148,9 +164,13 @@ async def main() -> None:
         await show(ws, "pager-eng --help")
         await show(ws, "pager-eng list")
         await show(ws, "pager-support list")
-        await show(ws, "pager-eng ack --by Mina")
-        await show(ws, "pager-eng ack __proto__ --by Mina")
+        await show(ws, "pager-eng list INC-101 INC-404 --state open")
+        await show(ws, "pager-eng list --state invalid", expected_exit=2)
+        await show(ws, "pager-eng ack --by Mina", expected_exit=2)
+        await show(ws, "pager-eng ack __proto__ --by Mina", expected_exit=1)
         await show(ws, "pager-eng ack INC-101 --by Mina")
+        await show(ws, "pager-eng list --state acknowledged INC-101")
+        await show(ws, "pager-eng list INC-101 --state open")
         await show(ws, "pager-eng list")
         await show(ws, "pager-support list")
     finally:

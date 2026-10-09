@@ -11,8 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
+import { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide/runtime'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
@@ -904,10 +903,10 @@ describe('clis section', () => {
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     const args = await configToWorkspaceArgs(cfg)
     const [spec, config] = args.options.clis?.pager ?? []
-    expect(spec).toBeInstanceOf(CLISpec)
-    expect((spec as CLISpec).name).toBe('pager')
-    expect((spec as CLISpec).script).toEqual(new ScriptSource("print('page')"))
-    expect((spec as CLISpec).runtime).toBe('monty')
+    expect(spec).toBeInstanceOf(CLI)
+    expect((spec as CLI).spec.name).toBe('pager')
+    expect((spec as CLI).script).toEqual(new ScriptSource("print('page')"))
+    expect((spec as CLI).runtime).toBe('monty')
     expect(config).toEqual({ page_size: 20 })
     rmSync(dir, { recursive: true, force: true })
   })
@@ -925,7 +924,7 @@ describe('clis section', () => {
     // The module bit rides on the spec because the path is gone once
     // the source is embedded, and an ES module needs the engine's
     // module mode or `import` fails.
-    expect((spec as CLISpec).script).toEqual(new ScriptSource("console.log('page')", 'js', true))
+    expect((spec as CLI).script).toEqual(new ScriptSource("console.log('page')", 'js', true))
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -939,8 +938,8 @@ describe('clis section', () => {
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     const args = await configToWorkspaceArgs(cfg)
     const [spec] = args.options.clis?.pager ?? []
-    expect((spec as CLISpec).script?.language).toBe('js')
-    expect((spec as CLISpec).script?.module).toBe(false)
+    expect((spec as CLI).script?.language).toBe('js')
+    expect((spec as CLI).script?.module).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1127,8 +1126,8 @@ describe('clis cli: reference', () => {
     resolve(fileURLToPath(import.meta.url), '../../../core/dist/index.js'),
   ).href
   const SPEC =
-    `import {CLISpec} from ${JSON.stringify(CORE)}\n` +
-    "export const TALLY = new CLISpec({name: 'tally', fn: async () => ({exitCode: 0})})\n"
+    `import {CLI, CLIHandler, CommandSpec} from ${JSON.stringify(CORE)}\n` +
+    "export const TALLY = new CLI({spec: new CommandSpec({name: 'tally'}), handlers: {'': new CLIHandler({fn: async () => null})}, configModel: input => input})\n"
 
   it('loads a spec out of a file next to the config', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
@@ -1141,8 +1140,30 @@ describe('clis cli: reference', () => {
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     const args = await configToWorkspaceArgs(cfg)
     const [spec, config] = args.options.clis?.tally ?? []
-    expect(spec).toBeInstanceOf(CLISpec)
-    expect((spec as CLISpec).name).toBe('tally')
+    expect(spec).toBeInstanceOf(CLI)
+    expect((spec as CLI).spec.name).toBe('tally')
+    expect(config).toEqual({ unit: 'kg' })
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('reconstructs a valid foreign registration and retains its handlers', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
+    writeFileSync(
+      join(dir, 'foreign.mjs'),
+      SPEC.replace('export const TALLY = ', 'const original = ') +
+        'export const TALLY = {...original}\n',
+    )
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { vfs: 'ram' } },
+      clis: { tally: { cli: `${join(dir, 'foreign.mjs')}:TALLY`, config: { unit: 'kg' } } },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    const [cli, config] = args.options.clis?.tally ?? []
+    expect(cli).toBeInstanceOf(CLI)
+    if (!(cli instanceof CLI)) throw new Error('missing reconstructed CLI')
+    expect(cli.spec.name).toBe('tally')
+    expect(cli.spec.subcommands).toEqual([])
+    expect(typeof cli.handlers['']?.fn).toBe('function')
     expect(config).toEqual({ unit: 'kg' })
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1184,32 +1205,31 @@ describe('clis cli: reference', () => {
     expect(args.options.clis?.sl?.[0]).toBe('slack')
   })
 
-  it('refuses a ref that resolves to something other than a CLISpec', async () => {
+  it('refuses a ref that resolves to something other than a CLI', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
     writeFileSync(join(dir, 'nope.mjs'), 'export const TALLY = {name: "tally"}\n')
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
       clis: { tally: { cli: `${join(dir, 'nope.mjs')}:TALLY` } },
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLISpec/)
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLI/)
     rmSync(dir, { recursive: true, force: true })
   })
 
-  // A class name is not proof: dispatch reads subcommands/aliases/options
+  // A class name is not proof: dispatch reads grammar and handler bindings
   // at every level, so a value that only answers to the name crashes on
   // the first line an agent types instead of failing the create.
-  it('refuses an impostor class named CLISpec', async () => {
+  it('refuses an impostor class named CLI', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
     writeFileSync(
       join(dir, 'impostor.mjs'),
-      'class CLISpec { constructor() { this.name = "tally" } }\n' +
-        'export const TALLY = new CLISpec()\n',
+      'class CLI { constructor() { this.name = "tally" } }\n' + 'export const TALLY = new CLI()\n',
     )
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
       clis: { tally: { cli: `${join(dir, 'impostor.mjs')}:TALLY` } },
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLISpec/)
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLI/)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1217,14 +1237,14 @@ describe('clis cli: reference', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
     writeFileSync(
       join(dir, 'deep.mjs'),
-      'export const TALLY = {name: "tally", aliases: [], options: [],\n' +
-        '  subcommands: [{name: "sum", aliases: [], options: []}]}\n',
+      'export const TALLY = {spec: {name: "tally", aliases: [], arguments: [], addHelp: true, allowAbbrev: true,\n' +
+        '  subcommands: [{name: "sum", aliases: [], arguments: []}]}, handlers: {sum: {fn: () => null, write: false, limit: null}}}\n',
     )
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
       clis: { tally: { cli: `${join(dir, 'deep.mjs')}:TALLY` } },
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLISpec/)
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLI/)
     rmSync(dir, { recursive: true, force: true })
   })
 

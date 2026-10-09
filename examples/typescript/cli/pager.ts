@@ -15,11 +15,13 @@
 import { pathToFileURL } from 'node:url'
 
 import {
-  CLISpec,
+  CLI,
+  CLIHandler,
+  CommandSpec,
+  FlagView,
   type CLIInvocation,
   IOResult,
-  Operand,
-  Option,
+  Argument,
   RAMVFS,
   Workspace,
   z,
@@ -49,8 +51,7 @@ const INCIDENTS: Record<PagerConfig['account'], Record<string, Incident>> = {
 const enc = new TextEncoder()
 
 function configOf(inv: CLIInvocation): PagerConfig {
-  // registerCli validates this schema once per installation. CLISpec is not
-  // generic, so narrow the already-validated value at the handler boundary.
+  // registerCli validates the account before the handler runs.
   return inv.config as PagerConfig
 }
 
@@ -64,7 +65,14 @@ function accountIncidents(account: PagerConfig['account']): Record<string, Incid
 // throws before any await is refused exactly like one that rejects.
 function listIncidents(inv: CLIInvocation): Promise<CommandFnResult> {
   const { account } = configOf(inv)
+  const wanted = new Set(inv.texts)
+  const status = new FlagView(inv.flags, inv.spec).asStr('state')
   const lines = Object.entries(accountIncidents(account))
+    .filter(
+      ([id, incident]) =>
+        (wanted.size === 0 || wanted.has(id)) &&
+        (!status || status === (incident.acknowledgedBy === undefined ? 'open' : 'acknowledged')),
+    )
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([incidentId, incident]) => {
       const state =
@@ -73,17 +81,17 @@ function listIncidents(inv: CLIInvocation): Promise<CommandFnResult> {
           : `acknowledged-by=${incident.acknowledgedBy}`
       return `[${account}] ${incidentId} ${state} ${incident.summary}`
     })
-  return Promise.resolve([enc.encode(`${lines.join('\n')}\n`), new IOResult()])
+  return Promise.resolve([
+    enc.encode(lines.length === 0 ? '' : `${lines.join('\n')}\n`),
+    new IOResult(),
+  ])
 }
 
 function acknowledge(inv: CLIInvocation): CommandFnResult {
   const { account } = configOf(inv)
   const incidentId = inv.texts[0]
-  const by = inv.flags.by
-  // Operand.required is enforced by the executor only under the CLAP
-  // dialect; an argparse-style leaf words its own missing-operand refusal.
+  const by = new FlagView(inv.flags, inv.spec).asStr('by')
   if (incidentId === undefined) throw new Error('INCIDENT_ID is required')
-  if (typeof by !== 'string') throw new Error('--by must be a string')
   const incidents = accountIncidents(account)
   const incident = Object.hasOwn(incidents, incidentId) ? incidents[incidentId] : undefined
   if (incident === undefined) {
@@ -96,39 +104,44 @@ function acknowledge(inv: CLIInvocation): CommandFnResult {
   return [enc.encode(`[${account}] acknowledged ${incidentId} by ${by}\n`), new IOResult()]
 }
 
-export const PAGER = new CLISpec({
-  name: 'pager',
-  description: 'Task-specific incident CLI',
+export const PAGER = new CLI({
+  spec: new CommandSpec({
+    name: 'pager',
+    description: 'Task-specific incident CLI',
+    subcommands: [
+      new CommandSpec({
+        name: 'list',
+        description: 'List incidents for this installed account',
+        arguments: [
+          new Argument('INCIDENT_ID', { nargs: '*' }),
+          new Argument('--state', { choices: ['open', 'acknowledged'] }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'ack',
+        description: 'Acknowledge an incident',
+        arguments: [
+          new Argument('INCIDENT_ID'),
+          new Argument('--by', { required: true, help: 'Person acknowledging the incident' }),
+        ],
+      }),
+    ],
+  }),
+  handlers: {
+    list: new CLIHandler({ fn: listIncidents }),
+    ack: new CLIHandler({ fn: acknowledge, write: true }),
+  },
   configModel: PagerConfigSchema,
-  subcommands: [
-    new CLISpec({
-      name: 'list',
-      description: 'List incidents for this installed account',
-      fn: listIncidents,
-    }),
-    new CLISpec({
-      name: 'ack',
-      description: 'Acknowledge an incident',
-      fn: acknowledge,
-      // write labels the leaf for policy; the handler still owns the
-      // service mutation and its cache/invalidation semantics.
-      write: true,
-      positional: [new Operand({ name: 'INCIDENT_ID', type: 'str', required: true })],
-      options: [
-        new Option({
-          long: '--by',
-          type: 'str',
-          required: true,
-          description: 'Person acknowledging the incident',
-        }),
-      ],
-    }),
-  ],
 })
 
-async function show(ws: Workspace, line: string): Promise<void> {
+async function show(ws: Workspace, line: string, expectedExit = 0): Promise<void> {
   console.log(`$ ${line}`)
   const result = await ws.shell(line)
+  if (result.exitCode !== expectedExit) {
+    throw new Error(
+      `${line}: expected exit ${expectedExit}, got ${result.exitCode}: ${result.stderrText}`,
+    )
+  }
   if (result.stdoutText !== '') process.stdout.write(result.stdoutText)
   if (result.stderrText !== '') process.stdout.write(result.stderrText)
   console.log()
@@ -147,9 +160,13 @@ async function main(): Promise<void> {
     await show(ws, 'pager-eng --help')
     await show(ws, 'pager-eng list')
     await show(ws, 'pager-support list')
-    await show(ws, 'pager-eng ack --by Mina')
-    await show(ws, 'pager-eng ack __proto__ --by Mina')
+    await show(ws, 'pager-eng list INC-101 INC-404 --state open')
+    await show(ws, 'pager-eng list --state invalid', 2)
+    await show(ws, 'pager-eng ack --by Mina', 2)
+    await show(ws, 'pager-eng ack __proto__ --by Mina', 1)
     await show(ws, 'pager-eng ack INC-101 --by Mina')
+    await show(ws, 'pager-eng list --state acknowledged INC-101')
+    await show(ws, 'pager-eng list INC-101 --state open')
     await show(ws, 'pager-eng list')
     await show(ws, 'pager-support list')
   } finally {

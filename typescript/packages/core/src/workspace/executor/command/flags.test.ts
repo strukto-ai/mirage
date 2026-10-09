@@ -11,12 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { describe, expect, it } from 'vitest'
 
 import { SPECS, specOf } from '../../../commands/spec/index.ts'
 import { PathSpec } from '../../../types.ts'
-import { CommandSpec, Operand, Option } from '../../../commands/spec/types.ts'
+import { CommandSpec, Argument } from '../../../commands/spec/types.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { optionError, parseFlags } from './flags.ts'
 
@@ -119,7 +118,7 @@ describe('parseFlags', () => {
 describe('optionError scan order', () => {
   it('reports the first scan error like GNU', () => {
     const spec = new CommandSpec({
-      options: [new Option({ long: '--context', type: 'str' }), new Option({ long: '--count' })],
+      arguments: [new Argument('--context'), new Argument('--count', { action: 'store_true' })],
     })
     const dec = new TextDecoder()
     const ambiguousFirst = parseFlags(['--c', '--bogus', 'x'], spec, 'grep', '/')
@@ -139,11 +138,11 @@ describe('optionError scan order', () => {
     // line loses to a value refused before it.
     const dec = new TextDecoder()
     const spec = new CommandSpec({
-      options: [
-        new Option({ long: '--mode', type: 'str', choices: ['warn', 'exit'] }),
-        new Option({ long: '--count', type: 'int' }),
+      arguments: [
+        new Argument('--mode', { choices: ['warn', 'exit'] }),
+        new Argument('--count', { type: 'int' }),
+        new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
       ],
-      rest: new Operand({ type: 'path' }),
     })
     const valueFirst = optionError(
       'tee',
@@ -170,7 +169,7 @@ describe('optionError scan order', () => {
     // the walk's finishNode: a non-numeric value on a float option that
     // also declares choices refuses the conversion, not the list.
     const spec = new CommandSpec({
-      options: [new Option({ long: '--ratio', type: 'float', choices: ['0.5', '1.0'] })],
+      arguments: [new Argument('--ratio', { type: 'float', choices: ['0.5', '1.0'] })],
     })
     const parsed = parseFlags(['--ratio', '5x', 'p'], spec, 'cmd', '/')
     const refusal = optionError('cmd', parsed)
@@ -270,10 +269,15 @@ describe("optionError — tar's old option style", () => {
 
 it('retains scalar, repeated and pair spellings without classified paths', () => {
   const spec = new CommandSpec({
-    options: [
-      new Option({ short: '-o', long: '--output', type: 'path' }),
-      new Option({ short: '-I', long: '--include', type: 'path', multiple: true }),
-      new Option({ long: '--rawfile', type: 'path', pair: true }),
+    arguments: [
+      new Argument(['-o', '--output'], { type: 'path' }),
+      new Argument(['-I', '--include'], { action: 'append', type: 'path' }),
+      new Argument('--rawfile', {
+        action: 'extend',
+        nargs: 2,
+        type: 'path',
+        valueTypes: ['str', 'path'],
+      }),
     ],
   })
   const parsed = parseFlags(
@@ -308,7 +312,7 @@ describe('an empty attached path value', () => {
 
 it('keeps dots on synthesized attached and environment PATH flags', () => {
   const spec = new CommandSpec({
-    options: [new Option({ long: '--file', type: 'path', env: 'INPUT' })],
+    arguments: [new Argument('--file', { type: 'path', env: 'INPUT' })],
   })
   for (const [argv, env] of [
     [['--file=hidden/../public'], {}],

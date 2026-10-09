@@ -15,6 +15,7 @@
 import importlib
 from typing import TYPE_CHECKING, Any
 
+from mirage.commands.spec.types import CommandSpec
 from mirage.version import __version__ as __version__
 
 # The authoring surface: what a host reaches for to bring its own
@@ -27,8 +28,9 @@ if TYPE_CHECKING:
     from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
     from mirage.commands.builtin.generic_bind import generic_commands
     from mirage.commands.cli import (
+        CLI,
+        CLIHandler,
         CLIInvocation,
-        CLISpec,
         CLIView,
         register_cli_spec,
     )
@@ -36,10 +38,9 @@ if TYPE_CHECKING:
     from mirage.commands.errors import UsageError
     from mirage.commands.spec import (
         SPECS,
+        Argument,
         CommandSpec,
         FlagView,
-        Operand,
-        Option,
     )
     from mirage.commands.spec.types import UsageStyle
     from mirage.io import IOResult
@@ -143,13 +144,13 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.commands.config": ("command",),
     "mirage.commands.cli": (
         "CLIInvocation",
-        "CLISpec",
+        "CLI",
+        "CLIHandler",
         "register_cli_spec",
         "CLIView",
     ),
     "mirage.commands.spec": (
-        "Operand",
-        "Option",
+        "Argument",
         "SPECS",
         "CommandSpec",
         "FlagView",
@@ -278,9 +279,9 @@ __all__ = [
     "ReadSpec",
     "WritePolicy",
     "CLIInvocation",
-    "CLISpec",
-    "Operand",
-    "Option",
+    "CLI",
+    "CLIHandler",
+    "Argument",
     "register_cli_spec",
     "command",
     "new_session_id",

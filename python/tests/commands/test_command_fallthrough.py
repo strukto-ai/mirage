@@ -15,14 +15,14 @@
 import pytest
 
 from mirage.commands.config import command
-from mirage.commands.spec import CommandSpec, Operand
+from mirage.commands.spec import Argument, CommandSpec
 from mirage.io.types import IOResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 SPEC = CommandSpec(
-    rest=Operand(type="path"),
+    arguments=(Argument("paths", type="path", nargs="*", metavar=""),)
 )
 
 

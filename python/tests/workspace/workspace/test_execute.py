@@ -18,7 +18,7 @@ import threading
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec
 from mirage.io.types import IOResult
@@ -45,7 +45,13 @@ async def test_sync_cli_does_not_block_other_sessions_or_escape_cancellation():
         finished.append(True)
         return b"done", IOResult()
 
-    ws.register_cli("blocking", CLISpec(name="blocking", fn=blocking))
+    ws.register_cli(
+        "blocking",
+        CLI(
+            spec=CommandSpec(name="blocking"),
+            handlers={"": CLIHandler(fn=blocking)},
+        ),
+    )
     task = asyncio.create_task(ws.shell("blocking"))
     try:
         await asyncio.wait_for(entered.wait(), 1)
@@ -571,7 +577,12 @@ async def test_host_callback_reentering_its_own_session_runs_inline():
         inner = await ws.shell("echo inner")
         return inner.stdout, IOResult()
 
-    ws.register_cli("again", CLISpec(name="again", fn=again))
+    ws.register_cli(
+        "again",
+        CLI(
+            spec=CommandSpec(name="again"), handlers={"": CLIHandler(fn=again)}
+        ),
+    )
     try:
         io = await ws.shell("again")
         assert io.stdout == b"inner\n"
@@ -588,7 +599,12 @@ async def test_line_queued_behind_a_running_one_is_refused_once_close_starts():
         await gate.wait()
         return None, IOResult()
 
-    ws.register_cli("stall", CLISpec(name="stall", fn=stall))
+    ws.register_cli(
+        "stall",
+        CLI(
+            spec=CommandSpec(name="stall"), handlers={"": CLIHandler(fn=stall)}
+        ),
+    )
     first = asyncio.ensure_future(ws.shell("stall"))
     queued = asyncio.ensure_future(ws.shell("echo queued"))
     await asyncio.sleep(0.01)
@@ -656,7 +672,12 @@ async def test_invocation_shell_reenters_exact_session_and_expires(line):
         inner = await inv.shell("Z=inner; echo inner")
         return inner.stdout, inner
 
-    ws.register_cli("again", CLISpec(name="again", fn=again))
+    ws.register_cli(
+        "again",
+        CLI(
+            spec=CommandSpec(name="again"), handlers={"": CLIHandler(fn=again)}
+        ),
+    )
     try:
         io = await ws.shell(line)
         assert io.stdout == b"inner\n"
@@ -682,7 +703,12 @@ async def test_invocation_shell_does_not_admit_unrelated_calls(named):
         inner = await inv.shell('X=inner; echo "$X"')
         return inner.stdout, inner
 
-    ws.register_cli("again", CLISpec(name="again", fn=again))
+    ws.register_cli(
+        "again",
+        CLI(
+            spec=CommandSpec(name="again"), handlers={"": CLIHandler(fn=again)}
+        ),
+    )
     try:
         outer = asyncio.create_task(ws.shell('X=outer; again; echo "$X"'))
         await entered.wait()

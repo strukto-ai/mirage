@@ -47,12 +47,12 @@ export function helpPage(name: string, spec: CommandSpec): string {
 
 /** Whether the registration answers `--help` for this spec. */
 export function hasInjectedHelp(spec: CommandSpec | null): boolean {
-  return spec?.options.some((o) => o === HELP_OPTION) ?? false
+  return spec?.arguments.some((o) => o === HELP_OPTION) ?? false
 }
 
 /** Whether the registration answers `--version` for this spec. */
 export function hasInjectedVersion(spec: CommandSpec | null): boolean {
-  return spec?.options.some((o) => o === VERSION_OPTION) ?? false
+  return spec?.arguments.some((o) => o === VERSION_OPTION) ?? false
 }
 
 function parse(name: string, spec: CommandSpec, words: string[]): ParsedArgs {

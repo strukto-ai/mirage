@@ -15,6 +15,7 @@
 from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING
 
+from mirage.commands.spec.compile import compile_spec
 from mirage.policy.match import head_visible, node_visible
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
@@ -375,7 +376,9 @@ def program_note(
         else None
     )
     spec = mount.spec_for(name) if mount is not None else None
-    if spec is not None and any(o.long == "--help" for o in spec.options):
+    if spec is not None and any(
+        "--help" in o.names for o in compile_spec(spec).options
+    ):
         return f"{name} is built into mirage.{help_line}"
     return f"{name} is built into mirage."
 

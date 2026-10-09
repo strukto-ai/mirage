@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -22,7 +21,7 @@ import {
   gitUsage,
   leafRefusal,
 } from './refusal.js'
-import { CommandSpec, Operand, Option, UsageStyle } from '../spec/types.js'
+import { CommandSpec, Argument, UsageStyle } from '../spec/types.js'
 import type { ParsedCommand } from '../../workspace/executor/command/types.ts'
 
 const ENC = new TextEncoder()
@@ -30,15 +29,15 @@ const DEC = new TextDecoder()
 const ARGPARSE_MESSAGE = ENC.encode("gws gmail: unrecognized option '--nosuch'\n")
 
 const SPEC = new CommandSpec({
-  options: [
-    new Option({ short: '-q', long: '--quiet', description: 'be quiet' }),
-    new Option({ long: '--no-quiet', description: 'be loud' }),
-    new Option({ short: '-m', type: 'str', metavar: 'msg', description: 'message' }),
-    new Option({ long: '--count', type: 'int', description: 'how many' }),
-    new Option({ long: '--abbrev', type: 'int', valueOptional: true, description: 'abbreviate' }),
-    new Option({ long: '--ignore-unmatch', description: 'exit zero' }),
-    new Option({ long: '--no-ignore-unmatch', description: 'fail' }),
-    new Option({ short: '-i', long: '--interactive-mode', description: 'too long' }),
+  arguments: [
+    new Argument(['-q', '--quiet'], { action: 'store_true', help: 'be quiet' }),
+    new Argument('--no-quiet', { action: 'store_true', help: 'be loud' }),
+    new Argument('-m', { metavar: 'msg', help: 'message' }),
+    new Argument('--count', { type: 'int', help: 'how many' }),
+    new Argument('--abbrev', { type: 'int', nargs: '?', attachedOnly: true, help: 'abbreviate' }),
+    new Argument('--ignore-unmatch', { action: 'store_true', help: 'exit zero' }),
+    new Argument('--no-ignore-unmatch', { action: 'store_true', help: 'fail' }),
+    new Argument(['-i', '--interactive-mode'], { action: 'store_true', help: 'too long' }),
   ],
 })
 const USAGE =
@@ -187,8 +186,7 @@ describe('leafRefusal', () => {
 describe('clap refusals', () => {
   it('names the empty slot and echoes what was supplied', () => {
     const spec = new CommandSpec({
-      options: [new Option({ long: '--json', type: 'bool' })],
-      positional: [new Operand({ type: 'str', name: 'PAGE_ID', required: true })],
+      arguments: [new Argument('--json', { action: 'store_true' }), new Argument('PAGE_ID')],
     })
     const msg = clapMissingOperands('ntn pages get', spec, ['PAGE_ID'], ['--json'], {})
     expect(DEC.decode(msg)).toBe(
@@ -201,10 +199,7 @@ describe('clap refusals', () => {
 
   it('echoes typed options in the order they were typed', () => {
     const spec = new CommandSpec({
-      options: [
-        new Option({ long: '--limit', type: 'int' }),
-        new Option({ long: '--sort', type: 'str' }),
-      ],
+      arguments: [new Argument('--limit', { type: 'int' }), new Argument('--sort')],
     })
     // No metavar declared, so both names derive from the long spelling.
     expect(clapSupplied(spec, ['--limit', '--sort'], {})).toEqual([
@@ -219,14 +214,9 @@ describe('clap refusals', () => {
 
   it('appends env-sourced options after the typed ones', () => {
     const spec = new CommandSpec({
-      options: [
-        new Option({ long: '--json', type: 'bool' }),
-        new Option({
-          long: '--notion-version',
-          type: 'str',
-          metavar: 'VERSION',
-          env: 'NOTION_API_VERSION',
-        }),
+      arguments: [
+        new Argument('--json', { action: 'store_true' }),
+        new Argument('--notion-version', { metavar: 'VERSION', env: 'NOTION_API_VERSION' }),
       ],
     })
     const env = { NOTION_API_VERSION: '2025-09-03' }
@@ -239,7 +229,7 @@ describe('clap refusals', () => {
     // GNU-style defaults are invisible to clap's usage line: only what the line
     // carried (or an env supplied) is echoed.
     const spec = new CommandSpec({
-      options: [new Option({ long: '--limit', type: 'int', default: '25' })],
+      arguments: [new Argument('--limit', { type: 'int', default: '25' })],
     })
     expect(clapSupplied(spec, [], {})).toEqual([])
   })

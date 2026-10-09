@@ -203,7 +203,7 @@ def cli_env_names(
 ) -> frozenset[str]:
     """Env names the line's installed CLIs are about to read.
 
-    An installed CLI reads a managed name through ``Option.env`` with
+    An installed CLI reads a managed name through ``Argument.env`` with
     no ``$NAME`` in the line's text, so the fill set has to be told. A
     head word counts only when dispatch would actually run the CLI
     (``lookup``): a function, builtin or namespace command shadowing
@@ -232,14 +232,14 @@ def cli_env_names(
                 continue
             literal = [arg for arg in args if arg is not None]
             if len(literal) != len(args):
-                out |= invoked_env_names(install.spec, None)
+                out |= invoked_env_names(install.cli.spec, None)
                 continue
             words = frozenset(
                 arg for arg in literal if not arg.startswith("-")
             )
-            out |= invoked_env_names(install.spec, words) - supplied_env_names(
-                install.spec, literal
-            )
+            out |= invoked_env_names(
+                install.cli.spec, words
+            ) - supplied_env_names(install.cli.spec, literal)
     return frozenset(out)
 
 

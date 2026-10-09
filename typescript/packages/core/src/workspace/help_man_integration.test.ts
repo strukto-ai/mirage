@@ -11,9 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
+import { CLIHandler } from '../commands/cli/types.ts'
+import { CommandSpec } from '../commands/spec/types.ts'
 import { describe, expect, it } from 'vitest'
-import { CLISpec } from '../commands/cli/types.ts'
+import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -52,21 +53,19 @@ async function cliWs(): Promise<Workspace> {
   const ws = await makeWs()
   ws.registerCli(
     'linear',
-    new CLISpec({
-      name: 'linear',
-      description: 'Linear API client',
-      subcommands: [
-        new CLISpec({
-          name: 'issue',
-          description: 'Manage issues',
-          fn: () => [null, new IOResult()],
-        }),
-        new CLISpec({
-          name: 'team',
-          description: 'Manage one',
-          fn: () => [null, new IOResult()],
-        }),
-      ],
+    new CLI({
+      spec: new CommandSpec({
+        name: 'linear',
+        description: 'Linear API client',
+        subcommands: [
+          new CommandSpec({ name: 'issue', description: 'Manage issues' }),
+          new CommandSpec({ name: 'team', description: 'Manage one' }),
+        ],
+      }),
+      handlers: {
+        issue: new CLIHandler({ fn: () => [null, new IOResult()] }),
+        team: new CLIHandler({ fn: () => [null, new IOResult()] }),
+      },
     }),
   )
   return ws

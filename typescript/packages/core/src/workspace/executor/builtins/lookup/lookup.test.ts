@@ -11,9 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../../../commands/spec/types.ts'
+import { CLIHandler } from '../../../../commands/cli/types.ts'
 
 import { describe, expect, it } from 'vitest'
-import { CLISpec } from '../../../../commands/cli/types.ts'
+import { CLI } from '../../../../commands/cli/types.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { CLIRegistry } from '../../../cli/registry.ts'
@@ -31,9 +33,9 @@ function noop(): [null, IOResult] {
   return [null, new IOResult()]
 }
 
-const TREE = new CLISpec({
-  name: 'linear',
-  subcommands: [new CLISpec({ name: 'issue', fn: noop })],
+const TREE = new CLI({
+  spec: new CommandSpec({ name: 'linear', subcommands: [new CommandSpec({ name: 'issue' })] }),
+  handlers: { issue: new CLIHandler({ fn: noop }) },
 })
 
 function makeRegistry(withCli = false): MountRegistry {

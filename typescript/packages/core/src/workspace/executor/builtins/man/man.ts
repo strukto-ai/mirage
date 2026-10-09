@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLISpec } from '../../../../commands/cli/types.ts'
+import { compileSpec, optionSpellings } from '../../../../commands/spec/compile.ts'
 import { findNode, nodeHelp } from '../../../../commands/cli/walk.ts'
 import { BUILTIN_SPECS } from '../../../../commands/spec/builtins.ts'
 import type { CommandSpec } from '../../../../commands/spec/types.ts'
@@ -79,23 +79,23 @@ function commandEntries(registry: MountRegistry, session: SessionState): ManEntr
   return [...seen.values()]
 }
 
-/** One entry per installed CLI head word the session can see. */
+/** One entry per installed CommandSpec head word the session can see. */
 function cliEntries(registry: MountRegistry, session: SessionState): ManEntry[] {
   return [...registry.clis.items()]
     .filter(([name]) => commandVisible(name, session))
-    .map(([name, install]) => ({ name, spec: install.spec }))
+    .map(([name, install]) => ({ name, spec: install.cli.spec }))
 }
 
 function renderOptionsTable(spec: CommandSpec): string[] {
-  if (spec.options.length === 0) return []
+  if (compileSpec(spec).options.length === 0) return []
   const lines: string[] = []
   lines.push('## OPTIONS', '')
   lines.push('| short | long | value | description |')
   lines.push('| ----- | ---- | ----- | ----------- |')
-  for (const opt of spec.options) {
-    const short = opt.short ?? ''
-    const long = opt.long ?? ''
-    lines.push(`| ${short} | ${long} | ${opt.type} | ${opt.description ?? ''} |`)
+  for (const opt of compileSpec(spec).options) {
+    const [short, long] = optionSpellings(opt)
+    const kind = opt.action === 'store_true' || opt.action === 'count' ? 'bool' : opt.type
+    lines.push(`| ${short ?? ''} | ${long ?? ''} | ${kind} | ${opt.help ?? ''} |`)
   }
   return lines
 }
@@ -119,11 +119,11 @@ function renderSection(title: string, entries: readonly ManEntry[]): string {
 }
 
 /**
- * The page for one node of an installed CLI, null when the verbs miss or
+ * The page for one node of an installed CommandSpec, null when the verbs miss or
  * the session cannot see the node they name.
  *
  * The page is the node's own `--help`, rendered by the one renderer that
- * serves `--help` and the bare-group refusal, so a CLI's manual cannot
+ * serves `--help` and the bare-group refusal, so a CommandSpec's manual cannot
  * drift from the program. A tree is a manual with sections: `man linear`
  * lists the verbs and `man linear issue create` is the page for one leaf.
  *
@@ -135,7 +135,7 @@ function renderSection(title: string, entries: readonly ManEntry[]): string {
 function renderCliEntry(
   head: string,
   verbs: readonly string[],
-  spec: CLISpec,
+  spec: CommandSpec,
   session: SessionState,
 ): string | null {
   const found = findNode(spec, verbs)
@@ -168,9 +168,9 @@ function renderManIndex(registry: MountRegistry, session: SessionState): string 
 /**
  * The page (or pages) for an installed head word.
  *
- * A CLI may not take a general command's name, but a mount can register
+ * A CommandSpec may not take a general command's name, but a mount can register
  * a custom command under any name, so both pages can exist for one word.
- * The CLI goes first: it is the one dispatch would run.
+ * The CommandSpec goes first: it is the one dispatch would run.
  */
 function cliMan(
   install: CLIInstall,
@@ -180,7 +180,7 @@ function cliMan(
   session: SessionState,
 ): Result {
   const head = install.name
-  const entry = renderCliEntry(head, verbs, install.spec, session)
+  const entry = renderCliEntry(head, verbs, install.cli.spec, session)
   if (entry === null) {
     const err = encodeText(`man: no entry for ${[head, ...verbs].join(' ')}\n`)
     return [

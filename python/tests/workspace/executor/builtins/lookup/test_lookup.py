@@ -1,6 +1,7 @@
 import pytest
 
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.executor.builtins.lookup.lookup import (
     handle_type,
@@ -8,8 +9,9 @@ from mirage.workspace.executor.builtins.lookup.lookup import (
 )
 from mirage.workspace.session.session import SessionState
 
-TREE = CLISpec(
-    name="linear", subcommands=(CLISpec(name="issue", fn=lambda: None),)
+TREE = CLI(
+    spec=CommandSpec(name="linear", subcommands=(CommandSpec(name="issue"),)),
+    handlers={"issue": CLIHandler(fn=lambda: None)},
 )
 
 

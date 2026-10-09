@@ -23,26 +23,27 @@ const DOCS = new URL('../../docs/typescript/cli/', import.meta.url)
 const START = '{/* BEGIN GENERATED CLI COMMANDS */}'
 const END = '{/* END GENERATED CLI COMMANDS */}'
 
-function commands(node: Node.CLISpec, parents: readonly string[] = []): string[] {
+function commands(node: Node.CommandSpec, parents: readonly string[] = []): string[] {
   const path = [...parents, node.name]
   return [
-    ...(node.fn === null ? [] : [path.join(' ')]),
+    ...(node.subcommands.length === 0 ? [path.join(' ')] : []),
     ...node.subcommands.flatMap((child) => commands(child, path)),
   ]
 }
 
-const specs = Object.values(Node).filter((value) => value instanceof Node.CLISpec)
+const specs = Object.values(Node).filter((value) => value instanceof Node.CLI)
 assert.ok(specs.length > 0, 'No bundled CLI specs were loaded')
 const pages = readdirSync(DOCS)
   .filter((name) => name.endsWith('.mdx') && name !== 'index.mdx' && name !== 'custom.mdx')
   .map((name) => name.slice(0, -4))
 assert.deepEqual(
   pages.sort(compareCodePoints),
-  specs.map((spec) => spec.name).sort(compareCodePoints),
+  specs.map((cli) => cli.spec.name).sort(compareCodePoints),
   'CLI inventory differs',
 )
 
-for (const spec of specs) {
+for (const cli of specs) {
+  const spec = cli.spec
   const path = new URL(`${spec.name}.mdx`, DOCS)
   const text = readFileSync(path, 'utf8')
   assert.equal(text.split(START).length, 2, `Missing or repeated marker: ${fileURLToPath(path)}`)

@@ -18,7 +18,7 @@ import type { ExecutionScope } from '../execution.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { CacheConfig } from '../../cache/file/config.ts'
-import type { CLISpec } from '../../commands/cli/types.ts'
+import type { CLI } from '../../commands/cli/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import type { ObserverStore } from '../../observe/store.ts'
@@ -159,11 +159,11 @@ export interface WorkspaceOptions {
   onAsk?: AskHandler
   /**
    * Installed CLIs, fully separate from mounts: key = installed head
-   * word, value = a registered CLISpec name (the YAML `cli:` key) or a
-   * CLISpec instance, plus the installation's own config. Every entry
+   * word, value = a registered CLI name (the YAML `cli:` key) or a
+   * CLI instance, plus the installation's own config. Every entry
    * installs through the same fail-loud path as registerCli.
    */
-  clis?: Record<string, [string | CLISpec, Record<string, unknown> | null]>
+  clis?: Record<string, [string | CLI, Record<string, unknown> | null]>
   /**
    * The environment plane: one map, name -> entry. A bare string is
    * the literal short form; a mapping is an env entry, either a

@@ -1,6 +1,9 @@
+import { CommandSpec } from '../commands/spec/types.ts'
+import { CLIHandler } from '../commands/cli/types.ts'
+
 import * as executionTree from './node/run_tree.ts'
 import { afterEach, assert, expect, test, vi } from 'vitest'
-import { CLISpec } from '../commands/cli/types.ts'
+import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { Channel } from '../shell/console/index.ts'
 import { type ParsedProgram } from '../shell/parse/program.ts'
@@ -90,11 +93,15 @@ it('releases each alias expansion when it ends, not when the line does', async (
   let live = -1
   ws.registerCli(
     'probe',
-    new CLISpec({
-      name: 'probe',
-      fn: () => {
-        live = programs.filter((program) => program.references > 0).length
-        return Promise.resolve([null, new IOResult()])
+    new CLI({
+      spec: new CommandSpec({ name: 'probe' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: () => {
+            live = programs.filter((program) => program.references > 0).length
+            return Promise.resolve([null, new IOResult()])
+          },
+        }),
       },
     }),
   )
@@ -193,11 +200,15 @@ function barrier(): { entered: Promise<void>; pause: () => Promise<void>; releas
 function installStall(ws: Workspace, gate: ReturnType<typeof barrier>): void {
   ws.registerCli(
     'stall',
-    new CLISpec({
-      name: 'stall',
-      fn: async () => {
-        await gate.pause()
-        return [null, new IOResult()]
+    new CLI({
+      spec: new CommandSpec({ name: 'stall' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async () => {
+            await gate.pause()
+            return [null, new IOResult()]
+          },
+        }),
       },
     }),
   )

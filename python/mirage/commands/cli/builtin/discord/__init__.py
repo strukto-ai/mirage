@@ -22,8 +22,8 @@ from mirage.commands.cli.builtin.discord.search import search
 from mirage.commands.cli.builtin.discord.send import send
 from mirage.commands.cli.builtin.discord.server_info import server_info
 from mirage.commands.cli.builtin.discord.thread_create import thread_create
-from mirage.commands.cli.types import CLISpec
-from mirage.commands.spec.types import Option
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.discord.config import DiscordConfig
 
 # The discord program, spelled with the OpenClaw Discord action
@@ -31,149 +31,136 @@ from mirage.core.discord.config import DiscordConfig
 # thread-create, poll). members and server-info are mirage extensions
 # carrying over the old mount commands' capabilities. Install with a
 # DiscordConfig; two installs are two bots.
-DISCORD = CLISpec(
-    name="discord",
-    description="Discord REST API client",
-    config_model=DiscordConfig,
-    subcommands=(
-        CLISpec(
-            name="send",
-            description="Send a message to a channel",
-            fn=send,
-            write=True,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(long="--text", type="str", required=True),
-                Option(
-                    long="--reply-to",
-                    type="str",
-                    description="Reply to this message ID",
+DISCORD = CLI(
+    spec=CommandSpec(
+        name="discord",
+        description="Discord REST API client",
+        subcommands=(
+            CommandSpec(
+                name="send",
+                description="Send a message to a channel",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--text", required=True),
+                    Argument(
+                        "--reply-to",
+                        help="Reply to this message ID",
+                    ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="read",
-            description="Read the most recent messages of a channel",
-            fn=read,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(
-                    long="--limit",
-                    type="int",
-                    description="Max messages (default: 20)",
+            CommandSpec(
+                name="read",
+                description="Read the most recent messages of a channel",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument(
+                        "--limit",
+                        type="int",
+                        help="Max messages (default: 20)",
+                    ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="edit",
-            description="Edit a message the bot authored",
-            fn=edit,
-            write=True,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(long="--message", type="str", required=True),
-                Option(long="--text", type="str", required=True),
-            ),
-        ),
-        CLISpec(
-            name="delete",
-            description="Delete a message",
-            fn=delete,
-            write=True,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(long="--message", type="str", required=True),
-            ),
-        ),
-        CLISpec(
-            name="react",
-            description="Add an emoji reaction to a message",
-            fn=react,
-            write=True,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(long="--message", type="str", required=True),
-                Option(
-                    long="--emoji",
-                    type="str",
-                    required=True,
-                    description="Unicode emoji or name:id",
+            CommandSpec(
+                name="edit",
+                description="Edit a message the bot authored",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--message", required=True),
+                    Argument("--text", required=True),
                 ),
             ),
-        ),
-        CLISpec(
-            name="search",
-            description="Search a guild's messages by content",
-            fn=search,
-            options=(
-                Option(long="--guild", type="str", required=True),
-                Option(long="--query", type="str", required=True),
-                Option(
-                    long="--channel",
-                    type="str",
-                    description="Restrict to one channel",
+            CommandSpec(
+                name="delete",
+                description="Delete a message",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--message", required=True),
                 ),
             ),
-        ),
-        CLISpec(
-            name="thread-create",
-            description="Create a thread, standalone or from a message",
-            fn=thread_create,
-            write=True,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(long="--name", type="str", required=True),
-                Option(
-                    long="--message",
-                    type="str",
-                    description="Start the thread from this message",
+            CommandSpec(
+                name="react",
+                description="Add an emoji reaction to a message",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--message", required=True),
+                    Argument(
+                        "--emoji",
+                        required=True,
+                        help="Unicode emoji or name:id",
+                    ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="poll",
-            description="Post a poll message to a channel",
-            fn=poll,
-            write=True,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(long="--question", type="str", required=True),
-                Option(
-                    long="--answer",
-                    type="str",
-                    required=True,
-                    multiple=True,
-                    description="Answer option (repeatable)",
-                ),
-                Option(
-                    long="--duration",
-                    type="int",
-                    description="Poll lifetime in hours (default: 24)",
-                ),
-                Option(
-                    long="--multiselect",
-                    description="Allow selecting several answers",
+            CommandSpec(
+                name="search",
+                description="Search a guild's messages by content",
+                arguments=(
+                    Argument("--guild", required=True),
+                    Argument("--query", required=True),
+                    Argument("--channel", help="Restrict to one channel"),
                 ),
             ),
-        ),
-        CLISpec(
-            name="members",
-            description="List a guild's members, optionally filtered",
-            fn=members,
-            options=(
-                Option(long="--guild", type="str", required=True),
-                Option(
-                    long="--query",
-                    type="str",
-                    description="Username prefix filter",
+            CommandSpec(
+                name="thread-create",
+                description="Create a thread, standalone or from a message",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--name", required=True),
+                    Argument(
+                        "--message",
+                        help="Start the thread from this message",
+                    ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="server-info",
-            description="Fetch a guild's metadata",
-            fn=server_info,
-            options=(Option(long="--guild", type="str", required=True),),
+            CommandSpec(
+                name="poll",
+                description="Post a poll message to a channel",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--question", required=True),
+                    Argument(
+                        "--answer",
+                        action="append",
+                        required=True,
+                        help="Answer option (repeatable)",
+                    ),
+                    Argument(
+                        "--duration",
+                        type="int",
+                        help="Poll lifetime in hours (default: 24)",
+                    ),
+                    Argument(
+                        "--multiselect",
+                        action="store_true",
+                        help="Allow selecting several answers",
+                    ),
+                ),
+            ),
+            CommandSpec(
+                name="members",
+                description="List a guild's members, optionally filtered",
+                arguments=(
+                    Argument("--guild", required=True),
+                    Argument("--query", help="Username prefix filter"),
+                ),
+            ),
+            CommandSpec(
+                name="server-info",
+                description="Fetch a guild's metadata",
+                arguments=(Argument("--guild", required=True),),
+            ),
         ),
     ),
+    handlers={
+        "send": CLIHandler(fn=send, write=True),
+        "read": CLIHandler(fn=read),
+        "edit": CLIHandler(fn=edit, write=True),
+        "delete": CLIHandler(fn=delete, write=True),
+        "react": CLIHandler(fn=react, write=True),
+        "search": CLIHandler(fn=search),
+        "thread-create": CLIHandler(fn=thread_create, write=True),
+        "poll": CLIHandler(fn=poll, write=True),
+        "members": CLIHandler(fn=members),
+        "server-info": CLIHandler(fn=server_info),
+    },
+    config_model=DiscordConfig,
 )

@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import type { TrelloAccessor } from '../../../accessor/trello.ts'
 import {
   getBoard,
@@ -35,7 +34,7 @@ import {
 import { IOResult } from '../../../io/types.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts, type Command } from '../../config.ts'
-import { CommandSpec, Operand } from '../../spec/types.ts'
+import { CommandSpec, Argument } from '../../spec/types.ts'
 import { requireBoard, requireCard, requireList } from './_scope.ts'
 
 type Runner = (accessor: TrelloAccessor, texts: string[]) => Promise<Uint8Array>
@@ -47,7 +46,9 @@ interface TrelloRead {
 }
 
 const SPEC_NONE = new CommandSpec({})
-const SPEC_ARG = new CommandSpec({ rest: new Operand({ type: 'str' }) })
+const SPEC_ARG = new CommandSpec({
+  arguments: [new Argument('texts', { metavar: '', nargs: '*' })],
+})
 
 function first(texts: string[], label: string): string {
   const value = texts[0]

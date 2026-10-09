@@ -12,183 +12,180 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import CommandSpec, Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 
 SPECS: dict[str, CommandSpec] = {
     "curl": CommandSpec(
         description="Transfer data from or to a server.",
-        options=(
-            Option(
-                short="-H",
-                long="--header",
-                type="str",
-                multiple=True,
-                description="Add a custom header to the request.",
+        arguments=(
+            Argument(
+                "-H",
+                "--header",
+                action="append",
+                help="Add a custom header to the request.",
             ),
-            Option(
-                short="-A",
-                long="--user-agent",
-                type="str",
-                description="Set the User-Agent header.",
+            Argument(
+                "-A",
+                "--user-agent",
+                help="Set the User-Agent header.",
             ),
-            Option(
-                short="-X",
-                long="--request",
-                type="str",
-                description="Specify the HTTP request method.",
+            Argument(
+                "-X",
+                "--request",
+                help="Specify the HTTP request method.",
             ),
-            Option(
-                short="-d",
-                long="--data",
-                type="str",
-                multiple=True,
-                description="Send the given data as the request body.",
+            Argument(
+                "-d",
+                "--data",
+                action="append",
+                help="Send the given data as the request body.",
             ),
-            Option(
-                long="--data-binary",
-                type="str",
-                multiple=True,
-                description="Send the data exactly as given, a file "
-                "unchanged.",
+            Argument(
+                "--data-binary",
+                action="append",
+                help="Send the data exactly as given, a file unchanged.",
             ),
-            Option(
-                long="--data-raw",
-                type="str",
-                multiple=True,
-                description="Send the data with no special meaning for @.",
+            Argument(
+                "--data-raw",
+                action="append",
+                help="Send the data with no special meaning for @.",
             ),
-            Option(
-                long="--data-urlencode",
-                type="str",
-                multiple=True,
-                description="Send the data URL-encoded.",
+            Argument(
+                "--data-urlencode",
+                action="append",
+                help="Send the data URL-encoded.",
             ),
-            Option(
-                long="--json",
-                type="str",
-                multiple=True,
-                description="Send the data as JSON.",
+            Argument(
+                "--json",
+                action="append",
+                help="Send the data as JSON.",
             ),
-            Option(
-                short="-u",
-                long="--user",
-                type="str",
-                description="Send the user and password for basic auth.",
+            Argument(
+                "-u",
+                "--user",
+                help="Send the user and password for basic auth.",
             ),
-            Option(
-                short="-F",
-                long="--form",
-                type="str",
-                description="Submit a multipart/form-data field.",
+            Argument(
+                "-F",
+                "--form",
+                help="Submit a multipart/form-data field.",
             ),
-            Option(
-                short="-o",
-                long="--output",
+            Argument(
+                "-o",
+                "--output",
                 type="path",
-                description="Write response body to the given file.",
+                help="Write response body to the given file.",
             ),
-            Option(
-                short="-D",
-                long="--dump-header",
+            Argument(
+                "-D",
+                "--dump-header",
                 type="path",
-                description="Write the received headers to the given "
+                help="Write the received headers to the given "
                 "file, - for stdout.",
             ),
-            Option(
-                short="-L",
-                long="--location",
-                description="Follow HTTP redirects.",
+            Argument(
+                "-L",
+                "--location",
+                action="store_true",
+                help="Follow HTTP redirects.",
             ),
-            Option(
-                short="-f",
-                long="--fail",
-                description="Fail with exit 22 on an HTTP error status.",
+            Argument(
+                "-f",
+                "--fail",
+                action="store_true",
+                help="Fail with exit 22 on an HTTP error status.",
             ),
-            Option(
-                short="-s",
-                long="--silent",
-                description="Run silently with no progress or messages.",
+            Argument(
+                "-s",
+                "--silent",
+                action="store_true",
+                help="Run silently with no progress or messages.",
             ),
-            Option(
-                short="-S",
-                long="--show-error",
-                description="Show errors even when silent.",
+            Argument(
+                "-S",
+                "--show-error",
+                action="store_true",
+                help="Show errors even when silent.",
             ),
-            Option(
-                short="-v",
-                long="--verbose",
-                description="Dump the request and response headers on stderr.",
+            Argument(
+                "-v",
+                "--verbose",
+                action="store_true",
+                help="Dump the request and response headers on stderr.",
             ),
-            Option(
-                short="-i",
-                long="--include",
-                description="Include the response headers in the output.",
+            Argument(
+                "-i",
+                "--include",
+                action="store_true",
+                help="Include the response headers in the output.",
             ),
-            Option(
-                short="-I",
-                long="--head",
-                description="Fetch the headers only.",
+            Argument(
+                "-I",
+                "--head",
+                action="store_true",
+                help="Fetch the headers only.",
             ),
-            Option(
-                short="-4",
-                long="--ipv4",
-                description=(
-                    "Accept IPv4 preference "
-                    "(transport selects the address family)."
-                ),
+            Argument(
+                "-4",
+                "--ipv4",
+                action="store_true",
+                help="Accept IPv4 preference "
+                "(transport selects the address family).",
             ),
-            Option(
-                short="-6",
-                long="--ipv6",
-                description=(
-                    "Accept IPv6 preference "
-                    "(transport selects the address family)."
-                ),
+            Argument(
+                "-6",
+                "--ipv6",
+                action="store_true",
+                help="Accept IPv6 preference "
+                "(transport selects the address family).",
             ),
-            Option(
-                short="-w",
-                long="--write-out",
-                type="str",
-                description="Print transfer information after completion.",
+            Argument(
+                "-w",
+                "--write-out",
+                help="Print transfer information after completion.",
             ),
-            Option(
-                short="-m",
-                long="--max-time",
+            Argument(
+                "-m",
+                "--max-time",
                 type="float",
-                description="Give up after this many seconds.",
+                help="Give up after this many seconds.",
             ),
-            Option(
-                short="-k",
-                long="--insecure",
-                description="Skip verification of the server certificate.",
+            Argument(
+                "-k",
+                "--insecure",
+                action="store_true",
+                help="Skip verification of the server certificate.",
             ),
+            # A URL slot, not a free-text rest: a textual rest makes the parser
+            # keep unknown dash words as operands (the echo/git-log shape), and
+            # `curl -sv URL` then fetched "-sv" (#1065).
+            Argument("text", nargs="?", metavar=""),
         ),
-        # A URL slot, not a free-text rest: a textual rest makes the parser
-        # keep unknown dash words as operands (the echo/git-log shape), and
-        # `curl -sv URL` then fetched "-sv" (#1065).
-        positional=(Operand(type="str"),),
     ),
     "wget": CommandSpec(
         description="Retrieve files from the web.",
-        options=(
-            Option(
-                short="-O",
+        arguments=(
+            Argument(
+                "-O",
                 type="path",
-                description="Write the downloaded content to the given file.",
+                help="Write the downloaded content to the given file.",
             ),
-            Option(short="-q", description="Run quietly with no output."),
-            Option(
-                short="-T",
-                long="--timeout",
+            Argument(
+                "-q", action="store_true", help="Run quietly with no output."
+            ),
+            Argument(
+                "-T",
+                "--timeout",
                 type="float",
-                description="Set the network timeout in seconds (zero disables it).",
+                help="Set the network timeout in seconds (zero disables it).",
             ),
-            Option(
-                long="--spider",
-                description="Check that the URL exists without downloading it.",
+            Argument(
+                "--spider",
+                action="store_true",
+                help="Check that the URL exists without downloading it.",
             ),
+            Argument("text", nargs="?", metavar=""),
+            Argument("paths", type="path", nargs="*", metavar=""),
         ),
-        positional=(Operand(type="str"),),
-        rest=Operand(type="path"),
     ),
 }

@@ -16,7 +16,7 @@ from dataclasses import replace
 
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import CommandSpec, Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.workspace.executor.command.flags import (
     option_error,
     parse_flags,
@@ -54,7 +54,10 @@ def test_classified_path_wins_over_synthesis():
 
 def test_option_error_reports_the_first_scan_error_like_gnu():
     spec = CommandSpec(
-        options=(Option(long="--context", type="str"), Option(long="--count"))
+        arguments=(
+            Argument("--context"),
+            Argument("--count", action="store_true"),
+        )
     )
     ambiguous_first = parse_flags(["--c", "--bogus", "x"], spec, "grep", "/")
     refusal = option_error("grep", ambiguous_first)
@@ -72,11 +75,11 @@ def test_option_error_reports_a_refused_value_before_a_later_bad_option():
     # the reversed line names --bogus, and a value option that ran out
     # of line loses to a value refused before it.
     spec = CommandSpec(
-        options=(
-            Option(long="--mode", type="str", choices=("warn", "exit")),
-            Option(long="--count", type="int"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("--mode", choices=("warn", "exit")),
+            Argument("--count", type="int"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     )
     value_first = parse_flags(["--mode=bad", "--bogus", "f"], spec, "tee", "/")
     refusal = option_error("tee", value_first)
@@ -103,7 +106,7 @@ def test_option_error_reports_numeric_conversion_before_choices():
     # the walk's _finish_node: a non-numeric value on a float option
     # that also declares choices refuses the conversion, not the list.
     spec = CommandSpec(
-        options=(Option(long="--ratio", type="float", choices=("0.5", "1.0")),)
+        arguments=(Argument("--ratio", type="float", choices=("0.5", "1.0")),)
     )
     parsed = parse_flags(["--ratio", "5x", "p"], spec, "cmd", "/")
     refusal = option_error("cmd", parsed)
@@ -235,10 +238,16 @@ def test_the_two_argmatch_refusals_differ_only_in_the_first_line():
 
 def test_unclassified_path_options_retain_scalar_repeated_and_pair_spellings():
     spec = CommandSpec(
-        options=(
-            Option(short="-o", long="--output", type="path"),
-            Option(short="-I", long="--include", type="path", multiple=True),
-            Option(long="--rawfile", type="path", pair=True),
+        arguments=(
+            Argument("-o", "--output", type="path"),
+            Argument("-I", "--include", type="path", action="append"),
+            Argument(
+                "--rawfile",
+                type="path",
+                action="extend",
+                nargs=2,
+                value_types=("str", "path"),
+            ),
         )
     )
     parsed = parse_flags(
@@ -281,7 +290,7 @@ def test_an_empty_attached_path_value_names_nothing():
 
 def test_synthesized_path_flags_keep_dots_from_attached_and_env_values():
     spec = CommandSpec(
-        options=(Option(long="--file", type="path", env="INPUT"),)
+        arguments=(Argument("--file", type="path", env="INPUT"),)
     )
     for argv, env in [
         (["--file=hidden/../public"], {}),

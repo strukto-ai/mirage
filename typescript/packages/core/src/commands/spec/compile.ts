@@ -11,9 +11,96 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { FLOAT_VALUE, INT_VALUE } from './constants.ts'
-import { type CommandSpec, type ValueType } from './types.ts'
+import { type Argument, type CommandSpec, type ValueType } from './types.ts'
+
+/** First short and long spelling, for dialects that display each separately. */
+export function optionSpellings(argument: Argument): [string | null, string | null] {
+  return [
+    argument.names.find((name) => !name.startsWith('--')) ?? null,
+    argument.names.find((name) => name.startsWith('--')) ?? null,
+  ]
+}
+
+/** Canonical option spelling, or the positional argument's name. */
+export function argumentDest(argument: Argument): string {
+  return argument.names.find((name) => name.startsWith('--')) ?? argument.names[0] ?? ''
+}
+
+/** Declared positional placeholder, including an explicit empty placeholder. */
+export function positionalName(argument: Argument): string {
+  return argument.metavar ?? argument.names[0] ?? ''
+}
+
+export function positionalRequired(argument: Argument): boolean {
+  return argument.nargs !== '?' && argument.nargs !== '*' && argument.nargs !== 'REMAINDER'
+}
+
+function argumentShapes(spec: CommandSpec): {
+  options: readonly Argument[]
+  positional: readonly Argument[]
+  rest: Argument | null
+} {
+  const options: Argument[] = []
+  const positional: Argument[] = []
+  let rest: Argument | null = null
+  const seenNames = new Set<string>()
+  for (const arg of spec.arguments) {
+    if (
+      arg.names.length === 0 ||
+      arg.names.some((name) => name === '' || name === '-' || name === '--')
+    ) {
+      throw new Error('argument requires a name or option spelling')
+    }
+    const optional = arg.names[0]?.startsWith('-') ?? false
+    if (arg.names.some((name) => name.startsWith('-') !== optional)) {
+      throw new Error('argument cannot mix a positional name and option spellings')
+    }
+    if (arg.type === 'bool')
+      throw new Error("argument type 'bool' is expressed with action='store_true'")
+    if (typeof arg.nargs === 'number' && (!Number.isInteger(arg.nargs) || arg.nargs < 1)) {
+      throw new Error('nargs must be a positive integer')
+    }
+    if (
+      (arg.action === 'store_true' || arg.action === 'count') &&
+      (arg.nargs !== null || arg.type !== 'str')
+    ) {
+      throw new Error('store_true and count do not take a type or nargs')
+    }
+    if (arg.valueTypes.length > 0 && (arg.nargs !== 2 || arg.valueTypes.join(',') !== 'str,path')) {
+      throw new Error('valueTypes supports the text/path pair with nargs=2')
+    }
+
+    if (optional) {
+      if (arg.nargs === '*' || arg.nargs === '+' || arg.nargs === 'REMAINDER') {
+        throw new Error('option nargs must be a fixed count or ?')
+      }
+      if (arg.attachedOnly && arg.nargs !== '?') throw new Error('attachedOnly requires nargs ?')
+      if (arg.providedBy.length > 0 || arg.textWhen.length > 0) {
+        throw new Error('providedBy and textWhen require a positional argument')
+      }
+      options.push(arg)
+    } else {
+      if (arg.names.length !== 1) throw new Error('a positional argument takes exactly one name')
+      const name = arg.names[0] ?? ''
+      if (seenNames.has(name)) throw new Error(`duplicate positional argument '${name}'`)
+      seenNames.add(name)
+      if (arg.default !== null) throw new Error('positional defaults are not supported')
+      if (arg.valueTypes.length > 0) throw new Error('valueTypes requires option spellings')
+      if (arg.required) throw new Error('positional arity uses nargs, not required')
+      if (arg.action !== 'store') throw new Error('a positional argument requires action store')
+      if (arg.attachedOnly || arg.numericShorthand || arg.env !== null || !arg.shortValue) {
+        throw new Error('option settings require option spellings')
+      }
+      if (rest !== null) throw new Error('a variadic positional argument must be last')
+      if (arg.nargs === '*' || arg.nargs === '+' || arg.nargs === 'REMAINDER') rest = arg
+      else
+        for (let i = 0; i < (typeof arg.nargs === 'number' ? arg.nargs : 1); i++)
+          positional.push(arg)
+    }
+  }
+  return { options, positional, rest }
+}
 
 /**
  * A CommandSpec lowered into the lookup tables the parser walks.
@@ -25,7 +112,13 @@ import { type CommandSpec, type ValueType } from './types.ts'
  * per option regardless of which spelling appeared on the line
  * (click/argparse dest semantics). Mirrors Python's CompiledSpec.
  */
-export class CompiledSpec {
+export interface CompiledSpec {
+  readonly nargsByDest: ReadonlyMap<string, number>
+  readonly valueTypesByDest: ReadonlyMap<string, readonly ValueType[]>
+  readonly detachedOptionalSpellings: ReadonlySet<string>
+  readonly options: readonly Argument[]
+  readonly positional: readonly Argument[]
+  readonly rest: Argument | null
   /** Short spellings parsed as bare booleans (true booleans plus
    * optional-value shorts). */
   readonly boolSpellings: ReadonlySet<string>
@@ -61,9 +154,6 @@ export class CompiledSpec {
   readonly dest: ReadonlyMap<string, string>
   /** Canonical spellings that accumulate repeated values into a list. */
   readonly multipleDests: ReadonlySet<string>
-  /** Canonical spellings that consume two tokens per occurrence and
-   * accumulate both, flattened. */
-  readonly pairDests: ReadonlySet<string>
   /** Canonical spellings of boolean flags whose occurrences accumulate
    * into a number (click count, `-vvv`). */
   readonly countDests: ReadonlySet<string>
@@ -83,66 +173,14 @@ export class CompiledSpec {
   /** Kind of the rest operand. */
   readonly restKind: ValueType | null
   // The rest operand gathers every word from the first operand on,
-  // options included (Operand.remainder, argparse nargs=REMAINDER).
+  // options included (Argument.nargs='REMAINDER', argparse nargs=REMAINDER).
   readonly remainder: boolean
   // Canonical spelling of the option that re-bases the path operands
   // after it (CommandSpec.operandBase, tar's -C).
   readonly baseDest: string | null
 
-  constructor(fields: {
-    boolSpellings: ReadonlySet<string>
-    valueSpellings: readonly string[]
-    attachSpellings: readonly string[]
-    longBoolSpellings: ReadonlySet<string>
-    longValueSpellings: ReadonlySet<string>
-    longOptionalSpellings: ReadonlySet<string>
-    longSpellings: readonly string[]
-    intDests: ReadonlySet<string>
-    floatDests: ReadonlySet<string>
-    kindOf: ReadonlyMap<string, ValueType>
-    kindByDest: ReadonlyMap<string, ValueType>
-    dest: ReadonlyMap<string, string>
-    multipleDests: ReadonlySet<string>
-    pairDests: ReadonlySet<string>
-    countDests: ReadonlySet<string>
-    choicesByDest: ReadonlyMap<string, readonly string[]>
-    requiredDests: readonly string[]
-    defaults: ReadonlyMap<string, string>
-    envByDest: ReadonlyMap<string, string>
-    numericDest: string | null
-    restKind: ValueType | null
-    baseDest: string | null
-    remainder: boolean
-  }) {
-    this.boolSpellings = fields.boolSpellings
-    this.valueSpellings = fields.valueSpellings
-    this.attachSpellings = fields.attachSpellings
-    this.longBoolSpellings = fields.longBoolSpellings
-    this.longValueSpellings = fields.longValueSpellings
-    this.longOptionalSpellings = fields.longOptionalSpellings
-    this.longSpellings = fields.longSpellings
-    this.intDests = fields.intDests
-    this.floatDests = fields.floatDests
-    this.kindOf = fields.kindOf
-    this.kindByDest = fields.kindByDest
-    this.dest = fields.dest
-    this.multipleDests = fields.multipleDests
-    this.pairDests = fields.pairDests
-    this.countDests = fields.countDests
-    this.choicesByDest = fields.choicesByDest
-    this.requiredDests = fields.requiredDests
-    this.defaults = fields.defaults
-    this.envByDest = fields.envByDest
-    this.numericDest = fields.numericDest
-    this.restKind = fields.restKind
-    this.baseDest = fields.baseDest
-    this.remainder = fields.remainder
-  }
-
   /** Canonical spelling for a typed spelling. */
-  destOf(spelling: string): string {
-    return this.dest.get(spelling) ?? spelling
-  }
+  destOf(spelling: string): string
 }
 
 const CACHE = new WeakMap<CommandSpec, CompiledSpec>()
@@ -157,6 +195,10 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   const cached = CACHE.get(spec)
   if (cached !== undefined) return cached
 
+  const grammar = argumentShapes(spec)
+  const nargsByDest = new Map<string, number>()
+  const valueTypesByDest = new Map<string, readonly ValueType[]>()
+  const detachedOptionalSpellings = new Set<string>()
   const seenSpellings = new Set<string>()
   const boolSpellings = new Set<string>()
   const valueSpellings: string[] = []
@@ -171,7 +213,6 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   const kindByDest = new Map<string, ValueType>()
   const dest = new Map<string, string>()
   const multipleDests = new Set<string>()
-  const pairDests = new Set<string>()
   const countDests = new Set<string>()
   const choicesByDest = new Map<string, readonly string[]>()
   const requiredDests: string[] = []
@@ -179,36 +220,31 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   const envByDest = new Map<string, string>()
   let numericDest: string | null = null
 
-  for (const opt of spec.options) {
-    const canonical = opt.long ?? opt.short
-    if (canonical === null) {
-      throw new Error('option requires a short or long spelling')
-    }
-    for (const spelling of [opt.short, opt.long]) {
-      if (spelling === null) continue
+  for (const opt of grammar.options) {
+    const canonical = argumentDest(opt)
+    for (const spelling of opt.names) {
       if (seenSpellings.has(spelling)) {
         throw new Error(`duplicate option spelling '${spelling}'`)
       }
       seenSpellings.add(spelling)
     }
-    if (opt.count && opt.type !== 'bool') {
-      throw new Error(`option '${canonical}': count requires a boolean flag (valueKind NONE)`)
-    }
-    if (opt.pair && opt.type === 'bool') {
-      throw new Error(
-        `option '${canonical}': pair requires a value flag (a boolean consumes no token)`,
+    const arg = opt
+    const width = typeof arg.nargs === 'number' ? arg.nargs : 1
+    if (typeof arg.nargs === 'number') {
+      if (arg.action === 'append') throw new Error('multi-value arguments use store or extend')
+      nargsByDest.set(canonical, width)
+      valueTypesByDest.set(
+        canonical,
+        arg.valueTypes.length > 0 ? arg.valueTypes : Array<ValueType>(width).fill(arg.type),
       )
     }
-    if (opt.pair && opt.valueOptional) {
-      throw new Error(`option '${canonical}': pair and valueOptional are mutually exclusive`)
+    if (arg.nargs === '?' && !arg.attachedOnly) {
+      for (const spelling of arg.names) detachedOptionalSpellings.add(spelling)
     }
-    if (opt.pair && opt.short !== null) {
-      // A short spelling clusters and takes an attached value, both of
-      // which are single-token rules; jq's own two-token options are
-      // long-only for the same reason.
-      throw new Error(`option '${canonical}': pair requires a long spelling only`)
-    }
-    if (opt.type === 'bool' && (opt.choices.length > 0 || opt.default !== null)) {
+    if (
+      (opt.action === 'store_true' || opt.action === 'count') &&
+      (opt.choices.length > 0 || opt.default !== null)
+    ) {
       throw new Error(`option '${canonical}': choices and default require a value flag`)
     }
     if (opt.choices.length > 0 && opt.default !== null && !opt.choices.includes(opt.default)) {
@@ -226,47 +262,53 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
       }
       floatDests.add(canonical)
     }
-    if (opt.short !== null) dest.set(opt.short, canonical)
-    if (opt.long !== null) dest.set(opt.long, canonical)
-    if (opt.type !== 'bool') kindByDest.set(canonical, opt.type)
-    if (opt.multiple || opt.pair) multipleDests.add(canonical)
-    if (opt.pair) pairDests.add(canonical)
-    if (opt.count) countDests.add(canonical)
+    for (const spelling of arg.names) dest.set(spelling, canonical)
+    if (opt.action !== 'store_true' && opt.action !== 'count') kindByDest.set(canonical, opt.type)
+    if (opt.action === 'append' || opt.action === 'extend') multipleDests.add(canonical)
+    if (opt.action === 'count') countDests.add(canonical)
     if (opt.choices.length > 0) choicesByDest.set(canonical, opt.choices)
     if (opt.required) requiredDests.push(canonical)
     if (opt.default !== null) defaults.set(canonical, opt.default)
     if (opt.env !== null) envByDest.set(canonical, opt.env)
 
-    if (opt.short !== null) {
-      if (opt.type === 'bool') {
-        boolSpellings.add(opt.short)
-      } else if (opt.valueOptional) {
+    for (const short of arg.names.filter((name) => !name.startsWith('--'))) {
+      if (opt.action === 'store_true' || opt.action === 'count') {
+        boolSpellings.add(short)
+      } else if (opt.nargs === '?') {
         // GNU optional argument: the bare short is boolean and a value
         // only rides attached to the same token.
-        boolSpellings.add(opt.short)
-        if (opt.shortValue) attachSpellings.push(opt.short)
-        kindOf.set(opt.short, opt.type)
+        boolSpellings.add(short)
+        if (opt.shortValue) attachSpellings.push(short)
+        kindOf.set(short, opt.type)
       } else {
-        valueSpellings.push(opt.short)
-        kindOf.set(opt.short, opt.type)
+        valueSpellings.push(short)
+        kindOf.set(short, opt.type)
         if (opt.numericShorthand) numericDest = canonical
       }
     }
-    if (opt.long !== null) {
-      longSpellings.push(opt.long)
-      if (opt.type === 'bool') {
-        longBoolSpellings.add(opt.long)
-      } else if (opt.valueOptional) {
+    for (const long of arg.names.filter((name) => name.startsWith('--'))) {
+      longSpellings.push(long)
+      if (opt.action === 'store_true' || opt.action === 'count') {
+        longBoolSpellings.add(long)
+      } else if (opt.nargs === '?') {
         // GNU optional argument: bare form is boolean, value only
         // attaches via `=`; a detached next token is an operand.
-        longBoolSpellings.add(opt.long)
-        longOptionalSpellings.add(opt.long)
-        kindOf.set(opt.long, opt.type)
+        longBoolSpellings.add(long)
+        longOptionalSpellings.add(long)
+        kindOf.set(long, opt.type)
       } else {
-        longValueSpellings.add(opt.long)
-        kindOf.set(opt.long, opt.type)
+        longValueSpellings.add(long)
+        kindOf.set(long, opt.type)
       }
     }
+  }
+
+  for (const operand of [...grammar.positional, ...(grammar.rest === null ? [] : [grammar.rest])]) {
+    const argument = operand
+    const name = argument.names[0] ?? ''
+    if (argument.type === 'int') intDests.add(name)
+    if (argument.type === 'float') floatDests.add(name)
+    if (argument.choices.length > 0) choicesByDest.set(name, argument.choices)
   }
 
   let baseDest: string | null = null
@@ -275,7 +317,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     if (baseDest === null) {
       throw new Error(`operandBase '${spec.operandBase}' is not a declared option`)
     }
-    if (kindByDest.get(baseDest) !== 'path' || pairDests.has(baseDest)) {
+    if (kindByDest.get(baseDest) !== 'path' || nargsByDest.has(baseDest)) {
       throw new Error(`operandBase '${spec.operandBase}' must be a single-token path option`)
     }
   }
@@ -285,7 +327,11 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   valueSpellings.sort((a, b) => b.length - a.length)
   attachSpellings.sort((a, b) => b.length - a.length)
 
-  const compiled = new CompiledSpec({
+  const compiled: CompiledSpec = {
+    ...grammar,
+    nargsByDest,
+    valueTypesByDest,
+    detachedOptionalSpellings,
     boolSpellings,
     valueSpellings,
     attachSpellings,
@@ -299,17 +345,19 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     kindByDest,
     dest,
     multipleDests,
-    pairDests,
     countDests,
     choicesByDest,
     requiredDests,
     defaults,
     envByDest,
     numericDest,
-    restKind: spec.rest !== null ? spec.rest.type : null,
+    restKind: grammar.rest !== null ? grammar.rest.type : null,
     baseDest,
-    remainder: spec.rest?.remainder ?? false,
-  })
+    remainder: grammar.rest?.nargs === 'REMAINDER',
+    destOf(spelling: string): string {
+      return dest.get(spelling) ?? spelling
+    },
+  }
   CACHE.set(spec, compiled)
   return compiled
 }

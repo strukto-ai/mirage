@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../../../commands/spec/types.ts'
+import { CLIHandler } from '../../../../commands/cli/types.ts'
 
 import { WorkspaceBinding } from '../../../binding.ts'
 import { readFileSync } from 'node:fs'
@@ -21,7 +23,7 @@ import { PrefixResolver } from '../../../resolver.ts'
 import { FileStat, FileType, Limit, MountMode } from '../../../../types.ts'
 import type { BridgeDispatchFn, RunArgs } from '../../../types.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
-import { CLISpec } from '../../../../commands/cli/types.ts'
+import { CLI } from '../../../../commands/cli/types.ts'
 import { ScriptSource } from '../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../../workspace/fixtures/workspace_fixture.ts'
@@ -267,11 +269,11 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       )
       ws.registerCli(
         'spin',
-        new CLISpec({
-          name: 'spin',
+        new CLI({
+          spec: new CommandSpec({ name: 'spin' }),
+          handlers: { '': new CLIHandler({ limit: new Limit({ timeoutSeconds: 0.1 }) }) },
           script: new ScriptSource('while True: pass'),
           runtime: 'pyodide',
-          limit: new Limit({ timeoutSeconds: 0.1 }),
         }),
       )
       try {

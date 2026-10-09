@@ -55,7 +55,8 @@ import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { answered as answeredCall, checked } from '@struktoai/mirage-server/io_serde'
 import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
-import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
+import { CLI } from '@struktoai/mirage-core/commands/cli/types'
+import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { applyStateDict, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
@@ -319,8 +320,8 @@ async function action(
     case 'register_cli':
       ws.registerCli(
         step.name,
-        new CLISpec({
-          name: step.name,
+        new CLI({
+          spec: new CommandSpec({ name: step.name }),
           script: new ScriptSource(step.script.source, step.script.language),
           ...(step.runtime !== undefined ? { runtime: step.runtime } : {}),
         }),

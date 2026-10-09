@@ -28,7 +28,7 @@ def test_authoring_surface_is_stable():
     assert set(mirage.__all__) >= {
         "Accessor",
         "BaseVFS",
-        "CLISpec",
+        "CLI",
         "CommandSpec",
         "Effect",
         "FileStat",

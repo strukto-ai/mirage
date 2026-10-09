@@ -11,17 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../../spec/types.ts'
+import { CLI } from '../../types.ts'
+import { CLIHandler } from '../../types.ts'
 
-import { searchSpec } from './search.ts'
+import { searchHandlers, searchSpec } from './search.ts'
 import { GhConfigSchema } from '../../../../core/github/config.ts'
 import { BOOLEAN, HELP_TOPICS, REPO_EDIT_FIELDS } from './constants.ts'
 import type { RepoEditField } from './types.ts'
-import { CLISpec, type CLIInvocation } from '../../types.ts'
+import { type CLIInvocation } from '../../types.ts'
 import { findChild, nodeHelp } from '../../walk.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { Operand, Option } from '../../../spec/types.ts'
+import { Argument } from '../../../spec/types.ts'
 import { api } from './api.ts'
 import { status as authStatus, token as authToken } from './auth.ts'
 import { version } from './version.ts'
@@ -69,476 +72,364 @@ import {
   workflowViewCmd,
 } from './actions.ts'
 
-const REPO = new Option({
-  short: '-R',
-  long: '--repo',
-  type: 'str',
-  description: 'Select another repository, as [HOST/]OWNER/REPO',
+const REPO = new Argument(['-R', '--repo'], {
+  help: 'Select another repository, as [HOST/]OWNER/REPO',
 })
-const JSON_FIELDS = new Option({
-  long: '--json',
-  type: 'str',
-  description: 'Output selected JSON fields',
-})
-const JQ = new Option({ short: '-q', long: '--jq', type: 'str', description: 'Filter JSON output' })
-const LIMIT_30 = new Option({ short: '-L', long: '--limit', type: 'int', default: '30' })
-const BODY = new Option({ short: '-b', long: '--body', type: 'str' })
-const BODY_FILE = new Option({ short: '-F', long: '--body-file', type: 'path' })
-const TITLE = new Option({ short: '-t', long: '--title', type: 'str' })
-const NUMBER = new Operand({ type: 'str', name: 'NUMBER', required: true })
+const JSON_FIELDS = new Argument('--json', { help: 'Output selected JSON fields' })
+const JQ = new Argument(['-q', '--jq'], { help: 'Filter JSON output' })
+const LIMIT_30 = new Argument(['-L', '--limit'], { type: 'int', default: '30' })
+const BODY = new Argument(['-b', '--body'])
+const BODY_FILE = new Argument(['-F', '--body-file'], { type: 'path' })
+const TITLE = new Argument(['-t', '--title'])
+const NUMBER = new Argument('NUMBER')
 
 // gh's boolean flags are pflag's: a bare `--draft` is true, and `--draft=true`
 // or `--draft=false` spells the value out, which is how a script turns one
 // off. Their shorts still cluster (`-sd`). Read one with `ghBool`.
-function flag(init: { short?: string; long: string; description?: string }): Option {
-  return new Option({
-    ...init,
-    type: 'str',
-    valueOptional: true,
+function flag(init: { short?: string; long: string; description?: string }): Argument {
+  return new Argument([...(init.short === undefined ? [] : [init.short]), init.long], {
+    nargs: '?',
+    attachedOnly: true,
+    help: init.description ?? null,
     shortValue: false,
     choices: BOOLEAN,
   })
 }
 
 // The grammar and request mapping consume the same setting definition.
-function repoEditOption(field: RepoEditField): Option {
-  return new Option({
-    short: field.short ?? null,
-    long: field.flag,
-    type: 'str',
-    valueOptional: field.kind !== 'value',
+function repoEditOption(field: RepoEditField): Argument {
+  return new Argument([...(field.short === undefined ? [] : [field.short]), field.flag], {
+    nargs: field.kind !== 'value' ? '?' : null,
+    attachedOnly: field.kind !== 'value',
     choices: field.kind === 'value' ? [...(field.choices ?? [])] : BOOLEAN,
-    description: field.description,
+    help: field.description,
   })
 }
 
-function issue(): CLISpec {
-  return new CLISpec({
+function issue(): CommandSpec {
+  return new CommandSpec({
     name: 'issue',
     description: 'Manage issues',
     subcommands: [
-      new CLISpec({
+      new CommandSpec({
         name: 'list',
         aliases: ['ls'],
         description: 'List issues',
-        fn: issueList,
-        options: [
+        arguments: [
           REPO,
           JSON_FIELDS,
           JQ,
           LIMIT_30,
-          new Option({
-            short: '-s',
-            long: '--state',
-            type: 'str',
-            choices: ['open', 'closed', 'all'],
-            default: 'open',
-          }),
-          new Option({ short: '-a', long: '--assignee', type: 'str' }),
-          new Option({ short: '-A', long: '--author', type: 'str' }),
-          new Option({ short: '-l', long: '--label', type: 'str', multiple: true }),
+          new Argument(['-s', '--state'], { choices: ['open', 'closed', 'all'], default: 'open' }),
+          new Argument(['-a', '--assignee']),
+          new Argument(['-A', '--author']),
+          new Argument(['-l', '--label'], { action: 'append' }),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'view',
         description: 'View an issue',
-        fn: issueView,
-        positional: [NUMBER],
-        options: [
+        arguments: [
           REPO,
           JSON_FIELDS,
           JQ,
           flag({ short: '-c', long: '--comments', description: 'Show comments' }),
+          NUMBER,
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'create',
         aliases: ['new'],
         description: 'Create an issue',
-        fn: issueCreate,
-        write: true,
-        options: [
+        arguments: [
           REPO,
           TITLE,
           BODY,
           BODY_FILE,
-          new Option({ short: '-a', long: '--assignee', type: 'str', multiple: true }),
-          new Option({ short: '-l', long: '--label', type: 'str', multiple: true }),
+          new Argument(['-a', '--assignee'], { action: 'append' }),
+          new Argument(['-l', '--label'], { action: 'append' }),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'edit',
         description: 'Edit an issue',
-        fn: issueEdit,
-        write: true,
-        positional: [NUMBER],
-        options: [
+        arguments: [
           REPO,
           TITLE,
           BODY,
           BODY_FILE,
-          new Option({ long: '--add-assignee', type: 'str', multiple: true }),
-          new Option({ long: '--remove-assignee', type: 'str', multiple: true }),
-          new Option({ long: '--add-label', type: 'str', multiple: true }),
-          new Option({ long: '--remove-label', type: 'str', multiple: true }),
+          new Argument('--add-assignee', { action: 'append' }),
+          new Argument('--remove-assignee', { action: 'append' }),
+          new Argument('--add-label', { action: 'append' }),
+          new Argument('--remove-label', { action: 'append' }),
+          NUMBER,
         ],
       }),
-      new CLISpec({
-        name: 'close',
-        description: 'Close an issue',
-        fn: issueClose,
-        write: true,
-        positional: [NUMBER],
-        options: [REPO],
-      }),
-      new CLISpec({
+      new CommandSpec({ name: 'close', description: 'Close an issue', arguments: [REPO, NUMBER] }),
+      new CommandSpec({
         name: 'reopen',
         description: 'Reopen an issue',
-        fn: issueReopen,
-        write: true,
-        positional: [NUMBER],
-        options: [REPO],
+        arguments: [REPO, NUMBER],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'comment',
         description: 'Add a comment to an issue',
-        fn: issueComment,
-        write: true,
-        positional: [NUMBER],
-        options: [REPO, BODY, BODY_FILE],
+        arguments: [REPO, BODY, BODY_FILE, NUMBER],
       }),
     ],
   })
 }
 
-function pr(): CLISpec {
-  return new CLISpec({
+function pr(): CommandSpec {
+  return new CommandSpec({
     name: 'pr',
     description: 'Manage pull requests',
     subcommands: [
-      new CLISpec({
+      new CommandSpec({
         name: 'list',
         aliases: ['ls'],
         description: 'List pull requests',
-        fn: prList,
-        options: [
+        arguments: [
           REPO,
           JSON_FIELDS,
           JQ,
           LIMIT_30,
-          new Option({
-            short: '-s',
-            long: '--state',
-            type: 'str',
+          new Argument(['-s', '--state'], {
             choices: ['open', 'closed', 'merged', 'all'],
             default: 'open',
           }),
-          new Option({ short: '-B', long: '--base', type: 'str' }),
-          new Option({ short: '-H', long: '--head', type: 'str' }),
+          new Argument(['-B', '--base']),
+          new Argument(['-H', '--head']),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'view',
         description: 'View a pull request',
-        fn: prView,
-        positional: [NUMBER],
-        options: [
+        arguments: [
           REPO,
           JSON_FIELDS,
           JQ,
           flag({ short: '-c', long: '--comments', description: 'Show comments' }),
+          NUMBER,
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'create',
         aliases: ['new'],
         description: 'Create a pull request',
-        fn: prCreate,
-        write: true,
-        options: [
+        arguments: [
           REPO,
           TITLE,
           BODY,
           BODY_FILE,
-          new Option({ short: '-H', long: '--head', type: 'str' }),
-          new Option({ short: '-B', long: '--base', type: 'str' }),
+          new Argument(['-H', '--head']),
+          new Argument(['-B', '--base']),
           flag({ short: '-d', long: '--draft' }),
           flag({ long: '--no-maintainer-edit' }),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'edit',
         description: 'Edit a pull request',
-        fn: prEdit,
-        write: true,
-        positional: [NUMBER],
-        options: [
-          REPO,
-          TITLE,
-          BODY,
-          BODY_FILE,
-          new Option({ short: '-B', long: '--base', type: 'str' }),
-        ],
+        arguments: [REPO, TITLE, BODY, BODY_FILE, new Argument(['-B', '--base']), NUMBER],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'merge',
         description: 'Merge a pull request',
-        fn: prMerge,
-        write: true,
-        positional: [NUMBER],
-        options: [
+        arguments: [
           REPO,
           BODY,
           BODY_FILE,
           flag({ short: '-m', long: '--merge' }),
           flag({ short: '-r', long: '--rebase' }),
           flag({ short: '-s', long: '--squash' }),
-          new Option({ short: '-t', long: '--subject', type: 'str' }),
-          new Option({ long: '--match-head-commit', type: 'str' }),
+          new Argument(['-t', '--subject']),
+          new Argument('--match-head-commit'),
+          NUMBER,
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'close',
         description: 'Close a pull request',
-        fn: prClose,
-        write: true,
-        positional: [NUMBER],
-        options: [REPO],
+        arguments: [REPO, NUMBER],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'comment',
         description: 'Add a comment to a pull request',
-        fn: prComment,
-        write: true,
-        positional: [NUMBER],
-        options: [REPO, BODY, BODY_FILE],
+        arguments: [REPO, BODY, BODY_FILE, NUMBER],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'diff',
         description: 'View changes in a pull request',
-        fn: prDiff,
-        positional: [NUMBER],
-        options: [
+        arguments: [
           REPO,
           flag({ long: '--name-only', description: 'Display only names of changed files' }),
+          NUMBER,
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'checks',
         description: 'Show CI checks for a pull request',
-        fn: prChecks,
-        positional: [NUMBER],
-        options: [REPO, JSON_FIELDS, JQ],
+        arguments: [REPO, JSON_FIELDS, JQ, NUMBER],
       }),
     ],
   })
 }
 
-function repo(): CLISpec {
-  return new CLISpec({
+function repo(): CommandSpec {
+  return new CommandSpec({
     name: 'repo',
     description: 'Manage repositories',
     subcommands: [
-      new CLISpec({
+      new CommandSpec({
         name: 'list',
         aliases: ['ls'],
         description: 'List repositories',
-        fn: repoList,
-        positional: [new Operand({ type: 'str', name: 'OWNER' })],
-        options: [JSON_FIELDS, JQ, LIMIT_30],
+        arguments: [JSON_FIELDS, JQ, LIMIT_30, new Argument('OWNER', { nargs: '?' })],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'clone',
         description: 'Clone a repository locally',
-        fn: repoClone,
-        positional: [
-          new Operand({ type: 'str', name: 'REPOSITORY' }),
-          new Operand({ type: 'str', name: 'DIRECTORY' }),
-        ],
-        rest: new Operand({ type: 'str', name: 'GITFLAGS' }),
-        options: [
-          new Option({
-            short: '-u',
-            long: '--upstream-remote-name',
-            type: 'str',
-            description: 'Upstream remote name when cloning a fork',
+        arguments: [
+          new Argument(['-u', '--upstream-remote-name'], {
+            help: 'Upstream remote name when cloning a fork',
           }),
           flag({
             long: '--no-upstream',
             description: 'Do not add an upstream remote when cloning a fork',
           }),
+          new Argument('REPOSITORY', { nargs: '?' }),
+          new Argument('DIRECTORY', { nargs: '?' }),
+          new Argument('GITFLAGS', { nargs: '*' }),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'view',
         description: 'View a repository',
-        fn: repoView,
-        positional: [new Operand({ type: 'str', name: 'REPOSITORY' })],
-        options: [REPO, JSON_FIELDS, JQ],
+        arguments: [REPO, JSON_FIELDS, JQ, new Argument('REPOSITORY', { nargs: '?' })],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'create',
         description: 'Create a repository',
-        fn: repoCreate,
-        write: true,
-        positional: [new Operand({ type: 'str', name: 'NAME' })],
-        options: [
+        arguments: [
           flag({ long: '--public' }),
           flag({ long: '--private' }),
-          new Option({ short: '-d', long: '--description', type: 'str' }),
-          new Option({ short: '-h', long: '--homepage', type: 'str' }),
+          new Argument(['-d', '--description']),
+          new Argument(['-h', '--homepage']),
           flag({ long: '--add-readme' }),
+          new Argument('NAME', { nargs: '?' }),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'fork',
         description: 'Create a fork of a repository',
-        fn: fork,
-        write: true,
-        positional: [new Operand({ type: 'str', name: 'REPOSITORY' })],
-        options: [
+        arguments: [
           flag({ long: '--clone', description: 'Clone the fork' }),
           flag({
             long: '--default-branch-only',
             description: 'Only include the default branch in the fork',
           }),
-          new Option({
-            long: '--fork-name',
-            type: 'str',
-            description: 'Rename the forked repository',
-          }),
-          new Option({
-            long: '--org',
-            type: 'str',
-            description: 'Create the fork in an organization',
-          }),
+          new Argument('--fork-name', { help: 'Rename the forked repository' }),
+          new Argument('--org', { help: 'Create the fork in an organization' }),
           flag({ long: '--remote', description: 'Add a git remote for the fork' }),
-          new Option({
-            long: '--remote-name',
-            type: 'str',
-            description: 'Specify the name for the new remote',
-          }),
+          new Argument('--remote-name', { help: 'Specify the name for the new remote' }),
+          new Argument('REPOSITORY', { nargs: '?' }),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'rename',
         description: 'Rename a repository',
-        fn: rename,
-        write: true,
-        positional: [new Operand({ type: 'str', name: 'NEW-NAME', required: true })],
-        options: [REPO],
+        arguments: [REPO, new Argument('NEW-NAME')],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'edit',
         description: 'Edit repository settings',
-        fn: repoEdit,
-        write: true,
-        positional: [new Operand({ type: 'str', name: 'REPOSITORY' })],
-        options: [
+        arguments: [
           ...REPO_EDIT_FIELDS.map(repoEditOption),
-          new Option({
-            long: '--add-topic',
-            type: 'str',
-            multiple: true,
-            description: 'Add repository topic',
-          }),
-          new Option({
-            long: '--remove-topic',
-            type: 'str',
-            multiple: true,
-            description: 'Remove repository topic',
-          }),
+          new Argument('--add-topic', { action: 'append', help: 'Add repository topic' }),
+          new Argument('--remove-topic', { action: 'append', help: 'Remove repository topic' }),
           flag({
             long: '--accept-visibility-change-consequences',
             description: 'Accept the consequences of changing the repository visibility',
           }),
+          new Argument('REPOSITORY', { nargs: '?' }),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'delete',
         description: 'Delete a repository',
-        fn: repoDelete,
-        write: true,
-        positional: [new Operand({ type: 'str', name: 'REPOSITORY' })],
-        options: [
+        arguments: [
           flag({ long: '--yes', description: 'Confirm deletion without prompting' }),
           flag({ long: '--confirm', description: 'Deprecated: use --yes instead' }),
+          new Argument('REPOSITORY', { nargs: '?' }),
         ],
       }),
     ],
   })
 }
 
-function release(): CLISpec {
-  return new CLISpec({
+function release(): CommandSpec {
+  return new CommandSpec({
     name: 'release',
     description: 'Manage releases',
     subcommands: [
-      new CLISpec({
+      new CommandSpec({
         name: 'list',
         aliases: ['ls'],
         description: 'List releases',
-        fn: releaseList,
-        options: [REPO, JSON_FIELDS, JQ, LIMIT_30],
+        arguments: [REPO, JSON_FIELDS, JQ, LIMIT_30],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'view',
         description: 'View a release',
-        fn: releaseView,
-        positional: [new Operand({ type: 'str', name: 'TAG', required: true })],
-        options: [REPO, JSON_FIELDS, JQ],
+        arguments: [REPO, JSON_FIELDS, JQ, new Argument('TAG')],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'create',
         description: 'Create a release',
-        fn: releaseCreate,
-        write: true,
-        positional: [new Operand({ type: 'str', name: 'TAG', required: true })],
-        options: [
+        arguments: [
           REPO,
-          new Option({ short: '-n', long: '--notes', type: 'str' }),
-          new Option({ short: '-F', long: '--notes-file', type: 'path' }),
+          new Argument(['-n', '--notes']),
+          new Argument(['-F', '--notes-file'], { type: 'path' }),
           TITLE,
           flag({ short: '-d', long: '--draft' }),
           flag({ short: '-p', long: '--prerelease' }),
           flag({ long: '--generate-notes' }),
-          new Option({ long: '--target', type: 'str' }),
+          new Argument('--target'),
+          new Argument('TAG'),
         ],
       }),
     ],
   })
 }
 
-function run(): CLISpec {
-  return new CLISpec({
+function run(): CommandSpec {
+  return new CommandSpec({
     name: 'run',
     description: 'View workflow runs',
     subcommands: [
-      new CLISpec({
+      new CommandSpec({
         name: 'list',
         aliases: ['ls'],
         description: 'List workflow runs',
-        fn: runListCmd,
-        options: [
+        arguments: [
           REPO,
           JSON_FIELDS,
           JQ,
-          new Option({ short: '-L', long: '--limit', type: 'int', default: '20' }),
-          new Option({ short: '-b', long: '--branch', type: 'str' }),
-          new Option({ short: '-c', long: '--commit', type: 'str' }),
-          new Option({ long: '--created', type: 'str' }),
-          new Option({ short: '-e', long: '--event', type: 'str' }),
-          new Option({ short: '-s', long: '--status', type: 'str' }),
-          new Option({ short: '-u', long: '--user', type: 'str' }),
-          new Option({ short: '-w', long: '--workflow', type: 'str' }),
+          new Argument(['-L', '--limit'], { type: 'int', default: '20' }),
+          new Argument(['-b', '--branch']),
+          new Argument(['-c', '--commit']),
+          new Argument('--created'),
+          new Argument(['-e', '--event']),
+          new Argument(['-s', '--status']),
+          new Argument(['-u', '--user']),
+          new Argument(['-w', '--workflow']),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'view',
         description: 'View a workflow run',
-        fn: runViewCmd,
-        positional: [new Operand({ type: 'str', name: 'RUN-ID', required: true })],
-        options: [
+        arguments: [
           REPO,
           JSON_FIELDS,
           JQ,
@@ -551,72 +442,63 @@ function run(): CLISpec {
             long: '--log-failed',
             description: 'View the log for any failed steps in a run or specific job',
           }),
+          new Argument('RUN-ID'),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'rerun',
         description: 'Rerun a workflow run',
-        fn: runRerunCmd,
-        write: true,
-        positional: [new Operand({ type: 'str', name: 'RUN-ID', required: true })],
-        options: [
+        arguments: [
           REPO,
           flag({ short: '-d', long: '--debug' }),
           flag({ long: '--failed' }),
-          new Option({ short: '-j', long: '--job', type: 'str' }),
+          new Argument(['-j', '--job']),
+          new Argument('RUN-ID'),
         ],
       }),
     ],
   })
 }
 
-function workflow(): CLISpec {
-  return new CLISpec({
+function workflow(): CommandSpec {
+  return new CommandSpec({
     name: 'workflow',
     description: 'Manage workflows',
     subcommands: [
-      new CLISpec({
+      new CommandSpec({
         name: 'list',
         aliases: ['ls'],
         description: 'List workflows',
-        fn: workflowListCmd,
-        options: [
+        arguments: [
           REPO,
           JSON_FIELDS,
           JQ,
-          new Option({ short: '-L', long: '--limit', type: 'int', default: '50' }),
+          new Argument(['-L', '--limit'], { type: 'int', default: '50' }),
           flag({ short: '-a', long: '--all' }),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'view',
         description: 'View a workflow',
-        fn: workflowViewCmd,
-        positional: [new Operand({ type: 'str', name: 'WORKFLOW', required: true })],
-        options: [
+        arguments: [
           REPO,
           flag({ short: '-y', long: '--yaml', description: 'View the workflow yaml file' }),
-          new Option({
-            short: '-r',
-            long: '--ref',
-            type: 'str',
-            description:
-              "The branch or tag name which contains the version of the workflow file you'd like to view",
+          new Argument(['-r', '--ref'], {
+            help: "The branch or tag name which contains the version of the workflow file you'd like to view",
           }),
+          new Argument('WORKFLOW'),
         ],
       }),
-      new CLISpec({
+      new CommandSpec({
         name: 'run',
         description: 'Run a workflow',
-        fn: workflowRunCmd,
-        write: true,
-        positional: [new Operand({ type: 'str', name: 'WORKFLOW', required: true })],
-        options: [
+        arguments: [
           REPO,
-          new Option({ short: '-r', long: '--ref', type: 'str' }),
-          new Option({ short: '-f', long: '--raw-field', type: 'str', multiple: true }),
-          new Option({ short: '-F', long: '--field', type: 'str', multiple: true }),
+          new Argument(['-r', '--ref']),
+          new Argument(['-f', '--raw-field'], { action: 'append' }),
+          new Argument(['-F', '--field'], { action: 'append' }),
           flag({ long: '--json' }),
+          new Argument('WORKFLOW'),
         ],
       }),
     ],
@@ -632,7 +514,7 @@ const ENC = new TextEncoder()
  * stderr with the list of commands and still exits 0.
  */
 function helpCmd(inv: CLIInvocation): CommandFnResult {
-  let node: CLISpec = GH
+  let node: CommandSpec = GH.spec
   const path: string[] = []
   for (const word of inv.texts) {
     const child = findChild(node, word)
@@ -644,7 +526,7 @@ function helpCmd(inv: CLIInvocation): CommandFnResult {
   if (first !== undefined && path.length === 0) {
     const topic = HELP_TOPICS[first]
     if (topic !== undefined) return [ENC.encode(topic), new IOResult()]
-    const names = GH.subcommands
+    const names = GH.spec.subcommands
       .filter((child) => child.name !== 'help')
       .map((child) => `  ${child.name}\n`)
       .sort(compareCodePoints)
@@ -652,80 +534,113 @@ function helpCmd(inv: CLIInvocation): CommandFnResult {
     const usage = `Usage:  gh <command> <subcommand> [flags]\n\nAvailable commands:\n${names.join('')}`
     return [null, new IOResult({ stderr: ENC.encode(`Unknown help topic [${asked}]\n${usage}`) })]
   }
-  return [ENC.encode(nodeHelp(['gh', ...path].join(' '), node, GH.usageStyle)), new IOResult()]
+  return [ENC.encode(nodeHelp(['gh', ...path].join(' '), node, GH.spec.usageStyle)), new IOResult()]
 }
 
-export const GH = new CLISpec({
-  name: 'gh',
-  description: 'GitHub CLI',
+export const GH = new CLI({
+  spec: new CommandSpec({
+    name: 'gh',
+    description: 'GitHub CLI',
+    subcommands: [
+      new CommandSpec({
+        name: 'auth',
+        description: 'Manage authentication',
+        subcommands: [
+          new CommandSpec({ name: 'status', description: 'Check the configured token' }),
+          new CommandSpec({
+            name: 'token',
+            description: 'Token display is unavailable in Mirage',
+            arguments: [
+              new Argument('--hostname', {
+                help: 'The hostname of the GitHub instance authenticated with',
+              }),
+              new Argument(['-u', '--user'], {
+                help: 'The account selector; tokens are never printed',
+              }),
+            ],
+          }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'help',
+        description: 'Help about any command',
+        arguments: [new Argument('texts', { metavar: '', nargs: '*' })],
+      }),
+      new CommandSpec({
+        name: 'version',
+        aliases: ['--version'],
+        description: 'Show the Mirage GitHub CLI implementation version',
+      }),
+      new CommandSpec({
+        name: 'api',
+        description: 'Make an authenticated GitHub API request',
+        arguments: [
+          new Argument(['-X', '--method']),
+          new Argument(['-f', '--raw-field'], { action: 'append' }),
+          new Argument(['-F', '--field'], { action: 'append' }),
+          new Argument(['-H', '--header'], { action: 'append' }),
+          flag({
+            short: '-i',
+            long: '--include',
+            description: 'Include HTTP response status line and headers in the output',
+          }),
+          new Argument('--input', { type: 'path' }),
+          JQ,
+          flag({ long: '--paginate' }),
+          flag({ long: '--slurp' }),
+          flag({ long: '--silent' }),
+          new Argument('ENDPOINT'),
+        ],
+      }),
+      issue(),
+      pr(),
+      repo(),
+      release(),
+      run(),
+      workflow(),
+      searchSpec(),
+    ],
+  }),
+  handlers: {
+    ...searchHandlers(),
+    'auth status': new CLIHandler({ fn: authStatus }),
+    'auth token': new CLIHandler({ fn: authToken }),
+    help: new CLIHandler({ fn: helpCmd }),
+    version: new CLIHandler({ fn: version }),
+    api: new CLIHandler({ fn: api, write: true }),
+    'issue list': new CLIHandler({ fn: issueList }),
+    'issue view': new CLIHandler({ fn: issueView }),
+    'issue create': new CLIHandler({ fn: issueCreate, write: true }),
+    'issue edit': new CLIHandler({ fn: issueEdit, write: true }),
+    'issue close': new CLIHandler({ fn: issueClose, write: true }),
+    'issue reopen': new CLIHandler({ fn: issueReopen, write: true }),
+    'issue comment': new CLIHandler({ fn: issueComment, write: true }),
+    'pr list': new CLIHandler({ fn: prList }),
+    'pr view': new CLIHandler({ fn: prView }),
+    'pr create': new CLIHandler({ fn: prCreate, write: true }),
+    'pr edit': new CLIHandler({ fn: prEdit, write: true }),
+    'pr merge': new CLIHandler({ fn: prMerge, write: true }),
+    'pr close': new CLIHandler({ fn: prClose, write: true }),
+    'pr comment': new CLIHandler({ fn: prComment, write: true }),
+    'pr diff': new CLIHandler({ fn: prDiff }),
+    'pr checks': new CLIHandler({ fn: prChecks }),
+    'repo list': new CLIHandler({ fn: repoList }),
+    'repo clone': new CLIHandler({ fn: repoClone }),
+    'repo view': new CLIHandler({ fn: repoView }),
+    'repo create': new CLIHandler({ fn: repoCreate, write: true }),
+    'repo fork': new CLIHandler({ fn: fork, write: true }),
+    'repo rename': new CLIHandler({ fn: rename, write: true }),
+    'repo edit': new CLIHandler({ fn: repoEdit, write: true }),
+    'repo delete': new CLIHandler({ fn: repoDelete, write: true }),
+    'release list': new CLIHandler({ fn: releaseList }),
+    'release view': new CLIHandler({ fn: releaseView }),
+    'release create': new CLIHandler({ fn: releaseCreate, write: true }),
+    'run list': new CLIHandler({ fn: runListCmd }),
+    'run view': new CLIHandler({ fn: runViewCmd }),
+    'run rerun': new CLIHandler({ fn: runRerunCmd, write: true }),
+    'workflow list': new CLIHandler({ fn: workflowListCmd }),
+    'workflow view': new CLIHandler({ fn: workflowViewCmd }),
+    'workflow run': new CLIHandler({ fn: workflowRunCmd, write: true }),
+  },
   configModel: GhConfigSchema,
-  subcommands: [
-    new CLISpec({
-      name: 'auth',
-      description: 'Manage authentication',
-      subcommands: [
-        new CLISpec({ name: 'status', description: 'Check the configured token', fn: authStatus }),
-        new CLISpec({
-          name: 'token',
-          description: 'Token display is unavailable in Mirage',
-          fn: authToken,
-          options: [
-            new Option({
-              long: '--hostname',
-              type: 'str',
-              description: 'The hostname of the GitHub instance authenticated with',
-            }),
-            new Option({
-              short: '-u',
-              long: '--user',
-              type: 'str',
-              description: 'The account selector; tokens are never printed',
-            }),
-          ],
-        }),
-      ],
-    }),
-    new CLISpec({
-      name: 'help',
-      fn: helpCmd,
-      description: 'Help about any command',
-      rest: new Operand({ type: 'str' }),
-    }),
-    new CLISpec({
-      name: 'version',
-      aliases: ['--version'],
-      fn: version,
-      description: 'Show the Mirage GitHub CLI implementation version',
-    }),
-    new CLISpec({
-      name: 'api',
-      description: 'Make an authenticated GitHub API request',
-      fn: api,
-      write: true,
-      positional: [new Operand({ type: 'str', name: 'ENDPOINT', required: true })],
-      options: [
-        new Option({ short: '-X', long: '--method', type: 'str' }),
-        new Option({ short: '-f', long: '--raw-field', type: 'str', multiple: true }),
-        new Option({ short: '-F', long: '--field', type: 'str', multiple: true }),
-        new Option({ short: '-H', long: '--header', type: 'str', multiple: true }),
-        flag({
-          short: '-i',
-          long: '--include',
-          description: 'Include HTTP response status line and headers in the output',
-        }),
-        new Option({ long: '--input', type: 'path' }),
-        JQ,
-        flag({ long: '--paginate' }),
-        flag({ long: '--slurp' }),
-        flag({ long: '--silent' }),
-      ],
-    }),
-    issue(),
-    pr(),
-    repo(),
-    release(),
-    run(),
-    workflow(),
-    searchSpec(),
-  ],
 })

@@ -21,6 +21,7 @@ from mirage.commands.spec import (
     parse_command,
     parse_to_kwargs,
 )
+from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import (
@@ -191,25 +192,31 @@ def parse_flags(
         # gets the mount prefix stripped.
         repeat_path_keys = {
             flag_kwarg_name(name)
-            for opt in spec.options
-            if opt.type == "path" and opt.multiple
-            for name in (opt.short, opt.long)
+            for opt in compile_spec(spec).options
+            if opt.type == "path"
+            and (
+                opt.action in ("append", "extend")
+                or isinstance(opt.nargs, int)
+            )
+            for name in opt.names
             if name
         }
         # A pair option's list alternates name, value; only the values
         # are paths (jq --rawfile body /d/f.txt).
         pair_path_keys = {
             flag_kwarg_name(name)
-            for opt in spec.options
-            if opt.type == "path" and opt.pair
-            for name in (opt.short, opt.long)
+            for opt in compile_spec(spec).options
+            if opt.type == "path" and opt.value_types
+            for name in opt.names
             if name
         }
         single_path_keys = {
             flag_kwarg_name(name)
-            for opt in spec.options
-            if opt.type == "path" and not opt.multiple
-            for name in (opt.short, opt.long)
+            for opt in compile_spec(spec).options
+            if opt.type == "path"
+            and opt.action not in ("append", "extend")
+            and not isinstance(opt.nargs, int)
+            for name in opt.names
             if name
         }
         # An option's value is read before the operands, which is POSIX

@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../commands/spec/types.ts'
+import { CLIHandler } from '../commands/cli/types.ts'
 
 import { describe, expect, it, vi } from 'vitest'
 import type { CacheConfig } from '../cache/file/config.ts'
@@ -26,7 +28,7 @@ import { RedisIndexCacheStore } from '../cache/index/redis.ts'
 import { IndexView } from '../cache/index/view.ts'
 import { mountKey, mountPrefixOf } from '../utils/key_prefix.ts'
 import { globNameMatches, globPattern } from '../utils/glob_walk.ts'
-import { CLISpec } from '../commands/cli/types.ts'
+import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { vfsCall } from '../vfs/call.ts'
 import { Effect } from '../vfs/types.ts'
@@ -237,12 +239,16 @@ describe('Workspace lifecycle', () => {
       const ws = new Workspace(mounts, { shellParser: await getTestParser() })
       ws.registerCli(
         'gate',
-        new CLISpec({
-          name: 'gate',
-          fn: async () => {
-            enter()
-            await release
-            return [null, new IOResult()]
+        new CLI({
+          spec: new CommandSpec({ name: 'gate' }),
+          handlers: {
+            '': new CLIHandler({
+              fn: async () => {
+                enter()
+                await release
+                return [null, new IOResult()]
+              },
+            }),
           },
         }),
       )
