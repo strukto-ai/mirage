@@ -48,7 +48,7 @@ describe('sessions router', () => {
     // A list of prefixes used to mean "only these mounts". A profile now
     // narrows the mounts it names and never decides whether one exists,
     // so the list would be a silent no-op that still reads like
-    // confinement: the door refuses it instead.
+    // confinement: the entry point refuses it instead.
     const app = buildApp()
     await createWs(app, 'grants-ws')
     const created = await app.inject({

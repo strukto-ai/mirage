@@ -83,7 +83,7 @@ def scan_io(
     service's search the answer, since the service sees every entry, and
     its scan reads the operands through the guards the generic builders
     bind; an unjudged one scans the mount's own table. Either reads its
-    content at the door, which admits the path before a warm serve.
+    content at the dispatcher, which admits the path before a warm serve.
 
     Args:
         ops (CommandIO): the backend's raw IO adapter.
@@ -256,7 +256,7 @@ async def _run_with_namespace_globs(
     )
     # Command path restrictions speak first, then the coded pre_vfs
     # hooks, both outside the stat and slash wraps (`finish`). Content
-    # reads are the door's (`with_door_reads` on the mount's table),
+    # reads are the dispatcher's (`dispatched_io` on the mount's table),
     # which judges them itself before a warm serve. A probe answer is
     # served below the guards (`with_probe_answers` on the raw table),
     # so they still judge every path before it. Under a hide or a path

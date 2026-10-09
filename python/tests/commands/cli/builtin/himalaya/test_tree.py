@@ -183,7 +183,7 @@ def _header(uid: str, subject: str) -> dict:
 
 @pytest.fixture
 def mailbox(monkeypatch):
-    # The CLI and a mount are two doors to one account, so a message the
+    # The CLI and a mount are two entry points to one account, so a message the
     # CLI files has to show in the mount's listing without waiting out
     # the index TTL. The mailbox here is test state; the VFS, the
     # CLI, the workspace and its caches are the real ones.

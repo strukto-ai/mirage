@@ -13,19 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Activity } from '../utils/activity.ts'
-import { coerceRuntimeConfig, type RuntimeConfig } from './config.ts'
+import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
 import type { WorkspaceBinding, RuntimeContext } from './binding.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import { isEvaluator, isLineExecutor, isProcessExecutor } from './mixin.ts'
 import type { RouteScript } from './routing/types.ts'
-import { ScriptSource } from './types.ts'
-import type {
-  ExecutionRequest,
-  FilesystemOperation,
-  RuntimeCapabilities,
-  RunResult,
-  RuntimeOptions,
-  RuntimeReach,
+import {
+  ScriptSource,
+  type ExecutionRequest,
+  type FilesystemOperation,
+  type RuntimeCapabilities,
+  type RunResult,
+  type RuntimeReach,
 } from './types.ts'
 
 /**
@@ -54,7 +53,7 @@ export abstract class Runtime {
   abstract readonly name: string
   readonly captures: readonly string[]
   /**
-   * Which doors this runtime's code has to the outside world (see
+   * Which entry points this runtime's code has to the outside world (see
    * RuntimeReach): 'workspace' when the workspace dispatch is its only one,
    * as the bridged engines (monty, pyodide, quickjs) and the vfs
    * routing marker declare, 'process' or 'remote' when the code can

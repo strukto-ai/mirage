@@ -17,7 +17,7 @@ import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { FileStat, PathSpec, Visibility } from '../types.ts'
 
 /**
- * The keywords an op carries through the door: the mount's index, the
+ * The keywords an op carries through the dispatcher: the mount's index, the
  * filetype a read resolves by (null asks for the stored bytes), and the
  * op's own (`offset`, `size`, `parents`, `no_create`, the setattr fields).
  */
@@ -50,7 +50,7 @@ export type MountRoot = (path: string) => string
 // names session-filtered). The other half of namespace structure beside
 // link rows: a nested mount is invisible to the parent mount's backend,
 // so a listing command is handed the names from above, the same names
-// the door merges into its own readdir.
+// the dispatcher merges into its own readdir.
 export type ChildMounts = (parent: string) => string[]
 
 // Where the mount boundaries are, as one injected object.
@@ -113,7 +113,7 @@ export interface SessionView {
   snapshot(): Record<string, string>
   // Write one variable through the session plane (readonly + preSession).
   // General over variable shapes: a string stores a scalar, a ShellArray
-  // stores a whole array, and the door keeps the two storages exclusive.
+  // stores a whole array, and the session view keeps the two storages exclusive.
   // Writers with richer mechanics (subscripts, appends, holes) compute
   // the resulting value on a copy and hand it here, so a denial never
   // leaves a half-applied write.
@@ -157,14 +157,14 @@ export interface SessionView {
 // (workspace injects, lower layers never import workspace modules).
 //
 // Read-only, and the Python twin declares the same five members in the
-// same order. A link is created and removed through the op door
-// (`Files.symlink`, `Files.unlink`), never here: the door is the only layer
+// same order. A link is created and removed through the dispatcher
+// (`Files.symlink`, `Files.unlink`), never here: the dispatcher is the only layer
 // that sees both planes, so it is where symlink(2)'s refusal to
 // overwrite an occupied name is decided, and where session grants,
 // admission policies and the op ledger fire. A mutator on this seam is
 // a write at a layer no session view covers, which is how a
 // session-scoped kernel mount came to delete a link on a mount its
-// profile hides. Routing through the door costs a caller nothing: the
+// profile hides. Routing through the dispatcher costs a caller nothing: the
 // dispatcher already answers `unlink` on a link path, because `unlink`
 // is in `LINK_ENTRY_OPS`.
 export interface NamespaceLinks {

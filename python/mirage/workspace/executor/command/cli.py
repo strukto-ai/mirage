@@ -30,7 +30,7 @@ from mirage.commands.cli.refusal import (
     directory_refusal,
     leaf_refusal,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLIInvocation, CLISpec, CLIView
 from mirage.commands.cli.walk import listed_node, node_help, owns_argv, walk
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec import flag_kwarg_name
@@ -48,14 +48,18 @@ from mirage.policy import resolve_limit
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.routing import runtime_for_language
+from mirage.runtime.routing import RouteDecision, runtime_for_language
 from mirage.runtime.types import CodeExecution, DispatchFn, ScriptSource
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
 from mirage.view.types import NamespaceView, SessionView, StatPath
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
-from mirage.workspace.executor.command.run import exec_node
+from mirage.workspace.executor.command.run import (
+    admission_denial,
+    exec_node,
+)
 from mirage.workspace.lookup.lookup import verb_visible
 from mirage.workspace.mount.namespace.probe import miss_condition
 from mirage.workspace.session import SessionState, env_snapshot
@@ -123,21 +127,33 @@ def parse_spec_for(
 
 
 def _select_runtime(
-    prog: str, leaf: CLISpec, entries: list[Runtime]
-) -> tuple[LanguageRuntime | None, str | None]:
+    prog: str,
+    leaf: CLISpec,
+    entries: list[Runtime],
+    routing: RouteDecision[Runtime] | None = None,
+) -> tuple[LanguageRuntime | None, IOResult | None]:
     """Pick the workspace entry that runs a script leaf.
 
     A ``runtime:`` pin names the entry, and the entry must speak the
     script's language, so ``runtime: monty`` on a ``.mjs`` fails loud
     instead of feeding JS to a python interpreter. Without a pin the
-    first entry speaking the language serves (runtime_for_language).
-    Every refusal names the world so the fix (add or rename an entry)
-    is visible.
+    program runs where this line runs its language's own interpreter
+    (the tier's head word, ``python3`` or ``node``), so a route policy
+    or a runtime's script places it as it places that command, and a
+    line every capturer refused is refused here too (126). The first
+    entry speaking the language serves when there is no line decision
+    or the workspace serves that interpreter itself
+    (runtime_for_language); a placement on a runtime that does not run
+    the script's language is refused like such a pin. Every other
+    refusal names the world so the fix (add or rename an entry) is
+    visible (127).
 
     Args:
         prog (str): display path for message attribution.
         leaf (CLISpec): the script-bearing node.
         entries (list[Runtime]): the workspace's ordered world.
+        routing (RouteDecision[Runtime] | None): the line's placement, None
+            outside a routed line.
     """
     script = leaf.script
     if script is None:
@@ -145,32 +161,52 @@ def _select_runtime(
             f"selecting a runtime for {prog!r} without a script"
         )
     known = ", ".join(repr(entry.name) for entry in entries) or "none"
+    chosen: Runtime | None
     if leaf.runtime is not None:
-        pinned = next(
+        chosen = next(
             (entry for entry in entries if entry.name == leaf.runtime), None
         )
-        if pinned is None:
-            return None, (
+        if chosen is None:
+            return None, _missing(
                 f"{prog}: unknown runtime: {leaf.runtime!r} "
                 f"(workspace runtimes: {known})"
             )
-        if (
-            not isinstance(pinned, LanguageRuntime)
-            or pinned.language != script.language
-        ):
-            return None, (
-                f"{prog}: runtime {pinned.name!r} does not run "
-                f"{script.language} scripts"
+    else:
+        entry = runtime_for_language(entries, script.language)
+        if entry is None:
+            return None, _missing(
+                f"{prog}: no workspace runtime runs "
+                f"{script.language} scripts "
+                f"(workspace runtimes: {known})"
             )
-        return pinned, None
-    entry = runtime_for_language(entries, script.language)
-    if entry is None:
-        return None, (
-            f"{prog}: no workspace runtime runs "
-            f"{script.language} scripts "
-            f"(workspace runtimes: {known})"
+        heads = type(entry).captures
+        chosen = (
+            entry
+            if routing is None or not heads
+            else routing.bindings.get(heads[0], routing.fallback)
         )
-    return entry, None
+        if chosen is None:
+            return None, admission_denial(prog)
+        if isinstance(chosen, WorkspaceRuntime):
+            chosen = entry
+    if (
+        not isinstance(chosen, LanguageRuntime)
+        or chosen.language != script.language
+    ):
+        return None, _missing(
+            f"{prog}: runtime {chosen.name!r} does not run "
+            f"{script.language} scripts"
+        )
+    return chosen, None
+
+
+def _missing(message: str) -> IOResult:
+    """The 127 a script CLI answers when no entry can run its program.
+
+    Args:
+        message (str): the refusal, naming the world.
+    """
+    return IOResult(exit_code=127, stderr=encode_text(f"{message}\n"))
 
 
 async def _script_output(
@@ -222,7 +258,7 @@ async def _script_output(
 class CLIContext:
     """Workspace facts the dispatcher can offer but most CLIs do not
     want: an API client needs no filesystem, while ``git`` is nothing
-    but one. Forwarded whole onto the leaf's doors, so a leaf that does
+    but one. Forwarded whole onto the leaf's view, so a leaf that does
     not read them ignores them and there is no allowlist of
     filesystem-aware CLIs to keep in step (the same rule ``links``
     follows for mount commands). Mirrors the TS ``CLIContext``
@@ -241,9 +277,11 @@ class CLIContext:
         ns (NamespaceView | None): the name plane's facts, which no
             backend can see, for a verb that walks a tree itself. The
             mount prefix serving a path is one of them
-            (``ns.mounts.root_of``), so it needs no door of its own.
+            (``ns.mounts.root_of``), so it needs no entry point of its own.
         session_view (SessionView | None): the session plane's live,
             gated handle; ``inv.env`` stays the frozen process view.
+        routing (RouteDecision[Runtime] | None): the line's placement, which a
+            script leaf runs its program under.
     """
 
     shell: Callable[[str], Awaitable[IOResult]] | None = None
@@ -255,6 +293,7 @@ class CLIContext:
     ns: NamespaceView | None = None
     session_view: SessionView | None = None
     processes: ProcessView | None = None
+    routing: RouteDecision[Runtime] | None = None
 
 
 def drops_mount_caches(spec: CLISpec) -> bool:
@@ -308,8 +347,8 @@ async def handle_cli(
             invocation record.
         context (CLIContext): the workspace context on offer, one bag
             (the fifth argument TS's ``handleCli`` has always taken).
-            The four door facts ride ``inv.doors`` as one CLIDoors,
-            one door per state plane; a verb that never reads it
+            The four entry point facts ride ``inv.view`` as one CLIView,
+            one entry point per state plane; a verb that never reads it
             cannot touch a mount, and outside a workspace the field
             is None.
         drop_caches (Callable | None): drop cached listings and bodies
@@ -455,20 +494,20 @@ async def handle_cli(
         # --help itself is handed the value it asked for.
         kw.pop("help", None)
 
-    # One door per state plane, riding the record as one field. Most
+    # One entry point per state plane, riding the record as one field. Most
     # CLIs never read it: an API client has no filesystem, while `git`
     # is nothing but one. None outside a workspace, so a verb that needs
     # a plane refuses there on its own.
     opened = (dispatch, stat_path, ns, session_view, context.processes)
-    doors = (
-        CLIDoors(
+    view = (
+        CLIView(
             dispatch=dispatch,
             stat_path=stat_path,
             ns=ns,
             session_view=session_view,
             processes=context.processes,
         )
-        if any(door is not None for door in opened)
+        if any(part is not None for part in opened)
         else None
     )
     active = True
@@ -489,7 +528,7 @@ async def handle_cli(
         flags=kw,
         stdin=stdin,
         env=env_snapshot(session),
-        doors=doors,
+        view=view,
         spec=leaf,
         shell=shell if context.shell is not None else None,
     )
@@ -506,17 +545,21 @@ async def handle_cli(
     body: Awaitable[CommandOutput | None]
     native = leaf.script is None
     if leaf.script is not None:
-        runtime, refused = _select_runtime(prog, leaf, entries or [])
+        runtime, refused = _select_runtime(
+            prog, leaf, entries or [], context.routing
+        )
         if runtime is None:
             # The interpreter is missing, not the command: 127 like an
-            # interpreter command no runtime entry captures (run_code).
-            sel_stderr = encode_text(f"{refused}\n")
-            sel_io = IOResult(exit_code=127, stderr=sel_stderr)
+            # interpreter command no runtime entry captures (run_code),
+            # or 126 when this line's capturers all refused it.
+            assert refused is not None
             return (
                 None,
-                sel_io,
+                refused,
                 ExecutionNode(
-                    command=cmd_str, exit_code=127, stderr=sel_stderr
+                    command=cmd_str,
+                    exit_code=refused.exit_code,
+                    stderr=await refused.materialize_stderr(),
                 ),
             )
         body = _script_output(

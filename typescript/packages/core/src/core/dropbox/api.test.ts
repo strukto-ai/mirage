@@ -14,6 +14,7 @@
 
 // Mirror of the search_files cases in python/tests/core/dropbox/test_api.py.
 
+import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
 
@@ -23,7 +24,12 @@ vi.mock('./client.ts', async () => {
 })
 
 import * as client from './client.ts'
-import type { DropboxTokenManager } from './client.ts'
+import { DropboxApiError, type DropboxTokenManager } from './client.ts'
+import { runWithWriteContext } from '../../cache/context.ts'
+import { keptVersions } from '../../test-utils.ts'
+import { isStaleWrite } from '../../errors/fs.ts'
+import type { StaleWriteError } from '../../errors/types.ts'
+import { PathSpec } from '../../types.ts'
 import {
   MAX_SEARCH_MATCHES,
   SEARCH_PAGE,
@@ -31,6 +37,7 @@ import {
   listFolderState,
   movePath,
   searchFiles,
+  refused,
 } from './api.ts'
 
 const TM = {} as DropboxTokenManager
@@ -157,4 +164,44 @@ describe('movePath', () => {
     rpc.mockResolvedValueOnce(reply)
     expect(await movePath(TM, '/a', '/b')).toEqual(moved)
   })
+})
+
+interface LostCase {
+  name: string
+  summary: string
+  outcome: 'lost' | 'gone' | 'other'
+}
+
+const LOST = JSON.parse(
+  readFileSync(
+    new URL('../../../../../../integ/fixtures/write/drive_lost_codes.json', import.meta.url),
+    'utf-8',
+  ),
+) as { dropbox: LostCase[] }
+
+async function refuse(
+  err: DropboxApiError,
+  sent: string | null,
+): Promise<[string[], StaleWriteError | null]> {
+  const { context, kept } = keptVersions('dropbox')
+  const path = new PathSpec({ virtual: '/dbx/f', directory: '/dbx/', vfsPath: '/f' })
+  const got = await runWithWriteContext('/dbx/', context, () =>
+    refused(path, err, { ifMatch: 's1' }, sent),
+  )
+  return [kept, got]
+}
+
+describe('refused', () => {
+  const rows = LOST.dropbox.flatMap((c) => [[c.name, 'e1', c] as const, [c.name, null, c] as const])
+  it.each(rows)(
+    'reads Dropbox answers like the shared table: %s, sent %s',
+    async (_name, sent, c) => {
+      const [kept, got] = await refuse(new DropboxApiError('x', 409, c.summary), sent)
+      if (sent === null || c.outcome === 'other') expect([kept, got]).toEqual([[], null])
+      else {
+        expect(isStaleWrite(got)).toBe(true)
+        expect(kept).toEqual(c.outcome === 'lost' ? ['s1'] : [])
+      }
+    },
+  )
 })

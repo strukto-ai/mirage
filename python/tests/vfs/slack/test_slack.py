@@ -20,9 +20,9 @@ import pytest
 from mirage.cache.index import IndexEntry
 from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
+from mirage.utils.abort import MirageAbortError
 from mirage.vfs.slack.config import SlackConfig
 from mirage.vfs.slack.slack import SlackVFS
-from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.workspace.workspace import Workspace
 
 

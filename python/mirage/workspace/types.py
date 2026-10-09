@@ -37,12 +37,15 @@ class MountRow:
         sizes_always_known (bool): mirrors ``BaseVFS.sizes_always_known``;
             read by the fskit mount guard, which cannot serve a VFS that
             sizes files only on read.
+        anchor (bool): the scratch root the workspace adds when no mount
+            claims ``/``, which nobody mounted.
     """
 
     prefix: str
     resource_type: str
     mode: MountMode
     sizes_always_known: bool = False
+    anchor: bool = False
 
 
 @dataclass
@@ -92,3 +95,14 @@ class ExecutionNode:
         if self.records:
             d["records"] = [r.to_dict() for r in self.records]
         return d
+
+
+class StatusWriter:
+    """Opaque per-line identity for status writes.
+
+    Minted once per ``Workspace.shell`` and carried on the line's
+    ``LineFrame``, so ``record_status`` can say whose ``$?`` the session
+    is holding and a cancelled line puts back only what it overwrote.
+    """
+
+    __slots__ = ()

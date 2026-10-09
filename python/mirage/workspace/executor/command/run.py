@@ -29,8 +29,8 @@ from mirage.observe.context import command_records
 from mirage.observe.record import WRITE_FINGERPRINT_OPS, OpRecord
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
-from mirage.runtime.table import WorkspaceRuntime
 from mirage.runtime.types import DispatchFn
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext
@@ -82,7 +82,9 @@ def admission_denial(cmd_name: str) -> IOResult:
 
 
 def line_runtime_for(
-    cmd_name: str, registry: MountRegistry, routing: RouteDecision | None
+    cmd_name: str,
+    registry: MountRegistry,
+    routing: RouteDecision[Runtime] | None,
 ) -> tuple[Runtime | None, IOResult | None]:
     """Resolve a command against the line's routing decision.
 
@@ -90,7 +92,7 @@ def line_runtime_for(
     the command's runtime is looked up in the decision: its binding,
     or the decision's fallback when no entry captures it. A resolved
     WorkspaceRuntime means the executor serves the command itself (the
-    workspace runtime has no interpreter door); None means no runtime
+    workspace runtime has no interpreter entry point); None means no runtime
     accepted it: exit 126, like a shell refusing to exec.
 
     Args:
@@ -281,7 +283,7 @@ async def run_on_mount(
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     argv: tuple[str, ...] = (),
     execute_fn: ExecuteLine | None = None,
 ) -> tuple[ByteSource | None, IOResult]:

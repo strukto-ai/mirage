@@ -460,6 +460,48 @@ class IgnoredPathsError(GitError):
         )
 
 
+class UnindexableFileError(GitError):
+    """A path ``add`` or ``commit -a`` could not read to stage.
+
+    git names the open that failed and the file it could not index, then
+    gives up on the whole update, and words the end by whether the index
+    already held the path. Pinned against git 2.47.3.
+
+    Args:
+        name (str): the path as git names it.
+        reason (str): why the open failed, as strerror words it.
+        tracked (bool): the index already held the path.
+    """
+
+    prefix = "error"
+
+    def __init__(self, name: str, reason: str, tracked: bool) -> None:
+        verb = "updating" if tracked else "adding"
+        super().__init__(
+            f'open("{name}"): {reason}\n'
+            f"error: unable to index file '{name}'\n"
+            f"fatal: {verb} files failed"
+        )
+
+
+class UnhashableFileError(GitError):
+    """A working-tree file ``diff`` could not read to compare.
+
+    Pinned against git 2.47.3.
+
+    Args:
+        name (str): the path as git names it.
+        reason (str): why the open failed, as strerror words it.
+    """
+
+    prefix = "error"
+
+    def __init__(self, name: str, reason: str) -> None:
+        super().__init__(
+            f'open("{name}"): {reason}\nfatal: cannot hash {name}'
+        )
+
+
 class NothingSpecifiedError(GitError):
     """``add`` with no pathspec at all.
 

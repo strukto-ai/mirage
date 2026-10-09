@@ -16,6 +16,7 @@ import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { classify } from '../errors/index.ts'
 import { isMissingOp, isMissingPath } from '../errors/fs.ts'
 import {
+  atimeMs,
   contentSize,
   DIR_MODE,
   deviceRdev,
@@ -43,7 +44,7 @@ function isAbsent(err: unknown): boolean {
 }
 
 /**
- * Whether a listing row is one the door did not classify.
+ * Whether a listing row is one the file adapter did not classify.
  *
  * Its size-0 non-directory shape is a placeholder, not an answer: a
  * guest that needs the entry's kind, size or stamp must ask the mount
@@ -58,22 +59,24 @@ export function isUnclassified(entry: VFSEntry | VFSStat): boolean {
 /**
  * Translate one mirage stat row into the guest-facing struct.
  *
- * The projection lives at the door rather than in each surface so both
+ * The projection lives in the file adapter rather than in each surface so both
  * languages build one struct in one tier: preview1 reads the type bits
  * out of `mode` and drops the rest, monty fills a `StatResult`,
- * Emscripten fills an `FSAttr`. Mirrors python's `RuntimeVFS._row`.
+ * Emscripten fills an `FSAttr`. Mirrors python's `stat_row`.
  */
 function statRow(st: FileStat): VFSStat {
-  const ms = mtimeMs(st)
+  const mtime = mtimeMs(st)
+  const atime = atimeMs(st)
   return {
     size: contentSize(st),
     isDir: isDir(st),
-    // A guest wire has no validity channel for a timestamp, so an
-    // unknown mtime and epoch zero both encode as 0 from here on.
-    mtimeMs: ms ?? 0,
     mode: posixMode(st),
+    ...(mtime !== null ? { mtimeMs: mtime } : {}),
     ...(isLink(st) ? { isLink: true } : {}),
     ...(isCharDevice(st) ? { rdev: deviceRdev(st) } : {}),
+    ...(atime !== null ? { atimeMs: atime } : {}),
+    ...(typeof st.uid === 'number' ? { uid: st.uid } : {}),
+    ...(typeof st.gid === 'number' ? { gid: st.gid } : {}),
   }
 }
 
@@ -112,13 +115,13 @@ function baseName(entry: string): string {
  *   resolver: the workspace mount routing table; the default answers
  *     no mounts, so routing questions answer null.
  */
-export class RuntimeVFS {
+export class RuntimeFiles {
   private readonly dispatch: BridgeDispatchFn
   private readonly resolver: MountResolver
   private readonly noAppend = new Set<string>()
 
   constructor(dispatch: BridgeDispatchFn, resolver: MountResolver = new PrefixResolver(() => [])) {
-    // One cap on every request this door sends, held for that request
+    // One cap on every request the file adapter sends, held for that request
     // alone, so the stats of listings that run together (a preload
     // walking a tree) share it with the walk's own reads.
     const limiter = new ConcurrencyLimiter(LISTING_ENTRY_CONCURRENCY)
@@ -133,9 +136,9 @@ export class RuntimeVFS {
     this.resolver = resolver
   }
 
-  /** The file door every engine builds from its execution context. */
-  static of(context: RuntimeContext): RuntimeVFS {
-    return new RuntimeVFS(context.dispatch, context.resolver)
+  /** The file adapter every engine builds from its execution context. */
+  static of(context: RuntimeContext): RuntimeFiles {
+    return new RuntimeFiles(context.dispatch, context.resolver)
   }
 
   /**
@@ -182,15 +185,16 @@ export class RuntimeVFS {
   /**
    * A file's bytes, or the range of them a handle asked for. `raw` reads
    * the stored bytes rather than a rendering, which is what an edit that is
-   * written back must start from. Mirrors Python's `RuntimeVFS.read`.
+   * written back must start from; `direct` reads what the backend holds
+   * now, past the file cache. Mirrors Python's `RuntimeFiles.read`.
    */
   async read(
     path: string,
-    options: { offset?: number; size?: number; raw?: boolean } = {},
+    options: { offset?: number; size?: number; raw?: boolean; direct?: boolean } = {},
   ): Promise<Uint8Array> {
     const out = await this.dispatch('read', path, undefined, undefined, options)
     if (!(out instanceof Uint8Array)) {
-      throw new TypeError(`runtime vfs: read ${path} expected Uint8Array, got ${typeof out}`)
+      throw new TypeError(`runtime files: read ${path} expected Uint8Array, got ${typeof out}`)
     }
     return out
   }
@@ -198,7 +202,7 @@ export class RuntimeVFS {
   async write(path: string, bytes: Uint8Array): Promise<void> {
     const out = await this.dispatch('write', path, bytes)
     if (out !== undefined) {
-      throw new TypeError(`runtime vfs: write ${path} expected void, got ${typeof out}`)
+      throw new TypeError(`runtime files: write ${path} expected void, got ${typeof out}`)
     }
   }
 
@@ -229,7 +233,7 @@ export class RuntimeVFS {
       nofollow ? { nofollow: true } : undefined,
     )
     if (out === null || typeof out !== 'object' || typeof (out as FileStat).name !== 'string') {
-      throw new TypeError(`runtime vfs: stat ${path} bad shape`)
+      throw new TypeError(`runtime files: stat ${path} bad shape`)
     }
     return statRow(out as FileStat)
   }
@@ -258,7 +262,7 @@ export class RuntimeVFS {
    * shell, while a withheld surface's files (history, the program view)
    * stay unseen. A file's own row decides that, not its listing: the
    * history mount lists its one file as empty so a traversal never
-   * descends into it. 0 is the door's spelling of an unknown mtime.
+   * descends into it. 0 is the file adapter's spelling of an unknown mtime.
    */
   async viewStat(path: string): Promise<VFSStat | null> {
     const row = await this.statOrNull(path)
@@ -268,7 +272,7 @@ export class RuntimeVFS {
       return null
     }
     if ((await this.listingOrNull(path)) === null) return null
-    return { size: 0, isDir: true, mode: DIR_MODE, mtimeMs: 0 }
+    return { size: 0, isDir: true, mode: DIR_MODE }
   }
 
   /**
@@ -294,7 +298,7 @@ export class RuntimeVFS {
    * entry is classified by its own stat, which is RAM when the readdir
    * filled the index and a backend request when the mount keeps none.
    * At most `LISTING_ENTRY_CONCURRENCY` requests run at once across
-   * everything this door serves, so a large directory on an unindexed
+   * everything this adapter serves, so a large directory on an unindexed
    * mount does not put every entry's request on the wire together.
    *
    * An entry whose stat fails, for any reason, rides unclassified: a
@@ -330,7 +334,7 @@ export class RuntimeVFS {
   async readdir(path: string, classify = true): Promise<VFSEntry[]> {
     const out = await this.dispatch('readdir', path)
     if (!Array.isArray(out)) {
-      throw new TypeError(`runtime vfs: readdir ${path} expected array`)
+      throw new TypeError(`runtime files: readdir ${path} expected array`)
     }
     // After the listing, not before: a directory that will not list
     // (ENOENT, or a link cycle the namespace refuses to resolve) must
@@ -338,7 +342,7 @@ export class RuntimeVFS {
     const links = this.resolver.linkChildren(path)
     const rows = out.map((raw): VFSEntry => {
       if (typeof raw !== 'string') {
-        throw new TypeError(`runtime vfs: readdir ${path} bad entry shape`)
+        throw new TypeError(`runtime files: readdir ${path} bad entry shape`)
       }
       // Backends that mark directories with a trailing slash skip the
       // stat; unmarked entries (e.g. RAM) need one to learn dir-ness.
@@ -361,10 +365,20 @@ export class RuntimeVFS {
   private async classified(directory: string, row: VFSEntry): Promise<VFSEntry> {
     const mark = row.isLink === true ? { isLink: true } : {}
     try {
-      return { path: row.path, ...(await this.stat(row.path, row.isLink === true)), ...mark }
+      const st = await this.stat(row.path, row.isLink === true)
+      return {
+        path: row.path,
+        size: st.size,
+        isDir: st.isDir,
+        mode: st.mode,
+        mtimeMs: st.mtimeMs ?? 0,
+        ...(st.isLink === true ? { isLink: true } : {}),
+        ...(st.rdev !== undefined ? { rdev: st.rdev } : {}),
+        ...mark,
+      }
     } catch (err) {
       if (!isMissingPath(err)) {
-        console.warn(`runtime vfs: readdir ${directory}: stat ${row.path}: ${String(err)}`)
+        console.warn(`runtime files: readdir ${directory}: stat ${row.path}: ${String(err)}`)
       }
       return row
     }
@@ -428,7 +442,7 @@ export class RuntimeVFS {
    * A link is namespace state, so no backend stores one and the target
    * is kept verbatim as the guest typed it. The dispatcher answers this
    * op from the node table itself, which is why a runtime can serve
-   * `os.symlink` at all: the door a surface already holds reaches the
+   * `os.symlink` at all: the dispatcher a surface already holds reaches the
    * name plane, not just a mount.
    *
    * Args:
@@ -448,7 +462,7 @@ export class RuntimeVFS {
   async readlink(path: string): Promise<string> {
     const out = await this.dispatch('readlink', path)
     if (typeof out !== 'string') {
-      throw new TypeError(`runtime vfs: readlink ${path} expected string, got ${typeof out}`)
+      throw new TypeError(`runtime files: readlink ${path} expected string, got ${typeof out}`)
     }
     return out
   }
@@ -456,7 +470,7 @@ export class RuntimeVFS {
   /**
    * Write metadata fields, natively where the backend can hold them.
    *
-   * The door reads the whole set and stores in the namespace overlay
+   * The dispatcher reads the whole set and stores in the namespace overlay
    * whatever the backend cannot keep, so a mount with no setattr op
    * still answers: a utime on an s3 or dropbox mount lands in the name
    * plane and stat reports it back. Stored, not enforced; the mount
@@ -496,7 +510,7 @@ export class RuntimeVFS {
     if (await this.appendDelta(path, tail)) return
     let base: Uint8Array = new Uint8Array()
     try {
-      base = await this.read(path, { raw: true })
+      base = await this.read(path, { raw: true, direct: true })
     } catch (err) {
       if (!isMissingPath(err)) throw err
     }

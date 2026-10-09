@@ -38,7 +38,7 @@ implementations cannot drift apart.
   registers coded policies, then drives lines, VFS calls, tools, asks and
   explain, pinning what each refuses, asks or lets through: the allow list,
   command and path rules, anchor depth, asks and their answers, the VFS
-  door, hide and show, mount modes and sections, coded and script
+  entry point, hide and show, mount modes and sections, coded and script
   policies, and placement. `lifecycle/run.py` and `lifecycle/run.ts` run
   it, given its path.
 - `prisma/`: one schema per kit fake.
@@ -179,8 +179,9 @@ flowchart LR
 
 The same wiring from the side of a change. Every file under `python/` sets
 `core` and `data`, every file under `typescript/` sets `ts`, `data` and
-`database`, and every file under `integ/` sets `core`, `ts` and `data`. These
-set more:
+`database`, and every file under `integ/` sets `core`, `ts` and `data`. This includes the Git `grep` and `ls_files` modules: either host
+change selects the shared Git disk/RAM corpus through these broad filters.
+No per-verb allowlist is needed. The following paths select additional jobs:
 
 | Changed                                                                                                      | Also sets               |
 | ------------------------------------------------------------------------------------------------------------ | ----------------------- |
@@ -217,6 +218,22 @@ Their shared lifecycle cases cover ordered byte events, final status, session
 mutations, output before completion, cancellation and early consumer closure.
 The mirrored `server/mcp/progress` modules also belong to those filters; the
 access corpus checks progress over HTTP SSE and the CLI's stdio relay.
+
+Qdrant's shared query shapes (`core/qdrant/types.py` and `types.ts`) are
+covered by the Python backend glob and the broad TypeScript filter, so
+changes to those types also select the database job.
+
+LanceDB's shared query shapes (`core/lancedb/types.py` and `types.ts`) stay
+under the whole-host `core` and `ts` filters, whose jobs run the embedded
+LanceDB corpus.
+
+S3's shared `core/s3/types` modules and the consolidated `vfs/types` find
+options also select the whole-host jobs. Pyodide's `runtime/python/pyodide/config.ts`
+stays in the broad TypeScript and runtime filters.
+
+The shared `utils/abort` cancellation primitives remain in both whole-host
+filters and the runtime filters, alongside the `workspace/abort` line
+orchestration that consumes them.
 
 The shared YAML config readers (`python/mirage/utils/yaml.py` and
 `typescript/packages/node/src/utils/yaml.ts`) use the broad language filters
@@ -293,7 +310,7 @@ The target combines nested service mounts, a regular RAM mount, a child that
 serves metadata without search commands, and hidden descendants.
 `crossmount/service/native.json` also covers repeated operands, quiet stopping,
 errors, an existing custom aggregate registration, and one CLI invocation
-through dispatch doors. A barrier proves native read preparation is bounded to
+through dispatcher calls. A barrier proves native read preparation is bounded to
 four invocations; stream cases check partial failures, timeout cleanup and early
 pipe closure. Mutation commands and shared stdin retain serial execution.
 The program cases cover program files read across mounts (`grep -f`, `sed -f`,

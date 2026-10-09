@@ -26,8 +26,8 @@ class FileHandle:
     """One open file: its stored bytes fetched as read, its writes kept.
 
     Nothing moves at open. A read fetches the chunk it lands in through
-    ``base`` (a ``ChunkedHandle`` over the door's ranged read), and what
-    the handle wrote is kept as byte ranges laid over those stored
+    ``base`` (a ``ChunkedHandle`` over the file adapter's ranged read), and
+    what the handle wrote is kept as byte ranges laid over those stored
     bytes. A close owes the mount only those ranges (``flush_plan``),
     so another writer's bytes between them survive, which a copy of the
     whole file taken at open and written back at close would undo. An
@@ -80,7 +80,7 @@ class FileHandle:
 
         Args:
             path (str): guest-absolute virtual path.
-            fetch (FileFetch | None): the door's
+            fetch (FileFetch | None): the file adapter's
                 read of ``(offset, size)``, a None size reading to the
                 end; None when the open created or emptied the file.
             size (int): the file's length as the open saw it.
@@ -90,12 +90,12 @@ class FileHandle:
         """
         base = None
         if fetch is not None:
-            door = fetch
+            fetcher = fetch
 
             def ranged(offset: int, asked: int) -> bytes:
                 if offset == 0 and size <= READ_CHUNK:
-                    return door(0, None)
-                return door(offset, asked)
+                    return fetcher(0, None)
+                return fetcher(offset, asked)
 
             base = ChunkedHandle(path=path, size=size, fetch=ranged)
         handle = cls(
@@ -283,9 +283,12 @@ class FileHandle:
         Args:
             size (int): the new length.
         """
+        # ftruncate(2) sets the length outright, so a cut to the length
+        # this handle holds still drops what another writer appended
+        # since the open.
+        if self.base is not None and size <= self.size:
+            self.cut = size if self.cut is None else min(self.cut, size)
         if size < self.size:
-            if self.base is not None:
-                self.cut = size if self.cut is None else min(self.cut, size)
             kept: list[tuple[int, bytearray]] = []
             for start, run in self.runs:
                 if start < size:
@@ -302,7 +305,7 @@ class FileHandle:
         second flush then owes only what came after the first.
 
         Args:
-            fetch (FileFetch): the door's read
+            fetch (FileFetch): the file adapter's read
                 of the stored bytes, as ``opened`` takes it.
         """
         size = self.size

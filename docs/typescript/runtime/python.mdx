@@ -90,10 +90,12 @@ worker; the fallback below answers them with `OSError` (`ENOTSUP`).
 
 With a worker, files are fetched on first access and cached for that run.
 The cache is discarded before the next execution; it does not track
-external edits to already fetched files during a run. Writes flush through
-workspace operations before later backend reads and when execution ends.
-A failed flush produces stderr and a nonzero exit, and stops later
-mutations. Concurrent writes have no conflict detection.
+external edits to already fetched files during a run. A create, delete,
+rename, mkdir, chmod or truncate reaches the mount as the call makes it,
+and a file's writes when it is closed, so a refusal fails that call with
+the mount's errno, as a syscall would. Writes still open when execution
+ends flush then; a failure there produces stderr and a nonzero exit, and
+stops later mutations. Concurrent writes have no conflict detection.
 
 Worker access requires `SharedArrayBuffer`. Node supports this without
 experimental flags. Browser pages must be cross-origin isolated, typically
@@ -108,9 +110,9 @@ export default defineConfig({
 ```
 
 When workers or shared memory are unavailable, or a worker cannot start,
-Pyodide falls back to collecting mounted files before execution and
-replaying writes afterward. That fallback reads whole mounts into memory;
-use narrow mount prefixes for large mounts. Neither mode requires JSPI.
+`python3` in a workspace exits 127 and says so: the only other way to
+serve the mounts would read every file of every mount before each run.
+The worker does not require JSPI.
 
 Mount workspace files under a non-root prefix such as `/data`. A mount at
 `/` cannot replace Pyodide's own filesystem, which contains its standard
@@ -366,7 +368,7 @@ workers. Unsupported options fail explicitly.
 Monty keeps its normal unsupported `subprocess` import; no custom guest helper
 is injected.
 
-Host applications use the same admitted argv door:
+Host applications use the same admitted argv entry point:
 
 ```typescript
 const child = ws.spawn({ argv: ['cat'] })

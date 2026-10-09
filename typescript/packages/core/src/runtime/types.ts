@@ -14,18 +14,22 @@
 
 import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
 import type { PathSpec, SetAttrFields } from '../types.ts'
-import type { RuntimeConfig } from './config.ts'
-import type { RouteScript } from './routing/types.ts'
+
+/** The runtime metadata shared by routing and capability checks. */
+export interface RuntimeIdentity {
+  readonly name: string
+  readonly captures: readonly string[]
+}
 
 /**
- * The languages a runtime can interpret, one name for both doors (run
+ * The languages a runtime can interpret, one name for both entry points (run
  * and eval). A union, not string, so a typo is a type error instead of
  * a selector that silently matches nothing and reports "no runtime".
  */
 export type RuntimeLanguage = 'python' | 'js'
 
 /**
- * Which doors code executed by a runtime has to the outside world.
+ * Which entry points code executed by a runtime has to the outside world.
  *
  * The workspace dispatch is a gate: it checks mount modes, session
  * grants, and policy, records the op, and only then touches the real
@@ -34,11 +38,11 @@ export type RuntimeLanguage = 'python' | 'js'
  * write to an S3 mount still lands in real S3, but only after the
  * gate said yes.
  *
- * - 'workspace': the gate is the code's only door. The engine runs as an
+ * - 'workspace': the gate is the code's only entry point. The engine runs as an
  *   in-process guest with no syscalls, so its I/O can only travel the
  *   VFS bridge (or the workspace executor itself) and a mount-mode or
  *   policy refusal is final.
- * - 'process': the code has host doors around the gate. It is, or
+ * - 'process': the code has host entry points around the gate. It is, or
  *   spawns, a real process on this machine with the user's own
  *   filesystem and network, so it can reach the same backends (and
  *   everything else) without the gate seeing it.
@@ -54,7 +58,7 @@ export type RuntimeReach = 'workspace' | 'process' | 'remote'
  * the consumer side, because runtimes receive it through a binding while the
  * workspace provides it, and the runtime package imports no workspace
  * module — the home of Python's DispatchFn protocol (runtime/types).
- * `report`, when a caller passes one, is stamped by the door the moment
+ * `report`, when a caller passes one, is stamped by the dispatcher the moment
  * the op completes, so an observer reads what ran even when a later
  * step throws the result away; runtimes and combiners never pass it.
  */
@@ -68,7 +72,7 @@ export type DispatchFn = (
 
 /**
  * Run one shell line in the calling session and return its result, the
- * line reading the given input (null keeps the ambient one): the door a
+ * line reading the given input (null keeps the ambient one): the entry point a
  * command handler reaches the executor through, as awk's command pipes
  * and system() do. Defined beside DispatchFn for the same reason: the
  * consumer receives it, the workspace provides it.
@@ -93,6 +97,8 @@ export type BridgeOpAttrs = SetAttrFields & {
   length?: number
   /** A read of the stored bytes rather than a rendering. */
   raw?: boolean
+  /** A read of what the backend holds now, past the file cache. */
+  direct?: boolean
 }
 
 /**
@@ -282,29 +288,6 @@ export interface EvalResult {
   status: EvalStatus
 }
 
-/** Constructor options every runtime accepts (a yaml entry's keys). */
-export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown>> {
-  /**
-   * Commands this runtime claims; EXTERNAL_COMMANDS captures unresolved
-   * program names. ["*"]
-   * claims every line for a line-executing runtime.
-   */
-  captures?: readonly string[]
-  /**
-   * The runtime's implementation knobs (a yaml entry's `config`
-   * block), coerced against the runtime's own key list so a field the
-   * runtime does not have fails loud.
-   */
-  config?: C
-  /**
-   * Per-line admission script for the routing ladder, answering "do I
-   * want this line": a function taking a RouteContext, or a
-   * config-borne ScriptSource. Absent = always willing. Policy, not
-   * capability: it can only refuse lines the captures already allow.
-   */
-  script?: RouteScript
-}
-
 /**
  * Script source arriving from a workspace config, not from code.
  *
@@ -312,7 +295,7 @@ export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown
  * value references a `.py` file whose content is embedded here at
  * load. The source sees ctx as a dict and its LAST EXPRESSION is the
  * verdict. It runs on the policy engine (monty today; a sandbox
- * runtime is a candidate door later).
+ * runtime is a candidate entry point later).
  */
 export class ScriptSource {
   /**
@@ -362,7 +345,9 @@ export interface VFSStat {
   isDir: boolean
   // Milliseconds here and nanoseconds in python, on purpose: epoch
   // nanoseconds are past 2**53, so a number cannot hold them exactly.
-  mtimeMs: number
+  // Absent when the source reports none; a guest wire with no validity
+  // channel spells that 0 at its own boundary.
+  mtimeMs?: number
   // The full st_mode, type bits included, so a chmod the shell made is
   // what a guest's stat reports. A guest that has no mode field on its
   // own wire (preview1's filestat carries only a filetype) reads the
@@ -374,4 +359,9 @@ export interface VFSStat {
   isLink?: boolean
   // Encoded logical major:minor; present only for a character device.
   rdev?: number
+  // Access time, absent when the source reports none.
+  atimeMs?: number
+  // Numeric owner and group, absent when unknown or stored as a name.
+  uid?: number
+  gid?: number
 }

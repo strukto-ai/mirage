@@ -105,9 +105,9 @@ describe('pathFlagScopes', () => {
     ['curl', ['-o', '/other/body', '-D', '/data/h', 'http://x.test/']],
     ['curl', ['--dump-header', '-', '--output', '/other/body', 'http://x.test/']],
     ['jq', ['--slurpfile', 's', '/other/s.json', '--rawfile', 'r', '/dev/fd/63', '.']],
-  ])('leaves the files %s reads or writes through the door out', (cmd, argv) => {
+  ])('leaves the files %s reads or writes through the dispatcher out', (cmd, argv) => {
     // The handler reaches them through the dispatcher, so they name no
-    // mount the line has to run on (DOOR_FLAG_KEYS).
+    // mount the line has to run on (DISPATCH_FLAG_KEYS).
     expect(pathFlagScopes(cmd, argv, '/')).toEqual([])
   })
 })

@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from mirage.commands.cli.walk import invoked_env_names, supplied_env_names
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
-from mirage.runtime.table import WorkspaceRuntime
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import fetch_secret
 from mirage.secrets.summary import field_summary
@@ -163,7 +163,7 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
 
 def guest_bound(
     nodes: Sequence[TSNodeLike],
-    decision: RouteDecision | None,
+    decision: RouteDecision[Runtime] | None,
     static_bindings: Mapping[str, Runtime | None],
 ) -> bool:
     """Whether any of the line's commands runs on a guest runtime.
@@ -719,7 +719,7 @@ async def fill_env(
     idempotent. Fetches group by ``(source, ref)``, one await per
     distinct secret, and the fetched value lands directly in
     ``session.vars`` with the pointer kept: this is the one host-tier
-    writer, above the agent's gated door.
+    writer, above the agent's gated session view.
 
     A failed fetch, or a secret without the wanted field, raises
     SecretsError naming the variable and the source -- never the ref,

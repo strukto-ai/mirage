@@ -62,7 +62,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -190,10 +190,10 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch, stat_path = doors.dispatch, doors.stat_path
+    view = inv.view or CLIView()
+    dispatch, stat_path = view.dispatch, view.stat_path
     texts = inv.texts
     fl = FlagView(inv.flags)
     cached = fl.as_bool("cached") or fl.as_bool("staged")
@@ -208,7 +208,7 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             raise UsageError("", verb_usage(inv))
         if word is not None:
             raise InvalidOptionError(word, verb_usage(inv))
-        repo, location = await opened(fl, doors)
+        repo, location = await opened(fl, view)
         parsed = parse_diff_flags(
             fl,
             default_renames=await renames_enabled(dispatch, location),
@@ -229,7 +229,7 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             if new is None:
                 state = await read_index(dispatch, location.gitdir)
                 after = await work_entries(
-                    dispatch, stat_path, repo, location, state, links_of(doors)
+                    dispatch, stat_path, repo, location, state, links_of(view)
                 )
                 if old is None:
                     for path in state.conflicts:

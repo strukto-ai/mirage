@@ -13,33 +13,53 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { evictAfter, invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
+import {
+  evictAfter,
+  invalidateAfterWrite,
+  invalidateAncestors,
+  nativeCondition,
+  writeCondition,
+} from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { uploadToken } from '../../utils/upload.ts'
-import type { DropboxEntry } from './api.ts'
+import { lookup, refused, type DropboxEntry } from './api.ts'
+import { liveOf } from './fingerprint.ts'
 import { dropboxUpload } from './client.ts'
 import { dropboxPathOf } from './paths.ts'
 import { statFromEntry } from './stat.ts'
 
 // Single-call upload; Dropbox caps it at ~150 MB (larger files need
 // upload sessions, not supported here). A failed upload still evicts the
-// path: Dropbox may have stored the bytes before its reply broke off.
+// path: Dropbox may have stored the bytes before its reply broke off. A held
+// version costs one get_metadata and goes out as the file's rev in `update`
+// mode.
 export async function write(
   accessor: DropboxAccessor,
   path: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
+  const tm = accessor.tokenManager
+  const apiPath = dropboxPathOf(accessor, path)
+  const cond = await writeCondition(path, 'put')
+  let rev: string | null = null
+  if (cond?.ifMatch !== undefined && cond.ifMatch !== '') {
+    rev = await nativeCondition(path, cond, liveOf(await lookup(tm, apiPath)), 'put')
+  }
   const timer = startOp()
-  await evictAfter(
-    async () => {
-      const entry = await dropboxUpload(accessor.tokenManager, dropboxPathOf(accessor, path), data)
-      const token = uploadToken(entry as DropboxEntry | null, statFromEntry, path.virtual)
-      record('write', path.virtual, 'dropbox', data.byteLength, timer, { fingerprint: token })
-    },
-    async () => {
-      await invalidateAfterWrite(path)
-      await invalidateAncestors(path)
-    },
-  )
+  try {
+    await evictAfter(
+      async () => {
+        const entry = await dropboxUpload(tm, apiPath, data, rev)
+        const token = uploadToken(entry as DropboxEntry | null, statFromEntry, path.virtual)
+        record('write', path.virtual, 'dropbox', data.byteLength, timer, { fingerprint: token })
+      },
+      async () => {
+        await invalidateAfterWrite(path)
+        await invalidateAncestors(path)
+      },
+    )
+  } catch (err) {
+    throw (await refused(path, err, cond, rev)) ?? err
+  }
 }

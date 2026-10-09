@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { foldAscii } from '../../../../utils/posix.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
 import git from 'isomorphic-git'
 
 import { getOpcodes } from '../../../builtin/diff_format.ts'
@@ -21,8 +22,6 @@ import { lines } from './patch.ts'
 import { repoArgs, type Repo } from './repo.ts'
 import { BINARY_SNIFF } from './summary.ts'
 import { treeEntries } from './tree.ts'
-
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
 /** A blob's bytes, empty for a side that does not exist or is no blob. */
 async function blob(repo: Repo, oid: string | null): Promise<Uint8Array> {
@@ -75,8 +74,8 @@ async function occurrences(
   ignoreCase: boolean,
 ): Promise<number> {
   const data = await blob(repo, oid)
-  if (needle instanceof RegExp) return contains(DEC.decode(data), needle)
-  const text = ignoreCase ? foldAscii(DEC.decode(data)) : DEC.decode(data)
+  if (needle instanceof RegExp) return contains(decodeText(data), needle)
+  const text = ignoreCase ? foldAscii(decodeText(data)) : decodeText(data)
   if (needle === '') return 0
   let count = 0
   let at = text.indexOf(needle)
@@ -124,11 +123,13 @@ export async function greps(
   oid: string,
   parents: readonly string[],
   pattern: RegExp,
+  forceText = false,
 ): Promise<boolean> {
   for (const [oldOid, newOid] of await changes(repo, oid, parents)) {
     const old = await blob(repo, oldOid)
     const now = await blob(repo, newOid)
-    if ([old, now].some((data) => data.subarray(0, BINARY_SNIFF).includes(0))) continue
+    if (!forceText && [old, now].some((data) => data.subarray(0, BINARY_SNIFF).includes(0)))
+      continue
     const before = lines(old)
     const after = lines(now)
     for (const [tag, i1, i2, j1, j2] of getOpcodes(before, after)) {

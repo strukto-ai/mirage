@@ -28,6 +28,7 @@ from mirage.commands.cli.builtin.git.constants import (
     HEAD_REF,
     SYMLINK,
 )
+from mirage.commands.cli.builtin.git.errors import UnhashableFileError
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.objects import VfsObjectStore
@@ -40,6 +41,7 @@ from mirage.commands.cli.builtin.git.types import (
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
 from mirage.errors.constants import MISS_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.view.types import LinkView, StatPath
@@ -389,6 +391,10 @@ async def _differs(
         data = await entry_bytes(dispatch, worktree.join(path), info)
     except MISS_ERRORS:
         return True
+    except PermissionError:
+        # git counts a file it cannot read as changed; a command that
+        # needs its bytes then refuses it (UnhashableFileError).
+        return True
     return Blob.from_string(data).id != entry.sha
 
 
@@ -496,9 +502,15 @@ async def work_entries(
         if info is None:
             del entries[path]
             continue
-        blob = Blob.from_string(
-            await entry_bytes(dispatch, location.worktree.join(name), info)
-        )
+        try:
+            data = await entry_bytes(
+                dispatch, location.worktree.join(name), info
+            )
+        except PermissionError as exc:
+            raise UnhashableFileError(
+                name, fs_strerror(exc) or "Permission denied"
+            ) from exc
+        blob = Blob.from_string(data)
         store.hold(blob)
         entries[path] = (entry_mode(info), blob.id)
     return entries

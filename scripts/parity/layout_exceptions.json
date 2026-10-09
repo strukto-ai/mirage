@@ -4,7 +4,7 @@
  "directories": {
   "python_only": {
    "runtime/wasm": "The wasmtime WASI host. npm ships quickjs-emscripten and pyodide with their own hosts and python has no equivalent, so there is nothing to mirror. CLAUDE.md says do not port it.",
-   "runtime/python/host": "The `with ws:` door: the host interpreter's own builtins.open, io.open and os functions patched onto a workspace (fs, open, file, list, stat, errors, constants), plus the re-entrancy bypass (host_io) the mount path sets so a backend serving an op reaches the host. Its node twin is the one module ops/os_patch (patchNodeFs, excused there): an npm consumer holds promises, not file objects, so file, open and the stat and listing shapes have nothing to mirror, and node needs no host_io because the patch swaps only the CommonJS fs object's methods and promises getter, which every node backend's ESM node:fs/promises import never reaches (pinned by os_patch.test.ts, 'a disk root at its own prefix does not re-enter').",
+   "runtime/python/host": "The `with ws:` entry point: the host interpreter's own builtins.open, io.open and os functions patched onto a workspace (fs, open, file, list, stat, constants), plus the re-entrancy bypass (host_io) the mount path sets so a backend serving an op reaches the host. Both ride the runtimes' file API (runtime/files RuntimeFiles) over ws.vfs. Its node twin is runtime/js/host (fs and constants, excused there): an npm consumer holds promises, not file objects, so file, open and the stat and listing shapes have nothing to mirror, and node needs no host_io because the patch swaps only the CommonJS fs and fs.promises functions, which every node backend's ESM node:fs/promises import never reaches (pinned by fs.test.ts, 'a disk root at its own prefix does not re-enter').",
    "bridge": "sync.py exists to run an event loop on a worker thread for the FUSE callbacks, which python needs because its FUSE loop is threaded and node's is not.",
    "agents/agno": "Ecosystem split: agno is a python-only framework.",
    "agents/openai_agents": "Twin of the typescript agents/openai: the python package is named after the openai-agents SDK and the npm subpath after @openai/agents, so the two never pair by name. Each module added to both sides is excused under modules.agents/openai.",
@@ -28,13 +28,9 @@
   }
  },
  "modules": {
-  "ops": {
-   "typescript_only": {
-    "os_patch": "patchNodeFs, the node twin of python's `with ws:` door: it swaps node's own fs methods onto a workspace, the way runtime/python/host patches the host interpreter's builtins.open, io.open and os functions (excused there as a directory). The python door is a package of its own (fs, open, file, list, stat, errors, constants, host_io), so the two cannot pair by name; node needs only this one module, for the reasons that directory's entry gives."
-   }
-  },
   "accessor": {
    "python_only": {
+    "imap": "The asyncio IMAP4rev1 client behind accessor/email. Node's EmailAccessor drives imapflow (MIT); the asyncio IMAP client on PyPI (aioimaplib) is GPL-3.0, which an Apache-2.0 package cannot ship, so python carries its own minimal client and there is nothing on the node side to mirror.",
     "pool": "One open client per event loop, keyed by the loop object. Only python has the hazard: an aiobotocore client binds to the loop that opened it, and a process runs many loops over its lifetime (every asyncio.run makes one), so a cached client outlives the loop it belongs to and has to be released against a loop that is already closed. Node has one loop and an AWS SDK v3 client that is not bound to it, so S3Accessor there holds config and opens nothing -- there is no lifetime to manage and nothing to mirror."
    },
    "typescript_only": {
@@ -44,7 +40,7 @@
   "runtime/js/quickjs": {
    "typescript_only": {
     "errors": "The preview1 errno table and QuickJsUnavailableError for the Emscripten callbacks: the same guest-visible numbers Python's runtime/wasm/errors.py keeps for every WASI guest, which Python QuickJS uses.",
-    "fs": "The QuickJS Emscripten host callbacks over RuntimeVFS. Python QuickJS is a WASI guest whose file callbacks are the shared runtime/wasm/fs.py host, which is already excused.",
+    "fs": "The QuickJS Emscripten host callbacks over RuntimeFiles. Python QuickJS is a WASI guest whose file callbacks are the shared runtime/wasm/fs.py host, which is already excused.",
     "list": "Encodes directory entries as QuickJS Emscripten handles. Python QuickJS gets preview1 dirents from the shared runtime/wasm/list.py.",
     "loader": "Imports the optional quickjs-emscripten npm package. Python QuickJS locates qjs-wasi.wasm on disk and runs it on the shared runtime/wasm host, whose runtime/wasm/loader.py imports wasmtime.",
     "stat": "Encodes stat results as QuickJS Emscripten handles. Python QuickJS gets preview1 filestats from the shared runtime/wasm/stat.py."
@@ -195,6 +191,12 @@
   "shell/parse": {
    "typescript_only": {
     "config": "The WASM parser factory accepts engine and grammar bytes. Python loads its installed native tree-sitter binding and has no WASM input configuration."
+   }
+  },
+  "runtime/js/host": {
+   "typescript_only": {
+    "constants": "The node entry point's call tables (routed, refused, passthrough), the twin of runtime/python/host/constants.py, which classifies os the same way. Paired by role for the reason the fs entry gives.",
+    "fs": "patchNodeFs, the node twin of python's `with ws:` entry point: it swaps node's own fs and fs.promises functions onto a workspace, the way runtime/python/host patches the host interpreter's builtins.open, io.open and os functions (excused there as a directory), and both ride RuntimeFiles over ws.vfs. The two pair by role, not by path: python's entry point sits under runtime/python/host, node's under runtime/js/host, each beside the engines of its own language."
    }
   }
  }

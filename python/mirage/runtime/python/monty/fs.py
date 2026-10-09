@@ -19,6 +19,7 @@ from stat import S_ISREG
 from typing import Any
 
 from mirage.errors import FsCondition, classify
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import parse_mode
 from mirage.runtime.open import apply_open
 from mirage.runtime.python.monty.constants import (
@@ -34,7 +35,6 @@ from mirage.runtime.python.monty.loader import (
 )
 from mirage.runtime.python.monty.stat import stat_result
 from mirage.runtime.types import VFSStat
-from mirage.runtime.vfs import RuntimeVFS
 
 
 @contextmanager
@@ -61,24 +61,24 @@ def _as_guest(path: str, target: str | None = None) -> Iterator[None]:
 
 
 class MontyFs(AbstractOS):
-    """Monty's OS door: every path a guest names is the workspace's.
+    """Monty's OS callbacks: every path a guest names is the workspace's.
 
     This is monty's tier of the interception taxonomy: the engine hands
     the interpreter a host OS object and calls its methods, so mirage
     implements that object rather than hooking a syscall layer. Every
-    path goes to the file door, and nothing is kept aside: structure is
+    path goes to the file adapter, and nothing is kept aside: structure is
     open (a listing, whether a name is a directory or a link) and
-    content goes only through the runtime's view (``RuntimeVFS.serves``:
+    content goes only through the runtime's view (``RuntimeFiles.serves``:
     the announced mounts and what a link reaches), so a guest lists what
     a shell lists and reads and writes nothing the view withholds. The
     environment, the clocks and ``urandom`` are the engine's own.
 
-    Monty hands the door whole-file calls: an open, then reads of the
+    Monty hands the callbacks whole-file calls: an open, then reads of the
     whole file and appends of each new write. So an open applies its
     mode's effect on the mount (``apply_open``) and nothing else, and
     each write after it ships only its own bytes.
 
-    The door uses synchronous callbacks, so the core's hop parks the
+    The callbacks are synchronous, so the file API's hop parks the
     tokio worker for the whole I/O wait. That caps concurrent
     I/O-waiting runs at Monty's worker pool size, which is the core
     count by default; TOKIO_WORKER_THREADS raises it, and parked
@@ -86,18 +86,18 @@ class MontyFs(AbstractOS):
     runs finish in ~2s at 64 workers versus ~8s at 14).
 
     Args:
-        core (RuntimeVFS | None): the execution's file door, built with
-            ``RuntimeVFS.of(context)``; None outside a workspace, where
+        files (RuntimeFiles | None): the execution's file API, built with
+            ``RuntimeFiles.of(context)``; None outside a workspace, where
             every path is out of view.
         environ (dict[str, str]): the guest's environment.
     """
 
     def __init__(
-        self, core: RuntimeVFS | None, environ: dict[str, str]
+        self, files: RuntimeFiles | None, environ: dict[str, str]
     ) -> None:
         self.max_urandom_bytes = MAX_URANDOM_BYTES
         self._environ = dict(environ)
-        self._core = core
+        self._files = files
 
     def getenv(self, key: str, default: str | None = None) -> str | None:
         return self._environ.get(key, default)
@@ -112,32 +112,32 @@ class MontyFs(AbstractOS):
     def path_resolve(self, path: PurePosixPath) -> str:
         return self.path_absolute(path)
 
-    def _door(self, path: PurePosixPath) -> RuntimeVFS:
-        """The file door for a content call on `path`, in the view only.
+    def _files_for(self, path: PurePosixPath) -> RuntimeFiles:
+        """The file adapter for a content call on `path`, in the view only.
 
         Args:
             path (PurePosixPath): the guest path.
         """
-        core = self._core
-        if core is None or not core.serves(str(path)):
+        files = self._files
+        if files is None or not files.serves(str(path)):
             raise guest_error(FsCondition.ENOENT, str(path))
-        return core
+        return files
 
-    def _structure(self, path: PurePosixPath) -> RuntimeVFS:
-        """The file door for a structural question, asked of any path.
+    def _structure(self, path: PurePosixPath) -> RuntimeFiles:
+        """The file adapter for a structural question, asked of any path.
 
         Args:
             path (PurePosixPath): the guest path.
         """
-        if self._core is None:
+        if self._files is None:
             raise guest_error(FsCondition.ENOENT, str(path))
-        return self._core
+        return self._files
 
     def _row(self, path: PurePosixPath) -> VFSStat | None:
-        if self._core is None:
+        if self._files is None:
             return None
         with _as_guest(str(path)):
-            return self._core.view_stat(str(path))
+            return self._files.view_stat(str(path))
 
     def path_exists(self, path: PurePosixPath) -> bool:
         return self._row(path) is not None
@@ -159,11 +159,11 @@ class MontyFs(AbstractOS):
         Args:
             path (PurePosixPath): the guest path to test.
         """
-        if self._core is None:
+        if self._files is None:
             return False
         with _as_guest(str(path)):
             try:
-                self._core.readlink(str(path))
+                self._files.readlink(str(path))
             except Exception as caught:
                 if classify(caught) not in NOT_A_LINK:
                     raise
@@ -182,18 +182,18 @@ class MontyFs(AbstractOS):
         return stat_result(row)
 
     def path_iterdir(self, path: PurePosixPath) -> list[PurePosixPath]:
-        door = self._structure(path)
+        files = self._structure(path)
         with _as_guest(str(path)):
-            entries = door.readdir(str(path), classify=False)
+            entries = files.readdir(str(path), classify=False)
         return child_paths(path, [entry.path for entry in entries])
 
     def path_open(self, path: PurePosixPath, mode: str) -> MontyFileHandle:
         # Built first: a malformed mode must raise before any effect
         # lands on the mount.
         handle = MontyFileHandle(str(path), mode)
-        door = self._door(path)
+        files = self._files_for(path)
         with _as_guest(str(path)):
-            apply_open(door, str(path), parse_mode(mode))
+            apply_open(files, str(path), parse_mode(mode))
         return handle
 
     def path_read_text(self, path: PurePosixPath | MontyFileHandle) -> str:
@@ -201,9 +201,9 @@ class MontyFs(AbstractOS):
 
     def path_read_bytes(self, path: PurePosixPath | MontyFileHandle) -> bytes:
         target = path_from_arg(path)
-        door = self._door(target)
+        files = self._files_for(target)
         with _as_guest(str(target)):
-            return door.read(str(target))
+            return files.read(str(target))
 
     def path_write_text(
         self, path: PurePosixPath | MontyFileHandle, data: str
@@ -215,9 +215,9 @@ class MontyFs(AbstractOS):
         self, path: PurePosixPath | MontyFileHandle, data: bytes
     ) -> int:
         target = path_from_arg(path)
-        door = self._door(target)
+        files = self._files_for(target)
         with _as_guest(str(target)):
-            door.write(str(target), bytes(data))
+            files.write(str(target), bytes(data))
         return len(data)
 
     def path_append_text(
@@ -233,7 +233,7 @@ class MontyFs(AbstractOS):
 
         Re-sending everything written so far turns a write loop
         quadratic, so a mount with its own append op carries just these
-        bytes, and the door falls back to a whole-file write only for
+        bytes, and the adapter falls back to a whole-file write only for
         the mount without one.
 
         Args:
@@ -241,9 +241,9 @@ class MontyFs(AbstractOS):
             data (bytes): only the newly appended bytes.
         """
         target = path_from_arg(path)
-        door = self._door(target)
+        files = self._files_for(target)
         with _as_guest(str(target)):
-            door.append(str(target), bytes(data))
+            files.append(str(target), bytes(data))
         return len(data)
 
     def path_mkdir(
@@ -269,25 +269,25 @@ class MontyFs(AbstractOS):
             if exist_ok:
                 return
             raise guest_error(FsCondition.EEXIST, str(path))
-        door = self._door(path)
+        files = self._files_for(path)
         with _as_guest(str(path)):
-            door.mkdir(str(path), parents=parents)
+            files.mkdir(str(path), parents=parents)
 
     def path_rmdir(self, path: PurePosixPath) -> None:
-        door = self._door(path)
+        files = self._files_for(path)
         with _as_guest(str(path)):
-            door.rmdir(str(path))
+            files.rmdir(str(path))
 
     def path_unlink(self, path: PurePosixPath) -> None:
-        door = self._door(path)
+        files = self._files_for(path)
         with _as_guest(str(path)):
-            door.unlink(str(path))
+            files.unlink(str(path))
 
     def path_rename(self, path: PurePosixPath, target: PurePosixPath) -> None:
         """Rename within one mount; across mounts it is EXDEV.
 
         The dispatcher picks the mount from the source alone, so the
-        door refuses a pair on different mounts, and EXDEV is POSIX's
+        adapter refuses a pair on different mounts, and EXDEV is POSIX's
         answer for a rename across filesystems. Monty ships no `shutil`,
         so guest code writes the copy-and-delete fallback by hand, and
         the errno is what tells it to.
@@ -296,6 +296,6 @@ class MontyFs(AbstractOS):
             path (PurePosixPath): the source path.
             target (PurePosixPath): the destination path.
         """
-        door = self._door(path)
+        files = self._files_for(path)
         with _as_guest(str(path), str(target)):
-            door.rename(str(path), str(target))
+            files.rename(str(path), str(target))

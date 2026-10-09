@@ -91,8 +91,8 @@ async def test_a_revert_never_serves_other_bytes_as_fresh():
 
 @pytest.mark.asyncio
 async def test_a_revert_through_cp_never_serves_other_bytes_as_fresh():
-    # The same revert through the bytes door: a cross-mount cp reads with
-    # read_bytes, where cat reads with the stream.
+    # The same revert through the bytes read: a cross-mount cp reads
+    # with read_bytes, where cat reads with the stream.
     with serve(_hub({"a.txt": NEW}, listed={"a.txt": OLD})) as hub:
         ws = _ws(_vfs(hub))
         try:
@@ -204,7 +204,7 @@ async def test_an_expired_token_keeps_the_overlay():
             await _out(ws, "cat /m/a.txt")
             await ws.namespace.set_attrs("/m/a.txt", mode=0o600)
             hub.fail.update({"tree": (401, ""), "paths_info": (401, "")})
-            # Cross-mount cp reads through the dispatcher, the door whose
+            # Cross-mount cp reads through the dispatcher, the dispatcher whose
             # "no such file" drops the overlay; a plain cat never reaches it.
             cp = await ws.shell("cp /m/a.txt /r/x")
             assert cp.exit_code == 1
@@ -289,10 +289,10 @@ async def test_a_drift_check_on_a_loaded_mount_asks_one_path():
 
 # Measured on the first green run, then pinned (test plan T31): each path
 # ask is one reconcile probe, and a warm read makes no download. cat's own
-# stat and the cache door reuse the routing probe's answer. Cross-mount cp
-# skips routing's
-# probe, so only the cache door asks, and its stat re-checks the listing its
-# path resolves through, which fresh does once per command: one head check
+# stat and the cache stage reuse the routing probe's answer. Cross-mount
+# cp skips routing's
+# probe, so only the cache stage asks, and its stat re-checks the listing
+# its path resolves through, which fresh does once per command: one head check
 # against the listing's version, where it was a whole tree walk (Task 1.3).
 WARM = [
     ("cat /m/a.txt", 1, 0, 0),

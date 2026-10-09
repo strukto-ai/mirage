@@ -212,6 +212,81 @@
       ]
     },
     {
+      "id": "runs_where_the_line_places_its_interpreter",
+      "hosts": [
+        "python",
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "script": "'on-local' not in ctx['line']"
+          },
+          "local",
+          "workspace"
+        ],
+        "clis": {
+          "pager": {
+            "script": "import sys\nprint('monty', sys.platform == 'monty')\n"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager",
+          "expect": {
+            "exit": 0,
+            "stdout": "monty True\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "pager on-local",
+          "expect": {
+            "exit": 0,
+            "stdout": "monty False\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "refused_where_the_line_refuses_its_interpreter",
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "script": "'keep-out' not in ctx['line']"
+          },
+          "workspace"
+        ],
+        "clis": {
+          "pager": {
+            "script": "print('ran')\n"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager",
+          "expect": {
+            "exit": 0,
+            "stdout": "ran\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "pager keep-out",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "pager: no runtime accepted this line\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "no_runtime_for_the_language_exits_127",
       "world": {
         "runtimes": [

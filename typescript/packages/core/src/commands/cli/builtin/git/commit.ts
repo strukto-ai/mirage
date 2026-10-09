@@ -83,7 +83,7 @@ export interface Identity {
  * at the operator's name. The committer is the author here, where git tracks
  * `GIT_COMMITTER_*` separately.
  *
- * Read through the session plane's door rather than the frozen `inv.env`
+ * Read through the session view rather than the frozen `inv.env`
  * snapshot, so a hidden name reads as unset exactly as it does in the shell.
  */
 export function identity(fl: FlagView, session: SessionView | undefined): Identity {
@@ -204,11 +204,11 @@ async function buildCommit(
  * writes no merge commits, so an unmerged index is refused with or without `-a`.
  */
 export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const fl = new FlagView(inv.flags)
   try {
-    const dispatch = doors.dispatch
-    const statPath = doors.statPath
+    const dispatch = view.dispatch
+    const statPath = view.statPath
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
@@ -220,7 +220,7 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
       throw staging ? new AllWithPathsError(named) : new PartialCommitError(named)
     const message = fl.asStr('message')
     if (message === undefined || message === '') throw new MissingMessageError()
-    const repo = await opened(fl, doors, true)
+    const repo = await opened(fl, view, true)
     // git takes the index's lock before it looks for anything to commit, so a
     // read-only repository refuses an empty commit too.
     const index = repo.location.gitdir.join('index')
@@ -233,7 +233,7 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
     const state = await readIndex(repo, dispatch)
     if (state.conflicts.size > 0) throw new UnmergedIndexError()
     const restaged = staging
-      ? await stageTracked(repo, dispatch, statPath, state, doors.ns?.links ?? null)
+      ? await stageTracked(repo, dispatch, statPath, state, view.ns?.links ?? null)
       : null
     const head = await readHead(dispatch, repo.location.gitdir)
     const before = await headEntries(repo)
@@ -253,13 +253,13 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
           statPath,
           head,
           startPoint(fl).virtual,
-          doors.ns?.links ?? null,
+          view.ns?.links ?? null,
         ),
       )
     }
     const parents =
       before === null ? [] : [await git.resolveRef({ ...repoArgs(repo), ref: 'HEAD' })]
-    const who = identity(fl, doors.sessionView)
+    const who = identity(fl, view.sessionView)
     const when = Math.floor(Date.now() / 1000)
     const oid = await buildCommit(repo, state, message, who, parents, when)
     if (head.ref !== null) await writeRef(dispatch, repo.location.commondir, head.ref, oid)

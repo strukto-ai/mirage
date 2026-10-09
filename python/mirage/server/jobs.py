@@ -25,7 +25,7 @@ from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import ExecutionRecord as JobEntry
 from mirage.execution.types import ExecutionStatus as JobStatus
 from mirage.types import JsonValue
-from mirage.workspace.abort import MirageAbortError
+from mirage.utils.abort import MirageAbortError
 from mirage.workspace.execution import ExecutionScope
 
 logger = logging.getLogger(__name__)

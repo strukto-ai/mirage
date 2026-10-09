@@ -552,14 +552,15 @@ def test_commands_of_answers_the_sessions_own_rules():
     late.commands = own
     assert mgr.commands_of("late") is own
     # A session the profile never narrowed states no rules, and so does an
-    # id the manager does not know (the empty id of an unbound door
+    # id the manager does not know (the empty id of an unbound entry point
     # included), unless a default profile says otherwise.
     assert mgr.commands_of("early") is None
     assert mgr.commands_of("nobody") is None
     assert mgr.commands_of("") is None
     assert early.commands is None
     # With a default profile compiled in, an unknown id answers its rules
-    # rather than nothing, so an unbound door still fails toward refusal.
+    # rather than nothing, so an unbound entry point still fails toward
+    # refusal.
     mgr.default_profile = CompiledProfile(
         policies=ProfilePolicies(commands=AdmissionRules(allow=("cat",)))
     )

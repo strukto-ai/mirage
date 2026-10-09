@@ -1,6 +1,6 @@
 import { closeQuietly, wrapCachableStreams } from './stream.ts'
 import { concat } from './cachable_iterator.ts'
-import { abortable } from '../concurrency/limiter.ts'
+import { abortable } from '../utils/abort.ts'
 import { chunks } from './cooperative.ts'
 import { OutputPipe } from './output.ts'
 import { CAPACITY } from './pipe.ts'

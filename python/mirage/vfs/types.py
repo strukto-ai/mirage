@@ -7,12 +7,40 @@ from collections.abc import (
 )
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, NamedTuple, Protocol, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    NamedTuple,
+    Protocol,
+    TypedDict,
+    Unpack,
+    runtime_checkable,
+)
 
 from mirage.cache.index import IndexCacheStore
 from mirage.types import FileStat, JsonValue, PathSpec
 
+if TYPE_CHECKING:
+    from mirage.core.generic.find_eval import PredNode
+
 DuEntries = tuple[list[tuple[str, int]], int]
+
+
+class FindOptions(TypedDict, total=False):
+    name: str | None
+    type: str | None
+    min_size: int | None
+    max_size: int | None
+    maxdepth: int | None
+    mindepth: int | None
+    name_exclude: str | None
+    or_names: list[str] | None
+    iname: str | None
+    path_pattern: str | None
+    empty: bool
+    tree: "PredNode | None"
+    mtime_min: float | None
+    mtime_max: float | None
 
 
 class Effect(StrEnum):
@@ -143,6 +171,21 @@ class ExistsOp(Protocol):
     ) -> Awaitable[bool]: ...
 
 
+class SetAttrsOp(Protocol):
+    def __call__(
+        self,
+        accessor: Any,
+        path: PathSpec,
+        /,
+        *,
+        mode: int | None = ...,
+        uid: int | str | None = ...,
+        gid: int | str | None = ...,
+        atime: str | None = ...,
+        mtime: str | None = ...,
+    ) -> Awaitable[dict[str, int | str]]: ...
+
+
 class PathOp(Protocol):
     def __call__(
         self, accessor: Any, path: PathSpec, /
@@ -207,6 +250,18 @@ class DuSizeOp(Protocol):
     def __call__(
         self, accessor: Any, path: PathSpec, /, index: IndexCacheStore = ...
     ) -> Awaitable[int]: ...
+
+
+class FindOp(Protocol):
+    def __call__(
+        self,
+        accessor: Any,
+        path: PathSpec,
+        /,
+        *,
+        index: IndexCacheStore = ...,
+        **predicates: Unpack[FindOptions],
+    ) -> Awaitable[list[str]]: ...
 
 
 class DuEntriesOp(Protocol):

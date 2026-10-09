@@ -26,7 +26,7 @@ import { underPath } from '../utils/key_prefix.ts'
 // a create (`Operation` has no member for it) and truncate's command
 // returns an empty IOResult, so no created or truncated path is ever
 // listed in `IOResult.cache`. A script runtime can still issue either
-// through `RuntimeVFS`, and those ops bubble into the enclosing line's
+// through `RuntimeFiles`, and those ops bubble into the enclosing line's
 // records, which is exactly why admitting them here could only pair one
 // op's token with another op's bytes.
 // 'append' is absent because no object store implements it and the
@@ -47,8 +47,9 @@ export const WRITE_FINGERPRINT_OPS: ReadonlySet<string> = new Set(['write'])
 //
 // All three hold the op names a `record()` call spells, not the op-table
 // slots: the recursive delete is the `rm_recursive` slot but records as
-// 'rm_r', and the rename op records as 'rename' or 'rename_prefix'
-// depending on which of its two paths ran.
+// 'rm_r', the rename op records as 'rename' or 'rename_prefix'
+// depending on which of its two paths ran, and a copy of a whole folder in
+// one request as 'copy_prefix'.
 export const STAMP_FINGERPRINT_OPS: ReadonlySet<string> = new Set([
   'read',
   'write',
@@ -69,6 +70,7 @@ export const RETRACT_FINGERPRINT_OPS: ReadonlySet<string> = new Set([
   'rename',
   'rename_prefix',
   'copy',
+  'copy_prefix',
 ])
 // Stamps name the bytes at a path; retracts mean the line no longer knows them.
 export const VERSION_OPS: ReadonlySet<string> = new Set([
@@ -81,7 +83,11 @@ export const VERSION_OPS: ReadonlySet<string> = new Set([
 // spells them with two names. A point op must not take a subtree: it
 // touched one key, and on a keyed store the keys beneath its path are
 // objects of their own.
-export const SUBTREE_RETRACT_OPS: ReadonlySet<string> = new Set(['rm_r', 'rename_prefix'])
+export const SUBTREE_RETRACT_OPS: ReadonlySet<string> = new Set([
+  'rm_r',
+  'rename_prefix',
+  'copy_prefix',
+])
 
 /**
  * A line's records indexed as they arrive, for per-path version lookups.

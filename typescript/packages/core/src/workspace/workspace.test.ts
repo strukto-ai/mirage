@@ -301,7 +301,7 @@ describe('Workspace lifecycle', () => {
 })
 
 describe('Workspace.addMount read policy', () => {
-  // The runtime door is a mount door too. Without the verdict here a
+  // The runtime entry point is a mount entry point too. Without the verdict here a
   // mount added at runtime could declare a policy its backend cannot
   // honour, which reads as enabled and does nothing -- the silent
   // downgrade the mount-time check exists to refuse.

@@ -6,7 +6,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",
@@ -59,7 +60,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "world": {
         "mounts": {
@@ -97,7 +99,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "world": {
         "mounts": {
@@ -136,6 +139,9 @@
               "exit": 1,
               "stdout": "['0.json', '1.json', '2.json', '3.json']\n10\n",
               "stderr_contains": "'OSError' object has no attribute 'strerror'"
+            },
+            "host": {
+              "stdout": "['0.json', '1.json', '2.json', '3.json']\n10\nOSError Input/output error\nOSError Input/output error\n"
             }
           }
         }
@@ -147,7 +153,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "world": {
         "mounts": {
@@ -248,7 +255,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "world": {
         "mounts": {

@@ -33,6 +33,7 @@ from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff
 from mirage.process.supervisor import ProcessSupervisor
+from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision, RouteError
 from mirage.runtime.types import DispatchFn
 from mirage.secrets.types import ResolvedSource
@@ -49,11 +50,8 @@ from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
-from mirage.workspace.abort import (
-    MirageAbortError,
-    StatusWriter,
-    set_line_writer,
-)
+from mirage.utils.abort import MirageAbortError
+from mirage.workspace.abort import set_line_writer
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
@@ -91,6 +89,7 @@ from mirage.workspace.session import (
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.snapshot import ContentDriftError
 from mirage.workspace.snapshot.drift import DriftQueue
+from mirage.workspace.types import StatusWriter
 from mirage.workspace.workspace.failure import (
     failure_result,
     placement_refused,
@@ -123,7 +122,7 @@ class ExecuteEnv:
         namespace (Namespace): the mount table, links and overlay.
         sessions (SessionManager): the sessions a line resolves.
         registry (MountRegistry): mounts, policies and decisions.
-        dispatcher (Dispatcher): the op door.
+        dispatcher (Dispatcher): the dispatcher.
         observer (Observer): records each typed line.
         records (list[OpRecord]): the workspace's op log.
         job_table (JobTable): the workspace's jobs.
@@ -164,7 +163,7 @@ class NestedRefusal:
     """The record the line's nested evaluations earned, latest kept.
 
     Every nested line re-enters execute through ``recurse``, and a
-    substitution keeps only the inner stdout, so that door is the one
+    substitution keeps only the inner stdout, so that entry point is the one
     place its record survives. The typed line reports it when its own
     tree earned none: the rightmost rule ``IOResult.merge`` applies,
     with the inner line standing left of the command that consumed
@@ -185,7 +184,7 @@ async def recurse(
     handed: HandOff | None = None,
     *,
     cancel: asyncio.Event | None,
-    routing_decision: RouteDecision | None,
+    routing_decision: RouteDecision[Runtime] | None,
     agent_id: str | None,
     nested: NestedRefusal,
     execution_scope: ExecutionScope,
@@ -231,7 +230,7 @@ async def recurse(
             region, whose touching pairs tree-sitter lexes as one
             node), so each stands at its own place.
         handed (HandOff | None): the hand-off of the subtree that runs
-            this evaluation, bound by the walker at its door
+            this evaluation, bound by the walker at its entry point
             (``execute_node``): the line's own for a command in the
             foreground, a job's own for a command inside a background
             job, which may reach this after the line has ended. Bound
@@ -428,7 +427,7 @@ async def execute_line(
     cancel: asyncio.Event | None,
     record: bool,
     runtime: str | None,
-    routing_decision: RouteDecision | None,
+    routing_decision: RouteDecision[Runtime] | None,
     handed: HandOff | None = None,
     frame: LineFrame | None = None,
     argv: tuple[str, ...] | None = None,
@@ -621,7 +620,7 @@ async def run_prepared_line(
     cancel: asyncio.Event | None,
     record: bool,
     runtime: str | None,
-    routing_decision: RouteDecision | None,
+    routing_decision: RouteDecision[Runtime] | None,
     handed: HandOff | None,
     frame: LineFrame | None,
     argv: tuple[str, ...] | None,
@@ -722,7 +721,7 @@ async def run_prepared_line(
             nested.latest = refusal
 
         # An op a policy refuses inside a command prints the command's
-        # own GNU line, so the door notes the record here, for the line
+        # own GNU line, so the dispatcher notes the record here, for the line
         # to carry on its result. Bound before placement, so an op a
         # policy script makes while the line is judged is inside the
         # line, never a question of its own.
@@ -731,7 +730,7 @@ async def run_prepared_line(
         # for its commands, which the gates run on and the line's end
         # spends. A nested evaluation runs on one made under the
         # hand-off of the node that runs it, which the walker binds
-        # into the door (execute_node), not this line's: a background
+        # into the entry point (execute_node), not this line's: a background
         # job's subtree runs on a hand-off of the job's own.
         if handed is None:
             handed = HandOff()

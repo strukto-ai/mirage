@@ -220,7 +220,7 @@ class ProcessSupervisor:
         """Revoke the session's views and cancel its runners.
 
         A closed session's ID can be reused and a replaced profile grants
-        a new view, so neither may keep a door, or a runner admitted
+        a new view, so neither may keep an entry point, or a runner admitted
         under the old grants.
 
         Args:

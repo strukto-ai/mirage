@@ -16,12 +16,12 @@ import { describe, expect, it } from 'vitest'
 import { PyodideRuntime } from './runtime.ts'
 
 // The runtime declares reach='workspace', meaning the workspace bridge is the
-// guest's only door to the outside. Pyodide's default exposes the host
+// guest's only entry point to the outside. Pyodide's default exposes the host
 // globalThis as the `js` module, which under Node hands the guest
-// js.process (host env) and js.fetch (network) — doors around the
+// js.process (host env) and js.fetch (network) — entry points around the
 // bridge. loader.ts seals that with a null-prototype jsglobals; this
 // pins the seal so a future edit that drops it fails loudly.
-describe('PyodideRuntime js-module door', () => {
+describe('PyodideRuntime js-module entry point', () => {
   it('the guest cannot reach host process or network through js', async () => {
     const rt = new PyodideRuntime()
     const probe = `

@@ -45,7 +45,7 @@ import type {
 import type { Workspace } from '@struktoai/mirage-node'
 import { StreamTail, TailBuffer } from './text.ts'
 import { SpillSink, ensureDirPath, type SpillTarget } from './spill.ts'
-import type {} from './service.ts'
+
 import type { Refusal } from '@struktoai/mirage-core/types'
 import { refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -130,7 +130,7 @@ function executeOptions(
   bound: boolean,
   fallbackWorkdir: string,
   sink?: JobConsole,
-): ExecuteOptions {
+): ExecuteOptions & { stream?: false } {
   // A per-call `env` makes mirage fork a subshell, exactly as `cwd` does,
   // so what goes in it decides whether anything can persist. Bound to a
   // session, only a genuine per-call override belongs here: dsh sends a
@@ -557,7 +557,7 @@ export class MirageShellExecutor extends ShellExecutor {
    * workspace-write sandbox: reads and writes land only where mounts
    * (and their modes) allow. Declaring it lets sandbox-aware plugins
    * (dsh's permission presets) compose over this executor. A world
-   * holding a runtime with doors around the gate (the host `local`
+   * holding a runtime with entry points around the gate (the host `local`
    * python, a remote sandbox) voids that claim, so this answers
    * undefined then (the base contract's "does not sandbox") and those
    * plugins refuse to compose instead of trusting a lie.

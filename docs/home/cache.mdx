@@ -53,7 +53,7 @@ A command that writes a file and reports the bytes it wrote, such as `tee`, `sed
 
 The bytes are kept only when that command made the last change to the file on the line. When something else changed it later on the same line (`sed -n 'w file'`, a script, a concurrent pipeline stage, `xargs -P`, a background job, `truncate`), nothing is cached and the next read downloads the file. In the browser, where concurrent commands cannot be told apart, a later write of the same size is not noticed.
 
-Under [`write: conditional`](/home/yaml#the-write-policy), that token is also the version the next write on the path is based on. On such a mount the line also keeps a path's version where it keeps no bytes (a `grep` or `head` of the file, the agent's own `>` or `>>`, a file bigger than the cache, the version a refused write lost on) as an entry with no bytes, which reads treat as absent.
+Under [`write: conditional`](/home/yaml#the-write-policy), that token is also the version the next write on the path is based on. On Box and Dropbox it is a content hash, which a write compares with the file's live one before it sends the service's own version ([which backends](/home/yaml#which-backends)). On such a mount the line also keeps a path's version where it keeps no bytes (a `grep` or `head` of the file, except on Box, where a partial read keeps none; the agent's own `>` or `>>`, a file bigger than the cache, the version a refused write lost on) as an entry with no bytes, which reads treat as absent.
 
 Nothing bigger than the whole cache is kept, read or written: such a file would push every other entry out and then itself. A cache store that refuses a fill (Redis out of memory, or a value over its size limit) is logged as a warning and the line carries on; the read or write behind it already happened, so only the next read pays a fetch.
 
@@ -103,7 +103,7 @@ In YAML, an `index:` block's values are checked when the file is loaded, at the 
 
 How long a cached listing lives comes from the first of these that applies:
 
-1. **A per-mount index**: the mount block's `index:` in YAML ([a mount's own index](/home/yaml#a-mounts-own-index)), `Mount(vfs, index=IndexConfig(ttl=60))` / `ws.add_mount(prefix, vfs, index=...)` in Python, or `new Mount(vfs, { index: { ttl: 60 } })` / `ws.addMount(prefix, vfs, mode, read, vfsRef, index)` in TypeScript. It replaces the workspace index whole, so a RAM mount index under a Redis workspace index keeps that mount's listings in RAM. A second mount of the same VFS instance shares the first mount's index, through every door, so its own `index` is not used.
+1. **A per-mount index**: the mount block's `index:` in YAML ([a mount's own index](/home/yaml#a-mounts-own-index)), `Mount(vfs, index=IndexConfig(ttl=60))` / `ws.add_mount(prefix, vfs, index=...)` in Python, or `new Mount(vfs, { index: { ttl: 60 } })` / `ws.addMount(prefix, vfs, mode, read, vfsRef, index)` in TypeScript. It replaces the workspace index whole, so a RAM mount index under a Redis workspace index keeps that mount's listings in RAM. A second mount of the same VFS instance shares the first mount's index, through every entry point, so its own `index` is not used.
 2. **The workspace index**, the `index:` block in YAML or the `index` option in code. Its `ttl` applies to every mount without its own index, and is 600 seconds when left out, including on backends whose own TTL is shorter or zero.
 3. **The backend's own `index_ttl`** (`indexTtl` in TypeScript), on a RAM index, when no index is configured at all:
 

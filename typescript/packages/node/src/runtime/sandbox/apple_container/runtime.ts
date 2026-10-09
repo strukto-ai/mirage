@@ -16,11 +16,8 @@ import { getCurrentSession } from '@struktoai/mirage-core/context/session_contex
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type {
-  ProcessExecution,
-  RunResult,
-  RuntimeOptions,
-} from '@struktoai/mirage-core/runtime/types'
+import type { ProcessExecution, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import {
   APPLE_CONTAINER_CONFIG_KEYS,
   type AppleContainerConfig,

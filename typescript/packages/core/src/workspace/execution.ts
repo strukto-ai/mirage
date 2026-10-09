@@ -1,6 +1,6 @@
 import { YieldBudget } from '../io/yield_budget.ts'
-import { makeAbortError } from '../concurrency/limiter.ts'
 import { newExecutionId } from '../execution/context.ts'
+import { makeAbortError } from '../utils/abort.ts'
 
 /** Identity and scheduling budget shared by a call and its evaluations. */
 export class ExecutionScope {

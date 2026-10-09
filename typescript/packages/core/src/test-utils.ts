@@ -15,6 +15,7 @@
 import { RAMIndexCacheStore } from './cache/index/ram.ts'
 import type { IndexCacheStore } from './cache/index/store.ts'
 import type { OpKwargs } from './view/types.ts'
+import type { WriteContext } from './cache/types.ts'
 import { type FileStat, MountMode, type PathSpec } from './types.ts'
 import { BaseVFS } from './vfs/base.ts'
 import type { Accessor } from './accessor/base.ts'
@@ -72,12 +73,12 @@ export async function iconvMultibyteDigests(
 }
 
 /**
- * A VFS called the way a mount calls it: through the op door, one index
+ * A VFS called the way a mount calls it: through the dispatcher, one index
  * store per instance, so a driver can be exercised without a Workspace. A
  * verb the VFS does not answer is a `no op registered` error, the same
  * answer a mount gives.
  */
-class DoorOps {
+class MountedVFS {
   readonly index: IndexCacheStore
   private readonly mount: MountEntry
 
@@ -86,7 +87,7 @@ class DoorOps {
     this.mount = new MountEntry({ prefix: '/', vfs, mode: MountMode.WRITE })
   }
 
-  /** Whether the door answers `name` on this VFS. */
+  /** Whether the dispatcher answers `name` on this VFS. */
   has(name: string): boolean {
     return this.mount.answers(name)
   }
@@ -150,13 +151,13 @@ class DoorOps {
   }
 }
 
-const TABLES = new WeakMap<BaseVFS, DoorOps>()
+const TABLES = new WeakMap<BaseVFS, MountedVFS>()
 
-/** The op door of `vfs`, bound once per instance so its index store persists across calls. */
-export function ops(vfs: BaseVFS): DoorOps {
+/** The dispatcher of `vfs`, bound once per instance so its index store persists across calls. */
+export function ops(vfs: BaseVFS): MountedVFS {
   let table = TABLES.get(vfs)
   if (table === undefined) {
-    table = new DoorOps(vfs)
+    table = new MountedVFS(vfs)
     TABLES.set(vfs, table)
   }
   return table
@@ -202,4 +203,25 @@ export function ioFor<V extends BaseVFS>(
   facts: Partial<Record<keyof V, unknown>> = {},
 ): CommandIO {
   return commandIo(vfsOver(cls, accessor, facts) as BaseVFS)
+}
+
+/**
+ * A write context whose store holds `s0` and records what it keeps, for a
+ * refusal test where the store's version, the write's and the one sent all
+ * differ. Mirrors Python's `tests/fixtures/write_context.KeptVersions`.
+ */
+export function keptVersions(vfs: string): { context: WriteContext; kept: string[] } {
+  const kept: string[] = []
+  const context: WriteContext = {
+    vfs,
+    conditions: ['put', 'copy', 'delete'],
+    readVersion: () => Promise.resolve('s0'),
+    readVersions: (paths) => Promise.resolve(paths.map(() => 's0')),
+    drop: () => Promise.resolve(),
+    keep: (_path, version) => {
+      kept.push(version)
+      return Promise.resolve()
+    },
+  }
+  return { context, kept }
 }

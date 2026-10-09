@@ -161,7 +161,7 @@ def test_every_subjects_ask_is_reported_not_just_the_winner():
     rules = AdmissionRules(ask=(source, dest))
     decision = decide(_ctx("cp", "/a/x", "/deep/b/y"), rules)
     # The deeper anchor is still the decision, which is what the agent is
-    # told; both are what the door has to collect.
+    # told; both are what the entry point has to collect.
     assert decision.outcome is Outcome.ASK
     assert decision.rule is dest
     assert decision.asks == (source, dest)

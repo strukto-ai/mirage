@@ -58,6 +58,14 @@ jobs:
           # and typescript filters here and in runtime, as config itself does.
           predicate-quantifier: some-with-excludes
           filters: |
+            # Git's search and listing commands stay under these whole-host
+            # filters, so their disk/RAM CLI corpus runs with either twin.
+            # LanceDB's shared core/lancedb/types modules select the embedded
+            # LanceDB corpus through these same whole-host filters.
+            # Shared S3 types and VFS find options use these filters too;
+            # the extracted Pyodide config also remains in runtime's TS glob.
+            # Shared utils/abort primitives stay in both whole-host filters
+            # and runtime; workspace/abort owns only line orchestration.
             core:
               # Shared execution stores also feed hosted request tracking.
               - 'python/mirage/execution/**'
@@ -107,6 +115,7 @@ jobs:
               - 'python/mirage/commands/builtin/slug_tree/**'
               - 'integ/vfs/qdrant/**'
               - 'python/mirage/accessor/qdrant.py'
+              # Shared query shapes in core/qdrant/types.py are backend inputs too.
               - 'python/mirage/core/qdrant/**'
               - 'python/mirage/commands/builtin/qdrant/**'
               - 'python/mirage/vfs/qdrant/**'
@@ -942,6 +951,37 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Initialize MongoDB alongside the services, before dependency installs.
+      # Its replica-set command cannot be expressed by a services block.
+      # Wait for its socket before mongosh creates files under /data/db,
+      # which would race the entrypoint's chown and abort container startup.
+      - name: Start MongoDB replica set
+        run: |
+          trap 'docker inspect mongo; docker logs --tail 100 mongo' ERR
+          docker run -d --name mongo -p 27017:27017 mongo:8 \
+            mongod --replSet rs0 --bind_ip_all
+          for i in $(seq 1 60); do
+            if docker exec mongo bash -c 'true > /dev/tcp/127.0.0.1/27017' >/dev/null 2>&1; then
+              break
+            fi
+            [ "$(docker inspect --format '{{.State.Running}}' mongo)" = "true" ]
+            sleep 1
+          done
+          docker exec mongo mongosh --quiet \
+            --eval 'if (!db.runCommand({ping:1}).ok) quit(1)'
+          docker exec mongo mongosh --quiet --eval \
+            "if (!rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]}).ok) quit(1)"
+          for i in $(seq 1 60); do
+            if docker exec mongo mongosh --quiet \
+                --eval 'if (!db.hello().isWritablePrimary) quit(1)' >/dev/null 2>&1; then
+              exit 0
+            fi
+            [ "$(docker inspect --format '{{.State.Running}}' mongo)" = "true" ]
+            sleep 1
+          done
+          echo "MongoDB replica set did not become primary" >&2
+          false
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -987,23 +1027,6 @@ jobs:
           done
           echo "Qdrant did not become healthy" >&2
           exit 1
-
-      # mongodb needs a replica set for change streams, which a flat services:
-      # block cannot express, so it is started and initiated by hand.
-      - name: Start MongoDB replica set
-        run: |
-          docker run -d --name mongo -p 27017:27017 mongo:8 \
-            mongod --replSet rs0 --bind_ip_all
-          for i in $(seq 1 30); do
-            docker exec mongo mongosh --quiet --eval 'db.runCommand({ping:1}).ok' >/dev/null 2>&1 && break
-            sleep 1
-          done
-          docker exec mongo mongosh --quiet --eval \
-            "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
-          for i in $(seq 1 30); do
-            [ "$(docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' 2>/dev/null)" = "true" ] && break
-            sleep 1
-          done
 
       - name: Run database battery (python host)
         run: >-
@@ -1093,6 +1116,15 @@ jobs:
           NEXTCLOUD_ADMIN_USER: admin
           NEXTCLOUD_ADMIN_PASSWORD: admin123
           NEXTCLOUD_TRUSTED_DOMAINS: localhost
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "bash -c 'true > /dev/tcp/127.0.0.1/27017' && mongosh --quiet --eval 'if (!db.runCommand({ping:1}).ok) quit(1)'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
       NEXTCLOUD_URL: http://localhost:8080/remote.php/dav/files/admin/
       NEXTCLOUD_USERNAME: admin
@@ -1176,15 +1208,6 @@ jobs:
             -e MC_HOST_local="http://minio:minio123@localhost:9000" \
             cgr.dev/chainguard/minio-client@sha256:b8b144ab34694ecea25aa352c4be9de4c26ee2a02701521dce02ee5593c57338 \
             mb --ignore-existing local/mirage-watch
-
-      - name: Start MongoDB for the watch battery
-        run: |
-          docker run -d --name mongo-watch -p 27017:27017 mongo:8
-          for i in $(seq 1 30); do
-            docker exec mongo-watch mongosh --quiet \
-              --eval 'db.runCommand({ping:1}).ok' >/dev/null 2>&1 && break
-            sleep 1
-          done
 
       # gdrive, dropbox, box, onedrive, hf and github are the watch targets
       # whose fakes are TypeScript and out-of-process; the one in-process fake

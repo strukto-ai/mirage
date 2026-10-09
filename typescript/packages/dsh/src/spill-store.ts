@@ -19,7 +19,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import { SpillLocator, SpillStore } from '@deepseek-ai/dsh-spill'
 import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
 import { ensureDirPath } from './spill.ts'
-import type {} from './service.ts'
 
 /** The workspace directory spill artifacts land under when none is configured. */
 const DEFAULT_SPILL_DIR = '/tmp/dsh-spill'
@@ -94,7 +93,7 @@ export function sessionDirName(sessionId: string): string {
  * mirage world the model reaches the workspace, not the host: a spill
  * written to the harness's own disk hands it a path its next `grep`
  * cannot open, which reads as output the harness lost. So the artifact
- * is written through the same op door every other effect in this world
+ * is written through the same dispatcher every other effect in this world
  * passes, and the locator is an ordinary workspace path.
  *
  * The seam asks for a private location. mirage has no permission bits
@@ -114,7 +113,7 @@ export class MirageSpillStore extends SpillStore {
       throw new Error(`mirage: spill dir must be an absolute workspace path, got ${dir}`)
     }
     // Canonical once, here, rather than per save: a `.` or `..` left in
-    // the path is written literally by the op door and normalized away
+    // the path is written literally by the dispatcher and normalized away
     // by everything that reads a locator back, so the artifact lands on
     // a key neither the shell nor the fs seam can address. That is the
     // dead locator this store exists to prevent.

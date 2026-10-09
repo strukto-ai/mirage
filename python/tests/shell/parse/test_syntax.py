@@ -20,6 +20,8 @@ import pytest
 from mirage.shell.bytes import decode_text
 from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.constants import MAX_NESTING
+from mirage.shell.parse.syntax import heredoc_plan
+from mirage.shell.parse.types import SyntaxDiagnostic
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -74,6 +76,11 @@ def test_a_line_nested_past_the_reader_is_refused_at_the_next_opener():
     )
     found = check_syntax("{ " * (MAX_NESTING + 1) + "a; " + "} " * MAX_NESTING)
     assert found is not None and found.offending == "{"
+    bangs = "[[ " + "! " * 5000 + "x ]]"
+    assert check_syntax(bangs) == SyntaxDiagnostic(
+        "", "mirage: syntax error: nesting too deep\n", 2
+    )
+    assert heredoc_plan(bangs) is None
 
 
 def test_a_substitution_is_read_once_however_often_its_word_is():

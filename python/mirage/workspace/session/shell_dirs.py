@@ -26,7 +26,7 @@ def home_dir(session: SessionState) -> str | None:
     Returns:
         ``$HOME`` from the session env, or ``None`` when unset/empty,
         matching GNU bash (no implicit home; ``cd`` errors, ``~`` and
-        ``$HOME`` do not expand). Read through the session door, not
+        ``$HOME`` do not expand). Read through the session view, not
         the raw env: this is HOME's own resolution channel ($HOME,
         tilde expansion, bare ``cd``), so a hidden HOME must read as
         unset here too.

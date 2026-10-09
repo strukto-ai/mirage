@@ -139,7 +139,7 @@ def MirageServer(
                     "read",
                     READ_DESCRIPTION,
                     READ_INPUT,
-                    annotations=ToolAnnotations(readOnlyHint=True),
+                    annotations=ToolAnnotations(read_only_hint=True),
                 )(tools_impl.read),
                 tool("write", WRITE_DESCRIPTION, WRITE_INPUT)(
                     tools_impl.write
@@ -149,19 +149,19 @@ def MirageServer(
                     "ls",
                     LS_DESCRIPTION,
                     LS_INPUT,
-                    annotations=ToolAnnotations(readOnlyHint=True),
+                    annotations=ToolAnnotations(read_only_hint=True),
                 )(tools_impl.ls),
                 tool(
                     "grep",
                     GREP_DESCRIPTION,
                     GREP_INPUT,
-                    annotations=ToolAnnotations(readOnlyHint=True),
+                    annotations=ToolAnnotations(read_only_hint=True),
                 )(tools_impl.grep),
                 tool(
                     "glob",
                     GLOB_DESCRIPTION,
                     GLOB_INPUT,
-                    annotations=ToolAnnotations(readOnlyHint=True),
+                    annotations=ToolAnnotations(read_only_hint=True),
                 )(tools_impl.glob),
             )
             if entry.name in names

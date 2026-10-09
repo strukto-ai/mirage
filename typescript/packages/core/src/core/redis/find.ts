@@ -19,7 +19,6 @@ import {
   keep,
   startBasename,
 } from '../generic/find_eval.ts'
-import type { PredNode } from '../generic/find_eval.ts'
 import type { PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -27,20 +26,7 @@ import { DIR_SIZE } from '../../utils/stat_view.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from '../../utils/path.ts'
 
-export interface FindOptions {
-  name?: string | null
-  type?: string | null
-  minSize?: number | null
-  maxSize?: number | null
-  maxDepth?: number | null
-  minDepth?: number | null
-  nameExclude?: string | null
-  orNames?: string[] | null
-  iname?: string | null
-  pathPattern?: string | null
-  empty?: boolean | null
-  tree?: PredNode | null
-}
+import type { FindOptions } from '../../vfs/types.ts'
 
 export async function find(
   accessor: RedisAccessor,

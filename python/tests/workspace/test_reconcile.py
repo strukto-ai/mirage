@@ -842,7 +842,7 @@ async def test_the_gate_asks_the_backend_after_an_external_clear():
 
 @pytest.mark.asyncio
 async def test_the_gate_asks_the_backend_outside_a_command():
-    # FUSE and the op door belong to no command, so nothing a command's
+    # FUSE and the dispatcher belong to no command, so nothing a command's
     # probe saw is reused for them.
     ws, mount, stat, rec = await _gated()
     try:

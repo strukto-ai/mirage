@@ -19,19 +19,19 @@ import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/works
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 
-// One world, three surfaces, one door: the TS half of the conformance
+// One world, three surfaces, one dispatcher: the TS half of the conformance
 // worlds (python/tests/runtime/test_conformance_worlds.py). The suite
 // pins the facts a mount tree must present identically through the
 // shell (virtual commands) and a sandboxed guest (its own stdlib); the
 // FUSE surface lives in @struktoai/mirage-node, whose core routes every
 // op through the same Workspace.dispatch these tests exercise.
 //
-// R1 (mount structure into the door: readdir/stat merge child mounts
+// R1 (mount structure into the dispatcher: readdir/stat merge child mounts
 // and namespace links behind the session guard, fan-out and the ls
 // fact session-filtered) has landed, which is why the structure and
-// enumeration groups run unmarked. So has R2 (one guarded door for
+// enumeration groups run unmarked. So has R2 (one guarded entry point for
 // every op): the confinement group was always green here, because a
-// TypeScript guest reaches the door through the same async context
+// TypeScript guest reaches the dispatcher through the same async context
 // that holds the session, where Python had to re-bind it across a
 // thread hop. Facts still broken run as it.fails with the reason
 // beside them, and start passing loud when fixed.
@@ -146,7 +146,7 @@ describe('structure world', () => {
   })
 
   it('a namespace-only ancestor serves every ls variant', async () => {
-    // A mount at /ghost/deep gives /ghost no backend, so the door alone
+    // A mount at /ghost/deep gives /ghost no backend, so the dispatcher alone
     // says it exists; plain ls, ls -R (whose walk runs through the
     // cross-mount fan-out) and ls -d must all agree instead of
     // reporting the operand missing.

@@ -24,7 +24,6 @@ from mirage.runtime.table import (
     DEFAULT_PYTHON,
     NAMED,
     RUNTIMES,
-    WorkspaceRuntime,
     bind_commands,
     build_runtime,
     known_runtimes,
@@ -33,6 +32,7 @@ from mirage.runtime.table import (
     whole_line_runtime,
 )
 from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.workspace import WorkspaceRuntime
 
 
 class FakeRuntime(Runtime):
@@ -151,7 +151,7 @@ def test_whole_line_runtime_skips_stage_engines_and_vfs():
 
 def test_vfs_is_a_pure_routing_marker():
     # A line resolved to workspace runs on the workspace executor inline, so
-    # the marker carries no line door and no interpreter door.
+    # the marker carries no line entry point and no interpreter entry point.
     vfs = WorkspaceRuntime()
     assert not isinstance(vfs, LineExecutorMixin)
     assert not hasattr(vfs, "run_line")

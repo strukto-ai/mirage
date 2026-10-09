@@ -19,7 +19,7 @@ from mirage.errors import FsCondition
 # Capture unresolved program names without taking over the workspace shell.
 EXTERNAL_COMMANDS: Final = "@external"
 
-# The most requests one runtime file door keeps in flight: classifying
+# The most requests one runtime file adapter keeps in flight: classifying
 # an entry is a request of its own on a mount that keeps no listing
 # index, so an unbounded listing puts a whole directory's worth on the
 # wire.

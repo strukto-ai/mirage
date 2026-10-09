@@ -5,7 +5,10 @@
       "seq": 310070,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -44,7 +47,10 @@
       "seq": 310071,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -78,7 +84,10 @@
       "seq": 310072,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -121,7 +130,10 @@
       "seq": 310073,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -188,7 +200,10 @@
       "seq": 310075,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -227,7 +242,9 @@
       "seq": 310076,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -279,7 +296,10 @@
       "seq": 310077,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -438,7 +458,10 @@
       "seq": 310081,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -580,7 +603,10 @@
       "seq": 310085,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -618,7 +644,10 @@
       "seq": 310086,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -656,7 +685,10 @@
       "seq": 310087,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -780,7 +812,10 @@
       "seq": 310090,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CLI env-plane battery: a workspace YAML carries an `env:` block with
-# literal and managed entries, created through the real door (`mirage
+# literal and managed entries, created through the real entry point (`mirage
 # workspace create` reads the YAML, sends the checked config to the
 # daemon, and the daemon builds the workspace), and both hosts must
 # answer every probe identically. Managed entries use the two builtin

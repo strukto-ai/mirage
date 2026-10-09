@@ -406,7 +406,7 @@ async def path_exists(opts: CommandOpts, word: str) -> bool:
     """Whether the PATH operand names something pathconf could open.
 
     Args:
-        opts (CommandOpts): the invocation, for its cwd and stat door.
+        opts (CommandOpts): the invocation, for its cwd and stat function.
         word (str): the operand as typed.
     """
     if opts.stat_path is None:

@@ -48,9 +48,9 @@ from mirage.types import (
     PathSpec,
     ShowEntry,
 )
+from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.session.state import seed_var
 from mirage.workspace.tools.io_text import with_refusal
 
@@ -900,7 +900,7 @@ REVIEWER_COMMANDS = {
 
 def _commands_ws() -> Workspace:
     # The frozen subtree is seeded on the VFS: the pure path rule
-    # holds at every op door, the host's `ws.vfs` included.
+    # holds at every entry point, the host's `ws.vfs` included.
     repo = RAMVFS()
     repo._store.dirs.add("/locked")
     repo._store.files["/locked/y"] = b"y\n"
@@ -1061,7 +1061,7 @@ async def test_deny_rules_by_source_scope_and_voice():
         )
         assert (await _line(ws, "rm /scratch/z"))[0] == 0
         # A pure path rule holds at the command plane for any command
-        # and at the op door for every op, whatever door.
+        # and at the dispatcher for every op, whatever entry point.
         assert await _line(ws, "cat /repo/locked/y") == (
             1,
             "",
@@ -1094,11 +1094,11 @@ async def test_deny_rules_by_source_scope_and_voice():
 
 
 @pytest.mark.asyncio
-async def test_find_delete_is_gated_at_the_op_door_not_by_a_named_rule():
+async def test_find_delete_is_gated_at_the_dispatcher_not_by_a_named_rule():
     # mirage's find has no -exec; -delete is find's own action, not an
     # `rm` line, so a rule naming `rm` does not cover it (the same
     # honest limit as a guest's os.remove), while a pure path rule
-    # does, at the op door the removal clears.
+    # does, at the dispatcher the removal clears.
     ws = _commands_ws()
     try:
         await ws.shell("mkdir -p /repo/d && touch /repo/d/x")
@@ -1111,7 +1111,7 @@ async def test_find_delete_is_gated_at_the_op_door_not_by_a_named_rule():
             "policy denied: frozen\n",
         )
         assert (await _line(ws, "cat /repo/locked/y"))[0] == 1
-        # The same rule holds for the host's own door, read or write.
+        # The same rule holds for the host's own entry point, read or write.
         with pytest.raises(PermissionError):
             await ws.vfs.read("/repo/locked/y")
     finally:
@@ -1136,7 +1136,7 @@ LINK_DOC = {
 
 @pytest.mark.asyncio
 async def test_a_command_scoped_path_rule_reads_the_path_the_command_touches():
-    # A command-scoped rule never runs at the op door, so the command
+    # A command-scoped rule never runs at the dispatcher, so the command
     # plane has to see the path the command will actually touch: for a
     # command that follows links (open(2)) that is the target, for one
     # that acts on the link itself (rm, lstat(2)) it is the link.
@@ -1306,7 +1306,7 @@ class _Box(Runtime, LineExecutorMixin):
 async def test_a_whole_line_runtime_is_gated_like_the_tree():
     # A runtime that captures the raw line runs it under the same
     # rules: every parsed command clears visibility, the policy chain
-    # and the approval door before the runtime sees a byte, so a
+    # and the approval ledger before the runtime sees a byte, so a
     # captured line cannot run what the tree would refuse.
     box = _Box()
     ws = Workspace(
@@ -1550,7 +1550,7 @@ VEILED_DOC = {
 async def test_a_hidden_path_reads_as_absent_to_every_rule():
     # hide outranks every rule: a path the session cannot see
     # is dropped before any hook, so a deny never names it, an ask is
-    # never raised for it, and the door answers ENOENT as for any
+    # never raised for it, and the dispatcher answers ENOENT as for any
     # absent path. The same lines under a session that sees them meet
     # the rules as usual.
     ws = Workspace(
@@ -1787,7 +1787,7 @@ async def test_a_session_grant_covers_the_rule_and_a_deny_is_never_reopened():
 
 
 @pytest.mark.asyncio
-async def test_a_coded_ask_routes_to_the_same_door():
+async def test_a_coded_ask_routes_to_the_same_entry_point():
     ws = _ask_ws()
     try:
         await ws.shell("touch /scratch/z")
@@ -1923,7 +1923,7 @@ async def test_a_compound_line_asked_before_it_runs_is_killable_too():
 
 
 # A plain document, passed raw: the constructor validates it, so the
-# whole walk battery also pins the raw-doc door.
+# whole walk battery also pins the raw-doc entry point.
 WALK_DOC = {
     "paths": {"hide": ["/data/t/ghost"]},
     "commands": {
@@ -2367,7 +2367,7 @@ async def test_tree_across_mounts_marks_the_directory_it_may_not_open():
 async def test_find_delete_meets_the_command_rules():
     # The deletion is find's own write: an entry the rule names stays,
     # reported with the rule's reason, as a paths rule's refusal at the
-    # op door already is.
+    # dispatcher already is.
     ws = await _fanout_ws()
     try:
         assert await _line(ws, "find /data/w -name a.txt -delete", "g") == (
@@ -2446,7 +2446,7 @@ LINKED_DOC = {
 @pytest.mark.asyncio
 async def test_a_dispatched_read_through_a_link_meets_the_target_rule():
     # A path a command names inside its own program (awk's getline, sed's
-    # r) reaches the dispatcher unjudged, and the door follows a link to
+    # r) reaches the dispatcher unjudged, and the dispatcher follows a link to
     # its target. The rule on the target holds through the link exactly
     # as it holds on the target itself; a link to an allowed file reads.
     ws = Workspace(
@@ -2508,7 +2508,7 @@ async def _zap(
 
 @pytest.mark.asyncio
 async def test_a_dispatched_op_meets_the_rule_through_a_linked_parent():
-    # The door walks every link above the final name before it acts, so
+    # The dispatcher walks every link above the final name before it acts, so
     # /data/alias/secret is /data/real/secret by the time anything is
     # removed or moved. The rule on the real path holds there for an op
     # on the name itself (unlink, rename) as for one that follows it.
@@ -2548,7 +2548,7 @@ async def test_a_dispatched_op_meets_the_rule_through_a_linked_parent():
 
 @pytest.mark.asyncio
 async def test_a_rule_spelled_through_a_linked_parent_binds_a_dispatched_op():
-    # The door judges the path the command handed it as well as the one
+    # The dispatcher judges the path the command handed it as well as the one
     # its walk reaches, so a rule written through a link holds for the
     # command's own ops exactly as it holds for a named operand.
     doc = {
@@ -2669,7 +2669,7 @@ async def test_concurrent_sessions_judge_dispatched_ops_by_their_own_gate():
 
 @pytest.mark.asyncio
 async def test_a_raw_vfs_route_keeps_its_own_policy_scope():
-    # The command rules bind what a command does; the session's raw door
+    # The command rules bind what a command does; the session's raw entry point
     # (ws.vfs, the agent's file tool) is held to paths rules only, as
     # before.
     doc = {
@@ -2736,7 +2736,7 @@ async def test_an_asked_scope_reached_by_a_walk_is_refused_until_named():
 
 
 @pytest.mark.asyncio
-async def test_the_op_door_stats_a_refused_entry_and_withholds_its_content():
+async def test_the_dispatcher_stats_a_refused_entry_and_withholds_its_content():
     ws = _walk_ws()
     try:
         await _seed_walk_tree(ws)
@@ -2755,7 +2755,7 @@ async def test_the_op_door_stats_a_refused_entry_and_withholds_its_content():
 
 
 @pytest.mark.asyncio
-async def test_every_permissions_door_accepts_the_plain_document():
+async def test_every_permissions_entry_point_accepts_the_plain_document():
     # `profiles`, `create_session(profile=)` and `create_session
     # (permissions=)` all validate raw mappings internally, so the
     # Python API reads like the YAML and the TypeScript object literal;

@@ -46,6 +46,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.policy import resolve_limit, resolve_producer
 from mirage.policy.types import HandOff
+from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -213,7 +214,7 @@ async def handle_command(
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     agent_id: str | None = None,
     execute_fn: ExecuteLine | None = None,
     handed: HandOff | None = None,
@@ -275,7 +276,7 @@ async def handle_command(
     # below functions (a user can wrap an installed CLI, bash-style)
     # and above every mount branch (a CLI consults no mount). A CLI that
     # works on files rather than an API (`git`) reads the workspace
-    # facts it needs off `inv.doors`; the rest never look. The doors are
+    # facts it needs off `inv.view`; the rest never look. The entry points are
     # the same ones `run_on_mount` puts on `CommandOpts`, built the same
     # way, so a CLI leaf and a command handler see one plane alike.
     cli_install = registry.clis.get(cmd_name)
@@ -311,6 +312,7 @@ async def handle_command(
                 processes=registry.process_view(session)
                 if registry.process_view is not None
                 else None,
+                routing=routing_decision,
             ),
             drop_caches=(
                 functools.partial(drop_mount_caches, registry)
@@ -319,7 +321,8 @@ async def handle_command(
             ),
         )
 
-    # Every op the command issues from here carries its gate to the door.
+    # Every op the command issues from here carries its gate to the entry
+    # point.
     if dispatch is not None:
         dispatch = with_dispatch_rule_guard(dispatch)
 

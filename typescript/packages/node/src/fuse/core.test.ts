@@ -79,7 +79,7 @@ describe('MountCore', () => {
   )
 
   it('runs every op under its session with no adapter binding it', async () => {
-    // The SFTP door drives MountCore directly, with no FUSE adapter to
+    // The SFTP entry point drives MountCore directly, with no FUSE adapter to
     // enter the session context, so the core binds its own session per
     // op, as Python's MountCore does.
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
@@ -124,8 +124,8 @@ describe('MountCore', () => {
 
   it('refuses to remove a link on hidden turf for a scoped session', async () => {
     // The other half of the R8 hole, open until unlink stopped calling
-    // the namespace table directly: creation was routed through the op
-    // door, removal still wrote the table at a layer no session view
+    // the namespace table directly: creation was routed through the
+    // dispatcher, removal still wrote the table at a layer no session view
     // covers, so a scoped mount could delete a link on a mount its
     // profile hides. ENOENT rather than the create's EACCES is the
     // no-name-leak rule: only an op that spells out a name it is
@@ -145,7 +145,7 @@ describe('MountCore', () => {
   })
 
   it('removes a link and keeps its target', async () => {
-    // The other side of routing removal through the door: an unscoped
+    // The other side of routing removal through the dispatcher: an unscoped
     // mount still drops the link entry, and only that, the way
     // unlink(2) on a symlink leaves the pointee alone.
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
@@ -158,7 +158,7 @@ describe('MountCore', () => {
   })
 
   it('writes a file the session may not read', async () => {
-    // Writing at an offset is one write at the door, so a policy that
+    // Writing at an offset is one write at the dispatcher, so a policy that
     // refuses reads leaves FUSE writes alone, as a write-only descriptor
     // takes pwrite(2). The flush used to read the file first, and a refused
     // read was taken for an empty file, so the write wiped what was there.
@@ -526,7 +526,7 @@ describe('MountCore', () => {
     expect(code).toBe('ENOTEMPTY')
   })
 
-  it('round-trips xattrs through the door', async () => {
+  it('round-trips xattrs through the dispatcher', async () => {
     const core = await mkCore()
     await core.setxattr('/data/greeting.txt', 'user.tag', new TextEncoder().encode('v1'))
     const value = await core.getxattr('/data/greeting.txt', 'user.tag')
@@ -763,7 +763,7 @@ describe('MountCore chunks', () => {
     await core.release(fd)
   })
 
-  it('tells a session the command rules a door of ops skips', () => {
+  it('tells a session the command rules FUSE skips', () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {

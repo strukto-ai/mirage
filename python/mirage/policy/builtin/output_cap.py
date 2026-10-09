@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any
+from typing import Protocol
 
 from mirage.policy.base import Policy
 from mirage.policy.types import Action, VfsResultContext
@@ -34,9 +34,14 @@ FALLBACK_LIMIT = Limit(timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
 OverrideLookup = Callable[[str, str], Limit | None]
 
 
+class LimitMount(Protocol):
+    @property
+    def command_limits(self) -> Mapping[str, Limit]: ...
+
+
 def resolve_limit(
     name: str,
-    mounts: Iterable[Any] = (),
+    mounts: Iterable[LimitMount] = (),
     command_default: Limit | None = None,
     mount_override: Limit | None = None,
     workspace_limits: Mapping[str, Limit] | None = None,
@@ -51,7 +56,7 @@ def resolve_limit(
 
     Args:
         name (str): command name being resolved.
-        mounts (Iterable): the mounts the command spans (may be empty).
+        mounts (Iterable[LimitMount]): the mounts the command spans (may be empty).
         command_default (Limit | None): the registered command's own
             default, when the caller knows it.
         mount_override (Limit | None): one mount's per-command

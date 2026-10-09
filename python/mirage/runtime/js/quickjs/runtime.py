@@ -22,6 +22,7 @@ from typing import Any, Callable, ClassVar
 from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.config import HomeConfig, RuntimeConfig
 from mirage.runtime.errors import EvalError
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.js.quickjs.execution import cwd_preamble
 from mirage.runtime.mixin import EvaluatorMixin
@@ -34,7 +35,6 @@ from mirage.runtime.types import (
     RuntimeReach,
     ScriptSource,
 )
-from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm import WasmExecution, WasmView
 from mirage.runtime.wasm.loader import wasmtime
 
@@ -89,7 +89,7 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
 
     name = "quickjs"
     # The engine is a WASI guest whose `std.open`/`os.readdir` suspend
-    # into the workspace bridge: guest I/O has no door around the gate.
+    # into the workspace bridge: guest I/O has no way around the gate.
     reach: RuntimeReach = "workspace"
     filesystem: ClassVar[tuple[FilesystemOperation, ...]] = (
         "read",
@@ -171,7 +171,7 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
             source = cwd_preamble(cwd) + source
         argv += ["-e", source, "--", *named, *args.args]
         fs = WasmView(
-            core=RuntimeVFS.of(context) if context is not None else None
+            files=RuntimeFiles.of(context) if context is not None else None
         )
         stdout, stderr, exit_code = await self._execution.run(
             argv=argv,

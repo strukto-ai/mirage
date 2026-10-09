@@ -243,21 +243,21 @@ export async function clearWorktree(
  * here to recover a file from.
  */
 export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   let flags: RmFlags
   let selected: string[]
   try {
-    const dispatch = doors.dispatch
-    const statPath = doors.statPath
+    const dispatch = view.dispatch
+    const statPath = view.statPath
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
     flags = parseFlags(fl)
     if (texts.length === 0) throw new NoPathspecRemoveError()
-    const repo = await opened(fl, doors, !flags.cached)
+    const repo = await opened(fl, view, !flags.cached)
     const state = await readIndex(repo, dispatch)
     const tracked = new Set([
       ...visibleEntries(repo.location, state.entries).keys(),
@@ -272,7 +272,7 @@ export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
         repo.location,
         tracked,
         UNTRACKED_NO,
-        doors.ns?.links ?? null,
+        view.ns?.links ?? null,
       )
       const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
       await refuseLostWork(
@@ -283,7 +283,7 @@ export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
         found,
         checkable,
         flags.cached,
-        doors.ns?.links ?? null,
+        view.ns?.links ?? null,
       )
     }
     const lines = flags.quiet ? '' : selected.map((path) => `rm '${path}'\n`).join('')
@@ -294,8 +294,8 @@ export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
         repo.location.worktree,
         selected,
         lines,
-        doors.ns?.links ?? null,
-        doors.ns?.mounts ?? null,
+        view.ns?.links ?? null,
+        view.ns?.mounts ?? null,
       )
     }
     // Last, because the deletions above can fail: git writes the index only

@@ -73,7 +73,7 @@ afterEach(async () => {
   for (const app of apps.splice(0)) await app.close()
 })
 
-describe('the MCP door over HTTP', () => {
+describe('the MCP endpoint over HTTP', () => {
   it('serves the tools', async () => {
     const { base } = await daemon()
     const client = await connect(`${base}/v1/workspaces/${await createWorkspace(base)}/mcp`)

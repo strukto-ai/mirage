@@ -597,10 +597,10 @@ describe('configToWorkspaceArgs', () => {
     )
   })
 
-  // At the SYNC door. `loadWorkspaceConfig` is what the CLI runs before
+  // At the SYNC entry point. `loadWorkspaceConfig` is what the CLI runs before
   // it POSTs the document to the daemon; validating only in the async
   // builder means junk survives that hop.
-  it('refuses a junk top-level read policy at the sync door', () => {
+  it('refuses a junk top-level read policy at the sync entry point', () => {
     expect(() => loadWorkspaceConfig({ read: 'banana', mounts: { '/': { vfs: 'ram' } } })).toThrow(
       /fresh, bounded, pinned/,
     )
@@ -638,7 +638,7 @@ describe('configToWorkspaceArgs', () => {
   })
 
   it('refuses a mount declaring fresh on a backend that cannot revalidate', async () => {
-    // The config door parses; the mount door judges. Keeping the verdict
+    // The config loader parses; the mount entry point judges. Keeping the verdict
     // at mount time is what makes one rule cover YAML, addMount and a
     // snapshot restore alike.
     const args = await configToWorkspaceArgs(
@@ -650,7 +650,7 @@ describe('configToWorkspaceArgs', () => {
   })
 
   it('refuses a mount block whose bound and policy disagree', () => {
-    // Both rules live at the config door: once a ReadSpec exists its ttl
+    // Both rules live at the config loader: once a ReadSpec exists its ttl
     // has defaulted, so `bounded` without a bound is indistinguishable
     // from `read:` left out entirely.
     expect(() => loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram', ttl: 30 } } })).toThrow(
@@ -1296,7 +1296,7 @@ describe('CLI to daemon round trip', () => {
   })
 
   it('rebases a profile policy path onto the config dir before loading it', async () => {
-    // The check door validates the profile without reading its policy:
+    // The check entry point validates the profile without reading its policy:
     // reading at validation resolved `roles/x.js` against the process
     // cwd (this test's cwd is the package, not the config dir), so
     // checking a file config from anywhere else failed with ENOENT.
@@ -1440,7 +1440,7 @@ describe.each(ACCEPTED_FIXTURES)('shared acceptance fixture: %s', (fixture) => {
 })
 
 describe('shared acceptance fixture cache and index blocks', () => {
-  // The same keys are held a second time, camelCase, by the code door
+  // The same keys are held a second time, camelCase, by the code entry point
   // in core; a key accepted here and refused there would load a config
   // the workspace then refuses to build.
   const mountIndexes = (config: Record<string, unknown>): unknown[] =>
@@ -1615,13 +1615,13 @@ describe('the secrets block', () => {
 
 describe('a mount or CLI credential from the secrets plane', () => {
   it('resolves a mount pointer against a declared instance', async () => {
-    process.env.CONFIG_DOOR_PROBE = 'xoxb-from-env'
+    process.env.CONFIG_LOADER_PROBE = 'xoxb-from-env'
     const args = await configToWorkspaceArgs(
       loadWorkspaceConfig({
         mounts: {
           '/slack': {
             vfs: 'slack',
-            config: { token: { from: 'ambient', key: 'CONFIG_DOOR_PROBE' } },
+            config: { token: { from: 'ambient', key: 'CONFIG_LOADER_PROBE' } },
           },
         },
         secrets: { ambient: { source: 'env' } },
@@ -1629,20 +1629,20 @@ describe('a mount or CLI credential from the secrets plane', () => {
     )
     const entry = args.mounts['/slack']
     expect(entry).toBeDefined()
-    expect(JSON.stringify(entry?.vfs)).not.toContain('CONFIG_DOOR_PROBE')
+    expect(JSON.stringify(entry?.vfs)).not.toContain('CONFIG_LOADER_PROBE')
   })
 
   it('resolves a CLI pointer against the same instances', async () => {
     // The sources reached mount construction and not `buildCliEntries`,
     // so the CLI's config model was handed the pointer itself.
-    process.env.CONFIG_DOOR_CLI_PROBE = 'xoxb-for-the-cli'
+    process.env.CONFIG_LOADER_CLI_PROBE = 'xoxb-for-the-cli'
     const args = await configToWorkspaceArgs(
       loadWorkspaceConfig({
         mounts: { '/data': { vfs: 'ram' } },
         clis: {
           sl: {
             cli: 'slack',
-            config: { token: { from: 'ambient', key: 'CONFIG_DOOR_CLI_PROBE' } },
+            config: { token: { from: 'ambient', key: 'CONFIG_LOADER_CLI_PROBE' } },
           },
         },
         secrets: { ambient: { source: 'env' } },
@@ -1652,12 +1652,12 @@ describe('a mount or CLI credential from the secrets plane', () => {
   })
 
   it('resolves a pointer with no secrets block at all', async () => {
-    process.env.CONFIG_DOOR_BARE_PROBE = 'xoxb-ambient'
+    process.env.CONFIG_LOADER_BARE_PROBE = 'xoxb-ambient'
     const args = await configToWorkspaceArgs(
       loadWorkspaceConfig({
         mounts: { '/data': { vfs: 'ram' } },
         clis: {
-          sl: { cli: 'slack', config: { token: { from: 'env', key: 'CONFIG_DOOR_BARE_PROBE' } } },
+          sl: { cli: 'slack', config: { token: { from: 'env', key: 'CONFIG_LOADER_BARE_PROBE' } } },
         },
       }),
     )
@@ -1715,7 +1715,7 @@ it.each([
 })
 
 // The workspace index is Redis at 73, so a mount that took any of it would
-// show; the code door from `new Mount(vfs, { index })` on is tested in core.
+// show; the code entry point from `new Mount(vfs, { index })` on is tested in core.
 describe('mount index block', () => {
   const REDIS_URL = 'redis://127.0.0.1:1/0'
 
@@ -1760,7 +1760,7 @@ describe('mount index block', () => {
   })
 })
 
-// Non-default neighbours fail a door that rebuilds the mount around the key.
+// Non-default neighbours fail an entry point that rebuilds the mount around the key.
 describe('mount write block', () => {
   it.each([
     ['neither', undefined, undefined, WritePolicy.UNCONDITIONAL],

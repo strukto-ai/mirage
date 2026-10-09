@@ -153,7 +153,7 @@ def test_only_modules() -> set[Path]:
     ``<stem>.test.ts`` does not count as a user, or every module with a
     test and no other importer would pass for a helper; one imported by
     tests and other helpers only is a helper too. An ``index.ts`` never
-    is: it is a package's public door, which its tests import as a user
+    is: it is a package's public entry point, which its tests import as a user
     would.
 
     Returns:

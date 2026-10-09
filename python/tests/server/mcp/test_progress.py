@@ -9,7 +9,7 @@ from mirage.server.mcp.progress import (
     collect_execution,
 )
 from mirage.shell.console.types import Channel
-from mirage.workspace.abort import MirageAbortError
+from mirage.utils.abort import MirageAbortError
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.shell_execution import ShellExecution
 

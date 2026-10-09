@@ -20,7 +20,7 @@ from mirage import (
 )
 from mirage.commands.builtin.grep_pushdown import grep_search_options
 from mirage.commands.builtin.utils.lines import split_lines
-from mirage.runtime.vfs import RuntimeVFS
+from mirage.runtime.files import RuntimeFiles
 
 
 class NotesAccessor(Accessor):
@@ -117,28 +117,28 @@ class NotesVFS(BaseVFS):
 
 
 async def note_info(inv: CLIInvocation[None]) -> tuple[bytes, IOResult]:
-    doors = inv.doors
+    view = inv.view
     if (
-        doors is None
-        or doors.dispatch is None
-        or doors.ns is None
-        or doors.ns.mounts is None
-        or doors.session_view is None
+        view is None
+        or view.dispatch is None
+        or view.ns is None
+        or view.ns.mounts is None
+        or view.session_view is None
     ):
-        raise RuntimeError("note-info needs workspace doors")
+        raise RuntimeError("note-info needs workspace entry points")
     path = inv.paths[0]
     target = (
-        doors.ns.links.resolve(path.virtual)
-        if doors.ns.links is not None
+        view.ns.links.resolve(path.virtual)
+        if view.ns.links is not None
         else path.virtual
     )
-    data, result = await doors.dispatch("read", path)
+    data, result = await view.dispatch("read", path)
     if result.exit_code != 0:
         return b"", result
     if not isinstance(data, bytes):
         raise TypeError("expected file bytes")
-    mount = doors.ns.mounts.root_of(target)
-    reader = doors.session_view.get("READER") or "anonymous"
+    mount = view.ns.mounts.root_of(target)
+    reader = view.session_view.get("READER") or "anonymous"
     header = f"mount={mount} reader={reader} bytes={len(data)}\n"
     return header.encode() + data, result
 
@@ -215,7 +215,7 @@ async def main() -> None:
         reader = await ws.session("reader", {"/notes": MountMode.READ})
         assert await reader.vfs.read("/latest") == expected
 
-        runtime = RuntimeVFS(ws.dispatch, asyncio.get_running_loop())
+        runtime = RuntimeFiles(ws.dispatch, asyncio.get_running_loop())
         assert await asyncio.to_thread(runtime.read, "/latest") == expected
         assert not (await asyncio.to_thread(runtime.stat, "/latest")).is_dir
         refused = await ws.shell("echo changed > /notes/welcome.txt")

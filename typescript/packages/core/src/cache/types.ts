@@ -25,8 +25,17 @@ export interface WriteCondition {
 }
 
 /**
+ * A file's live tokens: the content token mirage compares, the native token
+ * the backend's condition takes. Mirrors Python's `LiveVersion`.
+ */
+export interface LiveVersion {
+  readonly content: string | null
+  readonly native: string | null
+}
+
+/**
  * What a write on a `write: conditional` mount needs to know. Bound by the
- * mount's own doors (`runWithCaches`, `runWithWriteRevisions`), so a write always sees
+ * mount's own entry points (`runWithCaches`, `runWithWriteRevisions`), so a write always sees
  * the context of the mount it lands on; an unconditional mount binds null,
  * which also clears an outer one. Mirrors Python's `WriteContext`.
  */

@@ -21,7 +21,7 @@ from mirage.server.ssh.config import SSHConfig
 
 
 class SSHListener(Protocol):
-    """A running SSH door, as the daemon holds it."""
+    """A running SSH endpoint, as the daemon holds it."""
 
     def get_port(self) -> int: ...
 

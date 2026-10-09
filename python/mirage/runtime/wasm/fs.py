@@ -535,14 +535,14 @@ class WasiFs:
         if entry is None:
             return EBADF
         if entry.kind == "file" and entry.handle is not None:
-            mtime = entry.stat.mtime_ns if entry.stat is not None else 0
+            mtime = (entry.stat.mtime_ns or 0) if entry.stat is not None else 0
             packed = pack_filestat(
                 entry.handle.size, mtime, FT_REG, self._ino(entry.path)
             )
         elif entry.kind == "dir":
             st = self._fs.stat(entry.path)
             packed = pack_filestat(
-                st.size, st.mtime_ns, FT_DIR, self._ino(entry.path)
+                st.size, st.mtime_ns or 0, FT_DIR, self._ino(entry.path)
             )
         else:
             packed = pack_filestat(0, 0, FT_CHR, fd)
@@ -567,7 +567,7 @@ class WasiFs:
         follow = bool(flags & LOOKUP_SYMLINK_FOLLOW)
         st = self._fs.stat(path) if follow else self._fs.lstat(path)
         packed = pack_filestat(
-            st.size, st.mtime_ns, filetype_of(st), self._ino(path)
+            st.size, st.mtime_ns or 0, filetype_of(st), self._ino(path)
         )
         self._store(caller, buf, packed)
         return OK

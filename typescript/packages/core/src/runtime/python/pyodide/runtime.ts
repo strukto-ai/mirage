@@ -24,32 +24,28 @@ import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PythonRuntime } from '../base.ts'
 import { EvalError } from '../../errors.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
-import type {
-  EvalResult,
-  EvalValue,
-  RunArgs,
-  RunResult,
-  RuntimeOptions,
-  RuntimeReach,
-} from '../../types.ts'
+import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeReach } from '../../types.ts'
+import type { RuntimeOptions } from '../../config.ts'
 import type { RuntimeContext } from '../../binding.ts'
 import {
   createPyodideInterrupter,
   type ArmedInterrupt,
   type PyodideInterrupter,
 } from './interrupt.ts'
+import { noWorker, PyodideUnavailableError } from './errors.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
-import { RuntimeVFS } from '../../vfs.ts'
+import { RuntimeFiles } from '../../files.ts'
 import { applyMutation, createJournal, type MutationJournal } from './fs/journal.ts'
-import { preloadInto } from './fs/preload.ts'
 import { PyodideFs } from './fs/fs.ts'
+import { preloadInto } from './fs/preload.ts'
 import { PyodideFsSeed } from './fs/seed.ts'
 import { PyodideExecution } from './execution.ts'
 import { mainFilename } from '../execution.ts'
 import { unhonoredNotice, type InitFlags } from '../flags.ts'
-import type { SyncVFS, XattrOp } from './fs/types.ts'
+import type { FlushFailure, SyncVFS, XattrOp } from './fs/types.ts'
 import { classify } from '../../../errors/index.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
+import { KEYS, type PyodideConfig } from './config.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
 
 function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
@@ -132,7 +128,7 @@ function servable(prefix: string): boolean {
 /**
  * Drop every prefix nested inside another: only the shallowest of a
  * nested pair earns an Emscripten mountpoint, and its preload descends
- * into the child through the door's merged readdir.
+ * into the child through the dispatcher's merged readdir.
  *
  * Args:
  *   prefixes: slash-terminated mount prefixes.
@@ -173,61 +169,6 @@ export function stripDeniedImports(code: string, denyPackages: ReadonlySet<strin
 }
 
 /** The pyodide runtime's implementation knobs (its `config` block). */
-export interface PyodideConfig {
-  /** Maximum simultaneous top-level calls, default 1; hosts without isolated async context serialize. */
-  maxConcurrency?: number
-  autoLoadFromImports?: boolean
-  bootstrapCode?: string
-  /** Trusted host module URL. Its default initializer receives Pyodide and may return cleanup. */
-  initModule?: string
-  denyPackages?: readonly string[]
-  /**
-   * Virtual paths prepended to sys.path once the mounts are in place, so
-   * an agent can `import openpyxl` without writing sys.path.append
-   * itself. Entries are MOUNT paths, not host paths: the glob runs
-   * inside the interpreter against the mounted tree. A `.whl` may be
-   * named directly (zipimport reads a pure-python wheel in place), and a
-   * pattern may contain `*`, `?` or `[`.
-   *
-   * Prepended, not appended: a vendored package of the same name must
-   * win over a bundled one, which is also CPython's own PYTHONPATH
-   * precedence.
-   */
-  sysPath?: readonly string[]
-  /**
-   * Packages loaded from the distribution when each interpreter starts:
-   * per invocation, or once per named console session. The subsequent
-   * autoLoadFromImports scan skips packages already loaded at initialization.
-   */
-  packages?: readonly string[]
-  /**
-   * Where package wheels are fetched from. Distinct from `home`, which
-   * only sets indexURL: the npm pyodide package ships the lock file and
-   * NO wheels, so a deployment that wants `packages` working offline
-   * points this at its own prebuilt distribution. A `://` value makes
-   * package loading a network fetch; a local path keeps it on disk.
-   */
-  packageBaseUrl?: string
-  /** A custom pyodide-lock.json, for a prebuilt distribution. */
-  lockFileURL?: string
-  // Where the pyodide distribution loads from; falls back to
-  // MIRAGE_PYODIDE_HOME, then the installed package in Node or the
-  // pinned CDN in the browser. Override for self-hosted assets.
-  home?: string
-}
-
-const PYODIDE_CONFIG_KEYS: readonly string[] = [
-  'maxConcurrency',
-  'autoLoadFromImports',
-  'bootstrapCode',
-  'initModule',
-  'denyPackages',
-  'home',
-  'sysPath',
-  'packages',
-  'packageBaseUrl',
-  'lockFileURL',
-]
 
 // One-shot eval is bounded like quickjs's: nothing above the runtime
 // can stop a hung guest on this thread, so the runtime owns its own
@@ -263,9 +204,13 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private readonly packages: readonly string[]
   private readonly packageBaseUrl: string | null
   private readonly lockFileURL: string | null
-  private vfs: RuntimeVFS | null = null
+  private files: RuntimeFiles | null = null
   private readonly journal: MutationJournal = createJournal()
+  private readonly deferred = new Map<string, FlushFailure>()
   private readonly mounted = new Set<string>()
+  // The directories made to hold a mountpoint, which an unmount takes
+  // back so a mount the session no longer sees leaves no name behind.
+  private readonly madeDirs = new Set<string>()
   private readonly mountedFilesystems = new Map<string, PyodideFs>()
   // Prefixes this interpreter cannot mount, reported once per interpreter.
   private readonly refused = new Set<string>()
@@ -281,7 +226,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   // where SharedArrayBuffer/workers are unavailable (runs unbounded).
   private interrupter: PyodideInterrupter | null = null
   private interrupterTried = false
-  private worker: Promise<PyodideWorkerClient | null> | null = null
+  private worker: Promise<PyodideWorkerClient | PyodideUnavailableError> | null = null
   private readonly syncFailures: string[] = []
   private syncSkipped = 0
 
@@ -290,7 +235,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     private readonly sync?: SyncVFS,
     private readonly interruptBuffer?: SharedArrayBuffer,
   ) {
-    super(options, PYODIDE_CONFIG_KEYS)
+    super(options, KEYS)
     const config = this.config as PyodideConfig
     const { maxConcurrency = 1 } = config
     if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1)
@@ -445,8 +390,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     opts: { inputs?: Record<string, EvalValue>; session?: string },
     context?: RuntimeContext,
   ): Promise<EvalResult> {
-    this.vfs = context !== undefined ? RuntimeVFS.of(context) : null
+    this.files = context !== undefined ? RuntimeFiles.of(context) : null
     const worker = await this.ensureWorker(context)
+    if (worker instanceof PyodideUnavailableError) throw worker
     if (worker !== null && context !== undefined) {
       return (await worker.execute(
         {
@@ -460,6 +406,13 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         },
         context,
       )) as EvalResult
+    }
+    // A console that ran before this runtime was bound keeps its names in
+    // an interpreter of its own, which has no bridge to the mounts.
+    if (context !== undefined && this.sync === undefined) {
+      throw new EvalError(
+        `pyodide console ${JSON.stringify(opts.session ?? '')} started before this runtime was bound to a workspace, so it cannot reach the mounts; start a new console`,
+      )
     }
     if (opts.session !== undefined) {
       const repl = await this.runOneRepl(
@@ -546,11 +499,13 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       const worker = this.worker
       this.worker = null
       this.initPromise = null
-      this.vfs = null
+      this.files = null
       this.mounted.clear()
+      this.madeDirs.clear()
       this.mountedFilesystems.clear()
       try {
-        ;(await worker)?.close()
+        const client = await worker
+        if (client instanceof PyodideWorkerClient) client.close()
       } finally {
         this.interrupter?.close()
         this.interrupter = null
@@ -616,7 +571,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     return this.pyodide
   }
 
-  private async ensureWorker(context?: RuntimeContext): Promise<PyodideWorkerClient | null> {
+  private async ensureWorker(
+    context?: RuntimeContext,
+  ): Promise<PyodideWorkerClient | PyodideUnavailableError | null> {
     if (this.sync !== undefined || context === undefined || this.pyodide !== null) return null
     this.worker ??= PyodideWorkerClient.create()
     return this.worker
@@ -624,16 +581,18 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
 
   /**
    * Rebuild mount nodes before each run so cached bytes never survive a
-   * session change. Workers populate nodes on lookup/open; the fallback
-   * for hosts without shared memory collects a complete seed instead.
-   * Removed mounts disappear, and nested mounts share their parent's
-   * Emscripten mountpoint while retaining workspace routing boundaries.
+   * session change. Workers populate nodes on lookup/open. The fallback
+   * for hosts without shared memory would collect a complete seed of
+   * every mount instead, so a bound run with no worker is refused before
+   * it gets here (`noWorker`). Removed mounts disappear, and nested
+   * mounts share their parent's Emscripten mountpoint while retaining
+   * workspace routing boundaries.
    */
   private async syncMounts(pyodide: PyodideInterface): Promise<void> {
-    const vfs = this.vfs
-    if (vfs === null) return
+    const files = this.files
+    if (files === null) return
     const sync = this.sync
-    const all = vfs.prefixes()
+    const all = files.prefixes()
     for (const prefix of all) {
       if (servable(prefix) || this.refused.has(prefix)) continue
       this.refused.add(prefix)
@@ -644,7 +603,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       )
     }
     // Only maximal prefixes become Emscripten mounts: the bridge routes
-    // every op by full path and the door's readdir lists a nested
+    // every op by full path and the dispatcher's readdir lists a nested
     // mount's name under its parent, so a child mount is served through
     // the parent's mountpoint. A second Emscripten mount inside the
     // first would be orphaned when the parent remounts.
@@ -654,13 +613,19 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       pyodide.FS.unmount(mountpointOf(prefix))
       this.mounted.delete(prefix)
       this.mountedFilesystems.delete(prefix)
+      let dir = mountpointOf(prefix)
+      while (this.madeDirs.has(dir) && pyodide.FS.readdir(dir).length === 2) {
+        pyodide.FS.rmdir(dir)
+        this.madeDirs.delete(dir)
+        dir = dir.slice(0, dir.lastIndexOf('/'))
+      }
     }
     for (const prefix of [...wanted].sort((a, b) => a.length - b.length)) {
       // Collect before touching the mount table: a failed readdir then
       // leaves the previous snapshot serving rather than an empty mount,
       // and the prefix retries on the next run.
       const seed = new PyodideFsSeed()
-      if (this.sync === undefined) await preloadInto(seed, vfs, prefix)
+      if (this.sync === undefined) await preloadInto(seed, files, prefix)
       const mountpoint = mountpointOf(prefix)
       if (this.mounted.has(prefix)) pyodide.FS.unmount(mountpoint)
       const fs = new PyodideFs(
@@ -668,7 +633,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         pyodide.ERRNO_CODES,
         this.journal,
         mountpoint,
-        (p) => vfs.mountOf(p),
+        (p) => files.mountOf(p),
         sync === undefined
           ? undefined
           : {
@@ -679,19 +644,22 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
                   throw new Error(this.syncFailures[0])
                 }
                 try {
-                  const failure = sync.flush(mutations)
-                  if (failure !== undefined) {
-                    this.syncSkipped += failure.skipped
-                    throw new Error(failure.message)
-                  }
+                  return sync.flush(mutations)
                 } catch (error) {
                   this.syncFailures.push(error instanceof Error ? error.message : String(error))
                   throw error
                 }
               },
             },
+        this.deferred,
       )
-      pyodide.FS.mkdirTree(mountpoint)
+      let dir = ''
+      for (const part of mountpoint.split('/').slice(1)) {
+        dir += '/' + part
+        if (pyodide.FS.analyzePath(dir).exists) continue
+        pyodide.FS.mkdir(dir)
+        this.madeDirs.add(dir)
+      }
       pyodide.FS.mount(fs.type, {}, mountpoint)
       // After the mount, never inside it: Emscripten assigns the root's
       // `mount` only once `type.mount()` has returned, and a node built
@@ -751,8 +719,8 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   /**
    * The guest's extended-attribute calls (its os.getxattr family, which
    * the harness installs over this module), answered by the workspace
-   * door and handed back as JSON: `{value}`, or `{code}` naming the
-   * condition the door reported. Only the worker can wait on the door
+   * dispatcher and handed back as JSON: `{value}`, or `{code}` naming the
+   * condition the dispatcher reported. Only the worker can wait on the dispatcher
    * from inside a WASM frame, so without one, and for a path no mount
    * serves, the answer is ENOTSUP: what a filesystem without extended
    * attributes says.
@@ -767,7 +735,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     nofollow: boolean,
   ): string {
     const sync = this.sync
-    if (sync === undefined || this.vfs?.mountOf(path) == null) {
+    if (sync === undefined || this.files?.mountOf(path) == null) {
       return JSON.stringify({ code: 'ENOTSUP' })
     }
     try {
@@ -796,8 +764,11 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
    */
   private async drainMutations(): Promise<string[]> {
     this.journal.reopen()
-    const vfs = this.vfs
-    if (vfs === null) return []
+    const files = this.files
+    if (files === null) return []
+    // A refusal no later call of its file came to claim.
+    const deferred = [...this.deferred.values()].map((failure) => failure.message)
+    this.deferred.clear()
     const failures = this.syncFailures.splice(0)
     const pending = this.journal.takeMutations()
     const skipped = this.syncSkipped + pending.length
@@ -805,13 +776,13 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     if (failures.length > 0) {
       if (skipped > 0)
         failures.push(`python3: skipped ${String(skipped)} later mutation(s) after that failure`)
-      return failures
+      return [...deferred, ...failures]
     }
     for (let i = 0; i < pending.length; i++) {
       const mutation = pending[i]
       if (mutation === undefined) continue
       try {
-        await applyMutation(vfs, mutation)
+        await applyMutation(files, mutation)
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err)
         failures.push(`python3: failed to ${mutation.kind} ${mutation.path} on mount: ${detail}`)
@@ -828,7 +799,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         break
       }
     }
-    return failures
+    return [...deferred, ...failures]
   }
 
   private async loadImports(pyodide: PyodideInterface, code: string): Promise<void> {
@@ -843,8 +814,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   }
 
   private async runOne(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
-    this.vfs = context !== undefined ? RuntimeVFS.of(context) : null
+    this.files = context !== undefined ? RuntimeFiles.of(context) : null
     const worker = await this.ensureWorker(context)
+    if (worker instanceof PyodideUnavailableError) throw worker
     if (worker !== null && context !== undefined) {
       const { cwd, signal, ...rest } = args
       return (await worker.execute(
@@ -859,6 +831,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         signal,
       )) as RunResult
     }
+    if (context !== undefined && this.sync === undefined) throw noWorker()
     const pyodide = await this.ensureLoaded()
     // Seeding happened inside ensureLoaded; its notices ride out on
     // this run's stderr, beside any flush failure and any init switch
@@ -952,7 +925,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
 
   private guestCwd(path?: PathSpec): string {
     const cwd = path?.virtual ?? ''
-    const mount = cwd === '' ? null : (this.vfs?.mountOf(cwd) ?? null)
+    const mount = cwd === '' ? null : (this.files?.mountOf(cwd) ?? null)
     // A root mount cannot replace the interpreter's own filesystem.
     return cwd !== '/' && mount !== null && !servable(mount) ? '' : cwd
   }

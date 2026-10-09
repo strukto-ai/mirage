@@ -19,7 +19,8 @@ import { Limit, MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RemoteSandbox } from './base.ts'
 import { isLineExecutor } from '../mixin.ts'
-import type { RunResult, RuntimeOptions } from '../types.ts'
+import type { RunResult } from '../types.ts'
+import type { RuntimeOptions } from '../config.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -146,7 +147,7 @@ describe('RemoteSandbox', () => {
 
   it('sandboxes take lines, not stages', () => {
     // A sandbox is a line executor, never the engine inside one
-    // command: it carries the line door and no interpreter door.
+    // command: it carries the line entry point and no interpreter entry point.
     const box = new RecordingSandbox()
     expect(isLineExecutor(box)).toBe(true)
     expect('run' in box).toBe(false)

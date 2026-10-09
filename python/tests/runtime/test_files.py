@@ -21,10 +21,10 @@ import pytest
 from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.constants import LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import FlushStep
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSEntry, VFSStat
-from mirage.runtime.vfs import RuntimeVFS
 from mirage.types import DEVICE_NUMBERS_KEY, ContentType, FileStat, FileType
 from mirage.utils.stat_view import (
     CHAR_MODE,
@@ -35,7 +35,7 @@ from mirage.utils.stat_view import (
 )
 
 
-class ListingVFS(RuntimeVFS):
+class ListingVFS(RuntimeFiles):
     """Core double for the readdir lifting: canned listing and stats."""
 
     def __init__(self, listing, stats, links=()):
@@ -69,7 +69,7 @@ class ListingVFS(RuntimeVFS):
         raise NotImplementedError(name)
 
 
-class RecordingVFS(RuntimeVFS):
+class RecordingVFS(RuntimeFiles):
     """Core with a recorded dispatch, so the routing under test is real."""
 
     def __init__(self, prefixes=(), no_append=()):
@@ -81,14 +81,14 @@ class RecordingVFS(RuntimeVFS):
         self.calls = []
         self._declines = set(no_append)
 
-    def _raw(self, op, path, **kwargs):
+    def call(self, op, path, **kwargs):
         self.calls.append((op, path, kwargs))
         if op == "append" and self.mount_of(path) in self._declines:
             raise OperationNotSupportedError("append")
         return b"" if op == "read" else None
 
 
-class WorldVFS(RuntimeVFS):
+class WorldVFS(RuntimeFiles):
     """Core over an empty world, or one where every op is refused."""
 
     def __init__(self, refuse=None):
@@ -165,7 +165,7 @@ def test_rename_within_one_mount_dispatches():
     assert kwargs["dst"].virtual == "/data/b.txt"
 
 
-def test_serves_scopes_to_the_mounts_and_an_unscoped_door_serves_all():
+def test_serves_scopes_to_the_mounts_and_an_unscoped_entry_point_serves_all():
     scoped = RecordingVFS(prefixes=["/data/"])
     assert scoped.serves("/data/a.txt") is True
     assert scoped.serves("/tmp/a.txt") is False
@@ -175,7 +175,7 @@ def test_serves_scopes_to_the_mounts_and_an_unscoped_door_serves_all():
 def test_serves_a_path_reached_through_a_link_outside_every_mount():
     # The dispatcher follows a link outside every mount, so what is
     # reached through one is the workspace's too.
-    door = RuntimeVFS(
+    files = RuntimeFiles(
         dispatch=None,
         loop=None,
         resolver=PrefixResolver(
@@ -183,15 +183,15 @@ def test_serves_a_path_reached_through_a_link_outside_every_mount():
             lambda directory: {"alias"} if directory == "/" else set(),
         ),
     )
-    assert door.serves("/alias") is True
-    assert door.serves("/alias/inner.txt") is True
-    assert door.serves("/tmp/a.txt") is False
+    assert files.serves("/alias") is True
+    assert files.serves("/alias/inner.txt") is True
+    assert files.serves("/tmp/a.txt") is False
 
 
 F = "/data/f"
 
 
-class ViewVFS(RuntimeVFS):
+class ViewVFS(RuntimeFiles):
     """Core over /data, with a withheld file and a listed-only directory."""
 
     def __init__(self):
@@ -238,10 +238,10 @@ def test_a_refusal_is_not_read_as_an_absence():
 
 
 def test_readdir_lifts_names_into_entries():
-    # The TS bridge resolves path/size/isDir once at the door, off the
+    # The TS bridge resolves path/size/isDir once at the file adapter, off the
     # stat index the readdir just populated; python answered bare names
     # and every consumer re-parsed the trailing-slash convention, paying
-    # one guest stat per entry for a fact the door already had.
+    # one guest stat per entry for a fact the file adapter already had.
     vfs = ListingVFS(
         listing=["/data/sub/", "/data/a.txt", "/data/ghost.txt"],
         stats={
@@ -282,7 +282,7 @@ def test_readdir_keeps_the_listing_when_one_stat_fails(caplog):
             "/data/bad.txt": RuntimeError("upstream 502 Bad Gateway"),
         },
     )
-    with caplog.at_level(logging.WARNING, logger="mirage.runtime.vfs"):
+    with caplog.at_level(logging.WARNING, logger="mirage.runtime.files"):
         assert vfs.readdir("/data/") == [
             VFSEntry(
                 path="/data/a.txt",
@@ -297,9 +297,9 @@ def test_readdir_keeps_the_listing_when_one_stat_fails(caplog):
     assert [
         r.getMessage()
         for r in caplog.records
-        if r.name == "mirage.runtime.vfs"
+        if r.name == "mirage.runtime.files"
     ] == [
-        "runtime vfs: readdir /data/: stat /data/bad.txt: "
+        "runtime files: readdir /data/: stat /data/bad.txt: "
         "upstream 502 Bad Gateway"
     ]
 
@@ -377,7 +377,7 @@ def test_readdir_marks_the_names_the_resolver_calls_links():
 
 
 def test_stat_projects_one_struct_for_every_surface():
-    # The projection is the door's, so preview1, monty and Emscripten
+    # The projection is the file adapter's, so preview1, monty and Emscripten
     # read the same five facts instead of translating a FileStat three
     # ways. mode carries the type bits, which is what a wire with no
     # mode field of its own reads the kind out of.
@@ -404,14 +404,14 @@ def test_stat_projects_one_struct_for_every_surface():
     assert st.mtime_ns > 0
 
 
-def test_stat_reports_an_unknown_stamp_as_epoch_zero():
+def test_stat_reports_an_unknown_stamp_as_none():
     vfs = ListingVFS(
         listing=[],
         stats={
             "/data/a.txt": FileStat(name="a.txt", size=1, type=FileType.FILE)
         },
     )
-    assert vfs.stat("/data/a.txt").mtime_ns == 0
+    assert vfs.stat("/data/a.txt").mtime_ns is None
 
 
 def test_stat_projects_character_type_bits_and_logical_device_numbers():
@@ -426,12 +426,12 @@ def test_stat_projects_character_type_bits_and_logical_device_numbers():
         },
     )
     assert vfs.stat("/dev/zero") == VFSStat(
-        size=0, is_dir=False, mode=CHAR_MODE, mtime_ns=0, rdev=0x105
+        size=0, is_dir=False, mode=CHAR_MODE, rdev=0x105
     )
 
 
-def test_stat_nofollow_asks_the_door_for_the_link_row():
-    # lstat is one door question now, not a surface reaching past it:
+def test_stat_nofollow_asks_the_dispatcher_for_the_link_row():
+    # lstat is one dispatcher question now, not a surface reaching past it:
     # the flag rides the dispatch, which answers a link's own row from
     # the node table and gates it exactly as it gates readlink.
     vfs = ListingVFS(
@@ -489,7 +489,7 @@ def test_readdir_marks_nothing_without_a_link_source():
     ]
 
 
-class NoAppendVFS(RuntimeVFS):
+class NoAppendVFS(RuntimeFiles):
     """Core over a mount that registers write but not append (S3)."""
 
     def __init__(self, files):
@@ -498,11 +498,13 @@ class NoAppendVFS(RuntimeVFS):
         )
         self.files = dict(files)
         self.writes = []
+        self.reads = []
 
-    def _raw(self, op, path, **kwargs):
+    def call(self, op, path, **kwargs):
         if op == "append":
             raise OperationNotSupportedError("append")
         if op == "read":
+            self.reads.append(kwargs)
             if path not in self.files:
                 raise FileNotFoundError(path)
             return self.files[path]
@@ -519,6 +521,12 @@ def test_append_without_a_whole_file_reads_its_own_base(files, written):
     vfs = NoAppendVFS(files)
     vfs.append("/s3/a", b"tail")
     assert vfs.writes == [("/s3/a", written)]
+
+
+def test_the_append_fallback_reads_past_the_file_cache():
+    vfs = NoAppendVFS({"/s3/a": b"base-"})
+    vfs.append("/s3/a", b"tail")
+    assert vfs.reads == [{"filetype": None, "direct": True}]
 
 
 def test_an_append_keeps_a_write_made_since_the_last_one():
@@ -569,14 +577,14 @@ def test_symlink_sends_the_target_verbatim():
 
 def test_readlink_returns_the_stored_target():
     class LinkVFS(RecordingVFS):
-        def _raw(self, op, path, **kwargs):
-            super()._raw(op, path, **kwargs)
+        def call(self, op, path, **kwargs):
+            super().call(op, path, **kwargs)
             return "../up/t.txt"
 
     assert LinkVFS(prefixes=["/data/"]).readlink("/data/l") == "../up/t.txt"
 
 
-def test_setattr_passes_every_field_so_the_door_reads_the_whole_set():
+def test_setattr_passes_every_field_so_the_dispatcher_reads_the_whole_set():
     vfs = RecordingVFS(prefixes=["/data/"])
     vfs.setattr("/data/f.txt", mode=0o600, mtime="1970-01-01T00:03:20+00:00")
     assert vfs.calls == [
@@ -604,18 +612,19 @@ def test_setattr_forwards_nofollow_for_the_dash_h_family():
 @pytest.mark.asyncio
 async def test_call_hops_from_a_worker_thread_to_the_workspace_loop():
     dispatch = RecordingDispatch()
-    vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
+    vfs = RuntimeFiles(dispatch, asyncio.get_running_loop())
     data = await asyncio.to_thread(vfs.read, "/data/f.txt")
     assert data == b"payload"
     assert dispatch.seen == [("read", "/data/f.txt")]
 
 
 @pytest.mark.asyncio
-async def test_an_unregistered_op_surfaces_as_not_implemented():
+async def test_an_unregistered_op_surfaces_numbered_enotsup():
     dispatch = RecordingDispatch(raises=OperationNotSupportedError("mkdir"))
-    vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
-    with pytest.raises(NotImplementedError):
+    vfs = RuntimeFiles(dispatch, asyncio.get_running_loop())
+    with pytest.raises(OperationNotSupportedError) as caught:
         await asyncio.to_thread(vfs.mkdir, "/data/sub")
+    assert caught.value.errno == errno.ENOTSUP
 
 
 @pytest.mark.asyncio
@@ -637,7 +646,7 @@ async def test_readdir_is_one_hop_that_stats_at_most_the_cap_at_once():
         in_flight -= 1
         return FileStat(name=path.virtual, size=1, type=FileType.FILE), None
 
-    vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
+    vfs = RuntimeFiles(dispatch, asyncio.get_running_loop())
     entries = await asyncio.to_thread(vfs.readdir, "/ram/")
     assert [entry.path for entry in entries] == names
     assert peak == LISTING_ENTRY_CONCURRENCY

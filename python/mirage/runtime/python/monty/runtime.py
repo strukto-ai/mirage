@@ -19,6 +19,7 @@ from typing import Any, Callable, ClassVar
 
 from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.flags import unhonored_notice
@@ -35,7 +36,6 @@ from mirage.runtime.types import (
     RuntimeReach,
     ScriptSource,
 )
-from mirage.runtime.vfs import RuntimeVFS
 
 
 class MontyRuntime(PythonRuntime, EvaluatorMixin):
@@ -60,7 +60,7 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
     version_suffix = " (monty)"
     # The pooled worker subprocess exists for crash isolation, not
     # host access: the interpreter inside it has no host filesystem,
-    # environment, or network door, and its file I/O is serviced only
+    # environment, or network entry point, and its file I/O is serviced only
     # through the workspace dispatch, so nothing goes around the gate.
     reach: RuntimeReach = "workspace"
     filesystem: ClassVar[tuple[FilesystemOperation, ...]] = (
@@ -160,5 +160,5 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
         self, env: dict[str, str], context: RuntimeContext | None
     ) -> MontyFs:
         return MontyFs(
-            RuntimeVFS.of(context) if context is not None else None, env
+            RuntimeFiles.of(context) if context is not None else None, env
         )

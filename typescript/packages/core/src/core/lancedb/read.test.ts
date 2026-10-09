@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
-import type { LanceDriver } from './query.ts'
+import type { LanceDriver } from './types.ts'
 import { read } from './tree.ts'
 
 const BLOB_PATH = new PathSpec({ vfsPath: '1.bin', virtual: '/1.bin', directory: '/1.bin' })

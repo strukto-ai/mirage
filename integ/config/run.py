@@ -14,10 +14,10 @@
 """The config-plane suite: one snake_case block through both registries.
 
 Every other integ case is a shell line run against a mount the runner
-built by hand in its own idiom, so the door a YAML block actually comes
+built by hand in its own idiom, so the entry point a YAML block actually comes
 through -- ``build_vfs`` here, ``buildVfs`` in
 ``integ/config/run.ts`` -- was exercised by nothing. This suite hands the
-same mapping to that door on both hosts and compares what came out: the
+same mapping to that entry point on both hosts and compares what came out: the
 redacted snapshot state for a config both must accept, or the refusal's
 ``<VFS>: <field>`` prefix for one both must refuse. Keys are compared
 in python's wire spelling; the TypeScript runner folds its camelCase state

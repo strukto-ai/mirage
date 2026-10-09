@@ -503,16 +503,16 @@ function boundOf(cache: RAMFileCacheStore, key: string): number | null | undefin
   return cache.snapshotEntries().find((e) => e.key === key)?.entry.ttl
 }
 
-describe('a path read at the door and written', () => {
+describe('a path read at the dispatcher and written', () => {
   it.each([
     ['line', false],
     ['nested', true],
   ] as const)('keeps nothing: %s', async (_name, nested) => {
     // SharePoint rewrites an uploaded Office file, so the bytes `tee` sent
-    // are not the file the door read back and kept; the read's record is
+    // are not the file the dispatcher read back and kept; the read's record is
     // what tells applyIo the line read the path too, a nested line's
     // (`eval`) as well, whose read tokens label nothing. Mirrors Python's
-    // test_a_path_read_at_the_door_and_written_keeps_nothing.
+    // test_a_path_read_at_the_dispatcher_and_written_keeps_nothing.
     const cache = new RAMFileCacheStore()
     await cache.set('/s3/f.pptx', ENC.encode('abc<meta/>'))
     const written = ENC.encode('abc')

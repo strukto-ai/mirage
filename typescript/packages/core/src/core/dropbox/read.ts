@@ -16,6 +16,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
+import { publishRead, writesConditioned } from '../../cache/context.ts'
 import { record, recordStream, startOp } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { DropboxApiError, dropboxDownload, dropboxDownloadStream } from './client.ts'
@@ -83,9 +84,9 @@ export async function read(
     throw err
   }
   const [data, result] = download
-  record('read', path.virtual, 'dropbox', data.byteLength, timer, {
-    fingerprint: resultToken(result),
-  })
+  const token = resultToken(result)
+  record('read', path.virtual, 'dropbox', data.byteLength, timer, { fingerprint: token })
+  if (window === undefined && writesConditioned(path)) publishRead(path.virtual, data, token)
   return data
 }
 

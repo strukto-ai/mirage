@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexEntry } from '../../cache/index/config.ts'
+import type { LiveVersion } from '../../cache/types.ts'
+import type { BoxItem } from './api.ts'
 import { SHA1 } from './constants.ts'
 
 /**
@@ -23,6 +25,12 @@ import { SHA1 } from './constants.ts'
  */
 export function tokenOf(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null
+}
+
+/** A looked-up item's live tokens, null when it is no file. Mirrors Python's `live_of`. */
+export function liveOf(item: BoxItem | null): LiveVersion | null {
+  if (item?.type !== 'file') return null
+  return { content: tokenOf(item.sha1), native: tokenOf(item.etag) }
 }
 
 /** The content token a listing row carries. */

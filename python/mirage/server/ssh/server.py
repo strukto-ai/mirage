@@ -143,7 +143,7 @@ async def start_ssh_server(
         ValueError: the config sets no port.
     """
     if config.port is None:
-        raise ValueError("the SSH door needs ssh_port")
+        raise ValueError("the SSH endpoint needs ssh_port")
     if not await run_blocking(config.authorized_keys_file.exists):
         logger.warning(
             "ssh: %s does not exist; every login will be refused until "

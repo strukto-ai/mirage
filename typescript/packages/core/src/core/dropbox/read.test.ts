@@ -28,6 +28,8 @@ vi.mock('./api.ts', async () => {
 })
 
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
+import { captureRead, runWithWriteContext } from '../../cache/context.ts'
+import type { WriteContext } from '../../cache/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import * as client from './client.ts'
@@ -186,5 +188,32 @@ describe('dropbox read stamps content_hash', () => {
       new client.DropboxApiError('refused', status, 'path/not_found/...'),
     )
     await expect(read(makeAccessor(), spec)).rejects.toMatchObject(raised)
+  })
+})
+
+describe('dropbox read publishes its token on a conditional mount', () => {
+  const context: WriteContext = {
+    vfs: 'dropbox',
+    conditions: ['put', 'copy', 'delete'],
+    readVersion: () => Promise.resolve(null),
+    readVersions: (paths) => Promise.resolve(paths.map(() => null)),
+    drop: () => Promise.resolve(),
+    keep: () => Promise.resolve(),
+  }
+
+  it.each([
+    ['whole', true, undefined, ['h1']],
+    ['ranged', true, { offset: 2, size: 3 }, []],
+    ['unconditional', false, undefined, []],
+  ] as const)('%s', async (_name, conditional, options, published) => {
+    vi.mocked(client.dropboxDownload).mockResolvedValue([
+      new Uint8Array([104, 105]),
+      JSON.stringify({ content_hash: 'h1' }),
+    ])
+    const path = new PathSpec({ virtual: '/a.txt', directory: '/', vfsPath: 'a.txt' })
+    const [, tokens] = await runWithWriteContext('/', conditional ? context : null, () =>
+      captureRead(path.virtual, () => read(makeAccessor(), path, undefined, options)),
+    )
+    expect(tokens).toEqual(published)
   })
 })

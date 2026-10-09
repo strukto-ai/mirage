@@ -25,7 +25,8 @@ import type { Deny, Route } from '../../policy/types.ts'
 import { settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { MountResolver } from '../../runtime/resolver.ts'
-import { WorkspaceRuntime, catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
+import { catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
+import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { Consumer, lookup } from '../lookup/index.ts'
@@ -74,7 +75,7 @@ export class Router {
     options: ExecuteOptions,
     session: SessionState,
     held?: () => Promise<boolean>,
-  ): Promise<RouteDecision | Deny | null> {
+  ): Promise<RouteDecision<Runtime> | Deny | null> {
     if (options.routingDecision !== undefined) return options.routingDecision
     const policies = this.registry.policies
     const placing = policies.wants('preExecute')
@@ -103,7 +104,7 @@ export class Router {
     root: TSNodeLike,
     command: string,
     session: SessionState,
-  ): Promise<[readonly (Deny | Route)[], RouteDecision | Deny | null]> {
+  ): Promise<[readonly (Deny | Route)[], RouteDecision<Runtime> | Deny | null]> {
     const policies = this.registry.policies
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
     if (!hasScripts && !policies.wants('preExecute')) return [[], null]
@@ -130,7 +131,7 @@ export class Router {
     name: string,
     ctx: RouteContext,
     session: SessionState,
-  ): Promise<RouteDecision | Deny> {
+  ): Promise<RouteDecision<Runtime> | Deny> {
     const placed = this.placed(name)
     const entries = this.runtimes.entries
     const entry = entries.find((e) => e.name === name)
@@ -155,7 +156,7 @@ export class Router {
    * runtime's `script:` says whether it takes the line. Mirrors Python's
    * `Router._scripted`.
    */
-  private scripted(ctx: RouteContext, session: SessionState): Promise<RouteDecision> {
+  private scripted(ctx: RouteContext, session: SessionState): Promise<RouteDecision<Runtime>> {
     return decideLine(
       this.runtimes.entries,
       null,
@@ -170,7 +171,7 @@ export class Router {
    * bindings when there is none), empty when the workspace runs it itself.
    * Mirrors Python's `Router.runtime_for`.
    */
-  runtimeFor(command: string, decision: RouteDecision | null): string {
+  runtimeFor(command: string, decision: RouteDecision<Runtime> | null): string {
     const bindings: Record<string, Runtime | null> = decision?.bindings ?? this.runtimes.bindings
     const serving = Object.hasOwn(bindings, command)
       ? (bindings[command] ?? null)
@@ -180,7 +181,7 @@ export class Router {
   }
 
   /** The decision that serves a line on one named runtime: its captures over the static bindings. */
-  private placed(name: string): RouteDecision {
+  private placed(name: string): RouteDecision<Runtime> {
     let overlay: Record<string, Runtime>
     try {
       overlay = runtimeBindingsFor(this.runtimes.entries, name)

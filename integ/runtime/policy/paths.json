@@ -1,0 +1,188 @@
+{
+  "cases": [
+    {
+      "id": "a_program_meets_the_refusals_the_shell_meets",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "s\n",
+              "sealed/f.txt": "f\n",
+              "open.txt": "o\n"
+            }
+          },
+          "/ro": {
+            "vfs": "ram",
+            "mode": "read"
+          }
+        }
+      },
+      "steps": [
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/data/secret.txt"
+              ]
+            },
+            "commands": {
+              "deny": [
+                {
+                  "reason": "sealed",
+                  "paths": [
+                    "/data/sealed/*"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "import os\ncalls = [('/data/secret.txt', 'r'), ('/data/sealed/f.txt', 'r'), ('/ro/new.txt', 'w'), ('/data/open.txt', 'r')]\nfor path, mode in calls:\n    try:\n        with open(path, mode) as f:\n            if mode == 'r':\n                f.read()\n            else:\n                f.write('x')\n        print('opened')\n    except OSError as e:\n        print(type(e).__name__)\nprint(' '.join(sorted(os.listdir('/data'))))",
+            "node": "const fsp = require('node:fs').promises\nconst calls = [\n  () => fsp.readFile('/data/secret.txt'),\n  () => fsp.readFile('/data/sealed/f.txt'),\n  () => fsp.writeFile('/ro/new.txt', 'x'),\n  () => fsp.readFile('/data/open.txt'),\n]\nfor (const call of calls) {\n  try {\n    await call()\n    console.log('opened')\n  } catch (e) {\n    console.log(e.code)\n  }\n}\nconsole.log((await fsp.readdir('/data')).sort().join(' '))",
+            "js": "const calls = [['/data/secret.txt', 'r'], ['/data/sealed/f.txt', 'r'], ['/ro/new.txt', 'w'], ['/data/open.txt', 'r']]\nfor (const [path, mode] of calls) {\n  const err = {}\n  const f = std.open(path, mode, err)\n  if (f === null) {\n    console.log(err.errno)\n    continue\n  }\n  if (mode === 'r') f.readAsString()\n  else f.puts('x')\n  const failed = f.error()\n  f.close()\n  console.log(failed ? 'failed' : 'opened')\n}\nconst [entries] = os.readdir('/data')\nconsole.log(entries.filter((n) => n !== '.' && n !== '..').sort().join(' '))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\nPermissionError\nOSError\nopened\nopen.txt sealed\n",
+              "ops_absent": [
+                "read /data/secret.txt",
+                "read /data/sealed/f.txt",
+                "create /ro/new.txt"
+              ]
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "ENOENT\nEACCES\nEROFS\nopened\nopen.txt sealed\n",
+              "ops_absent": [
+                "read /data/secret.txt",
+                "read /data/sealed/f.txt",
+                "create /ro/new.txt"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "44\nfailed\n69\nopened\nopen.txt sealed\n",
+              "ops_absent": [
+                "read /data/secret.txt",
+                "read /data/sealed/f.txt",
+                "create /ro/new.txt"
+              ]
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "errno": "ENOENT"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/sealed/f.txt"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "write",
+            "path": "/ro/new.txt",
+            "data": "x"
+          },
+          "expect": {
+            "errno": "EROFS"
+          }
+        },
+        {
+          "command": "cat /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "No such file or directory"
+          }
+        },
+        {
+          "command": "cat /data/sealed/f.txt",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "Permission denied"
+          }
+        },
+        {
+          "command": "ls /data",
+          "expect": {
+            "exit": 0,
+            "stdout": "open.txt\nsealed\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_hidden_mount_is_not_named",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "a\n"
+            }
+          },
+          "/secret": {
+            "vfs": "ram",
+            "files": {
+              "k.txt": "k\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/secret"
+              ]
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nfrom pathlib import Path\nprint(sorted(n for n in os.listdir('/') if n in ('data', 'secret')), Path('/secret').is_dir())",
+            "js": "const [names] = os.readdir('/')\nconsole.log(JSON.stringify(names.filter((n) => n === 'data' || n === 'secret').sort()), os.stat('/secret')[1])"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "['data'] False\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "[\"data\"] 44\n"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

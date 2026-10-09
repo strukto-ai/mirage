@@ -1,0 +1,58 @@
+{
+  "_note": "How box and dropbox answer a write sent with their own version, for both hosts' refusal mapping. lost = the file changed since the version sent (the refused write keeps that version); gone = the file is no longer there (keeps none); other = keeps its own meaning. Box carries the HTTP status; dropbox carries the error_summary of a 409.",
+  "_evidence": "box: 412 precondition_failed on a stale If-Match (upload 2026-10-05, delete 2026-10-08), 404 not_found once gone (2026-10-08). dropbox: upload update mode 409 path/conflict (2026-10-04/05), delete_v2 parent_rev 409 path_write/conflict/file/ and path_lookup/not_found/ (2026-10-08).",
+  "box": [
+    {
+      "name": "412",
+      "status": 412,
+      "outcome": "lost"
+    },
+    {
+      "name": "404",
+      "status": 404,
+      "outcome": "gone"
+    },
+    {
+      "name": "409-name-in-use",
+      "status": 409,
+      "outcome": "other"
+    },
+    {
+      "name": "403",
+      "status": 403,
+      "outcome": "other"
+    }
+  ],
+  "dropbox": [
+    {
+      "name": "update-conflict",
+      "summary": "path/conflict/file/..",
+      "outcome": "lost"
+    },
+    {
+      "name": "delete-conflict",
+      "summary": "path_write/conflict/file/..",
+      "outcome": "lost"
+    },
+    {
+      "name": "not-found",
+      "summary": "path/not_found/..",
+      "outcome": "gone"
+    },
+    {
+      "name": "lookup-not-found",
+      "summary": "path_lookup/not_found/..",
+      "outcome": "gone"
+    },
+    {
+      "name": "to-conflict",
+      "summary": "to/conflict/file/..",
+      "outcome": "other"
+    },
+    {
+      "name": "restricted",
+      "summary": "path/restricted_content/..",
+      "outcome": "other"
+    }
+  ]
+}

@@ -27,7 +27,7 @@ import { namespaceViewOf } from '../../mount/namespace/view.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { ownLimit } from '../../../policy/builtin/output_cap.ts'
 import type { Runtime } from '../../../runtime/base.ts'
-import { WorkspaceRuntime } from '../../../runtime/table.ts'
+import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { SessionState } from '../../session/session.ts'
 import type { DispatchFn, ShellFn } from '../../../runtime/types.ts'
@@ -38,8 +38,7 @@ import { readFailExitCode } from '../../../commands/spec/usage.ts'
 import { formatFsError } from '../../../errors/render.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
-import { mergeSignals } from '../../abort.ts'
-import { makeAbortError } from '../../../concurrency/limiter.ts'
+import { makeAbortError, mergeSignals } from '../../../utils/abort.ts'
 import type { Flags } from './types.ts'
 import { parseFlags } from './flags.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
@@ -51,13 +50,13 @@ export interface RunOnMountCtx {
   dispatch: DispatchFn
   namespace?: Namespace
   runtimeBindings?: Record<string, Runtime>
-  routingDecision?: RouteDecision
+  routingDecision?: RouteDecision<Runtime>
   signal?: AbortSignal
   executeFn?: ExecuteFn
 }
 
 /**
- * The door a command handler runs a nested line through (`opts.shell`):
+ * The entry point a command handler runs a nested line through (`opts.shell`):
  * the line runs in the calling command's own session, under its signal,
  * reading the input it is handed.
  */
@@ -104,7 +103,7 @@ interface RunOnMountOpts {
 }
 
 /** The 126 result for a command no runtime accepted. */
-function admissionDenial(cmdName: string): IOResult {
+export function admissionDenial(cmdName: string): IOResult {
   const msg = `${cmdName}: no runtime accepted this line\n`
   return new IOResult({ exitCode: 126, stderr: encodeText(msg) })
 }
@@ -115,14 +114,14 @@ function admissionDenial(cmdName: string): IOResult {
  * is looked up in the decision: its binding, or the decision's
  * fallback when no entry captures it. A resolved WorkspaceRuntime means the
  * executor serves the command itself (the workspace runtime has no
- * interpreter door); null means no runtime accepted it: exit 126,
+ * interpreter entry point); null means no runtime accepted it: exit 126,
  * "no runtime accepted this line", like a shell refusing to exec.
  */
 function lineRuntimeFor(
   cmdName: string,
   runtimeBindings: Record<string, Runtime> | undefined,
   fallback: Runtime | null,
-  routingDecision: RouteDecision | undefined,
+  routingDecision: RouteDecision<Runtime> | undefined,
 ): [Runtime | undefined, IOResult | null] {
   if (routingDecision === undefined) {
     const restricted = fallback instanceof WorkspaceRuntime && fallback.restricted
@@ -299,7 +298,7 @@ export async function runOnMount(
   // a start point under another mount answers (`find -L` follows a link
   // across mounts before the command ever runs).
   const statPath: StatPath = (path) => pathStat(dispatch, path, statOverlay)
-  // The same door for a listing: a walker whose output is one document
+  // The same entry point for a listing: a walker whose output is one document
   // (tree) reads the subtree under a nested mount through here, because
   // that subtree lives in a VFS its own accessor cannot open.
   const readdirPath: ReaddirPath = (path: string) => pathReaddir(dispatch, path)

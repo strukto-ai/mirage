@@ -221,12 +221,12 @@ truth. The expected loop is:
 
 A verb may read an unrelated workspace file explicitly named by the user, such
 as an attachment. That is different from treating a mount as the CLI's service
-client. Such a leaf opts into workspace access through `inv.doors`; do not
-assume those doors exist outside a workspace.
+client. Such a leaf opts into workspace access through `inv.view`; do not
+assume those entry points exist outside a workspace.
 
 Declare file operands and options with `type: 'path'`. The handler receives
 `PathSpec` objects in `inv.paths` and through `FlagView.asPath()` /
-`asPaths()`; pass those objects directly to `inv.doors.dispatch` or
+`asPaths()`; pass those objects directly to `inv.view.dispatch` or
 `statPath`. For a path string read from configuration, use
 `PathSpec.fromStrPath(filename, undefined, base)`. Derive workspace paths with
 `path.join('subdir', 'file')` and `path.parent`. These retain the spelling
@@ -377,7 +377,7 @@ The tables below explain how an author should use that surface.
 | `flags` | Group and leaf flags keyed by normalized property name. |
 | `stdin` | Piped bytes, or `null`. |
 | `env` | Frozen environment snapshot for this invocation. |
-| `doors` | Optional workspace state-plane access for verbs that explicitly need it. |
+| `view` | Optional workspace state-plane access for verbs that explicitly need it. |
 
 ## Checklist for agents
 
@@ -395,7 +395,7 @@ worked example, then require these outcomes:
   each other's state.
 - Treat service IDs as untrusted input and use own-key lookup for mapping-backed
   fakes or clients.
-- Keep account service access in config; use `doors` only for explicitly named
+- Keep account service access in config; use `view` only for explicitly named
   workspace files.
 - Verify snapshot restore with redacted credentials or document why the CLI has
   no secrets.

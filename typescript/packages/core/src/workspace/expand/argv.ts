@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Runtime } from '../../runtime/base.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { RouteDecision } from '../../runtime/routing/types.ts'
 import type { NamespaceLinks, SessionView } from '../../view/types.ts'
@@ -110,7 +111,7 @@ export async function expandArgv(
   registry: MountRegistry,
   namespace: NamespaceLinks | null = null,
   view?: SessionView,
-  routing?: RouteDecision,
+  routing?: RouteDecision<Runtime>,
 ): Promise<Argv> {
   const session = context.session
   let expanded = await expandWords(parts, context, executeFn, callStack, view)

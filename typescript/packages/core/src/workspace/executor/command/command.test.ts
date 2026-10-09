@@ -211,11 +211,11 @@ describe('the words a handler sees', () => {
   })
 })
 
-describe('door options route nothing', () => {
+describe('dispatched options route nothing', () => {
   // jq's --rawfile/--slurpfile are read and curl's -o/-D written through
   // the dispatcher, so a file on another mount, or a process substitution
-  // under /dev, is no cross-mount line (DOOR_FLAG_KEYS). Positional operands
-  // still route. Mirrors python's test_door_options_route_nothing.
+  // under /dev, is no cross-mount line (DISPATCH_FLAG_KEYS). Positional operands
+  // still route. Mirrors python's test_dispatch_options_route_nothing.
   it.each([
     [
       "jq -c -n --slurpfile t /work/t.json --slurpfile f <(echo '{\"x\":1}') '[$t, $f]'",
@@ -241,7 +241,7 @@ class CachedRAM extends RAMVFS {
   override readonly cachesReads = true
 }
 
-describe('the cross-mount door', () => {
+describe('the cross-mount entry point', () => {
   it('keeps both edited files cached', async () => {
     // The sed relay is its own write path, apart from runDispatch: it claims
     // each -i file, and the line keeps the edited bytes on both mounts, which

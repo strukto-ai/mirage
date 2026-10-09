@@ -15,9 +15,9 @@
 # Runtimes a deployment ships as a file and names from yaml
 # (`runtimes: [{name: ./box_runtimes.py:EchoBox}]`), one per tier the
 # workspace can route to. EchoBox takes whole lines (the line-executor
-# door every sandbox provider uses) and answers with the raw line, so a
+# entry point every sandbox provider uses) and answers with the raw line, so a
 # case can see exactly what reached it. ShoutPython is an interpreter
-# (the door python3 and node use): the workspace splits the line, hands
+# (the entry point python3 and node use): the workspace splits the line, hands
 # the captured stage's code to run(), and gets it back upper-cased. The
 # TypeScript twins beside this file must behave identically, because the
 # point of the ref form is that one deployment runs on both hosts.

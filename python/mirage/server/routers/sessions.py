@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import secrets
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
@@ -61,8 +63,6 @@ def _require_entry(request: Request, workspace_id: str):
 async def create_session(
     workspace_id: str, req: CreateSessionRequest, request: Request
 ) -> SessionResponse:
-    import secrets
-
     entry = _require_entry(request, workspace_id)
     sid = req.session_id or f"sess_{secrets.token_hex(6)}"
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
@@ -110,7 +110,7 @@ async def delete_session(
 async def cancel_session_lines(
     workspace_id: str, session_id: str, request: Request
 ) -> CancelLinesResponse:
-    """Cancel the session's running and queued lines, from every door.
+    """Cancel the session's running and queued lines, from every entry point.
 
     The session stays open; returns once those lines have ended.
     """

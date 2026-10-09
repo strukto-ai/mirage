@@ -1,4 +1,4 @@
-import { makeAbortError } from '../concurrency/limiter.ts'
+import { makeAbortError } from '../utils/abort.ts'
 import { concat } from '../io/cachable_iterator.ts'
 import { OutputPipe } from '../io/output.ts'
 import { CAPACITY } from '../io/pipe.ts'

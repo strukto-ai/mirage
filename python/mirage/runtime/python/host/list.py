@@ -20,8 +20,8 @@ from typing import Any, Protocol
 from mirage.runtime.python.host.stat import ident
 
 
-class StatDoor(Protocol):
-    """What a listed entry stats through: the `os` door."""
+class StatRouter(Protocol):
+    """What a listed entry stats through: the patched `os`."""
 
     def stat(self, path: Any) -> os.stat_result: ...
 
@@ -48,14 +48,16 @@ class MountDirEntry:
     is taken as proof and saves the round trip.
 
     Args:
-        router (StatDoor): the door to stat through.
+        router (StatRouter): the patched ``os`` to stat through.
         path (str): the entry's own virtual path.
         marked_dir (bool): the readdir listing slash-marked this entry.
     """
 
     __slots__ = ("_router", "_path", "_marked", "_stat", "_lstat")
 
-    def __init__(self, router: StatDoor, path: str, marked_dir: bool) -> None:
+    def __init__(
+        self, router: StatRouter, path: str, marked_dir: bool
+    ) -> None:
         self._router = router
         self._path = path
         self._marked = marked_dir

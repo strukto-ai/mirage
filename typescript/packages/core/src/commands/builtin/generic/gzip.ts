@@ -24,7 +24,7 @@ import type { PathSpec } from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
 import { gzip, gzipCompressStream } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { linkDoor } from '../utils/links.ts'
+import { linkResolver } from '../utils/links.ts'
 import { resolveSource, stdinStream } from '../utils/stream.ts'
 import { GZIP_SUFFIX } from '../constants.ts'
 import {
@@ -91,7 +91,7 @@ export async function gzipGeneric(
     level,
   } = parseFlags(opts.flags)
 
-  const door = linkDoor(opts)
+  const resolver = linkResolver(opts)
 
   const refused = suffixRefusal(suffix)
   if (refused !== null) return [null, refused]
@@ -106,7 +106,7 @@ export async function gzipGeneric(
       write,
       unlink,
       ...(stat !== undefined ? { stat } : {}),
-      door,
+      resolver,
     })
   if (paths.length === 0) {
     const result: ByteSource = gzipCompressStream(resolveSource(opts.stdin), level)
@@ -147,7 +147,7 @@ export async function gzipGeneric(
         suffix,
         decompress: false,
         follow: stdoutMode || force,
-        door,
+        resolver,
       })
       if (found === null) continue
       const known = inPlace ? gzipSuffix(p.rawPath, suffix) : null
@@ -171,14 +171,14 @@ export async function gzipGeneric(
     }
     const outPath = p.mountPath + suffix
     const out = link === null ? mountedPath(p, outPath) : besideLink(link, p.rawPath + suffix)
-    const existed = await outputTaken(out, stat, door)
+    const existed = await outputTaken(out, stat, resolver)
     if (existed && !force) {
       lines.push(`gzip: ${p.rawPath}${suffix} already exists;\tnot overwritten`)
       if (exitCode === 0) exitCode = 2
       continue
     }
     try {
-      await replaceOutput(out, data, write, door, link !== null)
+      await replaceOutput(out, data, write, resolver, link !== null)
     } catch (err) {
       if (!isFsError(err)) throw err
       lines.push(`${existed ? '' : '\n'}gzip: ${p.rawPath}${suffix}: ${String(fsStrerror(err))}`)
@@ -188,8 +188,8 @@ export async function gzipGeneric(
     }
     if (link === null) writes[outPath] = data
     if (!keep) {
-      if (link === null || door === null) await unlink(p)
-      else await door.unlink(link)
+      if (link === null || resolver === null) await unlink(p)
+      else await resolver.unlink(link)
     }
   }
   const stderr = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null

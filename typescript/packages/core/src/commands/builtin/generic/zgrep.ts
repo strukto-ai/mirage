@@ -30,7 +30,7 @@ import { UsageError } from '../../errors.ts'
 import type { RegexSyntax } from '../types.ts'
 import { matchStart, matchText } from '../utils/pcre.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
-import { linkDoor } from '../utils/links.ts'
+import { linkResolver } from '../utils/links.ts'
 import { operandLabel } from '../utils/stream.ts'
 import type { StatFn } from './archive/walk.ts'
 import { decompressInputs } from './decompress.ts'
@@ -74,6 +74,7 @@ interface ZgrepFlags {
   readonly onlyMatching: boolean
   readonly quiet: boolean
   readonly wholeWord: boolean
+  readonly lineRegexp: boolean
   readonly maxCount: number | null
 }
 
@@ -102,6 +103,7 @@ function parseFlags(fl: FlagView, neverMatch: boolean): ZgrepFlags {
     onlyMatching: fl.asBool('o'),
     quiet: fl.asBool('q'),
     wholeWord: fl.asBool('w'),
+    lineRegexp: fl.asBool('line_regexp'),
     maxCount: fl.asInt('m') ?? null,
   }
 }
@@ -228,6 +230,7 @@ export async function zgrepGeneric(
             parsed.wholeWord,
             syntax,
             utf8,
+            parsed.lineRegexp,
           )
 
   const multi = paths.length > 1
@@ -235,7 +238,7 @@ export async function zgrepGeneric(
   let anyMatch = false
   const allResults: string[] = []
 
-  const door = linkDoor(opts)
+  const resolver = linkResolver(opts)
   // zgrep runs grep, so grep's compile warnings come first, in its name.
   let errors =
     pattern === null || neverMatch || fixedString ? '' : patternWarnings(rawPattern, syntax)
@@ -249,7 +252,7 @@ export async function zgrepGeneric(
       force: true,
       quiet: true,
       ...(stat !== undefined ? { stat } : {}),
-      door,
+      resolver,
     })
     const data = await materialize(body)
     errors += decodeText(await io.materializeStderr())

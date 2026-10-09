@@ -37,6 +37,7 @@ from mirage.io.types import ByteSource, materialize
 from mirage.policy import PolicyDenied, resolve_limit, resolve_producer
 from mirage.policy.policies import reset_op_policies, set_op_policies
 from mirage.policy.types import Claimant, HandOff, SessionContext
+from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console import Channel, JobConsole
@@ -146,7 +147,7 @@ async def execute_command(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
@@ -291,7 +292,8 @@ async def execute_command(
             # checked here, so a deployment refusing `SECRET_*` still saw
             # `SECRET_K=leak printenv SECRET_K` print the secret: the
             # seeding below goes through `seed_var`, which is the ungated
-            # door, so this loop is the only place the rule can be asked.
+            # entry point, so this loop is the only place the rule can be
+            # asked.
             await pre_session_gate(
                 registry.policies,
                 SessionContext(
@@ -401,13 +403,13 @@ async def _dispatch_command_body(
     job_table,
     seed_prefix: Callable[[str], None],
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     # The command's place on the line, as the pass computed it, and
-    # the door its nested evaluations re-enter through: a word that
+    # the entry point its nested evaluations re-enter through: a word that
     # runs a line (eval, source, xargs) is bound to this node, and a
     # substitution names its own node when it calls, so every nested
     # line stands under the node its text came from.
@@ -575,7 +577,7 @@ async def _run_argv(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     row: int = 0,
     agent_id: str = "",
     redirects: tuple[PathSpec, ...] = (),
@@ -771,7 +773,7 @@ async def _route_argv(
     call_stack,
     job_table,
     cancel: asyncio.Event | None,
-    routing_decision: RouteDecision | None,
+    routing_decision: RouteDecision[Runtime] | None,
     row: int,
     agent_id: str = "",
     handed: HandOff | None = None,
@@ -882,7 +884,7 @@ async def _route_argv(
     if name == "readlink":
         return await handle_readlink(namespace, dispatch, session, operands)
 
-    # ── extended attributes (the door's node table and the backend's
+    # ── extended attributes (the namespace's node table and the backend's
     #    own facts; they read -h themselves) ──
     if name == "getfattr":
         return await handle_getfattr(dispatch, session, operands)

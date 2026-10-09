@@ -23,7 +23,7 @@ from mirage.policy.match.rule import (
     op_refusal,
     rule_reach,
     rule_scope,
-    skipped_at_op_doors,
+    skipped_at_dispatch,
     subjects,
 )
 from mirage.policy.types import (
@@ -179,7 +179,7 @@ def test_op_refusal_reads_depth_before_verb_and_honours_a_grant():
     inside = VfsContext(
         op="write", path=_path("/repo/outbox/a"), write=True, prefix="/repo/"
     )
-    # The deeper ask wins where both reach, exactly as the command door
+    # The deeper ask wins where both reach, exactly as command admission
     # ranks them, so a broad deny cannot overrule an approved carve-out.
     assert op_refusal(rules, inside, ()) == "outbox nod"
     assert op_refusal(rules, inside, (carve,)) is None
@@ -477,17 +477,17 @@ def test_io_reach_reads_each_start_point_on_its_own():
     assert not io_reach(None, find, "/repo")
 
 
-def test_skipped_at_op_doors_names_the_command_level_rules():
+def test_skipped_at_dispatcher_names_the_command_level_rules():
     keys = CommandRule(reason="keys", paths=("/k/*",))
     rules = AdmissionRules(
         allow=("ls",),
         deny=(keys, CommandRule(reason="no rm", commands=("rm",))),
         ask=(CommandRule(reason="nod", commands=("cp",), paths=("/x/*",)),),
     )
-    assert skipped_at_op_doors(rules) == (
+    assert skipped_at_dispatch(rules) == (
         "commands.allow",
         "commands.deny: no rm",
         "commands.ask: nod",
     )
-    assert skipped_at_op_doors(AdmissionRules(deny=(keys,))) == ()
-    assert skipped_at_op_doors(None) == ()
+    assert skipped_at_dispatch(AdmissionRules(deny=(keys,))) == ()
+    assert skipped_at_dispatch(None) == ()

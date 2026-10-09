@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.core.qdrant.payload import field_value, without_field
 
 
@@ -31,3 +33,17 @@ def test_without_field_removes_a_nested_value_without_mutating_the_row():
     copied = without_field(row, "metadata.blob")
     assert copied == {"metadata": {"source": "report.pdf"}}
     assert row["metadata"]["blob"] == "bytes"
+
+
+@pytest.mark.parametrize("field", ["__proto__", "constructor", "toString"])
+def test_field_value_reads_only_owned_fields(field):
+    assert field_value({}, field) is None
+    assert field_value({"metadata": {}}, f"metadata.{field}") is None
+    assert field_value({field: "payload"}, field) == "payload"
+
+
+def test_without_field_preserves_prototype_named_keys():
+    row = {"__proto__": {"keep": "value", "blob": "bytes"}, "vector": [1]}
+    copied = without_field(without_field(row, "vector"), "__proto__.blob")
+    assert copied == {"__proto__": {"keep": "value"}}
+    assert row["__proto__"]["blob"] == "bytes"

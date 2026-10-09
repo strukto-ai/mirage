@@ -27,13 +27,13 @@ class PolicyError(Exception):
 
 
 class Explained(Exception):
-    """A dry run reached the op gate: the door stops there, before any
+    """A dry run reached the op gate: the dispatcher stops there, before any
     backend or cache is touched, with what the gate would answer noted
     for ``session.explain.vfs``."""
 
 
 class PolicyDenied(PermissionError):
-    """An op or a session write refused by an admission policy at a door.
+    """An op or a session write an admission policy refused.
 
     A PermissionError subclass so every existing consumer keeps
     working: FUSE adapters classify it to EACCES, programmatic callers
@@ -42,20 +42,20 @@ class PolicyDenied(PermissionError):
     handlers that special-case mount-mode refusals (the read-only
     wording) tell a policy deny apart without guessing from errno.
 
-    The error says what the terminal would (``Permission denied`` at an
-    op door, ``<name>: permission denied`` at the session door), and
-    the policy's own words ride ``refusal``, never the strerror, so a
-    door that renders the error stays byte-identical to a plain EACCES
-    and a door that hands the agent text appends the record's line.
+    The error says what the terminal would (``Permission denied`` at the
+    dispatcher, ``<name>: permission denied`` at the session view), and
+    the policy's own words ride ``refusal``, never the strerror, so an
+    entry point that renders the error stays byte-identical to a plain EACCES
+    and an entry point that hands the agent text appends the record's line.
 
     It carries no accounting: a post_vfs refusal suppresses the result,
-    not the effect, and the door reports the completed op through the
+    not the effect, and the dispatcher reports the completed op through the
     caller's ``OpReport``, which covers this error and any foreign one
     the same way.
 
     Args:
         *args: the OSError arguments (errno, strerror, filename).
-        refusal (Refusal | None): the policy's record, None for a door
+        refusal (Refusal | None): the policy's record, None for an entry point
             that refuses on no policy's behalf (a hidden variable).
     """
 

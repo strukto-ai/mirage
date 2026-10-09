@@ -13,9 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dulwich.object_store import BaseObjectStore, iter_tree_contents
-from dulwich.objects import Blob, ObjectID
+from dulwich.objects import Blob, Commit, ObjectID, ShaFile
+from dulwich.objects import Tree as GitTree
 from dulwich.objectspec import parse_commit
 from dulwich.repo import BaseRepo
+
+from mirage.commands.cli.builtin.git.errors import GitError
+from mirage.commands.cli.builtin.git.revparse import resolve_object, unwrapped
 
 Tree = dict[bytes, tuple[int, bytes]]
 
@@ -48,10 +52,7 @@ def flat_tree(repo: BaseRepo, tree_id: ObjectID) -> Tree:
         repo (BaseRepo): the opened repository.
         tree_id (ObjectID): the tree to read.
     """
-    return {
-        entry.path: (entry.mode, entry.sha)
-        for entry in iter_tree_contents(repo.object_store, tree_id)
-    }
+    return tree_entries(repo.object_store, tree_id)
 
 
 def tree_of(repo: BaseRepo, commit_id: ObjectID) -> Tree:
@@ -75,4 +76,85 @@ def contents(repo: BaseRepo, shas: list[bytes]) -> dict[bytes, bytes]:
     for sha in shas:
         obj = repo.object_store[ObjectID(sha)]
         out[sha] = obj.data if isinstance(obj, Blob) else b""
+    return out
+
+
+def resolve_tree(
+    repo: BaseRepo, name: str, obj: ShaFile | None = None
+) -> ObjectID:
+    """Resolve a tree-ish through tags and commits.
+
+    Args:
+        repo (BaseRepo): opened object database.
+        name (str): revision as typed.
+        obj (ShaFile | None): already resolved object, when the caller has it.
+    """
+    obj = unwrapped(
+        repo, resolve_object(repo, name) if obj is None else obj, name
+    )
+    if isinstance(obj, Commit):
+        return ObjectID(obj.tree)
+    if isinstance(obj, GitTree):
+        return ObjectID(obj.id)
+    raise GitError("not a tree object")
+
+
+def listed_tree(
+    repo: BaseRepo,
+    tree: ObjectID,
+    patterns: tuple[str, ...],
+    recursive: bool,
+    trees: bool,
+    directories: bool,
+    prefix: str = "",
+) -> list[tuple[str, str, str]]:
+    """List literal tree prefixes without reading any blob content.
+
+    Git ls-tree operands are literal prefixes, unlike diff pathspecs.
+    A trailing slash descends into a named tree even without -r.
+
+    Args:
+        repo (BaseRepo): opened object database.
+        tree (ObjectID): tree to visit.
+        patterns (tuple[str, ...]): repository-relative literal prefixes.
+        recursive (bool): descend into every selected directory.
+        trees (bool): also emit trees being traversed.
+        directories (bool): suppress leaves.
+        prefix (str): repository-relative parent.
+    """
+    obj = repo.object_store[tree]
+    assert isinstance(obj, GitTree)
+    out: list[tuple[str, str, str]] = []
+    for entry in obj.iteritems():
+        name = entry.path.decode("utf-8", "surrogateescape")
+        path = f"{prefix}/{name}" if prefix else name
+        selected = not patterns or any(
+            pattern == ""
+            or path == pattern
+            or path.startswith(pattern.rstrip("/") + "/")
+            for pattern in patterns
+        )
+        row = (path, f"{entry.mode:06o}", entry.sha.decode())
+        if entry.mode != 0o40000:
+            if selected and not directories:
+                out.append(row)
+            continue
+        descend = (recursive and selected) or any(
+            pattern.startswith(path + "/") for pattern in patterns
+        )
+        show_tree = trees or directories and (selected or recursive)
+        if (selected and not descend) or (descend and show_tree):
+            out.append(row)
+        if descend:
+            out.extend(
+                listed_tree(
+                    repo,
+                    entry.sha,
+                    patterns,
+                    recursive,
+                    trees,
+                    directories,
+                    path,
+                )
+            )
     return out

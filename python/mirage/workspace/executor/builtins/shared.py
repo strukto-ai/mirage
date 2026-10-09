@@ -257,7 +257,7 @@ def refusal(cmd: str, exc: PolicyDenied) -> Result:
 
 
 def readonly_line(cmd: str, name: str) -> str:
-    """The shell's own readonly refusal line, checked before the door.
+    """The shell's own readonly refusal line, checked before the session view.
 
     ``declare``, ``local`` and ``typeset`` name themselves in it
     (``bash: declare: R: readonly variable``); every other writer
@@ -292,7 +292,7 @@ def arith_refusal(cmd: str, exc: ArithError) -> Result:
     GNU voices it as the evaluator's own line, prefixed by the builtin
     and the offending text (``bash: read: 1+: syntax error: operand
     expected``), and fails the builtin with 1 while the variable keeps
-    its old value, which is what the door's copy-then-store already
+    its old value, which is what the session view's copy-then-store already
     guarantees. A plain assignment (``n=1+``) is fatal instead and is
     voiced by the executor without a builtin name.
 

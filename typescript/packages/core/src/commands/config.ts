@@ -44,6 +44,7 @@ import type {
   RenameOp,
   RmdirOp,
   SearchOps,
+  SetAttrsOp,
   StatOp,
   WriteOp,
 } from '../vfs/types.ts'
@@ -117,8 +118,7 @@ export interface CommandIO<A extends Accessor = Accessor> {
   dirCopy?: CopyOp<A>
   /** noCreate requires an atomic existence precondition, or ENOTSUP before writing. */
   truncate?: (accessor: A, path: PathSpec, length: number, noCreate?: boolean) => Promise<void>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setAttrs?: (...args: any[]) => unknown
+  setAttrs?: SetAttrsOp<A>
   isMounted: (accessor: A) => boolean
   local?: boolean
   maxGlobMatches?: number

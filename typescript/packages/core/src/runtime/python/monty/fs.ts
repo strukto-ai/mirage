@@ -16,7 +16,7 @@ import { classify } from '../../../errors/index.ts'
 import { normDir } from '../../../utils/slash.ts'
 import { parseMode } from '../../handles/mode.ts'
 import { applyOpen } from '../../open.ts'
-import type { RuntimeVFS } from '../../vfs.ts'
+import type { RuntimeFiles } from '../../files.ts'
 import type { MontyFsBits } from './loader.ts'
 import { MAX_URANDOM_BYTES, NOT_A_LINK } from './constants.ts'
 import { asGuestError, guestError } from './errors.ts'
@@ -122,7 +122,7 @@ function dateMarker(): Record<string, unknown> {
 }
 
 // The calls that read or change content: only a path in the runtime's
-// view may reach the door with one. Structural questions ask of any
+// view may reach the adapter with one. Structural questions ask of any
 // path; a mkdir checks the view itself, after its existence probe.
 const CONTENT = new Set([
   'open',
@@ -140,34 +140,34 @@ const CONTENT = new Set([
 /** The predicates, which answer false where there is no filesystem. */
 const PROBES = new Set(['Path.exists', 'Path.is_file', 'Path.is_dir', 'Path.is_symlink'])
 
-/** The other calls this door serves, which refuse where there is none. */
+/** The other calls this adapter serves, which refuse where there is none. */
 const STRUCTURE = new Set(['Path.mkdir', 'Path.iterdir', 'Path.stat'])
 
 /**
- * Monty's OS door: every path a guest names is the workspace's.
+ * Monty's OS callbacks: every path a guest names is the workspace's.
  *
  * This is monty's tier of the interception taxonomy: the engine calls
  * one host callback per operation and takes back a value (or a promise
  * of one) or NOT_HANDLED, which the sandbox raises as the call's
- * default refusal. Every path goes to the file door, and nothing is
+ * default refusal. Every path goes to the file adapter, and nothing is
  * kept aside: structure is open (a listing, whether a name is a
  * directory or a link) and content goes only through the runtime's
- * view (`RuntimeVFS.serves`: the announced mounts and what a link
+ * view (`RuntimeFiles.serves`: the announced mounts and what a link
  * reaches), so a guest lists what a shell lists and reads and writes
  * nothing the view withholds. The python twin answers the same way.
- * Declining is reserved for an operation this door does not implement.
+ * Declining is reserved for an operation these callbacks do not implement.
  *
- * Monty hands the door whole-file calls: an open, then reads of the
+ * Monty hands the callbacks whole-file calls: an open, then reads of the
  * whole file and appends of each new write. So an open applies its
  * mode's effect on the mount (`applyOpen`) and nothing else, and each
  * write after it ships only its own bytes.
  *
  * Args:
- *   bits: the loaded engine's door pieces (NOT_HANDLED sentinel
+ *   bits: the loaded engine's callback pieces (NOT_HANDLED sentinel
  *     and the MontyFileHandle an `open` answer must be).
  *   env: the run's environment, readable both ways python's monty
  *     spells it (`os.getenv` and `os.environ`).
- *   door: the execution's file door, or null outside a workspace,
+ *   files: the execution's file adapter, or null outside a workspace,
  *     where every path is out of view.
  */
 export class MontyFs {
@@ -175,14 +175,14 @@ export class MontyFs {
   private readonly notHandled: symbol
   private readonly fileHandle: MontyFsBits['MontyFileHandle']
   private readonly env: Record<string, string>
-  private readonly door: RuntimeVFS | null
+  private readonly files: RuntimeFiles | null
 
-  constructor(bits: MontyFsBits, env: Record<string, string>, door: RuntimeVFS | null) {
+  constructor(bits: MontyFsBits, env: Record<string, string>, files: RuntimeFiles | null) {
     this.bits = bits
     this.notHandled = bits.NOT_HANDLED
     this.fileHandle = bits.MontyFileHandle
     this.env = env
-    this.door = door
+    this.files = files
   }
 
   readonly handle = (
@@ -205,13 +205,13 @@ export class MontyFs {
       // it cannot reach the session's own env.
       return { ...this.env }
     }
-    // The clock doors: python's engine defaults these to the host
+    // The clock callbacks: python's engine defaults these to the host
     // clock, so declining them (a guest RuntimeError) was a divergence
     // for any program that stamps its output.
     if (name === 'datetime.now') return dateTimeMarker(timeZoneArg(args[0]))
     if (name === 'date.today') return dateMarker()
     if (name === 'os.urandom') return urandom(args[0])
-    // Everything below serves a path; the doors above need none.
+    // Everything below serves a path; the callbacks above need none.
     const path = pathArg(args[0])
     if (path === null) return this.notHandled
     // Lexical questions need no mount: resolve() is absolute() and '/'
@@ -220,12 +220,12 @@ export class MontyFs {
     if (name === 'Path.resolve' || name === 'Path.absolute') {
       return path.startsWith('/') ? path : '/' + path
     }
-    const door = this.door
-    if (door === null) return this.unbound(name, path)
+    const files = this.files
+    if (files === null) return this.unbound(name, path)
     const out =
-      CONTENT.has(name) && !door.serves(path)
+      CONTENT.has(name) && !files.serves(path)
         ? Promise.reject(guestError('ENOENT', path))
-        : this.op(name, path, args, kwargs, door)
+        : this.op(name, path, args, kwargs, files)
     if (!(out instanceof Promise)) return out
     // A mount words its refusals its own way; the guest catches the
     // builtin CPython raises and may print its message.
@@ -247,34 +247,34 @@ export class MontyFs {
     path: string,
     args: unknown[],
     kwargs: Record<string, unknown>,
-    door: RuntimeVFS,
+    files: RuntimeFiles,
   ): unknown {
     switch (name) {
       case 'open':
-        return this.open(path, typeof args[1] === 'string' ? args[1] : 'r', door)
+        return this.open(path, typeof args[1] === 'string' ? args[1] : 'r', files)
       case 'Path.read_bytes':
-        return door.read(path)
+        return files.read(path)
       case 'Path.read_text':
-        return door.read(path).then((b) => new TextDecoder().decode(b))
+        return files.read(path).then((b) => new TextDecoder().decode(b))
       case 'Path.write_bytes':
       case 'Path.write_text':
-        return this.write(path, args[1], door)
+        return this.write(path, args[1], files)
       case 'Path.append_bytes':
       case 'Path.append_text':
-        return this.append(path, args[1], door)
+        return this.append(path, args[1], files)
       case 'Path.mkdir':
-        return this.mkdir(path, kwargs, door)
+        return this.mkdir(path, kwargs, files)
       case 'Path.rmdir':
-        return door.rmdir(path).then(() => null)
+        return files.rmdir(path).then(() => null)
       case 'Path.unlink':
-        return door.unlink(path).then(() => null)
+        return files.unlink(path).then(() => null)
       case 'Path.rename': {
         const dst = pathArg(args[1])
         if (dst === null) return this.notHandled
-        return door.rename(path, dst).then(() => null)
+        return files.rename(path, dst).then(() => null)
       }
       case 'Path.iterdir':
-        return door.readdir(normDir(path), false).then((entries) =>
+        return files.readdir(normDir(path), false).then((entries) =>
           childPaths(
             path,
             entries.map((e) => e.path),
@@ -283,15 +283,15 @@ export class MontyFs {
       // The predicates read the row the view shows: the mount's own,
       // or a directory the workspace lists.
       case 'Path.is_dir':
-        return door.viewStat(path).then((st) => st !== null && isDirRow(st))
+        return files.viewStat(path).then((st) => st !== null && isDirRow(st))
       case 'Path.is_symlink':
-        return this.isLink(path, door)
+        return this.isLink(path, files)
       case 'Path.is_file':
-        return door.viewStat(path).then((st) => st !== null && isRegularRow(st))
+        return files.viewStat(path).then((st) => st !== null && isRegularRow(st))
       case 'Path.exists':
-        return door.viewStat(path).then((st) => st !== null)
+        return files.viewStat(path).then((st) => st !== null)
       case 'Path.stat':
-        return door.viewStat(path).then((st) => {
+        return files.viewStat(path).then((st) => {
           if (st === null) throw guestError('ENOENT', path)
           return statResult(this.bits, st)
         })
@@ -306,8 +306,8 @@ export class MontyFs {
    * comes out as itself (NOT_A_LINK), which is what CPython's own
    * `Path.is_symlink` does.
    */
-  private isLink(path: string, door: RuntimeVFS): Promise<boolean> {
-    return door.readlink(path).then(
+  private isLink(path: string, files: RuntimeFiles): Promise<boolean> {
+    return files.readlink(path).then(
       () => true,
       (caught: unknown) => {
         const condition = classify(caught)
@@ -317,18 +317,18 @@ export class MontyFs {
     )
   }
 
-  private async open(path: string, mode: string, door: RuntimeVFS): Promise<unknown> {
+  private async open(path: string, mode: string, files: RuntimeFiles): Promise<unknown> {
     // Handle first, as monty's own engine does: a malformed mode must
     // raise before any side effect lands on the mount.
     const handle = new this.fileHandle(path, mode)
-    await applyOpen(door, path, parseMode(mode))
+    await applyOpen(files, path, parseMode(mode))
     return handle
   }
 
   /** Replace a file; the return is python's: characters for text, bytes for bytes. */
-  private async write(path: string, data: unknown, door: RuntimeVFS): Promise<number> {
+  private async write(path: string, data: unknown, files: RuntimeFiles): Promise<number> {
     const bytes = payloadBytes(data)
-    await door.write(path, bytes)
+    await files.write(path, bytes)
     return typeof data === 'string' ? textLength(data) : bytes.length
   }
 
@@ -336,12 +336,12 @@ export class MontyFs {
    * Send only the appended bytes; monty hands an append nothing else.
    * Re-sending everything written so far turns a write loop quadratic,
    * so a mount with its own append op carries just these bytes, and the
-   * door falls back to a whole-file write only for the mount without
+   * adapter falls back to a whole-file write only for the mount without
    * one. The return is python's: characters for text, bytes for bytes.
    */
-  private async append(path: string, data: unknown, door: RuntimeVFS): Promise<number> {
+  private async append(path: string, data: unknown, files: RuntimeFiles): Promise<number> {
     const tail = payloadBytes(data)
-    await door.append(path, tail)
+    await files.append(path, tail)
     return typeof data === 'string' ? textLength(data) : tail.length
   }
 
@@ -356,16 +356,16 @@ export class MontyFs {
   private async mkdir(
     path: string,
     kwargs: Record<string, unknown>,
-    door: RuntimeVFS,
+    files: RuntimeFiles,
   ): Promise<null> {
-    const row = await door.viewStat(path)
+    const row = await files.viewStat(path)
     if (row !== null && !isDirRow(row)) throw guestError('EEXIST', path)
     if (row !== null) {
       if (kwargs.exist_ok === true) return null
       throw guestError('EEXIST', path)
     }
-    if (!door.serves(path)) throw guestError('ENOENT', path)
-    await door.mkdir(path, kwargs.parents === true)
+    if (!files.serves(path)) throw guestError('ENOENT', path)
+    await files.mkdir(path, kwargs.parents === true)
     return null
   }
 }

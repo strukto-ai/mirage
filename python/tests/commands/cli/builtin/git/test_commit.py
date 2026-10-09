@@ -29,7 +29,7 @@ SUMMARY = re.compile(rb"^\[main [0-9a-f]{7,}\] (.+)$", re.M)
 
 
 def env_view(env: dict[str, str]) -> SessionView:
-    """The session plane's door over a session holding ``env``.
+    """The session view over a session holding ``env``.
 
     Args:
         env (dict[str, str]): the variables the session holds.
@@ -190,7 +190,7 @@ def test_no_environment_leaves_the_stated_default():
 
 
 def test_a_hidden_variable_is_not_read_as_an_identity():
-    # The door filters hidden names, so a hidden GIT_AUTHOR_NAME reads
+    # The dispatcher filters hidden names, so a hidden GIT_AUTHOR_NAME reads
     # as unset rather than leaking into a commit the session can see.
     session = SessionState(
         session_id="s",
@@ -270,4 +270,26 @@ async def test_a_move_is_summarized_as_a_rename(git_rw):
     assert out.split(b"\n", 1)[1] == (
         b" 1 file changed, 0 insertions(+), 0 deletions(-)\n"
         b" rename b.txt => c.txt (100%)\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_refuses_an_unreadable_file_in_git_words(
+    git_rw, repo_path: Path
+):
+    (repo_path / "a.txt").write_text("new\n", encoding="utf-8")
+    await git_rw.set_session_profile(
+        git_rw.default_session_id,
+        {
+            "commands": {
+                "deny": [{"reason": "sealed", "paths": ["/repo/a.txt"]}]
+            }
+        },
+    )
+    assert await run(git_rw, "commit -a -m x") == (
+        128,
+        b"",
+        b'error: open("a.txt"): Permission denied\n'
+        b"error: unable to index file 'a.txt'\n"
+        b"fatal: updating files failed\n",
     )

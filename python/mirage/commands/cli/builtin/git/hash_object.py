@@ -33,7 +33,7 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     start_point,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
@@ -136,7 +136,7 @@ async def _content(dispatch: DispatchFn, base: PathSpec, name: str) -> bytes:
         )
     except IsADirectoryError as exc:
         raise GitError(f"Unable to hash {name}") from exc
-    except (FileNotFoundError, NotADirectoryError) as exc:
+    except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
         reason = fs_strerror(exc) or "No such file or directory"
         raise GitError(
             f"could not open '{name}' for reading: {reason}"
@@ -155,8 +155,8 @@ async def hash_object(
         inv (CLIInvocation[None]): the line's invocation record.
     """
     fl = FlagView(inv.flags)
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
     texts = tuple(inv.texts)
     try:
         if dispatch is None:
@@ -181,7 +181,7 @@ async def hash_object(
         if not literally and not all(well_formed(kind, d) for d in contents):
             raise GitError("refusing to create malformed object")
         if fl.as_bool("w") and contents:
-            repo, _ = await opened(fl, doors)
+            repo, _ = await opened(fl, view)
             cls = OBJECT_CLASSES[kind]
             for data in contents:
                 obj = cls.from_raw_string(cls.type_num, data)

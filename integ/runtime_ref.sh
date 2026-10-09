@@ -2,13 +2,13 @@
 # `runtimes: [{name: <ref>}]` battery: a workspace routes lines to runtimes
 # that live in a file on disk, with no host program calling
 # register_runtime, one per tier the workspace can route to. EchoBox takes
-# whole lines (the door every sandbox provider uses) and ShoutPython is an
-# interpreter (the door python3 uses), so both tiers are proven pluggable
+# whole lines (the entry point every sandbox provider uses) and ShoutPython is an
+# interpreter (the entry point python3 uses), so both tiers are proven pluggable
 # from yaml. Python loads a .py class, TypeScript loads .mjs and .ts, and
 # every flavour must answer the same lines, because the point of the ref
 # form is that a deployment ships one runtime and both hosts run it.
 #
-# Every case goes through the real door: `mirage workspace create` reads
+# Every case goes through the real entry point: `mirage workspace create` reads
 # the YAML, rebases the relative ref against the file's directory, and the
 # daemon imports it. The refusals are pinned too: a ref to a missing file
 # and a ref to something that is not a Runtime both fail the create with

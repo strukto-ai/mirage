@@ -74,7 +74,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
@@ -166,8 +166,8 @@ async def clone(
             is and never written to the clone's config.
     """
     fl = FlagView(inv.flags)
-    doors = inv.doors or CLIDoors()
-    dispatch, stat_path = doors.dispatch, doors.stat_path
+    view = inv.view or CLIView()
+    dispatch, stat_path = view.dispatch, view.stat_path
     try:
         check_switches(inv, inv.texts)
         if not inv.texts:
@@ -196,7 +196,7 @@ async def clone(
                 "is not an empty directory."
             )
         transport = await open_transport(
-            url, start, doors, await configured_headers(inv, None), credentials
+            url, start, view, await configured_headers(inv, None), credentials
         )
     except GitError as exc:
         return fatal(exc)
@@ -211,12 +211,12 @@ async def clone(
     notes = "" if quiet else f"Cloning into '{name}'...\n"
     try:
         notes += await _populate(
-            inv, doors, transport, target, stored, local and not quiet
+            inv, view, transport, target, stored, local and not quiet
         )
     except GitError as exc:
         if info is None:
             await remove_tree(
-                dispatch, target, links_of(doors), mounts_of(doors)
+                dispatch, target, links_of(view), mounts_of(view)
             )
         else:
             for entry in await read_names(dispatch, target):
@@ -224,8 +224,8 @@ async def clone(
                 await remove_tree(
                     dispatch,
                     target.join(child),
-                    links_of(doors),
-                    mounts_of(doors),
+                    links_of(view),
+                    mounts_of(view),
                 )
         refusal = str(exc) if exc.prefix is None else f"{exc.prefix}: {exc}"
         return None, IOResult(
@@ -236,7 +236,7 @@ async def clone(
 
 async def _populate(
     inv: CLIInvocation[None],
-    doors: CLIDoors,
+    view: CLIView,
     transport: LocalTransport | HttpTransport,
     target: PathSpec,
     url: str,
@@ -246,7 +246,7 @@ async def _populate(
 
     Args:
         inv (CLIInvocation[None]): the parsed invocation.
-        doors (CLIDoors): the invocation's doors.
+        view (CLIView): the invocation's view.
         transport (LocalTransport | HttpTransport): the remote.
         target (PathSpec): the clone's working tree.
         url (str): the remote URL as the config records it.
@@ -256,9 +256,9 @@ async def _populate(
         str: what the clone prints to stderr after ``Cloning into``.
     """
     fl = FlagView(inv.flags)
-    dispatch, stat_path = doors.dispatch, doors.stat_path
+    dispatch, stat_path = view.dispatch, view.stat_path
     assert dispatch is not None and stat_path is not None
-    mounts = doors.ns.mounts if doors.ns is not None else None
+    mounts = view.ns.mounts if view.ns is not None else None
     gitdir = target.join(".git")
     remote = fl.as_str("origin") or "origin"
     if not valid_ref_name(f"refs/remotes/{remote}/test"):
@@ -364,7 +364,7 @@ async def _populate(
             location,
             {},
             tree,
-            links_of(doors),
+            links_of(view),
             mounts,
         )
     return notes

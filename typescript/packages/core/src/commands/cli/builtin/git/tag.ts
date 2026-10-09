@@ -167,7 +167,7 @@ export async function buildTag(
  * imply a listing the way `-n` does, so their operands are patterns.
  */
 export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const words = filterWords(inv)
   const texts = withoutFilterValues(inv.texts, words)
   const filtered = words.length > 0
@@ -176,7 +176,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
   let was: string | undefined
   let abbrev: number
   try {
-    const dispatch = doors.dispatch
+    const dispatch = view.dispatch
     if (dispatch === undefined) throw new NoWorkspaceError()
     checkSwitches(inv, texts)
     const flags = parseFlags(fl)
@@ -197,7 +197,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
     if (flags.remove && flags.lines !== undefined) throw new ListModeOnlyError()
     const listOnly = flags.remove ? listModeOption(words) : null
     if (listOnly !== null) throw new ListModeOnlyError(listOnly)
-    const repo = await opened(fl, doors)
+    const repo = await opened(fl, view)
     abbrev = repo.abbrev
     const keys = sortKeys(fl, await configuredSort(repo, 'tag'))
     const filter = await refFilter(repo, words)
@@ -280,7 +280,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
         name,
         target,
         flags.message ?? '',
-        identity(fl, doors.sessionView).line,
+        identity(fl, view.sessionView).line,
         Math.floor(Date.now() / 1000),
       )
     }

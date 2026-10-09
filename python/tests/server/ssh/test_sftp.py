@@ -16,7 +16,6 @@ import asyncio
 import inspect
 import stat
 import threading
-import time
 
 import asyncssh
 import pytest
@@ -328,12 +327,13 @@ async def test_sftp_runs_under_the_key_profile(tmp_path):
 
 
 class ListingCore:
-    """MountCore double: a wide directory whose stats each take a while."""
+    """MountCore double: hold the first batch until the stat pool is full."""
 
     def __init__(self, names, refuse=None):
         self.names = names
         self.refuse = refuse
         self.lock = threading.Lock()
+        self.started = threading.Barrier(LISTING_CONCURRENCY, timeout=5)
         self.now = 0
         self.peak = 0
         self.calls = 0
@@ -346,9 +346,13 @@ class ListingCore:
             self.calls += 1
             self.now += 1
             self.peak = max(self.peak, self.now)
-        time.sleep(0.005)
-        with self.lock:
-            self.now -= 1
+            first_batch = self.calls <= LISTING_CONCURRENCY
+        try:
+            if first_batch:
+                self.started.wait()
+        finally:
+            with self.lock:
+                self.now -= 1
         if path.endswith("gone"):
             raise FileNotFoundError(path)
         if self.refuse is not None and path.endswith(self.refuse):

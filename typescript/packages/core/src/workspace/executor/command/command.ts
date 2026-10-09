@@ -36,8 +36,7 @@ import { Consumer, JOB_BUILTINS, dereferences, lookup } from '../../lookup/index
 import { type Runtime } from '../../../runtime/base.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { SessionState } from '../../session/session.ts'
-import { mergeSignals } from '../../abort.ts'
-import { abortable } from '../../../concurrency/limiter.ts'
+import { abortable, mergeSignals } from '../../../utils/abort.ts'
 import { ExecutionNode } from '../../types.ts'
 import { RELAY_COMMANDS } from '../../../commands/builtin/generic/crossmount/constants.ts'
 import { aggregateFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
@@ -190,7 +189,7 @@ export async function handleCommand(
   jobTable: JobTable | null = null,
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
-  routingDecision?: RouteDecision,
+  routingDecision?: RouteDecision<Runtime>,
   agentId: string | null = null,
   executeFn?: ExecuteFn,
   handed: HandOff | null = null,
@@ -298,6 +297,7 @@ export async function handleCommand(
           ...(registry.processView === undefined
             ? {}
             : { processes: registry.processView(session) }),
+          ...(routingDecision === undefined ? {} : { routing: routingDecision }),
         },
         dropsMountCaches(cliInstall.spec) ? () => dropMountCaches(registry) : null,
       ),
@@ -305,7 +305,7 @@ export async function handleCommand(
     )
   }
 
-  // Every op the command issues from here carries its gate to the door.
+  // Every op the command issues from here carries its gate to the dispatcher.
   dispatch = withDispatchRuleGuard(dispatch)
 
   if (cmdName in CWD_DEFAULT_RAW) {

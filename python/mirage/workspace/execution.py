@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 
 from mirage.execution.context import new_execution_id
 from mirage.io.yield_budget import YieldBudget
-from mirage.workspace.abort import MirageAbortError
+from mirage.utils.abort import MirageAbortError
 
 
 class ExecutionScope:

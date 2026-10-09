@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -47,6 +47,8 @@ class _Item:
     folder: bool
     data: bytes = b""
     status: Status = "active"
+    version: int = 1
+    link: bool = False
 
 
 @dataclass
@@ -71,8 +73,21 @@ class FakeBox:
             ``info``, ``content``, ``dl``, ``upload``; an upload logs the
             parent id for a new file and the file id for a version).
         url (str): the origin ``serve`` sets once it is listening.
-        forbidden (set[str]): ids whose ``GET /files/{id}`` answers 403.
+        forbidden (set[str]): ids whose ``GET /files/{id}`` or
+            ``DELETE /web_links/{id}`` answers 403.
         unhashed (set[str]): ids Box renders with no ``sha1``.
+        hooks (dict[str, Callable[[], None]]): one-shot callbacks run when
+            the named route (``content``, ``upload``, ``delete``, ``update``,
+            ``copy``)
+            is reached, before it acts: another writer landing between
+            mirage's lookup and its request.
+
+    A file's ``etag`` is its version, bumped by every content write, and
+    ``If-Match`` on an upload or delete answers 412 ``precondition_failed``
+    when it differs, as Box does (measured 2026-10-05 for uploads,
+    2026-10-08 for deletes). A request onto a taken name answers 409
+    ``item_name_in_use`` naming the item that holds it in
+    ``context_info.conflicts``, as Box does (measured 2026-10-08).
     """
 
     files: dict[str, bytes] = field(default_factory=dict)
@@ -81,6 +96,7 @@ class FakeBox:
     forbidden: set[str] = field(default_factory=set)
     unhashed: set[str] = field(default_factory=set)
     items: dict[str, _Item] = field(default_factory=dict)
+    hooks: dict[str, Callable[[], None]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._ids = itertools.count(100)
@@ -132,10 +148,22 @@ class FakeBox:
         self.items[item.id] = item
         return item.id
 
+    def create_link(self, path: str) -> str:
+        parent, _, name = path.strip("/").rpartition("/")
+        folder = self._folder(parent)
+        item = _Item(str(next(self._ids)), name, folder.id, False, link=True)
+        self.items[item.id] = item
+        return item.id
+
     def write(self, path: str, data: bytes) -> None:
         item = self._find(path)
         assert item is not None and not item.folder, path
         item.data = data
+        item.version += 1
+
+    def read(self, path: str) -> bytes | None:
+        item = self._find(path)
+        return None if item is None or item.folder else item.data
 
     def move(self, path: str, to: str) -> None:
         item = self._find(path)
@@ -178,6 +206,13 @@ class FakeBox:
         return [{"type": "folder", "id": a.id, "name": a.name} for a in chain]
 
     def _row(self, item: _Item) -> dict[str, Any]:
+        if item.link:
+            return {
+                "type": "web_link",
+                "id": item.id,
+                "name": item.name,
+                "etag": "0",
+            }
         if item.folder:
             return {
                 "type": "folder",
@@ -193,7 +228,7 @@ class FakeBox:
             "name": item.name,
             "size": len(item.data),
             "modified_at": MODIFIED,
-            "etag": "1",
+            "etag": str(item.version),
             "parent": {"type": "folder", "id": item.parent},
             "item_status": "active",
             "path_collection": {"total_count": len(chain), "entries": chain},
@@ -215,7 +250,7 @@ class FakeBox:
 
     def _readable(self, file_id: str) -> _Item | None:
         item = self.items.get(file_id)
-        if item is None or item.folder or item.status != "active":
+        if item is None or item.folder or item.link or item.status != "active":
             return None
         return item
 
@@ -242,6 +277,25 @@ class FakeBox:
             {"entries": rows, "total_count": len(rows), "offset": 0}
         )
 
+    async def create_folder(self, req: web.Request) -> web.Response:
+        body = await req.json()
+        parent = body["parent"]["id"]
+        self.log.append(f"mkdir:{parent}")
+        if not self._listable(parent):
+            return self._refuse(404, "not_found")
+        if (taken := self._taken(parent, body["name"])) is not None:
+            return self._name_in_use(taken)
+        folder = _Item(str(next(self._ids)), body["name"], parent, True)
+        self.items[folder.id] = folder
+        return web.json_response(self._row(folder), status=201)
+
+    async def folder_info(self, req: web.Request) -> web.Response:
+        folder_id = req.match_info["id"]
+        self.log.append(f"folder:{folder_id}")
+        if not self._listable(folder_id):
+            return self._refuse(404, "not_found")
+        return web.json_response(self._row(self.items[folder_id]))
+
     async def file_info(self, req: web.Request) -> web.Response:
         file_id = req.match_info["id"]
         self.log.append(f"info:{file_id}")
@@ -261,6 +315,7 @@ class FakeBox:
     async def content(self, req: web.Request) -> web.Response:
         file_id = req.match_info["id"]
         self.log.append(f"content:{file_id}")
+        self._hook("content")
         item = self._readable(file_id)
         if item is None:
             return web.json_response({"code": "not_found"}, status=404)
@@ -278,10 +333,44 @@ class FakeBox:
             {"total_count": 1, "entries": [self._row(item)]}, status=status
         )
 
+    def _hook(self, route: str) -> None:
+        hook = self.hooks.pop(route, None)
+        if hook is not None:
+            hook()
+
+    def _taken(self, parent: str, name: str, own: str = "") -> _Item | None:
+        return next(
+            (k for k in self._kids(parent) if k.name == name and k.id != own),
+            None,
+        )
+
+    @staticmethod
+    def _name_in_use(item: _Item) -> web.Response:
+        kind = "web_link" if item.link else "folder" if item.folder else "file"
+        conflict = {"type": kind, "id": item.id, "name": item.name}
+        return web.json_response(
+            {
+                "code": "item_name_in_use",
+                "context_info": {"conflicts": [conflict]},
+            },
+            status=409,
+        )
+
+    def _precondition(self, req: web.Request, item: _Item) -> bool:
+        want = req.headers.get("If-Match")
+        return want is not None and want != str(item.version)
+
+    @staticmethod
+    def _refuse(status: int, code: str) -> web.Response:
+        return web.json_response({"code": code}, status=status)
+
     async def upload_new(self, req: web.Request) -> web.Response:
         attributes, data = await self._upload_form(req)
         parent_id = attributes["parent"]["id"]
         self.log.append(f"upload:{parent_id}")
+        self._hook("upload")
+        if (taken := self._taken(parent_id, attributes["name"])) is not None:
+            return self._name_in_use(taken)
         item = _Item(
             str(next(self._ids)), attributes["name"], parent_id, False, data
         )
@@ -292,9 +381,96 @@ class FakeBox:
         file_id = req.match_info["id"]
         _, data = await self._upload_form(req)
         self.log.append(f"upload:{file_id}")
-        item = self.items[file_id]
+        self._hook("upload")
+        item = self._readable(file_id)
+        if item is None:
+            return self._refuse(404, "not_found")
+        if self._precondition(req, item):
+            return self._refuse(412, "precondition_failed")
         item.data = data
+        item.version += 1
         return self._uploaded(item, 200)
+
+    def _drop(self, item: _Item) -> None:
+        for kid in [k for k in self.items.values() if k.parent == item.id]:
+            self._drop(kid)
+        del self.items[item.id]
+
+    async def delete_file(self, req: web.Request) -> web.Response:
+        file_id = req.match_info["id"]
+        self.log.append(f"delete:{file_id}")
+        self._hook("delete")
+        item = self._readable(file_id)
+        if item is None:
+            return self._refuse(404, "not_found")
+        if self._precondition(req, item):
+            return self._refuse(412, "precondition_failed")
+        self._drop(item)
+        return web.Response(status=204)
+
+    async def delete_link(self, req: web.Request) -> web.Response:
+        link_id = req.match_info["id"]
+        self.log.append(f"delete:{link_id}")
+        self._hook("delete")
+        if link_id in self.forbidden:
+            return self._refuse(403, "forbidden")
+        item = self.items.get(link_id)
+        if item is None or not item.link:
+            return self._refuse(404, "not_found")
+        del self.items[link_id]
+        return web.Response(status=204)
+
+    async def delete_folder(self, req: web.Request) -> web.Response:
+        folder_id = req.match_info["id"]
+        self.log.append(f"delete:{folder_id}")
+        self._hook("delete")
+        if not self._listable(folder_id):
+            return self._refuse(404, "not_found")
+        recursive = req.query.get("recursive") == "true"
+        if not recursive and self._kids(folder_id):
+            return self._refuse(409, "folder_not_empty")
+        self._drop(self.items[folder_id])
+        return web.Response(status=204)
+
+    async def update(self, req: web.Request) -> web.Response:
+        item_id = req.match_info["id"]
+        self.log.append(f"update:{item_id}")
+        self._hook("update")
+        item = self.items.get(item_id)
+        if item is None or item.status != "active":
+            return self._refuse(404, "not_found")
+        body = await req.json()
+        parent = body.get("parent", {}).get("id", item.parent)
+        name = body.get("name", item.name)
+        if (taken := self._taken(parent, name, own=item.id)) is not None:
+            return self._name_in_use(taken)
+        item.parent, item.name = parent, name
+        return web.json_response(self._row(item))
+
+    def _clone(self, item: _Item, parent: str, name: str) -> _Item:
+        twin = _Item(
+            str(next(self._ids)), name, parent, item.folder, item.data
+        )
+        self.items[twin.id] = twin
+        for kid in self._kids(item.id):
+            self._clone(kid, twin.id, kid.name)
+        return twin
+
+    async def copy(self, req: web.Request) -> web.Response:
+        item_id = req.match_info["id"]
+        self.log.append(f"copy:{item_id}")
+        self._hook("copy")
+        item = self.items.get(item_id)
+        if item is None or item.status != "active":
+            return self._refuse(404, "not_found")
+        body = await req.json()
+        parent = body["parent"]["id"]
+        name = body.get("name", item.name)
+        if (taken := self._taken(parent, name)) is not None:
+            return self._name_in_use(taken)
+        return web.json_response(
+            self._row(self._clone(item, parent, name)), status=201
+        )
 
     async def dl(self, req: web.Request) -> web.Response:
         file_id = req.match_info["id"]
@@ -328,10 +504,19 @@ def serve(box: FakeBox | None = None) -> Iterator[FakeBox]:
     box = box or FakeBox()
     app = web.Application()
     app.router.add_get("/2.0/folders/{id}/items", box.folder_items)
+    app.router.add_post("/2.0/folders", box.create_folder)
+    app.router.add_get("/2.0/folders/{id}", box.folder_info)
     app.router.add_get("/2.0/files/{id}", box.file_info)
     app.router.add_get("/2.0/files/{id}/content", box.content)
     app.router.add_post("/2.0/files/content", box.upload_new)
     app.router.add_post("/2.0/files/{id}/content", box.upload_version)
+    app.router.add_delete("/2.0/files/{id}", box.delete_file)
+    app.router.add_delete("/2.0/folders/{id}", box.delete_folder)
+    app.router.add_delete("/2.0/web_links/{id}", box.delete_link)
+    app.router.add_put("/2.0/files/{id}", box.update)
+    app.router.add_put("/2.0/folders/{id}", box.update)
+    app.router.add_post("/2.0/files/{id}/copy", box.copy)
+    app.router.add_post("/2.0/folders/{id}/copy", box.copy)
     app.router.add_get("/dl/{id}", box.dl)
     loop = asyncio.new_event_loop()
     startup: Future[None] = Future()

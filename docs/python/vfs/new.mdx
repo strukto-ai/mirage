@@ -11,7 +11,7 @@ A VFS maps an external system to Mirage's filesystem operations and shell comman
 
 ## Ship Your Own Backend
 
-Everything an out-of-tree backend needs is exported from the `mirage` package root, the same front door that hands out `Workspace` and the twin of what `@struktoai/mirage-core` gives a TypeScript backend; there is no separate SDK module. Subclass `BaseVFS` and define the functions your data source supports. `readdir`, `read` and `stat` are enough for the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution:
+Everything an out-of-tree backend needs is exported from the `mirage` package root, the same entry point that hands out `Workspace` and the twin of what `@struktoai/mirage-core` gives a TypeScript backend; there is no separate SDK module. Subclass `BaseVFS` and define the functions your data source supports. `readdir`, `read` and `stat` are enough for the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution:
 
 ```python
 from pydantic import BaseModel, ConfigDict, SecretStr
@@ -130,7 +130,7 @@ class JiraVFS(BaseVFS):
 ```
 
 `await ws.dispatch("search_issues", PathSpec.from_str_path("/jira/"), jql="project = OPS")`
-then runs through every check the door runs: hidden paths, path rules, the
+then runs through every check the dispatcher runs: hidden paths, path rules, the
 mount's mode and admission policies. A subclass overriding a marked function
 keeps the mark. Every other `PathSpec` argument passes the same checks and
 must be on the function's own mount (EXDEV otherwise); the backend receives
@@ -140,10 +140,10 @@ The effect is one of `READ`, `METADATA`, `WRITE`, `CREATE`, `REMOVE`,
 `RENAME` and `ATTR`; every one but `READ` and `METADATA` is a write. `target=`
 names the kind of entry the path is (`Target.FILE`, `DIR`, `LINK`, or `ANY`
 by default), and `creates=True` marks a `WRITE` that makes a missing file. The
-base functions declare theirs the same way, and the door reads which ops
+base functions declare theirs the same way, and the dispatcher reads which ops
 follow a link, create a name or run one at a time per path off them.
 `REMOVE` belongs to `unlink` and `rmdir`, and `RENAME` to `rename`: only for
-those names does the door remove a link instead of following it, refuse a
+those names does the dispatcher remove a link instead of following it, refuse a
 rename that would bring hidden entries into view (hidden-path rules stay where
 they are written), and move the links and cache below a renamed directory. A
 custom function declaring either is refused when its class is defined; a VFS
@@ -160,8 +160,8 @@ The driver never sees the mount it runs under. The index store and the `vfs:` re
 | --- | --- |
 | Shell and coreutils | The mount builds the generic commands over the VFS's functions; the shell supplies expansion, pipes, redirects and session policy. |
 | Filesystem calls | `ws.vfs` and `ws.dispatch` reach the same functions through the dispatcher. |
-| CLIs | The host registers a `CLISpec` with `register_cli`. File-oriented handlers use `inv.doors.dispatch` and `inv.doors.ns`; mounting a driver does not install an account CLI. |
-| Runtimes | Runtimes wired to `RuntimeVFS` reach the same dispatcher. A process or remote runtime needs its configured mount bridge. |
+| CLIs | The host registers a `CLISpec` with `register_cli`. File-oriented handlers use `inv.view.dispatch` and `inv.view.ns`; mounting a driver does not install an account CLI. |
+| Runtimes | Runtimes wired to `RuntimeFiles` reach the same dispatcher. A process or remote runtime needs its configured mount bridge. |
 | Namespace | The workspace owns symlinks, nested mounts and metadata overlays; the backend implements its own tree. |
 
 Use `path.vfs_path` to address your backend and `path.virtual` for workspace
@@ -262,7 +262,7 @@ A relative path resolves against the config file's directory, not the server's w
 
 When mounting a driver built with `build_vfs` in code, preserve its loader name on the placement: `Mount(build_vfs("jira", config), vfs_ref="jira")`. YAML does this automatically. Snapshots also preserve the mount’s effective index settings. An index URL containing credentials is redacted; pass a `Mount(..., index=...)` override with fresh credentials when loading it.
 
-Snapshots and versions rebuild a saved mount through the same door: the registered name, or the reference the config named (recorded beside the class path, since a class loaded from a script file cannot be imported back). What comes back depends on what the VFS owns. Content the VFS holds itself (an in-memory store) is mirage-owned state: override `get_state` and `load_state` to carry it, and a snapshot or a version restores the mount with that content and no override. Content that lives in a remote service is only observed: keep the default state, which says `needs_override`, set `supports_snapshot=True` and fill `FileStat.fingerprint`, and a snapshot pins what it read while `Workspace.load` asks for the live VFS back through `mounts=`. A forgotten override is a refusal to load, never a mount that comes back empty. The example shows both halves: a wiki page is written, the workspace is snapshotted, the page is changed, and the loaded workspace serves the page as it was, while a feed mount that keeps the default state is refused until the load hands it back through `mounts=`.
+Snapshots and versions rebuild a saved mount through the same entry point: the registered name, or the reference the config named (recorded beside the class path, since a class loaded from a script file cannot be imported back). What comes back depends on what the VFS owns. Content the VFS holds itself (an in-memory store) is mirage-owned state: override `get_state` and `load_state` to carry it, and a snapshot or a version restores the mount with that content and no override. Content that lives in a remote service is only observed: keep the default state, which says `needs_override`, set `supports_snapshot=True` and fill `FileStat.fingerprint`, and a snapshot pins what it read while `Workspace.load` asks for the live VFS back through `mounts=`. A forgotten override is a refusal to load, never a mount that comes back empty. The example shows both halves: a wiki page is written, the workspace is snapshotted, the page is changed, and the loaded workspace serves the page as it was, while a feed mount that keeps the default state is refused until the load hands it back through `mounts=`.
 
 ## Contribute a Builtin VFS
 
@@ -439,7 +439,7 @@ class MyVFS(BaseVFS):
         return await _stat(self.accessor, path, index)
 ```
 
-The mount builds the commands and the dispatcher's door from the class when the driver is placed; a driver never registers anything onto itself.
+The mount builds the commands and the dispatcher from the class when the driver is placed; a driver never registers anything onto itself.
 
 Set `caches_reads=True` only for stable, read-mostly content. Implement `get_state()` with credentials redacted (`self.config_state(self.config)`) and close any network clients in `close()`.
 
@@ -515,7 +515,7 @@ An older spelling changes in these places:
 | --- | --- |
 | `GenericVFS(name=..., accessor=..., io=...)` | a `BaseVFS` subclass that defines the functions; a driver built from options needs a name |
 | `PROMPT`, `WRITE_PROMPT`, `SUPPORTS_SNAPSHOT`, `SIZES_ALWAYS_KNOWN`, `READ_REVALIDATABLE` | `prompt`, `write_prompt`, `supports_snapshot`, `sizes_always_known`, `read_revalidatable` |
-| `self.register(fn)` and `self.register_op(op)` in `__init__`, `ops_list()` | nothing: the mount builds the commands and the door when it places the driver |
+| `self.register(fn)` and `self.register_op(op)` in `__init__`, `ops_list()` | nothing: the mount builds the commands and the dispatcher when it places the driver |
 | `resolve_glob(paths, prefix)` | the `glob` the mount derives from `readdir`; the mount stamps each spec's `vfs_path` before calling it |
 | `vfs.read_bytes(path)` | `vfs.read(path)` outside a workspace, `ws.dispatch(...)` inside one |
 | `vfs.index`, `set_index(...)`, `index=` on the constructor | `Workspace(index=...)` or `Mount(index=...)`; the store is the mount's (`ws.mount(prefix).index_store`) |

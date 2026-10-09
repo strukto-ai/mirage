@@ -15,7 +15,7 @@
 import { invokedEnvNames, suppliedEnvNames } from '../../commands/cli/walk.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
-import { WorkspaceRuntime } from '../../runtime/table.ts'
+import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import { SecretsError } from '../../secrets/errors.ts'
 import { fieldSummary } from '../../secrets/summary.ts'
 import { fetchSecret } from '../../secrets/registry.ts'
@@ -39,7 +39,7 @@ import { VarAttr, withValue } from '../../shell/variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { varHidden } from '../../utils/hidden.ts'
-import { abortable, makeAbortError } from '../../concurrency/limiter.ts'
+import { abortable, makeAbortError } from '../../utils/abort.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -169,7 +169,7 @@ export function lineNodes(
  */
 export function guestBound(
   nodes: TSNodeLike[],
-  decision: RouteDecision | null,
+  decision: RouteDecision<Runtime> | null,
   staticBindings: Record<string, Runtime | null>,
 ): boolean {
   const bindings = decision !== null ? decision.bindings : staticBindings
@@ -636,7 +636,7 @@ export function fillNames(
  * idempotent. Fetches group by `(source, ref)`, one await per distinct
  * secret, and the fetched value lands directly in `session.vars` with
  * the pointer kept: this is the one host-tier writer, above the
- * agent's gated door.
+ * agent's gated session view.
  *
  * A failed fetch, or a secret without the wanted field, throws
  * SecretsError naming the variable and the source -- never the ref,

@@ -76,7 +76,7 @@ describe('buildApp config validation', () => {
   })
 })
 
-describe('buildApp ssh door', () => {
+describe('buildApp ssh entry point', () => {
   afterEach(() => {
     vi.unstubAllEnvs()
     vi.doUnmock('ssh2')

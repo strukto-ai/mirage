@@ -151,7 +151,7 @@ async def _primed(
     """Pull a stream's first chunk now and answer the stream from there.
 
     A read that fails at its start (a missing file, a refused request)
-    then fails at the call, where the door handles it, rather than in
+    then fails at the call, where the dispatcher handles it, rather than in
     the hands of whoever pulls the stream later.
 
     Args:
@@ -255,7 +255,7 @@ def _lists(listing: list[str], virtual: str) -> bool:
 
 
 def _session_id() -> str:
-    """The id of the session this door serves, empty for the unbound
+    """The id of the session this dispatcher serves, empty for the unbound
     host view; the same binding the hides and modes above read.
     """
     sess = get_current_session()
@@ -288,10 +288,10 @@ def _whole_read(kwargs: dict[str, Any]) -> dict[str, Any]:
 @dataclass(frozen=True, slots=True)
 class _MountChannel:
     """The ops plane's remnant channel: every step goes through
-    ``Mount.call``, the same door a first-class op takes, so the
+    ``Mount.call``, the same entry point a first-class op takes, so the
     mode axis refuses a protected path exactly as normal dispatch
     would. Only the dispatcher's own visibility filter sits above that
-    door, which is what lets the cascade see hidden entries.
+    entry point, which is what lets the cascade see hidden entries.
 
     Each deletion answers the same pre-vfs admission a dispatched op
     answers, with its own child path: the gate that admitted the rmdir
@@ -364,7 +364,7 @@ def _judge(gate: EntryGate, *paths: PathSpec | None) -> None:
 
     Args:
         gate (EntryGate): the gate the command was admitted under.
-        *paths (PathSpec | None): the spellings in the order the door
+        *paths (PathSpec | None): the spellings in the order the dispatcher
             met them; None (no rename destination) is skipped.
     """
     for virtual in dict.fromkeys(
@@ -379,7 +379,7 @@ def _follow_or_loop(
     last: bool,
     spelled: str | None = None,
 ) -> str:
-    """The door's link follow of one path, with a loop as ELOOP.
+    """The dispatcher's link follow of one path, with a loop as ELOOP.
 
     Args:
         namespace (Namespace): the namespace whose links are followed.
@@ -417,7 +417,7 @@ def _operands(name: str, kwargs: dict[str, Any]) -> list[tuple[str, PathSpec]]:
 
 @dataclass(slots=True)
 class _Call:
-    """One op on its way through the door, as the stages hand it on.
+    """One op on its way through the dispatcher, as the stages hand it on.
 
     Args:
         name (str): the dispatched op name.
@@ -426,7 +426,8 @@ class _Call:
         dst (PathSpec | None): a rename's walked destination.
         kwargs (dict[str, Any]): the op's arguments, forwarded to the
             backend.
-        vis (Visibility | None): the session's view, read once at the door.
+        vis (Visibility | None): the session's view, read once at the
+            dispatcher.
         rule_gate (EntryGate | None): the running command's gate.
         report (OpReport | None): the caller's report.
         no_follow (bool): whether the op acts on the final name itself.
@@ -480,7 +481,7 @@ class Dispatcher:
     and parent index invalidation. Constructed with the namespace (for
     addressing), cache store, and consistency policy; holds no other
     workspace state. The snapshot drift queue rides along because this
-    is the one door: a strict restore's pending fingerprint checks must
+    is the one dispatcher: a strict restore's pending fingerprint checks must
     run before ANY op can touch a mount, and FUSE and ``ws.vfs``
     reach here without passing Workspace.dispatch. So does the
     workspace's write admission, which holds a write while a capture
@@ -530,7 +531,7 @@ class Dispatcher:
     ) -> list[str] | FileStat | None:
         """The namespace's own answer for a path no backend serves.
 
-        Child mounts and symlinks are structure the door owns, so a
+        Child mounts and symlinks are structure the dispatcher owns, so a
         directory that exists only because a mount or link sits below it
         still lists and stats. None for any other op, or when the
         namespace knows nothing at ``virtual``.
@@ -604,7 +605,7 @@ class Dispatcher:
     ) -> tuple[Any, IOResult]:
         # with_dispatch_rule_guard's mark, never forwarded to an op.
         rule_gate: EntryGate | None = kwargs.pop("rule_gate", None)
-        # The door's own keywords: a read answered as it is pulled, and a
+        # The dispatcher's own keywords: a read answered as it is pulled, and a
         # read of what the backend holds now, past the file cache.
         stream = name == "read" and bool(kwargs.pop("stream", False))
         direct = name == "read" and bool(kwargs.pop("direct", False))
@@ -880,7 +881,7 @@ class Dispatcher:
     async def _admit(self, call: _Call, mount: MountEntry) -> Boundary:
         """Run admission for an op on a mounted path.
 
-        Admission policies fire at the door, before the warm-cache early
+        Admission policies fire at the dispatcher, before the warm-cache early
         return: a cached read must be refused exactly like a cold one, or
         the cache becomes a policy bypass. A rename's destination is a
         create there: it passes the same gate as the source, so a path
@@ -1224,7 +1225,11 @@ class Dispatcher:
             time.time() if name in STAMP_WRITE_OPS and not opened else None
         )
         await self.invalidate_after_write(
-            mount, path, observed=observed, times=not opened
+            mount,
+            path,
+            observed=observed,
+            times=not opened,
+            removed=name in ("unlink", "rmdir"),
         )
         for _, other in _operands(name, kwargs):
             await self.invalidate_after_write(mount, other)
@@ -1333,10 +1338,10 @@ class Dispatcher:
             entries = await mount.call("readdir", path.virtual)
         except Exception as exc:
             # A backend that cannot list (or later, remove) the
-            # remnants keeps the original refusal: the door has no way
+            # remnants keeps the original refusal: the dispatcher has no way
             # to take them.
             raise refusal from exc
-        # Emptiness is the door's own readdir pipeline: backend entries
+        # Emptiness is the dispatcher's own readdir pipeline: backend entries
         # merged with the namespace's children (nested mounts, links)
         # and judged by visibility, so a visible child no backend can
         # see keeps the refusal instead of reporting a successful rmdir
@@ -1354,7 +1359,9 @@ class Dispatcher:
         channel = _MountChannel(
             mount,
             self._boundary(mount),
-            functools.partial(self.invalidate_after_write, mount),
+            functools.partial(
+                self.invalidate_after_write, mount, removed=True
+            ),
         )
         try:
             await remove_remnants(channel, visible, path)
@@ -1380,10 +1387,10 @@ class Dispatcher:
         await self._namespace.purge_under(path.virtual)
 
     async def _walk_stat(self, path: PathSpec) -> FileStat:
-        """The door's own stat in the shape a chain walk reads.
+        """The dispatcher's own stat in the shape a chain walk reads.
 
         Raises when nothing is there, so a dot walk judges a name
-        through every plane the door does: the node table, a mount root,
+        through every plane the dispatcher does: the node table, a mount root,
         another mount, a link it follows.
 
         Args:
@@ -1428,7 +1435,7 @@ class Dispatcher:
 
         ``symlink`` and ``readlink`` always, because a link exists
         nowhere else. The rest only when the path itself is a link, and
-        then for the same reason the create and the read are the door's:
+        then for the same reason the create and the read are the dispatcher's:
         forwarding reaches a backend that has never heard of the name.
         A no-follow stat is the read half of that fact (lstat asks for
         the link's own row, which only the table holds); a following
@@ -1456,10 +1463,10 @@ class Dispatcher:
         kwargs: dict[str, Any],
         report: OpReport | None,
     ) -> Any:
-        """Answer a node-table op at the door itself, gated like a backend.
+        """Answer a node-table op in the dispatcher, gated like a backend.
 
         A symlink is namespace state with no backend behind it, so the
-        door owns every verb that names one. Admission still fires
+        dispatcher owns every verb that names one. Admission still fires
         exactly as for a backend write: the link's turf is the longest
         mount prefix above it (the same ownership rule ``_link_allowed``
         reads for), session grants and both gates run, and the write
@@ -1524,7 +1531,7 @@ class Dispatcher:
         elif name == "symlink":
             target = str(kwargs["target"])
             # symlink(2) refuses an occupied name and a name its parent
-            # cannot hold, and the door is the only place that can tell:
+            # cannot hold, and the dispatcher is the only place that can tell:
             # the node table sees a link, and a probe sees what a backend
             # holds. Left unchecked, the new node shadowed live data (the
             # bytes stayed, the name read as a link), could bury a mount
@@ -1594,7 +1601,7 @@ class Dispatcher:
         hierarchy kit itself proves one, by appearing in its parent's
         listing, which is also the only way a prefix store can answer
         for a directory that is nothing but a set of keys. Cannot reuse
-        ``resolve_path_stat``: that dispatches, and the door is what
+        ``resolve_path_stat``: that dispatches, and the dispatcher is what
         dispatch is inside of.
 
         The parent's listing comes back beside the answer, None when no
@@ -1632,7 +1639,7 @@ class Dispatcher:
             # absence. Reporting "present" keeps the answer at the EINVAL
             # every miss gave before the split, which asserts nothing the
             # policy is withholding; reporting absence would assert a
-            # fact this door was not allowed to check.
+            # fact the dispatcher was not allowed to check.
             return True, None
         return listing is not None and _lists(listing, path.virtual), listing
 
@@ -1754,7 +1761,7 @@ class Dispatcher:
         """Run one read op for a probe, or None when it found nothing.
 
         The probe reads on the caller's behalf but not at its request, so
-        it passes the same admission gate the op would at the door: a
+        it passes the same admission gate the op would at the dispatcher: a
         policy that denies ``stat`` must not be reachable through a
         readlink. That refusal is raised, not swallowed, because only the
         caller knows what to answer when a channel goes dark.
@@ -1916,7 +1923,7 @@ class Dispatcher:
         applied ones are dropped from it, so a stale overlay never
         shadows a fresh backend value. A mount without the op, and a
         link path (which has no backend inode), overlay everything. The
-        overlay half is the door's own write, so it runs inside the same
+        overlay half is the dispatcher's own write, so it runs inside the same
         gates as the native half.
 
         Args:
@@ -2078,6 +2085,7 @@ class Dispatcher:
         path: PathSpec,
         observed: float | None = None,
         times: bool = True,
+        removed: bool = False,
     ) -> None:
         """Drop what a write to ``path`` made stale above the store.
 
@@ -2088,11 +2096,16 @@ class Dispatcher:
                 record, None for a removal.
             times (bool): drop the overlay times a content write moves;
                 False for an open that wrote nothing.
+            removed (bool): the write removed ``path`` (unlink, rmdir),
+                so its own listing goes too, as a core's removal drops it.
         """
         if times:
             await self._namespace.clear_times(path.virtual, observed=observed)
         manager = self._manager_for(mount)
-        await manager.invalidate_after_write(path)
+        if removed:
+            await manager.invalidate_after_unlink(path)
+        else:
+            await manager.invalidate_after_write(path)
         await manager.invalidate_ancestors(path)
 
     async def invalidate_after_rename(

@@ -12,8 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
+
 from mirage.accessor.box import BoxAccessor
+from mirage.cache.context import own_write_version
+from mirage.cache.types import OwnRead
 from mirage.core.box.api import download_file
+from mirage.core.box.fingerprint import live_of
 from mirage.core.box.resolve import path_parts, resolve_item
 from mirage.core.box.write import write
 from mirage.errors.fs import enotsup
@@ -23,14 +28,32 @@ from mirage.types import PathSpec
 async def truncate(
     accessor: BoxAccessor, path: PathSpec, length: int, no_create: bool = False
 ) -> None:
+    """Resize a file by rewriting it whole.
+
+    Emptying reads nothing and carries the agent's version; a resize holds
+    the sha1 of the bytes it downloaded, or none for a file without one.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        path (PathSpec): the file.
+        length (int): the new size.
+        no_create (bool): refuse to create a missing file (unsupported).
+    """
     if no_create:
         raise enotsup("box", "truncate --no-create", path)
+    if length == 0:
+        await write(accessor, path, b"")
+        return
     item = await resolve_item(accessor, path_parts(path))
+    live = live_of(item)
     data = b""
-    if item is not None and item.get("type") == "file":
+    own: str | OwnRead | None = OwnRead.ABSENT
+    if item is not None and live is not None:
         data = await download_file(accessor.token_manager, item["id"])
+        own = hashlib.sha1(data).hexdigest() if live.content else None
     if length <= len(data):
         new = data[:length]
     else:
         new = data + b"\x00" * (length - len(data))
-    await write(accessor, path, new)
+    with own_write_version(path, own):
+        await write(accessor, path, new)

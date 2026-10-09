@@ -14,7 +14,8 @@
 
 import { RemoteSandbox } from '../base.ts'
 import { registerRuntime } from '../../table.ts'
-import type { RunResult, RuntimeOptions } from '../../types.ts'
+import type { RunResult } from '../../types.ts'
+import type { RuntimeOptions } from '../../config.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
 import type { CommandResult, Sandbox } from 'e2b'

@@ -156,7 +156,7 @@ async function* listSubtree(conn: HfConn, stem: string): AsyncIterable<TreeEntry
 async function head(conn: HfConn, key: string): Promise<ObjectMeta | null> {
   // paths-info, not opendal's stat: the binding reads the bucket's xet hash
   // for nothing but the size and drops it, so a bucket stat through it
-  // carries no token. A Hub refusal propagates; the stat door names the path
+  // carries no token. A Hub refusal propagates; the stat function names the path
   // it was asked about, which a key cannot.
   const row = await fetchRow(conn.accessor, key)
   if (row === null) return null

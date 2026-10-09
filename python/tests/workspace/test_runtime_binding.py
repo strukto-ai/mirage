@@ -36,8 +36,8 @@ from mirage.runtime.routing import (
     RouteContext,
     RouteResult,
 )
-from mirage.runtime.table import WorkspaceRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
+from mirage.runtime.workspace import WorkspaceRuntime
 
 
 @pytest_asyncio.fixture
@@ -771,7 +771,7 @@ async def test_runtime_argument_places_the_whole_line():
 @pytest.mark.asyncio
 async def test_vfs_entry_is_a_pure_routing_marker():
     # A workspace-resolved line runs on the workspace executor inline; the
-    # registry entry is a marker with no line door to call.
+    # registry entry is a marker with no line entry point to call.
     ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.EXEC)
     fallback = ws._registry.workspace_runtime
     assert fallback is not None
@@ -781,7 +781,7 @@ async def test_vfs_entry_is_a_pure_routing_marker():
     await ws.close()
 
 
-def test_stage_engines_carry_no_line_door():
+def test_stage_engines_carry_no_line_entry_point():
     assert not isinstance(MontyRuntime(), LineExecutorMixin)
     assert not hasattr(MontyRuntime(), "run_line")
 

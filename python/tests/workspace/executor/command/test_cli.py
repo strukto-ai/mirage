@@ -27,8 +27,12 @@ from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import Action, Deny, Policy
 from mirage.policy.types import SessionContext
+from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.variable import VarAttr
 from mirage.types import Limit, MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
@@ -406,7 +410,7 @@ async def test_script_selects_by_language_and_runs():
 
 @pytest.mark.asyncio
 async def test_script_declared_options_still_pass_verbatim():
-    # The spec is a typed front door: a declared option validates, then
+    # The spec is a typed entry point: a declared option validates, then
     # the program still receives the raw tokens, the contract a native
     # binary could also honor.
     py = FakePyRuntime()
@@ -535,7 +539,7 @@ async def test_script_help_reaches_a_program_that_declared_nothing():
 
 @pytest.mark.asyncio
 async def test_script_help_renders_when_the_spec_declares_a_grammar():
-    # Declaring options opts back into the front door, where the
+    # Declaring options opts back into the entry point, where the
     # rendered page is truthful and the program never runs.
     py = FakePyRuntime()
     install = script_install(
@@ -602,6 +606,89 @@ async def test_script_runtime_pin_is_honored():
     assert io.exit_code == 0
     assert first.seen == []
     assert len(pinned.seen) == 1
+
+
+class TierPyRuntime(PythonRuntime):
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self.name = name
+        self.seen: list[RunArgs] = []
+
+    async def run(self, args: RunArgs) -> RunResult:
+        self.seen.append(args)
+        return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
+
+
+class LineBox(Runtime):
+    name = "box"
+
+
+@pytest.mark.asyncio
+async def test_script_runs_where_the_line_runs_its_interpreter():
+    # A route policy or a runtime's script that places this line's
+    # python3 on the second entry places the script there too.
+    first, second = TierPyRuntime("first"), TierPyRuntime("second")
+    routing = RouteDecision(bindings={"python3": second, "python": second})
+    _, io, _ = await handle_cli(
+        script_install(),
+        ["pager"],
+        SessionState("t"),
+        context=CLIContext(entries=[first, second], routing=routing),
+    )
+    assert io.exit_code == 0
+    assert first.seen == []
+    assert len(second.seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_script_is_refused_when_the_line_refused_its_interpreter():
+    py = TierPyRuntime("first")
+    _, io, node = await handle_cli(
+        script_install(),
+        ["pager"],
+        SessionState("t"),
+        context=CLIContext(
+            entries=[py], routing=RouteDecision(bindings={"python3": None})
+        ),
+    )
+    assert io.exit_code == 126
+    assert io.stderr == b"pager: no runtime accepted this line\n"
+    assert node.exit_code == 126
+    assert py.seen == []
+
+
+@pytest.mark.asyncio
+async def test_script_is_refused_where_the_line_runs_python3_without_python():
+    # A line whose python3 runs inside a sandbox runs no script there, and
+    # the entry the line passed over does not run it either.
+    py = TierPyRuntime("first")
+    _, io, _ = await handle_cli(
+        script_install(),
+        ["pager"],
+        SessionState("t"),
+        context=CLIContext(
+            entries=[py],
+            routing=RouteDecision(bindings={"python3": LineBox()}),
+        ),
+    )
+    assert io.exit_code == 127
+    assert io.stderr == b"pager: runtime 'box' does not run python scripts\n"
+    assert py.seen == []
+
+
+@pytest.mark.asyncio
+async def test_script_runs_on_the_first_entry_where_the_workspace_serves_python3():
+    py = TierPyRuntime("first")
+    _, io, _ = await handle_cli(
+        script_install(),
+        ["pager"],
+        SessionState("t"),
+        context=CLIContext(
+            entries=[py], routing=RouteDecision(fallback=WorkspaceRuntime())
+        ),
+    )
+    assert io.exit_code == 0
+    assert len(py.seen) == 1
 
 
 @pytest.mark.asyncio
@@ -849,8 +936,8 @@ class DenyAwsWrites(Policy):
 
 
 async def stash(inv: CLIInvocation[None]):
-    """A leaf that writes the session plane through its door."""
-    view = inv.doors.session_view if inv.doors is not None else None
+    """A leaf that writes the session plane through its entry point."""
+    view = inv.view.session_view if inv.view is not None else None
     if view is None:
         return b"no session plane\n", IOResult(exit_code=1)
     await view.set(inv.texts[0], inv.texts[1])
@@ -861,8 +948,8 @@ STASH = CLISpec(name="stash", fn=stash, rest=Operand(type="str"))
 
 
 @pytest.mark.asyncio
-async def test_a_leaf_writes_the_session_through_its_door():
-    # The session plane's door is what a registered CLI has instead of
+async def test_a_leaf_writes_the_session_through_its_entry_point():
+    # The session view is what a registered CLI has instead of
     # reaching into the session: the write lands, and the shell sees it.
     with Workspace({"/ram/": RAMVFS()}) as ws:
         ws.register_cli("stash", STASH)
@@ -875,9 +962,9 @@ async def test_a_leaf_writes_the_session_through_its_door():
 
 @pytest.mark.asyncio
 async def test_a_leafs_session_write_clears_the_same_gate_the_shell_does():
-    # A door that skipped the gate would make an installed CLI the way
+    # An entry point that skipped the gate would make an installed CLI the way
     # around every pre_session rule, which is the whole reason writes
-    # go through one door rather than to the session.
+    # go through one entry point rather than to the session.
     with Workspace({"/ram/": RAMVFS()}, policies=[DenyAwsWrites()]) as ws:
         ws.register_cli("stash", STASH)
         denied = await ws.shell("stash AWS_PROFILE prod")

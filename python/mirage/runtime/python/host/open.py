@@ -19,6 +19,7 @@ from collections.abc import Callable
 from typing import IO, TypeAlias, cast
 
 from mirage.runtime.python.host.file import MirageFile
+from mirage.runtime.python.host.fs import syscall
 from mirage.runtime.python.host.host_io import in_host_io
 from mirage.workspace.files import Files
 
@@ -63,7 +64,7 @@ class MountedOpen:
                 raise ValueError("invalid buffering size")
             if buffering == 0 and "b" not in mode:
                 raise ValueError("can't have unbuffered text I/O")
-            return MirageFile(
+            return syscall(MirageFile)(
                 self._files,
                 path,
                 mode,

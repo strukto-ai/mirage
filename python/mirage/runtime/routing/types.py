@@ -14,11 +14,10 @@
 
 from collections.abc import Awaitable, Callable, Container, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Generic, TypeVar
 
-from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
-from mirage.runtime.types import ScriptSource
+from mirage.runtime.types import RuntimeIdentity, ScriptSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +97,7 @@ class RouteContext:
     mounts: tuple[str, ...]
 
     def for_runtime(
-        self, runtime: Runtime, external_commands: Container[str] = ()
+        self, runtime: RuntimeIdentity, external_commands: Container[str] = ()
     ) -> "RouteContext":
         """The context as one runtime's script sees it.
 
@@ -109,7 +108,7 @@ class RouteContext:
         stage.
 
         Args:
-            runtime (Runtime): the runtime being consulted.
+            runtime (RuntimeIdentity): the runtime being consulted.
             external_commands (Container[str]): stages resolved to the
                 external fallback by the workspace's command lookup.
         """
@@ -124,7 +123,9 @@ class RouteContext:
                 )
         return self
 
-    def to_dict(self, runtime: Runtime | None = None) -> dict[str, Any]:
+    def to_dict(
+        self, runtime: RuntimeIdentity | None = None
+    ) -> dict[str, Any]:
         """The ctx payload as any evaluator's script sees it.
 
         This is the policy context WIRE SCHEMA, a public contract:
@@ -138,7 +139,7 @@ class RouteContext:
         payload can be stored as JSON and replayed.
 
         Args:
-            runtime (Runtime | None): the runtime being asked, added as
+            runtime (RuntimeIdentity | None): the runtime being asked, added as
                 ctx["runtime"] for per-runtime scripts.
         """
         payload: dict[str, Any] = {
@@ -285,8 +286,11 @@ RoutePolicy = (
 )
 
 
+_R = TypeVar("_R", bound=RuntimeIdentity)
+
+
 @dataclass(frozen=True, slots=True)
-class RouteDecision:
+class RouteDecision(Generic[_R]):
     """The one-line placement decision the dispatcher consults.
 
     Both fields hold runtimes: the decision IS "which runtime runs
@@ -294,15 +298,15 @@ class RouteDecision:
     command placed on it is served by the workspace executor itself.
 
     Args:
-        bindings (dict[str, Runtime | None]): every command some entry
+        bindings (dict[str, _R | None]): every command some entry
             captures, resolved for this line: the runtime it runs on,
             or None when its capturers all refused (admission failure,
             exit 126, never a silent fallback to the workspace).
-        fallback (Runtime | None): where commands no entry captures
+        fallback (_R | None): where commands no entry captures
             run: the catch-all workspace runtime, or None when the workspace
             runtime refused the line or declares captures; unbound
             commands then exit 126.
     """
 
-    bindings: dict[str, Runtime | None] = field(default_factory=dict)
-    fallback: Runtime | None = None
+    bindings: dict[str, _R | None] = field(default_factory=dict)
+    fallback: _R | None = None

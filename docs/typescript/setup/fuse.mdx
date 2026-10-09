@@ -185,7 +185,7 @@ fully readable the moment anything opens them. See
 for the per-tool table and the mechanics (`direct_io` + `attr_timeout=0`).
 
 <Note>
-  FUSE on Node has two runtime constraints worth knowing: `fs-monkey` can't patch ESM `node:fs` imports, and synchronous access to your own mount from the mounting process deadlocks the event loop that serves it. See [TypeScript Limitations](/typescript/limitations) for details and workarounds.
+  FUSE on Node has two runtime constraints worth knowing: `patchNodeFs` can't patch ESM `node:fs` imports, and synchronous access to your own mount from the mounting process deadlocks the event loop that serves it. See [TypeScript Limitations](/typescript/limitations) for details and workarounds.
 </Note>
 
 <Warning>

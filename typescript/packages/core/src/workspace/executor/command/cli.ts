@@ -29,10 +29,10 @@ import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
 import type { ProcessView } from '../../../process/view.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
-import { CLISpec, type CLIInvocation, type CLIDoors } from '../../../commands/cli/types.ts'
+import { CLISpec, type CLIInvocation, type CLIView } from '../../../commands/cli/types.ts'
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import { verbVisible } from '../../lookup/lookup.ts'
-import { type DispatchFn, type ScriptSource } from '../../../runtime/types.ts'
+import { type DispatchFn, type RunResult, type ScriptSource } from '../../../runtime/types.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../../view/types.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle, Operand, type FlagValue } from '../../../commands/spec/types.ts'
@@ -46,9 +46,12 @@ import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForLanguage } from '../../../runtime/routing/decide.ts'
-import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
+import type { RouteDecision } from '../../../runtime/routing/index.ts'
+import { admissionDenial } from './run.ts'
+import { runOutput, runtimeUnavailable } from '../../../commands/builtin/general/interpreter.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
+import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { optionError, parseFlags } from './flags.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
 import { encodeText } from '../../../shell/bytes.ts'
@@ -89,38 +92,69 @@ function parseSpecFor(leaf: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): [
  * A `runtime:` pin names the entry, and the entry must speak the
  * script's language, so `runtime: monty` on a `.mjs` fails loud
  * instead of feeding JS to a python interpreter. Without a pin the
- * first entry speaking the language serves (runtimeForLanguage).
- * Every refusal names the world so the fix (add or rename an entry)
- * is visible.
+ * program runs where this line runs its language's own interpreter
+ * (the tier's head word, `python3` or `node`), so a route policy or a
+ * runtime's script places it as it places that command, and a line
+ * every capturer refused is refused here too (126). The first entry
+ * speaking the language serves when there is no line decision or the
+ * workspace serves that interpreter itself (runtimeForLanguage); a
+ * placement on a runtime that does not run the script's language is
+ * refused like such a pin. Every other refusal names the world so the
+ * fix (add or rename an entry) is visible (127). Mirrors Python's
+ * `_select_runtime`.
  */
 function selectRuntime(
   prog: string,
   leaf: CLISpec,
   entries: readonly Runtime[],
-): [LanguageRuntime | null, string | null] {
+  routing?: RouteDecision<Runtime>,
+): [LanguageRuntime, null] | [null, IOResult] {
   const script = leaf.script
   if (script === null) {
     throw new Error(`selecting a runtime for '${prog}' without a script`)
   }
   const known = entries.map((entry) => `'${entry.name}'`).join(', ') || 'none'
+  let chosen: Runtime | null | undefined
   if (leaf.runtime !== null) {
-    const pinned = entries.find((entry) => entry.name === leaf.runtime) ?? null
-    if (pinned === null) {
-      return [null, `${prog}: unknown runtime: '${leaf.runtime}' (workspace runtimes: ${known})`]
+    chosen = entries.find((entry) => entry.name === leaf.runtime) ?? null
+    if (chosen === null) {
+      return [
+        null,
+        missing(`${prog}: unknown runtime: '${leaf.runtime}' (workspace runtimes: ${known})`),
+      ]
     }
-    if (!(pinned instanceof LanguageRuntime) || pinned.language !== script.language) {
-      return [null, `${prog}: runtime '${pinned.name}' does not run ${script.language} scripts`]
+  } else {
+    const entry = runtimeForLanguage(entries, script.language)
+    if (entry === null) {
+      return [
+        null,
+        missing(
+          `${prog}: no workspace runtime runs ${script.language} scripts (workspace runtimes: ${known})`,
+        ),
+      ]
     }
-    return [pinned, null]
+    const head = (entry.constructor as { commands?: readonly string[] }).commands?.[0]
+    chosen =
+      routing === undefined || head === undefined
+        ? entry
+        : head in routing.bindings
+          ? routing.bindings[head]
+          : routing.fallback
+    if (chosen === null || chosen === undefined) return [null, admissionDenial(prog)]
+    if (chosen instanceof WorkspaceRuntime) chosen = entry
   }
-  const entry = runtimeForLanguage(entries, script.language)
-  if (entry === null) {
+  if (!(chosen instanceof LanguageRuntime) || chosen.language !== script.language) {
     return [
       null,
-      `${prog}: no workspace runtime runs ${script.language} scripts (workspace runtimes: ${known})`,
+      missing(`${prog}: runtime '${chosen.name}' does not run ${script.language} scripts`),
     ]
   }
-  return [entry, null]
+  return [chosen, null]
+}
+
+/** The 127 a script CLI answers when no entry can run its program. */
+function missing(message: string): IOResult {
+  return new IOResult({ exitCode: 127, stderr: encodeText(`${message}\n`) })
 }
 
 /**
@@ -147,22 +181,30 @@ async function scriptOutput(
     env[CLI_CONFIG_ENV] = JSON.stringify(inv.config)
   }
   const stdin = inv.stdin !== null ? await materialize(inv.stdin) : null
-  // A .mjs source needs the engine's module mode, the same bit the js
-  // command derives from the operand's extension.
-  const result = await runtime.execute({
-    kind: 'code',
-    language: runtime.language,
-    code: script.source,
-    args: [...inv.argv],
-    prog,
-    scriptCli: true,
-    cwd: inv.cwd,
-    env,
-    stdin,
-    signal,
-    ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
-    ...(script.module ? { flags: { module: true } } : {}),
-  })
+  let result: RunResult
+  try {
+    // A .mjs source needs the engine's module mode, the same bit the js
+    // command derives from the operand's extension.
+    result = await runtime.execute({
+      kind: 'code',
+      language: runtime.language,
+      code: script.source,
+      args: [...inv.argv],
+      prog,
+      scriptCli: true,
+      cwd: inv.cwd,
+      env,
+      stdin,
+      signal,
+      ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
+      ...(script.module ? { flags: { module: true } } : {}),
+    })
+  } catch (err) {
+    // The interpreter is missing, not the program: 127, as the
+    // interpreter command answers for the same runtime.
+    if (!runtimeUnavailable(err)) throw err
+    return [null, missing(`${prog}: ${err.message}`)]
+  }
   return runOutput(result)
 }
 
@@ -189,6 +231,8 @@ export interface CLIContext {
   ns?: NamespaceView
   sessionView?: SessionView
   processes?: ProcessView
+  /** The line's placement, which a script leaf runs its program under. */
+  routing?: RouteDecision<Runtime>
 }
 
 /**
@@ -220,7 +264,7 @@ export function dropsMountCaches(spec: CLISpec): boolean {
  * (scriptOutput), so usage refusals, limits, and classification all
  * happen in front of either tier. Help too, for every node that declared
  * a grammar to render it from (parseSpecFor). The workspace facts in
- * `context` reach a verb as one `inv.doors` field, one door per state
+ * `context` reach a verb as one `inv.view` field, one entry point per state
  * plane, so a verb that never reads it cannot touch a mount.
  */
 export async function handleCli(
@@ -342,11 +386,11 @@ export async function handleCli(
   // itself is handed the value it asked for.
   if (mirageHelp) delete flags.help
 
-  // The workspace doors a mount-reading verb needs ride the record as one
+  // The workspace entry points a mount-reading verb needs ride the record as one
   // field. Most CLIs never read it: an API client has no filesystem,
   // while `git` is nothing but one. Absent outside a workspace, so a verb
   // that needs a mount refuses there on its own.
-  const doors: CLIDoors = {
+  const view: CLIView = {
     ...(context.processes === undefined ? {} : { processes: context.processes }),
     ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
     ...(context.statPath !== undefined ? { statPath: context.statPath } : {}),
@@ -371,7 +415,7 @@ export async function handleCli(
     flags,
     stdin,
     env: envSnapshot(session),
-    ...(Object.keys(doors).length > 0 ? { doors } : {}),
+    ...(Object.keys(view).length > 0 ? { view } : {}),
     spec: leaf,
   }
 
@@ -391,15 +435,16 @@ export async function handleCli(
   let body: Promise<[ByteSource | null, IOResult] | null>
   const native = leaf.script === null
   if (leaf.script !== null) {
-    const [runtime, refused] = selectRuntime(prog, leaf, context.entries ?? [])
+    const [runtime, refused] = selectRuntime(prog, leaf, context.entries ?? [], context.routing)
     if (runtime === null) {
       // The interpreter is missing, not the command: 127 like an
-      // interpreter command no runtime entry captures.
-      const stderr = encodeText(`${refused ?? ''}\n`)
+      // interpreter command no runtime entry captures, or 126 when this
+      // line's capturers all refused it.
+      const stderr = await materialize(refused.stderr)
       return [
         null,
-        new IOResult({ exitCode: 127, stderr }),
-        new ExecutionNode({ command: cmdStr, exitCode: 127, stderr }),
+        new IOResult({ exitCode: refused.exitCode, stderr }),
+        new ExecutionNode({ command: cmdStr, exitCode: refused.exitCode, stderr }),
       ]
     }
     body = scriptOutput(inv, leaf.script, runtime, prog, timeout, abort.signal)

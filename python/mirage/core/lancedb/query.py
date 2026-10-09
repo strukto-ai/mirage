@@ -13,15 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import Callable
-from typing import Any
 
 from lancedb.query import AsyncQuery
 
 from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.core.lancedb.render import cell_text
-
-ValueTest = Callable[[str], bool]
+from mirage.core.lancedb.types import LanceRow, ValueTest
 
 _INTEGER = re.compile(r"-?[0-9]+")
 
@@ -189,7 +186,7 @@ async def rows_matching(
     limit: int,
     id_column: str = "",
     prefix: str = "",
-) -> list[dict[str, Any]]:
+) -> list[LanceRow]:
     tbl = await accessor.table(table)
     query = tbl.query().select(columns).limit(limit)
     clause = _predicate(id_column, filters, prefix)
@@ -200,7 +197,7 @@ async def rows_matching(
 
 async def row_record(
     accessor: LanceDBAccessor, table: str, id_column: str, row_id: str
-) -> dict[str, Any] | None:
+) -> LanceRow | None:
     tbl = await accessor.table(table)
     rows = await tbl.query().where(_eq(id_column, row_id)).limit(1).to_list()
     return rows[0] if rows else None
@@ -208,7 +205,7 @@ async def row_record(
 
 async def search_rows(
     accessor: LanceDBAccessor, table: str, query_text: str, limit: int
-) -> list[dict[str, Any]]:
+) -> list[LanceRow]:
     key = (table, query_text, limit)
     cached = accessor.search_cache.get(key)
     if cached is not None:

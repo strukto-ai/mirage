@@ -35,7 +35,7 @@ from mirage.commands.cli.builtin.gh.repo import (
     view,
 )
 from mirage.commands.cli.specs import cli_spec_for
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.api.client import ApiResponse
@@ -155,7 +155,7 @@ def _patch(monkeypatch):
 
 
 def _inv(
-    texts=(), flags=None, config=CONFIG, stdin=None, doors=None, argv=()
+    texts=(), flags=None, config=CONFIG, stdin=None, view=None, argv=()
 ) -> CLIInvocation:
     return CLIInvocation(
         config,
@@ -163,7 +163,7 @@ def _inv(
         texts=tuple(texts),
         flags=flags or {},
         stdin=stdin,
-        doors=doors,
+        view=view,
     )
 
 
@@ -234,12 +234,12 @@ def _path(value: str) -> PathSpec:
     return PathSpec.from_str_path(value)
 
 
-def _doors(files: dict[str, bytes]) -> CLIDoors:
+def _view(files: dict[str, bytes]) -> CLIView:
     async def dispatch(op, path, *args, **kwargs):
         assert op == "read"
         return files[path.virtual], None
 
-    return CLIDoors(dispatch=dispatch)
+    return CLIView(dispatch=dispatch)
 
 
 @pytest.mark.asyncio
@@ -790,7 +790,7 @@ async def test_api_reads_typed_at_values_from_workspace_and_stdin():
             ["x"],
             {"field": ["body=@/scratch/body.md", "note=@-"]},
             stdin=b"from stdin",
-            doors=_doors({"/scratch/body.md": b"from file"}),
+            view=_view({"/scratch/body.md": b"from file"}),
         )
     )
     assert CALLS[0]["body"] == {"body": "from file", "note": "from stdin"}
@@ -806,7 +806,7 @@ async def test_api_input_is_the_body_and_fields_move_to_the_query():
                 "input": _path("/scratch/body.json"),
                 "raw_field": ["mode=strict"],
             },
-            doors=_doors({"/scratch/body.json": b'{"enabled":true}'}),
+            view=_view({"/scratch/body.json": b'{"enabled":true}'}),
         )
     )
     assert CALLS[0] == {
@@ -823,7 +823,7 @@ async def test_api_input_preserves_an_explicit_json_null_body():
         _inv(
             ["x"],
             {"input": _path("/scratch/body.json")},
-            doors=_doors({"/scratch/body.json": b"null"}),
+            view=_view({"/scratch/body.json": b"null"}),
         )
     )
     assert CALLS[0] == {"method": "POST", "path": "/x", "body": None}
@@ -1309,7 +1309,7 @@ async def test_file_reader_keeps_resolved_path_and_materializes_stream():
         return chunks(), None
 
     value = await read_cli_file(
-        _inv(doors=CLIDoors(dispatch=dispatch)), path, "--body-file"
+        _inv(view=CLIView(dispatch=dispatch)), path, "--body-file"
     )
     assert value == b"first second"
 

@@ -33,7 +33,7 @@ from mirage.cache.manager import CacheManager
 from mirage.cache.types import WriteContext
 from mirage.commands.builtin.generic_bind.adapter import (
     command_io,
-    with_door_reads,
+    dispatched_io,
 )
 from mirage.commands.builtin.utils.limit import (
     run_with_timeout,
@@ -837,7 +837,7 @@ class MountEntry:
         """What a write through this mount must carry, None when its writes
         are unconditional.
 
-        Pushed by both doors whatever the policy, so an unconditional
+        Pushed by both entry points whatever the policy, so an unconditional
         mount clears a context an outer command's mount set.
         """
         manager = self.cache_manager
@@ -990,7 +990,7 @@ class MountEntry:
             mount_prefix=mount_prefix,
             index=self.index,
             io=(
-                with_door_reads(self.io, context.dispatch)
+                dispatched_io(self.io, context.dispatch)
                 if context.dispatch is not None
                 else self.io
             ),
@@ -1018,8 +1018,8 @@ class MountEntry:
         cache manager and write context; the mode the command tier's mode
         guard holds each write to (its own region's mode); and what the
         command tier's walk guard proves an operand's `.` and `..` with:
-        the handler reaches its backend past the door, so the door's stat
-        and link follow are bound here.
+        the handler reaches its backend past the dispatcher, so the
+        dispatcher's stat and link follow are bound here.
 
         Args:
             context (ExecContext): the invocation's execution context.
@@ -1057,7 +1057,7 @@ class MountEntry:
         cmd: Command,
         flags: dict[str, FlagValue],
     ) -> IOResult | None:
-        """Refuse a write command no door would see, on a read-only mount.
+        """Refuse an unseen write command on a read-only mount.
 
         A command whose I/O runs under the path guards is refused where
         it writes, because only the write knows whether a line writes:
@@ -1066,7 +1066,7 @@ class MountEntry:
         gzip's own GNU voice. A write command that reaches its service
         some other way (trello's id-addressed card writes, a custom
         backend's own verb) is refused here, before it runs, because no
-        door would see its write. strongest_mode_under, not
+        gate would see its write. strongest_mode_under, not
         effective_mode: a mount whose only writable region is a show
         entry still runs it. Only wrapper-owned responses (help, an
         injected version) bypass it. The trailing newline is
@@ -1198,7 +1198,7 @@ class MountEntry:
 
         A rendered filetype's renderer answers a read before ``read``
         does, window and all, and the first answer that is not None wins.
-        The rest is the op door's own shape around the VFS's functions: a
+        The rest is the dispatcher's own shape around the VFS's functions: a
         read takes a window, ``append`` and ``pwrite`` are a rewrite where
         the VFS only writes whole files, ``mkdir`` refuses a taken name
         first, and ``glob`` walks ``readdir``. Only a function marked
@@ -1336,7 +1336,7 @@ class MountEntry:
                 vfs_path=mount_key(path, mount_prefix),
             )
             kwargs.setdefault("index", self.index)
-            # Per-op caps are policy and fire at the op doors (post_vfs);
+            # Per-op caps are policy and fire at the dispatcher (post_vfs);
             # only the timeout stays here, bounding the backend call itself.
             op_override = self.command_limits.get(name)
             op_timeout = (
@@ -1375,10 +1375,10 @@ class MountEntry:
 
         The backend runs on each pull, after this frame is gone, so every
         pull gets what ``call`` sets up around one call: the caller's
-        context (session, recorder), the mount's recording context, its
-        revision pins, the host-I/O bypass, and the read's timeout, which
-        bounds each pull rather than the whole stream. The mount is held
-        until the stream ends or is closed.
+        context (session, recorder), the mount's recording and write
+        contexts, its revision pins, the host-I/O bypass, and the read's
+        timeout, which bounds each pull rather than the whole stream. The
+        mount is held until the stream ends or is closed.
 
         Args:
             path (str): virtual path.
@@ -1404,7 +1404,12 @@ class MountEntry:
             self.revisions or None,
             with_mount_context(stream, self.mount_id),
         )
+        prev_write = push_write_context(self.write_context())
+        try:
+            pulls = ContextScope()
+        finally:
+            push_write_context(prev_write)
         return cast(
             AsyncIterator[bytes],
-            self.activity.hold(ContextScope().stream(with_host_io(stream))),
+            self.activity.hold(pulls.stream(with_host_io(stream))),
         )

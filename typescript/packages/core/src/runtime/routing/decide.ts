@@ -46,7 +46,7 @@ import { SCRIPT_EVAL_TIMEOUT } from '../constants.ts'
  * evaluator, which only matters once a ScriptSource actually needs one.
  * The attribute read here is the one `run` answers for too
  * (Runtime.language), so an engine cannot speak one language at this
- * door and another at that one.
+ * entry point and another at that one.
  */
 export function evaluatorOf(
   entries: readonly Runtime[],
@@ -259,7 +259,7 @@ export async function decideLine(
   ctx: RouteContext,
   staticBindings: Record<string, Runtime>,
   externalCommands: readonly string[] = [],
-): Promise<RouteDecision> {
+): Promise<RouteDecision<Runtime>> {
   if (policy !== null) {
     const name = await evaluatePolicy(policy, ctx, entries)
     if (name !== null) {

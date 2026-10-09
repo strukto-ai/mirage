@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import GZIP_SUFFIX
 from mirage.commands.builtin.generic.decompress import decompress_inputs
-from mirage.commands.builtin.utils.links import LinkDoor, link_door
+from mirage.commands.builtin.utils.links import LinkResolver, link_resolver
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -26,7 +26,7 @@ async def gunzip(
     test_only: bool = False,
     quiet: bool = False,
     suffix: str = GZIP_SUFFIX,
-    door: LinkDoor | None = None,
+    resolver: LinkResolver | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     return await decompress_inputs(
         paths,
@@ -41,7 +41,7 @@ async def gunzip(
         suffix=suffix,
         to_stdout=to_stdout,
         test_only=test_only,
-        door=door,
+        resolver=resolver,
     )
 
 
@@ -94,5 +94,5 @@ async def gunzip_generic(
         test_only=parsed.test_only,
         quiet=parsed.quiet,
         suffix=parsed.suffix,
-        door=link_door(opts),
+        resolver=link_resolver(opts),
     )

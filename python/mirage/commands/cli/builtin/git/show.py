@@ -75,7 +75,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -351,10 +351,10 @@ async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
@@ -363,7 +363,7 @@ async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             raise NoWorkspaceError()
         check_operands(inv, texts)
         revisions, paths = split_marked(tuple(texts), inv.argv)
-        repo, location = await opened(fl, doors)
+        repo, location = await opened(fl, view)
         parsed = parse_show_flags(
             fl,
             await renames_enabled(dispatch, location),
@@ -441,15 +441,15 @@ async def diff_tree(
         inv (CLIInvocation[None]): the line's invocation record.
     """
     fl = FlagView(inv.flags)
-    doors = inv.doors or CLIDoors()
+    view = inv.view or CLIView()
     try:
-        if doors.dispatch is None:
+        if view.dispatch is None:
             raise NoWorkspaceError()
         if option_operand(inv, inv.texts) is not None:
             raise UsageError("", verb_usage(inv))
-        repo, location = await opened(fl, doors)
+        repo, location = await opened(fl, view)
         fully = await config_bool(
-            doors.dispatch, location, b"core", b"quotepath", True
+            view.dispatch, location, b"core", b"quotepath", True
         )
         parsed = parse_diff_flags(
             fl,

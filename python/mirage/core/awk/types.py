@@ -33,7 +33,7 @@ class CommandRun:
 
 
 class AwkHost(Protocol):
-    """The doors an awk program reaches the world through.
+    """The entry points an awk program reaches the world through.
 
     Every stream awk opens by name goes through here: the main input
     operands, ``getline < file``, output redirection and the command

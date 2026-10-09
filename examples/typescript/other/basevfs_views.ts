@@ -13,7 +13,7 @@ import {
   MountMode,
   Operand,
   type PathSpec,
-  RuntimeVFS,
+  RuntimeFiles,
   type SearchQuery,
   Workspace,
 } from "@struktoai/mirage-node";
@@ -109,21 +109,21 @@ class NotesVFS extends BaseVFS<NotesAccessor> {
 }
 
 async function noteInfo(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
-  const doors = inv.doors;
+  const view = inv.view;
   if (
-    doors?.dispatch === undefined ||
-    doors.ns?.mounts == null ||
-    doors.sessionView === undefined
+    view?.dispatch === undefined ||
+    view.ns?.mounts == null ||
+    view.sessionView === undefined
   ) {
-    throw new Error("note-info needs workspace doors");
+    throw new Error("note-info needs workspace entry points");
   }
   const path = inv.paths[0];
-  const target = doors.ns.links?.resolve(path.virtual) ?? path.virtual;
-  const [data, result] = await doors.dispatch("read", path);
+  const target = view.ns.links?.resolve(path.virtual) ?? path.virtual;
+  const [data, result] = await view.dispatch("read", path);
   if (result.exitCode !== 0) return [new Uint8Array(), result];
   if (!(data instanceof Uint8Array)) throw new TypeError("expected file bytes");
-  const mount = doors.ns.mounts.rootOf(target);
-  const reader = doors.sessionView.get("READER") || "anonymous";
+  const mount = view.ns.mounts.rootOf(target);
+  const reader = view.sessionView.get("READER") || "anonymous";
   const header = ENC.encode(
     `mount=${mount} reader=${reader} bytes=${data.length}\n`,
   );
@@ -211,7 +211,7 @@ async function main(): Promise<void> {
     });
     assert.deepEqual(await reader.vfs.read("/latest"), expected);
 
-    const runtime = new RuntimeVFS((op, path) => ws.dispatch(op, path));
+    const runtime = new RuntimeFiles((op, path) => ws.dispatch(op, path));
     assert.deepEqual(await runtime.read("/latest"), expected);
     assert.equal((await runtime.stat("/latest")).isDir, false);
     const refused = await ws.shell("echo changed > /notes/welcome.txt");

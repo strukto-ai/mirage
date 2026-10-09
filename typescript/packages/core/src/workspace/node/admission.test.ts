@@ -142,7 +142,7 @@ describe('admission', () => {
   it('a hidden path is no path to any policy', async () => {
     // A session that cannot see a path must not learn of it from a
     // rule: the gate drops the operand before any hook, the rule does
-    // not fire, and the line goes on to the door, which answers ENOENT.
+    // not fire, and the line goes on to the dispatcher, which answers ENOENT.
     const w = await ws()
     await w.shell('mkdir -p /data/private && echo s > /data/secret')
     const veiled = w.createSession('veiled', {
@@ -306,7 +306,7 @@ describe('admission', () => {
 
   it('admitLine reads an interpreter’s script as a path', async () => {
     // The runtime that takes the line runs the interpreter itself, where
-    // no op door follows the script read, so the gate types the script
+    // no dispatcher follows the script read, so the gate types the script
     // slot from the interpreter's spec as it does a mount command's: a
     // bare name under the cwd is the file it names, and once -c or -e
     // names the program no operand is a path.

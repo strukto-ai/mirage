@@ -54,7 +54,7 @@ class BuiltinCall:
             its parse (``read_row``); ``alias``, ``unalias`` and ``shopt``
             read it, so the commands of one read keep the aliases it began
             with, as bash's reader has it.
-        dispatch (DispatchFn): the op dispatcher door.
+        dispatch (DispatchFn): the op dispatcher.
         registry (MountRegistry): the mount registry.
         namespace (Namespace): the name plane (links, node table).
         execute_fn (Callable[..., Any]): runs a text line in this

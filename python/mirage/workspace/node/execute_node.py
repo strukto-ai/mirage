@@ -36,6 +36,7 @@ from mirage.io.async_line_iterator import share
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
+from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
@@ -152,7 +153,7 @@ async def _eval_cfor_expr(
             land in its session's env.
         execute_fn (Callable): recursive execute for substitutions.
         call_stack (CallStack | None): function-call scope, if any.
-        view (SessionView | None): the session plane's gated door the
+        view (SessionView | None): the gated session view the
             assignments land through; None outside a workspace.
 
     Raises:
@@ -187,7 +188,7 @@ async def _eval_cfor_expr(
         # bash bound the assignments made before the error; they land
         # before the error is reported.
         error, writes = exc, exc.writes
-    # Through the door, so a pre_session rule governs an arithmetic
+    # Through the session view, so a pre_session rule governs an arithmetic
     # assignment exactly as it governs `X=1` and a hidden name refuses
     # at its own write; in evaluation order, so a bare name and its
     # element 0 land as the expression wrote them.
@@ -260,7 +261,7 @@ async def _recurse_reassociated(
     session = context.session
     if node.id != right.id:
         return await recurse(node, context, stdin, call_stack, sink=sink)
-    # The session plane's door, bound once for the line: every
+    # The session view, bound once for the line: every
     # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
     # so a pre_session rule governs those exactly as it governs `X=d`.
     view = session_view(
@@ -527,7 +528,7 @@ async def _recurse_pipe_stderr(
     *,
     sink: JobConsole | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
-    # The session plane's door, bound once for the line: every
+    # The session view, bound once for the line: every
     # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
     # so a pre_session rule governs those exactly as it governs `X=d`.
     session = context.session
@@ -627,7 +628,7 @@ async def _run_redirected(
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
         namespace (Namespace): namespace links for redirect pathname expansion.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
         command (Any): the redirected command node, None for a bare
             redirect.
         redirects (list[Redirect]): the statement's parsed redirects.
@@ -1001,7 +1002,7 @@ async def execute_node(
     stdin: Any = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     sink: JobConsole | None = None,
     handed: HandOff | None = None,
     execution_scope: ExecutionScope | None = None,
@@ -1127,7 +1128,7 @@ async def _execute_node(
     stdin: Any = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     sink: JobConsole | None = None,
     handed: HandOff | None = None,
     execution_scope: ExecutionScope | None = None,
@@ -1158,7 +1159,7 @@ async def _execute_node(
             redirects) rely on.
     """
     session = context.session
-    # The session plane's door, bound once for the line: every
+    # The session view, bound once for the line: every
     # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
     # so a pre_session rule governs those exactly as it governs `X=d`.
     view = session_view(
@@ -1167,7 +1168,7 @@ async def _execute_node(
     # `set -n` reads without executing, and it stops *everything* after
     # it, at every depth: GNU answers `if true; then set -n; echo BAD;
     # fi` and `f(){ set -n; echo BAD; }; f` with nothing at all. Stated
-    # here, at the one door every node goes through, rather than in each
+    # here, at the one entry point every node goes through, rather than in each
     # statement runner -- the program loop, the subshell body, a group,
     # a function body and every loop body are five places for one rule to
     # drift, and it did: the check lived in the program loop alone, so
@@ -1183,7 +1184,7 @@ async def _execute_node(
     # evaluations run under. Everything a command hands a line to
     # (eval, source, xargs, command, a substitution, a herestring, a
     # redirect target) re-enters through execute_fn, so the hand-off is
-    # bound into it here, at the one door every node goes through,
+    # bound into it here, at the one entry point every node goes through,
     # rather than where the line made it: a background job's subtree
     # runs on a hand-off of the job's own, and a line it evaluates
     # after the typed line has ended has to stand under that one.

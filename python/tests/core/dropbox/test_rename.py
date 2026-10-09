@@ -55,12 +55,12 @@ async def test_rename_replaces_existing_destination_file():
         side_effect=[conflict, {}],
     ) as moved:
         with patch(
-            "mirage.core.dropbox.rename.get_metadata",
+            "mirage.core.dropbox.copy.get_metadata",
             new_callable=AsyncMock,
             return_value={".tag": "file", "name": "b.txt"},
         ):
             with patch(
-                "mirage.core.dropbox.rename.delete_path",
+                "mirage.core.dropbox.copy.delete_path",
                 new_callable=AsyncMock,
             ) as deleted:
                 await rename(
@@ -81,17 +81,17 @@ async def test_rename_conflict_replaces_empty_dir_destination():
         side_effect=[conflict, {}],
     ) as moved:
         with patch(
-            "mirage.core.dropbox.rename.get_metadata",
+            "mirage.core.dropbox.copy.get_metadata",
             new_callable=AsyncMock,
             return_value={".tag": "folder", "name": "dst"},
         ):
             with patch(
-                "mirage.core.dropbox.rename.list_folder",
+                "mirage.core.dropbox.copy.list_folder",
                 new_callable=AsyncMock,
                 return_value=[],
             ):
                 with patch(
-                    "mirage.core.dropbox.rename.delete_path",
+                    "mirage.core.dropbox.copy.delete_path",
                     new_callable=AsyncMock,
                 ) as deleted:
                     await rename(
@@ -112,17 +112,17 @@ async def test_rename_conflict_keeps_error_for_nonempty_dir():
         side_effect=[conflict, {}],
     ) as moved:
         with patch(
-            "mirage.core.dropbox.rename.get_metadata",
+            "mirage.core.dropbox.copy.get_metadata",
             new_callable=AsyncMock,
             return_value={".tag": "folder", "name": "dst"},
         ):
             with patch(
-                "mirage.core.dropbox.rename.list_folder",
+                "mirage.core.dropbox.copy.list_folder",
                 new_callable=AsyncMock,
                 return_value=[{".tag": "file", "name": "keep.txt"}],
             ):
                 with patch(
-                    "mirage.core.dropbox.rename.delete_path",
+                    "mirage.core.dropbox.copy.delete_path",
                     new_callable=AsyncMock,
                 ) as deleted:
                     with pytest.raises(DropboxApiError):
@@ -188,19 +188,19 @@ async def _moved(*replies, existing: str | None) -> list[tuple[str, str]]:
             side_effect=list(replies),
         ):
             with patch(
-                "mirage.core.dropbox.rename.get_metadata",
+                "mirage.core.dropbox.copy.get_metadata",
                 new_callable=AsyncMock,
                 return_value={"name": "b"}
                 if existing is None
                 else {".tag": existing, "name": "b"},
             ):
                 with patch(
-                    "mirage.core.dropbox.rename.list_folder",
+                    "mirage.core.dropbox.copy.list_folder",
                     new_callable=AsyncMock,
                     return_value=[],
                 ):
                     with patch(
-                        "mirage.core.dropbox.rename.delete_path",
+                        "mirage.core.dropbox.copy.delete_path",
                         new_callable=AsyncMock,
                     ):
                         await rename(

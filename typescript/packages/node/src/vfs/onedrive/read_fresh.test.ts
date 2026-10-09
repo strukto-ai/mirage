@@ -199,7 +199,7 @@ describe('onedrive under read: fresh', () => {
     }
   })
 
-  it.each([false, true])('a door read stamps its cTag (streamed: %s)', async (streamed) => {
+  it.each([false, true])('a dispatcher read stamps its cTag (streamed: %s)', async (streamed) => {
     const graph = await graphOf(OLD)
     const w = ws(await vfsOf(graph))
     try {

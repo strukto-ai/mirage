@@ -19,7 +19,7 @@ import { LanguageRuntime } from './language.ts'
 import { LINE_EXECUTOR } from './mixin.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import type { RunArgs, RunResult } from './types.ts'
-import { RuntimeVFS } from './vfs.ts'
+import { RuntimeFiles } from './files.ts'
 import { MontyRuntime } from './python/monty/runtime.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
@@ -204,7 +204,7 @@ describe('execution bindings', () => {
       expect(required(context.ns.links).resolve('/data/link')).toBe('/data/a')
       ws.addMount('/data/nested', new RAMVFS(), MountMode.EXEC)
       expect(context.resolver.ownerOf('/data/nested/a')).toBe('/data/nested/')
-      const vfs = new RuntimeVFS(context.dispatch, context.resolver)
+      const vfs = new RuntimeFiles(context.dispatch, context.resolver)
       expect(dec.decode(await vfs.read('/data/link'))).toBe('shared\n')
       expect((await vfs.stat('/data/a')).mode & 0o777).toBe(0o600)
     } finally {

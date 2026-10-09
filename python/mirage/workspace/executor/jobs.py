@@ -204,7 +204,7 @@ async def handle_background(
     whichever way the line ends, a release for a question left waiting
     included, and through the launch of the same job again by a loop.
     The job's whole subtree runs on that hand-off, the lines it
-    evaluates included (the walker binds it into their door), and the
+    evaluates included (the walker binds it into their entry point), and the
     job revokes it when it ends, which spends what no other hand-off
     still holds.
     """
@@ -594,7 +594,7 @@ async def handle_wait(
         job_table (JobTable): the session's jobs.
         parts (list[str]): the command words, `wait` first.
         session (SessionState | None): shell session state, for `-p`.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
     """
     cmd_str = " ".join(parts)
     sid = _session_of(session)
@@ -802,7 +802,7 @@ async def handle_fg(
         session (SessionState | None): the shell session, whose profile
             decides which jobs are visible and whether the command line
             is printed.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
         sink (JobConsole | None): where the statement writes, so the
             command line is there before the job's next bytes.
     """
@@ -926,7 +926,7 @@ async def handle_kill(
         job_table (JobTable): the session's jobs.
         parts (list[str]): the command words, `kill` first.
         session (SessionState | None): the shell session, if any.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
     """
     cmd_str = " ".join(parts)
     sid = _session_of(session)
@@ -1483,7 +1483,7 @@ async def handle_ps(
         job_table (JobTable): the workspace's job table.
         parts (list[str]): the command words, `ps` first.
         session (SessionState | None): the shell session, if any.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): the gated session view.
         user (str | None): the workspace user, who owns every runner.
     """
     cmd_str = " ".join(parts)

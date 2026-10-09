@@ -10,7 +10,7 @@ from mirage.io.pipe import CAPACITY
 from mirage.io.types import IOResult, OutputEvent
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.types import Channel
-from mirage.workspace.abort import MirageAbortError
+from mirage.utils.abort import MirageAbortError
 from mirage.workspace.execution import ExecutionScope
 
 logger = logging.getLogger(__name__)

@@ -72,7 +72,7 @@ from mirage.commands.cli.builtin.git.util import (
     mounts_of,
     start_point,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType
@@ -187,11 +187,11 @@ async def restore(
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
-    stat_path = doors.stat_path
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
+    stat_path = view.stat_path
     texts = inv.texts
     fl = FlagView(inv.flags)
     notes: list[str] = []
@@ -202,7 +202,7 @@ async def restore(
         if not texts:
             raise NoRestorePathsError()
         flags = parse_flags(fl)
-        repo, location = await opened(fl, doors, work_tree=True)
+        repo, location = await opened(fl, view, work_tree=True)
         source: Tree | None
         if flags.source is not None:
             _, source = await asyncio.to_thread(
@@ -225,7 +225,7 @@ async def restore(
         notes, _ = await restore_paths(
             repo,
             location,
-            doors,
+            view,
             texts,
             start_point(fl).virtual,
             source,
@@ -242,7 +242,7 @@ async def restore(
 async def restore_paths(
     repo: BaseRepo,
     location: RepoLocation,
-    doors: CLIDoors,
+    view: CLIView,
     operands: Sequence[str],
     start: str,
     source: Tree | None,
@@ -261,7 +261,7 @@ async def restore_paths(
     Args:
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
-        doors (CLIDoors): the invocation's doors.
+        view (CLIView): the invocation's view.
         operands (Sequence[str]): the pathspecs as typed.
         start (str): the directory the line runs in.
         source (Tree | None): the tree to restore from, None for the
@@ -274,8 +274,8 @@ async def restore_paths(
         tuple[list[str], int]: the warnings git prints, and how many
         working-tree files changed.
     """
-    dispatch = doors.dispatch
-    stat_path = doors.stat_path
+    dispatch = view.dispatch
+    stat_path = view.stat_path
     if dispatch is None or stat_path is None:
         raise NoWorkspaceError()
     notes: list[str] = []
@@ -312,8 +312,8 @@ async def restore_paths(
     unmerged = [name for name in absent if name.encode() in state.conflicts]
     if unmerged:
         raise UnmergedPathError(unmerged)
-    links = links_of(doors)
-    mounts = mounts_of(doors)
+    links = links_of(view)
+    mounts = mounts_of(view)
     # Before the index is written, not at the entry that meets it:
     # ``-SW`` stages first and restores after, so a refusal in the
     # working-tree pass would leave the index moved and the tree

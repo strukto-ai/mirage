@@ -23,8 +23,9 @@ import { dirEntry } from '../vector/readdir.ts'
 import { filtersOf, tableOf } from '../vector/scope.ts'
 import { groupName, rowStem } from './naming.ts'
 import { fieldValue } from './payload.ts'
-import { distinctValues, resolveGroup, rowsMatching, tableExists, type QdrantRow } from './query.ts'
+import { distinctValues, resolveGroup, rowsMatching, tableExists } from './query.ts'
 import { renderJson, renderText } from './render.ts'
+import type { QdrantRow } from './types.ts'
 
 function blobSize(value: unknown): number | null {
   // A payload whose blob column holds something undecodable must not take

@@ -239,7 +239,7 @@ describe('a host folder removal reported by the disk watcher', () => {
   })
 })
 
-describe('the write policy at the workspace doors', () => {
+describe('the write policy at the workspace entry points', () => {
   const built: Workspace[] = []
   function track(ws: Workspace): Workspace {
     built.push(ws)
@@ -258,7 +258,7 @@ describe('the write policy at the workspace doors', () => {
   ] as const)(
     'judges an added mount on its write policy: %s',
     (_name, options, vfs, write, expected) => {
-      // The wire string, not the enum: the programmatic door coerces first.
+      // The wire string, not the enum: the programmatic entry point coerces first.
       const ws = track(new Workspace({}, { mode: MountMode.WRITE, ...options }))
       const add = () => ws.addMount('/m', vfs(), MountMode.WRITE, undefined, null, undefined, write)
       if (expected === WritePolicy.CONDITIONAL) expect(add().write).toBe(expected)

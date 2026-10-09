@@ -23,6 +23,10 @@ import { Limit } from '../../../types.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
+import { PythonRuntime } from '../../../runtime/python/base.ts'
+import { Runtime } from '../../../runtime/base.ts'
+import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
+import { noWorker } from '../../../runtime/python/pyodide/errors.ts'
 import type { RunArgs, RunResult, RuntimeLanguage } from '../../../runtime/types.ts'
 import { SessionState } from '../../session/session.ts'
 import { dropsMountCaches, handleCli } from './cli.ts'
@@ -310,6 +314,29 @@ class FakePyRuntime extends LanguageRuntime {
   }
 }
 
+class TierPyRuntime extends PythonRuntime {
+  seen: RunArgs[] = []
+
+  constructor(readonly name: string) {
+    super()
+  }
+
+  run(args: RunArgs): Promise<RunResult> {
+    this.seen.push(args)
+    return Promise.resolve({ stdout: new TextEncoder().encode('ran\n'), stderr: null, exitCode: 0 })
+  }
+}
+
+class LineBox extends Runtime {
+  readonly name = 'box'
+}
+
+class GonePyRuntime extends FakePyRuntime {
+  override run(): Promise<RunResult> {
+    return Promise.reject(noWorker())
+  }
+}
+
 class OtherPyRuntime extends FakePyRuntime {
   override readonly name = 'otherpy'
 }
@@ -387,7 +414,7 @@ describe('handleCli script arm', () => {
   })
 
   it('declared options still pass verbatim', async () => {
-    // The spec is a typed front door: a declared option validates,
+    // The spec is a typed entry point: a declared option validates,
     // then the program still receives the raw tokens, the contract a
     // native binary could also honor.
     const py = new FakePyRuntime()
@@ -499,7 +526,7 @@ describe('handleCli script arm', () => {
   })
 
   it('--help renders when the spec declares a grammar', async () => {
-    // Declaring options opts back into the front door, where the
+    // Declaring options opts back into the entry point, where the
     // rendered page is truthful and the program never runs.
     const py = new FakePyRuntime()
     const install = scriptInstall({
@@ -569,6 +596,86 @@ describe('handleCli script arm', () => {
     expect(io.exitCode).toBe(0)
     expect(first.seen).toEqual([])
     expect(pinned.seen).toHaveLength(1)
+  })
+
+  // A route policy or a runtime's script that places this line's python3
+  // on the second entry places the script there too.
+  it('runs where the line runs its interpreter', async () => {
+    const first = new TierPyRuntime('first')
+    const second = new TierPyRuntime('second')
+    const [, io] = await handleCli(
+      scriptInstall(),
+      ['pager'],
+      new SessionState({ sessionId: 't' }),
+      null,
+      {
+        entries: [first, second],
+        routing: { bindings: { python3: second, python: second }, fallback: null },
+      },
+    )
+    expect(io.exitCode).toBe(0)
+    expect(first.seen).toEqual([])
+    expect(second.seen).toHaveLength(1)
+  })
+
+  it('is refused when the line refused its interpreter', async () => {
+    const py = new TierPyRuntime('first')
+    const [, io, node] = await handleCli(
+      scriptInstall(),
+      ['pager'],
+      new SessionState({ sessionId: 't' }),
+      null,
+      { entries: [py], routing: { bindings: { python3: null }, fallback: null } },
+    )
+    expect(io.exitCode).toBe(126)
+    expect(dec.decode(await materialize(io.stderr))).toBe('pager: no runtime accepted this line\n')
+    expect(node.exitCode).toBe(126)
+    expect(py.seen).toEqual([])
+  })
+
+  // A line whose python3 runs inside a sandbox runs no script there, and
+  // the entry the line passed over does not run it either.
+  it('is refused where the line runs python3 on a runtime without python', async () => {
+    const py = new TierPyRuntime('first')
+    const [, io] = await handleCli(
+      scriptInstall(),
+      ['pager'],
+      new SessionState({ sessionId: 't' }),
+      null,
+      { entries: [py], routing: { bindings: { python3: new LineBox() }, fallback: null } },
+    )
+    expect(io.exitCode).toBe(127)
+    expect(dec.decode(await materialize(io.stderr))).toBe(
+      "pager: runtime 'box' does not run python scripts\n",
+    )
+    expect(py.seen).toEqual([])
+  })
+
+  // The interpreter is missing, not the program: 127, as python3 answers.
+  it('exits 127 when its runtime is unavailable', async () => {
+    const [, io, node] = await handleCli(
+      scriptInstall(),
+      ['pager'],
+      new SessionState({ sessionId: 't' }),
+      null,
+      { entries: [new GonePyRuntime()] },
+    )
+    expect(io.exitCode).toBe(127)
+    expect(dec.decode(await materialize(io.stderr))).toBe(`pager: ${noWorker().message}\n`)
+    expect(node.exitCode).toBe(127)
+  })
+
+  it('runs on the first entry where the workspace serves python3', async () => {
+    const py = new TierPyRuntime('first')
+    const [, io] = await handleCli(
+      scriptInstall(),
+      ['pager'],
+      new SessionState({ sessionId: 't' }),
+      null,
+      { entries: [py], routing: { bindings: {}, fallback: new WorkspaceRuntime() } },
+    )
+    expect(io.exitCode).toBe(0)
+    expect(py.seen).toHaveLength(1)
   })
 
   it('an unknown pin exits 127', async () => {

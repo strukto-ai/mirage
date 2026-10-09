@@ -310,8 +310,9 @@ def test_the_four_op_sets_hold_exactly_what_the_ladder_needs():
         "rename",
         "rename_prefix",
         "copy",
+        "copy_prefix",
     }
-    assert SUBTREE_RETRACT_OPS == {"rm_r", "rename_prefix"}
+    assert SUBTREE_RETRACT_OPS == {"rm_r", "rename_prefix", "copy_prefix"}
 
 
 @pytest.mark.parametrize("op", sorted(RETRACT_FINGERPRINT_OPS))

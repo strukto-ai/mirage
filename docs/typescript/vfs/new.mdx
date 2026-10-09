@@ -129,7 +129,7 @@ class JiraVFS extends BaseVFS<JiraAccessor> {
 ```
 
 `await ws.dispatch('searchIssues', '/jira/', ['project = OPS'])` then runs
-through every check the door runs: hidden paths, path rules, the mount's mode
+through every check the dispatcher runs: hidden paths, path rules, the mount's mode
 and admission policies. A subclass overriding a marked function keeps the
 mark. Every other `PathSpec` argument passes the same checks and must be on
 the function's own mount (EXDEV otherwise); the backend receives it
@@ -139,10 +139,10 @@ The effect is one of `READ`, `METADATA`, `WRITE`, `CREATE`, `REMOVE`,
 `RENAME` and `ATTR`; every one but `READ` and `METADATA` is a write. `target`
 names the kind of entry the path is (`Target.FILE`, `DIR`, `LINK`, or `ANY`
 by default), and `creates: true` marks a `WRITE` that makes a missing file.
-The base functions declare theirs the same way, and the door reads which ops
+The base functions declare theirs the same way, and the dispatcher reads which ops
 follow a link, create a name or run one at a time per path off them.
 `REMOVE` belongs to `unlink` and `rmdir`, and `RENAME` to `rename`: only for
-those names does the door remove a link instead of following it, refuse a
+those names does the dispatcher remove a link instead of following it, refuse a
 rename that would bring hidden entries into view (hidden-path rules stay where
 they are written), and move the links and cache below a renamed directory. A
 custom function declaring either is refused when its class is defined; a VFS
@@ -157,8 +157,8 @@ that deletes or moves defines those functions.
 | --- | --- |
 | Shell and coreutils | The mount builds the generic commands over the VFS's functions; the shell supplies expansion, pipes, redirects and session policy. |
 | Filesystem calls | `ws.vfs` and `ws.dispatch` reach the same functions through the dispatcher. |
-| CLIs | The host registers a `CLISpec` with `registerCli`. File-oriented handlers use `inv.doors.dispatch` and `inv.doors.ns`; mounting a driver does not install an account CLI. |
-| Runtimes | Runtimes wired to `RuntimeVFS` reach the same dispatcher. A process or remote runtime needs its configured mount bridge. |
+| CLIs | The host registers a `CLISpec` with `registerCli`. File-oriented handlers use `inv.view.dispatch` and `inv.view.ns`; mounting a driver does not install an account CLI. |
+| Runtimes | Runtimes wired to `RuntimeFiles` reach the same dispatcher. A process or remote runtime needs its configured mount bridge. |
 | Namespace | The workspace owns symlinks, nested mounts and metadata overlays; the backend implements its own tree. |
 
 Use `path.vfsPath` to address your backend and `path.virtual` for workspace
@@ -385,7 +385,7 @@ export class MyVFS extends BaseVFS<MyAccessor> {
 }
 ```
 
-The mount builds the commands and the dispatcher's door from the class when the driver is placed; a driver never registers anything onto itself.
+The mount builds the commands and the dispatcher from the class when the driver is placed; a driver never registers anything onto itself.
 
 Set `cachesReads` true only for stable, read-mostly content. `BaseVFS` supplies a no-op `loadState()` and a 600 s `indexTtl`, so declare one only to change it. A mount's read `ttl` caps listing lifetimes. Override `getState()` to carry the (redacted) config, and `close()` to release any client handles, calling `super.close()`. The index store is the mount's, built when the driver is placed, so a driver never sees or closes one.
 

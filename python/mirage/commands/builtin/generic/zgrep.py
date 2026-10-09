@@ -16,7 +16,7 @@ from mirage.commands.builtin.grep_pattern import (
 from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
 from mirage.commands.builtin.utils.lines import split_lines
-from mirage.commands.builtin.utils.links import LinkDoor
+from mirage.commands.builtin.utils.links import LinkResolver
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.pcre import match_start, match_text
 from mirage.commands.builtin.utils.stream import operand_label
@@ -146,6 +146,7 @@ class ZgrepFlags:
     only_matching: bool
     quiet: bool
     whole_word: bool
+    line_regexp: bool
     max_count: int | None
 
 
@@ -180,6 +181,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> ZgrepFlags:
         only_matching=fl.as_bool("o"),
         quiet=fl.as_bool("q"),
         whole_word=fl.as_bool("w"),
+        line_regexp=fl.as_bool("line_regexp"),
         max_count=fl.as_int("m"),
     )
 
@@ -192,7 +194,7 @@ async def zgrep_generic(
     read_bytes: Callable[..., Awaitable[bytes]],
     stdin: ByteSource | None = None,
     stat: StatFn | None = None,
-    door: LinkDoor | None = None,
+    resolver: LinkResolver | None = None,
     utf8: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["zgrep"])
@@ -216,6 +218,7 @@ async def zgrep_generic(
             f.whole_word,
             f.syntax,
             utf8,
+            f.line_regexp,
         )
     )
     multi = len(paths) > 1
@@ -241,7 +244,7 @@ async def zgrep_generic(
             force=True,
             quiet=True,
             stat=stat,
-            door=door,
+            resolver=resolver,
         )
         data = await materialize(body)
         errors.append(decode_text(await io.materialize_stderr()))

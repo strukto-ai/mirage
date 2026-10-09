@@ -173,7 +173,7 @@ async def test_a_warm_cache_still_answers_a_ranged_read_with_the_window():
     # The cache holds the whole object; a ranged read asked for a
     # window instead of the file, so serving the file back is wrong.
     # git reads pack indexes this way (4 bytes at a known offset), and
-    # the dispatcher is the door it reaches too.
+    # the dispatcher is the dispatcher it reaches too.
     ws = _workspace(_CachingRAM())
     await ws.vfs.write("/data/f.bin", b"0123456789")
     await ws.apply_io(

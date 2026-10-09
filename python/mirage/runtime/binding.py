@@ -30,8 +30,9 @@ from mirage.view.types import NamespaceView, SessionView
 class RuntimeContext:
     """Local workspace binding captured for one execution, never guest globals.
 
-    The scoped doors retain session, policy, and observation context even
-    when called later from a worker callback. No workspace stores are exposed.
+    The scoped entry points retain session, policy, and observation context
+    even when called later from a worker callback. No workspace stores are
+    exposed.
     """
 
     binding: WorkspaceBinding

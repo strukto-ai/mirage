@@ -29,14 +29,14 @@ export const FLAG: Schema = { type: 'boolean' }
 export const OWNER: Schema = { type: ['integer', 'string'] }
 
 /**
- * One `session.vfs` call as the remote doors carry it: its arguments as
+ * One `session.vfs` call as the remote entry points carry it: its arguments as
  * JSON schemas, the method it calls on `session.vfs` (or on
  * `session.explain.vfs` to explain it) and the key its result is answered
  * under. `<name>_base64` carries the bytes `<name>` takes. Mirrors
  * Python's `VfsCall`.
  */
 export interface VfsCall {
-  /** The call's name; `vfs/<name>` on every door. */
+  /** The call's name; `vfs/<name>` on every entry point. */
   readonly name: string
   /** What the call does, in one line. */
   readonly description: string

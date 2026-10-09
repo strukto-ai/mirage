@@ -126,7 +126,7 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   requireOperands(inv, ['repo_id'])
   requireToken(inv, 'upload')
   const fl = new FlagView(inv.flags)
-  const dispatch = inv.doors?.dispatch
+  const dispatch = inv.view?.dispatch
   if (dispatch === undefined) {
     throw new UsageError('hf upload needs a workspace to read from')
   }

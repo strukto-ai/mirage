@@ -638,7 +638,7 @@ async function runLines(
   return [results.flat(), stop]
 }
 
-export interface XargsDoors {
+export interface XargsOptions {
   /** The op dispatcher, which reads -a's file. */
   dispatch?: DispatchFn | null
   /** Where command names are looked up; absent runs every name. */
@@ -670,7 +670,7 @@ export async function handleXargs(
   args: readonly string[],
   context: EvaluationContext,
   stdin: ByteSource | null,
-  doors: XargsDoors = {},
+  options: XargsOptions = {},
 ): Promise<Result> {
   const session = context.session
   const parse = parseShellOptions(SHELL_SPECS.xargs, args)
@@ -789,10 +789,10 @@ export async function handleXargs(
     data = await materialize(stdin)
   } else {
     try {
-      if (doors.dispatch === undefined || doors.dispatch === null) {
+      if (options.dispatch === undefined || options.dispatch === null) {
         throw enoent(argFile)
       }
-      data = await readScriptBytes(doors.dispatch, argFile, session.cwd)
+      data = await readScriptBytes(options.dispatch, argFile, session.cwd)
     } catch (err) {
       const strerror = fsStrerror(err)
       if (strerror === null) throw err
@@ -833,7 +833,7 @@ export async function handleXargs(
   const [ios, stop] = await runLines(executeFn, builder.events, context, procs, {
     trace: toggles.has('t'),
     slotVar,
-    registry: doors.registry ?? null,
+    registry: options.registry ?? null,
     stdin: childStdin,
   })
   const stdouts: ByteSource[] = []

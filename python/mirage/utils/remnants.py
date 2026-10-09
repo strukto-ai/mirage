@@ -18,6 +18,7 @@ from typing import Protocol
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import child_spec
 
 Allowed = Callable[[str], bool]
 
@@ -49,8 +50,8 @@ class RemnantChannel(Protocol):
     The channel carries every protection axis except visibility: a
     deletion must still answer for its path's mode and rules exactly as
     a first-class op would (the command plane binds its mode- and
-    rule-guarded slots, the dispatchers route through their own op
-    door), while the visibility filter stays off because the cascade
+    rule-guarded slots, the dispatcher routes through
+    ``Mount.call``), while the visibility filter stays off because the cascade
     exists to see and destroy what the session cannot. The cascade
     never sprinkles those checks itself; wiring a raw, unguarded
     channel here is the bug this contract exists to prevent.
@@ -84,7 +85,7 @@ def visible_below(base: str, names: Iterable[str], allowed: Allowed) -> bool:
     The one emptiness predicate every remnant arm judges with, fed
     every name source its plane can enumerate (the backend listing,
     and on the ops plane the namespace's merged children too), so
-    "visibly empty" cannot mean different things at different doors.
+    "visibly empty" cannot mean different things at different entry points.
 
     Args:
         base (str): absolute virtual path of the directory.
@@ -93,22 +94,6 @@ def visible_below(base: str, names: Iterable[str], allowed: Allowed) -> bool:
     """
     root = base.rstrip("/")
     return any(allowed(f"{root}/{entry_name(n)}") for n in names)
-
-
-def child_spec(spec: PathSpec, name: str) -> PathSpec:
-    """The child PathSpec one cascade step descends to.
-
-    Args:
-        spec (PathSpec): the directory being walked.
-        name (str): the child's bare name.
-    """
-    base = spec.virtual.rstrip("/")
-    key = spec.vfs_path.rstrip("/")
-    return PathSpec(
-        virtual=f"{base}/{name}",
-        directory=spec.virtual,
-        vfs_path=f"{key}/{name}" if key else name,
-    )
 
 
 async def remove_remnants(

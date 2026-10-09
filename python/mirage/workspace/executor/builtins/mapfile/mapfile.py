@@ -85,7 +85,7 @@ async def handle_mapfile(
         session (SessionState): shell session state.
         stdin (ByteSource | None): the input source.
         execute_fn (Callable): the executor's nested eval, for `-C`.
-        state (SessionView | None): the session plane's gated door.
+        state (SessionView | None): the gated session view.
         cmd (str): `mapfile` or `readarray`, for diagnostics.
     """
     parse = parse_shell_options(SHELL_SPECS["mapfile"], args)

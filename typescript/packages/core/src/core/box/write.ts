@@ -13,19 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { evictAfter, invalidateAfterWrite } from '../../cache/context.ts'
+import {
+  evictAfter,
+  invalidateAfterWrite,
+  nativeCondition,
+  writeCondition,
+} from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
 import { uploadToken } from '../../utils/upload.ts'
-import { type BoxItem, uploadFileVersion, uploadNewFile } from './api.ts'
+import { type BoxItem, refused, uploadFileVersion, uploadNewFile } from './api.ts'
+import { liveOf } from './fingerprint.ts'
 import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
 import { statFromItem } from './stat.ts'
 
 /**
  * Upload a new file, or a new version of an existing one. A failed upload
  * still evicts the path: Box may have stored the bytes before its reply
- * broke off.
+ * broke off. A held version goes out as the file's etag.
  */
 export async function write(
   accessor: BoxAccessor,
@@ -35,29 +41,35 @@ export async function write(
   const parts = pathParts(path)
   if (parts.length === 0) throw eisdir(path.virtual)
   const tm = accessor.tokenManager
+  const cond = await writeCondition(path, 'put')
   const timer = startOp()
   const existing = await resolveItem(accessor, parts)
+  const etag = await nativeCondition(path, cond, liveOf(existing), 'put')
   let upload: () => Promise<unknown>
   if (existing !== null && existing.type === 'file') {
     // Overwrite uploads a new version under the same id, keeping Box's own
     // name so a box-native file isn't renamed with the vfs suffix.
-    upload = () => uploadFileVersion(tm, existing.id, existing.name, data)
+    upload = () => uploadFileVersion(tm, existing.id, existing.name, data, etag)
   } else {
     const parentId = await resolveParentId(accessor, parts)
     if (parentId === null) throw enoent(path.virtual)
     upload = () => uploadNewFile(tm, parentId, parts[parts.length - 1] ?? '', data)
   }
-  await evictAfter(
-    async () => {
-      const reply = await upload()
-      const entries: unknown =
-        typeof reply === 'object' && reply !== null && !Array.isArray(reply)
-          ? (reply as { entries?: unknown }).entries
-          : undefined
-      const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
-      const token = uploadToken(first, statFromItem, path.virtual)
-      record('write', path.virtual, 'box', data.length, timer, { fingerprint: token })
-    },
-    () => invalidateAfterWrite(path),
-  )
+  try {
+    await evictAfter(
+      async () => {
+        const reply = await upload()
+        const entries: unknown =
+          typeof reply === 'object' && reply !== null && !Array.isArray(reply)
+            ? (reply as { entries?: unknown }).entries
+            : undefined
+        const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
+        const token = uploadToken(first, statFromItem, path.virtual)
+        record('write', path.virtual, 'box', data.length, timer, { fingerprint: token })
+      },
+      () => invalidateAfterWrite(path),
+    )
+  } catch (err) {
+    throw (await refused(path, err, cond, etag)) ?? err
+  }
 }

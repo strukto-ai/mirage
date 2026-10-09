@@ -940,7 +940,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     }
   }
   if (HARNESSES[name] === 'hf_buckets') {
-    // One Map behind both doors: the Hub serves it over HTTP and the opendal
+    // One Map behind both entry points: the Hub serves it over HTTP and the opendal
     // fake lists and writes it. The opendal fake refuses every read, so a
     // stat or read that fell back to opendal fails here.
     const op = fakeHfOperator()
@@ -1366,7 +1366,7 @@ describe('the read-token contract', () => {
         expect(new TextDecoder().decode(await line(ws, `cat ${virtual}`))).toBe('new\n')
         expect(fake.fetches() - before).toBe(WRITE_EXCEPTIONS[family] ?? 0)
         // A new gridfs key's stat miss asks filesColl whether the key names a
-        // folder, a door the read rows refuse; the read itself reaches nothing.
+        // folder, a dispatcher the read rows refuse; the read itself reaches nothing.
         const statMiss = family === 'gridfs' && target === 'new'
         expect(written).toEqual(statMiss ? ['filesColl'] : [])
         expect(H.reach).toEqual(written)

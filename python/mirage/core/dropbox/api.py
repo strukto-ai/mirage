@@ -14,7 +14,20 @@
 
 from typing import Any
 
-from mirage.core.dropbox.client import DropboxTokenManager, dropbox_rpc
+from mirage.cache.context import stale
+from mirage.cache.types import WriteCondition
+from mirage.core.dropbox.client import (
+    DropboxApiError,
+    DropboxTokenManager,
+    dropbox_rpc,
+)
+from mirage.core.dropbox.constants import (
+    GONE_SUMMARIES,
+    LOST_SUMMARIES,
+    MISS_SUMMARIES,
+)
+from mirage.errors.types import StaleWriteError
+from mirage.types import PathSpec
 
 SEARCH_PAGE = 1000
 # search_v2 + search/continue_v2 serve at most 10,000 matches total; a
@@ -25,6 +38,44 @@ MAX_SEARCH_MATCHES = 10_000
 
 async def get_metadata(tm: DropboxTokenManager, path: str) -> dict[str, Any]:
     return await dropbox_rpc(tm, "/files/get_metadata", {"path": path})
+
+
+async def lookup(tm: DropboxTokenManager, path: str) -> dict[str, Any] | None:
+    """An entry's metadata, None when Dropbox has nothing at the path.
+
+    Args:
+        tm (DropboxTokenManager): the account's token manager.
+        path (str): the Dropbox path.
+    """
+    try:
+        return await get_metadata(tm, path)
+    except DropboxApiError as exc:
+        if exc.summary.startswith(MISS_SUMMARIES):
+            return None
+        raise
+
+
+async def refused(
+    path: PathSpec,
+    exc: DropboxApiError,
+    cond: WriteCondition | None,
+    rev: str | None,
+) -> StaleWriteError | None:
+    """The refusal a write sent with a rev met, None for any other failure.
+
+    Args:
+        path (PathSpec): the path the write named.
+        exc (DropboxApiError): Dropbox's answer.
+        cond (WriteCondition | None): the write's condition.
+        rev (str | None): the rev sent, None if the write went plain.
+    """
+    if not rev:
+        return None
+    if exc.summary.startswith(LOST_SUMMARIES):
+        return await stale(path, version=cond.if_match if cond else None)
+    if exc.summary.startswith(GONE_SUMMARIES):
+        return await stale(path, gone=True)
+    return None
 
 
 async def create_folder(tm: DropboxTokenManager, path: str) -> None:
@@ -38,8 +89,13 @@ async def create_folder(tm: DropboxTokenManager, path: str) -> None:
     )
 
 
-async def delete_path(tm: DropboxTokenManager, path: str) -> None:
-    await dropbox_rpc(tm, "/files/delete_v2", {"path": path})
+async def delete_path(
+    tm: DropboxTokenManager, path: str, parent_rev: str | None = None
+) -> None:
+    body: dict[str, Any] = {"path": path}
+    if parent_rev is not None:
+        body["parent_rev"] = parent_rev
+    await dropbox_rpc(tm, "/files/delete_v2", body)
 
 
 async def move_path(

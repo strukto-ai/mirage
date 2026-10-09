@@ -29,16 +29,21 @@ for (const backend of ['ram', 'redis']) {
     () => {
       let store: IndexCacheStore
       let keyPrefix: string
+      // Every test lists under an hour's ttl, so a stalled runner cannot
+      // expire a listing between two of its awaits; the one that waits on
+      // the clock builds its own one-second store.
+      function build(ttl = 3600): IndexCacheStore {
+        return backend === 'ram'
+          ? new RAMIndexCacheStore({ ttl })
+          : new RedisIndexCacheStore({
+              ...(REDIS_URL === undefined ? {} : { url: REDIS_URL }),
+              keyPrefix,
+              ttl,
+            })
+      }
       beforeEach(() => {
         keyPrefix = `contract:[${crypto.randomUUID()}]:`
-        store =
-          backend === 'ram'
-            ? new RAMIndexCacheStore({ ttl: 1 })
-            : new RedisIndexCacheStore({
-                ...(REDIS_URL === undefined ? {} : { url: REDIS_URL }),
-                keyPrefix,
-                ttl: 1,
-              })
+        store = build()
       })
       afterEach(async () => {
         await store.clear()
@@ -227,8 +232,13 @@ for (const backend of ['ram', 'redis']) {
         expect(await store.setDir('/dir', [])).toEqual([{ path: '/dir/a', folder: false }])
       })
 
-      it('reports the lifetime a listing gets when its writer names none', () => {
-        expect(store.ttl).toBe(1)
+      it('reports the lifetime a listing gets when its writer names none', async () => {
+        const configured = build(7)
+        try {
+          expect(configured.ttl).toBe(7)
+        } finally {
+          await configured.close()
+        }
       })
 
       // Uncapped, the store's default; capped, whichever is shorter, since
@@ -236,8 +246,8 @@ for (const backend of ['ram', 'redis']) {
       it('lets a view report the lifetime its listings get', async () => {
         const cache = new RAMFileCacheStore()
         try {
-          expect(new IndexView(store, cache, '/', () => true).ttl).toBe(1)
-          expect(new IndexView(store, cache, '/', () => true, { readTtl: 600 }).ttl).toBe(1)
+          expect(new IndexView(store, cache, '/', () => true).ttl).toBe(3600)
+          expect(new IndexView(store, cache, '/', () => true, { readTtl: 7200 }).ttl).toBe(3600)
           expect(new IndexView(store, cache, '/', () => true, { readTtl: 0.5 }).ttl).toBe(0.5)
         } finally {
           await cache.close()
@@ -256,12 +266,26 @@ for (const backend of ['ram', 'redis']) {
         const got = (await store.get('/dir/a')).entry
         expect(got).toEqual(entry().copyWith({ indexTime: got?.indexTime ?? '' }))
         expect(got?.indexTime).not.toBe('')
-        await new Promise((resolve) => setTimeout(resolve, 1100))
-        expect((await store.listDir('/dir')).status).toBe(LookupStatus.EXPIRED)
-        expect((await store.get('/dir/a')).entry).toEqual(got)
         await store.invalidateDir('/dir')
         expect((await store.listDir('/dir')).status).toBe(LookupStatus.NOT_FOUND)
         expect((await store.get('/dir/a')).status).toBe(LookupStatus.NOT_FOUND)
+      })
+
+      it('expires a listing after the ttl', async () => {
+        const short = build(1)
+        try {
+          await short.setDir('/dir', [['a', entry()]])
+          const got = (await short.get('/dir/a')).entry
+          await new Promise((resolve) => setTimeout(resolve, 1100))
+          expect((await short.listDir('/dir')).status).toBe(LookupStatus.EXPIRED)
+          expect((await short.get('/dir/a')).entry).toEqual(got)
+          await short.invalidateDir('/dir')
+          expect((await short.listDir('/dir')).status).toBe(LookupStatus.NOT_FOUND)
+          expect((await short.get('/dir/a')).status).toBe(LookupStatus.NOT_FOUND)
+        } finally {
+          await short.clear()
+          await short.close()
+        }
       })
 
       it.each([-1000, 0])('does not clamp deadline offset %s', async (offset) => {
@@ -635,13 +659,7 @@ for (const backend of ['ram', 'redis']) {
       })
 
       function peer(): IndexCacheStore {
-        return backend === 'ram'
-          ? store
-          : new RedisIndexCacheStore({
-              ...(REDIS_URL === undefined ? {} : { url: REDIS_URL }),
-              keyPrefix,
-              ttl: 1,
-            })
+        return backend === 'ram' ? store : build()
       }
 
       it('stamps every folder a seed writes with its version', async () => {

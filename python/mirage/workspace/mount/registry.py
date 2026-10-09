@@ -35,7 +35,7 @@ from mirage.io.config import IOConfig
 from mirage.policy import Decisions, MountRootPolicy, OutputCapPolicy, Policies
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
-from mirage.runtime.table import WorkspaceRuntime
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.types import (
     Limit,
     MountMode,
@@ -106,6 +106,8 @@ class MountRegistry:
             WeakValueDictionary()
         )
         self._root: MountEntry | None = None
+        # The root the workspace adds when no mount claims `/`.
+        self._anchor: MountEntry | None = None
         # Workspace-level command -> runtime bindings (first listed
         # capturer wins). The three runtime fields below are written
         # only by the workspace's Runtimes, on construction and on every
@@ -151,7 +153,7 @@ class MountRegistry:
         # runtime fields above.
         self.clis = CLIRegistry()
         # The workspace-level default a mount overrides, kept so the
-        # runtime door (`Workspace.add_mount`) has something to resolve
+        # runtime entry point (`Workspace.add_mount`) has something to resolve
         # an unset policy against.
         self._default_read: ReadSpec = ReadSpec()
         self._default_write: WritePolicy = WritePolicy.UNCONDITIONAL
@@ -373,6 +375,8 @@ class MountRegistry:
                 del self._mounts[i]
                 if m is self._root:
                     self._root = None
+                if m is self._anchor:
+                    self._anchor = None
                 return m
         raise ValueError(f"no mount at prefix: {norm_prefix!r}")
 
@@ -620,6 +624,15 @@ class MountRegistry:
     def root_mount(self) -> MountEntry | None:
         return self._root
 
+    def anchor_root(self, entry: MountEntry) -> None:
+        """Mark `entry` as the root the workspace added, not one mounted.
+
+        Args:
+            entry (MountEntry): the scratch root ``install_mounts`` made
+                because no mount claims ``/``.
+        """
+        self._anchor = entry
+
     @property
     def file_cache(self) -> FileCacheMixin | None:
         return self._file_cache
@@ -638,6 +651,7 @@ class MountRegistry:
                 resource_type=m.vfs.name,
                 mode=m.mode,
                 sizes_always_known=m.vfs.sizes_always_known,
+                anchor=m is self._anchor,
             )
             for m in self._mounts
         ]

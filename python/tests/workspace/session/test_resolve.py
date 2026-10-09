@@ -222,7 +222,7 @@ def test_compile_commands_anchors_a_name_pattern_to_its_mount():
     assert rules is not None
     rule = rules.deny[0]
     assert rule.paths == ("/repo/*.pem",)
-    # The stamp scopes the rule at admission, but the op door reads the
+    # The stamp scopes the rule at admission, but the dispatcher reads the
     # paths alone, so a raw name pattern refused a read in every other
     # mount too.
     scope = rule_scope(rule)

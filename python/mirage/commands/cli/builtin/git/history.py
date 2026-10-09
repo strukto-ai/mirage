@@ -89,6 +89,7 @@ class LogFlags:
             string, or its pattern under ``--pickaxe-regex``.
         changed (re.Pattern[str] | None): ``-G``, the pattern an added or
             removed line must match.
+        force_text (bool): search binary changed lines under ``--text``.
         since (float | None): ``--since`` as an epoch second.
         until (float | None): ``--until`` as an epoch second.
         authors (tuple[re.Pattern[str], ...]): author patterns, ORed together.
@@ -134,6 +135,7 @@ class LogFlags:
     all_refs: bool = False
     pretty: LogFormat = MEDIUM
     changed: re.Pattern[str] | None = None
+    force_text: bool = False
     abbrev_commit: bool = False
 
     min_parents: int | None = None
@@ -260,7 +262,7 @@ def _pickaxe_pattern(value: str, ignore_case: bool) -> re.Pattern[str]:
     """A ``-G`` or ``--pickaxe-regex`` pattern, compiled as git's
     diffcore-pickaxe compiles it: POSIX extended whatever -E, -F or -P
     say, ``-i`` folding case, and matched one line at a time
-    (REG_NEWLINE).
+    (REG_NEWLINE). Linux regcomp keeps dot off NUL, unlike Darwin.
 
     Args:
         value (str): the pattern as typed.
@@ -269,7 +271,10 @@ def _pickaxe_pattern(value: str, ignore_case: bool) -> re.Pattern[str]:
     flags = re.IGNORECASE if ignore_case else 0
     try:
         return compile_posix_regex(
-            translate_ere(value, PosixSyntax.EXTENDED)[0], flags
+            translate_ere(value, PosixSyntax.EXTENDED, dot_matches_nul=False)[
+                0
+            ],
+            flags,
         )
     except (BreError, re.error) as exc:
         raise GitError(f"invalid regex: {exc}") from exc
@@ -329,6 +334,7 @@ def parse_flags(
         committers=committers,
         greps=greps,
         ignore_case=ignore_case,
+        force_text=fl.as_bool("text"),
         date=parse_date_mode(fl.as_str("date") or "default", date_clock(env)),
         # git reads a negative count as no limit at all.
         max_count=None
@@ -795,7 +801,7 @@ def _picked(store: BaseObjectStore, commit: Commit, flags: LogFlags) -> bool:
         flags (LogFlags): the parsed invocation.
     """
     if flags.changed is not None:
-        return greps(store, commit, flags.changed)
+        return greps(store, commit, flags.changed, flags.force_text)
     if flags.search is None:
         return True
     if isinstance(flags.search, str):

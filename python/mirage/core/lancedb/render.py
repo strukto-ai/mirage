@@ -14,6 +14,7 @@
 
 from typing import Any
 
+from mirage.core.lancedb.types import LanceRow
 from mirage.core.render.json import value_text
 from mirage.vfs.lancedb.config import LanceDBConfig
 
@@ -46,7 +47,7 @@ def cell_text(value: Any) -> str:
     return value_text(value) if _is_json(value) else str(value)
 
 
-def render_card(row: dict[str, Any], config: LanceDBConfig) -> bytes:
+def render_card(row: LanceRow, config: LanceDBConfig) -> bytes:
     lines: list[str] = []
     title = row.get(config.title_column) if config.title_column else None
     if title is not None:

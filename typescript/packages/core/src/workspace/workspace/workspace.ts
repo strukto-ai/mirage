@@ -88,7 +88,12 @@ import type { ProcessView } from '../../process/view.ts'
 import { literalTree } from '../../shell/literal.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { ProcessSupervisor } from '../../process/supervisor.ts'
-import { WorkspaceBinding, captureBinding, type RuntimeContext } from '../../runtime/binding.ts'
+import {
+  WorkspaceBinding,
+  captureBinding,
+  workspaceBridge,
+  type RuntimeContext,
+} from '../../runtime/binding.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import { captureRecordingContext } from '../../observe/context.ts'
 import {
@@ -98,25 +103,25 @@ import {
   runWithRefusalSink,
   runWithSession,
   runAsProgram,
+  sessionVisibility,
 } from '../../context/session_context.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import { namespaceViewOf } from '../mount/namespace/view.ts'
 import { asyncContextIsolatesTasks, createAsyncContext } from '../../utils/async_context.ts'
 import { makeVar, VarAttr } from '../../shell/variable.ts'
 import { enoent } from '../../errors/fs.ts'
 import { sessionView, envSnapshot } from '../session/state.ts'
-import type { BridgeDispatchFn } from '../../runtime/types.ts'
+import type { BridgeDispatchFn, EvalResult } from '../../runtime/types.ts'
 import { MontyUnavailableError } from '../../runtime/python/monty/index.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import { isEvaluator } from '../../runtime/mixin.ts'
-import type { EvalResult } from '../../runtime/types.ts'
 import { PyodideUnavailableError } from '../../runtime/python/pyodide/errors.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { explainLine, explainedLine, holds } from '../node/explain.ts'
 import { Documents } from '../documentation/documents.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
-import { hasAborted } from '../abort.ts'
-import { abortable, makeAbortError } from '../../concurrency/limiter.ts'
+import { abortable, hasAborted, makeAbortError } from '../../utils/abort.ts'
 import { SecretSourceSchema, type SecretSource } from '../../secrets/config.ts'
 import { SecretsError } from '../../secrets/errors.ts'
 import { sourceFor } from '../../secrets/registry.ts'
@@ -228,7 +233,7 @@ export class Workspace {
    * runtime can still replay its journal, and that window would otherwise let
    * a caller start a job after `killAll`, or add a mount after the close list
    * was taken. Internal dispatch and recursive execution stay open until
-   * teardown finishes; their public doors do not. A method keeps TypeScript
+   * teardown finishes; their public entry points do not. A method keeps TypeScript
    * from treating a pre-await check as proof that the state is still open.
    */
   private isShuttingDown(): boolean {
@@ -366,11 +371,11 @@ export class Workspace {
     if (this.defaultProfileName !== null && !(this.defaultProfileName in this.profiles)) {
       throw new PolicyError(`unknown profile ${JSON.stringify(this.defaultProfileName)}`)
     }
-    // The config door validates the pairing too, but a typed caller
-    // does not pass that door, and the python host refuses the same
+    // The config loader validates the pairing too, but a typed caller
+    // does not pass that entry point, and the python host refuses the same
     // profiles at construction.
     for (const [name, profile] of Object.entries(this.profiles)) {
-      // A typed caller does not pass the parser, so this door repeats
+      // A typed caller does not pass the parser, so this entry point repeats
       // its two checks: the old keys are told where they went, and a
       // policy block is whole.
       const legacy = profile as { script?: unknown; runtime?: unknown }
@@ -386,7 +391,7 @@ export class Workspace {
     // Admission policies, consulted in registration order after the
     // built-ins the registry seeds: the document's command tiers
     // (PermissionsPolicy, reading each session's compiled layers from
-    // the manager by the id the door puts in the context), the
+    // the manager by the id the entry point puts in the context), the
     // profile's policy (ScriptPolicy, calling its hook per command through
     // the same manager), then Policy instances, then anything added later
     // through ws.policies.add(). The runtime policy (policy option) is
@@ -395,14 +400,14 @@ export class Workspace {
     this.scriptPolicy = new ScriptPolicy(
       this.sessionManager,
       () => this.mounts().map((entry) => entry.prefix),
-      // The doors the runtime world attaches, so a profile policy reads
+      // The entry points the runtime world attaches, so a profile policy reads
       // the mounts an agent's program would, and through the same gate,
       // with its ops stamped as its own for its `preVfs` to recognize.
       { bridge: (issuer) => this.buildWorkspaceBridge(issuer), resolver: sandboxResolver },
     )
     this.registry.policies.add(this.scriptPolicy)
     for (const entry of options.policies ?? []) this.registry.policies.add(entry)
-    // The approval door an Ask is taken to (design 3.9): grants live on
+    // The approval ledger an Ask is taken to (design 3.9): grants live on
     // the sessions, the host answers through `onAsk` (or just records
     // the question when none is wired) and reads `ws.decisions`.
     this.registry.decisions = new Decisions(this.sessionManager, options.onAsk ?? null)
@@ -485,7 +490,7 @@ export class Workspace {
     }
     // The facade delegates every op to the dispatcher, so FUSE and
     // programmatic ws.vfs walk the same pipeline as a shell command and
-    // the policy gates fire exactly once, at that door. It keeps the
+    // the policy gates fire exactly once, at that entry point. It keeps the
     // ledger, which is its own; the sink is only the observer's copy.
     // It runs as the default session, as a bare `shell` does, so the
     // default profile confines it too.
@@ -541,13 +546,17 @@ export class Workspace {
    * mounted: the workspace adds it so arg-less commands and root listing
    * have somewhere to resolve, so announcing it as a mount would make
    * every runtime report a claim on a VFS the embedder never asked for.
+   * A mount the bound session hides is withheld too: a runtime that builds
+   * its own tree from this list (Pyodide) would otherwise show its name.
    */
   private sandboxVisibleMounts(): string[] {
+    const vis = sessionVisibility()
     const prefixes: string[] = []
     for (const m of this.registry.allMounts()) {
       if (m.prefix === HISTORY_PREFIX || m.prefix === HISTORY_PREFIX + '/') continue
       if (m.prefix === BIN_PREFIX + '/') continue
       if (this.syntheticRootAnchor && m.prefix === '/') continue
+      if (!pathVisible(vis, rstripSlash(m.prefix) || '/')) continue
       prefixes.push(m.prefix)
     }
     return prefixes
@@ -612,7 +621,7 @@ export class Workspace {
     )
   }
 
-  /** Capture local adapter doors under this workspace's active or explicitly named session. */
+  /** Capture local adapter calls under this workspace's active or explicitly named session. */
   runtimeContext(sessionId?: string): RuntimeContext {
     const session =
       sessionId === undefined ? this.callSession() : this.sessionManager.get(sessionId)
@@ -757,129 +766,20 @@ export class Workspace {
   // so runtime journal replay stays open during close and sandbox I/O takes
   // the same path as shell commands — cache read-through on
   // reads, post-write invalidation, and mount-mode enforcement narrowed
-  // by the current session all come from the Dispatcher. A read is the
-  // rendered one unless its `raw` attr asks for the stored bytes, and its
-  // `offset`/`size` attrs ask for a byte range, matching Python's
-  // RuntimeVFS.read. An `issuer` rides every op as the `issuer` kwarg, which the dispatcher
-  // lifts onto the op door's context and never forwards to a backend:
+  // by the current session all come from the Dispatcher. An `issuer` rides
+  // every op as the `issuer` kwarg, which the dispatcher
+  // lifts onto the dispatcher's context and never forwards to a backend:
   // it is how a profile policy's own reads reach its `preVfs` marked as
   // its own, as an argument rather than ambient state.
   private buildWorkspaceBridge(issuer?: symbol): BridgeDispatchFn {
-    const dispatch = (
-      name: string,
-      path: string,
-      args: readonly unknown[] = [],
-      kwargs: OpKwargs = {},
-    ): Promise<unknown> =>
-      this.dispatchInternal(name, path, args, issuer === undefined ? kwargs : { ...kwargs, issuer })
-    return async (op, path, bytes, dst, attrs) => {
-      switch (op) {
-        case 'read': {
-          const kwargs: OpKwargs = attrs?.raw === true ? { filetype: null } : {}
-          if (attrs?.offset !== undefined || attrs?.size !== undefined) {
-            kwargs.offset = attrs.offset ?? 0
-            kwargs.size = attrs.size ?? null
-          }
-          return (await dispatch('read', path, [], kwargs)) as Uint8Array
-        }
-        case 'write': {
-          if (bytes === undefined) throw new Error('write op requires bytes')
-          const buf =
-            bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
-          await dispatch('write', path, [buf])
-          return undefined
-        }
-        case 'append': {
-          if (bytes === undefined) throw new Error('append op requires bytes')
-          const buf =
-            bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
-          await dispatch('append', path, [buf])
-          return undefined
-        }
-        case 'pwrite': {
-          if (bytes === undefined) throw new Error('pwrite op requires bytes')
-          await dispatch('pwrite', path, [bytes, attrs?.offset ?? 0])
-          return undefined
-        }
-        case 'stat':
-          // The mount's own row, nothing projected: the runtime door
-          // builds the one VFSStat both languages read, so the two
-          // tiers cannot drift into two translations of one fact.
-          // `nofollow` is the only attrs field a stat carries, and it
-          // is the caller's lstat; the dispatcher consumes it.
-          return await dispatch(
-            'stat',
-            path,
-            [],
-            attrs?.nofollow === true ? { nofollow: true } : undefined,
-          )
-        case 'create':
-          await dispatch('create', path)
-          return undefined
-        case 'truncate':
-          await dispatch('truncate', path, [attrs?.length ?? 0])
-          return undefined
-        case 'unlink':
-          await dispatch('unlink', path)
-          return undefined
-        case 'mkdir':
-          // `parents` is pathlib's mkdir(parents=True), riding to the
-          // backend op as a kwarg the way python's dispatch carries it.
-          await dispatch('mkdir', path, [], attrs?.parents === true ? { parents: true } : {})
-          return undefined
-        case 'rmdir':
-          await dispatch('rmdir', path)
-          return undefined
-        case 'rename': {
-          if (dst === undefined) throw new Error('rename op requires dst')
-          await dispatch('rename', path, [PathSpec.fromStrPath(dst)])
-          return undefined
-        }
-        case 'symlink': {
-          // The target is not a PathSpec: a link stores what was typed,
-          // relative or dangling, and resolving it here would record a
-          // different link than the guest asked for.
-          if (dst === undefined) throw new Error('symlink op requires dst')
-          await dispatch('symlink', path, [], { target: dst })
-          return undefined
-        }
-        case 'readlink':
-          return (await dispatch('readlink', path)) as string
-        case 'setattr': {
-          if (attrs === undefined) throw new Error('setattr op requires attrs')
-          await dispatch('setattr', path, [], attrs as Record<string, unknown>)
-          return undefined
-        }
-        case 'readdir':
-          // The names as the door merged them, nothing resolved: the
-          // runtime door (`RuntimeVFS.readdir`) stats each entry and
-          // marks the links, so a row is built in one tier and in one
-          // shape in both languages.
-          return ((await dispatch('readdir', path)) as string[] | null) ?? []
-        case 'getxattr':
-          return await dispatch('getxattr', path, [], {
-            name: dst ?? '',
-            nofollow: attrs?.nofollow === true,
-          })
-        case 'listxattr':
-          return await dispatch('listxattr', path, [], { nofollow: attrs?.nofollow === true })
-        case 'setxattr':
-          await dispatch('setxattr', path, [], {
-            name: dst ?? '',
-            value: bytes ?? new Uint8Array(),
-            create: attrs?.create === true,
-            replace: attrs?.replace === true,
-            nofollow: attrs?.nofollow === true,
-          })
-          return undefined
-        case 'removexattr':
-          await dispatch('removexattr', path, [], {
-            name: dst ?? '',
-            nofollow: attrs?.nofollow === true,
-          })
-          return undefined
-      }
-    }
+    return workspaceBridge((name, path, args, kwargs = {}) =>
+      this.dispatchInternal(
+        name,
+        path,
+        args,
+        issuer === undefined ? kwargs : { ...kwargs, issuer },
+      ),
+    )
   }
 
   private async getShellParser(): Promise<ShellParser> {
@@ -906,7 +806,7 @@ export class Workspace {
   }
 
   /**
-   * The host's door on asked commands: `list()` the requests waiting,
+   * The host's entry point on asked commands: `list()` the requests waiting,
    * `grant(id, scope)` or `deny(id)` one, and the agent's retry passes
    * or is refused.
    */
@@ -927,7 +827,7 @@ export class Workspace {
    * table keeps working when a snapshot load or an attach re-keys the
    * default; an id stays that session.
    *
-   * @internal `Session.tools` is the door.
+   * @internal `Session.tools` is the entry point.
    */
   sessionTools(sessionId: string | null): MirageToolOperations {
     let tools = this.toolTables.get(sessionId)
@@ -946,7 +846,7 @@ export class Workspace {
    * is final before it is looked up. Closing the session drops it, and a
    * snapshot restore drops them all; null is the default as it is now.
    *
-   * @internal `Session.tools` is the door.
+   * @internal `Session.tools` is the entry point.
    */
   async sessionReads(sessionId: string | null): Promise<FileVersionTracker> {
     await this.ensureSessionsLoaded()
@@ -1046,7 +946,7 @@ export class Workspace {
    * registered on the workspace after it is built.
    */
   /**
-   * One session's two doors: `shell` and `vfs` bound to it.
+   * One session's two entry points: `shell` and `vfs` bound to it.
    *
    * Creates the session under the given profile when the id is new (the
    * same call as `createSession`), and adopts it as is when it exists.
@@ -1163,7 +1063,7 @@ export class Workspace {
    * host, is never placed, as it is never placed when it runs, and a
    * placement that refuses the line gives it the placement's refusal. A
    * hidden path is no path to any of it. `session.explain` is
-   * the same dry run for each of a session's doors.
+   * the same dry run for each of a session's entry points.
    *
    * Host-side only. The structure of a profile's rules is an operator's
    * business, so there is no builtin an agent can type to read it.
@@ -1295,7 +1195,7 @@ export class Workspace {
   /**
    * Add a mount to a running workspace.
    *
-   * The runtime door runs the same read-policy verdict the constructor
+   * The runtime entry point runs the same read-policy verdict the constructor
    * does: a mount added here is no more able to declare a policy its
    * backend cannot honour than one declared in config.
    *
@@ -1492,21 +1392,21 @@ export class Workspace {
   }
 
   /**
-   * Run one op door call as `sessionId`.
+   * Run one dispatcher call as `sessionId`.
    *
    * A session already bound in this context is kept: a command's
    * runtime reaching `ws.vfs` stays in its own session, and a kernel
-   * mount serving one session keeps that one, so the door never widens
+   * mount serving one session keeps that one, so the entry point never widens
    * a caller's view. A session another workspace bound is the
    * exception: its hides and grants describe that workspace, so an
-   * embedder callback reaching this door from inside the other's line
+   * embedder callback reaching this entry point from inside the other's line
    * runs as the session it asked for, judged by this workspace's own
    * profile. Otherwise the named session is bound the way `shell`
    * binds it.
    *
    * On the fallback storage (no task isolation) the newest live frame
    * may be another task's, so a facade that names its session binds it
-   * rather than trusting an ambient one; only the unnamed door (`ws.vfs`,
+   * rather than trusting an ambient one; only the unnamed entry point (`ws.vfs`,
    * `ws.dispatch`) keeps whatever is bound there, which is what a
    * command's runtime reaching it relies on.
    */
@@ -1521,7 +1421,7 @@ export class Workspace {
     return runWithSession(session, run, { owner: this.sessionManager })
   }
 
-  /** The ambient session the op door keeps for a facade, or null. */
+  /** The ambient session the dispatcher keeps for a facade, or null. */
   private ambientFor(sessionId: string | null): SessionState | null {
     const ambient = getCurrentSessionUnlessForeign(this.sessionManager)
     if (ambient !== null && (sessionId === null || asyncContextIsolatesTasks)) return ambient
@@ -1529,10 +1429,10 @@ export class Workspace {
   }
 
   /**
-   * The session the op door would run a facade's op as, from here.
+   * The session the dispatcher would run a facade's op as, from here.
    *
    * The rule is `bindSession`'s, so an adapter that reads namespace
-   * state outside the door (a link table consulted before a dispatch)
+   * state outside the dispatcher (a link table consulted before a dispatch)
    * judges it as the session the dispatch will then run as, ambient
    * one included, rather than as the one it was configured with.
    * Sessions must already be hydrated: this is a lookup, not a bind.
@@ -1716,7 +1616,7 @@ export class Workspace {
   }
 
   private async runShell(command: string, options: ExecuteOptions): Promise<ExecuteResult> {
-    // The top-level door, so it shuts as soon as a close starts. A line that
+    // The top-level entry point, so it shuts as soon as a close starts. A line that
     // got in after `jobTable.killAll()` could submit a background job that
     // teardown then never stops, and mounts would close under it. The
     // internal dispatch path stays open, which is what the journal replay
@@ -1748,7 +1648,7 @@ export class Workspace {
   /**
    * Cancel the top-level lines running or queued in a session, or in
    * every session when `sessionId` is undefined. What Ctrl-C does to a
-   * foreground line, for every door at once: HTTP jobs, SSH and codex
+   * foreground line, for every entry point at once: HTTP jobs, SSH and codex
    * lines and SDK callers alike reject with the abort error, their `$?`
    * left as they found it. Resolves once those lines have ended, so the
    * session is quiet; a line cancelling its own session is stopped but
@@ -1820,14 +1720,14 @@ export class Workspace {
   /**
    * Hold a write while a capture reads, unless its line is waited for. A
    * write from a running top-level line passes: the capture waits for that
-   * line. Any other (a door's file op, SFTP, FUSE, a background job) waits
+   * line. Any other (an entry point's file op, SFTP, FUSE, a background job) waits
    * for the capture to finish, and counts as under way until it ends, so a
    * capture that starts waits it out.
    */
   private async admitWrite<T>(write: () => Promise<T>): Promise<T> {
     // Without task-isolated context a running line's write looks like
     // anyone's, and holding it would stall the capture waiting on that
-    // line; such hosts have no SFTP or FUSE door to hold, so writes pass.
+    // line; such hosts have no SFTP or FUSE entry point to hold, so writes pass.
     if (!asyncContextIsolatesTasks) return write()
     const line = LINE_STOP.getStore()
     if (WRITE_HELD.getStore() === true || (line !== undefined && this.admitted.has(line))) {
@@ -1893,7 +1793,7 @@ export class Workspace {
    * deadlock. Evaluators carry their session explicitly. Ambient re-entry
    * is accepted only with task-local storage, just as in `executeLine`:
    * the fallback's newest binding may belong to another call. Host callbacks
-   * use their invocation's explicitly bound shell door on the fallback.
+   * use their invocation's explicitly bound shell entry point on the fallback.
    *
    * @param sessionId the session named by the caller, or undefined for
    *   the default.
@@ -2078,6 +1978,9 @@ export class Workspace {
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
+      // Each restored Mount carries its own mode, so this reaches only the
+      // scratch root the workspace adds again.
+      ...(args.anchorMode !== undefined ? { mode: args.anchorMode } : {}),
       ...options,
       write: args.writeDefault,
     }
@@ -2104,7 +2007,9 @@ export class Workspace {
       if (saved !== undefined) saved.index_config = indexConfigDump(mount.indexConfig, true)
     }
     const opts: WorkspaceOptions = {
-      mode: options.mode ?? MountMode.WRITE,
+      // Every restored mount keeps its saved mode, the scratch root
+      // included, unless the caller names one.
+      ...(options.mode !== undefined ? { mode: options.mode } : {}),
       io: options.io ?? this.io,
       // The declarations travel with the copy the way a live CLI
       // install does: an env pointer restores from state naming its
@@ -2201,18 +2106,19 @@ export class Workspace {
       // Teardown has run either way, and `closing` is memoized, so it will
       // not run again. The guards that only read `closed` are the ones that
       // stop a settled runner resuming onto a released VFS, so a
-      // teardown that raises must still close the door behind it.
+      // teardown that raises must still close the entry point behind it.
       this.closed = true
     }
   }
 }
 
 /**
- * One session's doors, bound together.
+ * One session's entry points, bound together.
  *
  * `shell` runs a line as the session, `vfs` is the file API run as it,
- * `tools` the agent tools over both and `explain` the same doors as a dry
- * run, so a host holds one object per agent and every door answers under the same profile: hides, mount
+ * `tools` the agent tools over both and `explain` the same entry points as a dry
+ * run, so a host holds one object per agent and every entry point answers under the same profile:
+ * hides, mount
  * modes, grants and standing decisions. Nothing is stored here; the session record stays with the
  * session manager and `state` reads it. Obtained from
  * `Workspace.session`, which creates the session or adopts it. A null id

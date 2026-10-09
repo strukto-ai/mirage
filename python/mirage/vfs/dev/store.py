@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterator
+from enum import Enum
 from typing import TypeVar, overload
 
 from mirage.context import get_current_session
@@ -19,8 +21,11 @@ from mirage.errors.fs import eacces, enoent
 from mirage.vfs.ram.store import RAMStore
 
 _DEV_NAMES = frozenset({"null", "zero"})
-_POP_MISSING = object()
 _T = TypeVar("_T")
+
+
+class _PopMissing(Enum):
+    TOKEN = 0
 
 
 class DevFiles(dict[str, bytes]):
@@ -94,7 +99,7 @@ class DevFiles(dict[str, bytes]):
         name = key.strip("/")
         return name if self._synthetic_active(name) else None
 
-    def __contains__(self, key: object) -> bool:
+    def __contains__(self, key: _T) -> bool:
         if not isinstance(key, str):
             return False
         if key.startswith("/fd/"):
@@ -152,16 +157,18 @@ class DevFiles(dict[str, bytes]):
     @overload
     def pop(self, key: str, default: _T, /) -> bytes | _T: ...
 
-    def pop(self, key: str, default: object = _POP_MISSING, /) -> object:
+    def pop(
+        self, key: str, default: _T | _PopMissing = _PopMissing.TOKEN, /
+    ) -> bytes | _T:
         if key not in self:
-            if default is _POP_MISSING:
+            if default is _PopMissing.TOKEN:
                 raise KeyError(key)
             return default
         value = self[key]
         del self[key]
         return value
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self.keys())
 
     def __len__(self) -> int:

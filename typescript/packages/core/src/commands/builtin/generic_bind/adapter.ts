@@ -19,7 +19,8 @@ import type {
   SearchQuery,
   StatOp,
 } from '../../../vfs/types.ts'
-import type { BaseVFS, FindOptions } from '../../../vfs/base.ts'
+import type { BaseVFS } from '../../../vfs/base.ts'
+import type { FindOptions } from '../../../vfs/types.ts'
 import { getExtension } from '../../../utils/filetype.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
 import { ensureStream } from '../../../io/stream.ts'
@@ -40,8 +41,7 @@ import { pathsScoped } from '../../../view/namespace_view.ts'
 import { METADATA_OPS } from '../../../policy/constants.ts'
 import { preVfsGate, type Policies, getOpPolicies } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { hasAborted } from '../../../workspace/abort.ts'
-import { makeAbortError } from '../../../concurrency/limiter.ts'
+import { hasAborted, makeAbortError } from '../../../utils/abort.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../../utils/remnants.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
@@ -131,8 +131,8 @@ async function existsByStat(vfs: BaseVFS, path: PathSpec): Promise<boolean> {
 // edit (`sed -i`) writes back what it read and a byte read agrees with a
 // stream. Only a VFS with no `read` of its own (gdocs, gsheets, gslides,
 // whose stored form is the rendering) is read through the renderer of the
-// path's filetype. Both are looked up per call, as the op door looks them
-// up; the op door renders for the surfaces that show files. Mirrors
+// path's filetype. Both are looked up per call, as the dispatcher looks them
+// up; the dispatcher renders for the surfaces that show files. Mirrors
 // Python's `_reader`.
 function reader(
   vfs: BaseVFS,
@@ -279,8 +279,8 @@ export function commandIo(vfs: BaseVFS): CommandIO {
   }
 }
 
-/** A command's whole or ranged read of the stored bytes, at the door. */
-async function doorBytes(
+/** A command's whole or ranged read of the stored bytes, at the dispatcher. */
+async function dispatchedBytes(
   dispatch: DispatchFn,
   path: PathSpec,
   offset = 0,
@@ -290,9 +290,9 @@ async function doorBytes(
   return materialize(data as ByteSource)
 }
 
-/** A command's streamed read of the stored bytes, at the door, opened at
+/** A command's streamed read of the stored bytes, at the dispatcher, opened at
  * the first pull as a backend stream is. */
-async function* doorStream(dispatch: DispatchFn, path: PathSpec): AsyncIterable<Uint8Array> {
+async function* dispatchedStream(dispatch: DispatchFn, path: PathSpec): AsyncIterable<Uint8Array> {
   const [data] = await dispatch('read', path, [], { stream: true, filetype: null })
   yield* ensureStream(data as ByteSource)
 }
@@ -300,16 +300,16 @@ async function* doorStream(dispatch: DispatchFn, path: PathSpec): AsyncIterable<
 /**
  * Return `ops` whose content reads go through the dispatcher.
  *
- * The door checks hides, the command's path rule, the mount's mode and
+ * The dispatcher checks hides, the command's path rule, the mount's mode and
  * policy, serves a warm copy and fills a cold one, so a command's read
  * answers what the same read through `ws.vfs` or FUSE answers. Mirrors
- * Python's `with_door_reads`.
+ * Python's `dispatched_io`.
  */
-export function withDoorReads(ops: CommandIO, dispatch: DispatchFn): CommandIO {
+export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn): CommandIO {
   return {
     ...ops,
-    readBytes: (_accessor, path) => doorBytes(dispatch, path),
-    readStream: (_accessor, path) => doorStream(dispatch, path),
+    readBytes: (_accessor, path) => dispatchedBytes(dispatch, path),
+    readStream: (_accessor, path) => dispatchedStream(dispatch, path),
     ...(ops.readRange === undefined
       ? {}
       : {
@@ -319,7 +319,7 @@ export function withDoorReads(ops: CommandIO, dispatch: DispatchFn): CommandIO {
             _index: IndexCacheStore | undefined,
             offset: number,
             size: number | null,
-          ) => doorBytes(dispatch, path, offset, size),
+          ) => dispatchedBytes(dispatch, path, offset, size),
         }),
   }
 }
@@ -700,7 +700,7 @@ async function pairSrcIsDir<A extends Accessor>(
  * for the whole command tier (resolveGlobOf derives from the wrapped
  * readdir). The backends' own IO constants stay raw: the ops tables
  * built from them serve the dispatcher, which enforces hiding itself
- * at the door. The guards read the current session at call time, so
+ * at the dispatcher. The guards read the current session at call time, so
  * one wrapped copy is shared across sessions.
  */
 function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): CommandIO<A> {
@@ -1007,7 +1007,7 @@ function refusedAfterAbort<T extends unknown[], R>(
  * Return `ops` whose backend slots refuse to start once the invocation's
  * signal has fired.
  *
- * The twin of the dispatch door's guard for mount commands: a handler
+ * The twin of the dispatcher's guard for mount commands: a handler
  * that loops over operands (`rm a b`, `cp -r`, `mkdir -p`) awaits a slot
  * once per operand, and a JS promise cannot be cancelled, so after the
  * caller was released the handler resumes on the await that was in
@@ -1057,13 +1057,7 @@ export function withAbortGuard<A extends Accessor = Accessor>(
   if (ops.rename !== undefined) guarded.rename = refusedAfterAbort(signal, ops.rename)
   if (ops.copy !== undefined) guarded.copy = refusedAfterAbort(signal, ops.copy)
   if (ops.dirCopy !== undefined) guarded.dirCopy = refusedAfterAbort(signal, ops.dirCopy)
-  const sa = ops.setAttrs
-  if (sa !== undefined) {
-    guarded.setAttrs = (accessor: A, path: PathSpec, ...rest: unknown[]) => {
-      if (hasAborted(signal)) throw makeAbortError(signal)
-      return sa(accessor, path, ...rest)
-    }
-  }
+  if (ops.setAttrs !== undefined) guarded.setAttrs = refusedAfterAbort(signal, ops.setAttrs)
   return guarded
 }
 
@@ -1161,7 +1155,7 @@ export function withCommandGuards<A extends Accessor>(
   ] as const) {
     const fn = prepared[slot]
     if (fn === undefined) continue
-    // Hides and the path rule on a content read are the door's.
+    // Hides and the path rule on a content read are the dispatcher's.
     const call =
       slot === 'readBytes' || slot === 'readRange' ? fn : commandCall(fn, slot, slot !== 'mkdir')
     Object.assign(guarded, {
@@ -1193,8 +1187,8 @@ export function withCommandGuards<A extends Accessor>(
 
 /**
  * Return `dispatch` marking each op with the admitted command's gate as
- * `ruleGate`, which the door judges on the paths the op reaches: the
- * command's dispatcher skips its guarded slots, and the door cannot tell
+ * `ruleGate`, which the dispatcher judges on the paths the op reaches: the
+ * command's dispatcher skips its guarded slots, and the dispatcher cannot tell
  * which command issued an op. A metadata op passes unmarked, as
  * `withCommandGuards` lets `stat` pass.
  */
@@ -1254,7 +1248,7 @@ async function policyAdmit(
   write: boolean,
 ): Promise<void> {
   const owner = scope.prefix ?? mountGateFor(path.virtual)?.[0] ?? null
-  // The mount prefix as the op door reports it, with its slash.
+  // The mount prefix as the dispatcher reports it, with its slash.
   const prefix = owner === null ? '' : `${rstripSlash(owner)}/`
   await preVfsGate(scope.policies, op, path, write, prefix, scope.sessionId, undefined, {
     checkHidden: false,
@@ -1267,7 +1261,7 @@ async function policyAdmit(
  *
  * The coded-policy arm of the guard chain. The surface is every mutation
  * slot and the directory a readdir lists; content reads go through the
- * dispatcher, which admits them itself (`withDoorReads`). stat/exists
+ * dispatcher, which admits them itself (`dispatchedIo`). stat/exists
  * stay unguarded as presence
  * facts, the mode-000 shape the path rules already take, so a denied
  * entry still lists and stats while the read of it is what fails;

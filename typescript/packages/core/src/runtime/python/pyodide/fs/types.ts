@@ -14,12 +14,15 @@
 
 import type { BridgeOpAttrs } from '../../../types.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
+import type { FsCondition } from '../../../../errors/types.ts'
 import type { MirageMutation } from './journal.ts'
 
 /** An inline flush stops at its first failure; skipped excludes that entry. */
 export interface FlushFailure {
   message: string
   skipped: number
+  /** The failed entry's errno name, which the guest call it fails raises. */
+  code?: FsCondition
 }
 
 export interface SyncVFS {
@@ -30,7 +33,7 @@ export interface SyncVFS {
   readlink(path: string): string
   flush(mutations: MirageMutation[]): FlushFailure | undefined
   /**
-   * One extended-attribute op, answered by the workspace door before it
+   * One extended-attribute op, answered by the dispatcher before it
    * returns: the value for getxattr, the names for listxattr.
    */
   xattr(

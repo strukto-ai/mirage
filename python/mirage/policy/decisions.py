@@ -17,7 +17,7 @@ import dataclasses
 import hashlib
 from collections.abc import Awaitable, Callable, Sequence
 from contextvars import ContextVar, Token
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
@@ -463,7 +463,7 @@ class Decisions:
     async def resolve_op(
         self, ctx: VfsContext, ask: Ask
     ) -> Deny | Pending | None:
-        """An Ask from the op door where no line is running: a standing
+        """An Ask from the dispatcher where no line is running: a standing
         answer settles it, else the question is raised now.
 
         The op has no command behind it, so its record names none: the
@@ -990,7 +990,9 @@ _op_call: ContextVar[tuple[Decisions, HandOff] | None] = ContextVar(
 )
 
 
-def set_op_call(owner: Decisions, handed: HandOff) -> Token[Any]:
+def set_op_call(
+    owner: Decisions, handed: HandOff
+) -> Token[tuple[Decisions, HandOff] | None]:
     """Bind one call made outside a line (a file tool's), the unit an
     op-level answer covers: a grant one of its ops is answered by is
     claimed on ``handed`` for the call's other ops on that path.
@@ -1003,7 +1005,7 @@ def set_op_call(owner: Decisions, handed: HandOff) -> Token[Any]:
     return _op_call.set((owner, handed))
 
 
-def reset_op_call(token: Token[Any]) -> None:
+def reset_op_call(token: Token[tuple[Decisions, HandOff] | None]) -> None:
     """Restore the previous call binding."""
     _op_call.reset(token)
 

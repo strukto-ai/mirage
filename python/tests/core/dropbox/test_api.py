@@ -12,10 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.cache.context import push_write_context
+from mirage.cache.types import WriteCondition
 from mirage.core.dropbox import api
 from mirage.core.dropbox.api import (
     continue_folder,
@@ -24,8 +28,21 @@ from mirage.core.dropbox.api import (
     move_path,
     search_files,
 )
-from mirage.core.dropbox.client import DropboxTokenManager
+from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
+from mirage.errors.types import StaleWriteError
+from mirage.types import PathSpec
 from mirage.vfs.dropbox.config import DropboxConfig
+from tests.fixtures.write_context import KeptVersions
+
+_LOST = json.loads(
+    (
+        Path(__file__).parents[4]
+        / "integ"
+        / "fixtures"
+        / "write"
+        / "drive_lost_codes.json"
+    ).read_text()
+)
 
 TM = DropboxTokenManager(
     DropboxConfig(client_id="c", client_secret="s", refresh_token="r")
@@ -216,3 +233,32 @@ async def test_move_path_reads_only_an_object_as_the_moved_entry(reply, entry):
         return_value=reply,
     ):
         assert await move_path(TM, "/a", "/b") == entry
+
+
+async def _refuse(
+    exc: DropboxApiError, sent: str | None
+) -> tuple[KeptVersions, StaleWriteError | None]:
+    store = KeptVersions("dropbox")
+    prev = push_write_context(store.context())
+    try:
+        path = PathSpec(virtual="/dbx/f", directory="/dbx/", vfs_path="/f")
+        got = await api.refused(path, exc, WriteCondition("s1"), sent)
+    finally:
+        push_write_context(prev)
+    return store, got
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sent", ["e1", None], ids=["sent", "plain"])
+@pytest.mark.parametrize(
+    "case", _LOST["dropbox"], ids=[c["name"] for c in _LOST["dropbox"]]
+)
+async def test_refused_reads_dropbox_answers_like_the_shared_table(case, sent):
+    store, got = await _refuse(
+        DropboxApiError("x", 409, case["summary"]), sent
+    )
+    outcome = {"lost": ["s1"], "gone": []}.get(case["outcome"])
+    if sent is None or outcome is None:
+        assert got is None and store.kept == []
+    else:
+        assert isinstance(got, StaleWriteError) and store.kept == outcome

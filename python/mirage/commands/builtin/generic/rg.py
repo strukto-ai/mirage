@@ -35,7 +35,7 @@ from mirage.commands.builtin.rg_search import (
 )
 from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
-from mirage.commands.builtin.utils.links import LinkDoor, link_door
+from mirage.commands.builtin.utils.links import LinkResolver, link_resolver
 from mirage.commands.builtin.utils.output import (
     format_optional_records,
     format_records,
@@ -910,7 +910,7 @@ async def rg_generic(
     # the fan-out that would search the mount itself is off too.
     boundary = mounts if f.one_file_system else None
     found = haystacks(
-        paths, rd, st, cwd, walk, f, warnings, boundary, link_door(opts)
+        paths, rd, st, cwd, walk, f, warnings, boundary, link_resolver(opts)
     )
     if f.sort not in (None, "none") and not (
         f.sort == "path" and not f.sort_reverse
@@ -1134,7 +1134,7 @@ async def haystacks(
     f: RgFlags,
     warnings: list[str],
     boundary: MountView | None,
-    door: LinkDoor | None,
+    resolver: LinkResolver | None,
 ) -> AsyncIterator[Haystack]:
     """Every input the line searches, in order: a stdin operand, a named
     file as itself whatever the filters say, and a directory walked.
@@ -1150,8 +1150,8 @@ async def haystacks(
         boundary (MountView | None): the mounts --one-file-system keeps
             each walk to its operand's own, None when the walk may enter
             any directory.
-        door (LinkDoor | None): the namespace's links and the door past
-            them, which -L walks through.
+        resolver (LinkResolver | None): the namespace's links and the
+            dispatcher past them, which -L walks through.
     """
     # ripgrep holds one path that is not a directory to one thread, as it
     # does -j1 and a sort; every other line runs its parallel walker.
@@ -1202,7 +1202,7 @@ async def haystacks(
             f.sort == "path" and not f.sort_reverse,
             warnings,
             crosses,
-            door,
+            resolver,
             f.follow,
             parallel,
         ):
@@ -1285,8 +1285,8 @@ async def _search_all(
                 source = operand_stream(h.spec)
             elif h.spec is not None and read_stream is not None:
                 source = read_stream(h.spec)
-            elif h.door is not None:
-                source = h.door.read(h.virtual)
+            elif h.resolver is not None:
+                source = h.resolver.read(h.virtual)
             else:
                 source = _wrap_bytes(await rb(h.virtual))
             chunks = [

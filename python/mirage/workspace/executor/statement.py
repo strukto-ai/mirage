@@ -34,10 +34,10 @@ from mirage.shell.descriptors import (
 )
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import TSNodeLike
-from mirage.workspace.abort import StatusWriter, line_status_writer
+from mirage.workspace.abort import line_status_writer
 from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.session import SessionState
-from mirage.workspace.types import ExecutionNode
+from mirage.workspace.types import ExecutionNode, StatusWriter
 
 
 def record_status(
@@ -46,7 +46,7 @@ def record_status(
     """Record a finished statement's exit status: ``$?`` and
     ``${PIPESTATUS[@]}`` together.
 
-    The one door every status write goes through, so the two can never
+    The one function every status write goes through, so the two can never
     disagree. ``handle_pipe`` parks its per-segment statuses on the
     session, and the boundary that closes the pipeline claims them here;
     a boundary with nothing parked stamps its own one-element status,

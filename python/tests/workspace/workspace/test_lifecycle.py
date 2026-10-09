@@ -42,12 +42,12 @@ from mirage.shell.console import (
 )
 from mirage.shell.job_table import JobStatus
 from mirage.types import CapacityResult, CapacityState, MountMode, PathSpec
+from mirage.utils.abort import MirageAbortError
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.vfs.call import vfs_call
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import Effect
 from mirage.workspace import Workspace
-from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.builtins.shared import expand_operands
 from mirage.workspace.executor.command.run import drop_mount_caches
 from mirage.workspace.mount.namespace import RAMNamespaceStore

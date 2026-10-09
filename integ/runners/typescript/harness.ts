@@ -132,13 +132,13 @@ export interface Target {
   cli_scope?: string
   // The target's profiles (`profiles:` in YAML). A profile is the whole
   // permission document a session runs under, per-mount rules included;
-  // validated by the parser the YAML door uses.
+  // validated by the parser the YAML loader uses.
   profiles?: Record<string, unknown>
   // Which profile shapes a session that names none, its own included.
   profile?: string
   mounts: Mount[]
   // Sessions a case can name via its `session` field, through the two
-  // doors a host really has. A string names one of the target's profiles,
+  // entry points a host really has. A string names one of the target's profiles,
   // which is the whole document that session runs under. A mapping is
   // an inline document added to the default profile: it may add ask and
   // deny rules and hides, never an allow list, so a session that needs

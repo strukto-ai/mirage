@@ -41,13 +41,13 @@ from mirage.fuse.core import MountCore
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import Deny, Policy, PolicyDenied
 from mirage.runtime.binding import WorkspaceBinding, capture_binding
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.wasi import WasiRuntime
 from mirage.runtime.resolver import PrefixResolver
-from mirage.runtime.vfs import RuntimeVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.session import SessionState
 
@@ -173,7 +173,7 @@ async def test_context_keeps_namespace_live_and_matches_native_projection():
         assert context.ns.links.resolve("/data/link") == "/data/a"
         ws.add_mount("/data/nested", RAMVFS(), mode=MountMode.EXEC)
         assert context.resolver.owner_of("/data/nested/a") == "/data/nested/"
-        vfs = RuntimeVFS.of(context)
+        vfs = RuntimeFiles.of(context)
         mount = MountCore(ws.vfs)
         # Call both sync adapters on a worker to keep their serving loop free.
         guest = await asyncio.to_thread(vfs.read, "/data/link")
@@ -339,19 +339,14 @@ def vfs_read_on_a_bare_thread(vfs):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("door", ["context", "raw"])
-async def test_a_file_door_replays_the_launch_session_and_recorder(door):
+async def test_a_file_adapter_replays_the_launch_session_and_recorder():
     dispatch = SessionSpyDispatch()
     binding = WorkspaceBinding(dispatch, PrefixResolver(lambda: []))
     sess = SessionState(session_id="agent")
     scope = RecordingScope()
     token = set_current_session(sess)
     try:
-        vfs = (
-            RuntimeVFS.of(capture_binding(binding))
-            if door == "context"
-            else RuntimeVFS(dispatch, asyncio.get_running_loop())
-        )
+        vfs = RuntimeFiles.of(capture_binding(binding))
     finally:
         reset_current_session(token)
     try:
@@ -365,7 +360,7 @@ async def test_a_file_door_replays_the_launch_session_and_recorder(door):
 @pytest.mark.asyncio
 async def test_context_vfs_of_a_bare_launch_stays_unscoped_and_unrecorded():
     dispatch = SessionSpyDispatch()
-    vfs = RuntimeVFS.of(
+    vfs = RuntimeFiles.of(
         capture_binding(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
     )
     scope = RecordingScope()

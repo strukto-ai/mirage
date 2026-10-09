@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { abortable, makeAbortError } from '../concurrency/limiter.ts'
+import { makeAbortError } from '../utils/abort.ts'
+import type { StatusWriter } from './types.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { SessionState } from './session/session.ts'
@@ -21,7 +22,7 @@ import type { SessionState } from './session/session.ts'
  * One running line: its signal and the sessions its statements stamp
  * on (the target session and the per-call fork, one object when the
  * call named no cwd or env). Bound by `shell` for the line's duration
- * and read at the status door. It rides the async context rather than
+ * and read at the status write. It rides the async context rather than
  * the session, so two lines on one session each see their own, and a
  * statement that settles after its caller was released still reads the
  * signal of the line that produced it.
@@ -36,7 +37,7 @@ const lineAbortContext = createAsyncContext<LineAbortFrame>()
 
 /**
  * Run `fn` as the body of the line `signal` belongs to. Everything the
- * body awaits, down to the status door, can then ask `abortedLine`
+ * body awaits, down to the status write, can then ask `abortedLine`
  * whether its caller is still waiting, without the signal being threaded
  * through every handler. `shell` is the only caller.
  */
@@ -79,7 +80,7 @@ export function lineSignal(session: SessionState): AbortSignal | undefined {
  * Read from every live frame for the session rather than the newest
  * frame. On an isolating runtime the live frames are the current task's
  * alone, so the answer is exact. On the browser fallback the newest
- * frame may belong to another line that happens to overlap, so the door
+ * frame may belong to another line that happens to overlap, so the status write
  * refuses only when every live line on this session has aborted: one
  * line's abort never reaches a concurrent line's statement, and the one
  * case left open is two aborted-or-not lines overlapping on one session
@@ -93,67 +94,12 @@ export function abortedLine(session: SessionState): AbortSignal | undefined {
 }
 
 /**
- * Whether the signal has fired. A call rather than a property read, so a
- * check that comes after an earlier one is not narrowed away as stale.
- */
-export function hasAborted(signal?: AbortSignal): boolean {
-  return signal?.aborted === true
-}
-
-/** Fold two optional abort signals into one; either aborting aborts. */
-export function mergeSignals(
-  a: AbortSignal | null | undefined,
-  b: AbortSignal | null | undefined,
-): AbortSignal | undefined {
-  if (a != null && b != null) return AbortSignal.any([a, b])
-  return a ?? b ?? undefined
-}
-
-// `setTimeout` holds a 32-bit signed delay, so anything longer is not merely
-// imprecise: node warns (`TimeoutOverflowWarning`) and clamps it to 1ms, which
-// turns a long wait into an immediate return. 2147483647ms is just under 25
-// days, which python's `asyncio.sleep` reaches without a word, so a delay past
-// it is served by re-arming rather than by one timer. `tail`'s own pause
-// (commands/builtin/generic/tail.ts) documents the infinite case of the same
-// trap.
-const MAX_TIMEOUT_MS = 2_147_483_647
-
-export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    if (signal?.aborted === true) {
-      reject(makeAbortError())
-      return
-    }
-    let timer: ReturnType<typeof setTimeout> | null = null
-    let left = ms
-    const onAbort = (): void => {
-      if (timer !== null) clearTimeout(timer)
-      reject(makeAbortError())
-    }
-    const arm = (): void => {
-      const step = Math.min(left, MAX_TIMEOUT_MS)
-      left -= step
-      timer = setTimeout(() => {
-        if (left > 0) {
-          arm()
-          return
-        }
-        signal?.removeEventListener('abort', onAbort)
-        resolve()
-      }, step)
-    }
-    arm()
-    signal?.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
-/**
  * A dispatch that refuses to start an op once `signal` has fired. A
  * cancelled asyncio task unwinds at its next await, so a Python handler
  * that loops over operands (`rm link1 link2`, `chmod`, `touch`) never
  * reaches the next one. A JS handler resumes after the await that was in
  * flight when the caller was released and would begin the next write.
- * Refusing at the op door, the one seam every handler's I/O goes through,
+ * Refusing at the dispatcher, the one seam every handler's I/O goes through,
  * stops it there without threading the signal through each handler. An
  * op already in flight settles on its own.
  */
@@ -164,48 +110,6 @@ export function guardDispatch(dispatch: DispatchFn, signal: AbortSignal | undefi
     return dispatch(op, path, args, kwargs, report)
   }
 }
-
-/** How long a cancelled tree gets to unwind before the caller is released anyway. */
-export const ABORT_JOIN_MS = 250
-
-/**
- * The twin of Python's `run_cancellable`: cancel, then join. A cancelled
- * asyncio task unwinds at its next await, so Python joins it fully. A JS
- * promise cannot be cancelled, so once `signal` fires the tree is given
- * `graceMs` to reach a checkpoint, close its producers and settle with
- * its own error (which keeps the caller's abort reason); a leaf that is
- * blocked past that is left running and the caller is released.
- */
-export async function joinOrAbort<T>(
-  promise: Promise<T>,
-  signal: AbortSignal | undefined,
-  graceMs = ABORT_JOIN_MS,
-): Promise<T> {
-  if (signal === undefined) return promise
-  try {
-    return await abortable(promise, signal)
-  } catch (error) {
-    if (!signal.aborted) throw error
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const grace = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        reject(makeAbortError(signal))
-      }, graceMs)
-    })
-    try {
-      return await Promise.race([promise, grace])
-    } finally {
-      clearTimeout(timer)
-    }
-  }
-}
-
-/**
- * Opaque per-line identity for status writes, minted once per
- * `execute()` and carried on the line's abort frame so every statement
- * it runs stamps the same one.
- */
-export type StatusWriter = symbol
 
 /** A fresh line identity. */
 export function newStatusWriter(): StatusWriter {

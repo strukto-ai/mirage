@@ -23,7 +23,7 @@ import {
   revisionFor,
   startOp,
 } from '../../observe/context.ts'
-import type { FindOptions } from '../../vfs/base.ts'
+import type { FindOptions } from '../../vfs/types.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, listingError } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
@@ -292,7 +292,7 @@ export interface FolderTarget {
  * "replace" is unreliable for folders on real Graph, so the create uses
  * "fail" and reads its 409: a folder already holding the name is success when
  * `existOk` (a level `mkdir -p` passes through) and EEXIST otherwise, so a
- * folder another client made after the doors looked is still refused; a file
+ * folder another client made after the lookup ran is still refused; a file
  * holding it is EEXIST. Graph answers a create under a missing parent and
  * under a file alike with 404, so the parent is looked up to tell ENOENT from
  * ENOTDIR. Both lookups run on a refusal only. Mirrors Python's

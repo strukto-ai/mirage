@@ -14,7 +14,7 @@
 
 import { type NativeParser } from './engine.ts'
 import { scanParameter } from '../parameter.ts'
-import { ARITH_OPEN_TOKEN, QUOTES } from './constants.ts'
+import * as constants from './constants.ts'
 import { expansionSource } from './expansion.ts'
 import { protectedSource } from './heredoc/index.ts'
 import { delimiterEnd } from './heredoc/reader.ts'
@@ -43,7 +43,7 @@ function balancedEnd(text: string, start: number): number | null {
       index += 1
       continue
     }
-    if (QUOTES.has(char)) {
+    if (constants.QUOTES.has(char)) {
       quote = char
     } else if (char === '\\') {
       index += 2
@@ -75,50 +75,9 @@ export function isArithmetic(parser: NativeParser, command: string, start: numbe
   return !span?.rootNode.hasError
 }
 
-const UNLEXED = new Set([
-  'test_command',
-  'arithmetic_expansion',
-  'string_content',
-  'raw_string',
-  'ansi_c_string',
-  'expansion',
-  'heredoc_content',
-  'comment',
-  'binary_expression',
-  'unary_expression',
-  'postfix_expression',
-])
-
-const WORD_START = ' \t\n;&|(){}'
-
-const DIGITS = /\d+/y
-
-const LAST_ARM = /^\s*esac(?![^\s;&|()<>])/
-
-// Tokens the grammar lexes apart from a word in an argument list, where
-// bash reads a word, by the node they stand under. A bare `$` in a command
-// is already kept as a word, and only an error region loses it; the `$`
-// opening `$"..."` is the translation marker, never a word.
-const BARE_WORDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['command', new Set(['==', '=~'])],
-  ['ERROR', new Set(['==', '=~', '$'])],
-])
-
-const WORD_BREAK = ' \t\n;&|()<>'
-
-const LIST_TOKENS = new Set(['&&', '||', '|', '|&', ';', '&', ';;'])
-
-const TEST_PARTS = new Set([
-  'binary_expression',
-  'unary_expression',
-  'negation_expression',
-  'parenthesized_expression',
-  'ERROR',
-])
-
 /** Whether `text[at]` ends a word: the end of the text, a blank or an operator. */
 function breaksWord(text: string, at: number): boolean {
-  return at < 0 || at >= text.length || WORD_BREAK.includes(text[at] ?? '')
+  return at < 0 || at >= text.length || constants.WORD_BREAKS.has(text[at] ?? '')
 }
 
 /**
@@ -139,8 +98,8 @@ function bracketIsACommand(text: string, node: ShellNode): boolean {
   if (!breaksWord(text, close.endIndex)) return true
   const stack = children.slice(1, -1)
   for (let part = stack.pop(); part !== undefined; part = stack.pop()) {
-    if (!part.isNamed && LIST_TOKENS.has(part.type)) return true
-    if (TEST_PARTS.has(part.type)) stack.push(...part.children)
+    if (!part.isNamed && constants.LIST_TOKENS.has(part.type)) return true
+    if (constants.TEST_PARTS.has(part.type)) stack.push(...part.children)
   }
   return false
 }
@@ -158,13 +117,17 @@ function bracketIsACommand(text: string, node: ShellNode): boolean {
  * arm's `;&` or `;;&`, which the grammar refuses, ends it as `;;` does, there
  * being no arm after it, so it is spelled so. An argument of `==` or `=~`,
  * which the grammar reads as a test operator wanting an operand (so `echo ==`
- * is an error and `echo == x` drops it), and a bare `$` before a terminator
- * are words to bash; spelled as `_` filler they parse as the words they are,
- * and `SourceNode` gives back their text. So is the `[` of a test bash reads
+ * is an error and `echo == x` drops it), and a `$` that opens no expansion
+ * (`$\a`, `$,`, `$` before a blank) are words to bash, where the grammar errs
+ * or reads an expansion missing its name; spelled as `_` filler they parse as
+ * the words they are, and `SourceNode` gives back their text. So is the `[` of a test bash reads
  * as a `[` command (`bracketIsACommand`, or one an error region opens), which
- * then runs as the builtin. An operator inside an error region gets its own
- * token only once the operators before it are respelled, so the pass repeats
- * on its own parse until nothing changes. Mirrors Python's operator_source.
+ * then runs as the builtin, and so is a backslash-blank pair the grammar
+ * skips as whitespace (`skippedEscapes`), spelled `..` so it opens its word
+ * without joining a `$name` before it or making an assignment. An
+ * operator inside an error region gets its own token only once the operators
+ * before it are respelled, so the pass repeats on its own parse until nothing
+ * changes. Mirrors Python's operator_source.
  */
 export function operatorSource(parser: NativeParser, text: string, root: ShellNode): string {
   let current = text
@@ -178,18 +141,56 @@ export function operatorSource(parser: NativeParser, text: string, root: ShellNo
   return current
 }
 
+/**
+ * Offsets of each backslash-blank pair the grammar read as a blank.
+ *
+ * Outside quotes, bash reads a backslash before a space or a tab as that
+ * blank escaped into the word it opens (`\ x` is the word ` x`). The grammar
+ * skips the pair as whitespace, so the word loses its blank, and a line one
+ * opens reads as more words of the line before. Only the text no token covers
+ * is searched; a quoted or unlexed span counts as one token.
+ */
+function skippedEscapes(text: string, root: ShellNode): number[] {
+  if (text.search(constants.ESCAPED_BLANK) === -1) return []
+  const spans: [number, number][] = [[text.length, text.length]]
+  const stack: ShellNode[] = [root]
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    if (node.childCount > 0 && !constants.UNLEXED.has(node.type) && node.type !== 'string')
+      stack.push(...node.children)
+    else spans.push([node.startIndex, node.endIndex])
+  }
+  spans.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const offsets: number[] = []
+  let at = 0
+  for (const [lo, hi] of spans) {
+    for (const match of text.slice(at, lo).matchAll(constants.ESCAPED_BLANK))
+      offsets.push(at + match.index)
+    at = Math.max(at, hi)
+  }
+  return offsets
+}
+
+/** One respelling pass of `operatorSource` over one parse. Mirrors Python's
+ * _respelled. */
 function respelled(text: string, root: ShellNode): string {
   const out = text.split('')
+  for (const at of skippedEscapes(text, root)) {
+    out[at] = '.'
+    out[at + 1] = '.'
+  }
   const stack: ShellNode[] = [root]
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
     if (node.type === 'test_command' && bracketIsACommand(text, node)) out[node.startIndex] = '_'
-    if (UNLEXED.has(node.type)) continue
+    if (constants.UNLEXED.has(node.type)) continue
     stack.push(...node.children)
-    const bare = BARE_WORDS.get(node.type)
     for (const child of node.children) {
       if (child.isNamed) continue
-      if (bare?.has(child.type) === true) {
-        if (child.type === '$' && text[child.endIndex] === '"') continue
+      constants.LITERAL_DOLLAR.lastIndex = child.startIndex
+      if (
+        (constants.BARE_WORDS.has(child.type) &&
+          (node.type === 'command' || node.type === 'ERROR')) ||
+        (child.type === '$' && constants.LITERAL_DOLLAR.test(text))
+      ) {
         for (let i = child.startIndex; i < child.endIndex; i++) out[i] = '_'
       } else if (
         node.type === 'ERROR' &&
@@ -207,16 +208,16 @@ function respelled(text: string, root: ShellNode): string {
       out[start + 2] = ' '
     } else if (
       (node.type === ';&' || node.type === ';;&') &&
-      LAST_ARM.test(text.slice(node.endIndex))
+      constants.LAST_CASE_ARM.test(text.slice(node.endIndex))
     ) {
       out[start] = ';'
       out[start + 1] = ';'
       if (node.type === ';;&') out[start + 2] = ' '
     }
     if (node.childCount > 0 || text[start] !== '0') continue
-    if (start > 0 && !WORD_START.includes(text[start - 1] ?? '')) continue
-    DIGITS.lastIndex = start
-    const end = start + (DIGITS.exec(text)?.[0].length ?? 0)
+    if (start > 0 && !constants.WORD_START.includes(text[start - 1] ?? '')) continue
+    constants.DIGIT_RUN.lastIndex = start
+    const end = start + (constants.DIGIT_RUN.exec(text)?.[0].length ?? 0)
     if (text[end] === '<' || text[end] === '>') out[start] = '1'
   }
   return out.join('')
@@ -262,7 +263,7 @@ export function failedArithOpeners(root: ShellNode): number[] {
     const [node, inError] = entry
     const errored = inError || node.type === 'ERROR'
     for (const child of node.children) {
-      if (child.type === ARITH_OPEN_TOKEN && (errored || node.hasError)) {
+      if (child.type === constants.ARITH_OPEN_TOKEN && (errored || node.hasError)) {
         offsets.push(child.startIndex)
       }
       stack.push([child, errored])
@@ -345,12 +346,19 @@ export function repairOrphanedDollars(
   return root
 }
 
+/**
+ * Quote a lone dash the grammar drops before a descriptor redirect.
+ * tree-sitter-bash loses a bare `-` written right before an explicit
+ * descriptor's redirect (`echo - 2>&1`). Only a dash standing alone in a gap
+ * between two nodes is quoted, never text inside a word or a body, and the
+ * repair stands only if the reparse has no error. Returns the tree and source
+ * to run. Mirrors Python's repair_redirect_dashes.
+ */
 export function repairRedirectDashes(
   parser: NativeParser,
   root: ShellNode,
   text: string,
 ): [ShellNode, string] {
-  // Quote only an uncovered dash before a redirect, never word or heredoc text.
   const offsets: number[] = []
   const stack = [root]
   while (stack.length > 0) {
@@ -375,10 +383,12 @@ export function repairRedirectDashes(
   return retried.hasError ? [root, text] : [retried, repaired]
 }
 
-const NAME = /^\w+$/
-
-const FOLLOWER = /^\s*(in|do)(?![^\s;&|()<>])/
-
+/**
+ * The insertions that let each for or select header parse, as offset and
+ * text: an omitted list becomes `in "$@"`, which bash iterates, and a
+ * variable that is not a name moves into a list behind `0 in`, where the loop
+ * refuses it at run time as bash does. Mirrors Python's _header_inserts.
+ */
 function headerInserts(root: ShellNode, text: string): [number, string][] {
   const heads: number[] = []
   const stack = [root]
@@ -393,8 +403,8 @@ function headerInserts(root: ShellNode, text: string): [number, string][] {
   for (const head of heads) {
     const start = text.length - text.slice(head).replace(/^[ \t]+/, '').length
     const end = delimiterEnd(text, start) ?? start
-    const word = FOLLOWER.exec(text.slice(end))?.[1]
-    const named = NAME.test(text.slice(start, end))
+    const word = constants.HEADER_FOLLOWER.exec(text.slice(end))?.[1]
+    const named = constants.HEADER_NAME.test(text.slice(start, end))
     if (end === start || (named && word === 'in')) continue
     const tail = word === 'do' ? ';' : ''
     if (named) inserts.push([end, ` in "$@"${tail}`])
@@ -403,13 +413,17 @@ function headerInserts(root: ShellNode, text: string): [number, string][] {
   return inserts
 }
 
+/**
+ * Repair for and select headers (`headerInserts`) until none is left: a
+ * header inside a repaired one shows only on the reparse. The repair stands
+ * only if it adds no error. Returns the tree and source to run. Mirrors
+ * Python's repair_for_headers.
+ */
 export function repairForHeaders(
   parser: NativeParser,
   root: ShellNode,
   text: string,
 ): [ShellNode, string] {
-  // Encode invalid names for runtime validation and supply omitted "$@".
-  // Repeat to expose nested headers; accept only repairs adding no errors.
   let [repaired, retried] = [text, root]
   for (let inserts = headerInserts(root, text); inserts.length > 0;) {
     for (const [offset, insert] of inserts.sort((a, b) => b[0] - a[0])) {
@@ -423,6 +437,7 @@ export function repairForHeaders(
     : [retried, repaired]
 }
 
+/** The spans of a tree's error and missing nodes. Mirrors Python's _errors. */
 function errors(root: ShellNode): Set<string> {
   const spans = new Set<string>()
   const stack = [root]
@@ -436,7 +451,10 @@ function errors(root: ShellNode): Set<string> {
 
 /**
  * Make statement newlines swallowed between simple-command words explicit.
- * Quoted newlines are inside a child and continuations were already removed.
+ * The grammar also folds one into the next word when a backslash opens that
+ * word (`\ls`, the alias bypass), so the next line reads as more arguments.
+ * Quoted newlines are inside a child, continuations were already removed, and
+ * an escaped blank beside one is a word the grammar skipped (`skippedEscapes`).
  * Insertion preserves the source maps used by lowered heredocs. The separator
  * goes before a comment that ends the statement, since one after it would be
  * read as part of the comment.
@@ -451,14 +469,15 @@ export function statementBoundaries(parser: NativeParser, text: string): string 
     const node = stack.pop()
     if (node === undefined) break
     stack.push(...node.children)
-    if (!['command', 'file_redirect', 'redirected_statement'].includes(node.type)) continue
+    if (!constants.STATEMENT_NODES.has(node.type)) continue
     const children = node.children
     for (let i = 1; i < children.length; i += 1) {
       const left = children[i - 1]
       const right = children[i]
       if (left === undefined || right === undefined) continue
-      const gap = text.slice(left.endIndex, right.startIndex)
-      if (gap.includes('\n') && gap.trim() === '')
+      const folded = text[right.startIndex] === '\n' ? 1 : 0
+      const gap = text.slice(left.endIndex, right.startIndex + folded)
+      if (gap.includes('\n') && gap.replace(constants.ESCAPED_BLANK, '').trim() === '')
         offsets.add(left.type === 'comment' ? left.startIndex : left.endIndex + gap.indexOf('\n'))
     }
   }

@@ -12,13 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, TypeAlias
 
 from mirage.io import IOResult, OpReport
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
+
+
+class RuntimeIdentity(Protocol):
+    """The runtime metadata shared by routing and capability checks."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def captures(self) -> Sequence[str]: ...
+
 
 # The value contract of eval: never richer than JSON plus bytes, so any
 # evaluator (in-process or remote over a serialized transport) can carry
@@ -38,22 +49,22 @@ EvalValue: TypeAlias = (
 # line (session mode only). "exit" is an explicit exit() call.
 EvalStatus: TypeAlias = Literal["complete", "incomplete", "exit"]
 
-# The languages a runtime can interpret, one name for both doors (run
+# The languages a runtime can interpret, one name for both entry points (run
 # and eval). A Literal, not str, so a typo is a type error instead of a
 # selector that silently matches nothing and reports "no runtime".
 Language: TypeAlias = Literal["python", "js"]
 
-# Which doors code executed by a runtime has to the outside world. The
+# Which entry points code executed by a runtime has to the outside world. The
 # workspace dispatch is a gate: it checks mount modes, session grants,
 # and policy, records the op, and only then touches the real backend
 # behind the mount (s3, disk, an API). Reach states whether that gate
 # is avoidable, not where bytes physically end up; a "workspace" write to an
 # s3 mount still lands in real s3, but only after the gate said yes.
-# - "workspace": the gate is the code's only door. The engine runs as an
+# - "workspace": the gate is the code's only entry point. The engine runs as an
 #   in-process guest with no syscalls, so its I/O can only travel the
 #   VFS bridge (or the workspace executor itself) and a mount-mode or
 #   policy refusal is final.
-# - "process": the code has host doors around the gate. It is, or
+# - "process": the code has host entry points around the gate. It is, or
 #   spawns, a real process on this machine with the user's own
 #   filesystem and network, so it can reach the same backends (and
 #   everything else) without the gate seeing it.
@@ -71,7 +82,7 @@ class DispatchFn(Protocol):
     on the consumer side, because runtimes receive it through a binding while
     the workspace provides it, and the runtime package imports no
     workspace module. ``report``, when a caller passes one, is stamped
-    by the door the moment the op completes, so an observer reads what
+    by the dispatcher the moment the op completes, so an observer reads what
     ran even when a later step throws the result away; runtimes never
     pass it."""
 
@@ -93,7 +104,7 @@ class DispatchFn(Protocol):
 ExecPathFn: TypeAlias = Callable[[str], bool]
 
 # Run one shell line in the calling session and return its result, the
-# line reading the given input (None keeps the ambient one): the door a
+# line reading the given input (None keeps the ambient one): the entry point a
 # command handler reaches the executor through, as awk's command pipes
 # and system() do. Defined beside DispatchFn for the same reason: the
 # consumer receives it, the workspace provides it.
@@ -113,7 +124,7 @@ class VFSStat:
     """One path's metadata, in the shape every guest encoder needs
     (TS ``VFSStat``).
 
-    Built once at the door out of the mount's own ``FileStat``, so a
+    Built once at the file adapter out of the mount's own ``FileStat``, so a
     surface projects rather than translates: preview1 keeps the type
     bits and drops the rest, monty fills a ``StatResult``, Emscripten
     fills an ``FSAttr``.
@@ -126,40 +137,50 @@ class VFSStat:
             the shell made is what a guest's stat reports. ``is_dir``
             and ``is_link`` are this field's type bits spelled out;
             mode is the authority and they are the convenience.
-        mtime_ns (int): modification time in epoch nanoseconds, 0 when
-            the source reports none. Nanoseconds here and milliseconds
-            in TypeScript, on purpose: epoch nanoseconds are past
-            2**53, so a JS number cannot hold them exactly, while a
-            python int can and preview1 asks in them.
+        mtime_ns (int | None): modification time in epoch nanoseconds,
+            None when the source reports none. A guest wire with no
+            validity channel spells None as 0 at its own boundary.
+            Nanoseconds here and milliseconds in TypeScript, on purpose:
+            epoch nanoseconds are past 2**53, so a JS number cannot hold
+            them exactly, while a python int can and preview1 asks in
+            them.
         is_link (bool): the path is a symlink. Only ever true for a
             stat the caller asked not to follow, since every other
             answer is the target's.
         rdev (int): encoded logical major:minor for a character device,
             otherwise 0.
+        atime_ns (int | None): access time in epoch nanoseconds, None
+            when the source reports none.
+        uid (int | None): the owner's numeric id, None when unknown or
+            stored as a name.
+        gid (int | None): the group's numeric id, read the same way.
     """
 
     size: int
     is_dir: bool
     mode: int
-    mtime_ns: int
+    mtime_ns: int | None = None
     is_link: bool = False
     rdev: int = 0
+    atime_ns: int | None = None
+    uid: int | None = None
+    gid: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class VFSEntry:
     """One directory entry as the mounts report it (TS ``VFSEntry``).
 
-    Resolved once at the door by the entry's own stat, so no guest
-    pays one stat per entry for a fact the door already had. An entry
-    the door did not classify (a guest that asked for names only, or a
+    Resolved once at the file adapter by the entry's own stat, so no guest
+    pays one stat per entry for a fact the file adapter already had. An entry
+    the file adapter did not classify (a guest that asked for names only, or a
     stat that failed) rides as a size-0 non-directory with no mode or
     mtime: "not known", rather than a default a guest cannot tell from
     a real answer. A slash-marked directory carries neither either,
     which is the whole point of the mark.
 
     Args:
-        path (str): the entry's virtual path, in the door's own
+        path (str): the entry's virtual path, in the file adapter's own
             spelling (a backend that slash-marks directories keeps the
             trailing slash).
         size (int): rendered content bytes, 0 for directories and

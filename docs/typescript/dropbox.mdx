@@ -106,6 +106,19 @@ A write records the `content_hash` its upload reply names, so a `fresh` read
 right after a `tee` or `sed -i` downloads nothing. See
 [Writes](/home/cache#writes).
 
+## Conditional writes
+
+A Dropbox mount accepts [`write: conditional`](/home/yaml#the-write-policy).
+A write that holds a version looks the file up once (`get_metadata`),
+refuses a file whose `content_hash` changed since it was read, and uploads
+in `update` mode with the file's `rev`, so Dropbox refuses (409
+`path/conflict`) a change that lands in between; a delete sends the `rev` as
+`parent_rev`. `rm -r` walks the folder file by file, and a `mv` within the
+mount is Dropbox's own move, which is not refused when its source changed
+(a `mv` to another mount is a copy and a conditioned delete, so there a
+changed source stays and `mv` reports the failed removal); see
+[which backends](/home/yaml#which-backends).
+
 ## Browser (PKCE, no client secret)
 
 ```bash
@@ -132,7 +145,7 @@ runs the full PKCE dance end-to-end and persists the refresh token to `localStor
 
 ## VFS mode (`patchNodeFs`)
 
-Mirage exposes a `patchNodeFs(workspace)` shim that routes `fs.promises.*` calls under a mount
+Mirage exposes a `patchNodeFs(workspace)` shim that routes `fs` calls under a mount
 through the workspace, so any library that uses Node's `fs` API can read directly from Dropbox
 without code changes.
 
@@ -153,8 +166,8 @@ const bytes = await fs.promises.readFile('/dropbox/data/example.parquet')
 restore()
 ```
 
-Only `fs.promises.*` (the async API) is patched. Sync forms like `fs.statSync` and
-`fs.readFileSync` aren't supported because remote reads can't block the event loop.
+The async forms (`fs.promises.*` and the callbacks) are routed. Sync forms like `fs.statSync` and
+`fs.readFileSync` refuse a mounted path because remote reads can't block the event loop.
 
 ## FUSE mode
 

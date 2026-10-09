@@ -97,7 +97,7 @@ export class WalkBudget {
  * worse than an unknown one, so it surfaces instead of being summed as
  * nothing.
  *
- * Both of the walk's doors come through here, because a refused `stat` is
+ * Both of the walk's calls come through here, because a refused `stat` is
  * the same fact as a refused `readdir`: a rule denying a path outright
  * refuses before the walk ever learns the entry is a directory. Recording
  * only the `readdir` one left a refused subtree missing from the total

@@ -15,6 +15,8 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, TypeVar
 
+from mirage.cache.context import stale
+from mirage.cache.types import WriteCondition
 from mirage.core.box.client import (
     BoxApiError,
     BoxTokenManager,
@@ -27,8 +29,10 @@ from mirage.core.box.client import (
     box_put_json,
     box_upload_multipart,
 )
+from mirage.core.box.constants import GONE_STATUS, LOST_STATUS
 from mirage.errors.fs import enoent
-from mirage.types import JsonValue
+from mirage.errors.types import StaleWriteError
+from mirage.types import JsonValue, PathSpec
 from mirage.utils.ranges import ByteWindow
 
 T = TypeVar("T")
@@ -57,6 +61,38 @@ async def absent_on_404(virtual: str, call: Callable[[], Awaitable[T]]) -> T:
         if exc.status == 404:
             raise enoent(virtual) from exc
         raise
+
+
+async def refused(
+    path: PathSpec,
+    exc: BoxApiError,
+    cond: WriteCondition | None,
+    etag: str | None,
+) -> StaleWriteError | None:
+    """The refusal an ``If-Match`` request met (412 changed, 404 gone).
+
+    Args:
+        path (PathSpec): the path the request wrote.
+        exc (BoxApiError): Box's answer.
+        cond (WriteCondition | None): the write's condition.
+        etag (str | None): the etag sent, None if the request went plain.
+    """
+    if not etag:
+        return None
+    if exc.status == LOST_STATUS:
+        return await stale(path, version=cond.if_match if cond else None)
+    if exc.status == GONE_STATUS:
+        return await stale(path, gone=True)
+    return None
+
+
+def if_match(etag: str | None) -> dict[str, str] | None:
+    """The ``If-Match`` header for ``etag``, None to go plain.
+
+    Args:
+        etag (str | None): the file's etag, or None.
+    """
+    return {"If-Match": etag} if etag else None
 
 
 LIST_FIELDS = "id,name,type,size,modified_at,etag,sha1,parent"
@@ -290,7 +326,11 @@ async def upload_new_file(
 
 
 async def upload_file_version(
-    tm: BoxTokenManager, file_id: str, name: str, data: bytes
+    tm: BoxTokenManager,
+    file_id: str,
+    name: str,
+    data: bytes,
+    etag: str | None = None,
 ) -> JsonValue:
     return await box_upload_multipart(
         tm,
@@ -298,6 +338,7 @@ async def upload_file_version(
         {"name": name},
         name,
         data,
+        headers=if_match(etag),
     )
 
 
@@ -311,8 +352,16 @@ async def create_folder(
     )
 
 
-async def delete_file(tm: BoxTokenManager, file_id: str) -> None:
-    await box_delete(tm, f"{tm.api_base}/files/{file_id}")
+async def delete_file(
+    tm: BoxTokenManager, file_id: str, etag: str | None = None
+) -> None:
+    await box_delete(
+        tm, f"{tm.api_base}/files/{file_id}", headers=if_match(etag)
+    )
+
+
+async def delete_web_link(tm: BoxTokenManager, link_id: str) -> None:
+    await box_delete(tm, f"{tm.api_base}/web_links/{link_id}")
 
 
 async def delete_folder(

@@ -69,6 +69,27 @@ describe('Workspace.snapshot', () => {
     expect(await cat(await Workspace.load('a.tar', { s3: STORE }))).toBe('kept\n')
   })
 
+  // The root the workspace adds when nothing claims `/` keeps its files
+  // and its mode, and stays the anchor, so patchNodeFs still leaves the
+  // host its paths after a copy or a load. Mirrors python's test_snapshot.
+  it('keeps the scratch root an anchor across a round trip', async () => {
+    const src = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.WRITE })
+    await src.dispatch('write', '/f', [new TextEncoder().encode('kept\n')])
+    const tar = await src.snapshot()
+    for (const dst of [await src.copy(), await Workspace.load(tar)]) {
+      expect(dst.syntheticRoot).toBe(true)
+      expect(await cat(dst)).toBe('kept\n')
+      await dst.dispatch('write', '/g', [new TextEncoder().encode('more')])
+    }
+  })
+
+  it('copies a read-only scratch root read-only', async () => {
+    const src = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.READ })
+    const copy = await src.copy()
+    expect(copy.syntheticRoot).toBe(true)
+    expect(copy.registry.rootMount?.mode).toBe(MountMode.READ)
+  })
+
   it('reports a missing key as not found', async () => {
     await expect(Workspace.load('nope.tar', { s3: STORE })).rejects.toMatchObject({
       code: 'ENOENT',

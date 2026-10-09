@@ -1,6 +1,6 @@
 {
- "type_cycle_files": 97,
- "type_cycle_reason": "Files on import cycles made only of type imports, which TypeScript erases, so nothing loads in a loop: the commands/config, types and vfs/base tangle, and four pairs that borrow types from each other (lancedb accessor and query, qdrant accessor and query, the pyodide worker and runtime, the dispatcher and namespace). Python has the same pairs, so breaking one moves types in both languages to keep symbol parity. The count may not move in either direction: a new type cycle fails, and a broken one has to lower it.",
+ "type_cycle_files": 0,
+ "type_cycle_reason": "No import cycles, including type-only dependencies. Shared shapes belong in types modules, configuration belongs in config modules, and capability guards and routing containers must not import concrete runtime implementations. Cancellation primitives sit below their I/O and workspace consumers. Any new cycle fails the gate.",
  "edges": {
   "python/mirage/core/hierarchy/search.py -> mirage.commands.builtin.grep_pattern": "query_matcher answers what grep would select for a SearchQuery, so it compiles the pattern with grep's own compiler (the BRE, ERE, PCRE and Rust dialects and their usage errors). Cutting it is the search interface S12 plans: the VFS answers records and grep keeps the matching.",
   "python/mirage/core/hierarchy/search.py -> mirage.commands.builtin.grep_pushdown": "query_matcher answers what grep would select for a SearchQuery, so it compiles the pattern with grep's own compiler (the BRE, ERE, PCRE and Rust dialects and their usage errors). Cutting it is the search interface S12 plans: the VFS answers records and grep keeps the matching.",

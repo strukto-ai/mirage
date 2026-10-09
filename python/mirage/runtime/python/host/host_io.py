@@ -20,14 +20,14 @@ from typing import TypeVar
 T = TypeVar("T")
 
 # Whether a backend is serving an op, in which case the patched `open`
-# and `os` doors (host/open.py, host/fs.py) answer nothing. Those
-# doors are for the embedding program's own code; a backend reaching the
+# and `os` entry points (host/open.py, host/fs.py) answer nothing. Those
+# entry points are for the embedding program's own code; a backend reaching the
 # host filesystem is not that code, and the path it reaches for is a
 # physical one even when a mount is spelled the same way.
 #
 # They can be spelled the same: a disk mount whose root sits at or under
 # its own virtual prefix (`{"/data/": DiskVFS(root="/data")}`) hands
-# the host a path `is_mounted` answers True for, so the door routed it
+# the host a path `is_mounted` answers True for, so the entry point routed it
 # back into the workspace, back into the same backend, forever. No
 # string tells the two apart, so the caller is the only signal there is.
 #
@@ -49,13 +49,13 @@ _depth = 0
 
 
 def in_host_io() -> bool:
-    """Whether a backend is serving an op, so the doors stay shut."""
+    """Whether a backend is serving an op, so the entry points stay shut."""
     return _depth > 0
 
 
 @contextmanager
 def host_io() -> Iterator[None]:
-    """Run a backend call with the patched `open`/`os` doors transparent."""
+    """Run a backend call with patched `open`/`os` functions transparent."""
     global _depth
     with _lock:
         _depth += 1

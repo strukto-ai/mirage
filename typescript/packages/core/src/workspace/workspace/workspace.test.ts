@@ -47,8 +47,8 @@ async function seeded(): Promise<Workspace> {
 }
 
 describe('Session', () => {
-  it('binds both doors to one session', async () => {
-    // One object per agent: the shell door and the op door answer
+  it('binds both entry points to one session', async () => {
+    // One object per agent: the shell entry point and the dispatcher answer
     // under the same profile, so a hide the shell honors is a hide the
     // file tool honors too.
     const ws = await seeded()
@@ -79,9 +79,9 @@ describe('Session', () => {
 
   it('adopts a persisted session before creating one', async () => {
     // A session store hydrates on first use, so a handle asked for
-    // before any async door has run used to see an empty session
+    // before any async entry point has run used to see an empty session
     // table, recreate a persisted session bare, and hand the next
-    // flush a record that overwrote the stored profile. The door
+    // flush a record that overwrote the stored profile. The entry point
     // hydrates first, so the stored session is adopted as is.
     const parser = await getTestParser()
     const store = new RAMSessionStore()
@@ -114,7 +114,7 @@ describe('Session', () => {
     expect(stdoutStr(await reviewer.shell('pwd', { cwd: '/repo' }))).toBe('/repo\n')
     expect(reviewer.state.cwd).not.toBe('/repo')
     await runWithSession(ws.getSession(ws.defaultSessionId), async () => {
-      // A session already bound is kept by the op door, so a handle
+      // A session already bound is kept by the dispatcher, so a handle
       // reached from inside the default session's own command reads
       // as that session, never wider.
       expect(await reviewer.vfs.cat('/repo/secrets/key.pem')).toBe('PRIVATE\n')
@@ -122,7 +122,7 @@ describe('Session', () => {
   })
 })
 
-describe('handle parity with the workspace door', () => {
+describe('handle parity with the workspace entry point', () => {
   it('forwards every option the workspace takes but the bound one', () => {
     // `Session.shell` is `Workspace.shell` with the session fixed,
     // so an option added to one has to reach the other. Checked at

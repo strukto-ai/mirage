@@ -13,20 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { invalidateAfterMove } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { invalidateAfterMove, invalidateAncestors } from '../../cache/context.ts'
+import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent } from '../../errors/fs.ts'
-import { DropboxApiError } from './client.ts'
-import { deletePath, getMetadata, listFolder, movePath, type DropboxEntry } from './api.ts'
-import { invalidateAncestors } from '../../cache/context.ts'
+import { movePath } from './api.ts'
+import { replaceOnto } from './copy.ts'
 import { dropboxPathOf } from './paths.ts'
 
 // move_v2 rejects an existing destination, but rename(2) replaces one:
 // a file outright, and a directory when it is empty. So a conflict
 // deletes the target and retries, except for a folder that still lists a
 // child, where the original error propagates and the generic mv reports
-// GNU's "Directory not empty" (mirrors msgraph's renameReplace).
+// "Directory not empty" (mirrors msgraph's renameReplace). The source moves
+// whole, so only a destination it replaces is held to its version.
 export async function rename(
   accessor: DropboxAccessor,
   src: PathSpec,
@@ -34,33 +33,24 @@ export async function rename(
 ): Promise<void> {
   const from = dropboxPathOf(accessor, src)
   const to = dropboxPathOf(accessor, dst)
+  const tm = accessor.tokenManager
   const timer = startOp()
-  let moved: Partial<DropboxEntry>
-  let replacedNonFile = false
-  try {
-    moved = await movePath(accessor.tokenManager, from, to)
-  } catch (err) {
-    if (!(err instanceof DropboxApiError)) throw err
-    if (err.summary.startsWith('from_lookup/not_found')) throw enoent(src.virtual)
-    if (!err.summary.startsWith('to/conflict')) throw err
-    const existing = await getMetadata(accessor.tokenManager, to)
-    if (existing['.tag'] === 'folder') {
-      const children = await listFolder(accessor.tokenManager, to, { limit: 1 })
-      if (children.length > 0) throw err
-    }
-    await deletePath(accessor.tokenManager, to)
-    replacedNonFile = existing['.tag'] !== 'file'
-    moved = await movePath(accessor.tokenManager, from, to)
-  }
-  record('rename', src.virtual, 'dropbox', 0, timer)
+  const upto = lostCount()
+  const [moved, replaced] = await replaceOnto(tm, src, dst, to, () => movePath(tm, from, to), true)
+  const replacedNonFile = replaced !== null && replaced['.tag'] !== 'file'
   // A folder carries a subtree under both names. dst also loses one when
   // the move replaced anything there but a file (an empty folder, or an
   // entry of no known kind), whose name may still have cached children.
   // Only a file tag narrows; a reply that names no type keeps the
   // subtree.
   const folder = moved['.tag'] !== 'file'
+  const op = folder ? 'rename_prefix' : 'rename'
+  record(op, src.virtual, 'dropbox', 0, timer)
+  record(op, dst.virtual, 'dropbox', 0, timer)
   await invalidateAfterMove(src, folder)
   await invalidateAncestors(src)
   await invalidateAfterMove(dst, folder || replacedNonFile)
   await invalidateAncestors(dst)
+  liftLost(src, upto, folder)
+  liftLost(dst, upto, folder)
 }

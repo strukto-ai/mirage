@@ -20,7 +20,7 @@ import { READ_CHUNK } from './constants.ts'
  * The read-side twin of `FileHandle`, for a read-only open of a file larger
  * than one chunk; a smaller file is read whole, since whole is what the file
  * cache keeps. Nothing moves at open: a read fetches the chunk it lands in
- * through the door's ranged read, and that chunk is kept so a sequential
+ * through the file adapter's ranged read, and that chunk is kept so a sequential
  * read of small pieces costs one request per chunk. The file ends where a
  * fetch comes back short, not at the size the open saw: a rendering need
  * not be as long as the stored bytes a stat measured, so that size answers

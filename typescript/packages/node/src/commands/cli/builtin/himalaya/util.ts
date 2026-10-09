@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIDoors } from '@struktoai/mirage-core/commands/cli/types'
+import type { CLIView } from '@struktoai/mirage-core/commands/cli/types'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import type { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult, type ByteSource } from '@struktoai/mirage-core/io/types'
@@ -47,15 +47,15 @@ export function firstText(texts: readonly string[], label: string): string {
  *
  * An account CLI has no mount of its own; an attachment is an unrelated
  * workspace file, so it is read through the op dispatcher the executor
- * hands every CLI, the same door git reads repositories through. The
+ * hands every CLI, the same entry point git reads repositories through. The
  * flag bag carries typed paths with their original directory walks.
  */
 async function loadAttachments(
-  doors: CLIDoors | undefined,
+  view: CLIView | undefined,
   paths: readonly PathSpec[],
 ): Promise<Attachment[]> {
   if (paths.length === 0) return []
-  const dispatch = doors?.dispatch
+  const dispatch = view?.dispatch
   if (dispatch === undefined) {
     throw new Error('--attach needs a workspace to read files from')
   }
@@ -94,7 +94,7 @@ export async function route(
   fl: FlagView,
   stdin: ByteSource | null,
   source: Source | null,
-  doors: CLIDoors | undefined,
+  view: CLIView | undefined,
 ): Promise<CommandFnResult> {
   const raw = build(
     {
@@ -105,7 +105,7 @@ export async function route(
       subject: fl.asStr('subject') ?? null,
       body: await readBody(fl, stdin),
       signature: fl.asStr('signature') ?? null,
-      attachments: await loadAttachments(doors, fl.asPaths('attach')),
+      attachments: await loadAttachments(view, fl.asPaths('attach')),
     },
     source,
   )

@@ -53,7 +53,7 @@ async def call_tool(
 
     Args:
         request (Request): the HTTP request, carrying the body and the
-            app's MCP door.
+            app's MCP endpoint.
         workspace_id (str): the workspace.
         name (str): the tool.
         session_id (str | None): the session; None is the default.

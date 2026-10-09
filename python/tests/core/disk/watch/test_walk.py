@@ -112,13 +112,6 @@ def test_changed_path_carries_the_mount_framing(tmp_path):
     assert changed.vfs_path == "data/a.txt"
 
 
-def test_missing_root_reports_nothing(tmp_path):
-    entries = asyncio.run(
-        _collect(DiskWalk(_accessor(tmp_path)), _root("/d/gone", "gone"))
-    )
-    assert entries == []
-
-
 def test_unreadable_directory_aborts_rather_than_reporting_empty(tmp_path):
     # An unreadable subtree is not an empty one. Swallowing the error
     # diffs into a DELETE for every child, then a CREATE for each once

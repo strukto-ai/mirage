@@ -54,7 +54,7 @@ function statFn(p: PathSpec): Promise<FileStat> {
 }
 
 describe('catGeneric multi-file streaming', () => {
-  it('prints each file in order and leaves the cache to the door', async () => {
+  it('prints each file in order and leaves the cache to the dispatcher', async () => {
     const pulled: string[] = []
     const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], opts(), statFn, (p) =>
       fileStream(p.virtual, pulled),

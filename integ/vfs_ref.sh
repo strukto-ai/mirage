@@ -6,7 +6,7 @@
 # the same lines, because the point of the ref form is that a deployment
 # ships one backend and both hosts run it.
 #
-# Every case goes through the real door: `mirage workspace create` reads
+# Every case goes through the real entry point: `mirage workspace create` reads
 # the YAML, rebases the relative ref against the file's directory, and the
 # daemon imports it; `workspace snapshot` records the reference beside the
 # class path; `workspace load` rebuilds the mount through it. The two

@@ -50,6 +50,7 @@ from mirage.context import (
     reset_explaining,
     reset_program_invocation,
     reset_refusal_sink,
+    session_visibility,
     set_current_session,
     set_explaining,
     set_program_invocation,
@@ -119,12 +120,13 @@ from mirage.types import (
     WritePolicy,
     parse_mount_mode,
 )
+from mirage.utils.abort import MirageAbortError, run_cancellable
+from mirage.utils.hidden import path_visible
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.history import HISTORY_PREFIX, HistoryViewVFS
 from mirage.vfs.s3.config import S3Config
-from mirage.workspace.abort import MirageAbortError, run_cancellable
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.documentation.documents import Documents
@@ -384,14 +386,14 @@ class Workspace:
         # Admission policies, consulted in registration order after the
         # built-ins the registry seeds: the profile's admission rules
         # (PermissionsPolicy, reading each session's compiled rules
-        # from the manager by the id the door puts in the context), the
+        # from the manager by the id the entry point puts in the context), the
         # profile's policy (ScriptPolicy, calling its hook per command
         # through the same manager), then Policy instances, then anything added
         # later through ws.policies.add(). The route policy
         # (route_policy=) is the line-level counterpart until it is
         # absorbed as a hook.
         self._registry.policies.add(PermissionsPolicy(self._session_mgr))
-        # The doors the runtime world attaches (below), so a profile
+        # The entry points the runtime world attaches (below), so a profile
         # script reads the mounts an agent's program would, and through
         # the same gate. The link source is a lambda because the
         # namespace is built after this and read only at run time.
@@ -494,7 +496,7 @@ class Workspace:
         )
         # The facade delegates every op to the dispatcher, so FUSE and
         # programmatic ws.vfs walk the same pipeline as a shell command
-        # and the policy gates fire exactly once, at that door. It runs
+        # and the policy gates fire exactly once, at that entry point. It runs
         # as the default session, as a bare ``shell`` does, so the
         # default profile confines it too.
         self._files = Files(
@@ -582,7 +584,7 @@ class Workspace:
         it is never placed when it runs, and a placement that refuses
         the line gives it the placement's refusal. A hidden path is no
         path to any of it. ``session.explain`` is the same dry run for
-        each of a session's doors.
+        each of a session's entry points.
 
         Host-side only. The structure of a profile's rules is an
         operator's business, so there is no builtin an agent can type
@@ -794,7 +796,7 @@ class Workspace:
 
     @property
     def decisions(self) -> Decisions:
-        """The host's door on asked commands: ``list()`` every record,
+        """The host's entry point on asked commands: ``list()`` every record,
         ``pending()`` the ones waiting, ``answer(id, outcome, scope)``
         one, and the agent's retry passes or is refused.
         """
@@ -846,7 +848,7 @@ class Workspace:
     ) -> MountEntry:
         """Add a VFS to a running workspace, mirroring TS ``addMount``.
 
-        The runtime door runs the same read-policy verdict the
+        The runtime entry point runs the same read-policy verdict the
         constructor does: a mount added here is no more able to declare
         a policy its backend cannot honour than one declared in YAML.
 
@@ -1021,8 +1023,11 @@ class Workspace:
         so arg-less commands and root listing have somewhere to resolve,
         so announcing it as a mount would make every runtime report a
         claim on a VFS the embedder never asked for (TS
-        ``sandboxVisibleMounts``).
+        ``sandboxVisibleMounts``). A mount the bound session hides is
+        withheld too: a runtime that builds its own tree from this list
+        would otherwise show the hidden mount's name.
         """
+        vis = session_visibility()
         prefixes: list[str] = []
         for entry in self._registry.mounts():
             if entry.prefix in (
@@ -1032,6 +1037,8 @@ class Workspace:
             ):
                 continue
             if self._implicit_root and entry.prefix == "/":
+                continue
+            if not path_visible(vis, entry.prefix.rstrip("/") or "/"):
                 continue
             prefixes.append(entry.prefix)
         return prefixes
@@ -1043,7 +1050,7 @@ class Workspace:
         ) or self._session_mgr.get(self._session_mgr.default_id)
 
     def runtime_context(self, session_id: str | None = None) -> RuntimeContext:
-        """Capture local workspace doors for an adapter, scoped to one session.
+        """Capture local entry points for an adapter, scoped to one session.
 
         With no id, use this workspace's active session or its default.
         Calling a runtime directly remains a host API, outside shell admission.
@@ -1678,10 +1685,13 @@ class Workspace:
         profile: str | None = None,
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
-        # No read= here: each restored Mount carries its own spec.
+        # No read= here: each restored Mount carries its own spec, and
+        # its own mode, so `mode` reaches only the scratch root the
+        # workspace adds again.
         ws = cls(
             args.mount_args,
             io=IOConfig.model_validate(state.get("io", {})),
+            mode=args.anchor_mode or MountMode.READ,
             write=args.write_default,
             session_id=args.default_session_id,
             agent_id=args.default_agent_id,
@@ -1776,7 +1786,7 @@ class Workspace:
         profile: str | SessionProfile | Mapping[str, Any] | None = None,
         permissions: SessionProfile | Mapping[str, Any] | None = None,
     ) -> "Session":
-        """One session's two doors: ``shell`` and ``vfs`` bound to it.
+        """One session's two entry points: ``shell`` and ``vfs`` bound to it.
 
         Creates the session under the given profile when the id is new
         (the same call as ``create_session``), and adopts it as is when
@@ -1956,7 +1966,7 @@ class Workspace:
     async def cancel(self, session_id: str | None = None) -> int:
         """Cancel the top-level lines running or queued in a session.
 
-        What Ctrl-C does to a foreground line, for every door at once:
+        What Ctrl-C does to a foreground line, for every entry point at once:
         HTTP jobs, SSH and codex lines and SDK callers alike end with
         ``MirageAbortError``, their ``$?`` left as they found it. Returns
         once those lines have ended, so the session is quiet; a line
@@ -2047,7 +2057,7 @@ class Workspace:
         """Hold a write while a capture reads, unless its line is waited for.
 
         A write from a running top-level line passes: the capture waits
-        for that line. Any other (a door's file op, SFTP, FUSE, a
+        for that line. Any other (an entry point's file op, SFTP, FUSE, a
         background job) waits for the capture to finish, and counts as
         under way until it ends, so a capture that starts waits it out.
         """
@@ -2127,14 +2137,14 @@ class Workspace:
     async def _bind_session(
         self, session_id: str | None, run: Callable[[], Awaitable[Any]]
     ) -> Any:
-        """Run one op door call as ``session_id``.
+        """Run one dispatcher call as ``session_id``.
 
         A session already bound in this context is kept: a command's
         runtime reaching ``ws.vfs`` stays in its own session, and a
-        kernel mount serving one session keeps that one, so the door
+        kernel mount serving one session keeps that one, so the entry point
         never widens a caller's view. A session another workspace
         bound is the exception: its hides and grants describe that
-        workspace, so an embedder callback reaching this door from
+        workspace, so an embedder callback reaching this entry point from
         inside the other's line runs as the session it asked for,
         judged by this workspace's own profile. Otherwise the named
         session is bound the way ``shell`` binds it.
@@ -2142,7 +2152,7 @@ class Workspace:
         Args:
             session_id (str | None): the session to run as when none is
                 bound; None for the default session as it is now.
-            run (Callable[[], Awaitable[Any]]): the door call.
+            run (Callable[[], Awaitable[Any]]): the dispatcher call.
         """
         if get_current_session_unless_foreign(self._session_mgr) is not None:
             return await run()
@@ -2164,7 +2174,7 @@ class Workspace:
     async def dispatch(
         self, name: str, path: PathSpec, /, **kwargs: Any
     ) -> tuple[Any, IOResult]:
-        # The door owns pre-dispatch initialization (namespace load,
+        # The dispatcher owns pre-dispatch initialization (namespace load,
         # pending drift checks), so FUSE and `ws.vfs` get it too.
         # Runs as the default session unless one is bound, like ws.vfs.
         return await self._bind_session(
@@ -2315,7 +2325,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision | None = None,
+        routing_decision: RouteDecision[Runtime] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2337,7 +2347,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision | None = None,
+        routing_decision: RouteDecision[Runtime] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2359,7 +2369,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision | None = None,
+        routing_decision: RouteDecision[Runtime] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2380,7 +2390,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision | None = None,
+        routing_decision: RouteDecision[Runtime] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2533,7 +2543,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision | None = None,
+        routing_decision: RouteDecision[Runtime] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2616,12 +2626,12 @@ class Workspace:
 
 
 class Session:
-    """One session's doors, bound together.
+    """One session's entry points, bound together.
 
     ``shell`` runs a line as the session, ``vfs`` is the file API run
     as it, ``tools`` the agent tools over both and ``explain`` the same
-    doors as a dry run, so a host holds one
-    object per agent and every door answers under the same profile:
+    entry points as a dry run, so a host holds one
+    object per agent and every entry point answers under the same profile:
     hides, mount modes, grants and standing decisions. Nothing is
     stored here; the session record stays with the session manager and
     ``state`` reads it. Obtained from ``Workspace.session``, which

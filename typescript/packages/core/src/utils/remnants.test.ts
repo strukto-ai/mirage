@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileStat, FileType, PathSpec } from '../types.ts'
-import { VisibleRemnant, childSpec, entryName, removeRemnants, visibleBelow } from './remnants.ts'
+import { VisibleRemnant, entryName, removeRemnants, visibleBelow } from './remnants.ts'
 import { rstripSlash } from './slash.ts'
 
 function spec(virtual: string): PathSpec {
@@ -160,16 +160,5 @@ describe('entryName', () => {
     expect(entryName('sub/')).toBe('sub')
     expect(entryName('/a/b/c')).toBe('c')
     expect(entryName('plain')).toBe('plain')
-  })
-})
-
-describe('childSpec', () => {
-  it('appends to the VFS key', () => {
-    const parent = new PathSpec({ virtual: '/m/d', directory: '/m', vfsPath: 'd' })
-    const child = childSpec(parent, 'x')
-    expect(child.virtual).toBe('/m/d/x')
-    expect(child.vfsPath).toBe('d/x')
-    const root = new PathSpec({ virtual: '/m', directory: '/', vfsPath: '' })
-    expect(childSpec(root, 'x').vfsPath).toBe('x')
   })
 })

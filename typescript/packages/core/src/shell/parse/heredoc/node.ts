@@ -14,6 +14,7 @@
 
 import type { WrappedNode } from '../engine.ts'
 import type { ShellNode } from '../../types.ts'
+import { endsEscaped } from './line.ts'
 import type { Heredoc, HeredocSource } from './types.ts'
 
 export class HeredocNode implements WrappedNode {
@@ -125,8 +126,7 @@ export class HeredocNode implements WrappedNode {
         if (!bodies.endsWith('\n')) bodies += '\n'
         if (!doc.terminated) {
           const line = body.endsWith('\n') ? body.slice(0, -1) : body
-          const trailing = line.length - line.replace(/\\+$/, '').length
-          if (!doc.quoted && trailing % 2 === 1) bodies += '\n'
+          if (!doc.quoted && endsEscaped(line)) bodies += '\n'
           bodies += `${doc.delimiter}\n`
         }
         if (first <= doc.bodyStart && doc.end <= last + 1)

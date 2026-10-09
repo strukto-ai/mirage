@@ -19,9 +19,9 @@ import time
 
 import pytest
 
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSStat
-from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.constants import (
     FT_DIR,
@@ -42,7 +42,7 @@ from mirage.view.namespace_view import merge_readdir
 LINK_MTIME = "2026-07-16T00:00:00Z"
 
 
-class FakeVFS(RuntimeVFS):
+class FakeVFS(RuntimeFiles):
     """Core double: real routing and flush logic, fake dispatch.
 
     Only `_raw` is replaced, so the prefix table, the cross-mount rename
@@ -91,7 +91,7 @@ class FakeVFS(RuntimeVFS):
     async def _call(self, name, path, **kwargs):
         self.calls.append((name, path, kwargs))
         if name == "stat":
-            # The door answers a no-follow stat of a link from the node
+            # The dispatcher answers a no-follow stat of a link from the node
             # table, with the link's own row: its stamp, and its size in
             # target bytes.
             if kwargs.get("nofollow") and path in self.links:
@@ -102,7 +102,7 @@ class FakeVFS(RuntimeVFS):
                     modified=LINK_MTIME,
                     type=FileType.SYMLINK,
                 )
-            # A following stat is the door's default, so a link answers
+            # A following stat is the dispatcher's default, so a link answers
             # for its target: the row says nothing about the link and the
             # mark is the only thing that can.
             if path in self.links:
@@ -115,7 +115,7 @@ class FakeVFS(RuntimeVFS):
                     type=FileType.FILE,
                     content=ContentType.TEXT,
                 )
-            # The real door answers a directory for a structure-only
+            # The real dispatcher answers a directory for a structure-only
             # path (a mount prefix with no backend object behind it).
             roots = {p.rstrip("/") or "/" for p in self.prefixes()}
             if path in self.dirs or path == "/" or path in roots:
@@ -154,7 +154,7 @@ class FakeVFS(RuntimeVFS):
             out += [p for p in self.links if p.startswith(prefix)]
             if not out and path not in self.dirs and path != "/":
                 raise FileNotFoundError(path)
-            # The real door merges child-mount names into readdir; the
+            # The real dispatcher merges child-mount names into readdir; the
             # double rides the same helper so it cannot drift from it.
             return sorted(
                 merge_readdir(None, out, self.prefixes(), None, path)
@@ -165,7 +165,7 @@ class FakeVFS(RuntimeVFS):
         if name == "readlink":
             found = self.links.get(path)
             if found is None:
-                # The door's own answer for a path the node table holds
+                # The dispatcher's own answer for a path the node table holds
                 # no link for, whether or not anything else is there.
                 raise OSError(host_errno.EINVAL, "not a symbolic link", path)
             return found
@@ -237,7 +237,7 @@ def test_stat_maps_filestat_fields():
         dirs={"/data/sub"},
         prefixes=["/data/"],
     )
-    fs = WasmView(core=bridge)
+    fs = WasmView(files=bridge)
     st = fs.stat("/data/f.txt")
     assert (
         st
@@ -255,7 +255,7 @@ def test_readdir_bridge_resolves_kind_from_slash_or_stat():
     bridge = FakeVFS(
         files={"/data/f.txt": b""}, dirs={"/data/sub"}, prefixes=["/data/"]
     )
-    fs = WasmView(core=bridge)
+    fs = WasmView(files=bridge)
     assert fs.readdir("/data") == [("f.txt", FT_REG), ("sub", FT_DIR)]
 
 
@@ -268,14 +268,14 @@ def test_readdir_reports_an_entry_it_could_not_stat_as_unknown():
         files={"/data/f.txt": b"", "/data/bad.txt": b""},
         prefixes=["/data/"],
     )
-    fs = WasmView(core=bridge)
+    fs = WasmView(files=bridge)
     assert fs.readdir("/data") == [("bad.txt", FT_UNKNOWN), ("f.txt", FT_REG)]
     with pytest.raises(OSError):
         fs.stat("/data/bad.txt")
 
 
 def test_readdir_reports_a_link_as_a_link():
-    # preview1 has the filetype and the door marks the row, so a guest
+    # preview1 has the filetype and the file adapter marks the row, so a guest
     # that reads d_type (CPython's scandir does) answers is_symlink
     # without a call of its own. A link to a file stats as that file, so
     # only the mark can tell them apart.
@@ -284,7 +284,7 @@ def test_readdir_reports_a_link_as_a_link():
         links={"/data/l": "/data/f.txt"},
         prefixes=["/data/"],
     )
-    fs = WasmView(core=bridge)
+    fs = WasmView(files=bridge)
     assert fs.readdir("/data") == [("f.txt", FT_REG), ("l", FT_SYMLINK)]
 
 
@@ -296,7 +296,7 @@ def test_readdir_reports_a_link_to_a_directory_as_a_link():
         links={"/data/dl": "/data/sub"},
         prefixes=["/data/"],
     )
-    fs = WasmView(core=bridge)
+    fs = WasmView(files=bridge)
     assert fs.readdir("/data") == [("dl", FT_SYMLINK), ("sub", FT_DIR)]
 
 
@@ -305,8 +305,8 @@ def test_readdir_root_merges_host_bridge_and_mounts(tmp_path):
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
     bridge = FakeVFS(files={"/root.txt": b""}, prefixes=["/data/", "/logs/"])
     fs = WasmView(WasmFsConfig(host_root=str(tmp_path)), bridge)
-    # Mount entries arrive through the core readdir (the door merges
-    # them) and resolve as directories through the door's stat, which
+    # Mount entries arrive through the core readdir (the dispatcher merges
+    # them) and resolve as directories through the dispatcher's stat, which
     # answers for a structure-only path.
     assert fs.readdir("/") == [
         ("data", FT_DIR),
@@ -370,8 +370,8 @@ def test_stat_reads_offsetless_stamps_as_utc():
             prefixes=["/data/"],
             modified="2026-01-02T03:04:05+00:00",
         )
-        got_naive = WasmView(core=naive).stat("/data/f.txt").mtime_ns
-        got_aware = WasmView(core=aware).stat("/data/f.txt").mtime_ns
+        got_naive = WasmView(files=naive).stat("/data/f.txt").mtime_ns
+        got_aware = WasmView(files=aware).stat("/data/f.txt").mtime_ns
         assert got_naive == got_aware
         assert got_naive == mtime_ns(
             FileStat(
@@ -416,7 +416,7 @@ def test_lstat_of_a_plain_path_answers_exactly_as_stat():
     assert fs.lstat("/data/f.txt") == fs.stat("/data/f.txt")
 
 
-def test_stat_follows_a_link_because_the_door_resolves_it():
+def test_stat_follows_a_link_because_the_dispatcher_resolves_it():
     # The dispatcher resolves link prefixes for a following op, so the
     # core never sees the link path: `stat` is the target's row.
     bridge = FakeVFS(files={"/data/l": b"target-bytes"}, prefixes=["/data/"])

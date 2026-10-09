@@ -93,8 +93,8 @@ class TestDepth:
         assert in_host_io() is False
 
 
-class TestDoors:
-    def test_the_patched_doors_answer_nothing_while_a_backend_serves(self):
+class TestPatchedFunctions:
+    def test_the_patched_functions_answer_nothing_while_a_backend_serves(self):
         ws = Workspace({"/mem/": RAMVFS()}, mode=MountMode.WRITE)
         run(ws.vfs.mkdir("/mem/dir"))
         run(ws.vfs.write("/mem/dir/a.txt", b"a"))

@@ -18,13 +18,7 @@ import { valueText } from '../render/json.ts'
 import { groupName, rowStem } from './naming.ts'
 import { fieldValue } from './payload.ts'
 
-export type QdrantRow = Record<string, unknown>
-
-export interface QdrantPoint {
-  id: string | number
-  payload?: Record<string, unknown> | null
-  score?: number
-}
+import type { PointTest, QdrantPoint, QdrantRow } from './types.ts'
 
 export const SCROLL_BATCH = 256
 
@@ -73,8 +67,6 @@ export function buildFilter(filters: Record<string, string>): Record<string, unk
   return { must: keys.map((key) => condition(key, filters[key] ?? '')) }
 }
 
-export type PointTest = (point: QdrantPoint) => boolean
-
 /** Keep points whose id starts with a literal name prefix. */
 export function idPrefixTest(prefix: string): PointTest {
   return (point) => String(point.id).startsWith(prefix)
@@ -107,10 +99,7 @@ export function exactNameTest(
 }
 
 export function pointToRow(point: QdrantPoint, idField: string): QdrantRow {
-  const payload = point.payload ?? {}
-  const row: QdrantRow = { ...payload }
-  row[idField] = point.id
-  return row
+  return { ...point.payload, [idField]: point.id }
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

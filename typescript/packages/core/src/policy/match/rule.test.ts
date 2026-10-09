@@ -26,7 +26,7 @@ import {
   matchRule,
   ruleReach,
   ruleScope,
-  skippedAtOpDoors,
+  skippedAtDispatch,
   subjects,
   type Subject,
 } from './rule.ts'
@@ -119,7 +119,7 @@ describe('rules', () => {
       write: true,
       prefix: '/repo/',
     }
-    // The deeper ask wins where both reach, exactly as the command door
+    // The deeper ask wins where both reach, exactly as command admission
     // ranks them, so a broad deny cannot overrule an approved carve-out.
     expect(opRefusal(rules, inside, [])).toBe('outbox nod')
     expect(opRefusal(rules, inside, [carve])).toBeNull()
@@ -415,19 +415,19 @@ describe('rules', () => {
     expect(ioReach(null, find, '/repo')).toBe(false)
   })
 
-  it('skippedAtOpDoors names the command-level rules', () => {
+  it('skippedAtDispatch names the command-level rules', () => {
     const keys: CommandRule = { reason: 'keys', paths: ['/k/*'] }
     const rules: AdmissionRules = {
       allow: ['ls'],
       deny: [keys, { reason: 'no rm', commands: ['rm'] }],
       ask: [{ reason: 'nod', commands: ['cp'], paths: ['/x/*'] }],
     }
-    expect(skippedAtOpDoors(rules)).toEqual([
+    expect(skippedAtDispatch(rules)).toEqual([
       'commands.allow',
       'commands.deny: no rm',
       'commands.ask: nod',
     ])
-    expect(skippedAtOpDoors({ allow: null, ask: [], deny: [keys] })).toEqual([])
-    expect(skippedAtOpDoors(null)).toEqual([])
+    expect(skippedAtDispatch({ allow: null, ask: [], deny: [keys] })).toEqual([])
+    expect(skippedAtDispatch(null)).toEqual([])
   })
 })

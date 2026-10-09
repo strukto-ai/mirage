@@ -90,7 +90,7 @@ export async function executeProgram(
   callStack: CallStack | null,
   jobTable: JobTable,
   agentId: string,
-  // The op door, threaded so an active `exec` redirect can send each
+  // The dispatcher, threaded so an active `exec` redirect can send each
   // statement's output to its file; undefined (a nested loop that is not
   // the program root) leaves output undiverted.
   dispatch?: DispatchFn,

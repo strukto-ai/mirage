@@ -33,6 +33,8 @@ export interface MountSnapshot {
   vfs_ref: string | null
   index_config?: IndexConfigSnapshot | null
   vfs_state: VFSState
+  // Set on the scratch root the workspace added because no mount claims `/`.
+  anchor?: true
 }
 
 export interface CacheEntrySnapshot {

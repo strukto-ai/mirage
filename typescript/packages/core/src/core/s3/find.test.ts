@@ -20,7 +20,7 @@ vi.mock('./client.ts', async () => {
   return { ...actual, loadS3Module: vi.fn(), createS3Client: vi.fn() }
 })
 
-import type { FindOptions } from '../../vfs/base.ts'
+import type { FindOptions } from '../../vfs/types.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { S3Accessor } from '../../accessor/s3.ts'
 import { PathSpec } from '../../types.ts'

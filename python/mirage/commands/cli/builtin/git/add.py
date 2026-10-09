@@ -29,6 +29,7 @@ from mirage.commands.cli.builtin.git.errors import (
     NothingSpecifiedError,
     NoWorkspaceError,
     PathspecError,
+    UnindexableFileError,
     UnknownPathspecError,
 )
 from mirage.commands.cli.builtin.git.ignore import IgnoreStack, load_ignores
@@ -57,8 +58,9 @@ from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_NO,
     scan,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.fs import fs_strerror
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
@@ -275,12 +277,19 @@ async def stage_changes(
     changed: list[tuple[str, str]] = []
     added: list[str] = []
     for path in sorted(stage):
-        data = await entry_bytes(
-            dispatch, location.worktree.join(path), found.files[path]
-        )
+        before = state.entries.get(path.encode())
+        try:
+            data = await entry_bytes(
+                dispatch, location.worktree.join(path), found.files[path]
+            )
+        except PermissionError as exc:
+            raise UnindexableFileError(
+                path,
+                fs_strerror(exc) or "Permission denied",
+                before is not None,
+            ) from exc
         sha = await store_blob(dispatch, location.commondir, data)
         entry = staged_entry(sha, found.files[path], len(data))
-        before = state.entries.get(path.encode())
         if before is None:
             added.append(path)
         elif (before.sha, before.mode) != (entry.sha, entry.mode):
@@ -343,11 +352,11 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
-    stat_path = doors.stat_path
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
+    stat_path = view.stat_path
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
@@ -358,7 +367,7 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         parsed = parse_flags(fl)
         if not texts and not parsed.every and not parsed.update:
             raise NothingSpecifiedError()
-        _repo, location = await opened(fl, doors, work_tree=True)
+        _repo, location = await opened(fl, view, work_tree=True)
         state = await read_index(dispatch, location.gitdir)
         tracked = {
             path.decode("utf-8", errors="replace")
@@ -370,7 +379,7 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             location,
             tracked,
             UNTRACKED_ALL,
-            links_of(doors),
+            links_of(view),
         )
         ignores = await load_ignores(
             dispatch, location.commondir, location.worktree

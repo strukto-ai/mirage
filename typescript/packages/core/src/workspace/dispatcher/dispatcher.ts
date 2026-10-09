@@ -150,7 +150,7 @@ function lists(listing: readonly string[], virtual: string): boolean {
   })
 }
 
-// The id of the session this door serves, empty for the unbound host
+// The id of the session this dispatcher serves, empty for the unbound host
 // view; the same binding the hides and modes above read.
 function sessionId(): string {
   return getCurrentSession()?.sessionId ?? ''
@@ -160,7 +160,7 @@ function sessionId(): string {
  * The `issuer` kwarg lifted off an op, with the kwargs it leaves behind.
  *
  * A caller that stamps its ops (a profile policy's bridge) does so as
- * an argument, and the door consumes it here: it reaches every gate the
+ * an argument, and the dispatcher consumes it here: it reaches every gate the
  * dispatch clears as `VfsContext.issuer`, probes and cascades included,
  * and is never forwarded to a backend, which has no such argument.
  */
@@ -227,8 +227,6 @@ function wholeRead(kwargs: OpKwargs): OpKwargs {
   ) as OpKwargs
 }
 
-export type ResolveFn = (path: string) => Promise<[BaseVFS, PathSpec, MountMode]>
-
 /**
  * Stamp the caller's report: memory answered, no backend ran.
  *
@@ -255,7 +253,7 @@ function served(report: OpReport | undefined, result: unknown): void {
 
 /**
  * Pull a stream's first chunk now and answer the stream from there, so a read
- * that fails at its start fails at the call, where the door handles it, rather
+ * that fails at its start fails at the call, where the dispatcher handles it, rather
  * than in the hands of whoever pulls it later. Mirrors Python's `_primed`.
  */
 async function primed(
@@ -303,7 +301,7 @@ async function* resumed(
   }
 }
 
-/** The door's link follow of one path, the final name too (`last`) or
+/** The dispatcher's link follow of one path, the final name too (`last`) or
  * only the names above it, with a loop thrown as ELOOP rather than the
  * namespace's CycleError. */
 function followOrLoop(
@@ -321,7 +319,7 @@ function followOrLoop(
 }
 
 /**
- * One op on its way through the door, as the stages hand it on. Mirrors
+ * One op on its way through the dispatcher, as the stages hand it on. Mirrors
  * Python's `_Call`.
  */
 interface Call {
@@ -336,7 +334,7 @@ interface Call {
   args: readonly unknown[] | undefined
   /** The op's arguments; `follow` consumes `nofollow`. */
   kwargs: Record<string, unknown> | undefined
-  /** The session's view, read once at the door. */
+  /** The session's view, read once at the dispatcher. */
   readonly vis: Visibility | null
   readonly ruleGate: EntryGate | null
   readonly report: OpReport | undefined
@@ -368,7 +366,7 @@ export class Dispatcher {
   private readonly namespace: Namespace
   private readonly cache: FileCache & BaseVFS
   private readonly policies: Policies
-  // The snapshot drift queue rides along because this is the one door:
+  // The snapshot drift queue rides along because this is the one dispatcher:
   // a strict restore's pending fingerprint checks must run before ANY
   // op can touch a mount, and FUSE and `ws.vfs` reach here
   // without passing Workspace.dispatch.
@@ -404,7 +402,7 @@ export class Dispatcher {
   /**
    * The namespace's own answer for a path no backend serves.
    *
-   * Child mounts and symlinks are structure the door owns, so a
+   * Child mounts and symlinks are structure the dispatcher owns, so a
    * directory that exists only because a mount or link sits below it
    * still lists and stats. Null for any other op, or when the
    * namespace knows nothing at `virtual`.
@@ -434,7 +432,7 @@ export class Dispatcher {
     // withDispatchRuleGuard's mark, never forwarded to an op.
     const { ruleGate, ...unmarked } = (stripped ?? {}) as { ruleGate?: EntryGate | null }
     kwargs = ruleGate === undefined ? stripped : unmarked
-    // The door's own keywords: a read answered as it is pulled, and a read
+    // The dispatcher's own keywords: a read answered as it is pulled, and a read
     // of what the backend holds now, past the file cache.
     const { stream, direct, ...own } = (kwargs ?? {}) as { stream?: unknown; direct?: unknown }
     if (name === 'read' && (stream !== undefined || direct !== undefined)) kwargs = own
@@ -716,9 +714,9 @@ export class Dispatcher {
   /**
    * Run admission for an op on a mounted path.
    *
-   * Admission policies fire at the door, before the warm-cache early
+   * Admission policies fire at the dispatcher, before the warm-cache early
    * return: a cached read must be refused exactly like a cold one, or the
-   * cache becomes a policy bypass. This dispatcher is the one door in
+   * cache becomes a policy bypass. This dispatcher is the one dispatcher in
    * TypeScript: shell internals, programmatic access, `ws.vfs`, and
    * FUSE all end up here. A rename's destination is a create there: it
    * passes the same gate as the source, so a path rule holds against
@@ -1184,7 +1182,12 @@ export class Dispatcher {
   ): Promise<void> {
     const opened = appendsNothing(name, args)
     const observed = STAMP_WRITE_OPS.has(name) && !opened ? Date.now() / 1000 : null
-    await this.invalidateAfterWriteByPath(p.virtual, observed, !opened)
+    await this.invalidateAfterWriteByPath(
+      p.virtual,
+      observed,
+      !opened,
+      name === 'unlink' || name === 'rmdir',
+    )
     for (const [, other] of others) await this.invalidateAfterWriteByPath(other.virtual)
     if (name === 'unlink' || name === 'rmdir') {
       // The name no longer holds that file, so what was set on it
@@ -1245,7 +1248,7 @@ export class Dispatcher {
    *
    * `symlink` and `readlink` always, because a link exists nowhere else.
    * The rest only when the path itself is a link, and then for the same
-   * reason the create and the read are the door's: forwarding reaches a
+   * reason the create and the read are the dispatcher's: forwarding reaches a
    * backend that has never heard of the name. A no-follow stat is the
    * read half of that fact (lstat asks for the link's own row, which
    * only the table holds); a following stat never arrives here, since
@@ -1254,7 +1257,7 @@ export class Dispatcher {
    */
   /**
    * The index kwargs normal dispatch stamps on every registered op, for
-   * the door's own raw registry calls: an indexed backend cannot
+   * the dispatcher's own raw registry calls: an indexed backend cannot
    * resolve a nested path without it.
    */
   private indexKwargs(mount: MountEntry | null): OpKwargs {
@@ -1277,7 +1280,7 @@ export class Dispatcher {
   }
 
   /**
-   * The door's own channel for internal walks: the TS twin of Python's
+   * The dispatcher's own channel for internal walks: the TS twin of Python's
    * Mount.call plus the dispatcher-side duties around it. The
    * same mode fence, index stamping and mount-prefix context normal
    * dispatch applies, plus the boundary's admission and completion for
@@ -1338,7 +1341,14 @@ export class Dispatcher {
       // refuse after the entry is gone and strand the cascade.
       return result
     } finally {
-      if (write) await this.invalidateAfterWriteByPath(spec.virtual)
+      if (write) {
+        await this.invalidateAfterWriteByPath(
+          spec.virtual,
+          null,
+          true,
+          name === 'unlink' || name === 'rmdir',
+        )
+      }
     }
   }
 
@@ -1413,7 +1423,7 @@ export class Dispatcher {
    * directory through the shared removeRemnants walk; a visible child,
    * or any cascade failure (a mode-protected entry, a visible entry
    * appearing mid-walk), re-raises the backend's refusal. Emptiness is
-   * the door's own readdir pipeline: backend entries merged with the
+   * the dispatcher's own readdir pipeline: backend entries merged with the
    * namespace's children (nested mounts, links) and judged by
    * visibility, so a visible child no backend can see keeps the
    * refusal instead of reporting a successful rmdir while the mounted
@@ -1436,7 +1446,7 @@ export class Dispatcher {
       entries = await this.fencedCall(vfs, mountPrefix, mode, 'readdir', path, issuer)
     } catch {
       // A backend that cannot list (or later, remove) the remnants
-      // keeps the original refusal: the door has no way to take them.
+      // keeps the original refusal: the dispatcher has no way to take them.
       throw refusal
     }
     if (!Array.isArray(entries)) throw refusal
@@ -1517,9 +1527,9 @@ export class Dispatcher {
   }
 
   /**
-   * Answer a node-table op at the door itself, gated like a backend.
+   * Answer a node-table op at the dispatcher itself, gated like a backend.
    *
-   * A symlink is namespace state with no backend behind it, so the door
+   * A symlink is namespace state with no backend behind it, so the dispatcher
    * owns every verb that names one. Admission still fires exactly as for
    * a backend write: the link's turf is the longest mount prefix above it
    * (the same ownership rule the link read filter uses), session grants
@@ -1584,7 +1594,7 @@ export class Dispatcher {
     } else if (name === 'symlink') {
       target = String(kwargs.target)
       // symlink(2) refuses an occupied name and a name its parent cannot
-      // hold, and the door is the only place that can tell: the node table
+      // hold, and the dispatcher is the only place that can tell: the node table
       // sees a link, and a probe sees what a backend holds. Left unchecked,
       // the new node shadowed live data (the bytes stayed, the name read as
       // a link), could bury a mount root, which is the one name a
@@ -1640,7 +1650,7 @@ export class Dispatcher {
    * is proven the way the hierarchy kit itself proves one, by appearing
    * in its parent's listing, which is also the only way a prefix store
    * can answer for a directory that is nothing but a set of keys.
-   * Cannot reuse `resolvePathStat`: that dispatches, and the door is
+   * Cannot reuse `resolvePathStat`: that dispatches, and the dispatcher is
    * what dispatch is inside of.
    *
    * The parent's listing comes back beside the answer, null when no probe
@@ -1673,7 +1683,7 @@ export class Dispatcher {
       // A channel that refuses to answer is not evidence of absence.
       // Reporting "present" keeps the answer at the EINVAL every miss
       // gave before the split, which asserts nothing the policy is
-      // withholding; reporting absence would assert a fact this door was
+      // withholding; reporting absence would assert a fact the dispatcher was
       // not allowed to check.
       return [true, null]
     }
@@ -1780,14 +1790,14 @@ export class Dispatcher {
    * Run one read op for a probe, or null when it found nothing.
    *
    * The probe reads on the caller's behalf but not at its request, so it
-   * passes the same admission gate the op would at the door: a policy
+   * passes the same admission gate the op would at the dispatcher: a policy
    * that denies `stat` must not be reachable through a readlink. That
    * refusal is raised, not swallowed, because only the caller knows what
    * to answer when a channel goes dark.
    *
    * The index and the path's filetype are the two kwargs that decide
    * which registered op answers, so a probe that omitted them would ask
-   * a different question than the door does and report a rendered path
+   * a different question than the dispatcher does and report a rendered path
    * as absent. Python needs no twin of that half: its dispatcher routes
    * through `Mount.call`, which stamps both itself.
    *
@@ -1961,7 +1971,7 @@ export class Dispatcher {
    * natively applied ones are dropped from it, so a stale overlay never
    * shadows a fresh backend value. A VFS without the op, and a
    * link path (which has no backend inode), overlay everything. The
-   * overlay half is the door's own write, so it runs inside the same
+   * overlay half is the dispatcher's own write, so it runs inside the same
    * gates as the native half. Mirrors Python's Dispatcher._apply_setattr.
    */
   private async applySetattr(
@@ -2040,13 +2050,16 @@ export class Dispatcher {
   /**
    * Drop what a write to `rawPath` made stale above the store. `observed` is
    * the epoch seconds of a content write to record, null for a removal;
-   * `times` false keeps the overlay times, for an open that wrote nothing.
-   * Mirrors Python's Dispatcher.invalidate_after_write.
+   * `times` false keeps the overlay times, for an open that wrote nothing;
+   * `removed` drops the path's own listing too, for an unlink or rmdir, as
+   * a core's removal drops it. Mirrors Python's
+   * Dispatcher.invalidate_after_write.
    */
   async invalidateAfterWriteByPath(
     rawPath: string,
     observed: number | null = null,
     times = true,
+    removed = false,
   ): Promise<void> {
     // Directory writes (mkdir/rmdir via tree copies) arrive with a
     // trailing slash; normalize so the parent computation below does not
@@ -2057,7 +2070,8 @@ export class Dispatcher {
     if (mount === null) return
     if (times) await this.namespace.clearTimes(path, observed)
     const manager = this.managerFor(mount)
-    await manager.invalidateAfterWrite(path)
+    if (removed) await manager.invalidateAfterUnlink(path)
+    else await manager.invalidateAfterWrite(path)
     await manager.invalidateAncestors(path)
   }
 

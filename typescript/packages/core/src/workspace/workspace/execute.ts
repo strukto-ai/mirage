@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
 
@@ -43,8 +44,14 @@ import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
-import { hasAborted, lineStatusWriter, mergeSignals, runWithLineAbort } from '../abort.ts'
-import { makeAbortError } from '../../concurrency/limiter.ts'
+import {
+  hasAborted,
+  makeAbortError,
+  mergeSignals,
+  abortable,
+  joinOrAbort,
+} from '../../utils/abort.ts'
+import { lineStatusWriter, runWithLineAbort } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
@@ -75,10 +82,8 @@ import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
 import { type SessionState } from '../session/session.ts'
-import { type StatusWriter, newStatusWriter } from '../abort.ts'
-import { ExecutionNode } from '../types.ts'
-import { joinOrAbort } from '../abort.ts'
-import { abortable } from '../../concurrency/limiter.ts'
+import { type StatusWriter, ExecutionNode } from '../types.ts'
+import { newStatusWriter } from '../abort.ts'
 import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
 import { finishShell, inheritTraps } from '../executor/traps.ts'
@@ -126,7 +131,7 @@ export interface ExecuteEnv {
 /**
  * The record the line's nested evaluations earned, latest kept. Every
  * nested line re-enters execute through `executeFn`, and a substitution
- * keeps only the inner stdout, so that door is the one place its record
+ * keeps only the inner stdout, so that entry point is the one place its record
  * survives. The typed line reports it when its own tree earned none: the
  * rightmost rule IOResult.merge applies, with the inner line standing
  * left of the command that consumed its output. Mirrors Python's
@@ -419,7 +424,7 @@ async function runPreparedLine(
   effectiveSession.aliasView = null
   try {
     // The line's signal, the caller's folded with the session's kill
-    // channel, rides the async context so the status door can refuse an
+    // channel, rides the async context so the status write can refuse an
     // orphan of this line and no other, and every status the line stamps,
     // a syntax error's or a deny's included, is the line's to put back.
     // Python sets the line writer at the same point.
@@ -468,7 +473,7 @@ async function runPreparedLine(
           // The line's hand-off: the grants its passes and gates claim for its
           // commands, which the gates run on and the line's end spends. A
           // nested evaluation runs on one made under the hand-off of the node
-          // that runs it, which the walker binds into the door (`withHandOff`),
+          // that runs it, which the walker binds into the entry point (`withHandOff`),
           // not this line's: a background job's subtree runs on a hand-off of
           // the job's own.
           const handed: HandOff = options.handed ?? { claimed: [], parent: null, origin: null }
@@ -508,7 +513,7 @@ async function runPreparedLine(
               env.registry.decisions.handUp(effectiveSession.sessionId, handed)
             else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
           }
-          let placed: RouteDecision | Deny | null
+          let placed: RouteDecision<Runtime> | Deny | null
           try {
             placed = await abortable(
               env.router.decide(rootNode, command, options, targetSession, held),
@@ -528,7 +533,7 @@ async function runPreparedLine(
               placementRefused(placed, command),
             )
           }
-          const routingDecision: RouteDecision | null = placed
+          const routingDecision: RouteDecision<Runtime> | null = placed
 
           const dispatch: DispatchFn = env.dispatcher.dispatch
 
@@ -581,7 +586,7 @@ async function runPreparedLine(
               innerContext = new EvaluationContext(session, innerContext.frame.fork(), innerContext)
             innerOpts.evaluation = innerContext
             if (opts.substitution === true && opts.node?.type === NT.COMMAND_SUBSTITUTION) {
-              // A background evaluation can outlive the line that created this door.
+              // A background evaluation can outlive the line that created this entry point.
               const substitutionParser = parser.fork()
               try {
                 const substitutionTree = substitutionParser.parse(cmd)
@@ -781,7 +786,7 @@ async function runParsedLine(
   const cacheFacts = env.dispatcher.captureCacheFacts()
   const callAgentId = options.agentId ?? env.agentId ?? ''
   // An op a policy refuses inside a command prints the command's own GNU
-  // line, so the door notes the record here, for the line to carry on its
+  // line, so the dispatcher notes the record here, for the line to carry on its
   // result.
   const note = (refusal: Refusal): void => {
     nested.latest = refusal

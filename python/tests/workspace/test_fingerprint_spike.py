@@ -188,7 +188,7 @@ def test_a_tokenless_entry_costs_one_extra_get_then_carries_the_etag():
     On s3 the ETag of a simple unencrypted PUT *is* md5(content), so the
     old fallback was a valid validator there -- the one backend where it
     was. An entry that reaches the cache with no token (here through the
-    programmatic ``apply_io`` door, which defaults ``records=None``) can
+    programmatic ``apply_io`` entry point, which defaults ``records=None``) can
     no longer claim freshness, so the next read under ``fresh`` refetches
     once. After that the entry carries the backend's own ETag and the
     read after it is served from cache: the cost is one GET, once, not a
@@ -264,7 +264,7 @@ def _always_mount(objects):
 
 
 def test_always_revalidates_a_walk_and_a_glob():
-    """The second door, the one every shell read uses.
+    """The second entry point, the one every shell read uses.
 
     A recursive walk and a glob never named their files as operands, so the
     registry's pre-command reconcile never saw them and the file cache
@@ -600,7 +600,7 @@ def test_a_routing_probe_failure_never_takes_the_line():
 def test_metadata_command_reconciles_its_operand():
     """``ls`` reads no bytes, so the cache gate never fires for it.
 
-    Routing is the one door a metadata command has to backend truth, and
+    Routing is the one entry point a metadata command has to backend truth, and
     it must keep probing there. The stat count cannot show it any more:
     ``ls``'s own operand stat serves the routing probe's answer, so a warm
     ``ls -l`` is the probe plus ls's readdir check of its operand, and with
@@ -628,7 +628,7 @@ def test_metadata_command_reconciles_its_operand():
     assert kept, "an unchanged copy survives the probe"
     assert evicted, (
         "ls must still reconcile its operand at routing; a replaced copy "
-        "left in the cache means the one door a metadata command has to "
+        "left in the cache means the one entry point a metadata command has to "
         "backend truth went dark"
     )
     assert client.calls["head_object"] == 4
@@ -697,7 +697,7 @@ def test_bounded_serves_within_the_bound_then_goes_cold():
         "a warm bounded read is cat's own stat and nothing else; the same "
         "read under fresh also costs one (the routing reconcile, whose "
         "answer cat's stat and the gate reuse), so anything above one here "
-        "means a door that should have skipped did not"
+        "means an entry point that should have skipped did not"
     )
     assert warm_calls.get("get_object", 0) == 0
     assert cold == b"v2\n", "past its bound, the entry must not be served"
@@ -856,7 +856,7 @@ def test_one_line_serves_each_mount_under_its_own_policy(
     into the second leaves the bytes right when the bounded leg runs
     first; only the fresh leg's missing probe shows it.
 
-    The closing `cat` of the bounded leg is the other door: a
+    The closing `cat` of the bounded leg is the other entry point: a
     single-mount read reconciles at routing, which a walk over directory
     operands never reaches, so a routing reconcile reading the
     workspace's `fresh` would refetch v2 there and nothing above would
@@ -962,18 +962,18 @@ def test_one_line_serves_each_mount_under_its_own_policy(
     )
     assert (single_out, single_calls) == (b"v1\n", {}), (
         "a single-mount read of the bounded leg must not reconcile at "
-        "routing; v2 here means the routing door read another policy"
+        "routing; v2 here means the routing probe read another policy"
     )
 
 
-def test_the_live_cache_facts_door_reads_the_mounts_bound():
-    """``apply_io`` with no captured function is the embedder's door.
+def test_the_live_cache_facts_entry_point_reads_the_mounts_bound():
+    """``apply_io`` with no captured function is the embedder's entry point.
 
     ``cache_facts_for`` resolves the mount live and is what the public
     ``Workspace.apply_io`` (FUSE and facade fills) uses. Only
     ``capture_cache_facts``, reached through a shell line, is covered by
-    the tests above, so a door returning ``DEFAULT_READ_TTL`` here would
-    go unnoticed.
+    the tests above, so an entry point returning ``DEFAULT_READ_TTL`` here
+    would go unnoticed.
     """
     config = S3Config(
         bucket="test-bucket",
@@ -1003,7 +1003,7 @@ def test_the_live_cache_facts_door_reads_the_mounts_bound():
 
     ttl, unmounted = asyncio.run(run())
     assert ttl == 45, (
-        "the live door must read the mount's bound, not the package default"
+        "the live entry point must read the mount's bound, not the package default"
     )
     assert unmounted.cacheable is False
 

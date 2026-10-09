@@ -37,10 +37,24 @@ class WriteCondition:
 
 
 @dataclass(frozen=True, slots=True)
+class LiveVersion:
+    """A file's live tokens: the content token mirage compares, the native
+    token the backend's condition takes.
+
+    Args:
+        content (str | None): the token mirage keeps for these bytes.
+        native (str | None): the token the backend's condition takes.
+    """
+
+    content: str | None
+    native: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class WriteContext:
     """What a write on a ``write: conditional`` mount needs to know.
 
-    Pushed by the mount's own doors (``MountEntry.call`` and its command
+    Pushed by the mount's own entry points (``MountEntry.call`` and its command
     scope), so a write always sees the context of the mount it lands on; an
     unconditional mount pushes None, which also clears an outer one.
 

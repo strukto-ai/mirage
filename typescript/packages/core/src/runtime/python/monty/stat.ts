@@ -87,9 +87,9 @@ export function isDirRow(st: VFSStat): boolean {
  */
 export function statFields(st: VFSStat): GuestStat {
   const type = fileType(st)
-  // Seconds, as CPython reports them; 0 is the door's spelling of "no
-  // stamp", and it stays 0 rather than becoming the host clock.
-  const stamp = st.mtimeMs / 1000
+  // Seconds, as CPython reports them; an unknown stamp is 0 rather
+  // than the host clock.
+  const stamp = (st.mtimeMs ?? 0) / 1000
   return {
     st_mode: type | (st.mode & PERMISSION_BITS),
     st_ino: 0,
@@ -120,7 +120,7 @@ export function statFields(st: VFSStat): GuestStat {
  * requires a native NamedTuple stat result to validate the directory.
  *
  * Args:
- *   bits: the loaded engine's door pieces.
+ *   bits: the loaded engine's pieces.
  *   st: the mount's row for the path.
  */
 export function statResult(bits: MontyFsBits, st: VFSStat): object {

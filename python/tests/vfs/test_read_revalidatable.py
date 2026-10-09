@@ -496,7 +496,7 @@ def _gdrive_fake(shape: str, data: bytes) -> Iterator[Fake]:
     with patch_gdrive(drive):
         vfs = build_vfs("gdrive", GDRIVE_CONFIG)
         # No stray reach to refuse: stat has no download to fall into, and
-        # a no-index stat reaching get_file is its legitimate API door.
+        # a no-index stat reaching get_file is its legitimate API entry point.
         yield Fake(
             vfs=vfs,
             key=key,
@@ -545,7 +545,7 @@ def _hf_buckets_fake(shape: str, data: bytes) -> Iterator[Fake]:
     if prefix is not None:
         files[key] = DECOY
         config["key_prefix"] = prefix
-    # One dict behind both doors: the Hub serves it over HTTP and the
+    # One dict behind both entry points: the Hub serves it over HTTP and the
     # opendal fake lists and writes it. The opendal fake refuses every read,
     # so a stat or read that fell back to opendal fails here.
     hub = FakeHub(repos={("buckets", "acme/bkt"): files})
@@ -1220,7 +1220,8 @@ def test_a_written_file_is_served_without_a_download(
     assert out == b"new\n"
     assert downloads == WRITE_EXCEPTIONS.get(family, 0)
     # A new gridfs key's stat miss asks files_coll whether the key names a
-    # folder, a door the read rows refuse; the read itself reaches nothing.
+    # folder, a dispatcher the read rows refuse; the read itself reaches
+    # nothing.
     stat_miss = family == "gridfs" and target == "new"
     assert written == (["files_coll"] if stat_miss else [])
     assert fake.reach == written

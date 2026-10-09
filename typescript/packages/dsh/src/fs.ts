@@ -44,7 +44,6 @@ import {
   normalizeLineEndings,
   restoreLineEndings,
 } from './text.ts'
-import type {} from './service.ts'
 
 type LinksSeam = NonNullable<Files['links']>
 type Host = Awaited<Context['mirage']['ready']>
@@ -169,7 +168,7 @@ function shadowedByLink(links: LinksSeam | null, virtual: string): boolean {
 /**
  * Mirage-backed implementation of `ctx.fs`. Targets are canonical virtual
  * paths (namespace symlinks followed), every operation walks the workspace
- * op door — session grants, admission policies, cache read-through and
+ * dispatcher — session grants, admission policies, cache read-through and
  * post-write invalidation all fire exactly as they do for a shell command —
  * and `processPath` answers in the same virtual path space the mirage shell
  * executes in, so the two providers share one execution world.
@@ -202,14 +201,14 @@ export class MirageFileSystem extends FileSystem {
 
   // The workspace may still be building (declarative mounts resolve
   // asynchronously), so every entry point awaits the service's `ready`
-  // once and caches the op door. The caller's signal can fire during
+  // once and caches the dispatcher. The caller's signal can fire during
   // that wait, after its entry assertion passed, so it is asserted
   // again here, before the op it guards dispatches.
   //
   // `ready` does not hydrate: a workspace freshly attached to a shared
   // store still holds a minted default session and an empty link table
   // until its first op loads both. This adapter reads the session and
-  // the links outside the door, so it hydrates before either is
+  // the links outside the dispatcher, so it hydrates before either is
   // consulted, or a persisted hide would be judged by the wrong session.
   private async files(signal?: AbortSignal, operation = 'ready'): Promise<Files> {
     if (this.fsOps === null) {
@@ -231,7 +230,7 @@ export class MirageFileSystem extends FileSystem {
   }
 
   /**
-   * The session the op door judges this adapter's ops as, asked of the
+   * The session the dispatcher judges this adapter's ops as, asked of the
    * workspace so it is the one a dispatch from this context will bind:
    * the configured session, unless an ambient one of this workspace is
    * kept (a callback reaching `ctx.fs` from inside its `shell`).
@@ -245,9 +244,9 @@ export class MirageFileSystem extends FileSystem {
 
   /**
    * Whether the session may be told a path exists. The link table is
-   * read here, outside the door, so it is read the way the door would:
+   * read here, outside the dispatcher, so it is read the way the dispatcher would:
    * a link the session cannot see is never followed (the typed path
-   * reaches the door and is refused as absent, not resolved to the
+   * reaches the dispatcher and is refused as absent, not resolved to the
    * visible target it points at), and never listed.
    */
   private visible(path: string): boolean {
@@ -444,8 +443,8 @@ export class MirageFileSystem extends FileSystem {
       normalized === '/'
         ? '/'
         : posix.join(this.follow(posix.dirname(normalized)), posix.basename(normalized))
-    // The leaf is read off the link table outside the door, so it is
-    // gated the way the door would gate it: a link the session cannot
+    // The leaf is read off the link table outside the dispatcher, so it is
+    // gated the way the dispatcher would gate it: a link the session cannot
     // see is not a link here, and the stat below reports it absent.
     const links = this.links
     if (links?.isLink(parentFollowed) === true && this.visible(parentFollowed)) {
@@ -550,7 +549,7 @@ export class MirageFileSystem extends FileSystem {
     // No store can spell an empty range, so the known answer is given here
     // rather than sent to a backend that would have to refuse it.
     if (range.length === 0) return new Uint8Array(0)
-    // The window is the bound, not the file: the op door asks a native range
+    // The window is the bound, not the file: the dispatcher asks a native range
     // when the backend has one and slices a rendered read when it does not,
     // and turns a store's past-EOF refusal into the empty POSIX answer either
     // way, so every mount answers this the same.
@@ -603,7 +602,7 @@ export class MirageFileSystem extends FileSystem {
     }
     const entries: FsDirEntry[] = []
     for (const name of [...names].sort(compareCodePoints)) {
-      // Per entry, not just at the door: a listing is one classification
+      // Per entry, not just at the entry point: a listing is one classification
       // round trip per child on a backend the readdir did not warm, and
       // a caller that gave up should stop paying for them.
       assertNotAborted(signal, 'list')

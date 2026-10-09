@@ -25,7 +25,7 @@ const LINE_SCAN = 4096
  * One open file: its stored bytes fetched as read, its writes kept.
  *
  * Nothing moves at open. The stored bytes sit behind a `ChunkedHandle`
- * over the door's read, and what the handle wrote is kept as byte ranges
+ * over the file adapter's read, and what the handle wrote is kept as byte ranges
  * laid over them. A close owes the mount only those ranges (`flushPlan`),
  * so another writer's bytes between them survive, which a copy of the
  * whole file taken at open and written back at close would undo. An
@@ -70,7 +70,7 @@ export class FileHandle {
    *
    * Args:
    *   path: guest-absolute virtual path.
-   *   fetch: the door's read, or null when the open created or emptied
+   *   fetch: the file adapter's read, or null when the open created or emptied
    *     the file.
    *   opts: the file's length as the open saw it, whether writes are
    *     accepted, and whether every write lands at the end (the position
@@ -265,8 +265,12 @@ export class FileHandle {
 
   /** Set the file's length: a shrink drops bytes, growth reads zeros. */
   truncate(size: number): void {
+    // ftruncate(2) sets the length outright, so a cut to the length this
+    // handle holds still drops what another writer appended since the open.
+    if (this.base !== null && size <= this.size) {
+      this.cut = this.cut === null ? size : Math.min(this.cut, size)
+    }
     if (size < this.size) {
-      if (this.base !== null) this.cut = this.cut === null ? size : Math.min(this.cut, size)
       this.runs = this.runs
         .filter((run) => run.start < size)
         .map((run) => ({ ...run, length: Math.min(run.length, size - run.start) }))

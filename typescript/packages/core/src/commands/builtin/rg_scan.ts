@@ -22,7 +22,7 @@ import { getExtension } from '../../utils/filetype.ts'
 import { BINARY_EXTENSIONS } from './constants.ts'
 import type { FileTypes } from './rg_filetypes.ts'
 import { type Overrides, Verdict, walkCandidate } from './rg_glob.ts'
-import type { LinkDoor } from './utils/links.ts'
+import type { LinkResolver } from './utils/links.ts'
 import type { AsyncReaddirFn, AsyncStatFn } from './utils/types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
@@ -69,7 +69,7 @@ export class WalkFilter {
  * One input rg searches: its virtual path (`-` for stdin), the path rg
  * prints for it, its stat when the walk read one (the time sorts read it),
  * the operand itself when it was named on the line, which a stream read
- * takes, and the door a file the walk reached through a link is read
+ * takes, and the dispatcher a file the walk reached through a link is read
  * through, since the link may lead onto a mount the operand's backend
  * cannot read.
  */
@@ -78,7 +78,7 @@ export interface Haystack {
   shown: string
   stat: FileStat | null
   spec: PathSpec | null
-  door: LinkDoor | null
+  resolver: LinkResolver | null
 }
 
 function errorText(err: unknown): string {
@@ -155,7 +155,7 @@ export function onOtherMount(
  * entries in name order rather than the backend's. `boundary` is
  * --one-file-system's test for a directory on another mount than the
  * operand's, which the walk does not enter, or null to enter everything.
- * `door` is the namespace's links and the door past them, null outside a
+ * `resolver` is the namespace's links and the dispatcher past them, null outside a
  * workspace, where no link can stand.
  *
  * A link the walk meets is skipped, as ripgrep skips one, unless `follow`
@@ -174,7 +174,7 @@ export async function* walkHaystacks(
   sortByName: boolean,
   warnings: string[] | null,
   boundary: ((path: string) => boolean) | null = null,
-  door: LinkDoor | null = null,
+  resolver: LinkResolver | null = null,
   follow = false,
   parallel = false,
 ): AsyncGenerator<Haystack> {
@@ -186,7 +186,7 @@ export async function* walkHaystacks(
     sortByName,
     warnings,
     boundary,
-    door,
+    resolver,
     follow,
     shownRoot === '',
     parallel,
@@ -209,7 +209,7 @@ class Walker {
     readonly sortByName: boolean,
     readonly warnings: string[] | null,
     readonly boundary: ((path: string) => boolean) | null,
-    readonly door: LinkDoor | null,
+    readonly resolver: LinkResolver | null,
     readonly follow: boolean,
     readonly implicit: boolean,
     readonly parallel: boolean,
@@ -229,7 +229,7 @@ class Walker {
 
   // Whether a link stands at a walked entry.
   isLink(virtual: string): boolean {
-    return this.door !== null && this.door.links.statAt(virtual) !== null
+    return this.resolver !== null && this.resolver.links.statAt(virtual) !== null
   }
 
   /**
@@ -239,7 +239,7 @@ class Walker {
    * and `shownBase` that path as printed. `chain` is `here` and every
    * directory above it to the operand, nearest first: what a link leading
    * back into the walk is caught against. `linked` says the walk reached
-   * `here` through a link, so it reads through the door rather than the
+   * `here` through a link, so it reads through the dispatcher rather than the
    * operand's backend.
    */
   async *below(
@@ -251,18 +251,18 @@ class Walker {
     linked: boolean,
   ): AsyncGenerator<Haystack> {
     if (this.walk.maxDepth !== null && depth >= this.walk.maxDepth) return
-    const door = linked ? this.door : null
+    const resolver = linked ? this.resolver : null
     let entries: string[]
     try {
-      entries = door !== null ? await door.readdir(here) : await this.readdirFn(here)
+      entries = resolver !== null ? await resolver.readdir(here) : await this.readdirFn(here)
     } catch (err) {
       if (!isWalkError(err)) throw err
       this.warn(walkErrorLine(chain[0]?.[1] ?? here, err, this.parallel))
       return
     }
-    if (this.follow && this.door !== null) {
+    if (this.follow && this.resolver !== null) {
       const listed = new Set(entries.map(entryName))
-      entries = [...entries, ...this.door.children(here).filter((link) => !listed.has(link))]
+      entries = [...entries, ...this.resolver.children(here).filter((link) => !listed.has(link))]
     }
     if (this.sortByName) entries = [...entries].sort(byName)
     for (const entry of entries) {
@@ -275,7 +275,7 @@ class Walker {
       }
       let s: FileStat
       try {
-        s = door !== null ? await door.stat(entry) : await this.statFn(entry)
+        s = resolver !== null ? await resolver.stat(entry) : await this.statFn(entry)
       } catch (err) {
         if (!isWalkError(err)) throw err
         this.warn(walkErrorLine(this.named(shown), err, this.parallel))
@@ -296,7 +296,7 @@ class Walker {
           )
         }
       } else if (s.type === FileType.FILE && this.walk.admitsFile(candidate, name, s)) {
-        yield { virtual: child, shown, stat: s, spec: null, door }
+        yield { virtual: child, shown, stat: s, spec: null, resolver }
       }
     }
   }
@@ -313,14 +313,14 @@ class Walker {
     depth: number,
     chain: readonly Level[],
   ): AsyncGenerator<Haystack> {
-    const door = this.door
-    if (door === null) return
+    const resolver = this.resolver
+    if (resolver === null) return
     const named = this.named(shown)
     let target: string
     let s: FileStat
     try {
-      target = door.target(link)
-      s = await door.stat(target)
+      target = resolver.target(link)
+      s = await resolver.stat(target)
     } catch (err) {
       if (!isWalkError(err)) throw err
       this.warn(walkErrorLine(named, err, this.parallel))
@@ -339,7 +339,7 @@ class Walker {
         yield* this.below(target, target, shown, depth + 1, [[target, named], ...chain], true)
       }
     } else if (s.type === FileType.FILE && this.walk.admitsFile(candidate, name, s)) {
-      yield { virtual: target, shown, stat: s, spec: null, door }
+      yield { virtual: target, shown, stat: s, spec: null, resolver }
     }
   }
 }

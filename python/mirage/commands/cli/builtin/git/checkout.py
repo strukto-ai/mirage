@@ -116,7 +116,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -764,7 +764,7 @@ async def _names_path(
 async def _checkout_paths(
     repo: BaseRepo,
     location: RepoLocation,
-    doors: CLIDoors,
+    view: CLIView,
     fl: FlagView,
     treeish: str | None,
     paths: Sequence[str],
@@ -780,7 +780,7 @@ async def _checkout_paths(
     Args:
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
-        doors (CLIDoors): the invocation's doors.
+        view (CLIView): the invocation's view.
         fl (FlagView): the line's flags.
         treeish (str | None): the tree-ish named ahead of the paths,
             None for the index.
@@ -797,7 +797,7 @@ async def _checkout_paths(
     notes, updated = await restore_paths(
         repo,
         location,
-        doors,
+        view,
         paths,
         start_point(fl).virtual,
         source,
@@ -830,11 +830,11 @@ async def checkout(
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
-    stat_path = doors.stat_path
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
+    stat_path = view.stat_path
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
@@ -850,7 +850,7 @@ async def checkout(
             raise UnknownPathspecError("")
         if detach and len(texts) > 1:
             raise DetachPathError(texts[1])
-        repo, location = await opened(fl, doors, work_tree=True)
+        repo, location = await opened(fl, view, work_tree=True)
         mode = await track_mode(dispatch, location)
         head = await read_head(dispatch, location.gitdir)
         creating = fl.as_bool("b")
@@ -864,7 +864,7 @@ async def checkout(
                 return await _checkout_paths(
                     repo,
                     location,
-                    doors,
+                    view,
                     fl,
                     leading[0] if leading else None,
                     [*leading[1:], *marked],
@@ -879,7 +879,7 @@ async def checkout(
                 return await _checkout_paths(
                     repo,
                     location,
-                    doors,
+                    view,
                     fl,
                     treeish,
                     texts if treeish is None else texts[1:],
@@ -904,7 +904,7 @@ async def checkout(
                     dispatch, location, start_point(fl).virtual, target
                 ):
                     return await _checkout_paths(
-                        repo, location, doors, fl, None, list(texts), True
+                        repo, location, view, fl, None, list(texts), True
                     )
                 guessed = remote_branch(repo, target)
                 if guessed is None:
@@ -950,8 +950,8 @@ async def checkout(
         moved = await move_head(
             dispatch,
             stat_path,
-            links_of(doors),
-            mounts_of(doors),
+            links_of(view),
+            mounts_of(view),
             repo,
             location,
             head,

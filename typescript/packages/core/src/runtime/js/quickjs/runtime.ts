@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { HOME_CONFIG_KEYS } from '../../config.ts'
+import { HOME_CONFIG_KEYS, type RuntimeOptions } from '../../config.ts'
 import { EvalError } from '../../errors.ts'
 import { JsRuntime } from '../base.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
-import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../../types.ts'
+import type { EvalResult, EvalValue, RunArgs, RunResult } from '../../types.ts'
 import type { RuntimeContext } from '../../binding.ts'
-import { RuntimeVFS } from '../../vfs.ts'
+import { RuntimeFiles } from '../../files.ts'
 import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
 import { cwdPreamble } from './execution.ts'
 import BOOTSTRAP from '../../../generated/quickjs.ts'
@@ -47,7 +47,7 @@ const EVAL_INTERRUPT_SECONDS = 10
 export class QuickJsRuntime extends JsRuntime implements Evaluator {
   readonly name = 'quickjs'
   // The engine is a WASI guest whose `std.open`/`os.readdir` suspend
-  // into the workspace bridge: guest I/O has no door around the gate.
+  // into the workspace bridge: guest I/O has no way around the gate.
   override readonly reach = 'workspace'
   override readonly filesystem = ['read', 'write', 'list', 'stat'] as const
   readonly [EVALUATOR] = true as const
@@ -103,8 +103,8 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     const timedOut = this.installInterrupt(runtime, args.signal, args.timeoutSeconds)
     try {
       this.installGlobals(ctx, args, out, err, exit)
-      const vfs = context !== undefined ? RuntimeVFS.of(context) : null
-      const closeAll = installQuickJsFs(ctx, vfs)
+      const files = context !== undefined ? RuntimeFiles.of(context) : null
+      const closeAll = installQuickJsFs(ctx, files)
 
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
@@ -201,9 +201,9 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       })
       // Same filesystem surface as run(): an attached workspace serves
       // std.open/os.readdir, so a JS policy script can read mounted
-      // content (the python evaluator gets this via run()'s RuntimeVFS).
-      const vfs = context !== undefined ? RuntimeVFS.of(context) : null
-      const closeAll = installQuickJsFs(ctx, vfs)
+      // content (the python evaluator gets this via run()'s RuntimeFiles).
+      const files = context !== undefined ? RuntimeFiles.of(context) : null
+      const closeAll = installQuickJsFs(ctx, files)
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
         boot.error.dispose()

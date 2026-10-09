@@ -16,16 +16,17 @@ import asyncio
 import logging
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Callable, Generic, TypeVar
 
 logger = logging.getLogger(__name__)
 
-ClientManager = AbstractAsyncContextManager[Any]
-ClientFactory = Callable[[], ClientManager]
+_T = TypeVar("_T")
+ClientManager = AbstractAsyncContextManager[_T]
+ClientFactory = Callable[[], ClientManager[_T]]
 
 
 @dataclass(slots=True)
-class _Entry:
+class _Entry(Generic[_T]):
     """One open client and the context manager that releases it.
 
     The context manager itself, not an AsyncExitStack wrapping it: a stack
@@ -36,15 +37,15 @@ class _Entry:
     remembered.
 
     Args:
-        client (Any): the open client.
-        manager (ClientManager): releases the client on exit.
+        client (_T): the open client.
+        manager (ClientManager[_T]): releases the client on exit.
     """
 
-    client: Any
-    manager: ClientManager
+    client: _T
+    manager: ClientManager[_T]
 
 
-class LoopClientCache:
+class LoopClientCache(Generic[_T]):
     """One open client per event loop, opened once and released exactly once.
 
     A client that costs real time to build is worth keeping, but keeping it
@@ -76,18 +77,18 @@ class LoopClientCache:
             what (str): what is being cached, for log lines ("s3").
         """
         self.what = what
-        self._entries: dict[asyncio.AbstractEventLoop, _Entry] = {}
+        self._entries: dict[asyncio.AbstractEventLoop, _Entry[_T]] = {}
         self._locks: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
 
-    async def get(self, factory: ClientFactory) -> Any:
+    async def get(self, factory: ClientFactory[_T]) -> _T:
         """Return this loop's client, opening one when there is none.
 
         Args:
-            factory (ClientFactory): builds the client manager. Called
+            factory (ClientFactory[_T]): builds the client manager. Called
                 only on a miss, so a hit costs one dict lookup.
 
         Returns:
-            Any: the open client for the running loop.
+            _T: the open client for the running loop.
         """
         loop = asyncio.get_running_loop()
         await self.release_dead()
@@ -109,7 +110,7 @@ class LoopClientCache:
             self._entries[loop] = _Entry(client=client, manager=manager)
             return client
 
-    def peek(self) -> Any:
+    def peek(self) -> _T | None:
         """Return the running loop's open client, None without one.
 
         Opens nothing, so a synchronous caller may ask.

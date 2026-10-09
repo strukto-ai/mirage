@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Console } from 'node:console'
+import { stderr } from 'node:process'
 import { VERSION } from '@struktoai/mirage-core/version'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
@@ -49,9 +51,11 @@ import { McpToolOperations, OutputProgress } from './progress.ts'
 import { answered, checked, explanationToDict, failureToDict } from '../io_serde.ts'
 import { VFS_CALLS, schemaOf, type VfsCall } from '../vfs_calls.ts'
 
+const logger = new Console({ stdout: stderr, stderr })
+
 const READ_ONLY: ToolAnnotations = { readOnlyHint: true }
 
-/** The tools every door serves, in the order a client lists them. */
+/** The tools every entry point serves, in the order a client lists them. */
 export const TOOLS: readonly {
   name: string
   description: string
@@ -141,7 +145,7 @@ export interface MirageMcpServerOptions extends MirageToolOperationsOptions {
   version?: string
   /**
    * The tool table to serve; the session's own (`session.tools`) when
-   * absent. The HTTP door passes one that runs each call through its API.
+   * absent. The HTTP endpoint passes one that runs each call through its API.
    */
   operations?: MirageToolOperations
   /**
@@ -229,6 +233,7 @@ export function createMirageMcpServer(
       }
       return await operations.call(name, given, ctx.mcpReq.signal)
     } catch (err) {
+      logger.debug('mcp tool %s failed', name, err)
       // A call that failed is a tool result the agent reads, not a
       // protocol error.
       if (vfs !== undefined) return json(failureToDict(err), true)

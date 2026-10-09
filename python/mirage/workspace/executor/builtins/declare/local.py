@@ -91,7 +91,7 @@ async def handle_local(
             ``NAME``, ``NAME=value``, ``NAME+=value`` and staged array
             literals.
         session (SessionState): shell session state.
-        state (SessionView | None): the session plane's gated door.
+        state (SessionView | None): the gated session view.
         cmd (str): the spelling that reached here, for diagnostics.
             ``declare`` and ``typeset`` route through this handler and
             must say their own name, not ``local``.
@@ -182,7 +182,7 @@ async def _declare_operands(
     Args:
         operands (list[DeclarationOperand]): the operands in order.
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         cmd (str): the builtin's spelling, for diagnostics.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
         shaping (AttrMarks): the ``-i -l -u`` / ``+i +l +u`` marks.
@@ -275,7 +275,7 @@ def _literal_reference_refusal(
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         cmd (str): the builtin's spelling, for diagnostics.
         name (str): the literal's name.
     """
@@ -307,7 +307,7 @@ async def _declare_operand(
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         assign (str): the operand.
         cmd (str): the builtin's spelling, for diagnostics.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
@@ -364,7 +364,7 @@ async def _declare_operand(
             # `${L-d}` still expands to `d`. A bare declaration of an
             # existing array re-scopes it, so nothing is written there.
             # Visible reads: a hidden name counts as unset, so the mark
-            # is attempted and the door refuses it.
+            # is attempted and the session view refuses it.
             await view.mark(key, None, True, not nameref)
         await stamp_marks(session, view, key, None, marks, not nameref)
         return None
@@ -464,7 +464,7 @@ async def _aim_reference(
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         cmd (str): the builtin's spelling, for diagnostics.
         key (str): the reference being declared.
         append (bool): the operand was ``NAME+=VALUE``.
@@ -535,7 +535,7 @@ async def _fresh_local(
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         cmd (str): the builtin's spelling, for the diagnostic.
         name (str): the name being declared.
         inherit (bool): the declaration carried ``-I``.

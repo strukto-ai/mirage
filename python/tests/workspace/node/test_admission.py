@@ -331,7 +331,7 @@ async def test_admit_line_classifies_bare_operands_with_the_spec():
 @pytest.mark.asyncio
 async def test_admit_line_reads_an_interpreters_script_as_a_path():
     # The runtime that takes the line runs the interpreter itself, where
-    # no op door follows the script read, so the gate types the script
+    # no dispatcher follows the script read, so the gate types the script
     # slot from the interpreter's spec as it does a mount command's: a
     # bare name under the cwd is the file it names, and once -c or -e
     # names the program no operand is a path.
@@ -521,7 +521,7 @@ async def test_a_hoisted_redirect_is_judged_with_its_command_on_the_run(text):
 async def test_a_hidden_path_is_no_path_to_any_policy():
     # A session that cannot see a path must not learn of it from a
     # rule: the gate drops the operand before any hook, the rule does
-    # not fire, and the line goes on to the door, which answers ENOENT.
+    # not fire, and the line goes on to the dispatcher, which answers ENOENT.
     ws = _ws()
     try:
         await ws.shell("mkdir -p /data/private && echo s > /data/secret")

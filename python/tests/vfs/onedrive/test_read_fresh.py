@@ -227,7 +227,7 @@ async def test_a_listed_ctag_never_answers_for_a_changed_file():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("streamed", [False, True])
-async def test_a_door_read_stamps_its_ctag(streamed):
+async def test_an_entry_point_read_stamps_its_ctag(streamed):
     with serve(FakeGraph(drives={ME: {"a.txt": OLD}})) as graph:
         ws = _ws(_vfs(graph))
         try:

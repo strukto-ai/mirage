@@ -209,7 +209,7 @@ async def test_a_link_loop_is_eloop(workspace):
 
 
 @pytest.mark.anyio
-async def test_remove_asks_the_door_about_the_path_as_given():
+async def test_remove_asks_the_dispatcher_about_the_path_as_given():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.WRITE,

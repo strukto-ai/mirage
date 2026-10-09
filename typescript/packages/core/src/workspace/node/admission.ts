@@ -44,7 +44,7 @@ import { PathSpec, type Refusal } from '../../types.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { makeAbortError } from '../../concurrency/limiter.ts'
+import { makeAbortError } from '../../utils/abort.ts'
 import { toScope } from '../executor/builtins/scope.ts'
 import { followPaths } from '../executor/builtins/links/links.ts'
 import {
@@ -144,12 +144,12 @@ export const UNREADABLE_LINES = 'runs lines the gate cannot read'
  * read, write or listing (`EntryGate`). The paths the gate already judged
  * pass, since the line was admitted on them; every other entry is judged
  * by `ioRefusal` under the same precedence the gate applied to the line,
- * and a refusal is the op door's `PolicyDenied` (EACCES, the path, the
+ * and a refusal is the dispatcher's `PolicyDenied` (EACCES, the path, the
  * reason on its record), which every command renders as GNU's
  * `Permission denied`. `opsJudged` is whether a coded or scripted preVfs
  * policy speaks for the session, which judges every path.
  * `granted` holds the ask rules the line runs under a grant for: the one
- * the door answered for this line, and the session's standing ones.
+ * the entry point answered for this line, and the session's standing ones.
  */
 export class Admitted implements EntryGate {
   readonly rules: AdmissionRules | null
@@ -210,7 +210,7 @@ export class Admitted implements EntryGate {
  * typed and the values of path-valued flags, then, for a command that
  * follows links, the targets they resolve to. `cat /data/link` reads
  * `/data/secret`, so a rule protecting the target has to see it, and a
- * command-scoped rule never runs at the op door where the resolved path
+ * command-scoped rule never runs at the dispatcher where the resolved path
  * would otherwise be checked. The follow policy is the command's own
  * (`followsLastComponent`: rm, mv, ln, stat, tar ... act on the link
  * itself, `-L` turns following back on), the same one the router
@@ -287,7 +287,7 @@ export function policyScopes(
  * for the session, so no policy may learn of it either: a rule scoped
  * to it must not fire (the reason would say the path is there), an ask
  * must not be raised for it (a request would name it to the host), and
- * the line runs on to the door, which answers ENOENT like any other
+ * the line runs on to the dispatcher, which answers ENOENT like any other
  * absent path. A path the reader could not read (`unread`, as `gate`
  * takes it) goes the same way, since the line may never name it.
  */
@@ -301,15 +301,15 @@ function seen(
 
 /**
  * The command plane's admission of one command: visibility, then the
- * policy chain, then the approval door. The one gate every command
+ * policy chain, then the approval ledger. The one gate every command
  * class passes through, in the tree (`runArgv`, once the words are
  * expanded) and for a line a runtime takes whole (`admitLine`, per
  * parsed command). A word the session's allow lists do not install is
  * bash's "command not found" before any admission hook, so an unlisted
  * tool never leaks a deny reason; a path the session cannot see is
- * dropped before any hook, so a rule never names it and the door
+ * dropped before any hook, so a rule never names it and the dispatcher
  * answers ENOENT; a Deny renders in the outcome table's voice; an Ask
- * is answered by the door from the session's grants or the host.
+ * is answered by the entry point from the session's grants or the host.
  * `agentId` is the agent the line is attributed to, for an approval
  * request; `stdin` decides whether a bare `rg` reads the working
  * directory.
@@ -469,7 +469,7 @@ export async function admit(
   if (!Array.isArray(gated)) return gated
   const [ctx, asked] = gated
   // An Ask is the chain's answer only after every Deny had its say; the
-  // door answers it from the session's grants or the host, so a grant
+  // entry point answers it from the session's grants or the host, so a grant
   // never re-opens a deny.
   const action =
     asked !== null && asked.kind === 'ask'
@@ -530,7 +530,7 @@ function wordHints(
   const consumer = lookup(joined, session, registry)
   // A mount command's spec is read, and so is a native capture's and an
   // interpreter's: `python3 steal.py` runs on the runtime's own disk or
-  // a host process, where no op door follows the read, so the script
+  // a host process, where no dispatcher follows the read, so the script
   // slot the spec declares is the one place a path rule can see the
   // file. The tree's gate reads a native capture the same way
   // (`expandArgv`), and an interpreter it runs itself for the script slot
@@ -763,7 +763,7 @@ export async function admitLine(
  * the last-command chain instead, which is bash's own rule for a list,
  * a pipeline and a `!`. A compound (`{ }`, a loop, a subshell) redirects
  * every command inside it, which is not a chain, so none is claimed
- * here and the op door judges the write.
+ * here and the dispatcher judges the write.
  */
 function statementRedirectsRaw(node: TSNodeLike): Redirect[] {
   let owner = node

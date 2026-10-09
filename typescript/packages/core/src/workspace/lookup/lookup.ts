@@ -91,7 +91,7 @@ export function runtimeRefused(
   name: string,
   session: SessionState,
   registry: MountRegistry,
-  routing?: RouteDecision,
+  routing?: RouteDecision<Runtime>,
 ): boolean {
   if (routing === undefined) return false
   const key = Object.hasOwn(routing.bindings, name) ? name : EXTERNAL_COMMANDS
@@ -123,7 +123,7 @@ function* layers(
   name: string,
   session: SessionState,
   registry: MountRegistry,
-  routing?: RouteDecision,
+  routing?: RouteDecision<Runtime>,
 ): Generator<Consumer> {
   const installed = listed(name, session)
   let found = false
@@ -215,7 +215,7 @@ export function lookup(
   name: string,
   session: SessionState,
   registry: MountRegistry,
-  routing?: RouteDecision,
+  routing?: RouteDecision<Runtime>,
 ): Consumer {
   for (const consumer of layers(name, session, registry, routing)) return consumer
   return Consumer.UNKNOWN

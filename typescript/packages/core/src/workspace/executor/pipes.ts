@@ -62,8 +62,7 @@ import { Recorder } from '../../shell/descriptors.ts'
 import { Channel } from '../../shell/console/types.ts'
 
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { mergeSignals } from '../abort.ts'
-import { abortable, makeAbortError } from '../../concurrency/limiter.ts'
+import { abortable, makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { CAPACITY } from '../../io/pipe.ts'
@@ -426,7 +425,7 @@ export async function handleSubshell(
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
   agentId: string | null = null,
-  // The op door, so a subshell honors an `exec` redirect the way the
+  // The dispatcher, so a subshell honors an `exec` redirect the way the
   // program loop does. A subshell is a child shell, so the redirect it
   // installs belongs to the child and is discarded when the body
   // ends.

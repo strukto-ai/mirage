@@ -18,12 +18,12 @@ import type { FsCondition } from '../errors/index.ts'
 export const EXTERNAL_COMMANDS = '@external'
 
 /**
- * The most requests one runtime file door keeps in flight.
+ * The most requests one runtime file adapter keeps in flight.
  *
  * Classifying or preloading an entry is a request of its own on a
  * mount that keeps no listing index, so an unbounded listing puts a
  * whole directory's worth of requests on the wire together. Every
- * request a door sends shares the one cap, a preload walk's included.
+ * request an entry point sends shares the one cap, a preload walk's included.
  */
 export const LISTING_ENTRY_CONCURRENCY = 16
 
@@ -35,6 +35,13 @@ export const LISTING_ENTRY_CONCURRENCY = 16
  * tell from a real one, so nothing else belongs here.
  */
 export const ABSENT_PATH: ReadonlySet<FsCondition> = new Set<FsCondition>(['ENOENT', 'ENOTDIR'])
+
+/**
+ * What a hard link is refused with, wherever one can be spelled (node's
+ * patched `fs.link`): a hard link is a second name for one inode, and
+ * nothing above a mount holds that.
+ */
+export const HARD_LINK_REFUSAL: FsCondition = 'EPERM'
 
 /**
  * How long one policy script (a profile's `policy:`, a `routePolicy` or a

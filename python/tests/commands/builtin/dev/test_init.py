@@ -30,9 +30,9 @@ class _SealedReads(Policy):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("command", ["cat", "head -n 1"])
-async def test_a_file_in_dev_is_read_at_the_door(command):
+async def test_a_file_in_dev_is_read_at_the_dispatcher(command):
     # cat and head read /dev in ranges, which /dev/zero answers without
-    # end; each range is a door read, so a policy refusing the file is
+    # end; each range is a dispatcher read, so a policy refusing the file is
     # asked before any byte is printed.
     ws = Workspace(
         {"/data": RAMVFS()}, mode=MountMode.WRITE, policies=[_SealedReads()]

@@ -162,7 +162,7 @@ describe('browser VFS registry', () => {
     }
   })
 
-  // The browser door validates too: a wrong-typed field is refused with the
+  // The browser entry point validates too: a wrong-typed field is refused with the
   // field and the code, the same line the node registry and python's
   // `build_vfs` produce.
   it('refuses a wrong-typed config, naming field and code', async () => {

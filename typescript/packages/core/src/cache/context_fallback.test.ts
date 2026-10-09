@@ -28,6 +28,7 @@ import {
   runWithOwnVersion,
   runWithWriteContext,
   writeCondition,
+  writesConditioned,
 } from './context.ts'
 import { MountMode, PathSpec, WritePolicy } from '../types.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
@@ -263,7 +264,7 @@ describe('a conditional write on the fallback storage', () => {
   }
 
   it("agrees with itself across one mount's nested frames", async () => {
-    // A command's frame and its op door's are one mount, so the version stays.
+    // A command's frame and its dispatcher's are one mount, so the version stays.
     const [entry, path] = await conditional()
     const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
       runWithWriteContext('/s3/', entry.writeContext(), () => writeCondition(path, 'put')),
@@ -323,6 +324,31 @@ describe('a conditional write on the fallback storage', () => {
       ),
     ).rejects.toMatchObject({ code: 'ENOTSUP' })
   })
+
+  it('answers whether a path writes conditioned while lines overlap, never throwing', async () => {
+    // A read hands its token on when the owner is unclear: true is the safe side.
+    const [entry, path] = await conditional()
+    const paths = [path, PathSpec.fromStrPath('/u/g', '/g'), PathSpec.fromStrPath('/x/h', '/h')]
+    const got = await runWithWriteContext('/s3/', entry.writeContext(), () =>
+      runWithWriteContext('/u/', null, () => Promise.resolve(paths.map(writesConditioned))),
+    )
+    expect(got).toEqual([true, false, true])
+  })
+
+  it.each([
+    ['a plain mount nested under it', '/s3/u/', [true, false]],
+    ['a plain frame on its own prefix', '/s3/', [true, true]],
+  ] as const)(
+    'answers the longest owning prefix, true while its frames disagree: %s',
+    async (_name, plainPrefix, want) => {
+      const [entry, path] = await conditional()
+      const paths = [path, PathSpec.fromStrPath('/s3/u/g', '/u/g')]
+      const got = await runWithWriteContext('/s3/', entry.writeContext(), () =>
+        runWithWriteContext(plainPrefix, null, () => Promise.resolve(paths.map(writesConditioned))),
+      )
+      expect(got).toEqual(want)
+    },
+  )
 
   it("leaves another path's own version alone", async () => {
     const [entry, path] = await conditional()

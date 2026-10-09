@@ -6,7 +6,7 @@ from mirage import ShellExecution, Workspace
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.shell.console.types import Channel
-from mirage.workspace.abort import MirageAbortError
+from mirage.utils.abort import MirageAbortError
 from mirage.workspace.execution import ExecutionScope
 
 

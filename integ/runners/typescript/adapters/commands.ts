@@ -156,7 +156,7 @@ export const CLI = new CLISpec({
   fn: async (inv) => {
     let size = 0
     for (const path of inv.paths) {
-      const [stat] = await inv.doors.dispatch('stat', path)
+      const [stat] = await inv.view.dispatch('stat', path)
       size += (stat as FileStat).size ?? 0
     }
     return [

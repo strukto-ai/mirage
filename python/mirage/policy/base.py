@@ -59,10 +59,10 @@ class Policy:
         return None
 
     async def pre_vfs(self, ctx: VfsContext) -> Action | None:
-        """Admit or refuse one VFS op, at the op doors and on the
+        """Admit or refuse one VFS op, at the dispatcher and on the
         command tier's backend I/O.
 
-        The doors are the dispatcher and ``ws.vfs``, which is also
+        The entry points are the dispatcher and ``ws.vfs``, which is also
         how FUSE, the runtime guests, ``find -delete`` and the warm
         cache arrive; a mount command's handler (cat, grep -r, sed -i,
         rm) admits each content read, mutation and readdir through the
@@ -101,7 +101,7 @@ class Policy:
         """Observe one completed VFS op; a Deny suppresses its result,
         a Limit caps a byte-producing one.
 
-        Narrower than pre_vfs: the dispatcher and facade doors only.
+        Narrower than pre_vfs: the dispatcher and facade entry points only.
         The backend I/O inside a mount command's handler and each
         ``find -delete`` deletion admit through pre_vfs and report no
         per-op result here; the command tier's result plane is

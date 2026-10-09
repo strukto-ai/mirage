@@ -23,7 +23,6 @@ from typing import Any, TypeVar
 import jsonschema
 
 from mirage import __version__
-from mirage.errors.classify import failure_text
 from mirage.errors.types import FsCondition
 from mirage.server.io_serde import (
     CallArgsError,
@@ -269,7 +268,7 @@ class MirageRpcServer:
                 if data.get("errno") == FsCondition.ENOENT.name
                 else RPC_INTERNAL_ERROR
             )
-            return error_response(request_id, code, failure_text(exc), data)
+            return error_response(request_id, code, str(data["detail"]), data)
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
     async def serve(

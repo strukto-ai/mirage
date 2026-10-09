@@ -294,7 +294,7 @@ describe('a nested line carries its refusal out', () => {
   })
 
   // A substitution keeps only the inner stdout, so its record has to
-  // reach the line through the door every nested line re-enters by.
+  // reach the line through the entry point every nested line re-enters by.
   it('a substitution keeps the record the inner line earned', async () => {
     const ws = await policedWs()
     const io = await ws.shell('V=secret; X=$(echo "$V")')

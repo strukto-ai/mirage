@@ -59,7 +59,7 @@ function makeBridge(): {
         }
       }
     }
-    // The door builds each row from a name plus one stat, so the double
+    // The file adapter builds each row from a name plus one stat, so the double
     // answers both, and a directory is whatever a deeper key implies.
     if (op === 'stat') {
       const found = files.get(path)
@@ -77,7 +77,7 @@ function makeBridge(): {
       if (deeper) return Promise.resolve(new FileStat({ name: path, type: FileType.DIRECTORY }))
       return Promise.reject(Object.assign(new Error(`no such file: ${path}`), { code: 'ENOENT' }))
     }
-    // The real door merges child mounts and directories into readdir
+    // The real dispatcher merges child mounts and directories into readdir
     // (R1), so the double reports them too: preload descends through
     // them exactly as it does against a live workspace.
     for (const d of dirs) entries.push(d)
@@ -162,11 +162,12 @@ describe('PyodideRuntime mount visibility', () => {
     }
   }, 60_000)
 
-  it('a failed flush surfaces on stderr and flips a clean exit to 1', async () => {
+  it('a refused create fails the open with the mount errno', async () => {
     const dispatch: BridgeDispatchFn = (op) => {
       if (op === 'stat')
         return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
-      if (op === 'create') return Promise.reject(new Error('mount is read-only'))
+      if (op === 'create')
+        return Promise.reject(Object.assign(new Error('mount is read-only'), { code: 'EROFS' }))
       if (op === 'read') return Promise.resolve(new Uint8Array())
       return Promise.resolve([])
     }
@@ -180,8 +181,8 @@ describe('PyodideRuntime mount visibility', () => {
     })
     expect(result.exitCode).toBe(1)
     const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
-    expect(stderr).toContain('failed to create /ram/out.txt')
-    expect(stderr).toContain('mount is read-only')
+    expect(stderr).toContain("OSError: [Errno 69] Read-only file system: '/ram/out.txt'")
+    expect(stderr).not.toContain('failed to create')
     await rt.close()
   }, 60_000)
 
@@ -221,12 +222,11 @@ describe('PyodideRuntime mount visibility', () => {
       env: {},
       stdin: new Uint8Array(),
     })
-    // The rename must not run: its prerequisite write never landed, so
-    // replaying it could move a stale backend copy onto the destination.
+    // The rename must not run: its prerequisite create never landed, and
+    // the open that asked for it failed, so the program stopped there.
     expect(attempted.filter((c) => c.startsWith('rename'))).toHaveLength(0)
     const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
-    expect(stderr).toContain('failed to create /ram/tmp.txt')
-    expect(stderr).toContain('backend hiccup')
+    expect(stderr).toContain("OSError: [Errno 29] I/O error: '/ram/tmp.txt'")
     expect(result.exitCode).toBe(1)
     await rt.close()
   }, 60_000)

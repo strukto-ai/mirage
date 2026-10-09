@@ -137,6 +137,49 @@ export function compilePosixRegex(source: string, flags = '', utf8 = false): Reg
     : new RegExp(subject, hostFlags)
 }
 
+/**
+ * Prepare a reusable line matcher for translated POSIX expressions. Their
+ * assertions need at most one preceding character, so a same-position retry
+ * can retain that context without changing anchors, captures or backreferences.
+ * Subjects must be single lines. Arbitrary host lookbehinds requiring more
+ * context are not supported.
+ */
+export function posixLineMatcher(pattern: RegExp, nonempty = false): (line: string) => boolean {
+  if (!nonempty)
+    return (line) => {
+      pattern.lastIndex = 0
+      return pattern.test(line)
+    }
+  const source = pattern.ignoreCase
+    ? foldRegexSource(pattern.source, pattern.unicode)
+    : pattern.source
+  const flags = pattern.flags.replace(/[gydi]/g, '')
+  const scanner = new RegExp(source, flags + 'g')
+  const start = new RegExp(`(?:${source})(?!^)`, flags + 'y')
+  const interior = new RegExp(`(?:${source})(?<!^[\\s\\S])`, flags + 'y')
+  return (line) => {
+    const subject = pattern.ignoreCase ? foldAscii(line) : line
+    scanner.lastIndex = 0
+    for (let match = scanner.exec(subject); match !== null; match = scanner.exec(subject)) {
+      const at = match.index
+      if (scanner.unicode && at > 0 && (subject.codePointAt(at - 1) ?? 0) > 0xffff) {
+        scanner.lastIndex = at + 1
+        continue
+      }
+      if (match[0] !== '') return true
+      let before = Math.max(0, at - 1)
+      if (scanner.unicode && before > 0 && (subject.codePointAt(before - 1) ?? 0) > 0xffff)
+        before -= 1
+      const retry = at === 0 ? start : interior
+      retry.lastIndex = at - before
+      const retried = retry.exec(subject.slice(before))
+      if (retried !== null && retried.index === at - before && retried[0] !== '') return true
+      scanner.lastIndex = at + (scanner.unicode && (subject.codePointAt(at) ?? 0) > 0xffff ? 2 : 1)
+    }
+    return false
+  }
+}
+
 // JavaScript's \s stays Unicode-aware even without u; Python re.ASCII does not.
 // Under u, `\S` reaches every code point rather than stopping at U+FFFF.
 function spaceEscapes(unicode: boolean): Readonly<Record<string, string>> {

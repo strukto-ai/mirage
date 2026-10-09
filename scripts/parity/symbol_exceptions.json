@@ -1,5 +1,5 @@
 {
- "baseline": 3981,
+ "baseline": 3962,
  "modules": {
   "execution/context": {
    "typescript_only": {
@@ -84,6 +84,7 @@
   },
   "server/mcp/server": {
    "typescript_only": {
+    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "createMirageMcpServer": "Python's lowlevel Server takes list and call handlers, so MirageMcpServer is a class that holds the tool table and answers both. TypeScript's McpServer registers each tool itself, so a factory registers the table and returns the server."
    }
   },
@@ -97,6 +98,7 @@
   },
   "server/rpc/server": {
    "typescript_only": {
+    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "MirageRpcServerOptions": "Python's MirageRpcServer takes its session, tool table, name and version as keyword arguments; the TypeScript constructor takes them as one options object, as MirageMcpServerOptions does for the MCP server."
    }
   },
@@ -294,21 +296,21 @@
   },
   "cache/file/config": {
    "typescript_only": {
-    "CacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
-    "RedisCacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "CacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
+    "RedisCacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
     "normalizeCacheConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
    }
   },
   "cache/index/config": {
    "typescript_only": {
-    "IndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
-    "RedisIndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "IndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
+    "RedisIndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
     "normalizeIndexConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
    }
   },
   "vfs/secrets": {
    "typescript_only": {
-    "refuseRepeatedFields": "Python's models take one spelling of a field, so a second spelling is an extra field pydantic refuses; a TypeScript config takes either spelling, so the code door refuses one field named in both."
+    "refuseRepeatedFields": "Python's models take one spelling of a field, so a second spelling is an extra field pydantic refuses; a TypeScript config takes either spelling, so the code entry point refuses one field named in both."
    }
   },
   "utils/yaml": {
@@ -318,7 +320,7 @@
   },
   "config": {
    "typescript_only": {
-    "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same door."
+    "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same entry point."
    }
   },
   "server/routers/documents": {
@@ -395,6 +397,7 @@
     "json_body": "FastAPI hands a route the raw request, so the VFS, glob and tool routes read their JSON object through json_body, bounded by MCP's size limit; Fastify parses and bounds the body itself (bodyLimit)."
    },
    "typescript_only": {
+    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "CallQuery": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "RouteError": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "VfsRoutesDeps": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
@@ -469,7 +472,8 @@
     "runWithWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
     "writeStorage": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
     "agree": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree.",
-    "overlapping": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree."
+    "overlapping": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree.",
+    "ownersOf": "TypeScript's fallback async-context storage can hold live frames of several overlapping lines at once, so a path is answered by the frames of the longest prefix covering it; Python's ContextVar is always task-isolated, so its one frame is the owner."
    }
   },
   "observe/context": {
@@ -497,6 +501,9 @@
     "isStaleWrite": "TypeScript errors are FsError objects tagged by code, so a stale write is read through a type guard, as isEfbig reads EFBIG; Python catches StaleWriteError by class.",
     "isLandedMove": "TypeScript errors are FsError objects tagged by field, so a landed move is read through a type guard, as isDotWalkError reads dotWalk; Python reads StaleWriteError.landed off the class.",
     "unnamedFsError": "TypeScript tags a code onto an Error that names no path (S3's DeleteObjects refusal names a key, not a path); Python raises the built-in PermissionError without a filename."
+   },
+   "python_only": {
+    "numbered": "pathlib reads an OSError's errno to tell a missing path from a broken one, so the Python file adapter renumbers an error a third-party mount raised without one; a TypeScript error carries its code, which is what node callers read."
    }
   },
   "workspace/mount/storage": {
@@ -536,6 +543,39 @@
   "core/s3/client": {
    "python_only": {
     "is_key_gone": "Python reads a conditioned request's 404 off the botocore response (status and code) beside is_not_found; TypeScript composes isNotFoundError with isMissingBucket inline in the driver's lostCondition."
+   }
+  },
+  "runtime/binding": {
+   "typescript_only": {
+    "workspaceBridge": "The TypeScript guest bridge takes fixed op names, string paths and positional payloads, so one converter maps it onto a workspace-shaped dispatch for the workspace and for patchNodeFs; Python's RuntimeFiles passes keyword arguments straight to DispatchFn, so there is nothing to convert."
+   }
+  },
+  "utils/stat_view": {
+   "python_only": {
+    "atime_ns": "Nanoseconds in python and milliseconds in TypeScript, as mtime_ns and mtimeMs: epoch nanoseconds are past 2**53, so a JS number cannot hold them exactly, while a python int can and preview1 asks in them."
+   },
+   "typescript_only": {
+    "atimeMs": "Nanoseconds in python and milliseconds in TypeScript, as mtime_ns and mtimeMs: epoch nanoseconds are past 2**53, so a JS number cannot hold them exactly, while a python int can and preview1 asks in them."
+   }
+  },
+  "runtime/python/local/config": {
+   "typescript_only": {
+    "LOCAL_CONFIG_KEYS": "A TypeScript config interface lists its keys so an unknown one fails loud at construction; Python's dataclass refuses an unknown field by itself (RuntimeConfig.coerce)."
+   }
+  },
+  "runtime/python/local/runtime": {
+   "typescript_only": {
+    "onHostPath": "Finds the interpreter on the host PATH before the child gets a clean env; Python uses shutil.which, and node's standard library has no PATH lookup."
+   }
+  },
+  "commands/builtin/general/interpreter": {
+   "typescript_only": {
+    "runtimeUnavailable": "A TypeScript engine (Pyodide, Monty, QuickJS) can find it cannot run only when a run starts, and says so with its own error, which the interpreter and a script CLI both answer with 127; a Python entry that cannot run fails to build and is left out of the world, so no run raises it."
+   }
+  },
+  "core/email/client": {
+   "python_only": {
+    "_text_lines": "Reads the text lines of an IMAPResponse from mirage's own Python IMAP client (accessor/imap); node's imapflow hands back parsed messages, so its client has no lines to read."
    }
   }
  }

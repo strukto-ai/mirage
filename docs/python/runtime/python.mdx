@@ -196,8 +196,10 @@ instead.
 ## Local
 
 The `local` runtime runs a host interpreter as a subprocess: full
-CPython, host filesystem, host environment. Use it when the code needs
-stdin, third-party packages, or host files:
+CPython and the host filesystem. Its environment is the session's plus
+the runtime entry's config `env`; nothing of the host process's own
+environment is passed. Use it when the code needs stdin, third-party
+packages, or host files:
 
 ```python
 ws = Workspace({"/data": RAMVFS()},
@@ -297,7 +299,7 @@ Python `subprocess.Popen` and its standard helpers into the workspace.
 See [managed execution](/home/architecture#managed-execution) for process views,
 lifetimes and provider limits.
 
-Host applications can use the same door:
+Host applications can use the same entry point:
 
 ```python
 from mirage.process.types import SpawnRequest

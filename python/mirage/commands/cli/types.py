@@ -37,33 +37,33 @@ ConfigT = TypeVar("ConfigT")
 
 
 @dataclass(frozen=True)
-class CLIDoors:
-    """One door per state plane, for the CLI verb that needs one.
+class CLIView:
+    """One entry point per state plane, for the CLI verb that needs one.
 
     Most CLIs want none of this: an account CLI reaches a service and
     has no filesystem, while ``git``'s whole subject is a repository
-    that lives on a mount. So this rides ``CLIInvocation.doors`` and is
+    that lives on a mount. So this rides ``CLIInvocation.view`` and is
     None outside a workspace (a spec exercised directly in a test), and
     a verb that never reads it cannot touch a mount. That is the same
     opt-in the parameter-injection form gave, moved onto the one record
-    every leaf already takes: the door is a field read instead of a
+    every leaf already takes: the dispatcher is a field read instead of a
     signature the dispatcher inspects.
 
     The field names and types are ``CommandOpts``' (commands/config.py),
     deliberately: a fact reached from a CLI leaf and the same fact
     reached from a command handler must be spelled the same way, or the
     two tiers grow separate vocabularies for one plane.
-    ``tests/commands/cli/test_doors_parity.py`` pins that.
+    ``tests/commands/cli/test_view_parity.py`` pins that.
 
     Args:
-        dispatch (DispatchFn | None): the data plane's door, the
+        dispatch (DispatchFn | None): the dispatcher, the
             workspace op dispatcher. The Protocol is declared in
             ``runtime.types``, on the consumer side, because the
-            workspace provides the door and everyone else receives one;
+            workspace provides the dispatcher and everyone else receives one;
             naming it from here costs no workspace import.
         stat_path (StatPath | None): dispatcher-backed stat that asks
             both channels a backend can answer on.
-        ns (NamespaceView | None): the name plane's door, holding the
+        ns (NamespaceView | None): the namespace view, holding the
             facts no backend can see: symlinks, mount boundaries, the
             attr overlay, the child names the namespace owes a
             directory. A verb that walks a tree itself needs this or it
@@ -71,7 +71,7 @@ class CLIDoors:
             not. ``ns.mounts.root_of`` is where a mount prefix comes
             from: a mount boundary is a filesystem boundary, which is
             where git stops looking for a repository.
-        session_view (SessionView | None): the session plane's door,
+        session_view (SessionView | None): the session view,
             live and gated for both reads and writes. ``inv.env`` stays
             the frozen process view, which is what a script or native
             handler maps onto a real process environment; a verb that
@@ -119,8 +119,8 @@ class CLIInvocation(Generic[ConfigT]):
             none.
         env (Mapping[str, str]): the session's environment variables,
             as one frozen process-view snapshot. A leaf that wants the
-            live, gated handle reads ``doors.session_view``.
-        doors (CLIDoors | None): one door per state plane, None outside
+            live, gated handle reads ``view.session_view``.
+        view (CLIView | None): one entry point per state plane, None outside
             a workspace and for every CLI that reaches a service
             instead of a filesystem.
         shell (Callable[[str], Awaitable[IOResult]] | None): evaluate a
@@ -145,7 +145,7 @@ class CLIInvocation(Generic[ConfigT]):
     stdin: ByteSource | None = None
     stdio: Stdio | None = None
     env: Mapping[str, str] = field(default_factory=dict)
-    doors: CLIDoors | None = None
+    view: CLIView | None = None
     spec: "CLISpec | None" = None
     shell: Callable[[str], Awaitable[IOResult]] | None = None
 
@@ -197,7 +197,7 @@ class CLISpec(CommandSpec):
             alone (no fn, no subcommands: the program re-parses argv
             natively). The program that serves the whole install,
             embedded from a YAML ``script:`` path at load; config is
-            the only door for script source, in code a leaf carries
+            the only entry point for script source, in code a leaf carries
             ``fn``.
         runtime (str | None): name of the world runtime entry that runs
             ``script`` (YAML ``runtime:``); None picks the first entry

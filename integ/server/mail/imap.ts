@@ -192,7 +192,7 @@ export function startImapServer(
           session.pending = { need: Number(literal[1]), chunks: [], line }
           // A synchronising literal (no `+`) needs the continuation before the
           // client will send anything. LITERAL+ is advertised, so most clients
-          // send `{n+}` and never wait, but aioimaplib's APPEND does not.
+          // send `{n+}` and never wait, but mirage's Python IMAP client does not.
           if (literal[2] !== '+') write(session, '+ ready for literal data')
           continue
         }

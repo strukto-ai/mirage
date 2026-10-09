@@ -14,17 +14,23 @@
 
 import asyncio
 import errno
+import functools
 import genericpath
+import logging
 import os as _real_os
 import posixpath
+import shutil
 import time
 import types
 from collections.abc import Callable, Iterator
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
-from mirage.errors import FsCondition
-from mirage.errors.fs import eexist, fs_error
+from mirage.bridge.sync import run_async_from_sync
+from mirage.errors import FsCondition, classify
+from mirage.errors.fs import ebusy, eexist, fs_error
 from mirage.errors.posix import posix_errno, posix_phrase
+from mirage.io import IOResult
+from mirage.runtime.files import RuntimeFiles, stat_row
 from mirage.runtime.python.host.constants import (
     REFUSED_CALLS,
     ROUTED_CALLS,
@@ -40,12 +46,15 @@ from mirage.runtime.python.host.list import (
     leaf,
 )
 from mirage.runtime.python.host.stat import stat_result
-from mirage.runtime.python.host.vfs import HostVFS
-from mirage.types import FileStat
-from mirage.utils.dates import iso_timestamp, timestamp_iso
+from mirage.runtime.types import VFSStat
+from mirage.types import PathSpec
+from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import owner_prefix
-from mirage.utils.stat_view import LINK_MODE, content_size, is_dir, posix_mode
+from mirage.utils.stat_view import LINK_MODE
 from mirage.workspace.files import Files
+
+logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 
 def _spelled(path: Any) -> str | None:
@@ -66,6 +75,264 @@ def _spelled(path: Any) -> str | None:
     return spelled if isinstance(spelled, str) else None
 
 
+def host_files(
+    files: Files, loop: asyncio.AbstractEventLoop | None
+) -> RuntimeFiles:
+    """The file adapter ``open`` and ``os`` call inside ``with ws:``.
+
+    A workspace op that fails with no errno (an upstream 502 a REST
+    mount raises as it came) answers what ``classify`` names for it, and
+    EIO when it names nothing, the kernel's word for a device that
+    failed: a guest's file adapter answers the same, and a caller of ``os`` can
+    only ``except OSError``. The original rides along as the cause.
+
+    Args:
+        files (Files): the workspace's ``ws.vfs``.
+        loop (asyncio.AbstractEventLoop | None): the block's loop.
+    """
+
+    async def dispatch(
+        name: str, path: PathSpec, /, **kwargs: Any
+    ) -> tuple[Any, IOResult]:
+        try:
+            return await files.dispatch(name, path, **kwargs)
+        except OSError:
+            raise
+        except Exception as exc:
+            condition = classify(exc) or FsCondition.EIO
+            raise fs_error(path, condition) from exc
+
+    return RuntimeFiles(dispatch, loop)
+
+
+def as_raised(exc: OSError) -> OSError:
+    """`exc` as a syscall raises it: CPython's own class for its errno.
+
+    A refusal leaves the workspace as one of mirage's subclasses
+    (``ReadOnlyError`` is a ``PermissionError`` stamped EROFS), where a
+    real filesystem gives the class CPython builds from the errno: plain
+    ``OSError`` for EROFS, ``FileNotFoundError`` for ENOENT. The errno,
+    message and paths carry over; an error with no errno is left as it
+    is, since no class follows from it.
+
+    Args:
+        exc (OSError): what the entry point raised.
+    """
+    if exc.errno is None or type(exc).__module__ == "builtins":
+        return exc
+    return OSError(exc.errno, exc.strerror, exc.filename, None, exc.filename2)
+
+
+def syscall(fn: Callable[..., T]) -> Callable[..., T]:
+    """`fn` raising what ``as_raised`` makes of its errors.
+
+    Args:
+        fn (Callable[..., T]): one entry point function.
+    """
+
+    @functools.wraps(fn)
+    def call(*args: Any, **kwargs: Any) -> T:
+        try:
+            return fn(*args, **kwargs)
+        except OSError as exc:
+            raised = as_raised(exc)
+            if raised is exc:
+                raise
+            raise raised from exc
+
+    return call
+
+
+ErrorHandler = Callable[[Callable[..., Any], str, OSError], None]
+
+
+def _ignored(func: Callable[..., Any], path: str, exc: OSError) -> None:
+    return None
+
+
+def _reraised(func: Callable[..., Any], path: str, exc: OSError) -> None:
+    raise exc
+
+
+def _rmtree_handler(
+    ignore_errors: bool,
+    onerror: Callable[..., None] | None,
+    onexc: ErrorHandler | None,
+) -> ErrorHandler:
+    """What ``shutil.rmtree`` does with a failure, from its own arguments.
+
+    Args:
+        ignore_errors (bool): drop every failure.
+        onerror (Callable[..., None] | None): the old handler, given
+            ``sys.exc_info()``-shaped arguments.
+        onexc (ErrorHandler | None): the handler given the exception,
+            which wins over ``onerror``.
+    """
+    if ignore_errors:
+        return _ignored
+    if onexc is not None:
+        return onexc
+    if onerror is not None:
+        handler = onerror
+        return lambda func, path, exc: handler(
+            func, path, (type(exc), exc, exc.__traceback__)
+        )
+    return _reraised
+
+
+def _held(
+    path: str, where: str, onexc: ErrorHandler, resolve: Callable[[str], str]
+) -> bool:
+    """Whether `path` still resolves where the walk found it.
+
+    A directory swapped for a link, or under an ancestor that was, now
+    resolves elsewhere, and a name under it would reach the link's
+    target. shutil's descriptor walk reports that directory as a link
+    and leaves it, and so does this one.
+
+    Args:
+        path (str): the directory the next call acts in.
+        where (str): what it resolved to when the walk reached it.
+        onexc (ErrorHandler): what a moved directory goes to.
+        resolve (Callable[[str], str]): the namespace's follow, now.
+    """
+    try:
+        if resolve(path) == where:
+            return True
+        raise OSError("Cannot call rmtree on a symbolic link")
+    except OSError as err:
+        onexc(_real_os.path.islink, path, err)
+        return False
+
+
+def _remove_tree(
+    path: str, where: str, onexc: ErrorHandler, resolve: Callable[[str], str]
+) -> None:
+    """Remove a tree by name, children first, through the entry point's ``os``.
+
+    The walk shutil keeps for a platform without descriptor calls, so a
+    failure reaches ``onexc`` with the function and path shutil names.
+    A name is all a mount gives, so before each call the directory it
+    acts in is checked against where it resolved when the walk reached
+    it, which is how a descriptor would have held it.
+
+    Args:
+        path (str): the directory to remove.
+        where (str): what `path` resolved to when the walk reached it.
+        onexc (ErrorHandler): what a failure goes to.
+        resolve (Callable[[str], str]): the namespace's follow, now.
+    """
+    if not _held(path, where, onexc, resolve):
+        return
+    try:
+        with _real_os.scandir(path) as listing:
+            entries = list(listing)
+    except OSError as err:
+        onexc(_real_os.scandir, path, err)
+        entries = []
+    for entry in entries:
+        try:
+            is_dir = entry.is_dir(follow_symlinks=False)
+        except OSError as err:
+            # shutil's own fallback: an entry it cannot classify goes as
+            # a file, and the unlink reports what is wrong with it.
+            logger.debug("rmtree: classifying %s failed: %s", entry.path, err)
+            is_dir = False
+        if is_dir:
+            child = posixpath.join(where, entry.name)
+            _remove_tree(entry.path, child, onexc, resolve)
+            continue
+        if not _held(path, where, onexc, resolve):
+            return
+        try:
+            _real_os.unlink(entry.path)
+        except OSError as err:
+            onexc(_real_os.unlink, entry.path, err)
+    if not _held(path, where, onexc, resolve):
+        return
+    try:
+        _real_os.rmdir(path)
+    except OSError as err:
+        onexc(_real_os.rmdir, path, err)
+
+
+def make_rmtree(
+    files: Files, loop: asyncio.AbstractEventLoop | None
+) -> Callable[..., None]:
+    """``shutil.rmtree``, walking a mounted tree by name.
+
+    shutil removes a tree through descriptors where the platform has
+    them, ``os.open`` on each directory and then ``os.scandir`` of the
+    descriptor, and a mount has none: the entry point refuses ``os.open``, so
+    every rmtree of a mounted path failed ENOTSUP. A mounted path is
+    walked by name here instead, through ``os.scandir``, ``os.unlink``
+    and ``os.rmdir`` like any other caller, while a host path keeps
+    shutil's own descriptor walk: shutil's switch between the two is
+    the whole process's, so flipping it would hand a host removal on
+    another thread the walk a swapped link can lead astray. A tree
+    holding a mount root, spelled however (``/data/.``), is refused
+    (EBUSY) before anything goes, as node's entry point refuses it, and the
+    refusal reaches ``onexc``, ``onerror`` or ``ignore_errors`` as any
+    other failure does.
+
+    The mounted walk asks the namespace, on the block's loop where its
+    table changes, where each directory resolves before acting in it,
+    so a directory swapped for a link is left rather than followed.
+    That check and the call after it are two steps, not one descriptor,
+    so ``avoids_symlink_attacks`` is False, the answer shutil itself
+    gives where it walks by name.
+
+    Args:
+        files (Files): the workspace's ``ws.vfs``.
+        loop (asyncio.AbstractEventLoop | None): the block's loop.
+    """
+    original = shutil.rmtree
+    links = files.links
+
+    async def follow(path: str) -> str:
+        return posixpath.normpath(
+            path if links is None else links.follow(path)
+        )
+
+    def resolve(path: str) -> str:
+        return run_async_from_sync(follow(path), loop)
+
+    @functools.wraps(original)
+    def rmtree(path: Any, *args: Any, **kwargs: Any) -> None:
+        spelled = _spelled(path)
+        if (
+            spelled is None
+            or in_host_io()
+            or kwargs.get("dir_fd") is not None
+            or not files.is_mounted(spelled)
+        ):
+            original(path, *args, **kwargs)
+            return
+        onexc = _rmtree_handler(
+            kwargs.get("ignore_errors", args[0] if args else False),
+            kwargs.get("onerror", args[1] if len(args) > 1 else None),
+            kwargs.get("onexc"),
+        )
+        root = posixpath.normpath(spelled).rstrip("/")
+        for prefix in files.mount_prefixes():
+            mount = prefix.rstrip("/")
+            if mount == root or mount.startswith(root + "/"):
+                busy = mount or "/"
+                onexc(_real_os.rmdir, busy, as_raised(ebusy(busy)))
+                return
+        try:
+            if _real_os.path.islink(spelled):
+                raise OSError("Cannot call rmtree on a symbolic link")
+            where = resolve(spelled)
+        except OSError as err:
+            onexc(_real_os.path.islink, spelled, err)
+            return
+        _remove_tree(spelled, where, onexc, resolve)
+
+    cast(Any, rmtree).avoids_symlink_attacks = False
+    return rmtree
+
+
 class HostFs:
     """Every routed `os` verb, answered on a mount or left to the host.
 
@@ -84,8 +351,8 @@ class HostFs:
     explicit chmod, where the guest asked for exactly that.
 
     Args:
-        files (Files): the workspace door.
-        loop (asyncio.AbstractEventLoop | None): the loop the door's
+        files (Files): the workspace's file API.
+        loop (asyncio.AbstractEventLoop | None): the loop the file API's
             coroutines run on; None gives each call a throwaway loop.
     """
 
@@ -93,7 +360,7 @@ class HostFs:
         self, files: Files, loop: asyncio.AbstractEventLoop | None
     ) -> None:
         self._files = files
-        self._door = HostVFS(files, loop)
+        self._adapter = host_files(files, loop)
         # The host functions as they were when this router was built.
         # `patch_process` installs these wrappers onto the real os
         # module itself, so a wrapper that read `os.listdir` at call
@@ -152,47 +419,47 @@ class HostFs:
         mode: int,
         size: int,
         nlink: int,
-        uid: int | str | None,
-        gid: int | str | None,
-        atime: float | None,
-        mtime: float | None,
+        uid: int | None,
+        gid: int | None,
+        atime_ns: int | None,
+        mtime_ns: int | None,
     ) -> _real_os.stat_result:
-        """One `os.stat_result` from the fields a FileStat carries.
+        """One `os.stat_result` from the fields a stat row carries.
 
         Args:
             virtual (str): the path being statted (the inode's name).
             mode (int): st_mode, type bits included.
             size (int): st_size.
             nlink (int): st_nlink.
-            uid (int | str | None): owner from the overlay; a name or
-                None falls back to the host's own uid.
-            gid (int | str | None): group, read the same way.
-            atime (float | None): access time, None for unknown.
-            mtime (float | None): modification time, None for unknown.
+            uid (int | None): owner from the overlay; None falls back to
+                the host's own uid.
+            gid (int | None): group, read the same way.
+            atime_ns (int | None): access time, None for unknown.
+            mtime_ns (int | None): modification time, None for unknown.
         """
-        stamp = self._now if mtime is None else mtime
+        stamp = self._now if mtime_ns is None else mtime_ns / 1_000_000_000
         return stat_result(
             virtual,
             owner_prefix(self._files.mount_prefixes(), virtual) or "/",
             mode,
             size,
             nlink,
-            uid if isinstance(uid, int) else self._uid,
-            gid if isinstance(gid, int) else self._gid,
-            stamp if atime is None else atime,
+            self._uid if uid is None else uid,
+            self._gid if gid is None else gid,
+            stamp if atime_ns is None else atime_ns / 1_000_000_000,
             stamp,
         )
 
-    def _stat_of(self, virtual: str, st: FileStat) -> _real_os.stat_result:
+    def _stat_of(self, virtual: str, st: VFSStat) -> _real_os.stat_result:
         return self._result(
             virtual,
-            posix_mode(st),
-            content_size(st),
-            2 if is_dir(st) else 1,
+            st.mode,
+            st.size,
+            2 if st.is_dir else 1,
             st.uid,
             st.gid,
-            iso_timestamp(st.atime),
-            iso_timestamp(st.modified),
+            st.atime_ns,
+            st.mtime_ns,
         )
 
     def _link_target(self, virtual: str) -> str | None:
@@ -202,9 +469,9 @@ class HostFs:
             virtual (str): the path to probe.
         """
         try:
-            return str(self._door.run(self._files.readlink(virtual)))
+            return self._adapter.readlink(virtual)
         except OSError as exc:
-            # EINVAL is the door's "there, but not a link". A missing
+            # EINVAL is the entry point's "there, but not a link". A missing
             # path raises ENOENT instead, exactly as readlink(2) does,
             # and that is the answer lstat owes its caller, so it is not
             # swallowed here.
@@ -214,14 +481,14 @@ class HostFs:
 
     def _exists(self, virtual: str) -> bool:
         try:
-            self._door.run(self._files.stat(virtual))
+            self._adapter.stat(virtual)
             return True
         except (OSError, ValueError):
             return False
 
     def _isdir(self, virtual: str) -> bool:
         try:
-            return is_dir(self._door.run(self._files.stat(virtual)))
+            return self._adapter.stat(virtual).is_dir
         except (OSError, ValueError):
             return False
 
@@ -238,8 +505,8 @@ class HostFs:
         if virtual is None:
             return cast(list[str] | list[bytes], self._host.listdir(path))
         return [
-            leaf(entry)
-            for entry in self._door.run(self._files.readdir(virtual))
+            leaf(row.path)
+            for row in self._adapter.readdir(virtual, classify=False)
         ]
 
     def scandir(self, path: Any = None) -> Any:
@@ -256,8 +523,8 @@ class HostFs:
         if virtual is None:
             return self._host.scandir(path)
         entries = [
-            MountDirEntry(self, entry.rstrip("/"), entry.endswith("/"))
-            for entry in self._door.run(self._files.readdir(virtual))
+            MountDirEntry(self, row.path.rstrip("/"), row.is_dir)
+            for row in self._adapter.readdir(virtual, classify=False)
         ]
         return MountScandir(entries)
 
@@ -346,9 +613,7 @@ class HostFs:
             )
         if not follow_symlinks:
             return self.lstat(virtual)
-        return self._stat_of(
-            virtual, self._door.run(self._files.stat(virtual))
-        )
+        return self._stat_of(virtual, self._adapter.stat(virtual))
 
     def lstat(
         self, path: Any, *, dir_fd: int | None = None
@@ -358,7 +623,7 @@ class HostFs:
         The node table is asked first because a link is namespace state
         that no backend can see: a stat alone would silently answer for
         the target, and a broken link would read as absent. The readlink
-        probe is what asks, so the door's visibility gate decides
+        probe is what asks, so the entry point's visibility gate decides
         whether the link is there at all; the row behind it is then read
         straight off the table, because it carries what a ``chown -h``
         wrote and rebuilding the answer from the target string alone
@@ -375,9 +640,7 @@ class HostFs:
             )
         target = self._link_target(virtual)
         if target is None:
-            return self._stat_of(
-                virtual, self._door.run(self._files.stat(virtual))
-            )
+            return self._stat_of(virtual, self._adapter.stat(virtual))
         links = self._files.links
         row = None if links is None else links.link_stat_at(virtual)
         if row is None:
@@ -393,7 +656,7 @@ class HostFs:
                 None,
                 None,
             )
-        return self._stat_of(virtual, row)
+        return self._stat_of(virtual, stat_row(row))
 
     def access(
         self,
@@ -410,7 +673,7 @@ class HostFs:
         mode, because a mount mode is mirage's access control and the
         permission bits a backend has none of are cosmetic. Execute is
         the one question the bits answer, so it reads them. A session's
-        own narrower grant is enforced at the door when the write
+        own narrower grant is enforced at the entry point when the write
         actually happens, exactly as POSIX leaves access(2) advisory.
 
         Args:
@@ -456,11 +719,7 @@ class HostFs:
                 path, mode, dir_fd=dir_fd, follow_symlinks=follow_symlinks
             )
             return
-        self._door.run(
-            self._files.setattr(
-                virtual, mode=mode, nofollow=not follow_symlinks
-            )
-        )
+        self._adapter.setattr(virtual, mode=mode, nofollow=not follow_symlinks)
 
     def chown(
         self,
@@ -477,15 +736,13 @@ class HostFs:
                 path, uid, gid, dir_fd=dir_fd, follow_symlinks=follow_symlinks
             )
             return
-        # -1 is POSIX's "leave this one alone", which the door spells
+        # -1 is POSIX's "leave this one alone", which the entry point spells
         # None; passing it through would store an id of -1.
-        self._door.run(
-            self._files.setattr(
-                virtual,
-                uid=None if uid == -1 else uid,
-                gid=None if gid == -1 else gid,
-                nofollow=not follow_symlinks,
-            )
+        self._adapter.setattr(
+            virtual,
+            uid=None if uid == -1 else uid,
+            gid=None if gid == -1 else gid,
+            nofollow=not follow_symlinks,
         )
 
     def getxattr(
@@ -504,12 +761,11 @@ class HostFs:
                 ),
             )
         return bytes(
-            self._door.run(
-                self._files.getxattr(
-                    virtual,
-                    _real_os.fsdecode(attribute),
-                    nofollow=not follow_symlinks,
-                )
+            self._adapter.call(
+                "getxattr",
+                virtual,
+                name=_real_os.fsdecode(attribute),
+                nofollow=not follow_symlinks,
             )
         )
 
@@ -523,8 +779,8 @@ class HostFs:
                 self._host.listxattr(path, follow_symlinks=follow_symlinks),
             )
         return list(
-            self._door.run(
-                self._files.listxattr(virtual, nofollow=not follow_symlinks)
+            self._adapter.call(
+                "listxattr", virtual, nofollow=not follow_symlinks
             )
         )
 
@@ -543,15 +799,14 @@ class HostFs:
                 path, attribute, value, flags, follow_symlinks=follow_symlinks
             )
             return
-        self._door.run(
-            self._files.setxattr(
-                virtual,
-                _real_os.fsdecode(attribute),
-                bytes(value),
-                create=bool(flags & XATTR_CREATE),
-                replace=bool(flags & XATTR_REPLACE),
-                nofollow=not follow_symlinks,
-            )
+        self._adapter.call(
+            "setxattr",
+            virtual,
+            name=_real_os.fsdecode(attribute),
+            value=bytes(value),
+            create=bool(flags & XATTR_CREATE),
+            replace=bool(flags & XATTR_REPLACE),
+            nofollow=not follow_symlinks,
         )
 
     def removexattr(
@@ -567,12 +822,11 @@ class HostFs:
                 path, attribute, follow_symlinks=follow_symlinks
             )
             return
-        self._door.run(
-            self._files.removexattr(
-                virtual,
-                _real_os.fsdecode(attribute),
-                nofollow=not follow_symlinks,
-            )
+        self._adapter.call(
+            "removexattr",
+            virtual,
+            name=_real_os.fsdecode(attribute),
+            nofollow=not follow_symlinks,
         )
 
     def lchmod(self, path: Any, mode: int) -> None:
@@ -630,13 +884,11 @@ class HostFs:
             access, stamp = (float(value) for value in times)
         else:
             access = stamp = time.time()
-        self._door.run(
-            self._files.setattr(
-                virtual,
-                atime=timestamp_iso(access),
-                mtime=timestamp_iso(stamp),
-                nofollow=not follow_symlinks,
-            )
+        self._adapter.setattr(
+            virtual,
+            atime=timestamp_iso(access),
+            mtime=timestamp_iso(stamp),
+            nofollow=not follow_symlinks,
         )
 
     def mkdir(
@@ -646,7 +898,7 @@ class HostFs:
         if virtual is None:
             self._host.mkdir(path, mode, dir_fd=dir_fd)
             return
-        self._door.run(self._files.mkdir(virtual))
+        self._adapter.mkdir(virtual)
 
     def makedirs(
         self, name: Any, mode: int = 0o777, exist_ok: bool = False
@@ -690,14 +942,20 @@ class HostFs:
                 return
             raise eexist(virtual)
         for path in reversed(missing):
-            self._door.run(self._files.mkdir(path))
+            self._adapter.mkdir(path)
 
     def rmdir(self, path: Any, *, dir_fd: int | None = None) -> None:
         virtual = self._virtual(path)
         if virtual is None:
             self._host.rmdir(path, dir_fd=dir_fd)
             return
-        self._door.run(self._files.rmdir(virtual))
+        # rmdir(2) on a mount point is EBUSY. A mount root is the
+        # deployment's own, which the shell's rm refuses the same way.
+        owner = owner_prefix(self._files.mount_prefixes(), virtual)
+        named = posixpath.normpath(virtual).rstrip("/")
+        if owner is not None and owner.rstrip("/") == named:
+            raise ebusy(virtual)
+        self._adapter.rmdir(virtual)
 
     def removedirs(self, name: Any) -> None:
         """Remove a directory, then every parent that empties.
@@ -726,7 +984,7 @@ class HostFs:
         if virtual is None:
             self._host.remove(path, dir_fd=dir_fd)
             return
-        self._door.run(self._files.unlink(virtual))
+        self._adapter.unlink(virtual)
 
     def unlink(self, path: Any, *, dir_fd: int | None = None) -> None:
         self.remove(path, dir_fd=dir_fd)
@@ -789,7 +1047,7 @@ class HostFs:
                 None,
                 _spelled(dst),
             )
-        self._door.run(self._files.rename(source, dest))
+        self._adapter.rename(source, dest)
 
     def renames(self, old: Any, new: Any) -> None:
         """Rename, creating the destination's parents and pruning the
@@ -842,7 +1100,7 @@ class HostFs:
         if virtual is None:
             self._host.symlink(src, dst, target_is_directory, dir_fd=dir_fd)
             return
-        self._door.run(self._files.symlink(virtual, _real_os.fsdecode(src)))
+        self._adapter.symlink(virtual, _real_os.fsdecode(src))
 
     def readlink(self, path: Any, *, dir_fd: int | None = None) -> str | bytes:
         """The target a link holds, as the caller spelled the path.
@@ -860,14 +1118,17 @@ class HostFs:
         virtual = self._virtual(path)
         if virtual is None:
             return cast(str | bytes, self._host.readlink(path, dir_fd=dir_fd))
-        return str(self._door.run(self._files.readlink(virtual)))
+        return self._adapter.readlink(virtual)
 
     def truncate(self, path: Any, length: int) -> None:
         virtual = self._virtual(path)
         if virtual is None:
             self._host.truncate(path, length)
             return
-        self._door.run(self._files.truncate(virtual, length))
+        # truncate(2) names a file that is there; the op creates a
+        # missing one, as GNU truncate does without -c.
+        self._adapter.stat(virtual)
+        self._adapter.truncate(virtual, length)
 
 
 def _refusal(
@@ -881,7 +1142,7 @@ def _refusal(
     argument answers None on its own.
 
     Args:
-        router (HostFs): the door, for its mount test.
+        router (HostFs): the entry point, for its mount test.
         verb (str): the os name being wrapped.
         condition (FsCondition): what the table says to answer.
     """
@@ -940,7 +1201,7 @@ def os_routing(
     """Every `os` name that must not answer from the host, and what does.
 
     Built from the three tables in ``host/constants``: a routed name gets
-    the workspace door, a refused name gets that table's errno on a
+    the workspace entry point, a refused name gets that table's errno on a
     mounted path, and a passthrough name is absent here because it is a
     program or a string, never a file. A name the host python does not
     have (``lchmod`` off macOS) is absent too, so ``hasattr`` still
@@ -953,7 +1214,7 @@ def os_routing(
     of the module answering about paths it has never had.
 
     Args:
-        files (Files): the workspace door.
+        files (Files): the workspace's file API.
         loop (asyncio.AbstractEventLoop | None): shared event loop.
 
     Returns:
@@ -963,10 +1224,10 @@ def os_routing(
     table: dict[str, Callable[..., Any]] = {}
     for verb in ROUTED_CALLS:
         if hasattr(_real_os, verb):
-            table[verb] = getattr(router, verb)
+            table[verb] = syscall(getattr(router, verb))
     for verb, condition in REFUSED_CALLS.items():
         if hasattr(_real_os, verb):
-            table[verb] = _refusal(router, verb, condition)
+            table[verb] = syscall(_refusal(router, verb, condition))
     return table
 
 

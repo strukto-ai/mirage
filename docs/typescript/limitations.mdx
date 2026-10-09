@@ -32,11 +32,11 @@ A `shell()` call answers with what reached the session's terminal while the line
 
 ## Node
 
-### 1. `fs-monkey` only patches CJS `require('fs')`, not ESM `node:fs`
+### 1. `patchNodeFs` only patches CJS `require('fs')`, not ESM named imports
 
-**The problem.** `patchNodeFs()` routes `fs` calls through the workspace VFS so that third-party libraries "just work" against mounted paths. It works by replacing `require.cache`'s `fs` entry (a CJS-only mechanism). ESM is fundamentally different:
+**The problem.** `patchNodeFs()` routes `fs` calls on mounted paths through the workspace so that third-party libraries "just work" against them. It swaps the functions on the CommonJS `fs` object and on `fs.promises`. ESM is different:
 
-- `import { readFile } from 'node:fs/promises'` resolves at parse time to V8's internal binding.
+- `import { readFile } from 'node:fs/promises'` binds the function when the module links.
 - There is no public hook to replace that binding after the fact.
 - Loader hooks (`--loader=…`) could intercept the resolution, but they're a build-time decision, not a runtime monkey-patch.
 
@@ -44,17 +44,19 @@ A `shell()` call answers with what reached the session's terminal while the line
 
 ```ts
 // ✅ Works, this is CJS and goes through require('fs')
-const { readFileSync } = require('fs')
+const fs = require('fs')
 patchNodeFs(ws)
-readFileSync('/data/x.txt')  // routes through RAM VFS
+await fs.promises.readFile('/data/x.txt')  // routes through the RAM VFS
 
-// ❌ Does not work, this is ESM and bypasses the patch
-import { readFileSync } from 'node:fs'
+// ❌ Does not work, an ESM named import bypasses the patch
+import { readFile } from 'node:fs/promises'
 patchNodeFs(ws)
-readFileSync('/data/x.txt')  // hits the real filesystem, throws ENOENT
+await readFile('/data/x.txt')  // hits the real filesystem, throws ENOENT
 ```
 
-**Why Python doesn't hit this.** Python has no equivalent concept of "ESM vs CJS". `with Workspace() as ws:` swaps `builtins.open` and `sys.modules["os"]`: one set of mutable globals, one patch point, works for every caller.
+A sync form (`fs.readFileSync`, `fs.statSync`) refuses a mounted path, since the workspace answers asynchronously. Paths outside every mount keep Node's own behavior in every form.
+
+**Why Python doesn't hit this.** Python has no equivalent concept of "ESM vs CJS". `with Workspace() as ws:` swaps `builtins.open`, the `os` module's functions and `shutil.rmtree` in place: one set of mutable globals, one patch point, works for every caller.
 
 **Workarounds.**
 
@@ -137,7 +139,7 @@ Mirage never reports a fake size and never fetches content during `stat`: return
 
 ## Browser
 
-The browser SDK runs entirely in-page: no kernel, no subprocesses, no Node `fs`. That removes the Node sections above (neither FUSE nor `fs-monkey` apply) but introduces its own constraints.
+The browser SDK runs entirely in-page: no kernel, no subprocesses, no Node `fs`. That removes the Node sections above (neither FUSE nor `patchNodeFs` apply) but introduces its own constraints.
 
 ### 1. No FUSE
 
@@ -162,8 +164,8 @@ Mounts that hit third-party APIs (S3, GitHub, Linear, etc.) make `fetch` calls f
 
 Pyodide's worker fetches workspace files on access and caches them for that
 execution. An external edit to a cached file is not visible until the next
-run. Without workers or `SharedArrayBuffer`, the fallback collects whole
-mounts before execution, which can be expensive for large mounts.
+run. Without workers or `SharedArrayBuffer`, `python3` in a workspace exits
+127 rather than copy every mount in before each run.
 
 See [Pyodide workspace file access](/typescript/runtime/python#workspace-file-access)
 for browser requirements and limitations.
@@ -210,4 +212,4 @@ File-cache fingerprints use incremental MD5: the Node package installs native ha
 
 These checkpoints are cooperative, not a hard execution-time bound. A synchronous regex call, native sort, whole-buffer allocation, or individual hash chunk can still occupy the thread until that operation returns. Custom handlers must observe cancellation themselves. Embeddings requiring isolation from arbitrary CPU work should run the workspace in a separate worker or process.
 
-Cancellation itself has one seam. Python runs the whole line as one task, cancels it and joins it, so every await in the line unwinds before `execute` raises; the line's own flush and history record get the same 250 ms grace after the cancel and are cancelled too if a store holds them past it. A JavaScript promise cannot be cancelled, so TypeScript fires the signal, joins the tree for a short grace (250 ms) while responsive leaves close their producers and settle, then releases the caller. `execute` always rejects with an `AbortError` whose `cause` is the signal's reason. A leaf that does not observe the signal within the grace (a custom handler, a backend call with no signal parameter) keeps running in the background until it settles on its own; its output is dropped and it cannot change `$?` (the status door refuses a statement that settles after the release), but any write it completes still lands on the backend. A handler that loops over operands reaches its backend through slots (a generic-bound command such as `rm`, `cp` or `mkdir`) or through the op door (a namespace-routed one such as `chmod`, `touch` or `rm` of a link), and both refuse to start once the signal has fired, so a released line begins no further read or write between operands; only a custom handler that reaches its backend directly can. Python's cancelled task never reaches the next operand, and a Python handler or store must let `CancelledError` propagate: one that swallows both deliveries holds `execute` until it returns, as it would hold `asyncio.wait_for`, and a warning is logged while it does. A caller cancelled from outside (`asyncio.wait_for` around `execute`) gets the same grace as the event. Loading workspace state, parsing, routing, the fetch of a managed variable's secret, the history record and the session flush are raced against the signal as well, so a stalled state store or secret source cannot hold the caller either. A line is recorded in history once it has been parsed; an abort that lands while workspace state is still loading records nothing, in both languages. A command timeout is the line's own answer (exit 124), never an abort of the invocation: neither language writes the caller's signal or event. A background job, and every line it evaluates, runs without the caller's signal or event; only `kill` reaches it.
+Cancellation itself has one seam. Python runs the whole line as one task, cancels it and joins it, so every await in the line unwinds before `execute` raises; the line's own flush and history record get the same 250 ms grace after the cancel and are cancelled too if a store holds them past it. A JavaScript promise cannot be cancelled, so TypeScript fires the signal, joins the tree for a short grace (250 ms) while responsive leaves close their producers and settle, then releases the caller. `execute` always rejects with an `AbortError` whose `cause` is the signal's reason. A leaf that does not observe the signal within the grace (a custom handler, a backend call with no signal parameter) keeps running in the background until it settles on its own; its output is dropped and it cannot change `$?` (the status entry point refuses a statement that settles after the release), but any write it completes still lands on the backend. A handler that loops over operands reaches its backend through slots (a generic-bound command such as `rm`, `cp` or `mkdir`) or through the dispatcher (a namespace-routed one such as `chmod`, `touch` or `rm` of a link), and both refuse to start once the signal has fired, so a released line begins no further read or write between operands; only a custom handler that reaches its backend directly can. Python's cancelled task never reaches the next operand, and a Python handler or store must let `CancelledError` propagate: one that swallows both deliveries holds `execute` until it returns, as it would hold `asyncio.wait_for`, and a warning is logged while it does. A caller cancelled from outside (`asyncio.wait_for` around `execute`) gets the same grace as the event. Loading workspace state, parsing, routing, the fetch of a managed variable's secret, the history record and the session flush are raced against the signal as well, so a stalled state store or secret source cannot hold the caller either. A line is recorded in history once it has been parsed; an abort that lands while workspace state is still loading records nothing, in both languages. A command timeout is the line's own answer (exit 124), never an abort of the invocation: neither language writes the caller's signal or event. A background job, and every line it evaluates, runs without the caller's signal or event; only `kill` reaches it.

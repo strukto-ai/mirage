@@ -64,18 +64,14 @@ function namedGitdir(fl: FlagView, texts: readonly string[]): PathSpec {
  */
 export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   try {
-    if (
-      doors.dispatch === undefined ||
-      doors.statPath === undefined ||
-      doors.ns?.mounts === undefined
-    )
+    if (view.dispatch === undefined || view.statPath === undefined || view.ns?.mounts === undefined)
       throw new NoWorkspaceError()
-    const dispatch = doors.dispatch
-    const mounts = doors.ns.mounts
+    const dispatch = view.dispatch
+    const mounts = view.ns.mounts
     const start = startPoint(fl)
-    const here = await doors.statPath(start)
+    const here = await view.statPath(start)
     if (here?.type !== FileType.DIRECTORY)
       throw new NoWorkingDirectoryError(start.rawPath, here === null ? 'ENOENT' : 'ENOTDIR')
     const target = PathSpec.fromStrPath(inv.texts[0] ?? '.', undefined, start)
@@ -86,7 +82,7 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
     const branch = fl.asStr('initial_branch') ?? 'master'
     if (!validRefName(`refs/heads/${branch}`) || branch.startsWith('-'))
       throw new GitError(`invalid branch name: '${branch}'`)
-    const info = await doors.statPath(gitdir)
+    const info = await view.statPath(gitdir)
     if (
       info !== null &&
       (info.type !== FileType.DIRECTORY ||
@@ -94,7 +90,7 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
     ) {
       const location = await discover(
         dispatch,
-        doors.statPath,
+        view.statPath,
         (path) => mounts.rootOf(path),
         target,
         gitdir,
@@ -104,7 +100,7 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
     }
     const existing = (await readOptional(dispatch, gitdir.join('HEAD'))) !== null
     const [typed] = inv.texts
-    const made = typed !== undefined && (await doors.statPath(target)) === null
+    const made = typed !== undefined && (await view.statPath(target)) === null
     const settings = gitdir.join('config')
     try {
       await layOut(

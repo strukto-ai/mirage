@@ -20,7 +20,7 @@ import { commandsFor } from '../commands/builtin/backends.ts'
 import { command, type Command } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
-import { RuntimeVFS } from '../runtime/vfs.ts'
+import { RuntimeFiles } from '../runtime/files.ts'
 import { IOResult } from '../io/types.ts'
 import { ops } from '../test-utils.ts'
 import { CapacityState, ContentType, FileStat, FileType, MountMode, PathSpec } from '../types.ts'
@@ -184,11 +184,11 @@ function commandNames(vfs: BaseVFS): Set<string> {
   return new Set(commandsFor(vfs).map((rc) => rc.name))
 }
 
-const DOOR_OPS = ['read', 'readdir', 'stat', 'glob', 'write', 'unlink', 'mkdir', 'rename']
+const DISPATCH_OPS = ['read', 'readdir', 'stat', 'glob', 'write', 'unlink', 'mkdir', 'rename']
 
 function served(vfs: BaseVFS): Set<string> {
   const mount = new MountEntry({ prefix: '/', vfs })
-  return new Set(DOOR_OPS.filter((op) => mount.answers(op)))
+  return new Set(DISPATCH_OPS.filter((op) => mount.answers(op)))
 }
 
 /**
@@ -338,7 +338,7 @@ describe('a plug-in VFS', () => {
     expect(matches.map((m) => m.virtual)).toEqual(['/guides/quickstart.md'])
   })
 
-  it('serves its reads at the door', () => {
+  it('serves its reads at the dispatcher', () => {
     expect(served(makeVfs())).toEqual(new Set(['glob', 'read', 'readdir', 'stat']))
   })
 
@@ -486,15 +486,15 @@ describe('custom VFS capability fallbacks', () => {
 })
 
 async function readCli(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
-  const dispatch = inv.doors?.dispatch
+  const dispatch = inv.view?.dispatch
   const path = inv.paths[0]
-  if (dispatch === undefined || path === undefined) throw new Error('missing CLI path door')
+  if (dispatch === undefined || path === undefined) throw new Error('missing CLI dispatch')
   const [data, result] = await dispatch('read', path)
   if (!(data instanceof Uint8Array)) throw new Error('expected file bytes')
   return [data, result]
 }
 
-it('serves a custom driver through CLI, namespace and runtime doors', async () => {
+it('serves a custom driver through CLI, namespace and runtime entry points', async () => {
   const ws = new Workspace(
     { '/wiki': makeVfs() },
     {
@@ -517,7 +517,7 @@ it('serves a custom driver through CLI, namespace and runtime doors', async () =
       expect(result.exitCode).toBe(0)
       expect(new TextDecoder().decode(result.stdout)).toBe('agents speak bash\n')
     }
-    const runtime = new RuntimeVFS((op, path) => ws.dispatch(op, path))
+    const runtime = new RuntimeFiles((op, path) => ws.dispatch(op, path))
     expect(new TextDecoder().decode(await runtime.read('/page'))).toBe('agents speak bash\n')
     expect(await runtime.stat('/page')).toMatchObject({ size: 18, isDir: false })
   } finally {

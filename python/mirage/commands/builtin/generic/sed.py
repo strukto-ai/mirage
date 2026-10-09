@@ -59,7 +59,7 @@ WriteBytes = Callable[..., Awaitable[None]]
 
 
 @dataclass(frozen=True)
-class _Doors:
+class _ScriptFiles:
     """How sed reaches the files its script names.
 
     ``r``, ``R``, ``w``, ``W`` and ``s///w`` go through the workspace
@@ -136,27 +136,29 @@ def _edit_failure(name: str, exc: BaseException) -> str:
     return f"sed: couldn't edit {name}: {strerror}\n"
 
 
-async def _open_write_files(names: Sequence[str], doors: _Doors) -> str | None:
+async def _open_write_files(
+    names: Sequence[str], access: _ScriptFiles
+) -> str | None:
     """Truncate the ``w`` files as GNU opens them when it compiles.
 
     In order; the first that cannot be opened is GNU's panic.
 
     Args:
         names (Sequence[str]): the files, in the order they were opened.
-        doors (_Doors): the file doors.
+        access (_ScriptFiles): how sed reaches the files its script names.
     """
     for name in names:
         if name in (SED_STDOUT, SED_STDERR):
             continue
         try:
-            await doors.write(name, b"")
+            await access.write(name, b"")
         except FS_ERRORS as exc:
             return _open_failure(name, exc)
     return None
 
 
 async def _read_script_files(
-    names: Sequence[str], doors: _Doors, utf8: bool = False
+    names: Sequence[str], access: _ScriptFiles, utf8: bool = False
 ) -> dict[str, SedFileContent]:
     """Read the files ``r`` or ``R`` names.
 
@@ -166,13 +168,13 @@ async def _read_script_files(
 
     Args:
         names (Sequence[str]): the file names.
-        doors (_Doors): the file doors.
+        access (_ScriptFiles): how sed reaches the files its script names.
         utf8 (bool): read them as text, under a UTF-8 locale.
     """
     files: dict[str, SedFileContent] = {}
     for name in names:
         try:
-            files[name] = SedFileText(byte_view(await doors.read(name), utf8))
+            files[name] = SedFileText(byte_view(await access.read(name), utf8))
         except IsADirectoryError:
             files[name] = SedFileError(
                 f"sed: read error on {name}: Is a directory\n"
@@ -183,7 +185,9 @@ async def _read_script_files(
 
 
 async def _flush_write_files(
-    machine: SedMachine, doors: _Doors, edited: frozenset[str] = frozenset()
+    machine: SedMachine,
+    access: _ScriptFiles,
+    edited: frozenset[str] = frozenset(),
 ) -> str:
     """Write out what the ``w`` files collected.
 
@@ -192,15 +196,15 @@ async def _flush_write_files(
 
     Args:
         machine (SedMachine): the finished machine.
-        doors (_Doors): the file doors.
+        access (_ScriptFiles): how sed reaches the files its script names.
         edited (frozenset[str]): virtual paths -i rewrote.
     """
     err = ""
     for name, out in machine.wfiles.items():
-        if not out.chunks or doors.spec(name).virtual in edited:
+        if not out.chunks or access.spec(name).virtual in edited:
             continue
         try:
-            await doors.write(
+            await access.write(
                 name, from_byte_view("".join(out.chunks), machine.opts.utf8)
             )
         except FS_ERRORS as exc:
@@ -257,15 +261,15 @@ async def sed(
     pieces = (
         [SedScriptPiece("expr", script)] if isinstance(script, str) else script
     )
-    doors = _Doors(read_bytes, write_bytes, dispatch, cwd, prefix)
+    access = _ScriptFiles(read_bytes, write_bytes, dispatch, cwd, prefix)
     try:
         program = compile_script(pieces, extended, utf8)
     except SedError as exc:
-        refused = await _open_write_files(exc.wfiles, doors)
+        refused = await _open_write_files(exc.wfiles, access)
         if refused is not None:
             return _failed(refused, 4)
         return _failed(f"{exc}\n", exc.exit_code)
-    refused = await _open_write_files(program.wfiles, doors)
+    refused = await _open_write_files(program.wfiles, access)
     if refused is not None:
         return _failed(refused, 4)
     machine = SedMachine(
@@ -274,16 +278,16 @@ async def sed(
             suppress=suppress,
             separate=in_place or separate,
             line_length=line_length,
-            files=await _read_script_files(program.rfiles, doors, utf8),
+            files=await _read_script_files(program.rfiles, access, utf8),
             reader_files=await _read_script_files(
-                program.reader_files, doors, utf8
+                program.reader_files, access, utf8
             ),
             utf8=utf8,
         ),
     )
     if in_place:
         return await _run_in_place(
-            paths, program, machine, doors, read_bytes, write_bytes
+            paths, program, machine, access, read_bytes, write_bytes
         )
 
     inputs: list[SedInput] = []
@@ -323,7 +327,7 @@ async def sed(
             continue
         inputs.append(SedInput(p.raw_path, byte_view(data, utf8)))
     machine.process(inputs, True)
-    write_err = await _flush_write_files(machine, doors)
+    write_err = await _flush_write_files(machine, access)
     stderr = machine.stderr() + write_err
     return from_byte_view("".join(machine.stdout.chunks), utf8), IOResult(
         exit_code=machine.exit_code() if not write_err else 4,
@@ -335,7 +339,7 @@ async def _run_in_place(
     paths: list[PathSpec],
     program: SedProgram,
     machine: SedMachine,
-    doors: _Doors,
+    access: _ScriptFiles,
     read_bytes: ReadBytes,
     write_bytes: WriteBytes | None,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -351,7 +355,7 @@ async def _run_in_place(
         paths (list[PathSpec]): the files to edit.
         program (SedProgram): the compiled script.
         machine (SedMachine): the compiled script's machine.
-        doors (_Doors): the file doors.
+        access (_ScriptFiles): how sed reaches the files its script names.
         read_bytes (ReadBytes): bound whole-file reader.
         write_bytes (WriteBytes | None): bound writer.
     """
@@ -381,7 +385,7 @@ async def _run_in_place(
             # An `r` file edited by an earlier file of this command reads
             # with its new content.
             machine.set_files(
-                await _read_script_files(program.rfiles, doors, utf8)
+                await _read_script_files(program.rfiles, access, utf8)
             )
         out = machine.process(
             [SedInput(p.raw_path, byte_view(data, utf8))], False
@@ -398,7 +402,7 @@ async def _run_in_place(
         writes[p.mount_path] = new_data
         edited.append(p)
     write_err = await _flush_write_files(
-        machine, doors, frozenset(p.virtual for p in edited)
+        machine, access, frozenset(p.virtual for p in edited)
     )
     stderr = err + machine.stderr() + write_err
     if machine.panic_code is not None:

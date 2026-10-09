@@ -5,7 +5,8 @@
       "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
       "runtimes": [
         "wasi",
-        "pyodide"
+        "pyodide",
+        "host"
       ],
       "world": {
         "mounts": {

@@ -31,8 +31,7 @@ import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
 import { isProgramInvocation, runWithEvaluation } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { mergeSignals } from '../abort.ts'
-import { abortable } from '../../concurrency/limiter.ts'
+import { abortable, mergeSignals } from '../../utils/abort.ts'
 import type { SessionView } from '../../view/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
@@ -182,7 +181,7 @@ export async function handleBackground(
   // its grants have to stay reserved through the line's end whichever
   // way the line ends, a release for a question left waiting included.
   // The job's whole subtree runs on that hand-off, the lines it
-  // evaluates included (the walker binds it into their door), and the
+  // evaluates included (the walker binds it into their entry point), and the
   // job revokes it when it ends.
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
@@ -276,7 +275,7 @@ export async function handleBackground(
       }
       return [io, execNode]
     }
-    // Task-local bindings keep op doors and host callbacks in the job's
+    // Task-local bindings keep dispatcher and host callbacks in the job's
     // fork. The fallback cannot attribute ambient reads to a task, so
     // it keeps the outer binding; nested shell evaluations carry the
     // walker's exact session explicitly on both runtimes.

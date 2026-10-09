@@ -90,7 +90,7 @@ async def test_write_existing_file_uploads_version(root_accessor):
     ):
         await write(root_accessor, _spec("/data/a.txt"), b"OVER")
     ver.assert_awaited_once_with(
-        root_accessor.token_manager, "200", "a.txt", b"OVER"
+        root_accessor.token_manager, "200", "a.txt", b"OVER", None
     )
 
 
@@ -229,7 +229,7 @@ async def test_unlink_deletes_file(root_accessor):
         ),
     ):
         await unlink(root_accessor, _spec("/data/a.txt"))
-    df.assert_awaited_once_with(root_accessor.token_manager, "200")
+    df.assert_awaited_once_with(root_accessor.token_manager, "200", None)
 
 
 @pytest.mark.asyncio
@@ -325,7 +325,7 @@ async def test_rename_replaces_empty_folder_destination(root_accessor):
     with (
         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
         patch(
-            "mirage.core.box.rename.delete_folder", new_callable=AsyncMock
+            "mirage.core.box.rmdir.delete_folder", new_callable=AsyncMock
         ) as df,
         patch(
             "mirage.core.box.rename.update_folder", new_callable=AsyncMock
@@ -351,7 +351,7 @@ async def test_rename_refuses_nonempty_folder_destination(root_accessor):
     with (
         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
         patch(
-            "mirage.core.box.rename.delete_folder",
+            "mirage.core.box.rmdir.delete_folder",
             new_callable=AsyncMock,
             side_effect=BoxApiError("conflict", 409),
         ),
@@ -374,7 +374,7 @@ async def test_rename_unmapped_folder_error_propagates(root_accessor):
     with (
         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
         patch(
-            "mirage.core.box.rename.delete_folder",
+            "mirage.core.box.rmdir.delete_folder",
             new_callable=AsyncMock,
             side_effect=BoxApiError("boom", 500),
         ),
@@ -396,7 +396,7 @@ async def test_rename_file_onto_folder_raises_isdir(root_accessor):
     with (
         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
         patch(
-            "mirage.core.box.rename.delete_folder", new_callable=AsyncMock
+            "mirage.core.box.rmdir.delete_folder", new_callable=AsyncMock
         ) as df,
         patch(
             "mirage.core.box.rename.update_file", new_callable=AsyncMock
@@ -419,7 +419,7 @@ async def test_rename_folder_onto_file_raises_notdir(root_accessor):
     with (
         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
         patch(
-            "mirage.core.box.rename.delete_file", new_callable=AsyncMock
+            "mirage.core.box.copy.delete_file", new_callable=AsyncMock
         ) as df,
         patch(
             "mirage.core.box.rename.update_folder", new_callable=AsyncMock
@@ -482,18 +482,146 @@ async def test_copy_folder_onto_file_raises_notdir(root_accessor):
 
 @pytest.mark.asyncio
 async def test_copy_file(root_accessor):
-    with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
-        patch("mirage.core.box.copy.copy_file", new_callable=AsyncMock) as cf,
-        patch(
-            "mirage.core.box.copy.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
-    ):
-        await copy(root_accessor, _spec("/data/a.txt"), _spec("/data/c.txt"))
+    scope = RecordingScope()
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+            patch(
+                "mirage.core.box.copy.copy_file", new_callable=AsyncMock
+            ) as cf,
+            patch(
+                "mirage.core.box.copy.invalidate_after_write",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await copy(
+                root_accessor, _spec("/data/a.txt"), _spec("/data/c.txt")
+            )
+    finally:
+        scope.close()
     cf.assert_awaited_once_with(
         root_accessor.token_manager, "200", "100", name="c.txt"
     )
+    assert [(r.op, r.path) for r in scope.records] == [("copy", "/data/c.txt")]
+
+
+@pytest.mark.asyncio
+async def test_copy_of_a_whole_folder_is_recorded_as_a_prefix(root_accessor):
+    scope = RecordingScope()
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+            patch(
+                "mirage.core.box.copy.copy_folder", new_callable=AsyncMock
+            ) as cd,
+            patch(
+                "mirage.core.box.copy.invalidate_subtree",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await copy(root_accessor, _spec("/data/sub"), _spec("/data/new"))
+    finally:
+        scope.close()
+    cd.assert_awaited_once_with(
+        root_accessor.token_manager, "300", "100", name="new"
+    )
+    assert [(r.op, r.path) for r in scope.records] == [
+        ("copy_prefix", "/data/new")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_merge_records_and_evicts_each_folder_before_the_next(
+    root_accessor,
+):
+    tree = {
+        **_TREE,
+        "300": [
+            {"id": "310", "name": "x", "type": "folder"},
+            {"id": "320", "name": "y", "type": "folder"},
+        ],
+    }
+
+    async def listing(_tm, folder_id, limit=1000):
+        return tree.get(folder_id, [])
+
+    scope = RecordingScope()
+    seen: list[list[tuple[str, str]]] = []
+    evicted: list[str] = []
+
+    async def copied(*_args, **_kwargs):
+        seen.append([(r.op, r.path) for r in scope.records])
+        seen[-1].extend(("evicted", path) for path in evicted)
+
+    async def subtree(path):
+        evicted.append(path.virtual)
+
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=listing),
+            patch("mirage.core.box.copy.list_folder_items", new=listing),
+            patch("mirage.core.box.copy.copy_folder", new=copied),
+            patch("mirage.core.box.copy.invalidate_subtree", new=subtree),
+            patch(
+                "mirage.core.box.copy.writes_conditioned", return_value=True
+            ),
+        ):
+            await copy(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
+    finally:
+        scope.close()
+    first = [("copy_prefix", "/data/dst/x"), ("evicted", "/data/dst/x")]
+    assert seen == [[], first]
+
+
+@pytest.mark.asyncio
+async def test_a_replaced_file_is_recorded_only_once_its_copy_lands(
+    root_accessor,
+):
+    scope = RecordingScope()
+    seen: list[list[tuple[str, str]]] = []
+
+    async def copied(*_args, **_kwargs):
+        seen.append([(r.op, r.path) for r in scope.records])
+        return {}
+
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=_copy_list),
+            patch("mirage.core.box.copy.copy_file", new=copied),
+            patch("mirage.core.box.copy.delete_file", new_callable=AsyncMock),
+            patch(
+                "mirage.core.box.copy.invalidate_after_write",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await copy(
+                root_accessor, _spec("/data/a.txt"), _spec("/data/b.txt")
+            )
+    finally:
+        scope.close()
+    assert seen == [[]]
+    assert [(r.op, r.path) for r in scope.records] == [("copy", "/data/b.txt")]
+
+
+@pytest.mark.asyncio
+async def test_a_rename_onto_its_own_name_sends_and_records_nothing(
+    root_accessor,
+):
+    scope = RecordingScope()
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+            patch(
+                "mirage.core.box.rename.update_file", new_callable=AsyncMock
+            ) as moved,
+        ):
+            await rename(
+                root_accessor, _spec("/data/a.txt"), _spec("/data/a.txt")
+            )
+    finally:
+        scope.close()
+    moved.assert_not_awaited()
+    assert scope.records == []
 
 
 @pytest.mark.asyncio
@@ -548,13 +676,14 @@ async def _copy_list(_tm, folder_id, limit=1000):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("src", "dst", "fails", "raised", "expected"),
+    ("src", "dst", "fails", "raised", "conditioned", "expected"),
     [
         (
             "/data/a.txt",
             "/data/c.txt",
             False,
             None,
+            False,
             [
                 ("copy_file", "c.txt"),
                 ("write", "/data/c.txt"),
@@ -565,6 +694,7 @@ async def _copy_list(_tm, folder_id, limit=1000):
             "/data/b.txt",
             True,
             RuntimeError,
+            False,
             [
                 ("delete_file", "210"),
                 ("copy_file", "b.txt"),
@@ -576,6 +706,7 @@ async def _copy_list(_tm, folder_id, limit=1000):
             "/data/new",
             False,
             None,
+            False,
             [
                 ("copy_folder", "new"),
                 ("subtree", "/data/new"),
@@ -586,6 +717,7 @@ async def _copy_list(_tm, folder_id, limit=1000):
             "/data/dst",
             True,
             RuntimeError,
+            False,
             [
                 ("delete_file", "410"),
                 ("copy_file", "x.txt"),
@@ -597,13 +729,47 @@ async def _copy_list(_tm, folder_id, limit=1000):
             "/data/a.txt",
             False,
             NotADirectoryError,
+            False,
             [("subtree", "/data/a.txt")],
         ),
+        (
+            "/data/a.txt",
+            "/data/b.txt",
+            False,
+            None,
+            True,
+            [
+                ("delete_file", "210"),
+                ("copy_file", "b.txt"),
+                ("write", "/data/b.txt"),
+                ("write", "/data/b.txt"),
+            ],
+        ),
+        (
+            "/data/sub",
+            "/data/new",
+            False,
+            None,
+            True,
+            [
+                ("copy_folder", "new"),
+                ("subtree", "/data/new"),
+                ("subtree", "/data/new"),
+            ],
+        ),
     ],
-    ids=["file-ok", "file-fails", "folder-ok", "folder-fails", "refused"],
+    ids=[
+        "file-ok",
+        "file-fails",
+        "folder-ok",
+        "folder-fails",
+        "refused",
+        "conditional-replace",
+        "conditional-folder",
+    ],
 )
 async def test_a_copy_evicts_after_it_ends(
-    root_accessor, src, dst, fails, raised, expected
+    root_accessor, src, dst, fails, raised, conditioned, expected
 ):
     events: list[tuple[str, str]] = []
 
@@ -617,7 +783,7 @@ async def test_a_copy_evicts_after_it_ends(
         events.append(("copy_folder", name))
         return {}
 
-    async def fake_delete_file(_tm, file_id):
+    async def fake_delete_file(_tm, file_id, _etag=None):
         events.append(("delete_file", file_id))
 
     async def wrote(path):
@@ -639,6 +805,10 @@ async def test_a_copy_evicts_after_it_ends(
         patch(
             "mirage.core.box.copy.invalidate_subtree",
             new=AsyncMock(side_effect=dropped),
+        ),
+        patch(
+            "mirage.core.box.copy.writes_conditioned",
+            return_value=conditioned,
         ),
     ):
         if raised is None:

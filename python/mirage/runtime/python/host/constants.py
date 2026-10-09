@@ -63,7 +63,7 @@ ROUTED_CALLS: Mapping[str, tuple[str, ...]] = {
 #
 # `open` is the fd tier rather than a missing fact: serving it means an
 # fd table with host-visible numbers, which `runtime/handles` builds for
-# the runtimes and this door has no equivalent of. `chdir` is refused
+# the runtimes and this entry point has no equivalent of. `chdir` is refused
 # because a host process cwd cannot be a virtual path; a runtime whose
 # guest has its own cwd (Emscripten does) serves it inside that guest
 # and never reaches this table.

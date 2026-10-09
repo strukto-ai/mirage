@@ -24,6 +24,7 @@ from mirage.runtime.mixin import (
     LineExecutorMixin,
     ProcessExecutorMixin,
 )
+from mirage.runtime.routing.types import RouteScript
 from mirage.runtime.types import (
     ExecutionRequest,
     FilesystemOperation,
@@ -31,7 +32,6 @@ from mirage.runtime.types import (
     RunResult,
     RuntimeCapabilities,
     RuntimeReach,
-    ScriptSource,
     ShellRequest,
 )
 from mirage.utils.activity import Activity
@@ -57,7 +57,7 @@ class Runtime(ABC):
 
     name: str
     captures: tuple[str, ...] = ()
-    # Which doors this runtime's code has to the outside world (see
+    # Which entry points this runtime's code has to the outside world (see
     # RuntimeReach): "workspace" when the workspace dispatch is its only
     # one, as the bridged engines (monty, quickjs, wasi) and the vfs
     # routing marker declare, "process" or "remote" when the code can
@@ -73,7 +73,7 @@ class Runtime(ABC):
     # I want this line": a callable taking a RouteContext, or a
     # config-borne ScriptSource. None = always willing. Policy, not
     # capability: it can only refuse lines the captures already allow.
-    script: Callable[..., Any] | ScriptSource | None = None
+    script: RouteScript | None = None
     # Each runtime's config class; coerce() makes unknown fields fail
     # loud, so runtimes need no per-field rejection code.
     config_cls: ClassVar[type[RuntimeConfig]] = RuntimeConfig
@@ -86,7 +86,7 @@ class Runtime(ABC):
         self,
         captures: Sequence[str] | None = None,
         config: RuntimeConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
+        script: RouteScript | None = None,
     ) -> None:
         """Every runtime is constructed the same way.
 
@@ -101,7 +101,7 @@ class Runtime(ABC):
                 own config class (config_cls), so a field the runtime
                 does not have fails loud; the dict form is a yaml
                 entry's ``config`` block.
-            script (Callable | ScriptSource | None): per-line
+            script (RouteScript | None): per-line
                 admission script for the routing ladder.
         """
         if captures is not None:
@@ -137,8 +137,9 @@ class Runtime(ABC):
     ) -> RunResult:
         """Execute directly, or under the bound workspace's captured context.
 
-        This is the engine door. Workspace.shell remains the shell admission
-        and routing door, as it was for callers of run and run_line.
+        This is the engine entry point. Workspace.shell remains the shell
+        admission and routing entry point, as it was for callers of run and
+        run_line.
         """
         release = self.admit()
         try:

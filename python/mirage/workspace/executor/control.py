@@ -435,7 +435,7 @@ async def handle_for(
             break
         # env stores strings only; bash keeps `for f in sub/*.txt`
         # matches relative, so the loop variable takes the typed form.
-        # The write goes through the session door; a policy denial
+        # The write goes through the session view; a policy denial
         # aborts the loop before its body runs.
         text_val = word_text(val)
         try:
@@ -628,7 +628,7 @@ async def handle_cfor(
         # bash: the loop aborts with status 1, keeping the output
         # of iterations that already ran. PolicyDenied is a header
         # expression assigning a hidden name, refused by the same
-        # door as any denied assignment.
+        # session view as any denied assignment.
         if isinstance(exc, ReadonlyError):
             err = encode_text(f"bash: {exc}\n")
         elif isinstance(exc, PolicyDenied):

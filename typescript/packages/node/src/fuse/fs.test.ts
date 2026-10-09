@@ -569,26 +569,26 @@ describe('MirageFS — xattr', () => {
   })
 
   it('is the same attribute every surface reads', async () => {
-    // The kernel's attribute is the door's, not an advisory copy held for
+    // The kernel's attribute is the dispatcher's, not an advisory copy held for
     // the mount's lifetime: the shell and a guest read what the mountpoint
     // wrote, and the mountpoint reads what they wrote.
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
     await callOp(mfs, 'setxattr', '/data/greeting.txt', 'user.kernel', Buffer.from('k'), 0, 0)
-    const fromDoor = await ws.vfs.getxattr('/data/greeting.txt', 'user.kernel')
-    expect(new TextDecoder().decode(fromDoor)).toBe('k')
-    await ws.vfs.setxattr('/data/greeting.txt', 'user.door', new TextEncoder().encode('d'))
+    const fromFiles = await ws.vfs.getxattr('/data/greeting.txt', 'user.kernel')
+    expect(new TextDecoder().decode(fromFiles)).toBe('k')
+    await ws.vfs.setxattr('/data/greeting.txt', 'user.vfs', new TextEncoder().encode('d'))
     const [, value] = await callOp<[number, Buffer?]>(
       mfs,
       'getxattr',
       '/data/greeting.txt',
-      'user.door',
+      'user.vfs',
       0,
     )
     expect(value?.toString()).toBe('d')
   })
 
-  it('hands the create and replace flags to the door', async () => {
+  it('hands the create and replace flags to the dispatcher', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
     const set = (name: string, flags: number) =>

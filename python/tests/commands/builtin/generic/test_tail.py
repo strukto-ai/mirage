@@ -415,7 +415,7 @@ async def _printed(job, want: bytes) -> bytes:
 @pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
 @pytest.mark.parametrize("policy", [ReadPolicy.FRESH, ReadPolicy.BOUNDED])
 async def test_follow_prints_each_append_past_the_file_cache(policy, warm):
-    # A follow polls at the door for what the backend holds now: neither
+    # A follow polls at the dispatcher for what the backend holds now: neither
     # the cached body nor the stat the freshness probe kept has the bytes
     # it waits for, under either read policy.
     objects = {"log": b"l1\n"}

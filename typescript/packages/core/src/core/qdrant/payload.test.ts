@@ -33,4 +33,18 @@ describe('qdrant payload fields', () => {
     expect(withoutField(row, 'metadata.blob')).toEqual({ metadata: { source: 'report.pdf' } })
     expect(row.metadata.blob).toBe('bytes')
   })
+
+  it.each(['__proto__', 'constructor', 'toString'])('reads only owned %s fields', (field) => {
+    expect(fieldValue({}, field)).toBeUndefined()
+    expect(fieldValue({ metadata: {} }, `metadata.${field}`)).toBeUndefined()
+    expect(fieldValue({ [field]: 'payload' }, field)).toBe('payload')
+  })
+
+  it('preserves prototype-named keys when omitting nested fields', () => {
+    const row = { ['__proto__']: { keep: 'value', blob: 'bytes' }, vector: [1] }
+    const copied = withoutField(withoutField(row, 'vector'), '__proto__.blob')
+    expect(JSON.stringify(copied)).toBe('{"__proto__":{"keep":"value"}}')
+    expect(Object.getPrototypeOf(copied)).toBe(Object.prototype)
+    expect(row.__proto__.blob).toBe('bytes')
+  })
 })

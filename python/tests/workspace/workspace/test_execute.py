@@ -25,8 +25,8 @@ from mirage.execution.context import current_execution
 from mirage.io.types import IOResult
 from mirage.observe.store import RAMObserverStore
 from mirage.policy import Action, CommandContext, Deny, Policy
+from mirage.utils.abort import ABORT_JOIN_SECONDS, MirageAbortError
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.abort import ABORT_JOIN_SECONDS, MirageAbortError
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.store import SessionFields
@@ -348,7 +348,7 @@ async def test_eval_keeps_the_record_the_inner_line_earned():
 
 
 # A substitution keeps only the inner stdout, so its record has to
-# reach the line through the door every nested line re-enters by.
+# reach the line through the entry point every nested line re-enters by.
 @pytest.mark.asyncio
 async def test_a_substitution_keeps_the_record_the_inner_line_earned():
     ws = _policed_ws()

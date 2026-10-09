@@ -49,11 +49,12 @@ def ansi_c_end(token: str, start: int) -> int:
     return len(token)
 
 
-def _joined(token: str, index: int) -> int:
-    """Where a word's next character is once continued lines are joined.
+def joined(token: str, index: int) -> int:
+    """Where the next character is once continued lines are joined, as
+    bash joins them before it reads one.
 
     Args:
-        token (str): the word.
+        token (str): the text.
         index (int): where to look.
     """
     while token.startswith("\\\n", index):
@@ -138,7 +139,7 @@ def clean_delimiter(token: str) -> str:
             else:
                 out.append(char)
         elif char == "$" and (
-            token[(after := _joined(token, index + 1)) : after + 1]
+            token[(after := joined(token, index + 1)) : after + 1]
             in ("'", '"')
         ):
             if token[after] == "'":

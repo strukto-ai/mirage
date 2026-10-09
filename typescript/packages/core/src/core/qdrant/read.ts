@@ -21,8 +21,9 @@ import { blobBytes } from '../vector/read.ts'
 import { tableOf } from '../vector/scope.ts'
 import { pointIdFromStem, rowStem } from './naming.ts'
 import { fieldValue } from './payload.ts'
-import { rowRecord, type QdrantRow } from './query.ts'
+import { rowRecord } from './query.ts'
 import { renderJson, renderText } from './render.ts'
+import type { QdrantRow } from './types.ts'
 
 async function rowOf(
   accessor: QdrantAccessor,

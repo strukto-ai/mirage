@@ -8,7 +8,7 @@
 # mount and profile command_limits, and the per-line --runtime argument.
 #
 # Cases whose steps need the SDK surface (add_runtime, rename, s3_put,
-# read_op, facade — the last calls ws.vfs directly) or a runner-local
+# read_op, profile, facade — the last calls ws.vfs directly) or a runner-local
 # test runtime (echobox, named as a string or a mapping, or registered
 # through world.register_runtimes), generated file catalogs, runner-local
 # code policies (world.policies), or non-ram mounts are skipped as sdk-only,
@@ -16,7 +16,7 @@
 # stdout are exact, stderr is a containment check (the CLI owns its
 # stderr framing), and the SDK-side expectations (ops_contain,
 # ops_absent, ops_count, value) are not checked because the op ledger has no CLI
-# door.
+# entry point.
 #
 # A yaml file is any JSON document here: YAML is a superset of JSON,
 # so the driver emits the case world as JSON with jq and both loaders
@@ -148,7 +148,7 @@ runtime_variants() {
 # Whether this case can run over the CLI at all. Worlds carrying code
 # policies (runner-local Policy classes) or a failing mount (a runner-local
 # VFS) cannot cross the yaml/daemon boundary, and read_op steps need the
-# SDK op door.
+# SDK dispatcher.
 cli_expressible() {
   local case_json="$1"
   jq -e '
@@ -160,7 +160,7 @@ cli_expressible() {
     and (((.world.policies // []) | length) == 0)
     and (((.world.runtimes // []) | map(select((type == "object" and .name == "echobox") or . == "echobox")) | length) == 0)
     and (((.world.register_runtimes // {}) | length) == 0)
-    and (([(.steps // [])[] | ., (.parallel // [])[]] | map(select(has("add_runtime") or has("rename") or has("s3_put") or has("read_op") or has("facade"))) | length) == 0)
+    and (([(.steps // [])[] | ., (.parallel // [])[]] | map(select(has("add_runtime") or has("rename") or has("s3_put") or has("read_op") or has("facade") or has("profile"))) | length) == 0)
   ' >/dev/null <<<"$case_json"
 }
 

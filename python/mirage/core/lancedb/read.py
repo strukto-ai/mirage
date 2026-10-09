@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
-
 from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.hierarchy.read import Reader
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.lancedb.query import row_record
 from mirage.core.lancedb.render import render_card
+from mirage.core.lancedb.types import LanceRow
 from mirage.core.vector.read import blob_bytes
 from mirage.core.vector.scope import table_of
 from mirage.errors.fs import enoent
@@ -28,7 +27,7 @@ from mirage.types import PathSpec
 
 async def _row_of(
     accessor: LanceDBAccessor, match: ScopeMatch, virtual: str
-) -> dict[str, Any]:
+) -> LanceRow:
     config = accessor.config
     row = await row_record(
         accessor,

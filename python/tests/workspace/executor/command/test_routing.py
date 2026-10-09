@@ -160,9 +160,9 @@ def test_path_flag_scopes_leaves_a_program_file_out(cmd: str, flag: str):
         ),
     ],
 )
-def test_path_flag_scopes_leaves_door_files_out(cmd: str, argv: list[str]):
+def test_path_flag_scopes_leaves_dispatch_files_out(cmd: str, argv: list[str]):
     # The handler reaches them through the dispatcher, so they name no
-    # mount the line has to run on (DOOR_FLAG_KEYS).
+    # mount the line has to run on (DISPATCH_FLAG_KEYS).
     assert path_flag_scopes(cmd, argv, "/") == []
 
 

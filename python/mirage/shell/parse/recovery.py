@@ -13,11 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-import re
-
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parameter import scan_parameter
-from mirage.shell.parse.constants import ARITH_OPEN_TOKEN, QUOTES
+from mirage.shell.parse import constants
 from mirage.shell.parse.engine import TS_PARSER
 from mirage.shell.parse.expansion import expansion_source
 from mirage.shell.parse.heredoc import protected_source
@@ -55,7 +53,7 @@ def _balanced_end(data: bytes, start: int) -> int | None:
                 quote = None
             index += 1
             continue
-        if char in QUOTES:
+        if char in constants.QUOTES:
             quote = char
         elif char == b"\\":
             index += 2
@@ -79,68 +77,17 @@ def is_arithmetic(data: bytes, start: int) -> bool:
     shares a line with a broken one, since tree-sitter's error region
     covers both.
 
+    An opener whose parens never balance leaves no span to judge, so it
+    counts as arithmetic and is left alone rather than rewritten.
+
     Args:
         data (bytes): encoded shell source.
         start (int): byte offset of the opener's first paren.
     """
     end = _balanced_end(data, start)
     if end is None:
-        # Unbalanced: no span to judge, so assume arithmetic and leave
-        # the construct alone rather than risk rewriting it.
         return True
     return not TS_PARSER.parse(data[start:end]).root_node.has_error
-
-
-_UNLEXED = frozenset(
-    {
-        "test_command",
-        "arithmetic_expansion",
-        "string_content",
-        "raw_string",
-        "ansi_c_string",
-        "expansion",
-        "heredoc_content",
-        "comment",
-        "binary_expression",
-        "unary_expression",
-        "postfix_expression",
-    }
-)
-
-
-_WORD_START = b" \t\n;&|(){}"
-
-
-_DIGITS = re.compile(rb"\d+")
-
-
-_LAST_ARM = re.compile(rb"\s*esac(?![^\s;&|()<>])")
-
-# Tokens the grammar lexes apart from a word in an argument list, where
-# bash reads a word, by the node they stand under. A bare `$` in a command
-# is already kept as a word, and only an error region loses it; the `$`
-# opening `$"..."` is the translation marker, never a word.
-_BARE_WORDS = {
-    "command": frozenset({"==", "=~"}),
-    "ERROR": frozenset({"==", "=~", "$"}),
-}
-
-
-_WORD_BREAK = b" \t\n;&|()<>"
-
-
-_LIST_TOKENS = frozenset({"&&", "||", "|", "|&", ";", "&", ";;"})
-
-
-_TEST_PARTS = frozenset(
-    {
-        "binary_expression",
-        "unary_expression",
-        "negation_expression",
-        "parenthesized_expression",
-        "ERROR",
-    }
-)
 
 
 def _breaks_word(data: bytes, at: int) -> bool:
@@ -150,7 +97,7 @@ def _breaks_word(data: bytes, at: int) -> bool:
         data (bytes): shell source.
         at (int): byte offset, which may fall outside ``data``.
     """
-    return at < 0 or at >= len(data) or data[at : at + 1] in _WORD_BREAK
+    return at < 0 or at >= len(data) or chr(data[at]) in constants.WORD_BREAKS
 
 
 def _bracket_is_a_command(data: bytes, node: TSNodeLike) -> bool:
@@ -178,9 +125,9 @@ def _bracket_is_a_command(data: bytes, node: TSNodeLike) -> bool:
     stack = list(children[1:-1])
     while stack:
         part = stack.pop()
-        if not part.is_named and part.type in _LIST_TOKENS:
+        if not part.is_named and part.type in constants.LIST_TOKENS:
             return True
-        if part.type in _TEST_PARTS:
+        if part.type in constants.TEST_PARTS:
             stack.extend(part.children)
     return False
 
@@ -200,11 +147,16 @@ def operator_source(data: bytes, root: TSNodeLike) -> bytes:
     as ``;;`` does, there being no arm after it, so it is spelled so. An
     argument of ``==`` or ``=~``, which the grammar reads as a test
     operator wanting an operand (so ``echo ==`` is an error and
-    ``echo == x`` drops it), and a bare ``$`` before a terminator are
-    words to bash; spelled as ``_`` filler they parse as the words they
-    are, and ``SourceNode`` gives back their text. So is the ``[`` of a
-    test bash reads as a ``[`` command (``_bracket_is_a_command``, or one
-    an error region opens), which then runs as the builtin. An operator
+    ``echo == x`` drops it), and a ``$`` that opens no expansion
+    (``$\\a``, ``$,``, ``$`` before a blank) are words to bash, where the
+    grammar errs or reads an expansion missing its name; spelled as ``_``
+    filler they parse as the words they are, and ``SourceNode`` gives
+    back their text. So is the ``[`` of a test bash reads as a ``[``
+    command (``_bracket_is_a_command``, or one an error region opens),
+    which then runs as the builtin, and so is a
+    backslash-blank pair the grammar skips as whitespace
+    (``_skipped_escapes``), spelled ``..`` so it opens its word without
+    joining a ``$name`` before it or making an assignment. An operator
     inside an error region gets its own token only once the operators
     before it are respelled, so the pass repeats on its own parse until
     nothing changes.
@@ -220,22 +172,67 @@ def operator_source(data: bytes, root: TSNodeLike) -> bytes:
     return data
 
 
+def _skipped_escapes(data: bytes, root: TSNodeLike) -> list[int]:
+    """Offsets of each backslash-blank pair the grammar read as a blank.
+
+    Outside quotes, bash reads a backslash before a space or a tab as that
+    blank escaped into the word it opens (``\\ x`` is the word `` x``).
+    The grammar skips the pair as whitespace, so the word loses its blank,
+    and a line one opens reads as more words of the line before. Only the
+    bytes no token covers are searched; a quoted or unlexed span counts as
+    one token.
+
+    Args:
+        data (bytes): shell source.
+        root (TSNodeLike): the parse of ``data``.
+    """
+    if constants.ESCAPED_BLANK.search(data) is None:
+        return []
+    spans: list[tuple[int, int]] = [(len(data), len(data))]
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.children and node.type not in constants.UNLEXED | {"string"}:
+            stack.extend(node.children)
+        else:
+            spans.append((node.start_byte, node.end_byte))
+    offsets: list[int] = []
+    at = 0
+    for lo, hi in sorted(spans):
+        offsets.extend(
+            m.start() for m in constants.ESCAPED_BLANK.finditer(data, at, lo)
+        )
+        at = max(at, hi)
+    return offsets
+
+
 def _respelled(data: bytes, root: TSNodeLike) -> bytes:
+    """One respelling pass of ``operator_source`` over one parse.
+
+    Args:
+        data (bytes): shell source.
+        root (TSNodeLike): the parse of ``data``.
+    """
     out = bytearray(data)
+    for at in _skipped_escapes(data, root):
+        out[at : at + 2] = b".."
     stack = [root]
     while stack:
         node = stack.pop()
         if node.type == "test_command" and _bracket_is_a_command(data, node):
             out[node.start_byte] = ord("_")
-        if node.type in _UNLEXED:
+        if node.type in constants.UNLEXED:
             continue
         stack.extend(node.children)
         for child in node.children:
             lo, hi = child.start_byte, child.end_byte
             if child.is_named:
                 continue
-            if child.type in _BARE_WORDS.get(node.type, ()) and not (
-                child.type == "$" and data[hi : hi + 1] == b'"'
+            if (
+                child.type in constants.BARE_WORDS
+                and node.type in ("command", "ERROR")
+                or child.type == "$"
+                and constants.LITERAL_DOLLAR.match(data, lo)
             ):
                 out[lo:hi] = b"_" * (hi - lo)
             elif (
@@ -250,16 +247,18 @@ def _respelled(data: bytes, root: TSNodeLike) -> bytes:
             out[start] = ord(">")
         elif node.type in ("<<<", "<<") and data[start : start + 3] == b"<<<":
             out[start + 1 : start + 3] = b"  "
-        elif node.type in (";&", ";;&") and _LAST_ARM.match(
+        elif node.type in (";&", ";;&") and constants.LAST_CASE_ARM.match(
             data, node.end_byte
         ):
             out[start : node.end_byte] = b";;".ljust(node.end_byte - start)
-        digits = None if node.children else _DIGITS.match(data, start)
+        digits = (
+            None if node.children else constants.DIGIT_RUN.match(data, start)
+        )
         if (
             digits is not None
             and data[start] == ord("0")
             and data[digits.end() : digits.end() + 1] in (b"<", b">")
-            and (start == 0 or data[start - 1] in _WORD_START)
+            and (start == 0 or data[start - 1] in constants.WORD_START)
         ):
             out[start] = ord("1")
     return bytes(out)
@@ -308,7 +307,9 @@ def failed_arith_openers(root: TSNodeLike) -> list[int]:
         node, in_error = stack.pop()
         errored = in_error or node.type == "ERROR"
         for child in node.children:
-            if child.type == ARITH_OPEN_TOKEN and (errored or node.has_error):
+            if child.type == constants.ARITH_OPEN_TOKEN and (
+                errored or node.has_error
+            ):
                 offsets.append(child.start_byte)
             stack.append((child, errored))
     return offsets
@@ -354,7 +355,8 @@ def _rebrace_dollar(data: bytes, offset: int) -> bytes:
     ``$id.json`` becomes ``${id}.json``, which says the same thing and
     is the spelling the grammar reads correctly. Bash reads a single
     digit after ``$`` as one positional parameter, so ``$12`` rebraces
-    as ``${1}2``.
+    as ``${1}2``. A reference is ASCII, so its character and byte lengths
+    agree even when the source around it is multibyte.
 
     Args:
         data (bytes): shell source holding the orphaned ``$``.
@@ -364,8 +366,6 @@ def _rebrace_dollar(data: bytes, offset: int) -> bytes:
     if ref is None:
         return data
     name, consumed = ref
-    # References contain only ASCII, so their character and byte lengths
-    # agree even when the source before or after them is multibyte.
     return (
         data[:offset]
         + b"${"
@@ -402,8 +402,20 @@ def repair_orphaned_dollars(root: TSNodeLike, data: bytes) -> TSNodeLike:
 def repair_redirect_dashes(
     root: TSNodeLike, data: bytes
 ) -> tuple[TSNodeLike, bytes]:
-    # tree-sitter-bash drops a bare dash immediately before an explicit fd.
-    # Quote only a dash in an uncovered gap, never text inside a word/body.
+    """Quote a lone dash the grammar drops before a descriptor redirect.
+
+    tree-sitter-bash loses a bare ``-`` written right before an explicit
+    descriptor's redirect (``echo - 2>&1``). Only a dash standing alone
+    in a gap between two nodes is quoted, never text inside a word or a
+    body, and the repair stands only if the reparse has no error.
+
+    Args:
+        root (TSNodeLike): the parse of ``data``.
+        data (bytes): shell source.
+
+    Returns:
+        tuple[TSNodeLike, bytes]: the tree and source to run.
+    """
     offsets: list[int] = []
     stack = [root]
     while stack:
@@ -424,13 +436,20 @@ def repair_redirect_dashes(
     return (root, data) if retried.has_error else (retried, repaired)
 
 
-_NAME = re.compile(rb"\w+")
-
-
-_FOLLOWER = re.compile(rb"\s*(in|do)(?![^\s;&|()<>])")
-
-
 def _header_inserts(root: TSNodeLike, data: bytes) -> list[tuple[int, bytes]]:
+    """The insertions that let each for or select header parse.
+
+    An omitted list becomes ``in "$@"``, which bash iterates, and a
+    variable that is not a name moves into a list behind ``0 in``, where
+    the loop refuses it at run time as bash does.
+
+    Args:
+        root (TSNodeLike): the parse of ``data``.
+        data (bytes): shell source.
+
+    Returns:
+        list[tuple[int, bytes]]: each insertion's offset and text.
+    """
     heads: list[int] = []
     stack = [root]
     while stack:
@@ -446,9 +465,9 @@ def _header_inserts(root: TSNodeLike, data: bytes) -> list[tuple[int, bytes]]:
     for head in heads:
         start = len(data) - len(data[head:].lstrip(b" \t"))
         end = delimiter_end(data, start) or start
-        follower = _FOLLOWER.match(data, end)
+        follower = constants.HEADER_FOLLOWER.match(data, end)
         word = follower.group(1) if follower else None
-        named = _NAME.fullmatch(data, start, end) is not None
+        named = constants.HEADER_NAME.fullmatch(data, start, end) is not None
         if end == start or named and word == b"in":
             continue
         tail = b";" if word == b"do" else b""
@@ -463,8 +482,17 @@ def _header_inserts(root: TSNodeLike, data: bytes) -> list[tuple[int, bytes]]:
 def repair_for_headers(
     root: TSNodeLike, data: bytes
 ) -> tuple[TSNodeLike, bytes]:
-    # Encode invalid names for runtime validation and supply omitted "$@".
-    # Repeat to expose nested headers; accept only repairs adding no errors.
+    """Repair for and select headers (``_header_inserts``) until none is
+    left: a header inside a repaired one shows only on the reparse. The
+    repair stands only if it adds no error.
+
+    Args:
+        root (TSNodeLike): the parse of ``data``.
+        data (bytes): shell source.
+
+    Returns:
+        tuple[TSNodeLike, bytes]: the tree and source to run.
+    """
     repaired, retried = data, root
     while inserts := _header_inserts(retried, repaired):
         for offset, text in sorted(inserts, reverse=True):
@@ -475,6 +503,11 @@ def repair_for_headers(
 
 
 def _errors(root: TSNodeLike) -> set[tuple[int, int]]:
+    """The spans of a tree's error and missing nodes.
+
+    Args:
+        root (TSNodeLike): the tree.
+    """
     stack, spans = [root], set()
     while stack:
         node = stack.pop()
@@ -488,12 +521,15 @@ def statement_boundaries(data: bytes) -> bytes:
     """Make newlines swallowed between command words explicit separators.
 
     tree-sitter-bash can absorb a statement newline into a nested pipeline
-    when the following statement has a file redirect. A newline between
-    children of a simple command cannot be whitespace in bash: quoted
-    newlines belong to a child, and continuations have already been joined.
-    Insert a semicolon without removing bytes so source maps remain valid,
-    before a comment that ends the statement, since one after it would be
-    read as part of the comment.
+    when the following statement has a file redirect, and folds it into
+    the next word when a backslash opens that word (``\\ls``, the alias
+    bypass), so the next line reads as more arguments. A newline between
+    children of a simple command, a redirect or a declaration cannot be
+    whitespace in bash: quoted newlines belong to a child, continuations
+    have already been joined, and an escaped blank beside it is a word the
+    grammar skipped (``_skipped_escapes``). Insert a semicolon without
+    removing bytes so source maps remain valid, before a comment that ends
+    the statement, since one after it would be read as part of the comment.
 
     Args:
         data (bytes): source after heredoc lowering and continuation removal.
@@ -506,15 +542,15 @@ def statement_boundaries(data: bytes) -> bytes:
     while stack:
         node = stack.pop()
         stack.extend(node.children)
-        if node.type not in (
-            "command",
-            "file_redirect",
-            "redirected_statement",
-        ):
+        if node.type not in constants.STATEMENT_NODES:
             continue
         for left, right in zip(node.children, node.children[1:]):
-            gap = data[left.end_byte : right.start_byte]
-            if b"\n" in gap and not gap.strip():
+            folded = data[right.start_byte : right.start_byte + 1] == b"\n"
+            gap = data[left.end_byte : right.start_byte + folded]
+            if (
+                b"\n" in gap
+                and not constants.ESCAPED_BLANK.sub(b"", gap).strip()
+            ):
                 offsets.add(
                     left.start_byte
                     if left.type == "comment"

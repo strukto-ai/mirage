@@ -24,7 +24,7 @@ import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime, type RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { buildRuntime, checkRuntimeOptions } from '@struktoai/mirage-core/runtime/table'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
+import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import {
   EnvVarSchema,
   SecretSourceSchema,
@@ -54,7 +54,7 @@ import { S3WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/s3
 import type { WorkspaceOptions } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { normalizeS3Config } from './vfs/s3/config.ts'
 import { isModulePath, loadAttr, splitRef } from './vfs/loader.ts'
-// The config door is a workspace entry point of its own (the daemon
+// The config loader is a workspace entry point of its own (the daemon
 // builds from here), so it arms the builtin secrets sources like the
 // node Workspace module does.
 import {
@@ -85,7 +85,7 @@ function isScriptPath(value: string): boolean {
 // Config carries a reference, the wire carries content (the docker
 // build-context model): the value must be a path to a .py/.js file,
 // read at load time. In code, scripts are functions; config is the
-// only door for script source. The extension stamps the script's
+// only entry point for script source. The extension stamps the script's
 // language so the policy engine can pick a matching evaluator.
 function loadScriptSource(value: string): ScriptSource {
   if (!isScriptPath(value)) {
@@ -393,11 +393,11 @@ function asConfig(value: unknown): Readonly<Record<string, unknown>> {
 /**
  * Refuse a mount block whose read policy and bound disagree.
  *
- * Both rules live at the config door rather than in the mount-time
+ * Both rules live at the config loader rather than in the mount-time
  * verdict: once a ReadSpec exists its ttl has already defaulted, so
  * `bounded` written without a bound is indistinguishable from `read:`
  * left out entirely. Python refuses the same pair in `MountBlock`'s
- * model validator, which is the same door.
+ * model validator, which is the same entry point.
  */
 function validateReadBlock(prefix: string, block: Record<string, unknown>): void {
   // Coerce once, then apply both dependent-key rules to the normalised
@@ -433,7 +433,7 @@ function validateReadBlock(prefix: string, block: Record<string, unknown>): void
 function validateConfigKeys(raw: Record<string, unknown>): void {
   rejectUnknownKeys(raw, TOP_LEVEL_KEYS, 'config')
   parseCommandLimits(raw.command_limits)
-  // At the sync door, as Python's WorkspaceConfig validator is, so the CLI
+  // At the sync entry point, as Python's WorkspaceConfig validator is, so the CLI
   // refuses a bad value before it POSTs the document to the daemon.
   if (raw.read !== undefined && raw.read !== null) resolveReadSpec(raw.read, undefined)
   if (raw.write !== undefined && raw.write !== null) coerceWritePolicy(raw.write)
@@ -458,7 +458,7 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
       // opaque: nothing declares which key is a credential, so the
       // snapshot captures it verbatim, and a pointer resolved into it
       // would be written out as the value it fetched. Refused here, on
-      // the block, so every door that reads a config inherits the rule.
+      // the block, so every entry point that reads a config inherits the rule.
       if (typeof block.script === 'string' && configHoldsPointer(asConfig(block.config))) {
         throw new Error(
           `clis entry '${name}': a script's config is opaque and a pointer in it would be ` +
@@ -603,9 +603,9 @@ function parseProfiles(raw: unknown): Record<string, SessionProfile> {
   const out: Record<string, SessionProfile> = {}
   for (const [name, block] of Object.entries(raw)) {
     // A path-form script stays the string the config wrote: the check
-    // door validates shape only, and runs before `absolutizeScripts`
+    // entry point validates shape only, and runs before `absolutizeScripts`
     // has rebased the path onto the config file's directory, so reading
-    // it here would resolve against the process cwd. The workspace door
+    // it here would resolve against the process cwd. The workspace entry point
     // (`toWorkspaceOptions`) loads it, the python loader's split.
     out[name] = parseSessionProfile(block, `profile \`${name}\``)
   }
@@ -615,7 +615,7 @@ function parseProfiles(raw: unknown): Record<string, SessionProfile> {
 /**
  * Load each profile's path-form policy into a ScriptSource.
  *
- * By this door the path is absolute for a file config (the check door
+ * By this entry point the path is absolute for a file config (the check entry point
  * rebased it onto the config file's directory); an object config's
  * relative path resolves against the process cwd, as in Python. Code
  * that passes a loaded ScriptSource is left alone.
@@ -1123,7 +1123,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
   for (const [prefix, block] of Object.entries(cfg.mounts)) {
     const r = await buildVfs(block.vfs, block.config ?? {}, sources)
     const m = coerceMountMode(block.mode, wsMode)
-    // Already validated by the sync door (validateReadBlock).
+    // Already validated by the sync entry point (validateReadBlock).
     const read = block.read === undefined ? defaultRead : resolveReadSpec(block.read, block.ttl)
     const mountIndex = buildIndex(block.index)
     const write =
@@ -1182,7 +1182,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
         ? { profile: cfg.profile as string }
         : {}),
       ...(cliEntries !== undefined ? { clis: cliEntries } : {}),
-      // Passed through as-is: this door resolves mounts, and
+      // Passed through as-is: this entry point resolves mounts, and
       // env-plane fetching is async at command time, so no fetching
       // here (the workspace translates and validates sources).
       ...(cfg.env !== undefined && cfg.env !== null ? { env: cfg.env as EnvEntries } : {}),

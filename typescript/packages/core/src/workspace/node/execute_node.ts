@@ -31,8 +31,7 @@ import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
-import { mergeSignals } from '../abort.ts'
-import { makeAbortError } from '../../concurrency/limiter.ts'
+import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { literalText } from '../../shell/parse/names.ts'
 import { BASH_BUILTINS } from '../lookup/constants.ts'
@@ -215,7 +214,7 @@ async function evalCforExpr(
     error = err
     writes = err.writes
   }
-  // Through the door, so a preSession rule governs an arithmetic assignment
+  // Through the session view, so a preSession rule governs an arithmetic assignment
   // exactly as it governs `X=1` and a hidden name refuses at its own
   // write; in evaluation order, so a bare name and its element 0 land as
   // the expression wrote them.
@@ -795,7 +794,7 @@ export interface ExecuteNodeDeps {
   workspaceId: string
   registerCloser: (fn: () => Promise<void>) => void
   runtimeBindings?: Record<string, Runtime>
-  routingDecision?: RouteDecision
+  routingDecision?: RouteDecision<Runtime>
   signal?: AbortSignal
   /**
    * The hand-off this subtree runs on, carried to every command's gate
@@ -983,7 +982,7 @@ async function executeNodeBody(
 ): Promise<Result> {
   const session = context.session
   // The scope and signal this subtree runs under are the ones its nested
-  // evaluations run under, bound into `executeFn` here, at the one door
+  // evaluations run under, bound into `executeFn` here, at the one entry point
   // every node goes through, as Python binds them into `execute_fn`: a
   // background job runs without the caller's signal, and so must the lines
   // it evaluates, or a `$(...)` inside the job would die of an abort that
@@ -1058,7 +1057,7 @@ async function executeNodeBody(
   // `set -n` reads without executing, and it stops *everything* after
   // it, at every depth: GNU answers `if true; then set -n; echo BAD; fi`
   // and `f(){ set -n; echo BAD; }; f` with nothing at all. Stated here,
-  // at the one door every node goes through, rather than in each
+  // at the one entry point every node goes through, rather than in each
   // statement runner — the program loop, the subshell body, a group, a
   // function body and every loop body are five places for one rule to
   // drift, and it did: the check lived in the program loop alone, so

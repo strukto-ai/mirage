@@ -29,7 +29,7 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     maybe_bool,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
@@ -214,12 +214,12 @@ async def reflog(
     try:
         texts = inv.texts[1:] if inv.texts[:1] == ("show",) else inv.texts
         check_operands(inv, texts)
-        doors = inv.doors or CLIDoors()
-        repo, location = await opened(fl, doors)
-        assert doors.dispatch is not None
+        view = inv.view or CLIView()
+        repo, location = await opened(fl, view)
+        assert view.dispatch is not None
         revision = texts[0] if texts else HEAD
         await asyncio.to_thread(resolve_commit, repo, revision)
-        name, data = await _named_log(doors.dispatch, location, revision)
+        name, data = await _named_log(view.dispatch, location, revision)
         rows = list(reversed((data or b"").splitlines()))
         limit = fl.as_int("max_count")
         if limit is not None and limit >= 0:

@@ -20,7 +20,7 @@ import pytest
 
 from mirage.commands.cli.builtin.himalaya import compose
 from mirage.commands.cli.builtin.himalaya import util as util_module
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
@@ -40,8 +40,8 @@ async def fake_dispatch(op, path, *args, **kwargs):
     return FILES[path.virtual], IOResult()
 
 
-def doors_with_files() -> CLIDoors:
-    return CLIDoors(dispatch=fake_dispatch)
+def view_with_files() -> CLIView:
+    return CLIView(dispatch=fake_dispatch)
 
 
 @pytest.fixture
@@ -167,7 +167,7 @@ async def test_attach_reads_through_the_dispatcher_into_multipart(sent):
                 "body": "see attached",
                 "attach": [PathSpec.from_str_path("/scratch/note.txt")],
             },
-            doors=doors_with_files(),
+            view=view_with_files(),
         )
     )
     assert io.exit_code == 0
@@ -198,7 +198,7 @@ async def test_attach_of_a_missing_file_names_the_path(sent):
                     "body": "yo",
                     "attach": [PathSpec.from_str_path("/scratch/gone.txt")],
                 },
-                doors=doors_with_files(),
+                view=view_with_files(),
             )
         )
 

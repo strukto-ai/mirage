@@ -18,7 +18,7 @@ import type { SharedInput } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { formatFsError } from '../../errors/render.ts'
-import type { ExecutionNode } from '../types.ts'
+import type { ExecutionNode, StatusWriter } from '../types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import {
   ENCLOSING,
@@ -34,8 +34,8 @@ import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
-import { abortedLine, lineStatusWriter, type StatusWriter } from '../abort.ts'
-import { makeAbortError } from '../../concurrency/limiter.ts'
+import { abortedLine, lineStatusWriter } from '../abort.ts'
+import { makeAbortError } from '../../utils/abort.ts'
 
 /**
  * Run a test, the left of `&&`/`||` or a negated command where bash ignores
@@ -69,7 +69,7 @@ export function errexitActs(node: TSNodeLike, status: number, session: SessionSt
  * Record a finished statement's exit status: `$?` and `${PIPESTATUS[@]}`
  * together.
  *
- * The one door every status write goes through, so the two can never
+ * The one function every status write goes through, so the two can never
  * disagree. `handlePipe` parks its per-segment statuses on the session,
  * and the boundary that closes the pipeline claims them here; a boundary
  * with nothing parked stamps its own one-element status, which is what a
@@ -102,7 +102,7 @@ export function recordStatus(session: SessionState, code: number, transparent = 
  * An aborted invocation is the caller's outcome, not the shell's, so it
  * must leave `$?` where it was. But the abort lands on one await inside
  * the line, and every statement before that await has already stamped
- * through `recordStatus`. The status door refuses a statement that
+ * through `recordStatus`. The status write refuses a statement that
  * settles after the caller was released; this is for the ones that
  * landed before it, and only a copy taken before the line can undo them.
  *

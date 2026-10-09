@@ -17,7 +17,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
+from mirage.cache.context import capture_read, push_write_context
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.types import WriteContext
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.read import read, read_stream
 from mirage.observe.context import RecordingScope
@@ -267,3 +269,50 @@ async def test_an_index_less_read_maps_only_a_409_to_enoent(status, raised):
     ):
         with pytest.raises(raised):
             await read(make_accessor(), A)
+
+
+async def _nothing(_path: PathSpec) -> str | None:
+    return None
+
+
+async def _none_all(paths: list[PathSpec]) -> list[str | None]:
+    return [None] * len(paths)
+
+
+async def _ignore(*_args: PathSpec | str) -> None:
+    return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "conditional, offset, size, published",
+    [
+        (True, 0, None, [content_hash(DATA)]),
+        (True, 2, 3, []),
+        (False, 0, None, []),
+    ],
+    ids=["whole", "ranged", "unconditional"],
+)
+async def test_a_whole_read_publishes_its_token_on_a_conditional_mount(
+    conditional, offset, size, published
+):
+    context = WriteContext(
+        vfs="dropbox",
+        conditions=frozenset({"put", "copy", "delete"}),
+        read_version=_nothing,
+        read_versions=_none_all,
+        drop=_ignore,
+        keep=_ignore,
+    )
+    prev = push_write_context(context if conditional else None)
+    with serve(FakeDropbox(files={"/a.txt": DATA})) as fake:
+        accessor = served_accessor(fake.url)
+        try:
+            _, tokens = await capture_read(
+                A.virtual,
+                lambda: read(accessor, A, offset=offset, size=size),
+            )
+        finally:
+            push_write_context(prev)
+            await accessor.close()
+    assert tokens == published

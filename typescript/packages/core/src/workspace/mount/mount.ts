@@ -47,7 +47,7 @@ import type { LinkView, OpKwargs } from '../../view/types.ts'
 import {
   commandIo,
   resolveGlobOf,
-  withDoorReads,
+  dispatchedIo,
 } from '../../commands/builtin/generic_bind/adapter.ts'
 import {
   appendByRewrite,
@@ -77,7 +77,8 @@ import {
 import { type WriteContext } from '../../cache/types.ts'
 import { captureCommandScope } from '../../cache/index/scope.ts'
 import type { CacheManager } from '../../cache/manager.ts'
-import { lineSignal, mergeSignals } from '../abort.ts'
+import { mergeSignals } from '../../utils/abort.ts'
+import { lineSignal } from '../abort.ts'
 import {
   captureRecordingContext,
   runWithMountContext,
@@ -230,7 +231,7 @@ export interface MountInit {
 }
 
 // What the command tier's walk guard proves an operand's `.` and `..` with:
-// the handler reaches its backend past the door, so the door's stat and link
+// the handler reaches its backend past the dispatcher, so the dispatcher's stat and link
 // follow are bound around it. No dispatcher (a mount driven directly) binds
 // nothing. Mirrors the Python set_walk_probe binding in Mount.run_command.
 function withWalkProbe<T>(
@@ -622,7 +623,7 @@ export class MountEntry {
    *
    * A rendered filetype's renderer answers a read before `read` does,
    * window and all, and the first answer that is not null wins. The rest
-   * is the op door's own shape around the VFS's functions: a read takes a
+   * is the dispatcher's own shape around the VFS's functions: a read takes a
    * window, `append` and `pwrite` are a rewrite where the VFS only writes
    * whole files, `mkdir` refuses a taken name first, and `glob` walks
    * `readdir`. Only a method marked `@vfsCall` is reachable by name, and a
@@ -764,8 +765,9 @@ export class MountEntry {
    * The VFS's streamed read of a scope keyed below the mount, framed for later
    * pulls. The backend runs on each pull, after this frame is gone, so every
    * pull gets what a call gets around it: the caller's context (session,
-   * recorder, cache scope), the mount's recording context, its revision pins,
-   * and the read's timeout, which bounds each pull rather than the whole
+   * recorder, cache scope), the mount's recording context, its write context
+   * (a read hands its token on only where a write will send it), its revision
+   * pins, and the read's timeout, which bounds each pull rather than the whole
    * stream. The mount is held until the stream ends or is closed. Mirrors
    * Python's `read_stream`.
    */
@@ -779,6 +781,7 @@ export class MountEntry {
       ...captureRecordingContext(),
       captureCacheContext(),
       captureCommandScope(),
+      (fn) => runWithWriteContext(this.prefix, this.writeContext(), async () => await fn()),
       (fn) => runWithRevisions(revisions, async () => await fn()),
     ])
     const session = getCurrentSession()
@@ -819,7 +822,7 @@ export class MountEntry {
 
   /**
    * What a write through this mount must carry, null when its writes are
-   * unconditional. Bound by both doors whatever the policy, so an
+   * unconditional. Bound by both entry points whatever the policy, so an
    * unconditional mount clears a context an outer command's mount set.
    * Mirrors Python's `MountEntry.write_context`.
    */
@@ -847,7 +850,7 @@ export class MountEntry {
     return this.writeContextFor.context
   }
 
-  /** The command door's cache manager and write context, one scope. */
+  /** The command entry point's cache manager and write context, one scope. */
   private runWithCaches<T>(fn: () => Promise<T>): Promise<T> {
     return runWithCacheManager(this.cacheManager, () =>
       runWithWriteContext(this.prefix, this.writeContext(), fn),
@@ -855,8 +858,8 @@ export class MountEntry {
   }
 
   /**
-   * The op door's revision pins and write context, one scope. Public for
-   * the dispatcher, which calls ops itself rather than through the command door.
+   * The dispatcher's revision pins and write context, one scope. Public for
+   * the dispatcher, which calls ops itself rather than through the command entry point.
    */
   runWithWriteRevisions<T>(fn: () => Promise<T>): Promise<T> {
     return runWithWriteContext(this.prefix, this.writeContext(), () =>
@@ -1012,7 +1015,7 @@ export class MountEntry {
       command: cmdName,
       cwd: context.cwd ?? ROOT_CWD,
       index: this.index,
-      io: context.dispatch === undefined ? this.io : withDoorReads(this.io, context.dispatch),
+      io: context.dispatch === undefined ? this.io : dispatchedIo(this.io, context.dispatch),
       ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
       ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
       ...(context.env !== undefined ? { env: context.env } : {}),
@@ -1053,7 +1056,7 @@ export class MountEntry {
   }
 
   /**
-   * Refuse a write command no door would see, on a read-only mount.
+   * Refuse a write command no gate would see, on a read-only mount.
    *
    * A command whose I/O runs under the path guards is refused where it
    * writes, because only the write knows whether a line writes: `gzip -c`,
@@ -1061,7 +1064,7 @@ export class MountEntry {
    * `gzip f` is refused at the write of `f.gz`, in gzip's own GNU voice. A
    * write command that reaches its service some other way (trello's
    * id-addressed card writes, a custom backend's own verb) is refused here,
-   * before it runs, because no door would see its write. strongestModeUnder,
+   * before it runs, because no gate would see its write. strongestModeUnder,
    * not effectiveMode: a mount whose only writable region is a show entry
    * still runs it. Only wrapper-owned responses (help, an injected version)
    * bypass it. The trailing newline is load-bearing: stderr accumulates
@@ -1220,7 +1223,7 @@ export class MountEntry {
         ...kwargs,
         ...(kwargs.index === undefined ? { index: this.index } : {}),
       }
-      // Per-op caps are policy and fire at the op door (postVfs); only
+      // Per-op caps are policy and fire at the dispatcher (postVfs); only
       // the timeout stays here, bounding the backend call itself.
       const opOverride = this.commandLimits.get(name) ?? null
       const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null

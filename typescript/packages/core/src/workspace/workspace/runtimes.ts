@@ -21,9 +21,9 @@ import {
   bindCommands,
   buildRuntime,
   DEFAULT_ENTRIES,
-  WorkspaceRuntime,
   wholeLineRuntime,
 } from '../../runtime/table.ts'
+import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
 export interface RuntimesInit {
@@ -136,7 +136,7 @@ export class Runtimes {
    * everything else walks the executor's tree. The common world has no
    * such runtime, so this is a cheap scan.
    */
-  wholeLineFor(decision: RouteDecision | null): (Runtime & LineExecutor) | null {
+  wholeLineFor(decision: RouteDecision<Runtime> | null): (Runtime & LineExecutor) | null {
     const candidates = this.entries.some((entry) => isLineExecutor(entry))
     if (!candidates) return null
     const bindings: Record<string, Runtime | null> =

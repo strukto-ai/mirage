@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PyodideUnavailableError } from '../errors.ts'
+import { noWorker, PyodideUnavailableError } from '../errors.ts'
 import { EvalError } from '../../../errors.ts'
+import { classify } from '../../../../errors/classify.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
 import type { BridgeDispatchFn, EvalResult, RunResult } from '../../../types.ts'
 import type { RuntimeContext } from '../../../binding.ts'
-import { RuntimeVFS } from '../../../vfs.ts'
+import { RuntimeFiles } from '../../../files.ts'
 import { applyMutation } from '../fs/journal.ts'
 import type { FlushFailure } from '../fs/types.ts'
 import { failureText } from './failure.ts'
@@ -130,19 +131,20 @@ export class PyodideWorkerClient {
     })
   }
 
-  static async create(): Promise<PyodideWorkerClient | null> {
+  /** A started worker, or the refusal that says why none could start. */
+  static async create(): Promise<PyodideWorkerClient | PyodideUnavailableError> {
     let client: PyodideWorkerClient | null = null
     try {
       const port = await createPort()
-      if (port === null) return null
+      if (port === null) return noWorker()
       client = new PyodideWorkerClient(port)
       // A constructed worker may still fail to load (for example under
       // CSP). Commit to it only after its message handler is listening.
       await client.ready
       return client
-    } catch {
+    } catch (error) {
       client?.close()
-      return null
+      return noWorker(error)
     }
   }
 
@@ -152,7 +154,7 @@ export class PyodideWorkerClient {
     signal?: AbortSignal,
   ): Promise<RunResult | EvalResult> {
     if (this.failure !== null) throw this.failure
-    const vfs = RuntimeVFS.of(context)
+    const files = RuntimeFiles.of(context)
     const { dispatch, scope } = context
     const responses = new Set<Promise<void>>()
     const processes = new GuestProcessTable(
@@ -177,7 +179,7 @@ export class PyodideWorkerClient {
         }
         if (message.kind === 'vfs') {
           const response = respond(message.buffer, () =>
-            scope.run(() => this.operation(message, vfs, dispatch, processes)),
+            scope.run(() => this.operation(message, files, dispatch, processes)),
           )
           responses.add(response)
           void response.then(() => {
@@ -237,7 +239,7 @@ export class PyodideWorkerClient {
 
   private async operation(
     request: VfsRequest,
-    vfs: RuntimeVFS,
+    files: RuntimeFiles,
     dispatch: BridgeDispatchFn,
     processes: GuestProcessTable,
   ): Promise<unknown> {
@@ -245,13 +247,13 @@ export class PyodideWorkerClient {
       case 'process':
         return processes.call(request.payload ?? '{}')
       case 'read':
-        return vfs.read(request.path)
+        return files.read(request.path)
       case 'stat':
-        return vfs.stat(request.path, true)
+        return files.stat(request.path, true)
       case 'readdir':
-        return vfs.readdir(request.path, request.classify ?? true)
+        return files.readdir(request.path, request.classify ?? true)
       case 'readlink':
-        return vfs.readlink(request.path)
+        return files.readlink(request.path)
       case 'dispatch': {
         if (request.args === undefined) throw new Error('missing bridge arguments')
         return dispatch(...request.args)
@@ -260,11 +262,13 @@ export class PyodideWorkerClient {
         const mutations = request.mutations ?? []
         for (const [index, mutation] of mutations.entries()) {
           try {
-            await applyMutation(vfs, mutation)
+            await applyMutation(files, mutation)
           } catch (error) {
+            const code = classify(error)
             return {
               message: `python3: failed to ${mutation.kind} ${mutation.path} on mount: ${error instanceof Error ? error.message : String(error)}`,
               skipped: mutations.length - index - 1,
+              ...(code === null ? {} : { code }),
             } satisfies FlushFailure
           }
         }

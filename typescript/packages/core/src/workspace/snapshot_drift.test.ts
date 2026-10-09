@@ -229,7 +229,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
     },
   )
 
-  // A restored index's ids are no lead for drift: each drift door stats
+  // A restored index's ids are no lead for drift: each drift check stats
   // through a plain index, not a hinting ListingCheckStore.
   it.each(['shell', 'dispatch'])('a drift check via %s offers no hints', async (surface) => {
     const accessor = new FakeRemoteAccessor()
@@ -279,7 +279,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
   it('STRICT load checks drift on ws.vfs too, not only Workspace.dispatch', async () => {
     // `ws.vfs` (the FUSE path) reaches the dispatcher without
     // passing Workspace.dispatch, so the pending fingerprint checks
-    // must run at the door itself or a first op through FUSE touches
+    // must run at the dispatcher itself or a first op through FUSE touches
     // drifted state unchecked.
     const accessor = new FakeRemoteAccessor()
     accessor.put('/remote/a.txt', new TextEncoder().encode('v1'))

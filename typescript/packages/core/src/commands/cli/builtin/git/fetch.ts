@@ -479,9 +479,9 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
     checkSwitches(inv, inv.texts)
-    const doors = inv.doors ?? {}
-    if (doors.dispatch === undefined) throw new NoWorkspaceError()
-    const repo = await opened(fl, doors)
+    const view = inv.view ?? {}
+    if (view.dispatch === undefined) throw new NoWorkspaceError()
+    const repo = await opened(fl, view)
     const { location } = repo
     const values = (path: string): Promise<string[]> => configValues(repo.dispatch, location, path)
     const head = await readHead(repo.dispatch, location.gitdir)
@@ -508,7 +508,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
     const start = bare ? location.gitdir : location.worktree
     let transport: Transport
     try {
-      transport = await openTransport(url, start, doors, await configuredHeaders(inv, repo))
+      transport = await openTransport(url, start, view, await configuredHeaders(inv, repo))
     } catch (err) {
       if (err instanceof MissingRepositoryError)
         throw new GitError(`'${url}' does not appear to be a git repository\n${UNREACHABLE}`)

@@ -18,13 +18,14 @@ import { BLKSIZE, GROW_FLOOR, LINK_MODE, O_APPEND, SEEK_CUR, SEEK_END } from './
 import { errnoError } from './errors.ts'
 import { classify } from '../../../../errors/index.ts'
 import { isMissingPath } from '../../../../errors/fs.ts'
-import { isUnclassified } from '../../../vfs.ts'
+import { isUnclassified } from '../../../files.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
-import type { MutationJournal } from './journal.ts'
+import type { MirageMutation, MutationJournal } from './journal.ts'
 import type { PyodideFsSeed } from './seed.ts'
 import { NodeTable } from './nodes.ts'
 import type {
   ErrnoCodes,
+  FlushFailure,
   FSAttr,
   FSHost,
   FSNode,
@@ -136,8 +137,8 @@ export function changedAttrs(node: FSNode, attr: SetAttr): SetAttrFields | null 
  */
 /**
  * A name a repeat listing found, classified by its own stat as the
- * first listing's door classifies it, or left as the listing's row
- * when that stat fails, the way the door degrades one.
+ * first listing's file adapter classifies it, or left as the listing's row
+ * when that stat fails, the way the file adapter degrades one.
  */
 function ownRow(sync: SyncVFS, path: string, entry: VFSEntry): VFSEntry | VFSStat {
   if (entry.isDir) return entry
@@ -168,10 +169,13 @@ export class PyodideFs {
    *   errno: Emscripten's errno table (`pyodide.ERRNO_CODES`).
    *   journal: the write-ahead log guest mutations are recorded on.
    *   prefix: the mount prefix this filesystem serves.
-   *   mountOf: the mirage mount owning a path (`RuntimeVFS.mountOf`).
+   *   mountOf: the mirage mount owning a path (`RuntimeFiles.mountOf`).
    *     One mountpoint serves every mirage mount nested under its
    *     prefix, so this is the only boundary fact left to check ops
    *     against; Emscripten's own cross-mount checks cannot see it.
+   *   sync: the worker's blocking way to the mounts, absent without one.
+   *   deferred: the refusals the mount gave a path whose call has not
+   *     come yet, shared by every mountpoint as the journal is.
    */
   constructor(
     host: FSHost,
@@ -180,6 +184,7 @@ export class PyodideFs {
     prefix: string,
     mountOf: (path: string) => string | null,
     private readonly sync?: SyncVFS,
+    private readonly deferred = new Map<string, FlushFailure>(),
   ) {
     this.host = host
     this.prefix = prefix
@@ -200,7 +205,9 @@ export class PyodideFs {
     }
     const streamOps: StreamOps = {
       open: this.streamOpen.bind(this),
-      close: () => undefined,
+      close: (stream) => {
+        this.settle(this.nodes.pathOf(stream.node))
+      },
       read: this.streamRead.bind(this),
       write: this.streamWrite.bind(this),
       llseek: this.llseek.bind(this),
@@ -277,36 +284,38 @@ export class PyodideFs {
     // the real mount for a node the mount does not have.
     const isDevice = isCharDevice(node.mode)
     const fields = finalizing || isDevice ? null : changedAttrs(node, attr)
-    if (attr.mode !== undefined) node.mode = attr.mode
-    if (attr.atime !== undefined) node.atime = attr.atime
-    if (attr.mtime !== undefined) node.mtime = attr.mtime
-    if (attr.ctime !== undefined) node.ctime = attr.ctime
+    const size = isDevice ? undefined : attr.size
+    if (size !== undefined && size > 0) this.loadContents(node)
     if (fields !== null) {
       // A link's own attrs go to the link, since the tree resolved to
       // the link node itself and the target's row is not what changed.
       if (this.host.isLink(node.mode)) fields.nofollow = true
       this.journal.markSetattr(this.nodes.pathOf(node), fields)
     }
-    if (attr.size === undefined || isDevice) return
-    if (attr.size > 0) this.loadContents(node)
-    const old = node.contents ?? new Uint8Array(0)
-    const next = new Uint8Array(attr.size)
-    next.set(old.subarray(0, Math.min(old.length, attr.size)))
-    node.contents = next
-    node.usedBytes = attr.size
-    node.loaded = true
     // A resize goes as a truncate to the new length. Recording here rather
     // than at close is what makes a bare `os.truncate(path, n)`, which
     // opens no handle at all, reach the mount.
-    this.journal.markTruncate(this.nodes.pathOf(node), attr.size)
+    if (size !== undefined) this.journal.markTruncate(this.nodes.pathOf(node), size)
+    this.settle(this.nodes.pathOf(node))
+    if (attr.mode !== undefined) node.mode = attr.mode
+    if (attr.atime !== undefined) node.atime = attr.atime
+    if (attr.mtime !== undefined) node.mtime = attr.mtime
+    if (attr.ctime !== undefined) node.ctime = attr.ctime
+    if (size === undefined) return
+    const old = node.contents ?? new Uint8Array(0)
+    const next = new Uint8Array(size)
+    next.set(old.subarray(0, Math.min(old.length, size)))
+    node.contents = next
+    node.usedBytes = size
+    node.loaded = true
   }
 
   private lookup(parent: FSNode, name: string): FSNode {
     const sync = this.sync
     let found = this.nodes.childOf(parent, name)
     if (found === undefined && sync !== undefined) {
-      found = this.readThrough(() => {
-        const path = this.nodes.pathOf(parent) + '/' + name
+      const path = this.nodes.pathOf(parent) + '/' + name
+      found = this.readThrough([path], () => {
         let stat: VFSStat
         try {
           stat = sync.stat(path)
@@ -331,26 +340,29 @@ export class PyodideFs {
   }
 
   private mknod(parent: FSNode, name: string, mode: number, rdev: number): FSNode {
-    const node = this.nodes.makeNode(parent, name, mode)
-    node.rdev = rdev
     // A character device is not mount content. pyodide makes one of its own
     // at runtime -- `API.capture_stderr` calls FS.createDevice, which lands
     // here as mknod -- and journaling it queued a write of /dev/capture_stderr
     // against the real mount, which then failed on replay. Devices live in
     // this tree only.
-    if (isCharDevice(mode)) return node
-    const path = this.nodes.pathOf(node)
-    if (this.host.isDir(mode)) this.journal.markMkdir(path)
-    else {
-      // The create is what carries a file that is made and never written
-      // (`Path.touch()`, `open(p,'w').close()`) through to the mount.
-      this.journal.markCreate(path)
-      // FS.open finalizes a new file with a chmod of its own, right
-      // here and on this node. Only a file is marked: a directory gets
-      // no such call, so a marker left on one would swallow the guest's
-      // next chmod instead.
-      this.fresh = node
+    if (isCharDevice(mode)) {
+      const device = this.nodes.makeNode(parent, name, mode)
+      device.rdev = rdev
+      return device
     }
+    const path = this.nodes.pathOf(parent) + '/' + name
+    if (this.host.isDir(mode)) this.journal.markMkdir(path)
+    // The create is what carries a file that is made and never written
+    // (`Path.touch()`, `open(p,'w').close()`) through to the mount.
+    else this.journal.markCreate(path)
+    this.settle(path)
+    const node = this.nodes.makeNode(parent, name, mode)
+    node.rdev = rdev
+    // FS.open finalizes a new file with a chmod of its own, right here
+    // and on this node. Only a file is marked: a directory gets no such
+    // call, so a marker left on one would swallow the guest's next chmod
+    // instead.
+    if (!this.host.isDir(mode)) this.fresh = node
     return node
   }
 
@@ -364,14 +376,16 @@ export class PyodideFs {
     if (this.mountOf(from) !== this.mountOf(to)) {
       throw errnoError(this.host, this.errno, 'EXDEV')
     }
-    this.nodes.move(node, newDir, newName)
     this.journal.markRename(from, to)
+    this.settle(from, to)
+    this.nodes.move(node, newDir, newName)
   }
 
   private unlink(parent: FSNode, name: string): void {
     const path = this.nodes.pathOf(parent) + '/' + name
-    this.nodes.detach(parent, name)
     this.journal.markUnlink(path)
+    this.settle(path)
+    this.nodes.detach(parent, name)
   }
 
   private rmdir(parent: FSNode, name: string): void {
@@ -379,8 +393,9 @@ export class PyodideFs {
       throw errnoError(this.host, this.errno, 'ENOTEMPTY')
     }
     const path = this.nodes.pathOf(parent) + '/' + name
-    this.nodes.detach(parent, name)
     this.journal.markRmdir(path)
+    this.settle(path)
+    this.nodes.detach(parent, name)
   }
 
   /**
@@ -394,7 +409,7 @@ export class PyodideFs {
   private readdir(node: FSNode): string[] {
     const sync = this.sync
     if (sync !== undefined) {
-      this.readThrough(() => {
+      this.readThrough([], () => {
         const dir = this.nodes.pathOf(node) + '/'
         const again = node.listed === true
         for (const entry of sync.readdir(dir, !again)) {
@@ -412,9 +427,47 @@ export class PyodideFs {
     this.nodes.invalidate()
   }
 
-  private readThrough<T>(read: () => T): T {
+  /**
+   * Send the journal to the mount now, in guest order. An entry the mount
+   * refuses fails the call that touched its path with the mount's errno,
+   * this call or that file's next one (its close), as a deferred write
+   * error does; until then nothing more for that path reaches the mount,
+   * and every other file's entries still land. Without a worker there is
+   * no mount to send to yet, and the journal waits for the run's end.
+   *
+   * Args:
+   *   paths: the paths this call touched.
+   */
+  private settle(...paths: string[]): void {
+    const sync = this.sync
+    if (sync === undefined) return
+    const sendable = (m: MirageMutation): boolean =>
+      !this.deferred.has(m.path) && !(m.kind === 'rename' && this.deferred.has(m.dst))
+    let pending = this.journal.takeMutations().filter(sendable)
     try {
-      this.sync?.flush(this.journal.takeMutations())
+      while (pending.length > 0) {
+        const failure = sync.flush(pending)
+        if (failure === undefined) break
+        const rest = pending.length - failure.skipped
+        const failed = pending[rest - 1]
+        if (failed === undefined) break
+        this.deferred.set(failed.path, failure)
+        pending = pending.slice(rest).filter(sendable)
+      }
+    } catch (error) {
+      throw errnoError(this.host, this.errno, classify(error) ?? 'EIO')
+    }
+    for (const path of paths) {
+      const failure = this.deferred.get(path)
+      if (failure === undefined) continue
+      this.deferred.delete(path)
+      throw errnoError(this.host, this.errno, failure.code ?? 'EIO')
+    }
+  }
+
+  private readThrough<T>(paths: readonly string[], read: () => T): T {
+    this.settle(...paths)
+    try {
       return read()
     } catch (error) {
       throw errnoError(this.host, this.errno, classify(error) ?? 'EIO')
@@ -433,7 +486,7 @@ export class PyodideFs {
     if (target !== undefined) node.link = target
     else if (this.host.isFile(mode)) node.loaded = false
     // Emscripten's getdents looks up every name it lists, so a row the
-    // door could not classify still needs a node; it goes in as a
+    // file adapter could not classify still needs a node; it goes in as a
     // regular file and is asked about before its first stat.
     if (isUnclassified(stat)) node.unclassified = true
     return node
@@ -456,18 +509,20 @@ export class PyodideFs {
   private classifyNode(node: FSNode): void {
     const sync = this.sync
     if (sync === undefined) throw errnoError(this.host, this.errno, 'EIO')
-    const stat = this.readThrough(() => sync.stat(this.nodes.pathOf(node)))
+    const path = this.nodes.pathOf(node)
+    const stat = this.readThrough([path], () => sync.stat(path))
     node.unclassified = false
     this.nodes.retype(node, stat.mode)
     node.rdev = stat.rdev ?? 0
-    node.atime = node.mtime = node.ctime = stat.mtimeMs
+    node.atime = node.mtime = node.ctime = stat.mtimeMs ?? 0
     if (this.host.isFile(stat.mode) && node.loaded === false) node.usedBytes = stat.size
   }
 
   private loadContents(node: FSNode): void {
     const sync = this.sync
     if (node.loaded !== false || sync === undefined) return
-    const bytes = this.readThrough(() => sync.read(this.nodes.pathOf(node)))
+    const path = this.nodes.pathOf(node)
+    const bytes = this.readThrough([path], () => sync.read(path))
     node.contents = bytes
     node.usedBytes = bytes.length
     node.loaded = true
@@ -487,9 +542,11 @@ export class PyodideFs {
    *   target: what it points at, verbatim.
    */
   private symlink(parent: FSNode, name: string, target: string): FSNode {
+    const path = this.nodes.pathOf(parent) + '/' + name
+    this.journal.markSymlink(path, target)
+    this.settle(path)
     const node = this.nodes.makeNode(parent, name, LINK_MODE)
     node.link = target
-    this.journal.markSymlink(this.nodes.pathOf(node), target)
     return node
   }
 

@@ -67,7 +67,7 @@ export interface Case {
   answer?: 'allow_once' | 'allow_session' | 'deny'
   // Why this case's verdict is out of reach of `ws.explain`, which reads
   // the command plane and the line as typed: a runtime-expanded glob, a
-  // refusal from the op door below the gate, a function the same line
+  // refusal from the dispatcher below the gate, a function the same line
   // defines. Named rather than silently omitted.
   explain_blind?: string
   scenario?: ScenarioStep[]
@@ -160,10 +160,11 @@ function checkField(st: HarnessStat, name: string): string {
  * Two forms. `stat` names a path and the FileStat fields to print. `read`
  * names a path and a byte window, and prints what that window returned: no
  * shell command asks for one, because commands read whole files, so the
- * ranged read op is only reachable through the same door FUSE and `ws.vfs`
- * use. `read` with `stream` reads the stored bytes as the door streams them
- * and fails when they come back whole. `max_chunk_size` bounds each chunk;
- * `take_bytes` closes a read after its prefix to exercise partial consumption.
+ * ranged read op is only reachable through the dispatcher FUSE and `ws.vfs`
+ * use. `read` with `stream` reads the stored bytes as the dispatcher streams
+ * them and fails when they come back whole. `max_chunk_size` bounds each
+ * chunk; `take_bytes` closes a read after its prefix to exercise partial
+ * consumption.
  */
 export async function statCheck(ws: ExecWorkspace, check: StatCheck): Promise<string> {
   if (check.read !== undefined && check.stream === true) {

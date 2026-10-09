@@ -52,7 +52,7 @@ def evaluator_of(
     world has no evaluator, which only matters once a ScriptSource
     actually needs one. The attribute read here is the one ``run``
     answers for too (LanguageRuntime.language), so an engine cannot
-    speak one language at this door and another at that one.
+    speak one language at this entry point and another at that one.
 
     Args:
         entries (list[Runtime]): the workspace's ordered world.
@@ -268,7 +268,7 @@ async def decide_line(
     ctx: RouteContext,
     static_bindings: dict[str, Runtime],
     external_commands: Container[str] = (),
-) -> RouteDecision:
+) -> RouteDecision[Runtime]:
     """Resolve the policy ladder for one line: policy, then scripts.
 
     A policy verdict overlays the named runtime's captures on the

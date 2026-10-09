@@ -362,7 +362,7 @@ session.tools.call(name, args, signal?): Promise<ToolResult>
 session.tools.names(): readonly string[]
 ```
 
-The seven agent tools, for a model rather than a program: every answer is text, and a failure is `isError`, never a throw. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it. `names()` is the tools the session's [profile](/home/policy/policies#which-door-enforces-what) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command the allow list installs, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
+The seven agent tools, for a model rather than a program: every answer is text, and a failure is `isError`, never a throw. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it. `names()` is the tools the session's [profile](/home/policy/policies#which-entry-point-enforces-what) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command the allow list installs, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
 
 | Tool | Answers |
 | --- | --- |

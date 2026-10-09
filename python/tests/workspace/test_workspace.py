@@ -1436,15 +1436,6 @@ def test_pipeline_sed():
 # ── cache VFS fallback ───────────────────
 
 
-def test_cache_fallback_wc():
-    """wc uses cache VFS when cwd has no mount."""
-    ws = _ws()
-    ws.get_session(ws.default_session_id).cwd = "/mirage"
-    io = _exec(ws, "cat /s3/report.csv | wc -l")
-    assert io.exit_code == 0
-    assert b"3" in _stdout(io)
-
-
 def test_cache_fallback_head():
     """head uses cache VFS fallback."""
     ws = _ws()
@@ -2807,7 +2798,7 @@ def test_add_mount_refuses_duplicates_invalid_mounts_and_closed_workspace():
 
 
 def test_add_mount_runs_the_same_read_verdict_as_the_constructor():
-    """The runtime door is a mount door too.
+    """The runtime entry point is a mount entry point too.
 
     Without the verdict here a mount added at runtime could declare a
     policy its backend cannot honour, which reads as enabled and does

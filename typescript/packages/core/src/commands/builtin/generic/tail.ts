@@ -177,7 +177,7 @@ async function catchUp(
 }
 
 /**
- * A follow poll's read: what the backend holds now, at the door. A direct
+ * A follow poll's read: what the backend holds now, at the dispatcher. A direct
  * read, never served from the file cache nor kept in it: the poll looks for
  * exactly the bytes a cached copy does not have yet. Mirrors Python's
  * `_polled_window`.
@@ -498,7 +498,7 @@ export async function tailGeneric(
       io.exitCode = 1
       return [null, io]
     }
-    // The first print reads like any other tail; the polls ask the door
+    // The first print reads like any other tail; the polls ask the dispatcher
     // for what the backend holds now, past the file cache and past the
     // stat the command's freshness probe kept: they look for exactly the
     // change neither has yet.

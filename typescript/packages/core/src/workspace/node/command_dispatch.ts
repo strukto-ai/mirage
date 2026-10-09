@@ -28,7 +28,8 @@ import {
 import { runWithOpPolicies } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
-import { guardDispatch, mergeSignals } from '../abort.ts'
+import { guardDispatch } from '../abort.ts'
+import { mergeSignals } from '../../utils/abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
@@ -144,7 +145,7 @@ export async function executeCommand(
   callStack: CallStack | null,
   jobTable: JobTable | null,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RouteDecision,
+  routingDecision?: RouteDecision<Runtime>,
   signal?: AbortSignal,
   // The line's parse scope; only alias expansion needs it, and each
   // expansion parses in a fork released when it ends. Absent means an
@@ -281,7 +282,7 @@ export async function executeCommand(
       // exports it for the command. Only the hidden half was checked
       // here, so a deployment refusing `SECRET_*` still saw
       // `SECRET_K=leak printenv SECRET_K` print the secret: the seeding
-      // below goes through `seedVar`, which is the ungated door, so this
+      // below goes through `seedVar`, which is the ungated entry point, so this
       // loop is the only place the rule can be asked.
       await preSessionGate(registry.policies, {
         plane: 'env',
@@ -397,7 +398,7 @@ async function runCommandBody(
   callStack: CallStack | null,
   jobTable: JobTable | null,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RouteDecision,
+  routingDecision?: RouteDecision<Runtime>,
   signalIn?: AbortSignal,
   agentId = '',
   handed?: HandOff,
@@ -411,7 +412,7 @@ async function runCommandBody(
   // builtins (sleep) and the mount layer observe the kill.
   const signal = mergeSignals(signalIn, context.frame.abortSignal)
   // The command's place on the line, as the pass computed it, and the
-  // door its nested evaluations re-enter through: a word that runs a
+  // entry point its nested evaluations re-enter through: a word that runs a
   // line (eval, source, xargs) is bound to this node, and a substitution
   // names its own node when it calls, so every nested line stands under
   // the node its text came from.
@@ -578,7 +579,7 @@ async function runArgv(
   callStack: CallStack | null,
   jobTable: JobTable | null,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RouteDecision,
+  routingDecision?: RouteDecision<Runtime>,
   signal?: AbortSignal,
   // The row the shell began reading the command on within its parse
   // (`readRow`), which only `alias`, `unalias` and `shopt` read: the
@@ -745,7 +746,7 @@ async function routeArgv(
   callStack: CallStack | null,
   jobTable: JobTable | null,
   runtimeBindings: Record<string, Runtime> | undefined,
-  routingDecision: RouteDecision | undefined,
+  routingDecision: RouteDecision<Runtime> | undefined,
   signal: AbortSignal | undefined,
   row: number,
   agentId: string,
@@ -756,7 +757,7 @@ async function routeArgv(
   const session = context.session
   // The half of `runArgv` past the gate, split out so the gate's verdict
   // can be bound around it.
-  // Every handler below reaches the op door through this one function,
+  // Every handler below reaches the dispatcher through this one function,
   // so a line whose caller was already released starts no further op
   // between its operands (`rm l1 l2` with the first unlink held past
   // the grace). Python needs nothing here: its cancelled task never
@@ -858,7 +859,7 @@ async function routeArgv(
     return await handleReadlink(namespace, dispatch, session, operands)
   }
 
-  // Extended attributes: the door's node table and the backend's own
+  // Extended attributes: the dispatcher's node table and the backend's own
   // facts; they read -h themselves.
   if (name === 'getfattr') {
     return await handleGetfattr(dispatch, session, operands)

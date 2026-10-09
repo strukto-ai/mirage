@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from typing import Any
 
 from mirage.accessor.qdrant import QdrantAccessor
 from mirage.cache.index import IndexEntry
@@ -28,6 +27,7 @@ from mirage.core.qdrant.query import (
     table_exists,
 )
 from mirage.core.qdrant.render import render_json, render_text
+from mirage.core.qdrant.types import QdrantRow
 from mirage.core.vector.read import blob_bytes
 from mirage.core.vector.readdir import dir_entry
 from mirage.core.vector.scope import filters_of, table_of
@@ -52,7 +52,7 @@ def _blob_size(value: JsonValue) -> int | None:
 
 
 def _row_entries(
-    rows: list[dict[str, Any]], config: QdrantConfig
+    rows: list[QdrantRow], config: QdrantConfig
 ) -> list[tuple[str, IndexEntry]]:
     # The scroll already carries every payload, so each file's exact
     # rendered size is free here; stat serves it from the index instead of

@@ -72,13 +72,13 @@ class Outcome(StrEnum):
 class Deny:
     """Refuse the command, op or session write, with a reason.
 
-    Rendered by the door it fires at: the command plane prints it in
-    the scope's voice (DenyScope), the op doors raise EACCES with it,
-    the session door EACCES too.
+    Rendered by the entry point it fires at: the command plane prints it in
+    the scope's voice (DenyScope), the dispatcher raise EACCES with it,
+    the session view EACCES too.
 
     Args:
         reason (str): why, without the command name and without a
-            trailing newline; the door adds both.
+            trailing newline; the entry point adds both.
         scope (DenyScope): whole command or one operand; ignored off
             the command plane.
         policy (str): the class name of the policy that spoke,
@@ -88,7 +88,7 @@ class Deny:
         error (OSError | None): an op refusal with a specific errno; None
             uses the normal permission-denied error.
         path (str | None): the operand an OPERAND refusal is about, as
-            typed: the door prints the command's own line for it and
+            typed: the entry point prints the command's own line for it and
             ``Permission denied``, the reason riding the record. None
             leaves the reason as the diagnostic.
         rule (CommandRule | None): the profile rule that refused, as an
@@ -113,12 +113,12 @@ class Hide:
     Outranks every other answer: a hidden path is absent, so there is
     nothing left to allow, refuse or ask about. Never rendered as a
     refusal: no reason, no ``refusal`` record, no explain line. The
-    door raises ``error`` as the terminal would for a missing name
+    entry point raises ``error`` as the terminal would for a missing name
     (ENOENT, or EACCES for a create landing in a visible directory). The
     built-in hide answers it; no coded hook returns one.
 
     Args:
-        error (OSError): what the door raises.
+        error (OSError): what the entry point raises.
     """
 
     kind: ClassVar[str] = "hide"
@@ -161,8 +161,8 @@ class CommandRule:
     on each, no paths), a mapping of command pattern to its paths (one
     command to many paths, one rule per command, so a path is never
     stated beside a command it was not meant for), or paths alone (a
-    rule on every command, at the op door too). A command entry is a
-    token-prefix pattern over the line as the door normalizes it (``rm``
+    rule on every command, at the dispatcher too). A command entry is a
+    token-prefix pattern over the line as the entry point normalizes it (``rm``
     is every rm line, ``git push`` every ``git push ...``, a ``*`` token
     any one token). Path entries use the document's one grammar: an
     entry with ``*``, ``?`` or ``[`` is a pattern (repo fnmatch dialect,
@@ -200,7 +200,7 @@ class HideReason:
     The document may state a hide as ``{patterns: [...], reason: ...}``;
     the patterns compile into the flat hide spec like any other entry,
     and this side table keeps the reason beside them for the host's
-    doors (audit, read-back). It is never rendered to the agent: a hide
+    entry points (audit, read-back). It is never rendered to the agent: a hide
     answers ENOENT, and a reason on a nonexistent path would confirm
     the path exists.
 
@@ -256,7 +256,7 @@ class Ask:
     both route to the workspace's decision ledger (``Decisions``). A Deny
     from any policy outranks it: the chain keeps looking past an Ask
     for a Deny, so an approval can never re-open a refusal. A pre_vfs
-    answer too, where the door puts it to the ledger when no line is
+    answer too, where the entry point puts it to the ledger when no line is
     running behind the op and refuses it inside one.
 
     Args:
@@ -269,10 +269,10 @@ class Ask:
         rules (tuple[CommandRule, ...]): every rule the line has to be
             granted, ``rule`` among them and usually alone: a line whose
             operands were each asked about by a different rule carries
-            them all. The door asks about them one at a time and runs
+            them all. The entry point asks about them one at a time and runs
             the line only once each is answered, so a nod given for one
             operand cannot carry another. Empty for a coded Ask, whose
-            one rule the door synthesizes.
+            one rule the entry point synthesizes.
         policy (str): the policy that asked, as ``explain`` names it.
     """
 
@@ -466,7 +466,7 @@ class Claimant:
 
 @dataclass(frozen=True, slots=True)
 class Pending:
-    """The door's answer while the host has not decided: the line is
+    """The entry point's answer while the host has not decided: the line is
     refused for now, and the id names what to grant.
 
     Args:
@@ -486,7 +486,7 @@ class Abandoned:
     The record is left waiting, and whatever the host eventually answers
     is dropped rather than recorded — an answer banked against a run
     that no longer exists would be taken by the next identical line with
-    nobody asked. The door turns this into the same abort every other
+    nobody asked. The entry point turns this into the same abort every other
     killed wait raises; the ledger states the fact in its own vocabulary
     because execution is not its to know about.
     """
@@ -568,7 +568,7 @@ class ProfileScript:
     Compiled off ``SessionProfile.policy`` beside the admission rules,
     and evaluated by ``ScriptPolicy`` at the admission hooks the program
     defines (``pre_command``, ``pre_vfs``, ``pre_session``) with the
-    door's facts as ``ctx``; its answer is allow (no opinion), deny, or
+    entry point's facts as ``ctx``; its answer is allow (no opinion), deny, or
     at the command gate ask.
 
     Args:
@@ -576,7 +576,7 @@ class ProfileScript:
             ``ctx["profile"]`` and every refusal about it prints; empty
             for a profile document passed to ``create_session`` without
             a name.
-        script (ScriptSource): the program, as the config door loaded
+        script (ScriptSource): the program, as the config loader loaded
             it.
         runtime (str): the engine the profile named for it.
     """
@@ -597,7 +597,7 @@ class SessionCommandsQuery(Protocol):
     def commands_of(self, session_id: str) -> "AdmissionRules | None":
         """The compiled admission rules of one session; the default
         profile's for an id the manager does not know, the empty id of an
-        unbound door included.
+        unbound entry point included.
 
         Args:
             session_id (str): the session, empty when none is bound.
@@ -610,7 +610,7 @@ class SessionScriptsQuery(Protocol):
 
     The SessionManager satisfies it structurally, the same way it
     satisfies ``SessionCommandsQuery``, so the policy reads a session's
-    script by the id the door put in the context.
+    script by the id the entry point put in the context.
     """
 
     def script_of(self, session_id: str) -> "ProfileScript | None":
@@ -644,7 +644,7 @@ class CommandContext:
         cwd (str): session working directory.
         registry (MountRootQuery): mount-root oracle for POSIX rules.
         session_id (str): the session running the line, set by the
-            door; empty outside a workspace.
+            entry point; empty outside a workspace.
         agent_id (str): the agent the workspace attributes the line
             to, carried per execution so a nested line (``eval``,
             ``$()``, ``xargs``) and a concurrent one keep their own;
@@ -658,7 +658,7 @@ class CommandContext:
             what runs: the name plus a CLI's verb path.
         tool (bool): whether the word is a tool the allow lists govern,
             which every named command is, shell builtins included. The
-            door clears it for the agent's own function where the
+            entry point clears it for the agent's own function where the
             function is what runs, and for an executed path: neither is
             a name a list could hold, and every line either runs passes
             the gate itself, so an allow list never refuses them,
@@ -689,7 +689,7 @@ class CommandContext:
 class VfsContext:
     """Facts about one VFS op, as pre_vfs hooks see it.
 
-    Fires at the op doors (the ``ws.vfs`` facade, which also serves
+    Fires at the dispatcher (the ``ws.vfs`` facade, which also serves
     FUSE, and the shell's internal dispatcher), before any backend or
     cache I/O, so it holds however the mount is reached.
 
@@ -698,11 +698,11 @@ class VfsContext:
         path (PathSpec): the resolved virtual path.
         write (bool): whether the op mutates the mount.
         prefix (str): the owning mount's prefix.
-        session_id (str): the session the door serves, set by the door
-            from the session it already resolves for hides and modes;
+        session_id (str): the session the dispatcher serves, set by the entry
+            point from the session it already resolves for hides and modes;
             empty for the unbound host view.
         mode (MountMode | None): the owning mount's authorization ceiling,
-            None at a door that judges the mode itself.
+            None at an entry point that judges the mode itself.
         create (bool): the op creates this path.
         subtree (bool): the op mutates the path's descendants too.
     """
@@ -795,7 +795,7 @@ class DryRun(StrEnum):
     explains.
 
     DECIDING is a policy's own ops: a read runs for real, a refusal
-    raises the door's error with no question recorded, and a write is
+    raises the entry point's error with no question recorded, and a write is
     refused as on a read-only mount, so an explanation changes nothing.
     """
 
@@ -984,7 +984,7 @@ class EntryGate(Protocol):
             yields to the guarded readdir walk while it is set, so each
             entry passes the gate.
         granted (tuple[CommandRule, ...]): the ask rules this line runs
-            under a grant for. Read by the op doors, which see the same
+            under a grant for. Read by the dispatcher, which sees the same
             entries from below and would otherwise re-derive a verdict
             that knows nothing of the nod the gate already took.
     """
@@ -1015,7 +1015,7 @@ class EntryGate(Protocol):
         ...
 
     def refuses(self, virtual: str) -> bool:
-        """True exactly where ``check`` would raise, for a door that
+        """True exactly where ``check`` would raise, for an entry point that
         declines instead (the read cache).
 
         Args:
