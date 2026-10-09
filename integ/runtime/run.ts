@@ -924,15 +924,18 @@ const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor a
   ...params: string[]
 ) => (...args: unknown[]) => Promise<unknown>
 
+/** A stream that keeps what is written to it in `into`. */
+function sink(into: string[]): NodeJS.WritableStream {
+  return {
+    write: (chunk: string) => {
+      into.push(chunk)
+      return true
+    },
+  } as unknown as NodeJS.WritableStream
+}
+
 /** A console writing into `out` and `err`, as a program's streams. */
 function capture(out: string[], err: string[]): Console {
-  const sink = (into: string[]): NodeJS.WritableStream =>
-    ({
-      write: (chunk: string) => {
-        into.push(chunk)
-        return true
-      },
-    }) as unknown as NodeJS.WritableStream
   return new Console({ stdout: sink(out), stderr: sink(err), ignoreErrors: false })
 }
 

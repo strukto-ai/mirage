@@ -58,6 +58,11 @@ function ident(text: string): number {
   return createHash('sha256').update(text).digest().readUIntBE(0, 6)
 }
 
+/** A stamp in nanoseconds, as node's BigIntStats spells one. */
+function ns(date: Date): bigint {
+  return BigInt(date.getTime()) * 1_000_000n
+}
+
 /** A refusal spelled the way node's own fs spells an error. */
 function refusal(condition: FsCondition, syscall: string, path: string): NodeJS.ErrnoException {
   const err: NodeJS.ErrnoException = new Error(
@@ -204,7 +209,6 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     const big = Object.fromEntries(
       Object.entries(fields).map(([k, v]) => [k, BigInt(Math.trunc(v))]),
     )
-    const ns = (date: Date): bigint => BigInt(date.getTime()) * 1_000_000n
     return {
       ...kinds,
       ...big,
@@ -383,8 +387,9 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     try {
       st = await this.files.stat(path, true)
     } catch (err) {
-      if (force && isMissingPath(err)) return
-      throw err
+      if (!force || !isMissingPath(err)) throw err
+      console.debug(`rm: ${path} is already gone: ${String(err)}`)
+      return
     }
     if (!st.isDir) {
       await this.files.unlink(path)
@@ -401,6 +406,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
         else await this.files.unlink(name)
       } catch (err) {
         if (!isMissingPath(err) || name === path) throw err
+        console.debug(`rm: ${name} went before its turn: ${String(err)}`)
       }
     }
   }
@@ -422,6 +428,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
         rows = await this.files.readdir(path)
       } catch (err) {
         if (!isMissingPath(err) || path === top) throw err
+        console.debug(`rm: ${path} went while the tree was planned: ${String(err)}`)
         return
       }
       for (const row of rows) {
