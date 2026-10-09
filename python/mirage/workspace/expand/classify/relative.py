@@ -15,7 +15,7 @@
 import posixpath
 
 from mirage.types import PathSpec
-from mirage.utils.glob_walk import has_glob
+from mirage.utils.glob_walk import has_glob, unmark_globs
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import dotted_spelling
 from mirage.workspace.mount import MountRegistry
@@ -40,7 +40,7 @@ def relative_spec(
         cwd (str): working directory the word was typed under.
     """
     path = posixpath.normpath(cwd.rstrip("/") + "/" + word)
-    mount = registry.try_mount_for(path)
+    mount = registry.try_mount_for(unmark_globs(path))
     if mount is None:
         return word
     vfs_path = mount_key(path, mount.prefix.rstrip("/"))

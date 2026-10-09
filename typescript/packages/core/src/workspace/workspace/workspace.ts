@@ -1382,6 +1382,7 @@ export class Workspace {
         nullglob: true,
         failglob: false,
         globstar: true,
+        extglob: false,
       })
       return matches.filter((m): m is PathSpec => m instanceof PathSpec).map((m) => m.virtual)
     })

@@ -594,7 +594,7 @@ async def resolve_globs(
             pattern = item.pattern
             # A pattern word no mount owns cannot match anything, so it
             # stays the literal word like a zero-match glob.
-            mount = registry.try_mount_for(item.virtual)
+            mount = registry.try_mount_for(unmark_globs(item.virtual))
             if mount is None:
                 result.append(item)
                 continue

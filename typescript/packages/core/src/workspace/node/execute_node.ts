@@ -30,7 +30,7 @@ import type { ProcessSupervisor } from '../../process/supervisor.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
-import { type ByteSource, IOResult } from '../../io/types.ts'
+import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { literalText } from '../../shell/parse/names.ts'
@@ -55,10 +55,18 @@ import {
   getParts,
   getUnsetArgs,
   getWhileParts,
+  getProcessSubBody,
+  getProcessSubDirection,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
-import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
+import {
+  NodeType as NT,
+  type PipelineStages,
+  ProcessSubDirection,
+  Redirect,
+  RedirectKind,
+} from '../../shell/types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
 import {
   runWithRedirectPaths,
@@ -67,7 +75,7 @@ import {
   type RedirectRunner,
 } from '../../context/session_context.ts'
 import { expandRedirect } from '../expand/redirects.ts'
-import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
+import { type ExecuteFn, childLine, expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
 import { ExitSignal, ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
@@ -92,6 +100,7 @@ import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.
 import { handleRedirect } from '../executor/redirect.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { DevVFS } from '../../vfs/dev/dev.ts'
 
 import { ExecutionNode } from '../types.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
@@ -910,34 +919,12 @@ export async function executeNode(
   }
   const executionScope = deps.executionScope ?? new ExecutionScope()
   await executionScope.checkpoint(deps.signal ?? context.frame.abortSignal ?? undefined)
-  if (!ownDiagnostics) {
-    const result = await executeNodeBody(
-      deps,
-      node,
-      context,
-      stdin,
-      callStack,
-      executionScope,
-      false,
-    )
-    if (deps.signal?.aborted === true || context.frame.abortSignal?.aborted === true) {
-      throw makeAbortError(
-        deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
-      )
-    }
-    return result
-  }
-  const outer = context.frame.diagnostics
-  context.frame.diagnostics = []
-  try {
-    const [stdout, io, execNode] = await executeNodeBody(
-      deps,
-      node,
-      context,
-      stdin,
-      callStack,
-      executionScope,
-    )
+  const run = (own: boolean): Promise<Result> =>
+    executeNodeBody(deps, node, context, stdin, callStack, executionScope, own)
+  return processInputs(context, deps.registry, async (held) => {
+    const [stdout, io, execNode] = ownDiagnostics
+      ? await diagnosed(node, context, () => run(true))
+      : await run(false)
     // A statement that settles after the caller aborted is an orphan: its
     // status must not reach the shell the caller was already released from.
     if (deps.signal?.aborted === true || context.frame.abortSignal?.aborted === true) {
@@ -945,6 +932,22 @@ export async function executeNode(
         deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
       )
     }
+    // The device files go with the node, so a command still reading one is
+    // read out first.
+    return [held.length > 0 && stdout !== null ? await materialize(stdout) : stdout, io, execNode]
+  })
+}
+
+/** Run a node with its own diagnostics, flushed ahead of its stderr. */
+async function diagnosed(
+  node: TSNodeLike,
+  context: EvaluationContext,
+  run: () => Promise<Result>,
+): Promise<Result> {
+  const outer = context.frame.diagnostics
+  context.frame.diagnostics = []
+  try {
+    const [stdout, io, execNode] = await run()
     if (context.frame.diagnostics.length > 0) {
       const err = diagnosticStderr(node, context)
       const existing = await io.materializeStderr()
@@ -966,6 +969,51 @@ export async function executeNode(
     throw err
   } finally {
     context.frame.diagnostics = outer
+  }
+}
+
+/**
+ * Open the input process substitutions a node's own words hold. Each
+ * `<(...)` runs as its word expands, in order with the word's other
+ * expansions and through the evaluator a `$(...)` there uses, and reads back
+ * as a buffered device file rather than a host pipe. The files go when the
+ * node ends; a nested node opens its own, so each lasts as long as the
+ * command naming it. An output `>(...)` is refused, as it is as a redirect
+ * target. Mirrors Python's `_process_inputs`.
+ */
+async function processInputs<T>(
+  context: EvaluationContext,
+  registry: MountRegistry,
+  run: (held: readonly (readonly [DevVFS, string, number])[]) => Promise<T>,
+): Promise<T> {
+  const held: (readonly [DevVFS, string, number])[] = []
+  const previous = context.frame.processSub
+  context.frame.processSub = async (node, executeFn, callStack) => {
+    if (getProcessSubDirection(node) === ProcessSubDirection.OUTPUT) {
+      throw new ExitSignal(
+        2,
+        encodeText('mirage: unsupported: process substitution >(...)\n'),
+        null,
+        2,
+      )
+    }
+    const [dev] = registry.resolve('/dev/null')
+    if (!(dev instanceof DevVFS)) throw new Error('missing device filesystem')
+    const [path, allocation] = dev.allocateInput()
+    held.push([dev, path, allocation])
+    const inner = getProcessSubBody(node)
+    if (inner !== '') {
+      const io = await childLine(context, executeFn, inner, node, callStack)
+      dev.setInput(path, allocation, await materialize(io.stdout))
+      context.frame.diagnostics.push(await materialize(io.stderr))
+    }
+    return path
+  }
+  try {
+    return await run(held)
+  } finally {
+    context.frame.processSub = previous
+    for (const [dev, path, allocation] of held) dev.releaseInput(path, allocation)
   }
 }
 

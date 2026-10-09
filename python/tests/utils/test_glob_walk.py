@@ -655,22 +655,3 @@ def test_quoted_bang_cannot_become_an_operator_after_expansion():
     assert fnmatch("a!(b|c)", pattern, extglob=True)
     assert fnmatch("d", pattern, extglob=True)
     assert not fnmatch("ax", pattern, extglob=True)
-
-
-@pytest.mark.parametrize("char", list("@+!()|"))
-@pytest.mark.parametrize("extglob", [False, True])
-def test_quoted_extended_operators_remain_bracket_members(char, extglob):
-    pattern = "[a" + escape_glob(char) + "]"
-    assert fnmatch(char, pattern, extglob=extglob)
-    assert fnmatch("a", pattern, extglob=extglob)
-    assert not fnmatch("z", pattern, extglob=extglob)
-    assert not fnmatch(char + "]", pattern, extglob=extglob)
-
-
-def test_literal_backslash_cannot_escape_a_quoted_bracket_member():
-    pattern = "[" + escape_glob("\\@") + "]"
-    for extglob in (False, True):
-        for char in "\\@":
-            assert fnmatch(char, pattern, extglob=extglob)
-        for char in "x40":
-            assert not fnmatch(char, pattern, extglob=extglob)

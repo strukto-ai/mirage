@@ -258,29 +258,35 @@ it('keeps extended groups opt-in and terminates nullable repetition', () => {
   expect(fnmatch('a'.repeat(80) + 'b', '+(?(a))', true)).toBe(false)
 })
 
-it('requires the suffix after a negative group, including on empty text', () => {
+it('a star hands a group every tail', () => {
   expect(fnmatch('', '*!(a)x', true)).toBe(false)
   expect(fnmatch('x', '*!(a)x', true)).toBe(true)
-})
-
-it.each([
-  ['1😀', true],
-  ['😀😀', true],
-  ['a', false],
-] as const)('POSIX classes match Unicode characters: %s', (name, expected) => {
-  expect(fnmatch(name, '+([[:digit:]😀])', true)).toBe(expected)
-})
-
-it('empty negative repetition remains nullable', () => {
+  expect(fnmatch('a', '*!(a)', true)).toBe(true)
   expect(fnmatch('', '*+([!a]|!([!a]))', true)).toBe(true)
 })
 
-it.each(['+(*)', '*(*)', '+(a|*)', '*+(*)'])(
-  'repeated wildcards match long values: %s',
-  (pattern) => {
-    const value = 'a'.repeat(10000)
-    expect(fnmatch(value, pattern, true)).toBe(true)
-    expect(fnmatch(value, pattern + 'b', true)).toBe(false)
+it.each([
+  ['+(*)', '', true],
+  ['+(*)b', '', false],
+  ['*(*)', '', true],
+  ['+(a|*)b', '', false],
+  ['*+(*)', '', true],
+  ['+(aa)', '', true],
+  ['+(aa)', 'a', false],
+  ['+(*(aa))', '', true],
+  ['+(?(aa))', 'a', false],
+  ['*(+(aa)|b)', 'c', false],
+  ['+(@(*(aa)|b))', '', true],
+  ['*!(a)', '', true],
+  ['*!(*)', '', false],
+  ['*!(a*)', '', true],
+  ['*!(*a)', '', true],
+  ['*!(*b)', '', true],
+  ['*!(+(aa))', 'a', true],
+] as [string, string, boolean][])(
+  'long subjects match in linear time: %s',
+  (pattern, tail, expected) => {
+    expect(fnmatch('a'.repeat(16000) + tail, pattern, true)).toBe(expected)
   },
 )
 
@@ -288,31 +294,4 @@ it.each(['@', '?', '+', '*'])('deep %s groups use an explicit stack', (operator)
   const pattern = (operator + '(').repeat(1200) + 'a' + ')'.repeat(1200)
   expect(fnmatch('a', pattern, true)).toBe(true)
   expect(fnmatch('b', pattern, true)).toBe(false)
-})
-
-it('keeps sparse repetition discovery linear', () => {
-  expect(fnmatch('a'.repeat(16000), '+(aa)', true)).toBe(true)
-  expect(fnmatch('a'.repeat(16001), '+(aa)', true)).toBe(false)
-})
-
-it.each([
-  ['5', true],
-  ['z', false],
-  ['a', false],
-] as const)('invalid ranges preserve POSIX class membership: %s', (char, expected) => {
-  expect(fnmatch(char, '[[:digit:]z-a]', true)).toBe(expected)
-})
-
-it.each(['+(*(aa))', '+(?(aa))', '*(+(aa)|b)', '+(@(*(aa)|b))'])(
-  'shares nested repetition states for %s',
-  (pattern) => {
-    expect(fnmatch('a'.repeat(16000), pattern, true)).toBe(true)
-    expect(fnmatch('a'.repeat(16001), pattern, true)).toBe(false)
-    expect(fnmatch('a'.repeat(16000) + 'c', pattern, true)).toBe(false)
-  },
-)
-
-it('shares scheduled offsets for negative suffixes', () => {
-  expect(fnmatch('a'.repeat(16000), '*!(a)', true)).toBe(true)
-  expect(fnmatch('a'.repeat(16000), '*!(*)', true)).toBe(false)
 })

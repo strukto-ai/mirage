@@ -32,13 +32,11 @@ export const QUOTED_CHARS: Readonly<Record<string, string>> = Object.fromEntries
     ch,
   ]),
 )
-const QUOTED_RE = /[\uFDD0-\uFDD8]/
+const QUOTED_RE = /[﷐-﷘]/
+export const EXTGLOB_RE = /[@?*+!]\(/
 
 export function fnmatch(name: string, pattern: string, extglob = false, period = false): boolean {
-  if (
-    QUOTED_RE.test(pattern) ||
-    (extglob && (pattern.includes('[:') || /[@?*+!]\(/.test(pattern)))
-  ) {
+  if (pattern.includes('[:') || QUOTED_RE.test(pattern) || (extglob && EXTGLOB_RE.test(pattern))) {
     return new Matcher(name, pattern, period, extglob).matches()
   }
   if (period && name.startsWith('.') && !pattern.startsWith('.')) return false
@@ -46,7 +44,7 @@ export function fnmatch(name: string, pattern: string, extglob = false, period =
 }
 
 /** Immutable reachable positions as merged half-open intervals. */
-class Positions implements Iterable<number> {
+class Positions {
   readonly spans: readonly (readonly [number, number])[]
 
   constructor(spans: Iterable<readonly [number, number]> = []) {
@@ -58,12 +56,6 @@ class Positions implements Iterable<number> {
       else merged.push([lo, hi])
     }
     this.spans = merged
-  }
-
-  *[Symbol.iterator](): Iterator<number> {
-    for (const [lo, hi] of this.spans) {
-      for (let position = lo; position < hi; position += 1) yield position
-    }
   }
 
   contains(position: number): boolean {
@@ -104,19 +96,72 @@ function unseen(links: Uint32Array, position: number): number {
 }
 
 /**
- * Positive groups compile to epsilon transitions. Active states advance
- * together, sharing nested repetition work at each subject offset.
- * Negative groups request memoized branch endpoints on an explicit stack.
- * Deliberate GNU 5.2 divergence: empty subjects obey group composition.
- * GNU's star fast path accepts `*!(a)x` but rejects `*+([!a]|!([!a]))`
- * against empty text; here the suffix is required and the group is nullable.
+ * A pattern's bracket expressions and extended groups, by offset. A bracket
+ * expression maps to the offset after its `]`, a POSIX class inside it read
+ * whole. A group maps to the offset after its `)` and each branch's span; a
+ * `(` inside a branch nests a literal pair.
+ */
+function scan(
+  p: readonly string[],
+  extglob = true,
+): [Map<number, number>, Map<number, { end: number; branches: [number, number][] }>] {
+  const classes = new Map<number, number>()
+  const groups = new Map<number, { end: number; branches: [number, number][] }>()
+  const stack: { open: number; starts: number[]; literalDepth: number }[] = []
+  let i = 0
+  while (i < p.length) {
+    const c = p[i] ?? ''
+    if (c === '[') {
+      const end = classEnd(p, i, true, true)
+      if (end >= 0) {
+        classes.set(i, end + 1)
+        i = end + 1
+        continue
+      }
+    }
+    if (extglob && '@?*+!'.includes(c) && p[i + 1] === '(') {
+      stack.push({ open: i, starts: [i + 2], literalDepth: 0 })
+      i += 2
+      continue
+    }
+    const frame = stack.at(-1)
+    if (frame && c === '(') frame.literalDepth += 1
+    else if (frame && c === ')' && frame.literalDepth > 0) frame.literalDepth -= 1
+    else if (frame && c === '|' && frame.literalDepth === 0) frame.starts.push(i + 1)
+    else if (frame && c === ')') {
+      stack.pop()
+      groups.set(frame.open, {
+        end: i + 1,
+        branches: frame.starts.map((start, j) => [start, (frame.starts[j + 1] ?? i + 1) - 1]),
+      })
+    }
+    i += 1
+  }
+  return [classes, groups]
+}
+
+/**
+ * Match extended groups by reachable character positions. Positive groups
+ * compile to epsilon transitions, so the active states advance together
+ * over the subject and nested repetitions share the work at each offset. A
+ * negative group asks for each branch's end positions from an offset, on an
+ * explicit stack. Runs of one branch from different offsets share their
+ * tails: once nothing is scheduled past the current offset, a run's states
+ * there decide the rest, so a run reaching the states an earlier run had at
+ * that offset ends as it did.
+ *
+ * Deliberate GNU 5.2 divergence: a `*` directly before an extended group
+ * hands the group every tail, the empty one included. bash 5.2.37 tries
+ * some tails and not others there: `[[ a == *!(a) ]]` and
+ * `[[ '' == *@(|b) ]]` fail, and `[[ '' == *!(a)x ]]` succeeds.
  */
 class Matcher {
   private readonly name: readonly string[]
   private readonly pattern: readonly string[]
-  private readonly classes = new Map<number, number>()
-  readonly groups = new Map<number, { end: number; branches: [number, number][] }>()
+  private readonly classes: Map<number, number>
+  private readonly groups: Map<number, { end: number; branches: [number, number][] }>
   private readonly memo = new Map<string, Positions>()
+  private readonly runs = new Map<string, string>()
   private readonly transitions = new Map<number, readonly number[]>()
   private readonly period: boolean
 
@@ -124,40 +169,11 @@ class Matcher {
     this.period = period && name.startsWith('.')
     this.name = Array.from(name)
     this.pattern = Array.from(pattern)
-    const p = this.pattern
-    const stack: { open: number; starts: number[]; literalDepth: number }[] = []
-    let i = 0
-    while (i < p.length) {
-      const c = p[i] ?? ''
-      if (c === '[') {
-        const end = classEnd(p, i, true, true)
-        if (end >= 0) {
-          this.classes.set(i, end + 1)
-          i = end + 1
-          continue
-        }
-      }
-      if (extglob && '@?*+!'.includes(c) && p[i + 1] === '(') {
-        stack.push({ open: i, starts: [i + 2], literalDepth: 0 })
-        i += 2
-        continue
-      }
-      const frame = stack.at(-1)
-      if (frame && c === '(') frame.literalDepth += 1
-      else if (frame && c === ')' && frame.literalDepth > 0) frame.literalDepth -= 1
-      else if (frame && c === '|' && frame.literalDepth === 0) frame.starts.push(i + 1)
-      else if (frame && c === ')') {
-        stack.pop()
-        this.groups.set(frame.open, {
-          end: i + 1,
-          branches: frame.starts.map((start, j) => [start, (frame.starts[j + 1] ?? i + 1) - 1]),
-        })
-      }
-      i += 1
-    }
-
-    for (const [opened, { end, branches }] of this.groups) {
-      const operator = p[opened]
+    const [classes, groups] = scan(this.pattern, extglob)
+    this.classes = classes
+    this.groups = groups
+    for (const [opened, { end, branches }] of groups) {
+      const operator = this.pattern[opened]
       if (operator === '!') continue
       this.transitions.set(opened, [
         ...branches.map(([a]) => a),
@@ -170,12 +186,9 @@ class Matcher {
   }
 
   matches(): boolean {
-    if (
-      this.groups.size === 0 &&
-      !this.pattern.join('').includes('[:') &&
-      !QUOTED_RE.test(this.pattern.join(''))
-    ) {
-      return fnmatch(this.name.join(''), this.pattern.join(''), false, this.period)
+    const pattern = this.pattern.join('')
+    if (this.groups.size === 0 && !pattern.includes('[:') && !QUOTED_RE.test(pattern)) {
+      return fnmatch(this.name.join(''), pattern, false, this.period)
     }
     return this.ends(0, this.pattern.length, 0).contains(this.name.length)
   }
@@ -210,18 +223,25 @@ class Matcher {
     hi: number,
     start: number,
   ): Generator<[number, number, number], Positions, Positions> {
-    if (hi === lo + 1 && this.pattern[lo] === '*') {
-      return this.period && start === 0
-        ? new Positions()
-        : new Positions([[start, this.name.length + 1]])
-    }
+    const size = this.name.length
     const pending = new Map<number, Set<number>>([[start, new Set([lo])]])
     const scheduled = new Map<number, Uint32Array>()
     const accepted: [number, number][] = []
-    for (let position = start; position <= this.name.length; position += 1) {
+    for (let position = start; position <= size; position += 1) {
       if (pending.size === 0) break
       const seen = pending.get(position) ?? new Set<number>()
       pending.delete(position)
+      if (pending.size === 0) {
+        const states = [...seen].sort((a, b) => a - b).join(',')
+        const at = `${String(lo)}:${String(hi)}:${String(position)}:${states}`
+        const run = this.runs.get(at) ?? `${String(lo)}:${String(hi)}:${String(start)}`
+        this.runs.set(at, run)
+        const done = this.memo.get(run)
+        if (done) {
+          const tail = done.subtract(new Positions([[0, position]]))
+          return new Positions([...accepted, ...tail.spans])
+        }
+      }
       const active = [...seen]
       const schedule = (target: number, offset = position): void => {
         if (offset === position) {
@@ -253,21 +273,23 @@ class Matcher {
         const c = this.pattern[i] ?? ''
         const group = this.groups.get(i)
         if (group && group.end <= hi) {
-          if (this.period && position === 0) continue
+          let links = scheduled.get(group.end)
+          if (
+            (this.period && position === 0) ||
+            (seen.has(group.end) && links !== undefined && unseen(links, position + 1) > size)
+          )
+            continue
           const matched: (readonly [number, number])[] = []
           for (const [a, b] of group.branches) {
             const once = yield [a, b, position]
             for (const span of once.spans) matched.push(span)
           }
-          const reached = new Positions([[position, this.name.length + 1]]).subtract(
-            new Positions(matched),
-          )
+          const reached = new Positions([[position, size + 1]]).subtract(new Positions(matched))
           if (reached.contains(position)) schedule(group.end)
           for (const [lower, upper] of reached.spans) {
             if (upper <= position + 1) continue
-            let links = scheduled.get(group.end)
             if (!links) {
-              links = Uint32Array.from({ length: this.name.length + 2 }, (_, i) => i)
+              links = Uint32Array.from({ length: size + 2 }, (_, k) => k)
               scheduled.set(group.end, links)
             }
             let target = unseen(links, Math.max(lower, position + 1))
@@ -284,9 +306,9 @@ class Matcher {
         if (this.period && position === 0 && wildcard) continue
         if (c === '*') {
           schedule(end)
-          if (position < this.name.length) schedule(i, position + 1)
+          if (position < size) schedule(i, position + 1)
         } else if (
-          position < this.name.length &&
+          position < size &&
           (end > i + 1
             ? extendedClassMatches(this.name[position] ?? '', this.pattern.slice(i, end).join(''))
             : c === '?' || (QUOTED_CHARS[c] ?? c) === this.name[position])
@@ -333,8 +355,8 @@ function extendedClassMatches(char: string, pattern: string): boolean {
 
 /** Replace extended groups with a wildcard for word classification. */
 export function patternShape(pattern: string): string {
-  const groups = new Matcher('', pattern).groups
   const chars = Array.from(pattern)
+  const groups = scan(chars)[1]
   let out = ''
   let i = 0
   while (i < chars.length) {
@@ -352,9 +374,9 @@ export function patternShape(pattern: string): string {
 
 /** Split a pathname without splitting slashes inside extended groups. */
 export function patternParts(pattern: string): string[] {
-  if (!/[@?*+!]\(/.test(pattern)) return pattern.split('/')
-  const groups = new Matcher('', pattern).groups
+  if (!EXTGLOB_RE.test(pattern)) return pattern.split('/')
   const chars = Array.from(pattern)
+  const groups = scan(chars)[1]
   const out: string[] = []
   let start = 0
   let i = 0
@@ -374,7 +396,12 @@ export function patternParts(pattern: string): string[] {
   return out
 }
 
-/** CPython's fnmatchcase: a leading caret in a class is a literal member. */
+/**
+ * CPython's `fnmatch.fnmatchcase`: as `fnmatch`, except that a leading `^` in
+ * a class is a member rather than a negation. What a Python tool matches with
+ * (huggingface_hub's `filter_repo_objects`), so a CLI that mimics one reads
+ * `[^a]` as `^` or `a`. Mirrors the Python `fnmatchcase`.
+ */
 export function fnmatchcase(name: string, pattern: string): boolean {
   return match(characters(name), characters(pattern), false)
 }

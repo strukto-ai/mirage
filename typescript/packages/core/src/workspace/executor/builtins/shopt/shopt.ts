@@ -17,7 +17,6 @@ import {
   SET_OPTION_DEFAULTS,
   SET_OPTION_NAMES,
   SHOPT_DEFAULTS,
-  SHOPT_UNSUPPORTED,
 } from '../../../../shell/constants.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { type AliasMark, aliasMark, noteExpanding } from '../alias/index.ts'
@@ -88,11 +87,6 @@ export function handleShopt(
       const on = store[name] ?? table.get(name) ?? false
       if (!on) status = 1
       if (!quiet) lines.push(row(name, on, reusable, setO))
-      continue
-    }
-    if (setting && !setO && SHOPT_UNSUPPORTED.has(name)) {
-      errors.push(`mirage: shopt: ${name}: not supported`)
-      status = 1
       continue
     }
     if (name === 'expand_aliases' && !setO && mark !== null) noteExpanding(session, mark)

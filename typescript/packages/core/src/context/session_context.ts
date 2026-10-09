@@ -221,6 +221,19 @@ export function dotglobActive(): boolean {
 }
 
 /**
+ * Whether the bound session's `shopt -s extglob` is on. Read where
+ * `dotglobActive` is, for the same reason: pathname expansion runs in every
+ * backend's resolveGlob, and whether `@(a|b)` is a group or text decides
+ * both how a word splits into segments and how a name matches one. False
+ * when no session is bound (bash's default), and unanimous across live
+ * sessions otherwise, as `dotglobActive` is.
+ */
+export function extglobActive(): boolean {
+  const live = liveSessions()
+  return live.length > 0 && live.every((sess) => sess.shopts.extglob === true)
+}
+
+/**
  * The bound session's visibility, null when no session is bound.
  *
  * For the op boundary, which runs under the session it serves and

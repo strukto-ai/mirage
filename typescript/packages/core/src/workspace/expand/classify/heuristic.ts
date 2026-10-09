@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../../types.ts'
-import { getCurrentSession } from '../../../context/session_context.ts'
+import { extglobActive } from '../../../context/session_context.ts'
 import { patternShape } from '../../../utils/fnmatch.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { dottedSpelling, posixNormpath } from '../../../utils/path.ts'
@@ -38,15 +38,15 @@ export function classifyWord(
   // like a path at all is a question about the name itself, so the shape
   // tests below read the literal spelling.
   const wordHasGlob = hasGlob(word)
-  const shape =
-    wordHasGlob && getCurrentSession()?.shopts.extglob ? patternShape(word) : unmarkGlobs(word)
+  const shape = wordHasGlob && extglobActive() ? patternShape(word) : unmarkGlobs(word)
 
   if (word.startsWith('/')) {
-    const mount = registry.tryMountFor(word)
+    // A quoted character names the mount literally (`'/team+'/*`).
+    const mount = registry.tryMountFor(unmarkGlobs(word))
     if (mount === null) return word
     let isDir = word.endsWith('/')
     const path = posixNormpath(word)
-    if (!isDir && `${path}/` === mount.prefix) {
+    if (!isDir && `${unmarkGlobs(path)}/` === mount.prefix) {
       isDir = true
     }
     // `rawPath` keeps the spelling as typed, the way relativeSpec does:

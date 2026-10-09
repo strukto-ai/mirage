@@ -649,6 +649,9 @@ async function wordChunks(
   return out
 }
 
+// Patterns read a value one character at a time, as Python's str does,
+// so every cut below falls between whole characters, never inside a
+// surrogate pair.
 function globStrip(
   value: string,
   pattern: string,
@@ -657,12 +660,13 @@ function globStrip(
   extglob = false,
 ): string {
   if (pattern === '') return value
-  const boundaries = [0]
-  for (const char of value) boundaries.push((boundaries.at(-1) ?? 0) + char.length)
-  if (greedy === prefix) boundaries.reverse()
-  for (const i of boundaries) {
-    const candidate = prefix ? value.slice(0, i) : value.slice(i)
-    if (fnmatch(candidate, pattern, extglob)) return prefix ? value.slice(i) : value.slice(0, i)
+  const chars = Array.from(value)
+  const cuts = [...chars.keys(), chars.length]
+  if (greedy === prefix) cuts.reverse()
+  for (const i of cuts) {
+    const head = chars.slice(0, i).join('')
+    const tail = chars.slice(i).join('')
+    if (fnmatch(prefix ? head : tail, pattern, extglob)) return prefix ? tail : head
   }
   return value
 }
@@ -678,15 +682,18 @@ function globReplace(
   extglob = false,
 ): string {
   if (pattern === '') return value
+  const chars = Array.from(value)
+  const n = chars.length
+  const cut = (from: number, to = n): string => chars.slice(from, to).join('')
   if (anchor === '#') {
-    for (let j = value.length; j >= 0; j--) {
-      if (fnmatch(value.slice(0, j), pattern, extglob)) return replacement + value.slice(j)
+    for (let j = n; j >= 0; j--) {
+      if (fnmatch(cut(0, j), pattern, extglob)) return replacement + cut(j)
     }
     return value
   }
   if (anchor === '%') {
-    for (let i = 0; i <= value.length; i++) {
-      if (fnmatch(value.slice(i), pattern, extglob)) return value.slice(0, i) + replacement
+    for (let i = 0; i <= n; i++) {
+      if (fnmatch(cut(i), pattern, extglob)) return cut(0, i) + replacement
     }
     return value
   }
@@ -695,25 +702,24 @@ function globReplace(
   }
   const out: string[] = []
   let i = 0
-  const n = value.length
   while (i < n) {
     let matchEnd = -1
     for (let j = n; j >= i; j--) {
-      if (fnmatch(value.slice(i, j), pattern, extglob)) {
+      if (fnmatch(cut(i, j), pattern, extglob)) {
         matchEnd = j
         break
       }
     }
     if (matchEnd <= i) {
       // No match here (or an empty one, which bash skips over).
-      out.push(value[i] ?? '')
+      out.push(chars[i] ?? '')
       i += 1
       continue
     }
     out.push(replacement)
     i = matchEnd
     if (!replaceAll) {
-      out.push(value.slice(i))
+      out.push(cut(i))
       return out.join('')
     }
   }
@@ -724,8 +730,7 @@ function caseMod(op: string, val: string, pattern: string, extglob = false): str
   if (val === '') return val
   const all = op === '^^' || op === ',,'
   let out = ''
-  for (let i = 0; i < val.length; i++) {
-    const ch = val[i] ?? ''
+  for (const [i, ch] of Array.from(val).entries()) {
     if ((!all && i > 0) || (pattern !== '' && !fnmatch(ch, pattern, extglob))) {
       out += ch
       continue

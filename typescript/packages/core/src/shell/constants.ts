@@ -314,8 +314,6 @@ export const SHOPT_DEFAULTS: ReadonlyMap<string, boolean> = new Map([
   ['xpg_echo', false],
 ])
 
-export const SHOPT_UNSUPPORTED: ReadonlySet<string> = new Set()
-
 export const GROUP_TIER: ReadonlyMap<BuiltinGroup, BuiltinTier> = new Map<
   BuiltinGroup,
   BuiltinTier

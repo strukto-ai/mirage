@@ -466,7 +466,8 @@ async def _node_chunks(
         ntype == NT.PROCESS_SUBSTITUTION
         and context.frame.process_sub is not None
     ):
-        return [Piece(await context.frame.process_sub(ts_node))]
+        path = await context.frame.process_sub(ts_node, execute_fn, call_stack)
+        return [Piece(path)]
 
     if ntype in (NT.COMMAND_SUBSTITUTION, NT.ARITHMETIC_EXPANSION):
         text = await _substitution(

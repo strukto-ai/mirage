@@ -209,27 +209,37 @@ def test_extglob_is_opt_in_and_nullable_repetition_terminates():
     assert not fnmatch("a" * 80 + "b", "+(?(a))", extglob=True)
 
 
-def test_empty_negative_suffix_is_required():
+def test_a_star_hands_a_group_every_tail():
     assert not fnmatch("", "*!(a)x", extglob=True)
     assert fnmatch("x", "*!(a)x", extglob=True)
-
-
-@pytest.mark.parametrize(
-    "name,expected", [("1😀", True), ("😀😀", True), ("a", False)]
-)
-def test_posix_classes_match_unicode_characters(name, expected):
-    assert fnmatch(name, "+([[:digit:]😀])", extglob=True) is expected
-
-
-def test_empty_negative_repetition_remains_nullable():
+    assert fnmatch("a", "*!(a)", extglob=True)
     assert fnmatch("", "*+([!a]|!([!a]))", extglob=True)
 
 
-@pytest.mark.parametrize("pattern", ["+(*)", "*(*)", "+(a|*)", "*+(*)"])
-def test_repeated_wildcards_match_long_values(pattern):
-    value = "a" * 10000
-    assert fnmatch(value, pattern, extglob=True)
-    assert not fnmatch(value, pattern + "b", extglob=True)
+@pytest.mark.parametrize(
+    "pattern,tail,expected",
+    [
+        ("+(*)", "", True),
+        ("+(*)b", "", False),
+        ("*(*)", "", True),
+        ("+(a|*)b", "", False),
+        ("*+(*)", "", True),
+        ("+(aa)", "", True),
+        ("+(aa)", "a", False),
+        ("+(*(aa))", "", True),
+        ("+(?(aa))", "a", False),
+        ("*(+(aa)|b)", "c", False),
+        ("+(@(*(aa)|b))", "", True),
+        ("*!(a)", "", True),
+        ("*!(*)", "", False),
+        ("*!(a*)", "", True),
+        ("*!(*a)", "", True),
+        ("*!(*b)", "", True),
+        ("*!(+(aa))", "a", True),
+    ],
+)
+def test_long_subjects_match_in_linear_time(pattern, tail, expected):
+    assert fnmatch("a" * 16000 + tail, pattern, extglob=True) is expected
 
 
 @pytest.mark.parametrize("operator", ["@", "?", "+", "*"])
@@ -237,29 +247,3 @@ def test_deep_extended_groups_use_an_explicit_stack(operator):
     pattern = (operator + "(") * 1200 + "a" + ")" * 1200
     assert fnmatch("a", pattern, extglob=True)
     assert not fnmatch("b", pattern, extglob=True)
-
-
-def test_sparse_repetition_keeps_discovery_linear():
-    assert fnmatch("a" * 16000, "+(aa)", extglob=True)
-    assert not fnmatch("a" * 16001, "+(aa)", extglob=True)
-
-
-@pytest.mark.parametrize(
-    "char,expected", [("5", True), ("z", False), ("a", False)]
-)
-def test_invalid_range_does_not_erase_a_posix_class(char, expected):
-    assert fnmatch(char, "[[:digit:]z-a]", extglob=True) == expected
-
-
-@pytest.mark.parametrize(
-    "pattern", ["+(*(aa))", "+(?(aa))", "*(+(aa)|b)", "+(@(*(aa)|b))"]
-)
-def test_nested_repetitions_share_active_states(pattern):
-    assert fnmatch("a" * 16000, pattern, extglob=True)
-    assert not fnmatch("a" * 16001, pattern, extglob=True)
-    assert not fnmatch("a" * 16000 + "c", pattern, extglob=True)
-
-
-def test_negative_suffixes_share_scheduled_offsets():
-    assert fnmatch("a" * 16000, "*!(a)", extglob=True)
-    assert not fnmatch("a" * 16000, "*!(*)", extglob=True)

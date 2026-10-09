@@ -31,25 +31,16 @@ import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { guardDispatch } from '../abort.ts'
 import { mergeSignals } from '../../utils/abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
-import { DevVFS } from '../../vfs/dev/dev.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
-import {
-  getCommandName,
-  getParts,
-  getProcessSubBody,
-  getProcessSubDirection,
-  getText,
-  readRow,
-  splitEnvPrefix,
-} from '../../shell/helpers.ts'
+import { getCommandName, getParts, getText, readRow, splitEnvPrefix } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { ArithError, DiscardSignal, ExitSignal } from '../../shell/errors.ts'
-import { NodeType as NT, ProcessSubDirection } from '../../shell/types.ts'
+import { NodeType as NT } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
 import { expandBoundaryGlobs } from '../expand/globs.ts'
-import { type ExecuteFn, expandNode, childLine } from '../expand/node.ts'
+import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { runExternal } from '../executor/command/external.ts'
@@ -117,8 +108,6 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
  * names the command, whose redirects bash had not applied. Mirrors Python's
  * _own_words.
  */
-class ProcessSubError extends Error {}
-
 async function ownWords<T>(node: TSNodeLike, pending: Promise<T>): Promise<T> {
   try {
     return await pending
@@ -423,139 +412,99 @@ async function runCommandBody(
   const claimant = claimantFor(node, handed)
   const executeFn: ExecuteFn = (cmd, opts) => executeFnIn(cmd, { node, ...opts })
 
-  // Input substitutions are buffered virtual files, not host pipes. Each
-  // operand has its own lifetime; they never consume the caller's stdin.
-  const procSubInputs: (readonly [DevVFS, string, number])[] = []
-  const processSub = async (p: TSNodeLike): Promise<string> => {
-    if (getProcessSubDirection(p) === ProcessSubDirection.OUTPUT) throw new ProcessSubError()
-    const [dev] = registry.resolve('/dev/null')
-    if (!(dev instanceof DevVFS)) throw new Error('missing device filesystem')
-    const [path, allocation] = dev.allocateInput()
-    procSubInputs.push([dev, path, allocation])
-    const inner = getProcessSubBody(p)
-    if (inner !== '') {
-      const io = await childLine(context, executeFn, inner, p, callStack)
-      dev.setInput(path, allocation, await materialize(io.stdout))
-      context.frame.diagnostics.push(await materialize(io.stderr))
-    }
-    return path
-  }
-  try {
-    const previous = context.frame.processSub
-    context.frame.processSub = processSub
-    let argv: Argv
-    try {
-      argv = await ownWords(
-        node,
-        expandArgv(
-          parts,
-          context,
-          executeFn,
-          callStack,
-          registry,
-          namespace,
-          sessionView(session, registry.policies, context.frame.diagnostics),
-          routingDecision,
-        ),
-      )
-    } catch (error) {
-      if (!(error instanceof ProcessSubError)) throw error
-      const err = encodeText('mirage: unsupported: process substitution >(...)\n')
-      return [
-        null,
-        new IOResult({ exitCode: 2, stderr: err }),
-        new ExecutionNode({ command: name || 'process_sub', exitCode: 2, stderr: err }),
-      ]
-    } finally {
-      context.frame.processSub = previous
-    }
+  const argv = await ownWords(
+    node,
+    expandArgv(
+      parts,
+      context,
+      executeFn,
+      callStack,
+      registry,
+      namespace,
+      sessionView(session, registry.policies, context.frame.diagnostics),
+      routingDecision,
+    ),
+  )
 
-    // Limits resolve against the expanded name, so `$CMD`-style
-    // invocations get their real command's policy.
-    // Mount, CLI and external dispatch own their resolved deadlines.
-    const consumer = lookup(argv.name, session, registry, routingDecision)
-    const ownsDeadline =
-      !argv.name.includes('/') &&
-      (consumer === Consumer.EXTERNAL ||
-        consumer === Consumer.MOUNT ||
-        consumer === Consumer.CLI ||
-        INTERPRETER_NAMES.has(argv.name))
-    const resolved =
-      argv.name !== '' && !ownsDeadline
-        ? resolveLimit(argv.name, [], null, null, registry.commandLimits, session.commandLimits)
-        : null
-    const timeout = resolved !== null ? resolved.timeoutSeconds : null
-    // Capture xtrace before the body runs so `set -x` itself is not
-    // traced (bash enables tracing only for the following commands). A body
-    // that writes as it runs is traced before it starts.
-    let xtrace = session.shellOptions.xtrace === true && argv.name !== ''
-    if (xtrace && sink !== undefined) {
-      await sink.emit(Channel.STDERR, traceCommand([argv.name, ...argv.args]))
-      xtrace = false
-    }
-    const [rawStdout, io, execNode] = await runWithTimeout(
-      runArgv(
-        recurse,
-        dispatch,
-        registry,
-        namespace,
-        executeFn,
-        argv,
-        context,
-        stdin,
-        callStack,
-        jobTable,
-        runtimeBindings,
-        routingDecision,
-        signal,
-        readRow(node),
-        agentId,
-        redirectPathsFor(node),
-        claimant,
-        sink,
-        redirectRunnerFor(node),
-        parser,
-        seedPrefix,
-      ),
-      timeout,
-      argv.name !== '' ? argv.name : '?',
-    )
-    let stdout = rawStdout
-    if (io.producer === null && argv.name !== '') {
-      // Builtins and other non-mount routes return no rider; stamp the
-      // expanded name here so postExecute policies keyed on a command
-      // (echo, printf, ...) still see it.
-      io.producer = { command: argv.name, prefixes: [], declared: null }
-    }
-    if (!io.outputFinalized) {
-      io.outputFinalized = true
-      if (
-        session.terminalOutput &&
-        (session.execStdout === null || session.execStdout === '&1') &&
-        io.producer !== null
-      ) {
-        const bound = resolveProducer(
-          io.producer,
-          (prefix, name) => registry.limitOverride(prefix, name),
-          registry.commandLimits,
-          session.commandLimits,
-        )
-        stdout = guardIO(stdout, io, bound, io.producer.command)
-        execNode.exitCode = io.exitCode
-      }
-    }
-    if (xtrace) {
-      const existing = await materialize(io.stderr)
-      io.stderr = concat([traceCommand([argv.name, ...argv.args]), existing])
-    }
-    return [
-      procSubInputs.length > 0 && stdout !== null ? await materialize(stdout) : stdout,
-      io,
-      execNode,
-    ]
-  } finally {
-    for (const [dev, path, allocation] of procSubInputs) dev.releaseInput(path, allocation)
+  // Limits resolve against the expanded name, so `$CMD`-style
+  // invocations get their real command's policy.
+  // Mount, CLI and external dispatch own their resolved deadlines.
+  const consumer = lookup(argv.name, session, registry, routingDecision)
+  const ownsDeadline =
+    !argv.name.includes('/') &&
+    (consumer === Consumer.EXTERNAL ||
+      consumer === Consumer.MOUNT ||
+      consumer === Consumer.CLI ||
+      INTERPRETER_NAMES.has(argv.name))
+  const resolved =
+    argv.name !== '' && !ownsDeadline
+      ? resolveLimit(argv.name, [], null, null, registry.commandLimits, session.commandLimits)
+      : null
+  const timeout = resolved !== null ? resolved.timeoutSeconds : null
+  // Capture xtrace before the body runs so `set -x` itself is not
+  // traced (bash enables tracing only for the following commands). A body
+  // that writes as it runs is traced before it starts.
+  let xtrace = session.shellOptions.xtrace === true && argv.name !== ''
+  if (xtrace && sink !== undefined) {
+    await sink.emit(Channel.STDERR, traceCommand([argv.name, ...argv.args]))
+    xtrace = false
   }
+  const [rawStdout, io, execNode] = await runWithTimeout(
+    runArgv(
+      recurse,
+      dispatch,
+      registry,
+      namespace,
+      executeFn,
+      argv,
+      context,
+      stdin,
+      callStack,
+      jobTable,
+      runtimeBindings,
+      routingDecision,
+      signal,
+      readRow(node),
+      agentId,
+      redirectPathsFor(node),
+      claimant,
+      sink,
+      redirectRunnerFor(node),
+      parser,
+      seedPrefix,
+    ),
+    timeout,
+    argv.name !== '' ? argv.name : '?',
+  )
+  let stdout = rawStdout
+  if (io.producer === null && argv.name !== '') {
+    // Builtins and other non-mount routes return no rider; stamp the
+    // expanded name here so postExecute policies keyed on a command
+    // (echo, printf, ...) still see it.
+    io.producer = { command: argv.name, prefixes: [], declared: null }
+  }
+  if (!io.outputFinalized) {
+    io.outputFinalized = true
+    if (
+      session.terminalOutput &&
+      (session.execStdout === null || session.execStdout === '&1') &&
+      io.producer !== null
+    ) {
+      const bound = resolveProducer(
+        io.producer,
+        (prefix, name) => registry.limitOverride(prefix, name),
+        registry.commandLimits,
+        session.commandLimits,
+      )
+      stdout = guardIO(stdout, io, bound, io.producer.command)
+      execNode.exitCode = io.exitCode
+    }
+  }
+  if (xtrace) {
+    const existing = await materialize(io.stderr)
+    io.stderr = concat([traceCommand([argv.name, ...argv.args]), existing])
+  }
+  return [stdout, io, execNode]
 }
 
 async function runArgv(

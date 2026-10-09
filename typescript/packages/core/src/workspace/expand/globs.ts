@@ -50,13 +50,13 @@ export interface GlobOptions {
   nullglob: boolean
   failglob: boolean
   globstar: boolean
-  extglob?: boolean
+  extglob: boolean
 }
 
 /** Whether a mount command's glob must expand here rather than push
  * down: the backend knows none of these. */
 export function globNeedsShell(opts: GlobOptions): boolean {
-  return opts.nullglob || opts.failglob || opts.globstar || (opts.extglob ?? false)
+  return opts.nullglob || opts.failglob || opts.globstar || opts.extglob
 }
 
 export function globOptions(session: SessionState): GlobOptions {
@@ -422,13 +422,18 @@ export async function resolveGlobs(
   // set -f: skip resolution entirely, so every glob word keeps its
   // literal spelling like a zero-match glob.
   if (noglob) return classified.map((item) => literalWord(item))
-  const opts: GlobOptions = options ?? { nullglob: false, failglob: false, globstar: false }
+  const opts: GlobOptions = options ?? {
+    nullglob: false,
+    failglob: false,
+    globstar: false,
+    extglob: false,
+  }
   const result: (string | PathSpec)[] = []
   for (const item of classified) {
     if (item instanceof PathSpec && item.pattern !== null) {
       // A pattern word no mount owns stays the literal word like a
       // zero-match glob.
-      const mount = registry.tryMountFor(item.virtual)
+      const mount = registry.tryMountFor(unmarkGlobs(item.virtual))
       if (mount === null) {
         result.push(item)
         continue

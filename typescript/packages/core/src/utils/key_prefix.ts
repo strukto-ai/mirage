@@ -14,6 +14,7 @@
 
 import { lstripSlash, rstripSlash, stripSlash } from '../utils/slash.ts'
 import { PathSpec } from '../types.ts'
+import { QUOTED_CHARS } from './fnmatch.ts'
 
 /**
  * Normalize a key prefix, the one rule every object-key backend applies on
@@ -57,9 +58,17 @@ export function strip(prefix: string, key: string): string {
  *   stripMount('/database/x.txt', '/data')  -> '/database/x.txt'
  *   stripMount('/data', '/data')            -> '/'
  *   stripMount('/x.txt', '')                -> '/x.txt'
+ *
+ * A glob word's quote marks (`glob_walk.markGlobs`) read as the characters
+ * they stand for, one for one: a quoted prefix still names its mount
+ * (`'/team+'/*`), and the rest keeps its marks.
  */
 export function stripMount(virtual: string, prefix: string): string {
-  if (prefix !== '' && virtual.startsWith(prefix)) {
+  const head = virtual.slice(0, prefix.length)
+  if (
+    prefix !== '' &&
+    (head === prefix || Array.from(head, (c) => QUOTED_CHARS[c] ?? c).join('') === prefix)
+  ) {
     const rest = virtual.slice(prefix.length)
     if (prefix.endsWith('/') || rest === '' || rest.startsWith('/')) {
       return rest === '' ? '/' : rest

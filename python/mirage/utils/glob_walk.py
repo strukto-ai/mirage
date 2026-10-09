@@ -20,14 +20,15 @@ from typing import Any, Protocol
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.context import (
-    dotglob_active,
-    get_current_session,
-    session_visibility,
-)
+from mirage.context import dotglob_active, extglob_active, session_visibility
 from mirage.errors.constants import WALK_ERRORS
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.fnmatch import QUOTED_CHARS, fnmatch, pattern_parts
+from mirage.utils.fnmatch import (
+    EXTGLOB_RE,
+    QUOTED_CHARS,
+    fnmatch,
+    pattern_parts,
+)
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import rekey
 from mirage.view.types import ChildMounts, LinkTargetStat
@@ -43,12 +44,9 @@ def _meta_index(pattern: str) -> int:
         idx = pattern.find(ch)
         if idx != -1 and (first == -1 or idx < first):
             first = idx
-    session = get_current_session()
-    if session is not None and session.shopts.get("extglob"):
-        for ch in "@+!":
-            idx = pattern.find(ch + "(")
-            if idx >= 0 and (first < 0 or idx < first):
-                first = idx
+    opener = EXTGLOB_RE.search(pattern) if extglob_active() else None
+    if opener is not None and (first == -1 or opener.start() < first):
+        first = opener.start()
     return first
 
 
@@ -221,11 +219,8 @@ def has_glob(segment: str) -> bool:
     Args:
         segment (str): one path component.
     """
-    session = get_current_session()
     return any(ch in segment for ch in GLOB_CHARS) or (
-        session is not None
-        and bool(session.shopts.get("extglob"))
-        and any(c + "(" in segment for c in "@+!")
+        extglob_active() and EXTGLOB_RE.search(segment) is not None
     )
 
 
@@ -376,10 +371,7 @@ def glob_parts(pattern: str) -> list[str]:
     Args:
         pattern (str): pathname with quote marks still intact.
     """
-    session = get_current_session()
-    if session is not None and session.shopts.get("extglob"):
-        return pattern_parts(pattern)
-    return pattern.split("/")
+    return pattern_parts(pattern) if extglob_active() else pattern.split("/")
 
 
 def spell_match(raw: str, virtual: str, walked: int) -> str:
@@ -416,12 +408,8 @@ def glob_name_matches(name: str, pattern: str) -> bool:
         name (str): the entry's own name, no directory part.
         pattern (str): the segment, marks already resolved.
     """
-    session = get_current_session()
     return fnmatch(
-        name,
-        pattern,
-        extglob=session is not None and bool(session.shopts.get("extglob")),
-        period=not dotglob_active(),
+        name, pattern, extglob=extglob_active(), period=not dotglob_active()
     )
 
 

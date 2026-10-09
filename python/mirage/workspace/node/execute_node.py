@@ -14,10 +14,11 @@
 
 import asyncio
 import time
-from contextlib import nullcontext
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from functools import partial
-from typing import Any, Callable
+from typing import Any
 
 from mirage.cache.index.scope import command_scope
 from mirage.context import (
@@ -33,7 +34,7 @@ from mirage.context import (
 from mirage.context.session_context import redirect_syntax_for
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, materialize
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.base import Runtime
@@ -60,6 +61,8 @@ from mirage.shell.helpers import (
     get_negated_command,
     get_parts,
     get_pipeline_stages,
+    get_process_sub_body,
+    get_process_sub_direction,
     get_redirects,
     get_text,
     get_unset_args,
@@ -71,8 +74,15 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
 from mirage.shell.parse.names import literal_text
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import PipelineStages, Redirect, RedirectKind
+from mirage.shell.types import (
+    PipelineStages,
+    ProcessSubDirection,
+    Redirect,
+    RedirectKind,
+    TSNodeLike,
+)
 from mirage.types import PathSpec
+from mirage.vfs.dev.dev import DevVFS
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
@@ -112,7 +122,7 @@ from mirage.workspace.expand import (
     expand_redirect,
 )
 from mirage.workspace.expand.globs import glob_options, resolve_globs
-from mirage.workspace.expand.node import expand_arith
+from mirage.workspace.expand.node import child_line, expand_arith
 from mirage.workspace.expand.pattern import expand_pattern
 from mirage.workspace.lookup.constants import BASH_BUILTINS
 from mirage.workspace.mount import MountRegistry
@@ -1054,48 +1064,55 @@ async def execute_node(
             ),
         )
     await execution_scope.checkpoint(cancel)
-    # What expanding the node printed (a substitution's stderr) goes out
-    # with the node's own stderr, unless its caller collects it: a simple
-    # command's words expand before its redirects apply.
-    if not own_diagnostics:
-        return await _execute_node(
-            dispatch,
-            registry,
-            namespace,
-            job_table,
-            execute_fn,
-            agent_id,
-            node,
-            context,
-            stdin,
-            call_stack,
-            cancel,
-            routing_decision,
-            sink,
-            handed,
-            execution_scope,
-            own_diagnostics=False,
-        )
+    run = partial(
+        _execute_node,
+        dispatch,
+        registry,
+        namespace,
+        job_table,
+        execute_fn,
+        agent_id,
+        node,
+        context,
+        stdin,
+        call_stack,
+        cancel,
+        routing_decision,
+        sink,
+        handed,
+        execution_scope,
+    )
+    with _process_inputs(context, registry) as held:
+        # What expanding the node printed (a substitution's stderr) goes
+        # out with the node's own stderr, unless its caller collects it: a
+        # simple command's words expand before its redirects apply.
+        if own_diagnostics:
+            stdout, io, exec_node = await _diagnosed(node, context, run)
+        else:
+            stdout, io, exec_node = await run(own_diagnostics=False)
+        # The device files go with the node, so a command still reading one
+        # is read out first.
+        if held and stdout is not None:
+            stdout = await materialize(stdout)
+        return stdout, io, exec_node
+
+
+async def _diagnosed(
+    node: Any,
+    context: EvaluationContext,
+    run: Callable[[], Awaitable[tuple[Any, IOResult, ExecutionNode]]],
+) -> tuple[Any, IOResult, ExecutionNode]:
+    """Run a node with its own diagnostics, flushed ahead of its stderr.
+
+    Args:
+        node (Any): the node, whose head word names a builtin's message.
+        context (EvaluationContext): the evaluation the node runs in.
+        run (Callable): the node's run.
+    """
     outer = context.frame.diagnostics
     context.frame.diagnostics = []
     try:
-        stdout, io, exec_node = await _execute_node(
-            dispatch,
-            registry,
-            namespace,
-            job_table,
-            execute_fn,
-            agent_id,
-            node,
-            context,
-            stdin,
-            call_stack,
-            cancel,
-            routing_decision,
-            sink,
-            handed,
-            execution_scope,
-        )
+        stdout, io, exec_node = await run()
         if context.frame.diagnostics:
             err = _diagnostic_stderr(node, context)
             io.stderr = err + await io.materialize_stderr()
@@ -1106,6 +1123,57 @@ async def execute_node(
         raise
     finally:
         context.frame.diagnostics = outer
+
+
+@contextmanager
+def _process_inputs(
+    context: EvaluationContext, registry: MountRegistry
+) -> Iterator[list[tuple[DevVFS, str, int]]]:
+    """Open the input process substitutions a node's own words hold.
+
+    Each ``<(...)`` runs as its word expands, in order with the word's
+    other expansions and through the evaluator a ``$(...)`` there uses,
+    and reads back as a buffered device file rather than a host pipe. The
+    files go when the node ends; a nested node opens its own, so each
+    lasts as long as the command naming it. An output ``>(...)`` is
+    refused, as it is as a redirect target.
+
+    Args:
+        context (EvaluationContext): the evaluation the node runs in.
+        registry (MountRegistry): mount registry holding ``/dev``.
+    """
+    held: list[tuple[DevVFS, str, int]] = []
+
+    async def open_input(
+        node: TSNodeLike,
+        execute_fn: Callable[..., Any],
+        call_stack: CallStack | None,
+    ) -> str:
+        if get_process_sub_direction(node) == ProcessSubDirection.OUTPUT:
+            raise ExitSignal(
+                2,
+                stderr=b"mirage: unsupported: process substitution >(...)\n",
+                contained_code=2,
+            )
+        dev, _, _ = registry.resolve("/dev/null")
+        assert isinstance(dev, DevVFS)
+        path, allocation = dev.allocate_input()
+        held.append((dev, path, allocation))
+        inner = get_process_sub_body(node)
+        if inner:
+            io = await child_line(context, execute_fn, inner, node, call_stack)
+            dev.set_input(path, allocation, await materialize(io.stdout))
+            context.frame.diagnostics.append(await materialize(io.stderr))
+        return path
+
+    previous = context.frame.process_sub
+    context.frame.process_sub = open_input
+    try:
+        yield held
+    finally:
+        context.frame.process_sub = previous
+        for dev, path, allocation in held:
+            dev.release_input(path, allocation)
 
 
 def _diagnostic_stderr(node: Any, context: EvaluationContext) -> bytes:

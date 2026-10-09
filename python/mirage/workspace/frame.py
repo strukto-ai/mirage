@@ -1,6 +1,8 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Any
 
+from mirage.shell.call_stack import CallStack
 from mirage.shell.types import TSNodeLike
 
 
@@ -11,7 +13,12 @@ class ExecutionFrame:
     diagnostics: list[str | bytes] = field(default_factory=list)
     cmdsub_seq: int = 0
     cmdsub_status: int = 0
-    process_sub: Callable[[TSNodeLike], Awaitable[str]] | None = None
+    process_sub: (
+        Callable[
+            [TSNodeLike, Callable[..., Any], CallStack | None], Awaitable[str]
+        ]
+        | None
+    ) = None
 
     def fork(self) -> "ExecutionFrame":
         """A child evaluation's frame, which starts empty.

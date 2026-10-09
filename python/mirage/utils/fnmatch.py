@@ -14,12 +14,13 @@
 
 import fnmatch as _stdlib_fnmatch
 import re
-from collections.abc import Generator, Iterable, Iterator
+from collections.abc import Generator, Iterable
 
 from mirage.utils.posix import POSIX_CLASSES
 
 QUOTED_CHARS = {chr(0xFDD0 + i): ch for i, ch in enumerate("*?[@+!()|")}
 QUOTED_RE = re.compile("[\ufdd0-\ufdd8]")
+EXTGLOB_RE = re.compile(r"[@?*+!]\(")
 
 
 class _Positions:
@@ -42,13 +43,6 @@ class _Positions:
             else:
                 merged.append((lo, hi))
         self.spans = tuple(merged)
-
-    def __bool__(self) -> bool:
-        return bool(self.spans)
-
-    def __iter__(self) -> Iterator[int]:
-        for lo, hi in self.spans:
-            yield from range(lo, hi)
 
     def contains(self, position: int) -> bool:
         return any(lo <= position < hi for lo, hi in self.spans)
@@ -88,18 +82,80 @@ def _unseen(links: list[int], position: int) -> int:
     return root
 
 
+def _scan(
+    pattern: str, extglob: bool = True
+) -> tuple[dict[int, int], dict[int, tuple[int, tuple[tuple[int, int], ...]]]]:
+    """A pattern's bracket expressions and extended groups, by offset.
+
+    A bracket expression maps to the offset after its ``]``, a POSIX
+    class inside it read whole. A group maps to the offset after its
+    ``)`` and each branch's span; a ``(`` inside a branch nests a literal
+    pair.
+
+    Args:
+        pattern (str): glob with quote marks intact.
+        extglob (bool): whether ``@(`` and its kin open groups.
+    """
+    classes: dict[int, int] = {}
+    groups: dict[int, tuple[int, tuple[tuple[int, int], ...]]] = {}
+    stack: list[tuple[int, list[int]]] = []
+    literal_depth: list[int] = []
+    i = 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "[":
+            j = i + 1
+            if pattern[j : j + 1] in ("!", "^"):
+                j += 1
+            if pattern[j : j + 1] == "]":
+                j += 1
+            while j < len(pattern) and pattern[j] != "]":
+                close = (
+                    pattern.find(":]", j + 2)
+                    if pattern.startswith("[:", j)
+                    else -1
+                )
+                j = close + 2 if close >= 0 else j + 1
+            if j < len(pattern):
+                classes[i] = j + 1
+                i = j + 1
+                continue
+        if extglob and c in "@?*+!" and pattern[i + 1 : i + 2] == "(":
+            stack.append((i, [i + 2]))
+            literal_depth.append(0)
+            i += 2
+            continue
+        if stack and c == "(":
+            literal_depth[-1] += 1
+        elif stack and c == ")" and literal_depth[-1]:
+            literal_depth[-1] -= 1
+        elif stack and c == "|" and not literal_depth[-1]:
+            stack[-1][1].append(i + 1)
+        elif stack and c == ")":
+            opened, starts = stack.pop()
+            literal_depth.pop()
+            stops = [start - 1 for start in starts[1:]] + [i]
+            groups[opened] = (i + 1, tuple(zip(starts, stops)))
+        i += 1
+    return classes, groups
+
+
 class _Matcher:
     """Match extended groups by reachable character positions.
 
-    Positive groups compile to epsilon transitions. The active states
-    advance together over the subject, so nested repetitions share work
-    at each offset instead of retaining a suffix result per repetition.
-    Negative groups request memoized branch endpoints on an explicit stack.
+    Positive groups compile to epsilon transitions, so the active states
+    advance together over the subject and nested repetitions share the
+    work at each offset. A negative group asks for each branch's end
+    positions from an offset, on an explicit stack. Runs of one branch
+    from different offsets share their tails: once nothing is scheduled
+    past the current offset, a run's states there decide the rest, so a
+    run reaching the states an earlier run had at that offset ends as it
+    did.
 
-    Deliberate GNU 5.2 divergence: empty subjects obey group composition.
-    GNU's star fast path accepts ``*!(a)x`` but rejects
-    ``*+([!a]|!([!a]))`` against empty text; this matcher requires the
-    former's suffix and accepts the latter's nullable group.
+    Deliberate GNU 5.2 divergence: a ``*`` directly before an extended
+    group hands the group every tail, the empty one included. bash 5.2.37
+    tries some tails and not others there: ``[[ a == *!(a) ]]`` and
+    ``[[ '' == *@(|b) ]]`` fail, and ``[[ '' == *!(a)x ]]`` succeeds.
 
     Args:
         name (str): text to match.
@@ -118,51 +174,12 @@ class _Matcher:
         self.name = name
         self.pattern = pattern
         self.period = period and name.startswith(".")
-        self.classes: dict[int, int] = {}
-        self.groups: dict[int, tuple[int, tuple[tuple[int, int], ...]]] = {}
+        self.classes, self.groups = _scan(pattern, extglob)
         self.memo: dict[tuple[int, int, int], _Positions] = {}
+        self.runs: dict[
+            tuple[int, int, int, frozenset[int]], tuple[int, int, int]
+        ] = {}
         self.transitions: dict[int, tuple[int, ...]] = {}
-        stack: list[tuple[int, list[int]]] = []
-        literal_depth: list[int] = []
-        i = 0
-        while i < len(pattern):
-            c = pattern[i]
-            if c == "[":
-                j = i + 1
-                if pattern[j : j + 1] in ("!", "^"):
-                    j += 1
-                if pattern[j : j + 1] == "]":
-                    j += 1
-                while j < len(pattern) and pattern[j] != "]":
-                    close = (
-                        pattern.find(":]", j + 2)
-                        if pattern.startswith("[:", j)
-                        else -1
-                    )
-                    j = close + 2 if close >= 0 else j + 1
-                end = j if j < len(pattern) else -1
-                if end >= 0:
-                    self.classes[i] = end + 1
-                    i = end + 1
-                    continue
-            if extglob and c in "@?*+!" and pattern[i + 1 : i + 2] == "(":
-                stack.append((i, [i + 2]))
-                literal_depth.append(0)
-                i += 2
-                continue
-            if stack and c == "(":
-                literal_depth[-1] += 1
-            elif stack and c == ")" and literal_depth[-1]:
-                literal_depth[-1] -= 1
-            elif stack and c == "|" and not literal_depth[-1]:
-                stack[-1][1].append(i + 1)
-            elif stack and c == ")":
-                opened, starts = stack.pop()
-                literal_depth.pop()
-                stops = [start - 1 for start in starts[1:]] + [i]
-                self.groups[opened] = (i + 1, tuple(zip(starts, stops)))
-            i += 1
-
         for opened, (end, branches) in self.groups.items():
             operator = pattern[opened]
             if operator == "!":
@@ -192,34 +209,25 @@ class _Matcher:
             hi (int): end of the pattern slice.
             start (int): first character to match.
         """
-        key = (lo, hi, start)
-        stack = [(key, self.evaluate(lo, hi, start), False)]
-        answer = _Positions()
+        stack = [((lo, hi, start), self.evaluate(lo, hi, start))]
+        answer: _Positions | None = None
         while stack:
-            current, frame, started = stack[-1]
+            key, frame = stack[-1]
             try:
-                if started:
-                    dependency = frame.send(answer)
-                else:
-                    stack[-1] = (current, frame, True)
-                    dependency = next(frame)
+                dependency = frame.send(answer)
             except StopIteration as done:
-                answer = done.value
-                self.memo[current] = answer
+                answer = self.memo[key] = done.value
                 stack.pop()
                 continue
-            cached = self.memo.get(dependency)
-            if cached is not None:
-                answer = cached
-            else:
-                child = self.evaluate(*dependency)
-                stack.append((dependency, child, False))
-                answer = _Positions()
+            answer = self.memo.get(dependency)
+            if answer is None:
+                stack.append((dependency, self.evaluate(*dependency)))
+        assert answer is not None
         return answer
 
     def evaluate(
         self, lo: int, hi: int, start: int
-    ) -> Generator[tuple[int, int, int], _Positions, _Positions]:
+    ) -> Generator[tuple[int, int, int], _Positions | None, _Positions]:
         """Yield dependencies so nested groups never consume the host stack.
 
         Args:
@@ -227,19 +235,22 @@ class _Matcher:
             hi (int): end of the pattern slice.
             start (int): first character to match.
         """
-        if self.pattern[lo:hi] == "*":
-            return (
-                _Positions()
-                if self.period and start == 0
-                else _Positions(((start, len(self.name) + 1),))
-            )
+        size = len(self.name)
         pending: dict[int, set[int]] = {start: {lo}}
         scheduled: dict[int, list[int]] = {}
         accepted: list[tuple[int, int]] = []
-        for position in range(start, len(self.name) + 1):
+        for position in range(start, size + 1):
             if not pending:
                 break
             seen = pending.pop(position, set())
+            if not pending:
+                run = self.runs.setdefault(
+                    (lo, hi, position, frozenset(seen)), (lo, hi, start)
+                )
+                done = self.memo.get(run)
+                if done is not None:
+                    tail = done.subtract(_Positions(((0, position),)))
+                    return _Positions([*accepted, *tail.spans])
             active = list(seen)
             while active:
                 i = active.pop()
@@ -256,26 +267,30 @@ class _Matcher:
                 c = self.pattern[i]
                 group = self.groups.get(i)
                 if group is not None and group[0] <= hi:
-                    if self.period and position == 0:
-                        continue
                     end, branches = group
+                    links = scheduled.get(end)
+                    if (self.period and position == 0) or (
+                        end in seen
+                        and links is not None
+                        and _unseen(links, position + 1) > size
+                    ):
+                        continue
                     matched: list[tuple[int, int]] = []
                     for a, b in branches:
                         once = yield (a, b, position)
+                        assert once is not None
                         matched.extend(once.spans)
-                    reached = _Positions(
-                        ((position, len(self.name) + 1),)
-                    ).subtract(_Positions(matched))
+                    reached = _Positions(((position, size + 1),)).subtract(
+                        _Positions(matched)
+                    )
                     if reached.contains(position) and end not in seen:
                         seen.add(end)
                         active.append(end)
                     for lower, upper in reached.spans:
                         if upper <= position + 1:
                             continue
-                        links = scheduled.get(end)
                         if links is None:
-                            links = list(range(len(self.name) + 2))
-                            scheduled[end] = links
+                            links = scheduled[end] = list(range(size + 2))
                         target = _unseen(links, max(lower, position + 1))
                         while target < upper:
                             pending.setdefault(target, set()).add(end)
@@ -290,9 +305,9 @@ class _Matcher:
                     if end not in seen:
                         seen.add(end)
                         active.append(end)
-                    if position < len(self.name):
+                    if position < size:
                         pending.setdefault(position + 1, set()).add(i)
-                elif position < len(self.name) and (
+                elif position < size and (
                     _extended_class_matches(
                         self.name[position], self.pattern[i:end]
                     )
@@ -341,7 +356,7 @@ def pattern_shape(pattern: str) -> str:
     Args:
         pattern (str): a word with quote marks still intact.
     """
-    groups = _Matcher("", pattern).groups
+    groups = _scan(pattern)[1]
     out: list[str] = []
     i = 0
     while i < len(pattern):
@@ -360,9 +375,9 @@ def pattern_parts(pattern: str) -> list[str]:
     Args:
         pattern (str): pathname with quote marks still intact.
     """
-    if not any(c + "(" in pattern for c in "@?*+!"):
+    if not EXTGLOB_RE.search(pattern):
         return pattern.split("/")
-    groups = _Matcher("", pattern).groups
+    groups = _scan(pattern)[1]
     out: list[str] = []
     start = i = 0
     while i < len(pattern):
@@ -422,9 +437,10 @@ def fnmatch(
         extglob (bool): interpret Bash's extended pattern groups.
         period (bool): require an explicit leading dot in pathname matches.
     """
-    if QUOTED_RE.search(pattern) or (
-        extglob
-        and ("[:" in pattern or any(c + "(" in pattern for c in "@?*+!"))
+    if (
+        "[:" in pattern
+        or QUOTED_RE.search(pattern)
+        or (extglob and EXTGLOB_RE.search(pattern))
     ):
         return _Matcher(name, pattern, period, extglob).matches()
     if period and name.startswith(".") and not pattern.startswith("."):

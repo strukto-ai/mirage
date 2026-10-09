@@ -310,8 +310,6 @@ SHOPT_DEFAULTS: dict[str, bool] = {
     "xpg_echo": False,
 }
 
-SHOPT_UNSUPPORTED: frozenset[str] = frozenset()
-
 # What each option reads as before anything sets it, pinned from
 # `bash -c 'set -o'` on debian:stable-slim (5.2.37). Only three are on,
 # and all three are on for a non-interactive shell too, so this is the

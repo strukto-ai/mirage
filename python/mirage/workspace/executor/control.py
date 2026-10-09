@@ -563,17 +563,11 @@ async def handle_case(
     # Each arm reads the fd 0 the `case` started with, so an `exec < f`
     # in one reaches an arm it falls into.
     bound = fd0_binding(session)
+    extglob = bool(session.shopts.get("extglob"))
     for patterns, body, terminator in items:
         if not (
             fallthrough
-            or any(
-                fnmatch(
-                    word,
-                    p,
-                    extglob=session.shopts.get("extglob", False),
-                )
-                for p in patterns
-            )
+            or any(fnmatch(word, p, extglob=extglob) for p in patterns)
         ):
             continue
         try:

@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { dotglobActive, getCurrentSession, sessionVisibility } from '../context/session_context.ts'
+import { dotglobActive, extglobActive, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
 import type { ChildMounts } from '../view/types.ts'
 import { type FileStat, FileType, PathSpec } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
-import { fnmatch, patternParts, QUOTED_CHARS } from './fnmatch.ts'
+import { EXTGLOB_RE, fnmatch, patternParts, QUOTED_CHARS } from './fnmatch.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 import { compareCodePoints } from './sort.ts'
@@ -80,12 +80,8 @@ export function globPrefix(pattern: string | null | undefined): string {
     const idx = pattern.indexOf(ch)
     if (idx !== -1 && (metaIndex === -1 || idx < metaIndex)) metaIndex = idx
   }
-  if (getCurrentSession()?.shopts.extglob) {
-    for (const opener of ['@(', '+(', '!(']) {
-      const idx = pattern.indexOf(opener)
-      if (idx !== -1 && (metaIndex === -1 || idx < metaIndex)) metaIndex = idx
-    }
-  }
+  const opener = extglobActive() ? pattern.search(EXTGLOB_RE) : -1
+  if (opener !== -1 && (metaIndex === -1 || opener < metaIndex)) metaIndex = opener
   if (metaIndex === -1) return ''
   return unmarkGlobs(pattern.slice(0, metaIndex))
 }
@@ -190,8 +186,7 @@ export const DEFAULT_MAX_GLOB_MATCHES = 10000
 
 export function hasGlob(segment: string): boolean {
   return (
-    GLOB_CHARS.some((ch) => segment.includes(ch)) ||
-    (!!getCurrentSession()?.shopts.extglob && ['@(', '+(', '!('].some((s) => segment.includes(s)))
+    GLOB_CHARS.some((ch) => segment.includes(ch)) || (extglobActive() && EXTGLOB_RE.test(segment))
   )
 }
 
@@ -311,7 +306,7 @@ export function isWordShaped(p: PathSpec): boolean {
 
 /** Path components under the active shell's pattern grammar. */
 export function globParts(pattern: string): string[] {
-  return getCurrentSession()?.shopts.extglob ? patternParts(pattern) : pattern.split('/')
+  return extglobActive() ? patternParts(pattern) : pattern.split('/')
 }
 
 // Spell a match the way bash expansion would. Bash rewrites only the glob
@@ -483,7 +478,7 @@ export async function resolveGlobWith<A, I>(
  * `fnmatch` directly.
  */
 export function globNameMatches(name: string, pattern: string): boolean {
-  return fnmatch(name, pattern, getCurrentSession()?.shopts.extglob ?? false, !dotglobActive())
+  return fnmatch(name, pattern, extglobActive(), !dotglobActive())
 }
 
 /**

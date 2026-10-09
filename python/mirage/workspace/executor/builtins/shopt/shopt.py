@@ -19,7 +19,6 @@ from mirage.shell.constants import (
     SET_OPTION_DEFAULTS,
     SET_OPTION_NAMES,
     SHOPT_DEFAULTS,
-    SHOPT_UNSUPPORTED,
 )
 from mirage.workspace.executor.builtins.alias import (
     AliasMark,
@@ -125,10 +124,6 @@ async def handle_shopt(
                 status = 1
             if not quiet:
                 lines.append(_row(name, on, reusable, set_o))
-            continue
-        if setting and not set_o and name in SHOPT_UNSUPPORTED:
-            errors.append(f"mirage: shopt: {name}: not supported")
-            status = 1
             continue
         if name == "expand_aliases" and not set_o and mark is not None:
             note_expanding(session, mark)
