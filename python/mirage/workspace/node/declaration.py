@@ -22,7 +22,7 @@ from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import VarAttr, VarKind
-from mirage.shell.xtrace import trace_array, trace_assignment, trace_command
+from mirage.shell.xtrace import trace_array, trace_command
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
@@ -40,9 +40,7 @@ from mirage.workspace.executor.builtins.declare.constants import (
 from mirage.workspace.executor.builtins.declare.declare import (
     declared_kind,
     held_value,
-    identifier_refusal,
     kind_conflict,
-    operand_parts,
     start_local,
 )
 from mirage.workspace.executor.builtins.declare.types import (
@@ -313,8 +311,7 @@ async def execute_declaration(
                 operands.append(expanded)
     cmd_word = "local" if keyword == NT.LOCAL else str(keyword)
     words = [operand for operand in operands if isinstance(operand, str)]
-    xtrace = bool(session.shell_options.get("xtrace"))
-    if xtrace:
+    if session.shell_options.get("xtrace"):
         # Traced once expanded, before the builtin runs and outside its
         # redirects: each array operand, then the command naming them.
         staged = [op for op in operands if not isinstance(op, str)]
@@ -451,22 +448,5 @@ async def execute_declaration(
     else:
         result = await handle_export(
             [*flag_words, *operands], session, handler_view
-        )
-    if xtrace:
-        # Each assignment these two make is traced as it is made, under
-        # the command's own redirects.
-        parts = [
-            operand_parts(word)
-            for word in words
-            if identifier_refusal(cmd_word, word) is None
-        ]
-        io = result[1]
-        io.stderr = (
-            b"".join(
-                trace_assignment(key, val, add)
-                for key, add, val in parts
-                if val is not None
-            )
-            + await io.materialize_stderr()
         )
     return _merge_conversion_errors(result, conversion_errors)

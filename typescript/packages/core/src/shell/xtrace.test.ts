@@ -35,18 +35,18 @@ describe('xtrace rendering', () => {
   })
 
   it('renders a plain assignment', () => {
-    expect(text(traceAssignment('x', '5', false))).toBe('+ x=5\n')
+    expect(traceAssignment('x', '5', false)).toBe('+ x=5')
   })
 
   it('renders an append assignment', () => {
-    expect(text(traceAssignment('x', 'y', true))).toBe('+ x+=y\n')
+    expect(traceAssignment('x', 'y', true)).toBe('+ x+=y')
   })
 
   it('renders an empty value bare', () => {
-    expect(text(traceAssignment('x', '', false))).toBe('+ x=\n')
+    expect(traceAssignment('x', '', false)).toBe('+ x=')
   })
 
   it('quotes an assignment value with spaces', () => {
-    expect(text(traceAssignment('x', 'a b', false))).toBe("+ x='a b'\n")
+    expect(traceAssignment('x', 'a b', false)).toBe("+ x='a b'")
   })
 })
