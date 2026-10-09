@@ -15,6 +15,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { accessSync, constants, statSync } from 'node:fs'
 import { delimiter, resolve } from 'node:path'
+import { debuglog } from 'node:util'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
@@ -44,8 +45,8 @@ function onHostPath(name: string): string {
       const code = (err as NodeJS.ErrnoException).code
       if (code === undefined) throw err
       // Not usable here (not executable, an unreadable entry): the next
-      // entry may be.
-      console.debug(`local: ${candidate} is not a usable interpreter: ${code}`)
+      // entry may be. Opt-in (NODE_DEBUG=mirage), on stderr.
+      debuglog('mirage')('local: %s is not a usable interpreter: %s', candidate, code)
     }
   }
   return name
