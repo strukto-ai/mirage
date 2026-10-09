@@ -329,8 +329,9 @@ export function tokenize(raw: string): string[] {
  *
  * A leading `CHARSET <name>` is consumed and ignored, which is the vendor's
  * own behaviour for UTF-8 and the reason it is handled here rather than
- * rejected: aioimaplib sends `SEARCH CHARSET UTF-8 ...` whenever a criterion
- * carries a non-ASCII byte, and a fake that treated CHARSET as an unknown key
+ * rejected: mirage's Python IMAP client sends `SEARCH CHARSET UTF-8 ...`
+ * whenever a criterion carries a non-ASCII byte, and a fake that treated
+ * CHARSET as an unknown key
  * failed exactly the searches with accented names in them.
  */
 export function searchMessages(raw: string, messages: SearchMsg[]): SearchMsg[] {

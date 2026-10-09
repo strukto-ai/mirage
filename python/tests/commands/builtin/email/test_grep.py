@@ -13,10 +13,6 @@ from mirage.vfs.email import EmailVFS
 from tests.fixtures.vfs_io import io_for
 
 sys.modules.setdefault(
-    "aioimaplib",
-    SimpleNamespace(IMAP4=object, IMAP4_SSL=object),
-)
-sys.modules.setdefault(
     "aiosmtplib",
     SimpleNamespace(SMTP=object, send=AsyncMock()),
 )
