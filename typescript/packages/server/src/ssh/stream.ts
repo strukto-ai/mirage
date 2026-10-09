@@ -446,8 +446,14 @@ export type Send = (data: Uint8Array, stderr: boolean) => Promise<void>
  * output already sent. Mirrors Python's `deliver`.
  */
 export async function deliver(execution: ShellExecution, send: Send): Promise<ExecuteResult> {
-  const prefix: Record<StreamName, Uint8Array> = { stdout: new Uint8Array(0), stderr: new Uint8Array(0) }
-  const tail: Record<StreamName, Uint8Array> = { stdout: new Uint8Array(0), stderr: new Uint8Array(0) }
+  const prefix: Record<StreamName, Uint8Array> = {
+    stdout: new Uint8Array(0),
+    stderr: new Uint8Array(0),
+  }
+  const tail: Record<StreamName, Uint8Array> = {
+    stdout: new Uint8Array(0),
+    stderr: new Uint8Array(0),
+  }
   const total: Record<StreamName, number> = { stdout: 0, stderr: 0 }
   for await (const { stream, data } of execution.events) {
     if (data.byteLength === 0) continue
