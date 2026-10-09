@@ -172,6 +172,9 @@ async def test_a_listing_expires_after_the_ttl(store_factory):
     await asyncio.sleep(1.1)
     assert (await store.list_dir("/dir")).status == LookupStatus.EXPIRED
     assert (await store.get("/dir/a")).entry == got
+    await store.invalidate_dir("/dir")
+    assert (await store.list_dir("/dir")).status == LookupStatus.NOT_FOUND
+    assert (await store.get("/dir/a")).status == LookupStatus.NOT_FOUND
 
 
 @pytest.mark.asyncio
