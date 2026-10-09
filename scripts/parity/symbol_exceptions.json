@@ -539,6 +539,11 @@
    "typescript_only": {
     "LOCAL_CONFIG_KEYS": "A TypeScript config interface lists its keys so an unknown one fails loud at construction; Python's dataclass refuses an unknown field by itself (RuntimeConfig.coerce)."
    }
+  },
+  "runtime/python/local/runtime": {
+   "typescript_only": {
+    "onHostPath": "Finds the interpreter on the host PATH before the child gets a clean env; Python uses shutil.which, and node's standard library has no PATH lookup."
+   }
   }
  }
 }

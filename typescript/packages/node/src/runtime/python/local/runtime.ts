@@ -53,11 +53,10 @@ function onHostPath(name: string): string {
  * Each run spawns `<interpreter> -c <code>`; the code sees the host
  * filesystem, not the workspace mounts. Its environment is the session's
  * and the config `env`, nothing of mirage's own, as a sandlock child
- * gets. Mirrors the
- * python LocalRuntime: the interpreter defaults to `python3` on PATH
- * (node has no embedded python, unlike the python package which
- * defaults to its own interpreter); point the config `home` or the
- * MIRAGE_LOCAL_HOME environment variable at another binary, e.g. a
+ * gets. Mirrors the python LocalRuntime: the interpreter defaults to
+ * `python3` on PATH (node has no embedded python, unlike the python
+ * package which defaults to its own interpreter); point the config `home`
+ * or the MIRAGE_LOCAL_HOME environment variable at another binary, e.g. a
  * project venv whose packages the code needs.
  */
 export class LocalRuntime extends PythonRuntime {
