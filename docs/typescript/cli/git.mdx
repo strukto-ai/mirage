@@ -88,10 +88,13 @@ read-only mount refuses it.
 base. Numeric selectors and `stash@{n}` work with stashes made by native Git.
 Stash creation, application and deletion are not implemented.
 
-`git fsck [--full] [--no-dangling]` checks loose and packed object hashes,
+`git fsck [--full] [--no-dangling] [--unreachable]` checks loose and packed object hashes,
 decoding and connectivity, using refs, the index and reflogs as roots.
 Missing and corrupt objects cause a nonzero exit. Corruption diagnostics
 retain the object ID and cause; their wording can differ from native Git.
+`--unreachable` lists every object outside the reachability of those roots,
+including trees and blobs below an abandoned commit. `--no-dangling`
+suppresses dangling tips independently of unreachable-object reporting.
 
 ## Verbs
 
@@ -121,6 +124,11 @@ git -C /repo log --oneline -n 20
 git -C /repo log --reverse
 git -C /repo log -S delta
 git -C /repo log -G 'del.a' --oneline
+git -C /repo log -G 'del.a' --text -p
+git -C /repo grep -n delta
+git -C /repo grep --cached -n delta
+git -C /repo grep -n delta HEAD~1 -- src
+git -C /repo ls-tree -r --name-only HEAD
 git -C /repo cat-file -p 'HEAD^{tree}'
 printf 'HEAD\n' | git -C /repo cat-file --batch-check
 git -C /repo hash-object -w notes.txt
@@ -141,6 +149,23 @@ git -C /repo diff HEAD~1 HEAD
 git -C /repo diff --stat main...topic
 git -C /repo branch
 ```
+
+`git grep` searches tracked files using their current working-tree content.
+`--cached` searches the index instead, and tree-ish operands search stored
+blobs from those revisions. Path operands after `--` limit the search.
+It shares the shell search matcher, with Git's filename labels, line numbers,
+counts and match status.
+
+`git ls-tree` lists the entries of a tree-ish with their modes, object types
+and IDs. `-r` traverses subtrees, `--name-only` prints paths, and `-z` writes
+verbatim paths with NUL terminators. Literal directory operands select
+subtrees; shell wildcard expansion is separate from tree selection.
+
+`-a` / `--text` makes the diff family render binary content as text and lets
+`log -G` search changes in binary files. `-S` already counts occurrences in
+binary content. Binary `--stat` and `--numstat` rows retain their binary
+classification when a text patch is requested. Combined merge output keeps
+its binary marker; ordinary and per-parent patches honor `--text`.
 
 `log` and `show` take `--pretty`/`--format` with git's grammar: the
 `oneline`, `short`, `medium`, `full` and `fuller` presets, plus

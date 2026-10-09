@@ -38,6 +38,7 @@ export interface FlagSet {
   filesOnly: boolean
   filesWithoutMatch: boolean
   wholeWord: boolean
+  lineRegexp: boolean
   fixedString: boolean
   syntax: RegexSyntax
   onlyMatching: boolean

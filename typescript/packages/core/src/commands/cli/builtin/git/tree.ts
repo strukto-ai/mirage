@@ -16,7 +16,9 @@ import git from 'isomorphic-git'
 
 import { decodeText } from '../../../../shell/bytes.ts'
 import { GitError } from './errors.ts'
+import { resolveObject, unwrapped } from './revparse.ts'
 import { repoArgs, type Repo } from './repo.ts'
+import type { GitObject } from './types.ts'
 
 const SPACE = 0x20
 const NUL = 0x00
@@ -88,16 +90,8 @@ export async function treeEntries(
   treeOid: string,
   prefix = '',
 ): Promise<Map<string, TreeEntry>> {
-  const out = new Map<string, TreeEntry>()
-  for (const entry of await treeItems(repo, treeOid)) {
-    const path = prefix === '' ? entry.path : `${prefix}/${entry.path}`
-    if (entry.mode === TREE_MODE) {
-      for (const [key, value] of await treeEntries(repo, entry.oid, path)) out.set(key, value)
-    } else {
-      out.set(path, { oid: entry.oid, mode: entry.mode })
-    }
-  }
-  return out
+  const rows = await listedTree(repo, treeOid, [], true, false, false, prefix)
+  return new Map(rows.map(([path, mode, oid]) => [path, { mode, oid }]))
 }
 
 /**
@@ -113,4 +107,57 @@ export async function commitEntries(
   if (commitOid === null) return new Map()
   const { commit } = await git.readCommit({ ...repoArgs(repo), oid: commitOid })
   return treeEntries(repo, commit.tree)
+}
+
+/** Resolve a tree-ish through tags and commits. */
+export async function resolveTree(repo: Repo, name: string, resolved?: GitObject): Promise<string> {
+  const obj = await unwrapped(repo, resolved ?? (await resolveObject(repo, name)), name)
+  if (obj.type === 'commit')
+    return (await git.readCommit({ ...repoArgs(repo), oid: obj.oid })).commit.tree
+  if (obj.type === 'tree') return obj.oid
+  throw new GitError('not a tree object')
+}
+
+/** Literal tree prefixes; a trailing slash descends even without -r. */
+export async function listedTree(
+  repo: Repo,
+  tree: string,
+  patterns: readonly string[],
+  recursive: boolean,
+  trees: boolean,
+  directories: boolean,
+  prefix = '',
+): Promise<[string, string, string][]> {
+  const out: [string, string, string][] = []
+  for (const entry of await treeItems(repo, tree)) {
+    const path = prefix ? `${prefix}/${entry.path}` : entry.path
+    const selected =
+      patterns.length === 0 ||
+      patterns.some(
+        (pattern) =>
+          pattern === '' || path === pattern || path.startsWith(pattern.replace(/\/$/, '') + '/'),
+      )
+    const row: [string, string, string] = [path, entry.mode, entry.oid]
+    if (entry.mode !== TREE_MODE) {
+      if (selected && !directories) out.push(row)
+      continue
+    }
+    const descend =
+      (recursive && selected) || patterns.some((pattern) => pattern.startsWith(path + '/'))
+    const showTree = trees || (directories && (selected || recursive))
+    if ((selected && !descend) || (descend && showTree)) out.push(row)
+    if (descend) {
+      const children = await listedTree(
+        repo,
+        entry.oid,
+        patterns,
+        recursive,
+        trees,
+        directories,
+        path,
+      )
+      for (const child of children) out.push(child)
+    }
+  }
+  return out
 }

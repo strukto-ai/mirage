@@ -99,6 +99,8 @@ export interface LogFlags {
   readonly search: string | RegExp | null
   /** `-G`, the pattern an added or removed line must match. */
   readonly changed: RegExp | null
+  /** Search binary changed lines under `--text`. */
+  readonly forceText: boolean
   /** `--since` as an epoch second. */
   readonly since: number | null
   /** `--until` as an epoch second. */
@@ -273,11 +275,15 @@ function perlRegex(value: string, ignoreCase: boolean): RegExp {
 /**
  * A `-G` or `--pickaxe-regex` pattern, compiled as git's diffcore-pickaxe
  * compiles it: POSIX extended whatever -E, -F or -P say, `-i` folding case,
- * and matched one line at a time (REG_NEWLINE).
+ * and matched one line at a time (REG_NEWLINE). Linux regcomp keeps dot off
+ * NUL, unlike Darwin.
  */
 function pickaxePattern(value: string, ignoreCase: boolean): RegExp {
   try {
-    return compilePosixRegex(translateEre(value, PosixSyntax.EXTENDED)[0], ignoreCase ? 'i' : '')
+    return compilePosixRegex(
+      translateEre(value, PosixSyntax.EXTENDED, false)[0],
+      ignoreCase ? 'i' : '',
+    )
   } catch (err) {
     if (err instanceof BreError || err instanceof SyntaxError) {
       throw new GitError(`invalid regex: ${err.message}`)
@@ -345,6 +351,7 @@ export function parseFlags(
     reverse: fl.asBool('reverse'),
     search,
     changed: changed === null ? null : pickaxePattern(changed, ignoreCase),
+    forceText: fl.asBool('text'),
     since: timestamp(fl.asStr('after') ?? fl.asStr('since') ?? null, '--since'),
     until: timestamp(fl.asStr('before') ?? fl.asStr('until') ?? null, '--until'),
     allRefs: fl.asBool('all'),
@@ -761,7 +768,8 @@ function filtersPass(commit: CommitFacts, flags: LogFlags): boolean {
  * change in the count of a string or pattern.
  */
 async function picked(repo: Repo, commit: CommitFacts, flags: LogFlags): Promise<boolean> {
-  if (flags.changed !== null) return greps(repo, commit.oid, commit.parents, flags.changed)
+  if (flags.changed !== null)
+    return greps(repo, commit.oid, commit.parents, flags.changed, flags.forceText)
   if (flags.search === null) return true
   if (typeof flags.search === 'string') {
     return touches(repo, commit.oid, commit.parents, flags.search, flags.ignoreCase)

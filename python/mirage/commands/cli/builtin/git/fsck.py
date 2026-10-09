@@ -145,8 +145,28 @@ def links(obj: ShaFile) -> list[bytes]:
     return []
 
 
+def reachable(
+    roots: set[bytes], edges: dict[bytes, list[bytes]]
+) -> set[bytes]:
+    """Walk validated object links from refs, index entries and reflogs.
+
+    Args:
+        roots (set[bytes]): the heads of the reachability trace.
+        edges (dict[bytes, list[bytes]]): validated objects' outgoing links.
+    """
+    seen: set[bytes] = set()
+    stack = list(roots)
+    while stack:
+        oid = stack.pop()
+        if oid in seen:
+            continue
+        seen.add(oid)
+        stack.extend(edges.get(oid, ()))
+    return seen
+
+
 def check(
-    repo: BaseRepo, roots: set[bytes], dangling: bool
+    repo: BaseRepo, roots: set[bytes], dangling: bool, unreachable: bool
 ) -> tuple[bytes, IOResult]:
     """Hash, decode and check connectivity of loose and packed objects.
 
@@ -157,10 +177,12 @@ def check(
         repo (BaseRepo): lazily dispatched object store, driven on a worker.
         roots (set[bytes]): refs, index and reflog tips.
         dangling (bool): report unreferenced tips.
+        unreachable (bool): report every object outside the rooted trace.
     """
     errors: list[str] = []
     objects: dict[bytes, ShaFile] = {}
     referenced = set(roots)
+    edges: dict[bytes, list[bytes]] = {}
     for oid in sorted(
         set(repo.object_store) | {ObjectID(oid) for oid in roots}
     ):
@@ -170,18 +192,21 @@ def check(
             if obj.id != oid:
                 raise ValueError("hash mismatch")
             objects[oid] = obj
-            referenced.update(links(obj))
+            edges[oid] = links(obj)
+            referenced.update(edges[oid])
         except Exception as exc:
             errors.append(f"error: object {oid.decode()}: {exc}\n")
     for missing in sorted(referenced - objects.keys()):
         if missing not in roots:
             errors.append(f"missing object {missing.decode()}\n")
+    excluded = reachable(roots, edges) if unreachable else referenced
+    label = "unreachable" if unreachable else "dangling"
     stdout = (
         "".join(
-            f"dangling {objects[oid].type_name.decode()} {oid.decode()}\n"
-            for oid in sorted(objects.keys() - referenced)
+            f"{label} {objects[oid].type_name.decode()} {oid.decode()}\n"
+            for oid in sorted(objects.keys() - excluded)
         )
-        if dangling
+        if unreachable or dangling
         else ""
     )
     return stdout.encode(), IOResult(
@@ -209,6 +234,12 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             for entry in index.entries.values()
             if entry.mode != 0o160000
         )
+        for conflict in index.conflicts.values():
+            roots.update(
+                entry.sha
+                for entry in (conflict.ancestor, conflict.this, conflict.other)
+                if entry is not None and entry.mode != 0o160000
+            )
         for directory in {location.gitdir, location.commondir}:
             roots.update(
                 await log_roots(
@@ -216,7 +247,11 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 )
             )
         out, io = await asyncio.to_thread(
-            check, repo, roots, not fl.as_bool("no_dangling")
+            check,
+            repo,
+            roots,
+            not fl.as_bool("no_dangling"),
+            fl.as_bool("unreachable"),
         )
         if not roots:
             head = await read_optional(

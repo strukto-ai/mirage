@@ -146,6 +146,7 @@ class ZgrepFlags:
     only_matching: bool
     quiet: bool
     whole_word: bool
+    line_regexp: bool
     max_count: int | None
 
 
@@ -180,6 +181,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> ZgrepFlags:
         only_matching=fl.as_bool("o"),
         quiet=fl.as_bool("q"),
         whole_word=fl.as_bool("w"),
+        line_regexp=fl.as_bool("line_regexp"),
         max_count=fl.as_int("m"),
     )
 
@@ -216,6 +218,7 @@ async def zgrep_generic(
             f.whole_word,
             f.syntax,
             utf8,
+            f.line_regexp,
         )
     )
     multi = len(paths) > 1

@@ -143,6 +143,7 @@ export function parseFlags(fl: FlagView): FlagSet {
     filesOnly,
     filesWithoutMatch,
     wholeWord: fl.asBool('w'),
+    lineRegexp: fl.asBool('line_regexp'),
     fixedString: fl.asBool('F'),
     // grep reads a basic expression unless -E or -P says otherwise; -G asks
     // for the default explicitly.
@@ -224,6 +225,7 @@ export async function grepGeneric(
           f.wholeWord,
           f.syntax,
           utf8,
+          f.lineRegexp,
         )
   } catch (error) {
     if (!(error instanceof UsageError)) throw error

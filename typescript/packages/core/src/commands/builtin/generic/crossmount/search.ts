@@ -84,7 +84,15 @@ export async function runSearch(
   if (grep !== null) {
     const pattern = patternArg(texts, bag)
     if (pattern !== null)
-      compilePattern(pattern, grep.ignoreCase, grep.fixedString, grep.wholeWord, grep.syntax)
+      compilePattern(
+        pattern,
+        grep.ignoreCase,
+        grep.fixedString,
+        grep.wholeWord,
+        grep.syntax,
+        false,
+        grep.lineRegexp,
+      )
   }
   if (rg !== null && !rg.listFiles) {
     const pattern = patternArg(texts, bag, 'regexp')

@@ -29,6 +29,7 @@ class GrepFlags:
     files_only: bool
     files_without_match: bool
     whole_word: bool
+    line_regexp: bool
     fixed_string: bool
     syntax: RegexSyntax
     only_matching: bool
