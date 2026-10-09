@@ -148,6 +148,18 @@ def test_an_error_is_worded_as_bash_names_it(expr, env, line):
         ("09+1", {}, '09: value too great for base (error token is "09")'),
         ("1#1", {}, '1#1: invalid arithmetic base (error token is "1#1")'),
         ("10#", {}, '10#: invalid integer constant (error token is "10#")'),
+        ("64##", {}, '64##: invalid integer constant (error token is "64##")'),
+        ("64#1#2", {}, '64#1#2: invalid number (error token is "64#1#2")'),
+        (
+            "1 || 2**(--x)",
+            {"x": "1"},
+            '1 || 2**(--x): exponent less than 0 (error token is ")")',
+        ),
+        (
+            "1 || 2**(x-=2)",
+            {"x": "1"},
+            '1 || 2**(x-=2): exponent less than 0 (error token is ")")',
+        ),
         (
             "2 * x",
             {"x": " 1+ "},
@@ -157,6 +169,11 @@ def test_an_error_is_worded_as_bash_names_it(expr, env, line):
             "x",
             {"x": "y", "y": "x"},
             'y: expression recursion level exceeded (error token is "y")',
+        ),
+        (
+            "x",
+            {"x": "(x)"},
+            '(x): expression recursion level exceeded (error token is "x)")',
         ),
     ],
 )
@@ -188,6 +205,48 @@ def test_an_error_names_the_expression_it_happened_in(expr, env, line):
 )
 def test_a_value_is_what_bash_reads(expr, value):
     assert evaluate_arith(expr, {"x": "5", "y": "1"}).value == value
+
+
+def test_a_long_decimal_value_wraps():
+    value = evaluate_arith("x", {"x": "99999999999999999999999"}).value
+    assert value == 200376420520689663
+
+
+def test_a_step_writes_once_it_reads_the_token_after_its_operand():
+    with pytest.raises(ArithError) as caught:
+        evaluate_arith("x++ 08", {"x": "3"})
+    assert _writes_of(caught.value) == [("x", None, "4")]
+    with pytest.raises(ArithError) as caught:
+        evaluate_arith("++x 08", {"x": "3"})
+    assert _writes_of(caught.value) == []
+
+
+def test_a_skipped_branch_reads_and_writes_nothing():
+    result = evaluate_arith("0 && (x-=1), 1 || x++, 1 ? 2 : x++", {"x": "1"})
+    assert (result.value, result.writes) == (2, ())
+
+
+def test_an_added_side_reads_in_the_same_record():
+    result = evaluate_arith("x=5", {}, added="x")
+    assert result.value == 10
+    assert _writes(result) == [("x", None, "5")]
+    with pytest.raises(ArithError) as caught:
+        evaluate_arith("4", {}, added="1+")
+    assert str(caught.value) == (
+        '1+: syntax error: operand expected (error token is "+")'
+    )
+
+
+def test_without_is_assoc_resolve_reads_every_subscript():
+    seen = []
+
+    def resolve(name, subscript, env):
+        seen.append(subscript)
+        return "k"
+
+    ops = ElementOps(resolve=resolve, read=lambda name, key: "4")
+    assert evaluate_arith("a[1+1] + 1", {}, elements=ops).value == 5
+    assert seen == ["1+1"]
 
 
 def test_the_writes_before_an_error_are_kept():

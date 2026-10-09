@@ -15,9 +15,10 @@
 import { IOResult } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { appended, type ShellVar, VarAttr, type VarKind } from '../../../../shell/variable.ts'
+import { type ShellVar, VarAttr, type VarKind } from '../../../../shell/variable.ts'
 import { sessionEntry, type SessionState } from '../../../session/session.ts'
 import {
+  appended,
   deref,
   envGet,
   evaluateInteger,
@@ -34,6 +35,7 @@ import { SUBSCRIPT_RE } from './constants.ts'
 import {
   declarationResult,
   dropReference,
+  heldSlot,
   heldValue,
   identifierRefusal,
   kindConflict,
@@ -327,7 +329,8 @@ async function declareOperand(
   const checked = deref(session, key) || key
   await premark(view, key, shaping)
   const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
-  const [value, assigned] = scalarValue(held, given, kind, append, integer)
+  const slot = append ? await appended(session, view, heldSlot(held), given, integer) : given
+  const [value, assigned] = scalarValue(held, slot, kind)
   if (kind !== null) await dropReference(session, view, key)
   await view.set(key, value, true, assigned)
   await stampMarks(session, view, key, checked, marks)
@@ -372,7 +375,9 @@ async function aimReference(
   const old = typeof held === 'string' ? held : ''
   let value = old + given
   if (shaping.some(([attr, on]) => attr === VarAttr.Integer && on)) {
-    await evaluateInteger(session, view, append ? appended(old, given, true) : given)
+    await (append
+      ? evaluateInteger(session, view, old, given)
+      : evaluateInteger(session, view, given))
     value = ''
   }
   if (isValidName(value) || SUBSCRIPT_RE.test(value)) {

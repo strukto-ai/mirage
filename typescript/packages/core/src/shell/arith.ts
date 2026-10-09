@@ -66,13 +66,17 @@ function baseDigit(ch: string, base: number): number {
   return 63
 }
 
-/** The value of `digits` in `base`, or null when one is too great. */
+/**
+ * The value of `digits` in `base` modulo 2**64, or null when one is too
+ * great. Kept to 64 bits as it is read, so a constant thousands of digits
+ * long stays linear to read.
+ */
 function digitsValue(digits: string, base: number): bigint | null {
   let value = 0n
   for (const ch of digits) {
     const digit = baseDigit(ch, base)
     if (digit >= base) return null
-    value = value * BigInt(base) + BigInt(digit)
+    value = BigInt.asUintN(64, value * BigInt(base) + BigInt(digit))
   }
   return value
 }
@@ -91,7 +95,8 @@ function constant(text: string): bigint | string {
     if (typeof base === 'string') return base
     if (base < 2n || base > 64n) return 'invalid arithmetic base'
     const digits = text.slice(hash + 1)
-    if (digits === '') return 'invalid integer constant'
+    if (digits === '' || digits.startsWith('#')) return 'invalid integer constant'
+    if (digits.includes('#')) return 'invalid number'
     value = digitsValue(digits, Number(base))
   } else if (text.startsWith('0x') || text.startsWith('0X')) {
     value = digitsValue(text.slice(2), 16)
@@ -282,7 +287,7 @@ class Reader {
     if (this.is('name')) {
       const [pos, tp, target] = [this.pos, this.tp, this.tok]
       this.advance()
-      if (this.is('op') && ARITH_ASSIGN_OPS.has(this.tok)) return this.assignment(target)
+      if (this.is('op') && ARITH_ASSIGN_OPS.has(this.tok)) return this.assignment(target, tp)
       this.set(pos, 'name', target)
       this.tp = tp
     }
@@ -297,25 +302,29 @@ class Reader {
    * An assignment to `target`, the reader on its operator. bash evaluates
    * a plain assignment's right side before it resolves the target's
    * subscript (`x=0, a[x++]=x++` stores 0 at index 1), and a compound one
-   * reads its target before the right side.
+   * reads its target before the right side. In a skipped branch nothing is
+   * read or written, but a compound one still computes over 0, so its value
+   * can refuse a negative exponent (`1 || 2**(x-=1)`). `at` is where the
+   * name starts.
    */
-  private assignment(target: string): bigint {
+  private assignment(target: string, at: number): bigint {
     const op = this.tok
     this.advance()
     const divisor = this.tp
-    if (this.skip > 0) return this.assign()
-    const record = this.record
     let key: string | null
     let value: bigint
     if (op === '=') {
       value = this.assign()
-      key = record.keyOf(target, this.depth)
+      if (this.skip > 0) return value
+      key = this.record.keyOf(target, this.depth)
+    } else if (this.skip > 0) {
+      return this.apply(op.slice(0, -1), 0n, this.assign(), divisor)
     } else {
-      key = record.keyOf(target, this.depth)
-      const current = record.readTarget(target, key, this.depth, this.subscript)
+      let current: bigint
+      ;[key, current] = this.lookup(target, at)
       value = this.apply(op.slice(0, -1), current, this.assign(), divisor)
     }
-    record.writeTarget(target, key, value, this.subscript)
+    this.record.writeTarget(target, key, value, this.subscript)
     return value
   }
 
@@ -394,23 +403,42 @@ class Reader {
     if (this.is('pre')) {
       const step = this.tok === '++' ? 1n : -1n
       this.advance()
-      const target = this.tok
+      const [target, at] = [this.tok, this.tp]
       this.advance()
+      const value = this.step(target, step, true, at)
       if (this.is('post')) throw this.fail(`${this.tok}: assignment requires lvalue`)
-      return this.step(target, step, true)
+      return value
     }
     return this.primary()
   }
 
-  /** `++` or `--` on `target`: the new value before it, the old one after. */
-  private step(target: string, step: bigint, prefix: boolean): bigint {
-    if (this.skip > 0) return 0n
+  /**
+   * `++` or `--` on `target`: the new value before it, the old one after.
+   * bash makes the write once it has read the token after the operand: a
+   * prefix one after the token past the name (`++x 08` refuses the
+   * constant and leaves x), a postfix one before the token past the
+   * operator (`x++ 08` leaves x stepped). In a skipped branch it computes
+   * over 0 without reading or writing. `at` is where the name starts.
+   */
+  private step(target: string, step: bigint, prefix: boolean, at: number): bigint {
+    if (this.skip > 0) return prefix ? step : 0n
+    const [key, value] = this.lookup(target, at)
+    const stepped = wrapInt64(value + step)
+    this.record.writeTarget(target, key, stepped, this.subscript)
+    return prefix ? stepped : value
+  }
+
+  /**
+   * The element key `target` names and the value it holds. A variable read
+   * from an expression `ARITH_MAX_DEPTH` values deep is past the recursion
+   * limit, which names this expression and the reference (`x='(x)'` is
+   * `(x): expression recursion level exceeded (error token is "x)")`).
+   */
+  private lookup(target: string, at: number): [string | null, bigint] {
+    if (this.depth >= ARITH_MAX_DEPTH) throw this.fail('expression recursion level exceeded', at)
     const record = this.record
     const key = record.keyOf(target, this.depth)
-    const value = record.readTarget(target, key, this.depth, this.subscript)
-    const stepped = wrapInt64(value + step)
-    record.writeTarget(target, key, stepped, this.subscript)
-    return prefix ? stepped : value
+    return [key, record.readTarget(target, key, this.depth, this.subscript)]
   }
 
   private primary(): bigint {
@@ -427,16 +455,15 @@ class Reader {
       return value
     }
     if (this.is('name')) {
-      const target = this.tok
+      const [target, at] = [this.tok, this.tp]
       this.advance()
       if (this.is('post')) {
-        const step = this.tok === '++' ? 1n : -1n
+        const value = this.step(target, this.tok === '++' ? 1n : -1n, false, at)
         this.advance()
-        return this.step(target, step, false)
+        return value
       }
       if (this.skip > 0) return 0n
-      const key = this.record.keyOf(target, this.depth)
-      return this.record.readTarget(target, key, this.depth, this.subscript)
+      return this.lookup(target, at)[1]
     }
     throw this.fail('syntax error: operand expected')
   }
@@ -478,17 +505,22 @@ class ArithRecord {
     let start = 0
     while (start < text.length && ARITH_BLANKS.includes(text[start] ?? '')) start++
     const expr = text.slice(start)
-    if (depth >= ARITH_MAX_DEPTH && expr !== '') {
+    try {
+      return new Reader(this, expr, depth, subscript).run()
+    } catch (err) {
+      if (!(err instanceof RangeError)) throw err
       throw new ArithError('expression recursion level exceeded', expr, expr)
     }
-    return new Reader(this, expr, depth, subscript).run()
   }
 
   /** A variable's value as a number: its text read as an expression. */
   private coerce(raw: string | null, depth: number, subscript: boolean): bigint {
     const text = raw ?? ''
     const number = text.replace(/^[ \t\n]+|[ \t\n]+$/g, '')
-    if (/^[1-9][0-9]*$/.test(number)) return wrapInt64(BigInt(number))
+    if (/^[1-9][0-9]*$/.test(number)) {
+      const value = digitsValue(number, 10)
+      if (value !== null) return wrapInt64(value)
+    }
     return this.evaluate(text, depth + 1, subscript)
   }
 
@@ -509,7 +541,7 @@ class ArithRecord {
     if (elements === null) {
       throw new ArithError('syntax error: operand expected', target, target.slice(name.length))
     }
-    if (elements.isAssoc?.(name) === true) return elements.resolve(name, inner, this.mergedEnv())
+    if (elements.isAssoc?.(name) ?? true) return elements.resolve(name, inner, this.mergedEnv())
     const trimmed = inner.trim()
     let index: bigint
     if (/^-?\d+$/.test(trimmed)) index = BigInt(trimmed)
@@ -581,7 +613,11 @@ class ArithRecord {
  * variable holds throws UnboundVariable instead of reading 0. `frozen`
  * names the readonly variable a write to a name reaches, through a
  * reference, or null: the evaluation stops there with ReadonlyError. An
- * ArithError or ReadonlyError carries the writes made before it.
+ * ArithError or ReadonlyError carries the writes made before it. `added`
+ * is a second expression read after `expr` in the same record and added to
+ * it: an integer `+=`, whose held value and added text bash evaluates in
+ * turn, the second seeing what the first assigned (`n='x=5'; n+=x` stores
+ * 10), each error naming its own side.
  */
 export function evaluateArith(
   expr: string,
@@ -592,11 +628,13 @@ export function evaluateArith(
   wroteVar: ((name: string, value: string) => void) | null = null,
   nounset = false,
   frozen: ((name: string) => string | null) | null = null,
+  added: string | null = null,
 ): ArithResult {
   const record = new ArithRecord(env, elements, readVar, wroteVar, nounset, frozen)
   let value: bigint
   try {
     value = record.evaluate(expr, depth, false)
+    if (added !== null) value = wrapInt64(value + record.evaluate(added, depth, false))
   } catch (err) {
     if (err instanceof ArithError || err instanceof ReadonlyError) err.writes = [...record.writes]
     throw err

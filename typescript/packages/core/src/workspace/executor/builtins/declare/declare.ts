@@ -27,8 +27,9 @@ import {
 import { varHidden } from '../../../../utils/hidden.ts'
 import { sessionEntry, setSessionEntry } from '../../../session/session.ts'
 import type { ShellValue, ShellVar } from '../../../../shell/variable.ts'
-import { appended, attrLetters, VarAttr, VarKind } from '../../../../shell/variable.ts'
+import { attrLetters, VarAttr, VarKind } from '../../../../shell/variable.ts'
 import {
+  appended,
   conversionScalar,
   deref,
   inCallEnv,
@@ -133,37 +134,42 @@ export function kindConflict(held: ShellValue | null, kind: VarKind | null): str
 }
 
 /**
+ * What a declaration's `NAME+=value` extends: a scalar's text, element 0
+ * of an array, key `"0"` of a map (`S=x; declare -a S+=y` gives
+ * `([0]="xy")`), '' when unset.
+ */
+export function heldSlot(held: ShellValue | null): string {
+  if (typeof held === 'string') return held
+  if (Array.isArray(held)) return arrayGet(held, 0)
+  return held?.['0'] ?? ''
+}
+
+/**
  * What a declaration's `NAME=value` stores, and the elements it assigns
  * (`coerceValue`). An array keeps its kind and takes the value at element 0
  * (key `"0"` in a map), as a plain `NAME=value` does, leaving the other
  * elements as stored; otherwise `-A` makes the map `([0]=value)` and `-a`
  * the one-element array, a held scalar converting to that element first,
- * and with neither the value stays a scalar. `NAME+=value` (`append`)
- * appends to what that slot holds (`S=x; declare -a S+=y` gives
- * `([0]="xy")`), and on an `integer` adds (`appended`).
+ * and with neither the value stays a scalar. A `NAME+=value` arrives here
+ * already joined onto `heldSlot`.
  */
 export function scalarValue(
   held: ShellValue | null,
   value: string,
   kind: VarKind | null,
-  append = false,
-  integer = false,
 ): [ShellValue, ReadonlySet<number | string> | null] {
   const scalar = typeof held === 'string' ? held : null
   const map = held !== null && typeof held === 'object' && !Array.isArray(held) ? held : null
   if (map !== null || kind === VarKind.Assoc) {
-    const amap: Record<string, string> = { ...map }
-    if (scalar !== null) amap['0'] = scalar
-    amap['0'] = append ? appended(amap['0'] ?? '', value, integer) : value
-    return [amap, new Set(['0'])]
+    return [{ ...map, '0': value }, new Set(['0'])]
   }
   if (Array.isArray(held) || kind === VarKind.Indexed) {
     const arr: ShellArray = Array.isArray(held) ? [...held] : []
     if (scalar !== null) arr.push(scalar)
-    arraySet(arr, 0, append ? appended(arrayGet(arr, 0), value, integer) : value)
+    arraySet(arr, 0, value)
     return [arr, new Set([0])]
   }
-  return [append ? appended(scalar ?? '', value, integer) : value, null]
+  return [value, null]
 }
 
 /**
@@ -894,7 +900,8 @@ async function markOperand(
   if (val !== null && conflict === null) {
     const checked = deref(session, key) || key
     const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
-    const [value, assigned] = scalarValue(held, val, kind, append, integer)
+    const slot = append ? await appended(session, view, heldSlot(held), val, integer) : val
+    const [value, assigned] = scalarValue(held, slot, kind)
     if (kind !== null) await dropReference(session, view, key)
     await view.set(key, value, true, assigned)
     // Rides on the gate the `view.set` above passed, unless the write

@@ -72,20 +72,17 @@ ARITH_PRECEDENCE = {
     "**": 11,
 }
 
-# What joins the two sides of a `+=` to an integer variable, for the `-i`
-# coercion to evaluate apart and add: NUL, which no shell value holds.
-INTEGER_APPEND = "\0"
-
 # 64-bit wrap like bash (intmax_t arithmetic).
 ARITH_WRAP = 1 << 64
 ARITH_SIGN = 1 << 63
 
-# How deep variables holding expressions may nest (`x="1+2"; $((x))`).
-# bash stops at 1023 levels; the host stack cannot hold that many, so
-# mirage stops at 63, which names the same variable of a reference cycle
-# of up to six names as bash's limit does (63 and 1023 agree modulo 2, 3,
-# 4, 5 and 6).
-ARITH_MAX_DEPTH = 63
+# How deep variables holding expressions may nest (`x="1+2"; $((x))`): a
+# variable read from an expression this many values deep is past the
+# limit. bash's is 1023; Python's stack holds about a dozen frames per
+# level, so mirage stops at 27, which names the same expression of a
+# reference cycle of 1, 2, 3, 4, 6 or 12 names as bash's limit does (27
+# and 1023 agree modulo 12).
+ARITH_MAX_DEPTH = 27
 
 # What the shell calls itself when no script is running, bash's "bash".
 # A nested `bash`/`sh` overrides it through SessionState.script_name, and

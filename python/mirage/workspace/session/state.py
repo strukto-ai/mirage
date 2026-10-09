@@ -19,7 +19,7 @@ from dataclasses import replace
 
 from mirage.policy import Policies, PolicyDenied, pre_session_gate
 from mirage.policy.types import SessionContext
-from mirage.shell.arith import evaluate_arith, wrap_int64
+from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (
     ShellArray,
     array_extent,
@@ -33,7 +33,6 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import (
     FUNCNAME,
-    INTEGER_APPEND,
     PIPESTATUS,
     RANDOM,
     RANDOM_MODULUS,
@@ -814,6 +813,7 @@ def session_arith(
     text: str,
     reader: RandomReader,
     nounset: bool = False,
+    added: str | None = None,
 ) -> ArithResult:
     """Evaluate ``text`` as every arithmetic context of the shell does:
     against the visible env and the session's elements, drawing through
@@ -825,6 +825,8 @@ def session_arith(
         text (str): the expression.
         reader (RandomReader): the expression's ``RANDOM`` reader.
         nounset (bool): ``set -u`` for the names it reads.
+        added (str | None): an integer ``+=``'s added text, read after
+            ``text`` in the same evaluation and added to it.
 
     Raises:
         ArithError: the text does not evaluate.
@@ -839,6 +841,7 @@ def session_arith(
         wrote_var=reader.wrote,
         nounset=nounset,
         frozen=functools.partial(_readonly_target, session),
+        added=added,
     )
 
 
@@ -881,41 +884,39 @@ class _IntegerCoercion:
         self.reader = random_reader(session)
         self.writes: list[ArithWrite] = []
 
-    def __call__(self, text: str) -> str:
+    def __call__(self, text: str, added: str | None = None) -> str:
         try:
-            return self.evaluate(text)
+            return self.evaluate(text, added)
         except ReadonlyError as exc:
             raise exc.signal(fatal=True) from exc
 
-    def evaluate(self, text: str) -> str:
+    def evaluate(self, text: str, added: str | None = None) -> str:
         """The value ``text`` evaluates to, keeping the writes it made
         before an ``ArithError`` or a ``ReadonlyError``.
 
-        The two sides of an integer ``+=`` (``appended``) evaluate apart
-        and add, so an error names the side that made it, as bash's does
-        (``N+=1+`` is ``1+: syntax error``).
+        With ``added``, the two sides of an integer ``+=`` (``appended``)
+        evaluate in turn in one evaluation and add: the second sees what
+        the first assigned, and an error names the side that made it, as
+        bash's does (``N+=1+`` is ``1+: syntax error``).
 
         Args:
-            text (str): the expression.
+            text (str): the expression, the held value for a ``+=``.
+            added (str | None): a ``+=``'s added text.
         """
         session = self.session
         # Inside a `declare -g` the expression still reads the
         # function's scope, as bash's does (`local H=2; declare -gi
         # G=H` stores 2), while the value lands on the global.
         reach_again = _step_back(session)
-        total = 0
         try:
-            for side in text.split(INTEGER_APPEND):
-                try:
-                    result = session_arith(session, side, self.reader)
-                except (ArithError, ReadonlyError) as exc:
-                    self.writes.extend(exc.writes)
-                    raise
-                self.writes.extend(result.writes)
-                total += result.value
+            result = session_arith(session, text, self.reader, added=added)
+        except (ArithError, ReadonlyError) as exc:
+            self.writes.extend(exc.writes)
+            raise
         finally:
             reach_again()
-        return str(wrap_int64(total))
+        self.writes.extend(result.writes)
+        return str(result.value)
 
 
 async def _land_coercion(
@@ -942,18 +943,23 @@ async def _land_coercion(
 
 
 async def evaluate_integer(
-    session: SessionState, view: SessionView, text: str
-) -> None:
-    """Evaluate ``text`` as an ``-i`` write coerces it and land what it
-    assigns through ``view``, storing no result: a ``declare -ni r=M``
-    value, which bash evaluates before refusing the reference
-    (``M='X=5'`` sets X). Inside a ``declare -g`` it reads the
-    function's scope, as the coercion does.
+    session: SessionState,
+    view: SessionView,
+    text: str,
+    added: str | None = None,
+) -> str:
+    """Evaluate ``text`` as an ``-i`` write coerces it, land what it
+    assigns through ``view``, and give back the value: a ``declare -ni
+    r=M`` value, which bash evaluates before refusing the reference
+    (``M='X=5'`` sets X), and an integer ``+=`` (``appended``). Inside a
+    ``declare -g`` it reads the function's scope, as the coercion does.
 
     Args:
         session (SessionState): shell session state.
         view (SessionView): the gated session view.
-        text (str): the value.
+        text (str): the value, the held one for a ``+=``.
+        added (str | None): a ``+=``'s added text, evaluated after
+            ``text`` in the same evaluation and added to it.
 
     Raises:
         PolicyDenied: an assignment named a hidden variable or the gate
@@ -965,9 +971,35 @@ async def evaluate_integer(
     """
     coercion = _IntegerCoercion(session)
     try:
-        coercion(text)
+        return coercion(text, added)
     finally:
         await _land_coercion(session, view.set, coercion)
+
+
+async def appended(
+    session: SessionState,
+    view: SessionView,
+    old: str,
+    added: str,
+    integer: bool,
+) -> str:
+    """The text a ``+=`` stores: the old text then the added one, or on
+    an integer the two read as arithmetic in turn and summed
+    (``evaluate_integer``). The held value evaluates too, so
+    ``n='x=5'; declare -i n; n+=x`` stores 10, and an empty side counts
+    as 0.
+
+    Args:
+        session (SessionState): shell session state.
+        view (SessionView): the gated session view, through which the
+            sides' assignments land.
+        old (str): what the slot holds, "" when unset.
+        added (str): the text appended.
+        integer (bool): the variable carries ``-i``.
+    """
+    if not integer:
+        return old + added
+    return await evaluate_integer(session, view, old, added)
 
 
 def ensure_var_visible(session: SessionState, name: str) -> None:

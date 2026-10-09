@@ -102,7 +102,9 @@ def _base_digit(ch: str, base: int) -> int:
 
 
 def _digits_value(digits: str, base: int) -> int | None:
-    """The value of ``digits`` in ``base``, or None when one is too great.
+    """The value of ``digits`` in ``base`` modulo 2**64, or None when one
+    is too great. Kept to 64 bits as it is read, so a constant thousands
+    of digits long stays linear to read.
 
     Args:
         digits (str): the digits.
@@ -113,7 +115,7 @@ def _digits_value(digits: str, base: int) -> int | None:
         digit = _base_digit(ch, base)
         if digit >= base:
             return None
-        value = value * base + digit
+        value = (value * base + digit) & (ARITH_WRAP - 1)
     return value
 
 
@@ -134,8 +136,10 @@ def _constant(text: str) -> int | str:
             return base
         if base < 2 or base > 64:
             return "invalid arithmetic base"
-        if not digits:
+        if not digits or digits[0] == "#":
             return "invalid integer constant"
+        if "#" in digits:
+            return "invalid number"
         value = _digits_value(digits, base)
     elif text[:2] in ("0x", "0X"):
         value = _digits_value(text[2:], 16)
@@ -338,40 +342,43 @@ class _Reader:
     def assign(self) -> int:
         if self.kind == "name":
             saved = (self.pos, self.tp, self.kind, self.tok)
-            target = self.tok
+            target, at = self.tok, self.tp
             self.advance()
             if self.kind == "op" and self.tok in ARITH_ASSIGN_OPS:
-                return self.assignment(target)
+                return self.assignment(target, at)
             self.pos, self.tp, self.kind, self.tok = saved
         value = self.ternary()
         if self.kind == "op" and self.tok in ARITH_ASSIGN_OPS:
             raise self.fail("attempted assignment to non-variable")
         return value
 
-    def assignment(self, target: str) -> int:
+    def assignment(self, target: str, at: int) -> int:
         """An assignment to ``target``, the reader on its operator.
 
         bash evaluates a plain assignment's right side before it resolves
         the target's subscript (``x=0, a[x++]=x++`` stores 0 at index 1),
-        and a compound one reads its target before the right side.
+        and a compound one reads its target before the right side. In a
+        skipped branch nothing is read or written, but a compound one
+        still computes over 0, so its value can refuse a negative
+        exponent (``1 || 2**(x-=1)``).
 
         Args:
             target (str): the name, with its subscript if it has one.
+            at (int): where the name starts.
         """
         op = self.tok
         self.advance()
         divisor = self.tp
-        if self.skip:
-            return self.assign()
         record = self.record
         if op == "=":
             value = self.assign()
+            if self.skip:
+                return value
             key = record.key_of(target, self.depth)
+        elif self.skip:
+            return self.apply(op[:-1], 0, self.assign(), divisor)
         else:
-            key = record.key_of(target, self.depth)
-            current = record.read_target(
-                target, key, self.depth, self.subscript
-            )
+            key, current = self.lookup(target, at)
             value = self.apply(op[:-1], current, self.assign(), divisor)
         record.write_target(target, key, value, self.subscript)
         return value
@@ -468,30 +475,54 @@ class _Reader:
         if self.kind == "pre":
             step = 1 if self.tok == "++" else -1
             self.advance()
-            target = self.tok
+            target, at = self.tok, self.tp
             self.advance()
+            value = self.step(target, step, True, at)
             if self.kind == "post":
                 raise self.fail(f"{self.tok}: assignment requires lvalue")
-            return self.step(target, step, True)
+            return value
         return self.primary()
 
-    def step(self, target: str, step: int, prefix: bool) -> int:
+    def step(self, target: str, step: int, prefix: bool, at: int) -> int:
         """``++`` or ``--`` on ``target``: the new value before it, the
         old one after it.
+
+        bash makes the write once it has read the token after the
+        operand: a prefix one after the token past the name (``++x 08``
+        refuses the constant and leaves x), a postfix one before the
+        token past the operator (``x++ 08`` leaves x stepped). In a
+        skipped branch it computes over 0 without reading or writing.
 
         Args:
             target (str): the name, with its subscript if it has one.
             step (int): 1 or -1.
             prefix (bool): the operator stands before the name.
+            at (int): where the name starts.
         """
         if self.skip:
-            return 0
+            return step if prefix else 0
+        key, value = self.lookup(target, at)
+        stepped = wrap_int64(value + step)
+        self.record.write_target(target, key, stepped, self.subscript)
+        return stepped if prefix else value
+
+    def lookup(self, target: str, at: int) -> tuple[str | None, int]:
+        """The element key ``target`` names and the value it holds.
+
+        A variable read from an expression ``ARITH_MAX_DEPTH`` values deep
+        is past the recursion limit, which names this expression and the
+        reference (``x='(x)'`` is ``(x): expression recursion level
+        exceeded (error token is "x)")``).
+
+        Args:
+            target (str): the name, with its subscript if it has one.
+            at (int): where the name starts.
+        """
+        if self.depth >= ARITH_MAX_DEPTH:
+            raise self.fail("expression recursion level exceeded", at)
         record = self.record
         key = record.key_of(target, self.depth)
-        value = record.read_target(target, key, self.depth, self.subscript)
-        stepped = wrap_int64(value + step)
-        record.write_target(target, key, stepped, self.subscript)
-        return stepped if prefix else value
+        return key, record.read_target(target, key, self.depth, self.subscript)
 
     def primary(self) -> int:
         if self.at("("):
@@ -506,17 +537,17 @@ class _Reader:
             self.advance()
             return value
         if self.kind == "name":
-            target = self.tok
+            target, at = self.tok, self.tp
             self.advance()
             if self.kind == "post":
-                step = 1 if self.tok == "++" else -1
+                value = self.step(
+                    target, 1 if self.tok == "++" else -1, False, at
+                )
                 self.advance()
-                return self.step(target, step, False)
+                return value
             if self.skip:
                 return 0
-            record = self.record
-            key = record.key_of(target, self.depth)
-            return record.read_target(target, key, self.depth, self.subscript)
+            return self.lookup(target, at)[1]
         raise self.fail("syntax error: operand expected")
 
 
@@ -571,9 +602,12 @@ class _ArithRecord:
             subscript (bool): it is an indexed subscript.
         """
         text = text.lstrip(ARITH_BLANKS)
-        if depth >= ARITH_MAX_DEPTH and text:
-            raise ArithError("expression recursion level exceeded", text, text)
-        return _Reader(self, text, depth, subscript).run()
+        try:
+            return _Reader(self, text, depth, subscript).run()
+        except RecursionError as exc:
+            raise ArithError(
+                "expression recursion level exceeded", text, text
+            ) from exc
 
     def coerce(self, raw: str | None, depth: int, subscript: bool) -> int:
         """A variable's value as a number: its text read as an expression.
@@ -586,7 +620,9 @@ class _ArithRecord:
         raw = raw or ""
         number = raw.strip(ARITH_BLANKS)
         if number.isdecimal() and number.isascii() and number[0] != "0":
-            return wrap_int64(int(number))
+            value = _digits_value(number, 10)
+            if value is not None:
+                return wrap_int64(value)
         return self.evaluate(raw, depth + 1, subscript)
 
     def merged_env(self) -> dict[str, str]:
@@ -618,7 +654,7 @@ class _ArithRecord:
                 "syntax error: operand expected", target, target[len(name) :]
             )
         is_assoc = elements.is_assoc
-        if is_assoc is not None and is_assoc(name):
+        if is_assoc is None or is_assoc(name):
             return elements.resolve(name, inner, self.merged_env())
         try:
             index = int(inner.strip())
@@ -707,6 +743,7 @@ def evaluate_arith(
     wrote_var: Callable[[str, str], None] | None = None,
     nounset: bool = False,
     frozen: Callable[[str], str | None] | None = None,
+    added: str | None = None,
 ) -> ArithResult:
     """Evaluate a bash arithmetic expression.
 
@@ -744,6 +781,11 @@ def evaluate_arith(
         frozen (Callable[[str], str | None] | None): the readonly
             variable a write to a name reaches, through a reference, or
             None; None refuses none.
+        added (str | None): a second expression, read after ``expr`` in
+            the same record and added to it: an integer ``+=``, whose held
+            value and added text bash evaluates in turn, the second seeing
+            what the first assigned (``n='x=5'; n+=x`` stores 10), each
+            error naming its own side.
 
     Returns:
         ArithResult: the value plus the assignments made, in order, for
@@ -758,6 +800,8 @@ def evaluate_arith(
     record = _ArithRecord(env, elements, read_var, wrote_var, nounset, frozen)
     try:
         value = record.evaluate(expr, depth, False)
+        if added is not None:
+            value = wrap_int64(value + record.evaluate(added, depth, False))
     except (ArithError, ReadonlyError) as exc:
         exc.writes = tuple(record.writes)
         raise

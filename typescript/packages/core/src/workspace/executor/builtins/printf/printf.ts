@@ -88,7 +88,8 @@ export const HELP =
  * AWS_KEY. The refusal is thrown, not collapsed into a status, so the
  * rule's own words reach the user as they do from `export`. bash stores the
  * bytes the format produced, so a `\x` run that is valid UTF-8 is stored as
- * its characters.
+ * its characters, and up to the first NUL, which no variable holds
+ * (`printf -v n '1\0002'` stores 1).
  */
 async function assignPrintfTarget(
   session: SessionState,
@@ -97,7 +98,7 @@ async function assignPrintfTarget(
   subscript: string | undefined,
   value: string,
 ): Promise<'ok' | 'denied' | 'readonly' | 'subscript'> {
-  const text = decodeText(encodeText(value))
+  const text = decodeText(encodeText(value)).split('\0', 1)[0] ?? ''
   return assignElement(session, view ?? null, name, subscript ?? null, text)
 }
 

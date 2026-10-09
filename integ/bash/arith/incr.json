@@ -61,10 +61,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "zx=5 zy=1; for e in '1++2' '1--1' '++5' '---1' 'zx+++zy' '0x' '-2**2' '99999999999999999999' '1 ? 2, 3 : 4'; do printf '%s ' \"$((e))\"; done; echo \"zx=$zx\"; unset zx zy e",
+      "command": "zx=5 zy=1; for e in '1++2' '1--1' '++5' '---1' 'zx+++zy' '0x' '-2**2' '99999999999999999999' '1 ? 2, 3 : 4'; do printf '%s ' \"$((e))\"; done; echo \"zx=$zx\"; zn='zw=4'; declare -i zn; zn+=zw; echo \"zn=$zn zw=$zw\"; unset zx zy e zn zw",
       "expect": {
         "exit": 0,
-        "stdout": "3 2 5 -1 6 0 4 7766279631452241919 3 zx=6\n",
+        "stdout": "3 2 5 -1 6 0 4 7766279631452241919 3 zx=6\nzn=8 zw=4\n",
         "stderr": ""
       }
     }

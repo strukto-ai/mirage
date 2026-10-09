@@ -379,8 +379,13 @@ describe('an error names the expression it happened in', () => {
     ['09+1', {}, '09: value too great for base (error token is "09")'],
     ['1#1', {}, '1#1: invalid arithmetic base (error token is "1#1")'],
     ['10#', {}, '10#: invalid integer constant (error token is "10#")'],
+    ['64##', {}, '64##: invalid integer constant (error token is "64##")'],
+    ['64#1#2', {}, '64#1#2: invalid number (error token is "64#1#2")'],
+    ['1 || 2**(--x)', { x: '1' }, '1 || 2**(--x): exponent less than 0 (error token is ")")'],
+    ['1 || 2**(x-=2)', { x: '1' }, '1 || 2**(x-=2): exponent less than 0 (error token is ")")'],
     ['2 * x', { x: ' 1+ ' }, '1+ : syntax error: operand expected (error token is "+ ")'],
     ['x', { x: 'y', y: 'x' }, 'y: expression recursion level exceeded (error token is "y")'],
+    ['x', { x: '(x)' }, '(x): expression recursion level exceeded (error token is "x)")'],
   ])('%j', (expr, env, line) => {
     expect(errorLine(expr, env)).toBe(line)
   })
@@ -405,6 +410,51 @@ describe('a value is what bash reads', () => {
     ['0 && 1/0', 0n],
   ])('%j', (expr, value) => {
     expect(evaluateArith(expr, { x: '5', y: '1' }).value).toBe(value)
+  })
+
+  it('wraps a long decimal value', () => {
+    expect(evaluateArith('x', { x: '99999999999999999999999' }).value).toBe(200376420520689663n)
+  })
+
+  it('steps once it reads the token after its operand', () => {
+    const writesOf = (expr: string): unknown => {
+      try {
+        evaluateArith(expr, { x: '3' })
+      } catch (err) {
+        if (err instanceof ArithError) return err.writes
+        throw err
+      }
+      return null
+    }
+    expect(writesOf('x++ 08')).toEqual([{ name: 'x', key: null, value: '4' }])
+    expect(writesOf('++x 08')).toEqual([])
+  })
+
+  it('reads and writes nothing in a skipped branch', () => {
+    const result = evaluateArith('0 && (x-=1), 1 || x++, 1 ? 2 : x++', { x: '1' })
+    expect([result.value, result.writes]).toEqual([2n, []])
+  })
+
+  it('reads an added side in the same record', () => {
+    const result = evaluateArith('x=5', {}, 0, null, null, null, false, null, 'x')
+    expect(result.value).toBe(10n)
+    expect(result.writes).toEqual([{ name: 'x', key: null, value: '5' }])
+    expect(() => evaluateArith('4', {}, 0, null, null, null, false, null, '1+')).toThrow(
+      '1+: syntax error: operand expected (error token is "+")',
+    )
+  })
+
+  it('resolves every subscript without isAssoc', () => {
+    const seen: string[] = []
+    const elements: ElementOps = {
+      resolve: (_name, sub) => {
+        seen.push(sub)
+        return 'k'
+      },
+      read: () => '4',
+    }
+    expect(evaluateArith('a[1+1] + 1', {}, 0, elements).value).toBe(5n)
+    expect(seen).toEqual(['1+1'])
   })
 
   it('keeps the writes made before an error', () => {

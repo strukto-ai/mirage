@@ -27,8 +27,8 @@ import {
 import { ArithError, DiscardSignal } from '../../shell/errors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { appended, type ShellValue, VarAttr } from '../../shell/variable.ts'
-import { sessionEntry } from '../session/session.ts'
+import { type ShellValue, VarAttr } from '../../shell/variable.ts'
+import { type SessionState, sessionEntry } from '../session/session.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../view/types.ts'
@@ -40,7 +40,7 @@ import { expandAndClassify } from '../expand/parts.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
-import { conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
+import { appended, conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -93,6 +93,28 @@ async function assignVar(
 ): Promise<void> {
   try {
     await view.set(key, value, true, assigned)
+  } catch (err) {
+    if (err instanceof PolicyDenied) {
+      throw new DiscardSignal(encodeText(`${err.message}\n`))
+    }
+    if (err instanceof ArithError) throw err.signal('', true)
+    throw err
+  }
+}
+
+/**
+ * What an assignment's `+=` stores (`appended`), its errors fatal as a
+ * store's are (`assignVar`).
+ */
+async function appendedValue(
+  session: SessionState,
+  view: SessionView,
+  old: string,
+  added: string,
+  integer: boolean,
+): Promise<string> {
+  try {
+    return await appended(session, view, old, added, integer)
   } catch (err) {
     if (err instanceof PolicyDenied) {
       throw new DiscardSignal(encodeText(`${err.message}\n`))
@@ -302,7 +324,8 @@ export async function executeAssignment(
       // The subscript is the key: no arithmetic, `m[1+1]` writes the
       // key "1+1".
       const newMap = { ...heldMap }
-      newMap[subText] = append ? appended(heldMap[subText] ?? '', val, integer) : val
+      if (append) val = await appendedValue(session, view, heldMap[subText] ?? '', val, integer)
+      newMap[subText] = val
       await assignVar(view, key, newMap, new Set([subText]))
       const mapCode = assignmentStatus(context.frame, subSeq)
       return [
@@ -326,7 +349,8 @@ export async function executeAssignment(
       const nameText = text.slice(0, eq).replace(/\+$/, '')
       throw new DiscardSignal(encodeText(`bash: ${nameText}: bad array subscript\n`))
     }
-    arraySet(arr, idx, append ? appended(arrayGet(arr, idx), val, integer) : val)
+    if (append) val = await appendedValue(session, view, arrayGet(arr, idx), val, integer)
+    arraySet(arr, idx, val)
     await assignVar(view, key, arr, new Set([idx]))
     const subCode = assignmentStatus(context.frame, subSeq)
     return [
@@ -337,22 +361,28 @@ export async function executeAssignment(
   }
   const heldMap = session.assocs[key]
   const heldArr = session.arrays[key]
+  if (append) {
+    // `a+=x` appends onto element 0 (key "0" of a map); `n+=3` on an
+    // integer name adds: `declare -i n=5; n+=3` stores 8.
+    let old: string
+    if (heldMap !== undefined) old = heldMap['0'] ?? ''
+    else if (heldArr !== undefined) old = arrayGet(heldArr, 0)
+    else old = session.env[key] ?? ''
+    val = await appendedValue(session, view, old, val, integer)
+  }
   if (heldMap !== undefined) {
     // `m=x` on an associative array writes the literal key "0" and
     // keeps every other key, as bash does.
     const newMap = { ...heldMap }
-    newMap['0'] = append ? appended(heldMap['0'] ?? '', val, integer) : val
+    newMap['0'] = val
     await assignVar(view, key, newMap, new Set(['0']))
   } else if (heldArr !== undefined) {
-    // `a=x` writes element 0 and keeps the rest; `a+=x` appends onto
-    // element 0.
+    // `a=x` writes element 0 and keeps the rest.
     const newArr = [...heldArr]
-    arraySet(newArr, 0, append ? appended(arrayGet(newArr, 0), val, integer) : val)
+    arraySet(newArr, 0, val)
     await assignVar(view, key, newArr, new Set([0]))
   } else {
-    // `n+=3` on an integer name adds: `declare -i n=5; n+=3` stores 8,
-    // not 53.
-    await assignVar(view, key, append ? appended(session.env[key] ?? '', val, integer) : val)
+    await assignVar(view, key, val)
   }
   // Reassigning OPTIND (even to its current value) restarts the getopts
   // scan, matching bash's internal char pointer.
