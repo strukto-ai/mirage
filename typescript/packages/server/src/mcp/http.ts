@@ -67,7 +67,7 @@ export class DaemonToolOperations extends McpToolOperations {
   ): Promise<ToolResult> {
     const ws = this.entry.runner.ws
     let answer: ToolResult | undefined
-    let job = await this.jobs.submit(
+    const submitted = this.jobs.submit(
       this.entry.id,
       command,
       async (signal, executionScope) => {
@@ -85,16 +85,7 @@ export class DaemonToolOperations extends McpToolOperations {
       },
       this.sessionId,
     )
-    const jobId = job.id
-    const cancel = (): void => void this.jobs.cancel(jobId)
-    signal?.addEventListener('abort', cancel, { once: true })
-    if (signal?.aborted === true) cancel()
-    try {
-      job = await this.jobs.wait(jobId)
-    } finally {
-      signal?.removeEventListener('abort', cancel)
-      if (signal?.aborted === true) await this.jobs.drain(jobId)
-    }
+    const job = await this.jobs.join(submitted.id, signal)
     if (job.status === JobStatus.CANCELED) {
       return { content: [{ type: 'text', text: 'job canceled' }], isError: true }
     }

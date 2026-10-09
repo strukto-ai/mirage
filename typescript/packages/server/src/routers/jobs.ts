@@ -50,7 +50,7 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
    * another account's workspace answers null like a missing one.
    */
   const reachable = async (id: string, account: string | null): Promise<JobEntry | null> => {
-    const entry = await deps.jobs.store.get(id)
+    const entry = deps.jobs.get(id)
     if (entry === null) return null
     return (await deps.registry.allows(entry.workspaceId, account, entry.submittedAt))
       ? entry
@@ -59,7 +59,7 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
 
   app.get<{ Querystring: JobsListQuery }>('/v1/jobs', async (req) => {
     const jobs: JobEntry[] = []
-    for (const job of await deps.jobs.list(req.query.workspace_id)) {
+    for (const job of deps.jobs.list(req.query.workspace_id)) {
       if (await deps.registry.allows(job.workspaceId, req.account, job.submittedAt)) jobs.push(job)
     }
     return jobs.map(toBriefDict)
@@ -86,6 +86,6 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
     const { id } = req.params
     if ((await reachable(id, req.account)) === null)
       return reply.status(404).send({ detail: 'job not found' })
-    return { job_id: id, canceled: await deps.jobs.cancel(id) }
+    return { job_id: id, canceled: deps.jobs.cancel(id) }
   })
 }

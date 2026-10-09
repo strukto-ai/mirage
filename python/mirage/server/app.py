@@ -24,7 +24,6 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from mirage.concurrency.limiter import run_blocking
-from mirage.execution.base import ExecutionStore
 from mirage.server.auth import (
     AuthConfig,
     AuthMiddleware,
@@ -174,7 +173,6 @@ def build_app(
     state_root: str | Path | None = None,
     pid_file: str | Path | None = None,
     ssh_config: SSHConfig | None = None,
-    execution_store: ExecutionStore | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -217,9 +215,6 @@ def build_app(
             app's lifespan. ``None`` (default) resolves it from the
             ``MIRAGE_SSH_*`` env vars and the ``ssh_*`` config keys; it
             stays shut unless a port is set.
-        execution_store (ExecutionStore | None): execution record storage.
-            Defaults to RAM. The caller closes a supplied store after shutdown;
-            persisted records do not resume running work after a restart.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -249,7 +244,7 @@ def build_app(
         accounts_required=auth.mode == AuthMode.JWT,
         owners=DiskRecordClient(str(app.state.state_root), OWNERS_PREFIX),
     )
-    app.state.jobs = JobTable(execution_store)
+    app.state.jobs = JobTable()
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
     )

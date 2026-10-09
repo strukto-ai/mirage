@@ -23,7 +23,6 @@ export interface ExecutionRecord {
   readonly command: string
   readonly submittedAt: number
   readonly status: ExecutionStatus
-  readonly revision: number
   readonly cancelRequested: boolean
   readonly startedAt: number | null
   readonly finishedAt: number | null

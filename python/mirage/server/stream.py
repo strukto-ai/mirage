@@ -185,19 +185,15 @@ class ShellResponse(Response):
         disconnected.cancel()
         if self._upload is not None:
             self._upload.cancel()
+        self._jobs.cancel(self._job.id)
         try:
-            await self._jobs.cancel(self._job.id)
+            await self._jobs.drain(self._job.id)
         finally:
-            try:
-                await self._jobs.drain(self._job.id)
-            finally:
-                completed.cancel()
-                tasks = [sender, disconnected, completed]
-                if self._upload is not None:
-                    tasks.append(self._upload)
-                for result in await asyncio.gather(
-                    *tasks, return_exceptions=True
-                ):
-                    if isinstance(result, Exception):
-                        logger.debug("stream transport closed: %r", result)
-                await self._output.close()
+            completed.cancel()
+            tasks = [sender, disconnected, completed]
+            if self._upload is not None:
+                tasks.append(self._upload)
+            for result in await asyncio.gather(*tasks, return_exceptions=True):
+                if isinstance(result, Exception):
+                    logger.debug("stream transport closed: %r", result)
+            await self._output.close()

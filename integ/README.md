@@ -285,20 +285,11 @@ suite. Run it locally with `cd integ && pnpm exec tsx hosting/run.ts` after
 building TypeScript; append `python` or `typescript` to select one host.
 
 `hosting/tracking.json` also runs on both HTTP hosts, in foreground and
-background modes. It joins execution-store results with policy denials,
+background modes. It joins job records with policy denials,
 approval/retry decisions and the observer's history view. Completed records
 must remain unchanged after cancellation attempts or approval retries, and
 `record: false` suppresses history while retaining execution tracking. The
 existing `integ/**` filter includes these cases in `integ-hosting`.
-
-Redis execution-record adapters live in `python/mirage/execution/redis/` and
-`typescript/packages/node/src/execution/redis/`; the `core` and `ts` filters
-explicitly include their execution paths. Both hosts also run real Redis store
-contract tests in their unit jobs, covering concurrent revisions, remote waits,
-immutable terminal records, cancellation intent, and completed-only retention.
-The app factories borrow an execution store; its caller closes it after shutdown.
-Sharing records does not transfer ownership of running commands or resume them
-after a worker restart.
 
 The substitution release/cancel cases hold `$(cd /; curl ...)` at that same
 HTTP gate and query the public session API while it is suspended. The parent

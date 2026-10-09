@@ -19,7 +19,6 @@ import asyncssh
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from mirage.execution.ram import RAMExecutionStore
 from mirage.server import app as app_module
 from mirage.server.app import (
     _remove_pid_file,
@@ -37,17 +36,6 @@ def test_build_app_pid_file_explicit_wins(tmp_path):
     target = tmp_path / "custom" / "daemon.pid"
     app = build_app(pid_file=target)
     assert app.state.pid_file == target
-
-
-@pytest.mark.asyncio
-async def test_build_app_borrows_injected_execution_store(tmp_path):
-    store = RAMExecutionStore()
-    app = build_app(state_root=tmp_path, execution_store=store)
-    assert app.state.jobs.store is store
-    async with app.router.lifespan_context(app):
-        assert await store.list() == []
-    assert await store.list() == []
-    await store.close()
 
 
 def test_build_app_roots_follow_mirage_home(monkeypatch, tmp_path):

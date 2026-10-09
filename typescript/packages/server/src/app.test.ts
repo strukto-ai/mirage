@@ -17,22 +17,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import ssh2 from 'ssh2'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RAMExecutionStore } from '@struktoai/mirage-core/execution/ram'
 import { buildApp } from './app.ts'
 import { DaemonConfigError } from './daemon_config.ts'
 import type { SSHConfig } from './ssh/config.ts'
 import { mintKeyPair } from './ssh/keys.ts'
-
-it('borrows an injected execution store', async () => {
-  const store = new RAMExecutionStore()
-  const app = buildApp({ executionStore: store })
-  expect(app.jobs.store).toBe(store)
-  await app.ready()
-  expect(await store.list()).toEqual([])
-  await app.close()
-  expect(await store.list()).toEqual([])
-  await store.close()
-})
 
 describe('buildApp pid file wiring', () => {
   afterEach(() => {

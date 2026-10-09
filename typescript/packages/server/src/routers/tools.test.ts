@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.ts'
 
 const apps: ReturnType<typeof buildApp>[] = []
@@ -108,5 +108,33 @@ describe('the tool routes', () => {
     expect(ws.json()).toEqual({ detail: 'workspace not found' })
     expect(session.statusCode).toBe(404)
     expect(session.json()).toEqual({ detail: 'session not found' })
+  })
+  it('cancel the shell when the caller disconnects', async () => {
+    const app = buildApp({ allowedHosts: ['*'] })
+    apps.push(app)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
+    })
+    const id = res.json<{ id: string }>().id
+    const base = await app.listen({ host: '127.0.0.1', port: 0 })
+    const stop = new AbortController()
+    const calling = fetch(`${base}/v1/workspaces/${id}/tools/shell`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ command: 'sleep 20' }),
+      signal: stop.signal,
+    })
+    const job = await vi.waitFor(() => {
+      const [entry] = app.jobs.list(id)
+      if (entry?.status !== 'running') throw new Error('the shell never started')
+      return entry
+    })
+    stop.abort()
+    await expect(calling).rejects.toThrow()
+    await vi.waitFor(() => {
+      expect(app.jobs.get(job.id)?.status).toBe('canceled')
+    })
   })
 })

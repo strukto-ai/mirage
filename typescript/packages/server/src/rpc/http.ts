@@ -54,7 +54,7 @@ class DaemonRpcServer extends MirageRpcServer {
   ): Promise<JsonValue> {
     const ws = this.entry.runner.ws
     const sessionId = this.sessionId
-    let job = await this.jobs.submit(
+    const submitted = this.jobs.submit(
       this.entry.id,
       command,
       async (jobSignal, executionScope) =>
@@ -63,15 +63,7 @@ class DaemonRpcServer extends MirageRpcServer {
         ),
       sessionId,
     )
-    const jobId = job.id
-    const cancel = (): void => void this.jobs.cancel(jobId)
-    signal?.addEventListener('abort', cancel, { once: true })
-    if (signal?.aborted === true) cancel()
-    try {
-      job = await this.jobs.wait(jobId)
-    } finally {
-      signal?.removeEventListener('abort', cancel)
-    }
+    const job = await this.jobs.join(submitted.id, signal)
     if (job.status === JobStatus.CANCELED) throw new RpcError(RPC_REQUEST_CANCELLED, 'job canceled')
     if (job.status === JobStatus.FAILED) {
       throw new RpcError(RPC_INTERNAL_ERROR, job.error ?? 'shell failed')

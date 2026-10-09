@@ -26,7 +26,6 @@ class JobBrief(BaseModel):
     session_id: str
     command: str
     status: str
-    revision: int
     cancel_requested: bool
     submitted_at: float
     started_at: float | None = None
@@ -54,7 +53,6 @@ def _to_brief(entry: JobEntry) -> JobBrief:
         session_id=entry.session_id,
         command=entry.command,
         status=entry.status.value,
-        revision=entry.revision,
         cancel_requested=entry.cancel_requested,
         submitted_at=entry.submitted_at,
         started_at=entry.started_at,
@@ -82,7 +80,7 @@ async def _require_job(request: Request, job_id: str) -> JobEntry:
     """
     table = request.app.state.jobs
     try:
-        entry = await table.get(job_id)
+        entry = table.get(job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="job not found") from exc
     registry = request.app.state.registry
@@ -101,7 +99,7 @@ async def list_jobs(
     account = request.state.account
     return [
         _to_brief(j)
-        for j in await request.app.state.jobs.list(workspace_id=workspace_id)
+        for j in request.app.state.jobs.list(workspace_id=workspace_id)
         if await registry.allows(j.workspace_id, account, j.submitted_at)
     ]
 
@@ -129,7 +127,7 @@ async def cancel_job(job_id: str, request: Request) -> CancelResponse:
     await _require_job(request, job_id)
     table = request.app.state.jobs
     try:
-        canceled = await table.cancel(job_id)
+        canceled = table.cancel(job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="job not found") from exc
     return CancelResponse(job_id=job_id, canceled=canceled)

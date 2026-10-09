@@ -28,7 +28,6 @@ class ExecutionRecord:
     command: str
     submitted_at: float
     status: ExecutionStatus = ExecutionStatus.PENDING
-    revision: int = 0
     cancel_requested: bool = False
     started_at: float | None = None
     finished_at: float | None = None

@@ -71,9 +71,7 @@ export function shellResponse(
   const disconnected = (): void => {
     output.pipe.closeReader()
     if (stdin instanceof UploadStdin) stdin.discard()
-    void jobs.cancel(job.id).catch((error: unknown) => {
-      reply.log.error(error)
-    })
+    jobs.cancel(job.id)
   }
   reply.raw.once('close', disconnected)
   void failed.then((error) => {
@@ -98,15 +96,12 @@ export function shellResponse(
     } finally {
       output.pipe.closeReader()
       if (stdin instanceof UploadStdin) stdin.discard()
+      jobs.cancel(job.id)
       try {
-        await jobs.cancel(job.id)
+        await jobs.drain(job.id)
       } finally {
-        try {
-          await jobs.drain(job.id)
-        } finally {
-          reply.raw.off('close', disconnected)
-          await output.close()
-        }
+        reply.raw.off('close', disconnected)
+        await output.close()
       }
     }
   }

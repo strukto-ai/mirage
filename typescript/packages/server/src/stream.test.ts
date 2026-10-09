@@ -2,11 +2,9 @@ import { EventEmitter } from 'node:events'
 import type { Readable } from 'node:stream'
 import type { FastifyReply } from 'fastify'
 import { expect, it, vi } from 'vitest'
-import { RAMExecutionStore } from '@struktoai/mirage-core/execution/ram'
-import type { ExecutionRecord } from '@struktoai/mirage-core/execution/types'
 import { CAPACITY } from '@struktoai/mirage-core/io/pipe'
 import { Channel } from '@struktoai/mirage-core/shell/console/types'
-import { JobTable } from './jobs.ts'
+import { JobStatus, JobTable } from './jobs.ts'
 import { UploadStdin } from './stdin.ts'
 import { ShellOutput, shellResponse } from './stream.ts'
 
@@ -66,22 +64,14 @@ it('ending a blocked write leaves only complete wire records', async () => {
   await output.close()
 })
 
-it('disconnect joins cleanup and closes transport even when the record store fails', async () => {
+it('disconnect cancels the job and joins its cleanup before closing the transport', async () => {
   const entered = gate(),
     cleanup = gate(),
     release = gate()
-  class BrokenStore extends RAMExecutionStore {
-    offline = false
-    override async get(id: string): Promise<ExecutionRecord | null> {
-      if (this.offline) throw new Error('storage unavailable')
-      return super.get(id)
-    }
-  }
-  const store = new BrokenStore()
-  const table = new JobTable(store)
+  const table = new JobTable()
   const output = new ShellOutput()
   const closed = vi.spyOn(output, 'close')
-  const job = await table.submit(
+  const job = table.submit(
     'workspace',
     'held',
     async (signal, scope) => {
@@ -126,25 +116,21 @@ it('disconnect joins cleanup and closes transport even when the record store fai
   const reading = (async () => {
     for await (const chunk of body) expect(chunk).toBeDefined()
   })()
-  const failed = expect(reading).rejects.toThrow('storage unavailable')
-  store.offline = true
   raw.emit('close')
   await cleanup.wait
   expect(closed).not.toHaveBeenCalled()
   release.release()
-  await failed
+  await reading
   expect(closed).toHaveBeenCalledOnce()
   expect(raw.listenerCount('close')).toBe(0)
-  expect(log.error).toHaveBeenCalled()
-  store.offline = false
+  expect(table.get(job.id)?.status).toBe(JobStatus.CANCELED)
   await table.close()
-  await store.close()
 })
 
 it('the final record waits for the upload to end', async () => {
   const uploaded = gate()
-  const table = new JobTable(new RAMExecutionStore())
-  const job = await table.submit(
+  const table = new JobTable()
+  const job = table.submit(
     'workspace',
     'true',
     async (_signal, scope) => {

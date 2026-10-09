@@ -26,7 +26,6 @@ interface Job {
   command: string
   status: string
   sessionId: string
-  revision: number
   cancelRequested: boolean
   submittedAt: number
   startedAt: number | null
@@ -242,7 +241,6 @@ async function run(
           )
           assert.equal(done.error, null)
           assert.equal(done.cancelRequested, false)
-          assert(done.revision > 0)
           assert(done.startedAt !== null && done.finishedAt !== null)
           assert(done.submittedAt <= done.startedAt && done.startedAt <= done.finishedAt)
           assert(done.result)

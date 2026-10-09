@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PolicyDenied, describeRefusal, saysWhy } from '../../policy/index.ts'
+import { REFUSAL_WINDOW } from '../../policy/constants.ts'
+import { concat } from '../../io/cachable_iterator.ts'
 import type { Refusal } from '../../types.ts'
 import type { ExecuteResult } from '../workspace/types.ts'
 import { errorVirtualPath, fsStrerror } from '../../errors/fs.ts'
@@ -32,6 +34,62 @@ export function decode(value: Uint8Array | null | undefined): string {
 export function refusalLine(text: string, refusal: Refusal | null): string {
   if (refusal === null || saysWhy(text, refusal)) return ''
   return `${describeRefusal(refusal)}\n`
+}
+
+/**
+ * A stream's first `REFUSAL_WINDOW` bytes, then on to the end of the line
+ * that window cuts (at most a window more), whole lines only unless the
+ * stream ends inside them. Mirrors Python's `head_window`.
+ */
+export function headWindow(prefix: Uint8Array, total: number): Uint8Array {
+  if (total <= REFUSAL_WINDOW) return prefix
+  const end = prefix.indexOf(10, REFUSAL_WINDOW - 1)
+  if (end !== -1) return prefix.subarray(0, end + 1)
+  if (total <= 2 * REFUSAL_WINDOW) return prefix
+  return prefix.subarray(0, prefix.subarray(0, REFUSAL_WINDOW).lastIndexOf(10) + 1)
+}
+
+/**
+ * What a streamed line said, as far as its refusal's line needs. Each
+ * stream keeps its first and last `REFUSAL_WINDOW` bytes. The first runs on
+ * to the end of the line it cuts and keeps whole lines only, so a line
+ * split at a cut can neither pose as the diagnostic nor hide one. A
+ * diagnostic deep inside a long output may be missed, which repeats the
+ * reason and never drops it. Mirrors Python's `SaidWindow`.
+ */
+export class SaidWindow {
+  private readonly prefix: Uint8Array[] = [new Uint8Array(0), new Uint8Array(0)]
+  private readonly tail: Uint8Array[] = [new Uint8Array(0), new Uint8Array(0)]
+  private readonly total = [0, 0]
+
+  /** Note bytes a stream sent. */
+  add(data: Uint8Array, stderr: boolean): void {
+    const stream = stderr ? 1 : 0
+    this.total[stream] = (this.total[stream] ?? 0) + data.byteLength
+    const prefix = this.prefix[stream] ?? new Uint8Array(0)
+    if (prefix.byteLength < 2 * REFUSAL_WINDOW) {
+      this.prefix[stream] = concat([
+        prefix,
+        data.subarray(0, 2 * REFUSAL_WINDOW - prefix.byteLength),
+      ])
+    }
+    this.tail[stream] = concat([
+      this.tail[stream] ?? new Uint8Array(0),
+      data.subarray(-REFUSAL_WINDOW),
+    ]).subarray(-REFUSAL_WINDOW)
+  }
+
+  /** The line to append after the output, as `refusalLine`. */
+  refusalLine(refusal: Refusal | null): string {
+    const said = [0, 1]
+      .flatMap((stream) => [
+        headWindow(this.prefix[stream] ?? new Uint8Array(0), this.total[stream] ?? 0),
+        this.tail[stream] ?? new Uint8Array(0),
+      ])
+      .map((bytes) => decode(bytes))
+      .join('\n')
+    return refusalLine(said, refusal)
+  }
 }
 
 /**

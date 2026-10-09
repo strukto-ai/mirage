@@ -185,7 +185,7 @@ async function waitAttended(
   upload: Promise<unknown>,
 ): Promise<JobEntry> {
   const gone = (): void => {
-    if (!reply.raw.writableFinished) void jobs.cancel(jobId)
+    if (!reply.raw.writableFinished) jobs.cancel(jobId)
   }
   void upload.then((error) => {
     if (error !== undefined) gone()
@@ -290,7 +290,7 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
       await entry.runner.ws.ensureSessionsLoaded()
       const sessionId = req.query.session_id ?? entry.runner.ws.defaultSessionId
       const output = streaming ? new ShellOutput(entry.runner.ws.io.bufferBytes) : undefined
-      let job = await deps.jobs.submit(
+      let job = deps.jobs.submit(
         wsId,
         body.command,
         async (signal, executionScope) => {

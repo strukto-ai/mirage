@@ -180,7 +180,7 @@ async def test_shell_background_returns_job_id_immediately():
         )
         assert r.status_code == 202, r.text
         body = r.json()
-        assert body["job_id"].startswith("job_")
+        assert body["job_id"].startswith("exec_")
         assert body["workspace_id"] == wid
         assert r.headers["X-Mirage-Job-Id"] == body["job_id"]
 

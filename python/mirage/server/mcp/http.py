@@ -16,7 +16,6 @@ import asyncio
 from collections.abc import Coroutine, Mapping
 from typing import Any, TypeVar
 
-import anyio
 from fastapi import FastAPI
 from mcp.server import Server, ServerRequestContext
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -114,19 +113,13 @@ class DaemonToolOperations(McpToolOperations):
         async def run(scope: ExecutionScope) -> JsonValue:
             return await runner.call(run_line(scope))
 
-        job = await self._jobs.submit(
+        job = self._jobs.submit(
             workspace_id=self._entry.id,
             command=command,
             factory=run,
             session_id=self._session_id,
         )
-        try:
-            job = await self._jobs.wait(job.id)
-        except asyncio.CancelledError:
-            with anyio.CancelScope(shield=True):
-                await self._jobs.cancel(job.id)
-                await self._jobs.drain(job.id)
-            raise
+        job = await self._jobs.join(job.id)
         if job.status == JobStatus.CANCELED:
             return ToolResult("job canceled", True)
         if job.status == JobStatus.FAILED or not answers:

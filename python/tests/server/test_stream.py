@@ -5,9 +5,8 @@ import json
 import pytest
 from starlette.requests import Request
 
-from mirage.execution.ram import RAMExecutionStore
 from mirage.io.pipe import CAPACITY
-from mirage.server.jobs import JobTable
+from mirage.server.jobs import JobStatus, JobTable
 from mirage.server.stdin import UploadStdin
 from mirage.server.stream import ShellOutput, ShellResponse
 from mirage.shell.console.types import Channel
@@ -52,17 +51,9 @@ async def test_canceling_a_blocked_write_leaves_only_complete_wire_records():
 
 
 @pytest.mark.asyncio
-async def test_disconnect_joins_cleanup_when_the_record_store_is_unavailable():
+async def test_disconnect_cancels_the_job_and_joins_its_cleanup():
     entered, cleanup, release, headers = (asyncio.Event() for _ in range(4))
     incoming = asyncio.Queue()
-
-    class BrokenStore(RAMExecutionStore):
-        offline = False
-
-        async def get(self, execution_id):
-            if self.offline:
-                raise OSError("storage unavailable")
-            return await super().get(execution_id)
 
     async def receive():
         return await incoming.get()
@@ -83,26 +74,22 @@ async def test_disconnect_joins_cleanup_when_the_record_store_is_unavailable():
             cleanup.set()
             await release.wait()
 
-    store = BrokenStore()
-    table = JobTable(store)
-    job = await table.submit("workspace", "held", run, session_id="session")
+    table = JobTable()
+    job = table.submit("workspace", "held", run, session_id="session")
     await entered.wait()
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
     request = Request(scope, receive)
     response = ShellResponse(output, table, job, request, None, None)
     sending = asyncio.create_task(response(scope, receive, send))
     await headers.wait()
-    store.offline = True
     await incoming.put({"type": "http.disconnect"})
     await asyncio.wait_for(cleanup.wait(), 1)
     assert not sending.done()
     release.set()
-    with pytest.raises(OSError, match="storage unavailable"):
-        await asyncio.wait_for(sending, 1)
+    await asyncio.wait_for(sending, 1)
     assert output.store.closed
-    store.offline = False
+    assert table.get(job.id).status == JobStatus.CANCELED
     await table.close()
-    await store.close()
 
 
 @pytest.mark.asyncio
@@ -121,8 +108,8 @@ async def test_the_final_record_waits_for_the_upload_to_end():
         await scope.start()
         return {"exit_code": 0}
 
-    table = JobTable(RAMExecutionStore())
-    job = await table.submit("workspace", "true", run, session_id="session")
+    table = JobTable()
+    job = table.submit("workspace", "true", run, session_id="session")
     await table.wait(job.id)
     upload = asyncio.create_task(uploaded.wait())
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}

@@ -17,7 +17,6 @@ import json
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
-import anyio
 from fastapi import FastAPI
 from mcp.server.transport_security import DEFAULT_MAX_REQUEST_BODY_SIZE
 from starlette.requests import Request
@@ -116,18 +115,13 @@ class DaemonRpcServer(MirageRpcServer):
         async def run(scope: ExecutionScope) -> JsonValue:
             return await runner.call(line(scope))
 
-        job = await self._jobs.submit(
+        job = self._jobs.submit(
             workspace_id=self._entry.id,
             command=command,
             factory=run,
             session_id=session_id,
         )
-        try:
-            job = await self._jobs.wait(job.id)
-        except asyncio.CancelledError:
-            with anyio.CancelScope(shield=True):
-                await self._jobs.cancel(job.id)
-            raise
+        job = await self._jobs.join(job.id)
         if job.status == JobStatus.CANCELED:
             raise RpcError(RPC_REQUEST_CANCELLED, "job canceled")
         if job.status == JobStatus.FAILED:

@@ -273,3 +273,62 @@ async def test_json_collects_channels_and_preserves_metadata(
             assert stderr.read() == b""
         finally:
             await runner.cleanup()
+
+
+async def test_raw_output_ends_with_the_refusal_line(monkeypatch, tmp_path):
+    async def handler(request):
+        return web.Response(
+            body=(
+                record(
+                    stream="stderr",
+                    data=base64.b64encode(b"rm: Permission denied\n").decode(),
+                )
+                + record(
+                    status="done",
+                    result={
+                        "kind": "io",
+                        "exit_code": 126,
+                        "refusal": {
+                            "kind": "deny",
+                            "reason": "no deletes",
+                            "policy": "Guard",
+                            "scope": "command",
+                            "ask_id": None,
+                        },
+                    },
+                    error=None,
+                )
+            ),
+            content_type="application/x-ndjson",
+        )
+
+    app = web.Application()
+    app.router.add_post("/shell", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", 0).start()
+    port = runner.addresses[0][1]
+    with (
+        (tmp_path / "stdout").open("w+b") as stdout,
+        (tmp_path / "stderr").open("w+b") as stderr,
+    ):
+        monkeypatch.setattr(
+            stream, "sys", SimpleNamespace(stdout=stdout, stderr=stderr)
+        )
+        client = SimpleNamespace(
+            settings=SimpleNamespace(url=f"http://127.0.0.1:{port}"),
+            token=lambda: "",
+        )
+        try:
+            assert (
+                await stream.stream_shell(
+                    client, "/shell?stream=true", {"command": "rm x"}, False
+                )
+                == 126
+            )
+            stderr.seek(0)
+            assert stderr.read() == (
+                b"rm: Permission denied\npolicy denied: no deletes\n"
+            )
+        finally:
+            await runner.cleanup()

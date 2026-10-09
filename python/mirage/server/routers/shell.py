@@ -156,7 +156,7 @@ async def shell(
 
     if background and upload is not None:
         await upload
-    job = await job_table.submit(
+    job = job_table.submit(
         workspace_id=workspace_id,
         command=req_obj.command,
         factory=run,
@@ -266,7 +266,7 @@ async def wait_attended(
     try:
         await asyncio.wait({waiter, gone}, return_when=asyncio.FIRST_COMPLETED)
         if gone.done() and not waiter.done():
-            await job_table.cancel(job_id)
+            job_table.cancel(job_id)
         return await waiter
     finally:
         gone.cancel()

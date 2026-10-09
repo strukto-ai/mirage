@@ -17,7 +17,7 @@ import { Channel } from '@struktoai/mirage-core/shell/console/types'
 import { ExecutionScope } from '@struktoai/mirage-core/workspace/execution'
 import { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
-import { REFUSAL_WINDOW } from './constants.ts'
+import { REFUSAL_WINDOW } from '@struktoai/mirage-core/policy/constants'
 import type { ServerChannel } from 'ssh2'
 import { describe, expect, it, vi } from 'vitest'
 import {
