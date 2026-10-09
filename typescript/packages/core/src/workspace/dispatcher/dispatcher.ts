@@ -1182,7 +1182,12 @@ export class Dispatcher {
   ): Promise<void> {
     const opened = appendsNothing(name, args)
     const observed = STAMP_WRITE_OPS.has(name) && !opened ? Date.now() / 1000 : null
-    await this.invalidateAfterWriteByPath(p.virtual, observed, !opened)
+    await this.invalidateAfterWriteByPath(
+      p.virtual,
+      observed,
+      !opened,
+      name === 'unlink' || name === 'rmdir',
+    )
     for (const [, other] of others) await this.invalidateAfterWriteByPath(other.virtual)
     if (name === 'unlink' || name === 'rmdir') {
       // The name no longer holds that file, so what was set on it
@@ -1336,7 +1341,14 @@ export class Dispatcher {
       // refuse after the entry is gone and strand the cascade.
       return result
     } finally {
-      if (write) await this.invalidateAfterWriteByPath(spec.virtual)
+      if (write) {
+        await this.invalidateAfterWriteByPath(
+          spec.virtual,
+          null,
+          true,
+          name === 'unlink' || name === 'rmdir',
+        )
+      }
     }
   }
 
@@ -2038,13 +2050,16 @@ export class Dispatcher {
   /**
    * Drop what a write to `rawPath` made stale above the store. `observed` is
    * the epoch seconds of a content write to record, null for a removal;
-   * `times` false keeps the overlay times, for an open that wrote nothing.
-   * Mirrors Python's Dispatcher.invalidate_after_write.
+   * `times` false keeps the overlay times, for an open that wrote nothing;
+   * `removed` drops the path's own listing too, for an unlink or rmdir, as
+   * a core's removal drops it. Mirrors Python's
+   * Dispatcher.invalidate_after_write.
    */
   async invalidateAfterWriteByPath(
     rawPath: string,
     observed: number | null = null,
     times = true,
+    removed = false,
   ): Promise<void> {
     // Directory writes (mkdir/rmdir via tree copies) arrive with a
     // trailing slash; normalize so the parent computation below does not
@@ -2055,7 +2070,8 @@ export class Dispatcher {
     if (mount === null) return
     if (times) await this.namespace.clearTimes(path, observed)
     const manager = this.managerFor(mount)
-    await manager.invalidateAfterWrite(path)
+    if (removed) await manager.invalidateAfterUnlink(path)
+    else await manager.invalidateAfterWrite(path)
     await manager.invalidateAncestors(path)
   }
 

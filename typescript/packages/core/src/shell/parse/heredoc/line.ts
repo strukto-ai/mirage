@@ -26,6 +26,18 @@ import {
 const NO_NESTED_QUOTES: ReadonlySet<string> = new Set()
 
 /**
+ * Whether an odd run of backslashes ends `text`, so its last backslash
+ * escapes what follows: the newline it continues, or the end of the input it
+ * quotes. An even run is escaped backslashes only. Mirrors Python's
+ * ends_escaped.
+ */
+export function endsEscaped(text: string): boolean {
+  let run = 0
+  while (run < text.length && text.charCodeAt(text.length - 1 - run) === 92) run += 1
+  return run % 2 === 1
+}
+
+/**
  * The character closing the construct that opens at `index`.
  *
  * `${` runs to its balancing brace, `$[` to its bracket, and `$(`,

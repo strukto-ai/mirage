@@ -196,8 +196,10 @@ instead.
 ## Local
 
 The `local` runtime runs a host interpreter as a subprocess: full
-CPython, host filesystem, host environment. Use it when the code needs
-stdin, third-party packages, or host files:
+CPython and the host filesystem. Its environment is the session's plus
+the runtime entry's config `env`; nothing of the host process's own
+environment is passed. Use it when the code needs stdin, third-party
+packages, or host files:
 
 ```python
 ws = Workspace({"/data": RAMVFS()},

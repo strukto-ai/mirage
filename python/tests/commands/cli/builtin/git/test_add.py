@@ -350,3 +350,30 @@ async def test_verbose_names_nothing_restaged_unchanged(
     (repo_path / "a.txt").write_text("edited\n", encoding="utf-8")
     await run(git_rw, "add a.txt")
     assert await run(git_rw, "add --verbose a.txt") == (0, b"", b"")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name, verb", [("a.txt", "updating"), ("fresh.txt", "adding")]
+)
+async def test_an_unreadable_file_is_refused_in_git_words(
+    git_rw, repo_path: Path, name: str, verb: str
+):
+    (repo_path / name).write_text("new\n", encoding="utf-8")
+    await git_rw.set_session_profile(
+        git_rw.default_session_id,
+        {
+            "commands": {
+                "deny": [{"reason": "sealed", "paths": [f"/repo/{name}"]}]
+            }
+        },
+    )
+    assert await run(git_rw, f"add {name}") == (
+        128,
+        b"",
+        (
+            f'error: open("{name}"): Permission denied\n'
+            f"error: unable to index file '{name}'\n"
+            f"fatal: {verb} files failed\n"
+        ).encode(),
+    )

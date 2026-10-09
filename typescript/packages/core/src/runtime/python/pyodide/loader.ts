@@ -30,6 +30,10 @@ function envHome(): string | null {
 }
 
 interface PyodideFS extends FSHost {
+  analyzePath: (path: string) => { exists: boolean }
+  mkdir: (path: string) => unknown
+  rmdir: (path: string) => void
+  readdir: (path: string) => string[]
   mkdirTree: (path: string, mode?: number) => void
   writeFile: (path: string, data: Uint8Array | string) => void
   readFile: (path: string, opts?: { encoding?: 'binary' | 'utf8' }) => Uint8Array | string

@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
+import { Console } from 'node:console'
+import { stderr } from 'node:process'
 import { fromJsonSchema } from '@modelcontextprotocol/server'
 import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
-import { failureText } from '@struktoai/mirage-core/errors/classify'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -38,6 +39,8 @@ import {
   RPC_PARSE_ERROR,
 } from './constants.ts'
 import { VFS_CALLS, type VfsCall } from '../vfs_calls.ts'
+
+const logger = new Console({ stdout: stderr, stderr })
 
 const PROTOCOL_VERSION = '1'
 export const CANCEL_REQUEST = '$/cancelRequest'
@@ -216,9 +219,10 @@ export class MirageRpcServer {
       if (signal?.aborted === true) {
         return errorResponse(requestId, RPC_REQUEST_CANCELLED, 'request cancelled')
       }
+      logger.debug('rpc %s failed', method, err)
       const data = failureToDict(err)
       const code = data.errno === 'ENOENT' ? RPC_NOT_FOUND : RPC_INTERNAL_ERROR
-      return errorResponse(requestId, code, failureText(err), data)
+      return errorResponse(requestId, code, data.detail, data)
     }
   }
 

@@ -251,6 +251,7 @@ class RuntimeFiles:
         offset: int = 0,
         size: int | None = None,
         raw: bool = False,
+        direct: bool = False,
     ) -> bytes:
         """A file's bytes, or the range of them a handle asked for.
 
@@ -260,10 +261,14 @@ class RuntimeFiles:
             size (int | None): its length; None reads to the end.
             raw (bool): the stored bytes rather than a rendering, which
                 is what an edit that is written back must start from.
+            direct (bool): what the backend holds now, past the file
+                cache, the dispatcher's ``direct`` read.
         """
         kwargs: dict[str, Any] = {"filetype": None} if raw else {}
         if offset or size is not None:
             kwargs.update(offset=offset, size=size)
+        if direct:
+            kwargs["direct"] = True
         data = self.call("read", path, **kwargs)
         if isinstance(data, str):
             return data.encode()
@@ -588,7 +593,7 @@ class RuntimeFiles:
         if self._append_delta(path, data):
             return
         try:
-            whole = self.read(path, raw=True) + data
+            whole = self.read(path, raw=True, direct=True) + data
         except FileNotFoundError:
             whole = data
         self.write(path, whole)

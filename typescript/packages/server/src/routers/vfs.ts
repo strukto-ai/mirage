@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Console } from 'node:console'
+import { stderr } from 'node:process'
 import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { classify } from '@struktoai/mirage-core/errors/classify'
@@ -22,6 +24,8 @@ import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/works
 import { CallArgsError, answered, checked, failureToDict } from '../io_serde.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { VFS_CALLS } from '../vfs_calls.ts'
+
+const logger = new Console({ stdout: stderr, stderr })
 
 export interface VfsRoutesDeps {
   registry: WorkspaceRegistry
@@ -122,6 +126,7 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
           const session = await sessionOf(ws, req.query.session_id)
           body = await answered(session, call, args, explain)
         } catch (err) {
+          logger.debug('vfs/%s failed', call.name, err)
           return failure(reply, err)
         }
         return reply.send(body)
@@ -144,6 +149,7 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
         const session = await sessionOf(ws, req.query.session_id)
         paths = await session.glob(pattern)
       } catch (err) {
+        logger.debug('glob failed', err)
         return failure(reply, err)
       }
       return reply.send({ paths })

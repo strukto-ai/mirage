@@ -65,6 +65,7 @@
   },
   "server/mcp/server": {
    "typescript_only": {
+    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "createMirageMcpServer": "Python's lowlevel Server takes list and call handlers, so MirageMcpServer is a class that holds the tool table and answers both. TypeScript's McpServer registers each tool itself, so a factory registers the table and returns the server."
    }
   },
@@ -78,6 +79,7 @@
   },
   "server/rpc/server": {
    "typescript_only": {
+    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "MirageRpcServerOptions": "Python's MirageRpcServer takes its session, tool table, name and version as keyword arguments; the TypeScript constructor takes them as one options object, as MirageMcpServerOptions does for the MCP server."
    }
   },
@@ -376,6 +378,7 @@
     "json_body": "FastAPI hands a route the raw request, so the VFS, glob and tool routes read their JSON object through json_body, bounded by MCP's size limit; Fastify parses and bounds the body itself (bodyLimit)."
    },
    "typescript_only": {
+    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "CallQuery": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "RouteError": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "VfsRoutesDeps": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
@@ -534,6 +537,21 @@
    },
    "typescript_only": {
     "atimeMs": "Nanoseconds in python and milliseconds in TypeScript, as mtime_ns and mtimeMs: epoch nanoseconds are past 2**53, so a JS number cannot hold them exactly, while a python int can and preview1 asks in them."
+   }
+  },
+  "runtime/python/local/config": {
+   "typescript_only": {
+    "LOCAL_CONFIG_KEYS": "A TypeScript config interface lists its keys so an unknown one fails loud at construction; Python's dataclass refuses an unknown field by itself (RuntimeConfig.coerce)."
+   }
+  },
+  "runtime/python/local/runtime": {
+   "typescript_only": {
+    "onHostPath": "Finds the interpreter on the host PATH before the child gets a clean env; Python uses shutil.which, and node's standard library has no PATH lookup."
+   }
+  },
+  "commands/builtin/general/interpreter": {
+   "typescript_only": {
+    "runtimeUnavailable": "A TypeScript engine (Pyodide, Monty, QuickJS) can find it cannot run only when a run starts, and says so with its own error, which the interpreter and a script CLI both answer with 127; a Python entry that cannot run fails to build and is left out of the world, so no run raises it."
    }
   },
   "core/email/client": {

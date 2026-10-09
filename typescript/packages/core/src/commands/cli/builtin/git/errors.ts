@@ -604,6 +604,36 @@ export class IgnoredPathsError extends GitError {
 }
 
 /**
+ * A path `add` or `commit -a` could not read to stage. git names the open
+ * that failed and the file it could not index, then gives up on the whole
+ * update, and words the end by whether the index already held the path.
+ * Pinned against git 2.47.3. Mirrors Python's UnindexableFileError.
+ */
+export class UnindexableFileError extends GitError {
+  override readonly prefix = 'error'
+
+  constructor(name: string, reason: string, tracked: boolean) {
+    super(
+      `open("${name}"): ${reason}\n` +
+        `error: unable to index file '${name}'\n` +
+        `fatal: ${tracked ? 'updating' : 'adding'} files failed`,
+    )
+  }
+}
+
+/**
+ * A working-tree file `diff` could not read to compare. Pinned against git
+ * 2.47.3. Mirrors Python's UnhashableFileError.
+ */
+export class UnhashableFileError extends GitError {
+  override readonly prefix = 'error'
+
+  constructor(name: string, reason: string) {
+    super(`open("${name}"): ${reason}\nfatal: cannot hash ${name}`)
+  }
+}
+
+/**
  * `add` with no pathspec at all. Not an error by exit code: git says what it did
  * not do and exits 0, because nothing went wrong and nothing happened.
  */

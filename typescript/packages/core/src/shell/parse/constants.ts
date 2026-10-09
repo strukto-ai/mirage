@@ -284,3 +284,72 @@ export const ARITH_TEST_OPERATORS: ReadonlySet<string> = new Set([
   '-gt',
   '-ge',
 ])
+
+// A shell identifier, as the names a word reads are found.
+export const IDENTIFIER_RE = /[A-Za-z_][A-Za-z0-9_]*/g
+
+// The nodes whose text the respelling pass leaves to their own grammar:
+// tests, arithmetic, strings, expansions, heredoc bodies and comments.
+export const UNLEXED: ReadonlySet<string> = new Set([
+  'test_command',
+  'arithmetic_expansion',
+  'string_content',
+  'raw_string',
+  'ansi_c_string',
+  'expansion',
+  'heredoc_content',
+  'comment',
+  'binary_expression',
+  'unary_expression',
+  'postfix_expression',
+])
+
+// The characters a word can start after, so a digit string there is a
+// redirect's descriptor rather than the tail of a word.
+export const WORD_START = ' \t\n;&|(){}'
+
+// A run of digits at the respelling position.
+export const DIGIT_RUN = /\d+/y
+
+// A backslash before a blank, which escapes the blank into the word it opens.
+export const ESCAPED_BLANK = /\\[ \t]/g
+
+// What follows a case arm's terminator when the arm is the last one.
+export const LAST_CASE_ARM = /^\s*esac(?![^\s;&|()<>])/
+
+// Test operators the grammar lexes apart from a word in an argument list or
+// an error region, where bash reads a word.
+export const BARE_WORDS: ReadonlySet<string> = new Set(['==', '=~'])
+
+// A `$` that no name, digit, special parameter, brace, paren, bracket or
+// quote follows, which bash reads as a literal `$`.
+export const LITERAL_DOLLAR = /\$(?![\w@*#?$!{(['"[-])/y
+
+// The list and pipe operators, which end a `[` command's words.
+export const LIST_TOKENS: ReadonlySet<string> = new Set(['&&', '||', '|', '|&', ';', '&', ';;'])
+
+// The expression nodes a `[` test is built from, walked for a list operator
+// the grammar folded into it.
+export const TEST_PARTS: ReadonlySet<string> = new Set([
+  'binary_expression',
+  'unary_expression',
+  'negation_expression',
+  'parenthesized_expression',
+  'ERROR',
+])
+
+// A for or select header's variable spelled as a name.
+export const HEADER_NAME = /^\w+$/
+
+// The `in` or `do` after a for or select header's variable.
+export const HEADER_FOLLOWER = /^\s*(in|do)(?![^\s;&|()<>])/
+
+// The nodes a newline between two children of cannot be whitespace, so a
+// newline the grammar folded into one ends the statement.
+export const STATEMENT_NODES: ReadonlySet<string> = new Set([
+  'command',
+  'declaration_command',
+  'file_redirect',
+  'redirected_statement',
+  'unset_command',
+])

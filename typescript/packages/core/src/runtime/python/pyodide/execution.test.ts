@@ -38,12 +38,10 @@ function gate(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe('Pyodide execution lifetime', { timeout: 120_000 }, () => {
-  it.each(['inline', 'worker', 'fallback'] as const)(
+  it.each(['inline', 'worker'] as const)(
     'isolates commands, one-shot eval, and named consoles (%s)',
     async (mode) => {
       const rt = new PyodideRuntime({ config: { autoLoadFromImports: false } })
-      const fallback =
-        mode === 'fallback' ? vi.spyOn(PyodideWorkerClient, 'create').mockResolvedValue(null) : null
       if (mode !== 'inline') {
         rt.bind(
           new WorkspaceBinding(
@@ -76,7 +74,6 @@ describe('Pyodide execution lifetime', { timeout: 120_000 }, () => {
         )
       } finally {
         await rt.close()
-        fallback?.mockRestore()
       }
     },
   )
@@ -813,48 +810,40 @@ sys._xoptions is saved_options and warnings.filters is saved_filters and \
 })
 
 describe('Pyodide command cwd', { timeout: 120_000 }, () => {
-  it.each([false, true])(
-    'keeps executing with a cwd on an unsupported root mount (eager: %s)',
-    async (eager) => {
-      const rt = new PyodideRuntime()
-      const fallback = eager
-        ? vi.spyOn(PyodideWorkerClient, 'create').mockResolvedValue(null)
-        : null
-      try {
-        rt.bind(
-          new WorkspaceBinding(
-            () => Promise.reject(new Error('root mount must not be read')),
-            new PrefixResolver(() => ['/']),
-            (binding) =>
-              captureBinding(binding, { cwd: PathSpec.fromStrPath('/unservable/nested') }),
-          ),
-        )
-        const before = await rt.eval('import os; os.getcwd()')
-        if (typeof before.value !== 'string') throw new Error('cwd must be a string')
-        const result = await rt.run({
-          code: 'import os; print(1); print(os.getcwd())',
-          args: [],
-          env: {},
-          stdin: null,
-          cwd: PathSpec.fromStrPath('/unservable/nested'),
-        })
-        expect(result.exitCode).toBe(0)
-        expect(new TextDecoder().decode(result.stdout)).toBe(`1\n${before.value}\n`)
-        const root = await rt.run({
-          code: 'import os; print(os.getcwd())',
-          args: [],
-          env: {},
-          stdin: null,
-          cwd: PathSpec.fromStrPath('/'),
-        })
-        expect(root.exitCode).toBe(0)
-        expect(new TextDecoder().decode(root.stdout)).toBe('/\n')
-      } finally {
-        await rt.close()
-        fallback?.mockRestore()
-      }
-    },
-  )
+  it('keeps executing with a cwd on an unsupported root mount', async () => {
+    const rt = new PyodideRuntime()
+    try {
+      rt.bind(
+        new WorkspaceBinding(
+          () => Promise.reject(new Error('root mount must not be read')),
+          new PrefixResolver(() => ['/']),
+          (binding) => captureBinding(binding, { cwd: PathSpec.fromStrPath('/unservable/nested') }),
+        ),
+      )
+      const before = await rt.eval('import os; os.getcwd()')
+      if (typeof before.value !== 'string') throw new Error('cwd must be a string')
+      const result = await rt.run({
+        code: 'import os; print(1); print(os.getcwd())',
+        args: [],
+        env: {},
+        stdin: null,
+        cwd: PathSpec.fromStrPath('/unservable/nested'),
+      })
+      expect(result.exitCode).toBe(0)
+      expect(new TextDecoder().decode(result.stdout)).toBe(`1\n${before.value}\n`)
+      const root = await rt.run({
+        code: 'import os; print(os.getcwd())',
+        args: [],
+        env: {},
+        stdin: null,
+        cwd: PathSpec.fromStrPath('/'),
+      })
+      expect(root.exitCode).toBe(0)
+      expect(new TextDecoder().decode(root.stdout)).toBe('/\n')
+    } finally {
+      await rt.close()
+    }
+  })
 
   it('still rejects a missing cwd on a supported child of a root mount', async () => {
     const rt = new PyodideRuntime()
@@ -1002,50 +991,42 @@ it.each([false, true])(
 )
 
 describe('Pyodide evaluation cwd', { timeout: 120_000 }, () => {
-  it.each([false, true])(
-    'recovers a console after its cwd disappears (eager: %s)',
-    async (eager) => {
-      const rt = new PyodideRuntime({ config: { autoLoadFromImports: false } })
-      const fallback = eager
-        ? vi.spyOn(PyodideWorkerClient, 'create').mockResolvedValue(null)
-        : null
-      const ws = new Workspace(
-        { '/data': new RAMVFS() },
-        { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [rt, 'workspace'] },
-      )
-      const dec = new TextDecoder()
-      try {
-        expect((await ws.shell('cd /data')).exitCode).toBe(0)
-        for (const mutation of ['rmdir /data/sub', 'mv /data/sub /data/moved']) {
-          expect((await ws.shell('mkdir /data/sub')).exitCode).toBe(0)
-          const session = mutation
-          const first = await rt.eval("import os; token = 42; os.chdir('sub')", { session })
-          expect(first.exitCode).toBe(0)
-          expect((await ws.shell(mutation)).exitCode).toBe(0)
-          const missing = await rt.eval("print('must not run')", { session })
-          expect(missing.exitCode).toBe(1)
-          expect(dec.decode(missing.stdout)).toBe('')
-          expect(dec.decode(missing.stderr ?? new Uint8Array())).toContain('FileNotFoundError')
-          const recovered = await rt.eval("print(token, os.getcwd()); os.chdir('/data')", {
-            session,
-          })
-          expect(recovered.exitCode).toBe(0)
-          expect(dec.decode(recovered.stdout)).toBe('42 /\n')
-          const next = await rt.eval('print(os.getcwd())', { session })
-          expect(next.exitCode).toBe(0)
-          expect(dec.decode(next.stdout)).toBe('/data\n')
-          expect((await rt.eval('import os; os.getcwd()')).value).toBe('/data')
-        }
-      } finally {
-        await ws.close()
-        fallback?.mockRestore()
-      }
-    },
-  )
-
-  it.each([false, true])('inherits cwd and isolates consoles (eager: %s)', async (eager) => {
+  it('recovers a console after its cwd disappears', async () => {
     const rt = new PyodideRuntime({ config: { autoLoadFromImports: false } })
-    const fallback = eager ? vi.spyOn(PyodideWorkerClient, 'create').mockResolvedValue(null) : null
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [rt, 'workspace'] },
+    )
+    const dec = new TextDecoder()
+    try {
+      expect((await ws.shell('cd /data')).exitCode).toBe(0)
+      for (const mutation of ['rmdir /data/sub', 'mv /data/sub /data/moved']) {
+        expect((await ws.shell('mkdir /data/sub')).exitCode).toBe(0)
+        const session = mutation
+        const first = await rt.eval("import os; token = 42; os.chdir('sub')", { session })
+        expect(first.exitCode).toBe(0)
+        expect((await ws.shell(mutation)).exitCode).toBe(0)
+        const missing = await rt.eval("print('must not run')", { session })
+        expect(missing.exitCode).toBe(1)
+        expect(dec.decode(missing.stdout)).toBe('')
+        expect(dec.decode(missing.stderr ?? new Uint8Array())).toContain('FileNotFoundError')
+        const recovered = await rt.eval("print(token, os.getcwd()); os.chdir('/data')", {
+          session,
+        })
+        expect(recovered.exitCode).toBe(0)
+        expect(dec.decode(recovered.stdout)).toBe('42 /\n')
+        const next = await rt.eval('print(os.getcwd())', { session })
+        expect(next.exitCode).toBe(0)
+        expect(dec.decode(next.stdout)).toBe('/data\n')
+        expect((await rt.eval('import os; os.getcwd()')).value).toBe('/data')
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('inherits cwd and isolates consoles', async () => {
+    const rt = new PyodideRuntime({ config: { autoLoadFromImports: false } })
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
@@ -1115,7 +1096,6 @@ describe('Pyodide evaluation cwd', { timeout: 120_000 }, () => {
       expect((await rt.eval('import os; os.getcwd()')).value).toBe('/')
     } finally {
       await ws.close()
-      fallback?.mockRestore()
     }
   })
 })

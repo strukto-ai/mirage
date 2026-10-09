@@ -14,7 +14,8 @@
 
 import { Buffer } from 'node:buffer'
 import { fromJsonSchema } from '@modelcontextprotocol/server'
-import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
+import { classify } from '@struktoai/mirage-core/errors/classify'
+import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import type {
   Ask,
@@ -65,13 +66,15 @@ export function refusalToDict(refusal: Refusal | null): IoResultDict['refusal'] 
 }
 
 /**
- * A failed call as the server's entry points carry it: its text, the errno it
- * names and, for a policy's refusal, its record. Mirrors Python's
- * `failure_to_dict`.
+ * A failed call's public detail, errno and policy refusal record. Unknown
+ * exceptions may carry credentials, backend responses or host paths; only
+ * named conditions have public text. Mirrors Python's `failure_to_dict`.
  */
-export function failureToDict(err: unknown): Record<string, JsonValue> {
-  const body: Record<string, JsonValue> = { detail: failureText(err) }
+export function failureToDict(err: unknown): Record<string, JsonValue> & { detail: string } {
   const condition = classify(err)
+  const body: Record<string, JsonValue> & { detail: string } = {
+    detail: condition === null ? 'internal server error' : posixPhrase(condition),
+  }
   if (condition !== null) body.errno = condition
   if (err instanceof PolicyDenied) body.refusal = refusalToDict(err.refusal)
   return body

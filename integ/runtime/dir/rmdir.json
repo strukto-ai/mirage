@@ -134,6 +134,69 @@
           }
         }
       ]
+    },
+    {
+      "id": "rmdir_drops_the_listing_of_what_it_removed",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "keep.txt": "k\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nos.mkdir('/data/d')\nprint(os.listdir('/data/d'))\nos.rmdir('/data/d')\ntry:\n    os.listdir('/data/d')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "node": "const fsp = require('node:fs').promises\nawait fsp.mkdir('/data/d')\nconsole.log(JSON.stringify(await fsp.readdir('/data/d')))\nawait fsp.rmdir('/data/d')\ntry {\n  await fsp.readdir('/data/d')\n} catch (e) {\n  console.log(e.code)\n}",
+            "js": "os.mkdir('/data/d')\nconsole.log(JSON.stringify(os.readdir('/data/d')[0].filter((n) => n !== '.' && n !== '..')))\nos.remove('/data/d')\nconsole.log(os.readdir('/data/d')[1])"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "[]\nFileNotFoundError\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "[]\nENOENT\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "[]\n44\n"
+            }
+          }
+        },
+        {
+          "command": "ls /data/d",
+          "expect": {
+            "exit": 2
+          }
+        },
+        {
+          "command": "ls /data",
+          "expect": {
+            "exit": 0,
+            "stdout": "keep.txt\n"
+          }
+        }
+      ]
     }
   ]
 }

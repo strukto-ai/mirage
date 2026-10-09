@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.shell.bytes import encode_text
+from mirage.shell.parse.heredoc.line import ends_escaped
 from mirage.shell.parse.heredoc.types import Heredoc, HeredocSource
 from mirage.shell.types import TSNodeLike
 
@@ -170,8 +171,7 @@ class HeredocNode:
                     bodies += b"\n"
                 if not doc.terminated:
                     line = body.removesuffix(b"\n")
-                    trailing = len(line) - len(line.rstrip(b"\\"))
-                    if not doc.quoted and trailing % 2:
+                    if not doc.quoted and ends_escaped(line):
                         bodies += b"\n"
                     bodies += encode_text(doc.delimiter) + b"\n"
                 if first <= doc.body_start and doc.end <= last + 1:

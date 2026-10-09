@@ -17,7 +17,7 @@ import { expect, it, vi } from 'vitest'
 import { PyodideRuntime } from '../runtime.ts'
 import { PrefixResolver } from '../../../resolver.ts'
 import type { BridgeDispatchFn } from '../../../types.ts'
-import { FileStat, FileType } from '../../../../types.ts'
+import { PyodideUnavailableError } from '../errors.ts'
 
 const state = vi.hoisted(() => ({ mode: 'construction', terminated: 0 }))
 vi.mock('node:worker_threads', () => ({
@@ -39,33 +39,33 @@ vi.mock('node:worker_threads', () => ({
 }))
 
 it.each(['construction', 'startup'])(
-  'uses the eager VFS after worker %s fails',
+  'refuses a bound run after worker %s fails',
   async (mode) => {
     state.mode = mode
     state.terminated = 0
     const calls: string[] = []
-    const dispatch: BridgeDispatchFn = (op, path) => {
+    const dispatch: BridgeDispatchFn = (op) => {
       calls.push(op)
-      if (op === 'readdir') return Promise.resolve(['/data/one.txt'])
-      if (op === 'stat')
-        return Promise.resolve(new FileStat({ name: path, type: FileType.FILE, size: 5 }))
-      if (op === 'read') return Promise.resolve(new TextEncoder().encode('hello'))
       return Promise.reject(new Error(`unexpected ${op}`))
     }
     const rt = new PyodideRuntime()
     rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
     try {
       for (let i = 0; i < 2; i++) {
-        const result = await rt.run({
+        const run = rt.run({
           code: "print(open('/data/one.txt').read())",
           args: [],
           env: {},
           stdin: null,
         })
-        expect(result.exitCode).toBe(0)
-        expect(new TextDecoder().decode(result.stdout)).toBe('hello\n')
+        await expect(run).rejects.toBeInstanceOf(PyodideUnavailableError)
+        // What stopped the worker, not the shared-memory hint a host
+        // that has shared memory cannot act on.
+        await expect(run).rejects.toThrow(
+          `pyodide could not start its worker: ${mode === 'startup' ? 'worker module blocked' : 'workers blocked'}`,
+        )
       }
-      expect(calls).toContain('readdir')
+      expect(calls).toEqual([])
       expect(state.terminated).toBe(mode === 'startup' ? 2 : 0)
     } finally {
       await rt.close()
