@@ -30,6 +30,7 @@
  "modules": {
   "accessor": {
    "python_only": {
+    "imap": "The asyncio IMAP4rev1 client behind accessor/email. Node's EmailAccessor drives imapflow (MIT); the asyncio IMAP client on PyPI (aioimaplib) is GPL-3.0, which an Apache-2.0 package cannot ship, so python carries its own minimal client and there is nothing on the node side to mirror.",
     "pool": "One open client per event loop, keyed by the loop object. Only python has the hazard: an aiobotocore client binds to the loop that opened it, and a process runs many loops over its lifetime (every asyncio.run makes one), so a cached client outlives the loop it belongs to and has to be released against a loop that is already closed. Node has one loop and an AWS SDK v3 client that is not bound to it, so S3Accessor there holds config and opens nothing -- there is no lifetime to manage and nothing to mirror."
    },
    "typescript_only": {
