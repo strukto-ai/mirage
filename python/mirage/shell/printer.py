@@ -31,6 +31,7 @@ from mirage.shell.parse.heredoc.types import Heredoc
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import FunctionBody, TSNodeLike
 from mirage.shell.types import NodeType as NT
+from mirage.utils.quote import single_quote
 
 _INDENT = "    "
 _CONTINUATION = re.compile(r"\\\n[ \t]*")
@@ -77,10 +78,6 @@ def _definition_of(body: FunctionBody) -> TSNodeLike:
     while parent is not None and parent.type != NT.FUNCTION_DEFINITION:
         parent = parent.parent
     return parent if parent is not None else node
-
-
-def _requote(text: str) -> str:
-    return "'" + text.replace("'", "'\\''") + "'"
 
 
 class _Printer:
@@ -559,7 +556,7 @@ class _Printer:
             quoted = delimiter != word
         self.deferred.append(body + delimiter + "\n")
         shown = fd if fd is not None and fd.lstrip("0") != "" else ""
-        return shown + operator + (_requote(delimiter) if quoted else word)
+        return shown + operator + (single_quote(delimiter) if quoted else word)
 
     def word(self, node: TSNodeLike) -> str:
         """A word as typed, but for what bash rewrites: ``$'...'`` decoded
@@ -571,7 +568,7 @@ class _Printer:
         """
         kind = node.type
         if kind == NT.ANSI_C_STRING:
-            return _requote(decode_ansi_c(get_text(node)[2:-1]))
+            return single_quote(decode_ansi_c(get_text(node)[2:-1]))
         if kind == "translated_string":
             return get_text(node)[1:]
         if kind == NT.COMMAND_SUBSTITUTION and get_text(node).startswith("$("):

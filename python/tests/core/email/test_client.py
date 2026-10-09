@@ -24,7 +24,6 @@ from mirage.core.email.client import (
     list_folders,
     list_message_uids,
     parse_folder_line,
-    quote_mailbox,
     quote_string,
     read_quoted,
     select_folder,
@@ -139,12 +138,6 @@ def test_an_atom_sent_mailbox_survives_into_resolution():
     # The whole point of the parse: this used to answer "/", which the
     # sent copy would then have tried to APPEND into.
     assert parse_folder_line(b'(\\Sent) "/" Sent')[0] == "Sent"
-
-
-def test_quote_mailbox_wraps_and_escapes():
-    assert quote_mailbox("Sent Items") == '"Sent Items"'
-    assert quote_mailbox('od"d') == '"od\\"d"'
-    assert quote_mailbox("back\\slash") == '"back\\\\slash"'
 
 
 @pytest.mark.asyncio

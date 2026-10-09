@@ -68,7 +68,8 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
     /**
      * Parse shell structure after the source reader gathers heredocs.
      * Bodies become inline expansion words with reader-owned input metadata;
-     * nodes retain their original source for nested evaluation.
+     * nodes retain their original source for nested evaluation. A line the
+     * reader refuses takes its heredocs from the grammar's.
      *
      * A leading `((` is lexed as the arithmetic opener and the lexer
      * cannot back out, so a subshell that immediately opens another
@@ -130,13 +131,10 @@ function toUint8(bytes: Uint8Array | ArrayBuffer): Uint8Array {
 }
 
 function parseRoot(parser: NativeParser, command: string): ShellNode {
-  // bash's reading of the line names its heredocs and the order of their
-  // bodies; a line it refuses falls back to the grammar's.
   const plan = command.includes('<<') ? heredocPlan(command) : null
   let hinted =
     command.includes('<<') && plan === null ? (parser.parse(command)?.rootNode ?? null) : null
   if (hinted !== null) {
-    // The operators are read off a tree that lexes `0<<EOF` as one.
     const lexed = operatorSource(parser, command, hinted)
     if (lexed !== command) hinted = parser.parse(lexed)?.rootNode ?? hinted
   }
@@ -169,12 +167,6 @@ function parseRoot(parser: NativeParser, command: string): ShellNode {
   let root = parseProtected(parser, source)
   let text = source
   if (root.hasError) {
-    // Sitting inside an ERROR is not evidence that an opener is
-    // broken: tree-sitter's error region swallows neighbouring tokens,
-    // so a valid `((i++))` next to a bad opener reports as errored
-    // too. Splitting it would silently turn arithmetic into a subshell
-    // running `i++`, which is a wrong parse rather than a rejected
-    // one. Each opener is judged on its own span instead.
     const offsets = [...new Set(failedArithOpeners(root))].filter(
       (o) => !isArithmetic(parser, source, o),
     )

@@ -12,20 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult } from '../../../../io/types.ts'
-import type { ArithWrite } from '../../../../shell/types.ts'
 import { ArithError, ReadonlyError } from '../../../../shell/errors.ts'
-import type { ArithResult } from '../../../../shell/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { landArith } from '../../../session/elements.ts'
-import { randomReader, sessionArith } from '../../../session/state.ts'
+import { landedArith } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import { ExecutionNode } from '../../../types.ts'
-import { readonlyRefusal, refusal, requireView } from '../shared.ts'
+import { fail, readonlyRefusal, refusal, requireView, result } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * `(( ))` as a builtin: every operand is one expression, the writes land
@@ -40,59 +34,21 @@ export async function handleLet(
   session: SessionState,
   state: SessionView | null = null,
 ): Promise<Result> {
-  if (args.length === 0) {
-    const err = encodeText('bash: let: expression expected\n')
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: err }),
-      new ExecutionNode({ command: 'let', exitCode: 1, stderr: err }),
-    ]
-  }
+  if (args.length === 0) return fail('let', 'bash: let: expression expected\n')
   const view = requireView(state)
   let value = 0n
   for (const expr of args) {
-    const reader = randomReader(session)
-    let error: ArithError | ReadonlyError | null = null
-    let writes: readonly ArithWrite[] = []
-    let expected = 0n
     try {
-      const result: ArithResult = sessionArith(session, expr, reader)
-      writes = result.writes
-      expected = result.value
-    } catch (err) {
-      if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
-      // bash bound the assignments made before the error; they land
-      // before the error is reported.
-      error = err
-      writes = err.writes
-    }
-    try {
-      await landArith(session, view, writes, reader)
+      value = await landedArith(session, view, expr)
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal('let', err)
-      throw err
+      if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
+      if (err.inSubscript) throw err.signal()
+      if (err instanceof ReadonlyError) return readonlyRefusal('let', err.varName)
+      return fail('let', `bash: let: ${err.message}\n`)
     }
-    if (error instanceof ReadonlyError) {
-      if (error.inSubscript) throw error.signal()
-      return readonlyRefusal('let', error.varName)
-    }
-    if (error !== null) {
-      if (error.inSubscript) throw error.signal()
-      const errBytes = encodeText(`bash: let: ${error.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: errBytes }),
-        new ExecutionNode({ command: 'let', exitCode: 1, stderr: errBytes }),
-      ]
-    }
-    value = expected
   }
-  const code = value !== 0n ? 0 : 1
-  return [
-    null,
-    new IOResult({ exitCode: code }),
-    new ExecutionNode({ command: 'let', exitCode: code }),
-  ]
+  return result('let', { exitCode: value !== 0n ? 0 : 1 })
 }
 
 /** The `let` arm. */

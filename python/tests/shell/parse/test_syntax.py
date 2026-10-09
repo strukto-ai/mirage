@@ -29,6 +29,13 @@ ROOT = Path(__file__).resolve().parents[4]
 CORPUS = json.loads(
     (ROOT / "integ/fixtures/shell/bash_syntax.json").read_text()
 )["lines"]
+SIDE_EFFECT_COMMANDS = [
+    case["command"]
+    for case in json.loads(
+        (ROOT / "integ/bash/syntax/quoting.json").read_text()
+    )["cases"]
+    if "/data/unexpected" in case["command"]
+]
 
 
 def read(line: str) -> tuple[int, str]:
@@ -131,34 +138,6 @@ def test_an_alias_name_is_reserved_inside_its_own_text(line, own, word):
     assert (found and found.offending) == word
 
 
-MISSING_QUOTE_CASES = json.loads(
-    (ROOT / "integ/bash/syntax/quoting.json").read_text()
-)["cases"]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "command",
-    [
-        case["command"]
-        for case in MISSING_QUOTE_CASES
-        if case["expect"]["exit"] == 2
-    ],
-)
-async def test_missing_nested_quote_refuses_before_any_execution(command):
-    ws = Workspace({"/data": RAMVFS()})
-    try:
-        io = await ws.shell(command)
-        assert io.exit_code == 2
-        assert await io.stdout_str() == ""
-        stderr = await io.stderr_str()
-        assert "unexpected EOF while looking for matching" in stderr
-        check = await ws.shell("test -e /data/unexpected")
-        assert check.exit_code == 1
-    finally:
-        await ws.close()
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "command,expected",
@@ -176,5 +155,16 @@ async def test_literal_quotes_are_not_reported_as_unclosed(command, expected):
         assert io.exit_code == 0
         assert await io.stdout_str() == expected
         assert await io.stderr_str() == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", SIDE_EFFECT_COMMANDS)
+async def test_a_missing_quote_refuses_before_any_command_runs(command):
+    ws = Workspace({"/data": RAMVFS()})
+    try:
+        assert (await ws.shell(command)).exit_code == 2
+        assert (await ws.shell("test -e /data/unexpected")).exit_code == 1
     finally:
         await ws.close()

@@ -30,6 +30,7 @@ SNIPPETS = {
     NodeKind.REDIRECT: "cat /data/a.txt > /data/b.txt",
     NodeKind.SUBSHELL: "(true)",
     NodeKind.COMPOUND: "{ true; }",
+    NodeKind.ARITH: "(( 1 ))",
     NodeKind.IF: "if true; then false; fi",
     NodeKind.FOR: "for i in 1 2; do true; done",
     NodeKind.SELECT: "select x in a b; do true; done",
@@ -64,22 +65,3 @@ def test_node_kind_classifies(kind):
     if kind == NodeKind.PROGRAM:
         node = parse(SNIPPETS[kind])
     assert node_kind(node) == kind
-
-
-def test_select_and_until_disambiguate():
-    assert (
-        node_kind(_first_statement("select x in a; do true; done"))
-        == NodeKind.SELECT
-    )
-    assert (
-        node_kind(_first_statement("for i in a; do true; done"))
-        == NodeKind.FOR
-    )
-    assert (
-        node_kind(_first_statement("until false; do true; done"))
-        == NodeKind.UNTIL
-    )
-    assert (
-        node_kind(_first_statement("while true; do false; done"))
-        == NodeKind.WHILE
-    )

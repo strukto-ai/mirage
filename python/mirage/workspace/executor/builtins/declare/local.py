@@ -12,17 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.io import IOResult
-from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
 from mirage.shell.errors import ArithError
-from mirage.shell.variable import ShellVar, VarAttr, VarKind
+from mirage.shell.variable import ShellVar, VarAttr
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.constants import SUBSCRIPT_RE
 from mirage.workspace.executor.builtins.declare.declare import (
     declaration_result,
     drop_reference,
-    held_slot,
     held_value,
     identifier_refusal,
     kind_conflict,
@@ -40,9 +37,11 @@ from mirage.workspace.executor.builtins.declare.declare import (
 )
 from mirage.workspace.executor.builtins.declare.types import (
     AttrMarks,
+    Declaration,
     DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.shared import (
+    fail,
     is_valid_name,
     readonly_line,
     refusal,
@@ -62,22 +61,14 @@ from mirage.workspace.session.state import (
     visible_arrays,
     visible_assocs,
 )
-from mirage.workspace.types import ExecutionNode
 
 
 async def handle_local(
     assignments: list[DeclarationOperand],
     session: SessionState,
     state: SessionView | None = None,
-    cmd: str = "local",
-    kind: VarKind | None = None,
-    shaping: AttrMarks = (),
-    marks: AttrMarks = (),
-    plus: str = "",
-    nameref: bool = False,
-    global_scope: bool = False,
-    inherit: bool = False,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    decl: Declaration = Declaration(),
+) -> Result:
     """Declare names in the running function's scope, or globally.
 
     bash's two passes (``store_staged_arrays``): every array literal
@@ -93,47 +84,15 @@ async def handle_local(
             literals.
         session (SessionState): shell session state.
         state (SessionView | None): the gated session view.
-        cmd (str): the spelling that reached here, for diagnostics.
-            ``declare`` and ``typeset`` route through this handler and
-            must say their own name, not ``local``.
-        kind (VarKind | None): the kind ``-a`` / ``-A`` declared, so
-            staged literals build that kind of array.
-        shaping (AttrMarks): the value-shaping marks (``-i -l -u``,
-            ``+i +l +u``) the declaration carries. They go on or off each
-            name *before* its value stores, after the local snapshot, so
-            the declaration's own value coerces exactly as a later write
-            would: GNU stores ``7`` for ``declare -i n=3+4``, ``hello``
-            for ``declare -l s=HeLLo`` and ``5x`` for ``declare +i
-            N+=x`` over an integer 5.
-        marks (AttrMarks): the attribute letters
-            to put on or take off each operand once it lands
-            (``stamp_marks``), readonly last.
-        plus (str): the ``+`` letters, for the two that cannot be taken
-            off (``plus_refusal``).
-        nameref (bool): the declaration carried ``-n``, so a value names
-            the reference's target and is stored on the reference's own
-            record, which also takes the marks, rather than written
-            through an existing one.
-        global_scope (bool): the declaration carried ``-g``, so inside a
-            function the names are declared globally: no local snapshot
-            is taken, and a name the function already shadows has its
-            *global* record read, written and marked (``reach_global``).
-        inherit (bool): the declaration carried ``-I``, so a new local
-            keeps the shadowed variable's value and attributes but a
-            reference (``start_local``).
+        decl (Declaration): the spelling and the letters it carried.
     """
-    if cmd == "local" and session._local_vars is None:
+    if decl.cmd == "local" and session._local_vars is None:
         # `local` is the one spelling that needs a function scope;
         # `declare`/`typeset` share this handler and are legal at top
         # level. Without the check the builtin took its operands, stored
         # them globally and exited 0, which is the silent-accept this
         # whole tier exists to remove.
-        err = b"bash: local: can only be used in a function\n"
-        return (
-            None,
-            IOResult(exit_code=1, stderr=err),
-            ExecutionNode(command=cmd, exit_code=1, stderr=err),
-        )
+        return fail("local", "bash: local: can only be used in a function\n")
     view = require_view(state)
     restore = (
         reach_global(
@@ -143,7 +102,7 @@ async def handle_local(
                 for a in assignments
             ],
         )
-        if global_scope
+        if decl.global_scope
         else None
     )
     try:
@@ -151,14 +110,8 @@ async def handle_local(
             assignments,
             session,
             view,
-            cmd,
-            kind,
-            shaping,
-            marks,
-            plus,
-            nameref,
-            None if global_scope else session._local_vars,
-            inherit,
+            decl,
+            None if decl.global_scope else session._local_vars,
         )
     finally:
         if restore is not None:
@@ -169,31 +122,20 @@ async def _declare_operands(
     operands: list[DeclarationOperand],
     session: SessionState,
     view: SessionView,
-    cmd: str,
-    kind: VarKind | None,
-    shaping: AttrMarks,
-    marks: AttrMarks,
-    plus: str,
-    nameref: bool,
+    decl: Declaration,
     local_vars: dict[str, ShellVar | None] | None,
-    inherit: bool,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """Run ``handle_local``'s operands in the scope it settled on.
 
     Args:
         operands (list[DeclarationOperand]): the operands in order.
         session (SessionState): shell session state.
         view (SessionView): the gated session view.
-        cmd (str): the builtin's spelling, for diagnostics.
-        kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
-        shaping (AttrMarks): the ``-i -l -u`` / ``+i +l +u`` marks.
-        marks (AttrMarks): the attribute marks.
-        plus (str): the ``+`` letters.
-        nameref (bool): the declaration carried ``-n``.
+        decl (Declaration): the spelling and the letters it carried.
         local_vars (dict[str, ShellVar | None] | None): the running
             frame, None at global scope.
-        inherit (bool): the declaration carried ``-I``.
     """
+    cmd, kind, shaping, marks, plus, nameref, _, inherit = decl
     errors: list[str] = []
     warnings: list[str] = []
     stored: dict[int, str] = {}
@@ -218,17 +160,7 @@ async def _declare_operands(
                     None
                     if refused is not None
                     else await _declare_operand(
-                        session,
-                        view,
-                        operand,
-                        cmd,
-                        kind,
-                        shaping,
-                        marks,
-                        plus,
-                        nameref,
-                        local_vars,
-                        inherit,
+                        session, view, operand, decl, local_vars
                     )
                 )
             elif position in stored:
@@ -240,7 +172,7 @@ async def _declare_operands(
                 # (`_unshaped`).
                 name = operand[0]
                 line = (
-                    _literal_reference_refusal(session, view, cmd, name)
+                    _reference_line(session, view, cmd, name, False)
                     if nameref
                     else None
                 ) or plus_refusal(cmd, session, view, name, plus)
@@ -266,21 +198,22 @@ async def _declare_operands(
     return declaration_result(cmd, errors, warnings)
 
 
-def _literal_reference_refusal(
-    session: SessionState, view: SessionView, cmd: str, name: str
+def _reference_line(
+    session: SessionState, view: SessionView, cmd: str, name: str, bare: bool
 ) -> str | None:
-    """The line a ``-n`` array literal earns on the reference it was
-    written through: an array cannot become one, and a frozen one keeps
-    every mark (``declare -nr r=t; declare -n r=(3)`` writes ``t`` and
-    refuses ``r``), as bash's does.
+    """The line a ``-n`` operand earns on the name it lands on: an array
+    cannot become a reference (``reference_refusal``), and a frozen one
+    keeps every mark (``declare -nr r=t; declare -n r=(3)`` writes ``t``
+    and refuses ``r``), as bash's does.
 
     Args:
         session (SessionState): shell session state.
         view (SessionView): the gated session view.
         cmd (str): the builtin's spelling, for diagnostics.
-        name (str): the literal's name.
+        name (str): the operand's name.
+        bare (bool): the operand gave no value.
     """
-    line = reference_refusal(cmd, name, visible_record(session, name), False)
+    line = reference_refusal(cmd, name, visible_record(session, name), bare)
     if line is None and view.is_readonly(name, False):
         return readonly_line(cmd, name)
     return line
@@ -290,14 +223,8 @@ async def _declare_operand(
     session: SessionState,
     view: SessionView,
     assign: str,
-    cmd: str,
-    kind: VarKind | None,
-    shaping: AttrMarks,
-    marks: AttrMarks,
-    plus: str,
-    nameref: bool,
+    decl: Declaration,
     local_vars: dict[str, ShellVar | None] | None,
-    inherit: bool,
 ) -> str | None:
     """Declare one ``NAME``, ``NAME=value`` or ``NAME+=value`` operand
     and mark it.
@@ -310,15 +237,9 @@ async def _declare_operand(
         session (SessionState): shell session state.
         view (SessionView): the gated session view.
         assign (str): the operand.
-        cmd (str): the builtin's spelling, for diagnostics.
-        kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
-        shaping (AttrMarks): the ``-i -l -u`` / ``+i +l +u`` marks.
-        marks (AttrMarks): the attribute marks.
-        plus (str): the ``+`` letters.
-        nameref (bool): the declaration carried ``-n``.
+        decl (Declaration): the spelling and the letters it carried.
         local_vars (dict[str, ShellVar | None] | None): the running
             frame, None at global scope.
-        inherit (bool): the declaration carried ``-I``.
 
     Returns:
         The operand's refusal line, or None when it declared.
@@ -327,6 +248,7 @@ async def _declare_operand(
         PolicyDenied: the gate refused a write or a mark.
         ArithError: an ``-i`` value did not evaluate.
     """
+    cmd, kind, shaping, marks, plus, nameref, _, inherit = decl
     bad_name = identifier_refusal(cmd, assign)
     if bad_name is not None:
         return bad_name
@@ -344,15 +266,9 @@ async def _declare_operand(
             line = await _fresh_local(session, view, cmd, key, inherit)
             if line is not None:
                 return line
-        if nameref:
-            line = reference_refusal(
-                cmd, key, visible_record(session, key), True
-            )
-            if line is None and view.is_readonly(key, False):
-                line = readonly_line(cmd, key)
-            if line is not None:
-                return line
-        line = plus_refusal(cmd, session, view, key, plus)
+        line = (
+            _reference_line(session, view, cmd, key, True) if nameref else None
+        ) or plus_refusal(cmd, session, view, key, plus)
         if line is not None:
             return line
         if (
@@ -383,19 +299,13 @@ async def _declare_operand(
         shadow_local(session, local_vars, key)
     if creates:
         start_local(session, key, inherit)
-    if nameref:
-        # Checked on the local, which exists from here on even when the
-        # array it inherited cannot become a reference, as bash's does,
-        # so the function's later writes stay its own. A name no local
-        # replaces reports its array before its readonly mark.
-        bad_ref = reference_refusal(
-            cmd, key, visible_record(session, key), False
-        )
-        if bad_ref is None and view.is_readonly(key, False):
-            bad_ref = readonly_line(cmd, key)
-        if bad_ref is not None:
-            return bad_ref
-    line = plus_refusal(cmd, session, view, key, plus)
+    # A reference is checked on the local, which exists from here on even
+    # when the array it inherited cannot become a reference, as bash's
+    # does, so the function's later writes stay its own. A name no local
+    # replaces reports its array before its readonly mark.
+    line = (
+        _reference_line(session, view, cmd, key, False) if nameref else None
+    ) or plus_refusal(cmd, session, view, key, plus)
     if line is not None:
         return line
     if nameref:
@@ -414,9 +324,7 @@ async def _declare_operand(
     await premark(view, key, shaping)
     target = session.vars.get(checked)
     integer = target is not None and VarAttr.INTEGER in target.attrs
-    val, added = (
-        appended(held_slot(held), val, integer) if append else (val, None)
-    )
+    val, added = appended(held, val, integer) if append else (val, None)
     value, assigned = scalar_value(held, val, kind)
     if kind is not None:
         await drop_reference(session, view, key)
@@ -491,10 +399,8 @@ async def _aim_reference(
     old = held if isinstance(held, str) else ""
     value = old + given
     if (VarAttr.INTEGER, True) in shaping:
-        await (
-            evaluate_integer(session, view, old, given)
-            if append
-            else evaluate_integer(session, view, given)
+        await evaluate_integer(
+            session, view, old if append else given, given if append else None
         )
         value = ""
     if is_valid_name(value) or SUBSCRIPT_RE.fullmatch(value) is not None:
@@ -522,7 +428,7 @@ async def _fresh_local(
     view: SessionView,
     cmd: str,
     name: str,
-    inherit: bool = False,
+    inherit: bool,
 ) -> str | None:
     """Start a new bare ``local NAME`` unset, as bash 5.2 does.
 
@@ -562,7 +468,7 @@ async def _fresh_local(
             await view.mark(name, VarAttr.NAMEREF, False)
         return None
     await view.unset(name, follow_ref=False)
-    for attr in local_attrs(var, inherit):
+    for attr in local_attrs(var, False):
         await view.mark(name, attr, True)
     return None
 

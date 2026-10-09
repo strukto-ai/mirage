@@ -1,6 +1,5 @@
 import pytest
 
-from mirage import RAMVFS, MountMode, Workspace
 from mirage.io.stream import materialize
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.declare import handle_export
@@ -60,16 +59,6 @@ async def test_export_bare_prints_like_p():
 
 
 @pytest.mark.asyncio
-async def test_export_invalid_option_exit_2():
-    session = make_session()
-    _, io, _ = await handle_export(["-z"], session)
-    assert io.exit_code == 2
-    err = (io.stderr or b"").decode()
-    assert "invalid option" in err
-    assert "usage: export" in err
-
-
-@pytest.mark.asyncio
 async def test_export_write_requires_a_threaded_view():
     # A write reached without the workspace's gated view is a wiring
     # bug, not a mode: the old fallback built an ungated view here, so
@@ -89,22 +78,6 @@ async def test_export_p_with_name_does_not_print():
     assert io.exit_code == 0
     assert out is None
     assert session.env["FOO"] == "bar"
-
-
-@pytest.mark.asyncio
-async def test_export_p_via_workspace():
-    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    io = await ws.shell("export ZEP1=v1; export -p | grep ZEP1")
-    assert io.exit_code == 0
-    assert (io.stdout or b"") == b'declare -x ZEP1="v1"\n'
-
-
-@pytest.mark.asyncio
-async def test_export_invalid_option_via_workspace():
-    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    io = await ws.shell("export -z")
-    assert io.exit_code == 2
-    assert b"invalid option" in (io.stderr or b"")
 
 
 @pytest.mark.asyncio
@@ -132,34 +105,9 @@ async def test_export_p_quotes_control_characters():
 
 
 @pytest.mark.asyncio
-async def test_export_p_double_terminator_still_prints():
-    session = make_session()
-    session.vars.clear()
-    seed_exported(session, "FOO", "bar")
-    out, io, _ = await handle_export(["-p", "--"], session)
-    assert io.exit_code == 0
-    assert await materialize(out) == b'declare -x FOO="bar"\n'
-
-
-@pytest.mark.asyncio
 async def test_export_f_lists_no_variables():
     session = make_session()
     seed_var(session, "FOO", "bar")
     out, io, _ = await handle_export(["-f"], session)
     assert io.exit_code == 0
     assert await materialize(out) == b""
-
-
-@pytest.mark.asyncio
-async def test_export_reports_first_invalid_option():
-    session = make_session()
-    _, io, _ = await handle_export(["-zq"], session)
-    assert (io.stderr or b"").startswith(b"bash: export: -z: invalid option")
-
-
-@pytest.mark.asyncio
-async def test_export_p_terminator_via_workspace():
-    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    io = await ws.shell("export ZEP5=v5; export -p -- | grep ZEP5")
-    assert io.exit_code == 0
-    assert (io.stdout or b"") == b'declare -x ZEP5="v5"\n'

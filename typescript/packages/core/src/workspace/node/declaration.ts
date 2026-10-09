@@ -14,7 +14,9 @@
 
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import { type ByteSource, IOResult } from '../../io/types.ts'
+import { IOResult } from '../../io/types.ts'
+import { fail } from '../executor/builtins/shared.ts'
+import type { Result } from '../executor/builtins/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { DiscardSignal } from '../../shell/errors.ts'
 import { getDeclarationKeyword, getText } from '../../shell/helpers.ts'
@@ -26,9 +28,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import {
   handleDeclareFunctions,
   handleDeclarePrint,
-  handleExport,
   handleLocal,
-  handleReadonly,
   noteLocalArray,
 } from '../executor/builtins/index.ts'
 import {
@@ -39,6 +39,7 @@ import {
   declaredKind,
   heldValue,
   kindConflict,
+  markNames,
   startLocal,
 } from '../executor/builtins/declare/declare.ts'
 import { traceArray, traceCommand } from '../../shell/xtrace.ts'
@@ -52,8 +53,6 @@ import { ExecutionNode } from '../types.ts'
 import { expandArrayItems } from './assignment.ts'
 import type { DeclarationOperand } from '../executor/builtins/declare/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
-
-type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 /**
  * Fold kind-conversion refusals into a declaration's result.
@@ -89,16 +88,6 @@ function mergeConversionErrors(result: Result, errors: readonly string[]): Resul
 const DECLARE_LETTERS: ReadonlySet<string> = new Set('aAfFgiIlnprtux')
 const DECLARE_USAGE =
   'declare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]'
-// The stored attributes a `-letter` / `+letter` toggles.
-const ATTR_LETTERS: ReadonlyMap<string, VarAttr> = new Map([
-  ['i', VarAttr.Integer],
-  ['l', VarAttr.Lower],
-  ['u', VarAttr.Upper],
-  ['n', VarAttr.Nameref],
-  ['t', VarAttr.Trace],
-  ['x', VarAttr.Export],
-  ['r', VarAttr.Readonly],
-])
 // The attributes that shape a value as it stores.
 const SHAPING: ReadonlySet<VarAttr> = new Set([VarAttr.Integer, VarAttr.Lower, VarAttr.Upper])
 // `-l` displaces `-u` and vice versa; the record keeps one.
@@ -124,12 +113,7 @@ function declareOptionRefusal(
     .find((c) => !DECLARE_LETTERS.has(c))
   if (bad === undefined) return null
   const sign = flagChars.has(bad) ? '-' : '+'
-  const err = encodeText(`bash: ${cmd}: ${sign}${bad}: invalid option\n${DECLARE_USAGE}\n`)
-  return [
-    null,
-    new IOResult({ exitCode: 2, stderr: err }),
-    new ExecutionNode({ command: cmd, exitCode: 2, stderr: err }),
-  ]
+  return fail(cmd, `bash: ${cmd}: ${sign}${bad}: invalid option\n${DECLARE_USAGE}\n`, 2)
 }
 
 /**
@@ -158,8 +142,7 @@ function declaredMarks(
   }
   const marks: (readonly [VarAttr, boolean])[] = []
   for (const c of 'xiluntr') {
-    const attr = ATTR_LETTERS.get(c)
-    if (attr === undefined) continue
+    const attr = c as VarAttr
     if (on.has(c)) {
       marks.push([attr, true])
       const displaced = DISPLACES.get(c)
@@ -265,7 +248,7 @@ export async function executeDeclaration(
         !optsDone &&
         expanded.startsWith('+') &&
         expanded.length > 1 &&
-        (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset')
+        !VISIBLE_SCOPE_BUILTINS.has(keyword)
       ) {
         // `+attr` turns an attribute off. Only the declare family
         // reads it: `export +x` and `readonly +r` are `not a valid
@@ -290,21 +273,22 @@ export async function executeDeclaration(
       ]),
     )
   }
-  if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
-    const refused = declareOptionRefusal(cmdWord, flagChars, plusChars)
-    if (refused !== null) return refused
+  if (VISIBLE_SCOPE_BUILTINS.has(keyword)) {
+    // Array literals travel as data: the handler stores them through
+    // the session view and owns both refusal voices, so the executor
+    // only expands and stages. The flags pass through so -p, the bare
+    // listing and bad options work.
+    const attr = keyword === 'readonly' ? VarAttr.Readonly : VarAttr.Export
+    return await markNames([...flagWords, ...operands], session, view, attr, parser)
   }
-  if (
-    (flagChars.has('f') || flagChars.has('F')) &&
-    (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset')
-  ) {
+  const refused = declareOptionRefusal(cmdWord, flagChars, plusChars)
+  if (refused !== null) return refused
+  if (flagChars.has('f') || flagChars.has('F')) {
     // `-f`/`-F` select functions, not variables: `-rf` freezes, `-xf`
     // exports, `-f NAME` prints the body, `-F NAME` prints the name, and
     // a missing name is exit 1 without a word.
     return handleDeclareFunctions(cmdWord, session, flagChars, words, plusChars, parser)
   }
-  // `-l` and `-u` cannot both hold; a cluster naming both sets neither
-  // (pinned: `declare -lu s=aBc` prints `declare -- s`).
   // The value-shaping marks go on or off before a value stores, the rest
   // once it has (`declaredMarks`).
   const marks = declaredMarks(flagChars, plusChars)
@@ -323,13 +307,12 @@ export async function executeDeclaration(
   }
   const conversionErrors: string[] = []
   const kind = declaredKind(flagChars)
-  if (kind !== null && !VISIBLE_SCOPE_BUILTINS.has(keyword)) {
+  if (kind !== null) {
     // `declare -a NAME` / `declare -A NAME` with no value declare an
     // empty array of that kind, so ${#NAME[@]} is 0 and an element
     // write leaves the other slots unassigned. GNU refuses to
     // convert between the two kinds and says so per name while the
-    // rest of the operands still declare. `export` and `readonly` leave
-    // a bare name's value alone.
+    // rest of the operands still declare.
     const wantAssoc = kind === VarKind.Assoc
     for (const bare of words) {
       if (bare.includes('=')) continue
@@ -373,31 +356,15 @@ export async function executeDeclaration(
   // handleLocal's fallback when no function scope is active. `-r` rides
   // the same path and lands on what each operand wrote, so
   // `f() { local -r A=(x); }` freezes f's own A, not the caller's.
-  if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
-    const result = await handleLocal(
-      operands,
-      session,
-      view,
-      // `declare`/`typeset` share this handler but have to name
-      // themselves in a diagnostic rather than say `local`.
-      cmdWord,
-      kind,
-      shaping,
-      marks,
-      [...plusChars].sort(compareCodePoints).join(''),
-      flagChars.has('n') && !plusChars.has('n'),
-      flagChars.has('g'),
-      flagChars.has('I'),
-    )
-    return mergeConversionErrors(result, conversionErrors)
-  }
-  // Array literals travel as data: the handler stores them through
-  // the session view and owns both refusal voices, so the executor
-  // only expands and stages. The flags pass through so -p, the bare
-  // listing and bad options work.
-  const result =
-    keyword === 'readonly'
-      ? await handleReadonly([...flagWords, ...operands], session, view, kind, parser)
-      : await handleExport([...flagWords, ...operands], session, view, parser)
+  const result = await handleLocal(operands, session, view, {
+    cmd: cmdWord,
+    kind,
+    shaping,
+    marks,
+    plus: [...plusChars].sort(compareCodePoints).join(''),
+    nameref: flagChars.has('n') && !plusChars.has('n'),
+    globalScope: flagChars.has('g'),
+    inherit: flagChars.has('I'),
+  })
   return mergeConversionErrors(result, conversionErrors)
 }

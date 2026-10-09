@@ -14,7 +14,6 @@
 
 import type { EvaluationContext } from '../evaluation.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
-import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import {
   type ShellArray,
@@ -35,6 +34,8 @@ import { traceAssignment } from '../../shell/xtrace.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../view/types.ts'
 import { wordText } from '../../types.ts'
+import { ok, result } from '../executor/builtins/shared.ts'
+import type { Result } from '../executor/builtins/types.ts'
 import { assignmentStatus } from '../executor/statement.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
@@ -43,10 +44,7 @@ import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
 import { appended, conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
-import { ExecutionNode } from '../types.ts'
 import { encodeText } from '../../shell/bytes.ts'
-
-type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 /** `subscriptIndex` whose failure ends the line, in bash's words. */
 async function fatalIndex(
@@ -203,9 +201,7 @@ export async function executeAssignment(
 ): Promise<Result> {
   const session = context.session
   const text = getText(node)
-  if (!text.includes('=')) {
-    return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
-  }
+  if (!text.includes('=')) return ok(text)
   const subSeq = context.frame.cmdsubSeq
   const subscriptNode = node.namedChildren.find((c) => c.type === 'subscript') ?? null
   const nameSource = subscriptNode ?? node
@@ -255,20 +251,15 @@ export async function executeAssignment(
       // A plain word in a keyed literal is dropped with a warning and the
       // assignment still succeeds; unlike a declaration's, this voice does
       // not quote the word (pinned on 5.2.37).
-      const errBytes = encodeText(
-        badWords
+      return result(text, {
+        exitCode: assignmentStatus(context.frame, subSeq),
+        stderr: badWords
           .map(
             (word) =>
               `bash: ${key}: ${word}: must use subscript when assigning associative array\n`,
           )
           .join(''),
-      )
-      const mapCode = assignmentStatus(context.frame, subSeq)
-      return [
-        null,
-        new IOResult({ exitCode: mapCode, stderr: errBytes.length > 0 ? errBytes : null }),
-        new ExecutionNode({ command: text, exitCode: mapCode, stderr: errBytes }),
-      ]
+      })
     }
     let held: ShellArray | null = session.arrays[key] ?? null
     if (append && held === null) {
@@ -283,12 +274,7 @@ export async function executeAssignment(
       subscriptIndex(session, sub, view),
     )
     await assignVar(view, key, base)
-    const arrCode = assignmentStatus(context.frame, subSeq)
-    return [
-      null,
-      new IOResult({ exitCode: arrCode }),
-      new ExecutionNode({ command: text, exitCode: arrCode }),
-    ]
+    return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
   }
   let val = text.slice(eq + 1)
   if (firstVal !== undefined) {
@@ -305,7 +291,7 @@ export async function executeAssignment(
       context,
       executeFn,
       callStack,
-      sessionView(session, registry.policies, context.frame.diagnostics),
+      view,
     )
     const heldMap = session.assocs[key]
     const rawSub = subscriptNode.text.slice(spelled.length + 1, -1)
@@ -325,12 +311,7 @@ export async function executeAssignment(
       const [slot, added] = append ? appended(heldMap[subText] ?? '', val, integer) : [val, null]
       newMap[subText] = slot
       await assignVar(view, key, newMap, new Set([subText]), added)
-      const mapCode = assignmentStatus(context.frame, subSeq)
-      return [
-        null,
-        new IOResult({ exitCode: mapCode }),
-        new ExecutionNode({ command: text, exitCode: mapCode }),
-      ]
+      return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
     }
     let arr: ShellArray | undefined = session.arrays[key]
     if (arr === undefined) {
@@ -347,12 +328,7 @@ export async function executeAssignment(
     refuseReadonly(view, key)
     const [slot, added] = append ? appended(arrayGet(arr, idx), val, integer) : [val, null]
     await assignVar(view, key, arrayWith(arr, idx, slot), new Set([idx]), added)
-    const subCode = assignmentStatus(context.frame, subSeq)
-    return [
-      null,
-      new IOResult({ exitCode: subCode }),
-      new ExecutionNode({ command: text, exitCode: subCode }),
-    ]
+    return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
   }
   const heldMap = session.assocs[key]
   const heldArr = session.arrays[key]
@@ -360,11 +336,7 @@ export async function executeAssignment(
   if (append) {
     // `a+=x` appends onto element 0 (key "0" of a map); `n+=3` on an
     // integer name adds: `declare -i n=5; n+=3` stores 8.
-    let old: string
-    if (heldMap !== undefined) old = heldMap['0'] ?? ''
-    else if (heldArr !== undefined) old = arrayGet(heldArr, 0)
-    else old = session.env[key] ?? ''
-    ;[stored, added] = appended(old, val, integer)
+    ;[stored, added] = appended(heldMap ?? heldArr ?? session.env[key] ?? null, val, integer)
   }
   if (heldMap !== undefined) {
     // `m=x` on an associative array writes the literal key "0" and
@@ -383,10 +355,5 @@ export async function executeAssignment(
   // Reassigning OPTIND (even to its current value) restarts the getopts
   // scan, matching bash's internal char pointer.
   if (key === 'OPTIND') session.getoptsOptind = null
-  const code = assignmentStatus(context.frame, subSeq)
-  return [
-    null,
-    new IOResult({ exitCode: code }),
-    new ExecutionNode({ command: text, exitCode: code }),
-  ]
+  return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
 }

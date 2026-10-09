@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type ByteSource, IOResult } from '../../../../io/types.ts'
+import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import type { JobConsole } from '../../../../shell/console/index.ts'
-import { returning } from '../../control.ts'
+import { ended, returning } from '../../control.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
@@ -29,6 +29,15 @@ import { readScriptText, scriptError } from './script.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { wordText } from '../../../../types.ts'
 
+/**
+ * Read a script file and execute it in the calling shell, `name` (`source`
+ * or `.`) as typed. A sourced file is the caller, so whatever it sets stays
+ * set; only the positional parameters come back, which `args` replaces
+ * while it runs. It runs in a frame of its own, which `return` ends,
+ * `FUNCNAME` names `source` and the RETURN action runs in as it returns; a
+ * `break` in it ends a caller's loop. An empty name fails as a missing file
+ * does, and bash blames a file it cannot read on itself, not the builtin.
+ */
 export async function handleSource(
   dispatch: DispatchFn,
   executeFn: ExecuteStringFn,
@@ -38,13 +47,10 @@ export async function handleSource(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   sink?: JobConsole,
-  // The builtin as typed, `source` or `.`.
   name = 'source',
 ): Promise<Result> {
   const raw = scopePath(path)
   if (wordText(path) === '') {
-    // The empty name is a filename bash tries to open, not a missing
-    // argument, so it fails like any file that is not there.
     return scriptError('bash', ': No such file or directory', 1, 'source ')
   }
   let script: string
@@ -56,14 +62,8 @@ export async function handleSource(
     if ((err as { code?: unknown }).code === 'EISDIR') {
       return scriptError(`bash: ${name}`, `${raw}: is a directory`, 1, `source ${raw}`)
     }
-    // bash blames a file it cannot read on itself, not the builtin.
     return scriptError('bash', `${raw}: ${strerror}`, 1, `source ${raw}`)
   }
-  // The file is the caller, run in a frame of its own: `return` ends it,
-  // `FUNCNAME` names it `source`, and it runs in the caller's loops, so a
-  // `break` in it ends one of theirs. Its arguments are its parameters
-  // while it runs; without any it has the caller's, and a `shift` in it
-  // shifts them.
   const cs = callStack ?? new CallStack()
   cs.push(args.length > 0 ? args : [...positionalParams(session, cs)], 'source', true)
   const outerNames = session.functionNames
@@ -80,13 +80,8 @@ export async function handleSource(
       })
     } catch (err) {
       if (!(err instanceof ReturnSignal)) throw err
-      io = new IOResult({
-        stdout: err.stdout,
-        stderr: err.stderr.byteLength > 0 ? err.stderr : null,
-        exitCode: err.exitCode,
-      })
+      io = ended(err)
     }
-    // The RETURN action runs as the file returns, in its frame.
     ;[stdout, io] = await returning(executeFn, session, stdin, cs, io.stdout, io)
   } catch (err) {
     if (err instanceof ExitSignal) err.sourced = true

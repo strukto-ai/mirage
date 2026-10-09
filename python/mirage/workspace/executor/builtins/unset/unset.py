@@ -12,16 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.io import IOResult
-from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
 from mirage.shell.array import array_extent, array_unset
-from mirage.shell.bytes import encode_text
 from mirage.shell.constants import FUNCNAME
 from mirage.shell.errors import ArithError
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
-from mirage.workspace.executor.builtins.shared import refusal, require_view
+from mirage.workspace.executor.builtins.shared import (
+    fail,
+    ok,
+    refusal,
+    require_view,
+)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
@@ -32,7 +34,6 @@ from mirage.workspace.session.state import (
     visible_arrays,
     visible_assocs,
 )
-from mirage.workspace.types import ExecutionNode
 
 
 def _unset_variable(session: SessionState, name: str) -> None:
@@ -141,7 +142,7 @@ async def handle_unset(
     args: list[str],
     session: SessionState,
     state: SessionView | None = None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """Unset shell variables, arrays, or functions, with bash's flags.
 
     ``-v`` targets a variable only, ``-f`` a function only, and a bare
@@ -171,12 +172,7 @@ async def handle_unset(
                 mode = "v"
             i += 1
             continue
-        err = encode_text(f"bash: unset: {tok}: invalid option\n")
-        return (
-            None,
-            IOResult(exit_code=2, stderr=err),
-            ExecutionNode(command="unset", exit_code=2, stderr=err),
-        )
+        return fail("unset", f"bash: unset: {tok}: invalid option\n", 2)
     for name in args[i:]:
         if mode == "n":
             # `unset -n` drops the reference itself rather than what it
@@ -185,13 +181,9 @@ async def handle_unset(
             # frozen reference refuses, writable target or not.
             view = require_view(state)
             if view.is_readonly(name, False):
-                err = encode_text(
-                    f"bash: unset: {name}: cannot unset: readonly variable\n"
-                )
-                return (
-                    None,
-                    IOResult(exit_code=1, stderr=err),
-                    ExecutionNode(command="unset", exit_code=1, stderr=err),
+                return fail(
+                    "unset",
+                    f"bash: unset: {name}: cannot unset: readonly variable\n",
                 )
             try:
                 await view.unset(name, follow_ref=False)
@@ -200,13 +192,9 @@ async def handle_unset(
             continue
         if mode == "f":
             if name in session.readonly_functions:
-                err = encode_text(
-                    f"bash: unset: {name}: cannot unset: readonly function\n"
-                )
-                return (
-                    None,
-                    IOResult(exit_code=1, stderr=err),
-                    ExecutionNode(command="unset", exit_code=1, stderr=err),
+                return fail(
+                    "unset",
+                    f"bash: unset: {name}: cannot unset: readonly function\n",
                 )
             session.remove_function(name)
             continue
@@ -218,13 +206,9 @@ async def handle_unset(
         # the base, not the element, in the error).
         base = target.group(1) if target is not None else name
         if base in session.readonly_vars:
-            err = encode_text(
-                f"bash: unset: {base}: cannot unset: readonly variable\n"
-            )
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command="unset", exit_code=1, stderr=err),
+            return fail(
+                "unset",
+                f"bash: unset: {base}: cannot unset: readonly variable\n",
             )
         existed = (
             is_element
@@ -255,24 +239,15 @@ async def handle_unset(
                 if status == "notarray"
                 else f"unset: {name[len(base) :]}: bad array subscript"
             )
-            err = encode_text(f"bash: {detail}\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command="unset", exit_code=1, stderr=err),
-            )
+            return fail("unset", f"bash: {detail}\n")
         if mode == "auto" and not existed and name in session.functions:
             if name in session.readonly_functions:
-                err = encode_text(
-                    f"bash: unset: {name}: cannot unset: readonly function\n"
-                )
-                return (
-                    None,
-                    IOResult(exit_code=1, stderr=err),
-                    ExecutionNode(command="unset", exit_code=1, stderr=err),
+                return fail(
+                    "unset",
+                    f"bash: unset: {name}: cannot unset: readonly function\n",
                 )
             session.remove_function(name)
-    return None, IOResult(), ExecutionNode(command="unset", exit_code=0)
+    return ok("unset")
 
 
 async def unset_builtin(call: BuiltinCall) -> Result:

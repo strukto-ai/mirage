@@ -19,6 +19,7 @@ from mirage.io.async_line_iterator import AsyncLineIterator, line_buffer
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.parse.heredoc.line import ends_escaped
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.read.constants import (
@@ -243,23 +244,14 @@ async def _read_raw(
         data, complete = await buffer.read_chars(nchars, delim)
         text = decode_text(data)
         while (
-            not raw
-            and complete
-            and text.endswith("\\")
-            and (len(text) - len(text.rstrip("\\"))) % 2 == 1
-            and len(text) < nchars
+            not raw and complete and ends_escaped(text) and len(text) < nchars
         ):
             more, complete = await buffer.read_chars(nchars - len(text), delim)
             text += decode_text(more)
         return text, complete
     data, complete = await buffer.read_until(delim)
     text = decode_text(data)
-    while (
-        not raw
-        and complete
-        and delim == b"\n"
-        and (len(text) - len(text.rstrip("\\"))) % 2 == 1
-    ):
+    while not raw and complete and delim == b"\n" and ends_escaped(text):
         more, complete = await buffer.read_until(delim)
         text += "\n" + decode_text(more)
     return text, complete

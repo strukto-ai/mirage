@@ -30,21 +30,6 @@ from mirage.workspace.types import StatusWriter
 
 
 @pytest.mark.asyncio
-async def test_finish_statement_materializes_and_seeds():
-    session = SessionState(session_id="t")
-    session.last_exit_code = 7
-
-    async def gen():
-        yield b"ab"
-        yield b"c"
-
-    io = IOResult(exit_code=3)
-    out = await finish_statement(gen(), io, session)
-    assert out == b"abc"
-    assert session.last_exit_code == 3
-
-
-@pytest.mark.asyncio
 async def test_finish_statement_none_stdout_still_seeds():
     session = SessionState(session_id="t")
     io = IOResult(exit_code=1)

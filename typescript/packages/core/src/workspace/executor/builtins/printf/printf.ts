@@ -29,6 +29,7 @@ import { runPrintf } from './format.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { envSnapshot, sessionView } from '../../../session/state.ts'
 import { TARGET_RE } from '../constants.ts'
+import { fail, result } from '../shared.ts'
 
 // bash 5.2.21's own string, which both the usage error and the invalid-option
 // refusal end with.
@@ -78,31 +79,6 @@ export const HELP =
   '    error occurs.\n'
 
 /**
- * Assign `value` to a `printf -v` target (scalar or `name[idx]`).
- *
- * A delegation to the one element writer: a bare name assigns element 0
- * when the name already holds an array (indexed or associative),
- * nothing mutates unless the whole assignment succeeds, and the landing
- * write goes through the session view as the whole variable, so a `preSession`
- * rule refusing the name sees `printf -v 'AWS_KEY[0]'` as a write to
- * AWS_KEY. The refusal is thrown, not collapsed into a status, so the
- * rule's own words reach the user as they do from `export`. bash stores the
- * bytes the format produced, so a `\x` run that is valid UTF-8 is stored as
- * its characters, and up to the first NUL, which no variable holds
- * (`printf -v n '1\0002'` stores 1).
- */
-async function assignPrintfTarget(
-  session: SessionState,
-  view: SessionView | undefined,
-  name: string,
-  subscript: string | undefined,
-  value: string,
-): Promise<'ok' | 'denied' | 'readonly' | 'subscript'> {
-  const text = decodeText(encodeText(value)).split('\0', 1)[0] ?? ''
-  return assignElement(session, view ?? null, name, subscript ?? null, text)
-}
-
-/**
  * Print formatted output, honoring GNU printf's format-reuse rules.
  *
  * Supports `%s %c %b %q`, the integer conversions `%d %i %o %u %x %X`,
@@ -119,35 +95,34 @@ async function assignPrintfTarget(
  * stdout, matching bash's builtin. An unusable `NAME` is rejected before
  * the format runs (status 2); a readonly name or an out-of-range subscript
  * still reports the format's own errors first, then fails with status 1
- * and leaves the variable untouched. `-v` is the builtin's alone: run as a
- * program (`find -exec printf`, which execvp answers with coreutils
- * printf) the word is the format, and a format that takes no argument
- * warns about the ones it drops.
+ * and leaves the variable untouched. bash stores the bytes the format
+ * produced, so a `\x` run that is valid UTF-8 is stored as its characters,
+ * and up to the first NUL, which no variable holds (`printf -v n '1\0002'`
+ * stores 1). `-v` is the builtin's alone: run as a program (`find -exec
+ * printf`, which execvp answers with coreutils printf) the word is the
+ * format, and a format that takes no argument warns about the ones it
+ * drops.
  */
 export async function handlePrintf(
   args: string[],
   session: SessionState,
   view?: SessionView,
 ): Promise<Result> {
+  const program = isProgramInvocation(session)
   let target: string | null = null
   let parsed: RegExpExecArray | null = null
-  if (args.length >= 2 && args[0] === '-v' && !isProgramInvocation(session)) {
+  if (args.length >= 2 && args[0] === '-v' && !program) {
     target = args[1] ?? ''
     args = args.slice(2)
     parsed = TARGET_RE.exec(target)
     if (parsed === null) {
       // bash validates the name before formatting, so a bad name
       // suppresses the conversion errors the format would report.
-      const err = encodeText(`bash: printf: \`${target}': not a valid identifier\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 2, stderr: err }),
-        new ExecutionNode({ command: 'printf', exitCode: 2, stderr: err }),
-      ]
+      return fail('printf', `bash: printf: \`${target}': not a valid identifier\n`, 2)
     }
   }
   const first = args[0]
-  if (first !== undefined && !isProgramInvocation(session)) {
+  if (first !== undefined && !program) {
     if (first === '--') {
       args = args.slice(1)
       if (args.length === 0) {
@@ -155,12 +130,7 @@ export async function handlePrintf(
         // is bash's usage error rather than an empty one (bash 5.2.21:
         // `printf --` is exit 2 with the usage, where `printf -- --zzz` prints
         // `--zzz`).
-        const err = encodeText(USAGE)
-        return [
-          null,
-          new IOResult({ exitCode: 2, stderr: err }),
-          new ExecutionNode({ command: 'printf', exitCode: 2, stderr: err }),
-        ]
+        return fail('printf', USAGE, 2)
       }
     } else if (first === '--help') {
       // bash answers the EXACT word `--help` for every builtin, ahead of
@@ -169,9 +139,8 @@ export async function handlePrintf(
       // `--version`) takes the invalid-option path below (bash 5.2.37). The
       // page is the BUILTIN's, in bash's own words and layout, because that
       // is whose printf this is; see HELP.
-      const page = encodeText(HELP)
       return [
-        yieldBytes(page),
+        yieldBytes(encodeText(HELP)),
         new IOResult({ exitCode: 2 }),
         new ExecutionNode({ command: 'printf', exitCode: 2 }),
       ]
@@ -185,107 +154,54 @@ export async function handlePrintf(
       // ships printf as a builtin, so the builtin governs. A bare `-v` short
       // of its NAME is left to the format path, where bash's own `option
       // requires an argument` is a separate change.
-      const err = encodeText(`bash: printf: -${first[1] ?? ''}: invalid option\n${USAGE}`)
-      return [
-        null,
-        new IOResult({ exitCode: 2, stderr: err }),
-        new ExecutionNode({ command: 'printf', exitCode: 2, stderr: err }),
-      ]
+      return fail('printf', `bash: printf: -${first[1] ?? ''}: invalid option\n${USAGE}`, 2)
     }
   } else if (first === '--') {
     // coreutils printf takes one leading `--` as the end of its options.
     args = args.slice(1)
   }
-  if (args.length === 0 && isProgramInvocation(session)) {
-    const err = encodeText(`printf: missing operand\n${usageHint('printf')}\n`)
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: err }),
-      new ExecutionNode({ command: 'printf', exitCode: 1, stderr: err }),
-    ]
-  }
   if (args.length === 0) {
     // A format is required: bash's usage error, `printf -v x` too.
-    const err = encodeText(USAGE)
-    return [
-      null,
-      new IOResult({ exitCode: 2, stderr: err }),
-      new ExecutionNode({ command: 'printf', exitCode: 2, stderr: err }),
-    ]
+    if (program) return fail('printf', `printf: missing operand\n${usageHint('printf')}\n`)
+    return fail('printf', USAGE, 2)
   }
-  const program = isProgramInvocation(session)
-  const [output, rawMessages, failed, excess] = runPrintf(
+  const [output, messages, failed, excess] = runPrintf(
     args[0] ?? '',
     args.slice(1),
     program,
     program && Object.hasOwn(envSnapshot(session), 'POSIXLY_CORRECT'),
   )
-  const voice = isProgramInvocation(session) ? '' : 'bash: '
-  const messages = rawMessages.map((message) => voice + message)
-  const errBytes = messages.length > 0 ? encodeText(messages.join('')) : null
+  let errors = messages.map((message) => (program ? '' : 'bash: ') + message).join('')
   const exitCode = failed ? 1 : 0
   if (target !== null && parsed !== null) {
     const base = parsed[1] ?? ''
+    const text = decodeText(encodeText(output)).split('\0', 1)[0] ?? ''
     let status: 'ok' | 'denied' | 'readonly' | 'subscript'
     try {
-      status = await assignPrintfTarget(session, view, base, parsed[2], output)
+      status = await assignElement(session, view ?? null, base, parsed[2] ?? null, text)
     } catch (err) {
       if (err instanceof ArithError) {
         // The target carries `-i` and the formatted text does not
         // evaluate, which ends the shell as any `-i` value does.
         const signal = err.signal('printf', true)
-        signal.stderr = concat([encodeText(messages.join('')), signal.stderr])
+        signal.stderr = concat([encodeText(errors), signal.stderr])
         throw signal
       }
       if (!(err instanceof PolicyDenied)) throw err
-      const denied = encodeText(messages.join('') + `bash: ${err.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: denied }),
-        new ExecutionNode({ command: 'printf', exitCode: 1, stderr: denied }),
-      ]
+      return fail('printf', errors + `bash: ${err.message}\n`)
     }
-    if (status !== 'ok') {
-      const detail =
-        status === 'readonly'
-          ? `bash: ${base}: readonly variable\n`
-          : status === 'denied'
-            ? `bash: ${base}: permission denied\n`
-            : `bash: ${target}: bad array subscript\n`
-      const err = encodeText(messages.join('') + detail)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: err }),
-        new ExecutionNode({ command: 'printf', exitCode: 1, stderr: err }),
-      ]
-    }
-    if (errBytes !== null) {
-      return [
-        null,
-        new IOResult({ exitCode, stderr: errBytes }),
-        new ExecutionNode({ command: 'printf', exitCode, stderr: errBytes }),
-      ]
-    }
-    return [null, new IOResult({ exitCode }), new ExecutionNode({ command: 'printf', exitCode })]
+    if (status === 'readonly') return fail('printf', errors + `bash: ${base}: readonly variable\n`)
+    if (status === 'denied') return fail('printf', errors + `bash: ${base}: permission denied\n`)
+    if (status !== 'ok') return fail('printf', errors + `bash: ${target}: bad array subscript\n`)
+    return result('printf', { exitCode, stderr: errors })
   }
-  const out = encodeText(output)
-  // coreutils printf names the first argument a format that takes none
-  // left over, where bash's builtin drops them silently; a warning, so the
-  // status stays the format's own.
-  const warning =
-    excess !== null && isProgramInvocation(session)
-      ? `printf: warning: ignoring excess arguments, starting with '${quoteText(excess)}'\n`
-      : ''
-  const text = messages.join('') + warning
-  if (text !== '') {
-    const stderr = encodeText(text)
-    return [
-      out,
-      new IOResult({ exitCode, stderr }),
-      new ExecutionNode({ command: 'printf', exitCode, stderr }),
-    ]
+  if (excess !== null && program) {
+    // coreutils printf names the first argument a format that takes none
+    // left over, where bash's builtin drops them silently; a warning, so the
+    // status stays the format's own.
+    errors += `printf: warning: ignoring excess arguments, starting with '${quoteText(excess)}'\n`
   }
-  return [out, new IOResult(), new ExecutionNode({ command: 'printf', exitCode: 0 })]
+  return result('printf', { out: encodeText(output), exitCode, stderr: errors })
 }
 
 /** The `printf` arm. */

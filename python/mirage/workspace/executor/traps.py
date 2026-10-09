@@ -23,6 +23,7 @@ from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import ERR_TRAP_EXEMPT_TYPES
 from mirage.shell.errors import ExitSignal, ReturnSignal
+from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.executor.statement import (
@@ -195,7 +196,7 @@ async def run_err_trap(
         or (
             node.type in ERR_TRAP_EXEMPT_TYPES
             and not unopened
-            and not _arithmetic(node)
+            and node_kind(node) != NodeKind.ARITH
         )
     ):
         return []
@@ -206,20 +207,6 @@ async def run_err_trap(
         )
     finally:
         session.err_trap_running = False
-
-
-def _arithmetic(node: TSNodeLike) -> bool:
-    """Whether a statement is ``(( ... ))``, which the grammar parses as a
-    compound statement but bash runs as a command of its own.
-
-    Args:
-        node (TSNodeLike): the statement.
-    """
-    return (
-        node.type == NT.COMPOUND_STATEMENT
-        and bool(node.children)
-        and node.children[0].type == "(("
-    )
 
 
 async def run_return_trap(
@@ -326,9 +313,10 @@ async def run_exit_trap(
     one it registers there, does not run again.
     ``$?`` starts at ``status``, and a bare ``exit`` keeps it. The status
     the shell ends with stays ``status`` unless the action exits, or
-    fails under ``set -e``, which exits too. Hard stops (cancellation, a
-    killed job, a closed workspace) are not an end the shell reaches,
-    and never get here.
+    fails where ``set -e`` acts (not in a test, the left of ``&&``/``||``
+    or after ``!``), which exits too; its commands answer ERR and RETURN
+    afresh. Hard stops (cancellation, a killed job, a closed workspace)
+    are not an end the shell reaches, and never get here.
 
     Args:
         execute_fn (Callable[..., Any] | None): runs a line in the
@@ -355,12 +343,8 @@ async def run_exit_trap(
     if not action:
         return None
     record_status(session, status)
-    # The status the shell is ending with, while the action runs: a bare
-    # `exit` in it keeps it, as bash's does.
     saved = session._trap_status
     session._trap_status = status
-    # Its own commands answer ERR and RETURN afresh; the failure that set
-    # `-e` off was answered already.
     exiting = session.errexit_exiting
     session.errexit_exiting = False
     final = status
@@ -373,8 +357,6 @@ async def run_exit_trap(
         )
         stdout = await materialize(io.stdout) or b""
         stderr = await materialize(io.stderr) or b""
-        # Only a failure `set -e` acts on ends the shell: one in a test,
-        # the left of `&&`/`||` or after `!` leaves the status alone.
         if (
             io.exit_code != 0
             and session.shell_options.get("errexit")
