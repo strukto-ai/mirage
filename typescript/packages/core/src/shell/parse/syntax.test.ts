@@ -155,30 +155,6 @@ describe('checkSyntax', () => {
   })
 })
 
-const missingQuoteCases = JSON.parse(
-  readFileSync(
-    new URL('../../../../../../integ/bash/syntax/quoting.json', import.meta.url),
-    'utf8',
-  ),
-) as { cases: { command: string; expect: { exit: number } }[] }
-it.each(missingQuoteCases.cases.filter((c) => c.expect.exit === 2).map((c) => c.command))(
-  'missing nested quote refuses before any execution: %s',
-  async (command) => {
-    const ws = new Workspace({ '/data': new RAMVFS() }, { shellParser: parser })
-    try {
-      const io = await ws.shell(command)
-      expect(io.exitCode).toBe(2)
-      expect(new TextDecoder().decode(io.stdout)).toBe('')
-      expect(new TextDecoder().decode(io.stderr)).toContain(
-        'unexpected EOF while looking for matching',
-      )
-      expect((await ws.shell('test -e /data/unexpected')).exitCode).toBe(1)
-    } finally {
-      await ws.close()
-    }
-  },
-)
-
 it.each([
   ['echo "it\'s fine"', "it's fine\n"],
   ['echo ok # unterminated \'"', 'ok\n'],

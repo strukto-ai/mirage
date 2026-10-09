@@ -34,14 +34,25 @@ def _collect_names(node: TSNodeLike, out: set[str]) -> None:
         return
     field = constants.TARGET_NAME_FIELDS.get(node.type)
     target = node.child_by_field_name(field) if field else None
-    # `+=` reads the target before writing it (`TOKEN+=x` starts from
-    # the existing value), so an append's name is a read here too.
     if target is not None and any(c.type == "+=" for c in node.children):
         target = None
     for child in node.children:
         if target is not None and child.id == target.id:
             continue
         _collect_names(child, out)
+
+
+def walk_tree(root: TSNodeLike) -> Iterator[TSNodeLike]:
+    """Every node under ``root``, ``root`` included, depth first.
+
+    Args:
+        root (TSNodeLike): subtree root.
+    """
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        yield node
+        stack.extend(node.children)
 
 
 def walk_named_outside_defs(
@@ -257,12 +268,7 @@ def _test_arith_names(test: TSNodeLike, out: set[str]) -> None:
         if n.type != "binary_expression":
             continue
         operator = next(
-            (
-                child
-                for child in n.named_children
-                if child.type == "test_operator"
-            ),
-            None,
+            (c for c in n.named_children if c.type == "test_operator"), None
         )
         if operator is None:
             continue

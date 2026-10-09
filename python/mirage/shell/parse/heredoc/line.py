@@ -23,11 +23,8 @@ def ends_escaped(text: str | bytes | bytearray) -> bool:
     Args:
         text (str | bytes | bytearray): a line, without its newline.
     """
-    if isinstance(text, str):
-        run = len(text) - len(text.rstrip("\\"))
-    else:
-        run = len(text) - len(text.rstrip(b"\\"))
-    return run % 2 == 1
+    tail = text.rstrip("\\") if isinstance(text, str) else text.rstrip(b"\\")
+    return (len(text) - len(tail)) % 2 == 1
 
 
 def construct_closer(data: bytes, index: int, bare: bool) -> int | None:

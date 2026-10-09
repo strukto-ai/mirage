@@ -29,6 +29,7 @@ import { READ_USAGE, READ_VALUE_LETTERS } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
+import { endsEscaped } from '../../../../shell/parse/heredoc/line.ts'
 
 /** Split on whitespace runs with a maxsplit, like Python's split(None, n). */
 function splitOnWhitespace(text: string, maxsplit: number): string[] {
@@ -152,13 +153,7 @@ async function readRaw(
   if (nchars !== null) {
     let [data, complete] = await buffer.readChars(nchars, delim, signal)
     let text = decodeText(data)
-    while (
-      !raw &&
-      complete &&
-      text.endsWith('\\') &&
-      (text.length - text.replace(/\\+$/, '').length) % 2 === 1 &&
-      text.length < nchars
-    ) {
+    while (!raw && complete && endsEscaped(text) && text.length < nchars) {
       ;[data, complete] = await buffer.readChars(nchars - text.length, delim, signal)
       text += decodeText(data)
     }
@@ -166,12 +161,7 @@ async function readRaw(
   }
   let [data, complete] = await buffer.readUntil(delim, signal)
   let text = decodeText(data)
-  while (
-    !raw &&
-    complete &&
-    delim === 10 &&
-    (text.length - text.replace(/\\+$/, '').length) % 2 === 1
-  ) {
+  while (!raw && complete && delim === 10 && endsEscaped(text)) {
     ;[data, complete] = await buffer.readUntil(delim, signal)
     text += '\n' + decodeText(data)
   }

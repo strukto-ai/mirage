@@ -131,34 +131,6 @@ def test_an_alias_name_is_reserved_inside_its_own_text(line, own, word):
     assert (found and found.offending) == word
 
 
-MISSING_QUOTE_CASES = json.loads(
-    (ROOT / "integ/bash/syntax/quoting.json").read_text()
-)["cases"]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "command",
-    [
-        case["command"]
-        for case in MISSING_QUOTE_CASES
-        if case["expect"]["exit"] == 2
-    ],
-)
-async def test_missing_nested_quote_refuses_before_any_execution(command):
-    ws = Workspace({"/data": RAMVFS()})
-    try:
-        io = await ws.shell(command)
-        assert io.exit_code == 2
-        assert await io.stdout_str() == ""
-        stderr = await io.stderr_str()
-        assert "unexpected EOF while looking for matching" in stderr
-        check = await ws.shell("test -e /data/unexpected")
-        assert check.exit_code == 1
-    finally:
-        await ws.close()
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "command,expected",
