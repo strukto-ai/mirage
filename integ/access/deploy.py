@@ -321,7 +321,7 @@ class SnapshotStore:
                 "aws_access_key_id": "testing",
                 "aws_secret_access_key": "testing",
                 "path_style": True,
-                "key_prefix": "access/",
+                "key_prefix": f"access/{host}/",
             }
         return {
             "bucket": self.bucket,
@@ -330,7 +330,7 @@ class SnapshotStore:
             "accessKeyId": "testing",
             "secretAccessKey": "testing",
             "forcePathStyle": True,
-            "keyPrefix": "access/",
+            "keyPrefix": f"access/{host}/",
         }
 
 
