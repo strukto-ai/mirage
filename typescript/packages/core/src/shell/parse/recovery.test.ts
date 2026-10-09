@@ -87,9 +87,11 @@ describe('$ reparse: later unbraced var cut off from its name', () => {
   })
 
   it.each([
-    // A `$` bash keeps literal is left alone: no name character follows.
+    // A `$` bash keeps literal is left alone: no expansion opens after it.
     ['echo a$ b', ['echo', 'a$', 'b']],
     ['echo $', ['echo', '$']],
+    ['echo x $\\a $,y', ['echo', 'x', '$\\a', '$,y']],
+    ['echo x $\\ a a$\\b', ['echo', 'x', '$\\ a', 'a$\\b']],
   ])('leaves the literal dollar in %j untouched', (command, words) => {
     const node = parser.parse(command).children[0] as TSNodeLike
     expect(getParts(node).map((p) => getText(p))).toEqual(words)

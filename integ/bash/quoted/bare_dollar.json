@@ -61,10 +61,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo $ x",
+      "command": "echo $ x && printf '[%s]\\n' x $,y $\\a $\\\\a $\\ a a$\\b \"$\\a\" $\\$ $\\{x\\} $\\[1\\]",
       "expect": {
         "exit": 0,
-        "stdout": "$ x\n",
+        "stdout": "$ x\n[x]\n[$,y]\n[$a]\n[$\\a]\n[$ a]\n[a$b]\n[$\\a]\n[$$]\n[${x}]\n[$[1]]\n",
         "stderr": ""
       }
     },
