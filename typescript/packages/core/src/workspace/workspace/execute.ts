@@ -433,7 +433,12 @@ async function runPreparedLine(
           // build.
           const found =
             argv === undefined
-              ? (checkSyntax(command, expandingAliases(effectiveSession)) ?? findSyntaxIssue(root))
+              ? (checkSyntax(
+                  command,
+                  expandingAliases(effectiveSession),
+                  null,
+                  effectiveSession.shopts.extglob ?? false,
+                ) ?? findSyntaxIssue(root))
               : null
           if (found !== null) {
             const io = syntaxErrorResult(found)

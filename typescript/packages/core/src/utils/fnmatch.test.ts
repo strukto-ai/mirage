@@ -162,3 +162,115 @@ describe('fnmatch edge semantics', () => {
     expect(fnmatch('-', '[a-]')).toBe(true)
   })
 })
+
+const EXTGLOB_NAMES = [
+  '',
+  'a',
+  'b',
+  'c',
+  'ab',
+  'abc',
+  'bb',
+  'aa',
+  'ac',
+  'a(b)',
+  'a(b|d)',
+  'a|b',
+  '123',
+  '😀',
+  'a\nb',
+]
+
+const EXTGLOB_GOLDEN: [string, string[]][] = [
+  ['@(a|b)', ['a', 'b']],
+  ['?(a|b)', ['', 'a', 'b']],
+  ['*(a|b)', ['', 'a', 'b', 'ab', 'bb', 'aa']],
+  ['+(a|b)', ['a', 'b', 'ab', 'bb', 'aa']],
+  [
+    '!(a|b)',
+    ['', 'c', 'ab', 'abc', 'bb', 'aa', 'ac', 'a(b)', 'a(b|d)', 'a|b', '123', '😀', 'a\nb'],
+  ],
+  [
+    '!(a)*',
+    [
+      '',
+      'a',
+      'b',
+      'c',
+      'ab',
+      'abc',
+      'bb',
+      'aa',
+      'ac',
+      'a(b)',
+      'a(b|d)',
+      'a|b',
+      '123',
+      '😀',
+      'a\nb',
+    ],
+  ],
+  ['a!(b)c', ['ac']],
+  ['@(a|+(b|c))', ['a', 'b', 'c', 'bb']],
+  [
+    '*(!(a))',
+    ['', 'b', 'c', 'ab', 'abc', 'bb', 'aa', 'ac', 'a(b)', 'a(b|d)', 'a|b', '123', '😀', 'a\nb'],
+  ],
+  ['+(?(a))', ['', 'a', 'aa']],
+  ['@(|a)', ['', 'a']],
+  [
+    '!()',
+    ['a', 'b', 'c', 'ab', 'abc', 'bb', 'aa', 'ac', 'a(b)', 'a(b|d)', 'a|b', '123', '😀', 'a\nb'],
+  ],
+  ['@(a(b)|c)', ['c', 'a(b)']],
+  ['@(a(b|d)|c)', ['c', 'a(b|d)']],
+  ['+([[:digit:]])', ['123']],
+  ['@(😀|a)', ['a', '😀']],
+  ['@([!a]|ab)', ['b', 'c', 'ab', '😀']],
+  ['@(a[|]b|c)', ['c', 'a|b']],
+]
+
+describe('extended groups match GNU Bash 5.2.37', () => {
+  it.each(EXTGLOB_GOLDEN)('pattern %s', (pattern, hits) => {
+    for (const name of EXTGLOB_NAMES)
+      expect(fnmatch(name, pattern, true), name).toBe(hits.includes(name))
+  })
+})
+
+it.each([
+  ['.h', '@(.h|a)', true],
+  ['.h', '?(.h)', true],
+  ['.h', '*(.h)', true],
+  ['.h', '!(a)', false],
+  ['.h', '!(a).h', false],
+  ['.h', '*(x).h', true],
+  ['.h', '*.h', false],
+  ['.h', '@([.]h|a)', false],
+  ['.h', '@(.*|a)', true],
+] as [string, string, boolean][])('pathname %s %s', (name, pattern, expected) => {
+  expect(fnmatch(name, pattern, true, true)).toBe(expected)
+})
+
+it('keeps extended groups opt-in and terminates nullable repetition', () => {
+  expect(fnmatch('a', '@(a|b)')).toBe(false)
+  expect(fnmatch('@(a|b)', '@(a|b)')).toBe(true)
+  expect(fnmatch('a'.repeat(80), '+(?(a))', true)).toBe(true)
+  expect(fnmatch('a'.repeat(80) + 'b', '+(?(a))', true)).toBe(false)
+})
+
+it('requires the suffix after a negative group, including on empty text', () => {
+  expect(fnmatch('', '*!(a)x', true)).toBe(false)
+  expect(fnmatch('x', '*!(a)x', true)).toBe(true)
+})
+
+it.each([
+  ['1😀', true],
+  ['😀😀', true],
+  ['a', false],
+] as const)('POSIX classes match Unicode characters: %s', (name, expected) => {
+  expect(fnmatch(name, '+([[:digit:]😀])', true)).toBe(expected)
+})
+
+it('empty negative repetition remains nullable', () => {
+  expect(fnmatch('', '*+([!a]|!([!a]))', true)).toBe(true)
+})

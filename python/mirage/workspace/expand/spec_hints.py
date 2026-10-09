@@ -16,6 +16,7 @@ from mirage.commands.builtin.find_parse import exec_spans
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import CommandSpec, ValueType
+from mirage.utils.glob_walk import unmark_globs
 from mirage.workspace.mount import MountRegistry
 
 
@@ -78,9 +79,12 @@ def spec_word_kinds(
     # parse_command classifies ignore_tokens as TEXT itself, so there is
     # nothing to override here: leaving them None sent `find \( ... \)`
     # back to the shape heuristic, which read "(" as the bare path "/(".
-    kinds = list(parse_command(spec, argv, cwd="/", cmd_name=name).word_kinds)
+    literal = [unmark_globs(word) for word in argv]
+    kinds = list(
+        parse_command(spec, literal, cwd="/", cmd_name=name).word_kinds
+    )
     if name == "find":
-        for start, end in exec_spans(argv):
+        for start, end in exec_spans(literal):
             for i in range(start, end + 1):
                 kinds[i] = "str"
     return kinds
@@ -106,4 +110,8 @@ def spec_word_bases(
     """
     if spec.operand_base is None:
         return None
-    return list(parse_command(spec, argv, cwd=cwd).word_bases)
+    return list(
+        parse_command(
+            spec, [unmark_globs(word) for word in argv], cwd=cwd
+        ).word_bases
+    )

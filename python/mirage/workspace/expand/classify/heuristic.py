@@ -15,7 +15,9 @@
 import posixpath
 import re
 
+from mirage.context import get_current_session
 from mirage.types import PathSpec
+from mirage.utils.fnmatch import pattern_shape
 from mirage.utils.glob_walk import has_glob, unmark_globs
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import dotted_spelling
@@ -51,6 +53,9 @@ def classify_word(
     # shape tests below read the literal spelling.
     word_has_glob = has_glob(word)
     shape = unmark_globs(word)
+    session = get_current_session()
+    if session is not None and session.shopts.get("extglob"):
+        shape = unmark_globs(pattern_shape(word))
 
     if word.startswith("/"):
         mount = registry.try_mount_for(word)

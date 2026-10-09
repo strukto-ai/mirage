@@ -103,7 +103,7 @@
       }
     },
     {
-      "id": "shopt_refuses_extglob",
+      "id": "shopt_enables_extglob",
       "seq": 940023,
       "targets": [
         "ram",
@@ -132,8 +132,8 @@
       "command": "shopt -s extglob; echo rc=$?; shopt -u extglob; shopt extglob; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\nextglob        \toff\nrc=1\n",
-        "stderr": "mirage: shopt: extglob: not supported\n"
+        "stdout": "rc=0\nextglob        \toff\nrc=1\n",
+        "stderr": ""
       }
     }
   ]

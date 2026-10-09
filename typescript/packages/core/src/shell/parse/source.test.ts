@@ -79,3 +79,12 @@ describe('joinContinuations', () => {
     )
   })
 })
+
+it('keeps source rows across a newline shielded inside an extended pattern', () => {
+  const root = parser.parse('echo @(😀\nb|c)\necho after')
+  const [first, second] = root.namedChildren
+  expect(first?.text).toBe('echo @(😀\nb|c)')
+  expect(first?.endPosition).toEqual({ row: 1, column: 4 })
+  expect(second?.startPosition).toEqual({ row: 2, column: 0 })
+  expect(second?.text).toBe('echo after')
+})

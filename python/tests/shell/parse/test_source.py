@@ -68,3 +68,12 @@ def test_source_offsets_point_back_into_the_line_as_typed(command):
     (fi,) = names
     offsets = source_offsets(command, root)
     assert offsets[fi.start_byte] == command.encode().rindex(b"fi")
+
+
+def test_extended_pattern_shield_preserves_original_rows():
+    root = parse("echo @(😀\nb|c)\necho after")
+    first, second = root.named_children
+    assert first.text == "echo @(😀\nb|c)".encode()
+    assert first.end_point == (1, 4)
+    assert second.start_point == (2, 0)
+    assert second.text == b"echo after"

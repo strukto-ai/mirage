@@ -20,10 +20,14 @@ from typing import Any, Protocol
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.context import dotglob_active, session_visibility
+from mirage.context import (
+    dotglob_active,
+    get_current_session,
+    session_visibility,
+)
 from mirage.errors.constants import WALK_ERRORS
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.fnmatch import fnmatch
+from mirage.utils.fnmatch import QUOTED_BANG, fnmatch
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import rekey
 from mirage.view.types import ChildMounts, LinkTargetStat
@@ -39,6 +43,12 @@ def _meta_index(pattern: str) -> int:
         idx = pattern.find(ch)
         if idx != -1 and (first == -1 or idx < first):
             first = idx
+    session = get_current_session()
+    if session is not None and session.shopts.get("extglob"):
+        for ch in "@+!":
+            idx = pattern.find(ch + "(")
+            if idx >= 0 and (first < 0 or idx < first):
+                first = idx
     return first
 
 
@@ -188,7 +198,17 @@ def literal_span(literal: str) -> tuple[date, date] | None:
 # The marks are Unicode noncharacters, permanently unassigned and never
 # valid interchange text -- the same impossible input `brace.py` assumes
 # away when it delimits its inert atoms with NUL.
-_GLOB_MARKS = {"*": "\ufdd0", "?": "\ufdd1", "[": "\ufdd2"}
+_GLOB_MARKS = {
+    "*": "\ufdd0",
+    "?": "\ufdd1",
+    "[": "\ufdd2",
+    "@": "\ufdd3",
+    "+": "\ufdd4",
+    "!": QUOTED_BANG,
+    "(": "\ufdd6",
+    ")": "\ufdd7",
+    "|": "\ufdd8",
+}
 _GLOB_CHAR_OF = {mark: ch for ch, mark in _GLOB_MARKS.items()}
 # Translation tables, not per-character loops: every expanded word is
 # marked and unmarked, so a Python-level rebuild made the cost quadratic
@@ -196,7 +216,10 @@ _GLOB_CHAR_OF = {mark: ch for ch, mark in _GLOB_MARKS.items()}
 _MARK_TABLE = str.maketrans(_GLOB_MARKS)
 _UNMARK_TABLE = str.maketrans(_GLOB_CHAR_OF)
 _PATTERN_TABLE = str.maketrans(
-    {mark: f"[{ch}]" for mark, ch in _GLOB_CHAR_OF.items()}
+    {
+        mark: QUOTED_BANG if ch == "!" else f"[{ch}]"
+        for mark, ch in _GLOB_CHAR_OF.items()
+    }
 )
 
 DEFAULT_MAX_GLOB_MATCHES = 10000
@@ -208,7 +231,12 @@ def has_glob(segment: str) -> bool:
     Args:
         segment (str): one path component.
     """
-    return any(ch in segment for ch in GLOB_CHARS)
+    session = get_current_session()
+    return any(ch in segment for ch in GLOB_CHARS) or (
+        session is not None
+        and bool(session.shopts.get("extglob"))
+        and any(c + "(" in segment for c in "@+!")
+    )
 
 
 def mark_globs(text: str) -> str:
@@ -263,6 +291,8 @@ def glob_pattern(segment: str) -> str:
     fnmatch has no escape character, so a quoted glob character is
     handed over as its own one-character class, exactly what
     :func:`escape_glob` builds for text that is literal throughout.
+    A quoted bang keeps its mark until matching: ``[!]`` is not a
+    one-character class, and unquoting it could create a ``!(...)`` group.
 
     Args:
         segment (str): one path component, marks intact.
@@ -327,12 +357,13 @@ def escape_glob(text: str) -> str:
     fnmatch has no escape character, so each special is wrapped in its
     own one-character class: ``*`` becomes ``[*]``. A ``]`` needs no
     treatment: outside a class it is already literal, and no class can
-    open because every ``[`` gets wrapped.
+    open because every ``[`` gets wrapped. A bang retains the quote mark
+    described by :func:`glob_pattern`.
 
     Args:
         text (str): literal text destined for a glob pattern.
     """
-    return "".join(f"[{c}]" if c in GLOB_CHARS else c for c in text)
+    return glob_pattern(mark_globs(text))
 
 
 def is_word_shaped(p: PathSpec) -> bool:
@@ -382,13 +413,13 @@ def glob_name_matches(name: str, pattern: str) -> bool:
         name (str): the entry's own name, no directory part.
         pattern (str): the segment, marks already resolved.
     """
-    if (
-        name.startswith(".")
-        and not pattern.startswith(".")
-        and not dotglob_active()
-    ):
-        return False
-    return fnmatch(name, pattern)
+    session = get_current_session()
+    return fnmatch(
+        name,
+        pattern,
+        extglob=session is not None and bool(session.shopts.get("extglob")),
+        period=not dotglob_active(),
+    )
 
 
 async def expand_pattern(

@@ -310,12 +310,7 @@ SHOPT_DEFAULTS: dict[str, bool] = {
     "xpg_echo": False,
 }
 
-# `shopt` names mirage refuses to turn on rather than store: `extglob`
-# changes what the *parser* accepts (`!(a).txt` is a pattern, not a
-# subshell), and mirage's grammar has no such mode, so a stored `on`
-# would promise a syntax that still fails to parse. Refusing is the
-# honest answer until the parser learns it.
-SHOPT_UNSUPPORTED = frozenset({"extglob"})
+SHOPT_UNSUPPORTED: frozenset[str] = frozenset()
 
 # What each option reads as before anything sets it, pinned from
 # `bash -c 'set -o'` on debian:stable-slim (5.2.37). Only three are on,

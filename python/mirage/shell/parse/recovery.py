@@ -21,6 +21,7 @@ from mirage.shell.parse.expansion import expansion_source
 from mirage.shell.parse.heredoc import protected_source
 from mirage.shell.parse.heredoc.reader import delimiter_end
 from mirage.shell.parse.source import SourceNode
+from mirage.shell.parse.syntax import pattern_source
 from mirage.shell.types import TSNodeLike
 
 
@@ -276,17 +277,25 @@ def parse_protected(data: bytes) -> TSNodeLike:
     Args:
         data (bytes): encoded shell source.
     """
-    tree = TS_PARSER.parse(data)
+    patterned = pattern_source(data)
+    tree = TS_PARSER.parse(patterned)
     shielded_data = (
-        protected_source(data, tree.root_node) if b"<<" in data else None
-    ) or data
+        protected_source(patterned, tree.root_node)
+        if b"<<" in patterned
+        else None
+    ) or patterned
     shielded_data = expansion_source(shielded_data, tree.root_node)
     shielded_data = operator_source(shielded_data, tree.root_node)
-    if shielded_data == data:
-        return tree.root_node
+    original = (
+        tree.root_node
+        if patterned == data
+        else SourceNode(tree.root_node, data)
+    )
+    if shielded_data == patterned:
+        return original
     shielded = TS_PARSER.parse(shielded_data).root_node
     if not _errors(shielded) <= _errors(tree.root_node):
-        return tree.root_node
+        return original
     return SourceNode(shielded, data)
 
 

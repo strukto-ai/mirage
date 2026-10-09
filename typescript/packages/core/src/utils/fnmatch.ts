@@ -24,16 +24,195 @@
 // raising, and a leading ^ negates a class like ! does (bash/glibc
 // semantics; CPython keeps ^ literal, as `fnmatchcase` below does). Mirrors
 // the Python mirage.utils.fnmatch wrapper.
-export function fnmatch(name: string, pattern: string): boolean {
+import { translateBracket } from './posix.ts'
+
+export const QUOTED_BANG = '\uFDD5'
+
+export function fnmatch(name: string, pattern: string, extglob = false, period = false): boolean {
+  if (
+    pattern.includes(QUOTED_BANG) ||
+    (extglob && (pattern.includes('[:') || /[@?*+!]\(/.test(pattern)))
+  ) {
+    return new Matcher(name, pattern, period, extglob).matches()
+  }
+  if (period && name.startsWith('.') && !pattern.startsWith('.')) return false
   return match(characters(name), characters(pattern), true)
 }
 
 /**
- * CPython's `fnmatch.fnmatchcase`: as `fnmatch`, except that a leading `^` in
- * a class is a member rather than a negation. What a Python tool matches with
- * (huggingface_hub's `filter_repo_objects`), so a CLI that mimics one reads
- * `[^a]` as `^` or `a`. Mirrors the Python `fnmatchcase`.
+ * Match extended groups by memoized reachable character positions.
+ * Deliberate GNU 5.2 divergence: empty subjects obey group composition.
+ * GNU's star fast path accepts `*!(a)x` but rejects `*+([!a]|!([!a]))`
+ * against empty text; here the suffix is required and the group is nullable.
  */
+class Matcher {
+  private readonly name: readonly string[]
+  private readonly pattern: readonly string[]
+  private readonly classes = new Map<number, number>()
+  readonly groups = new Map<number, { end: number; branches: [number, number][] }>()
+  private readonly memo = new Map<string, ReadonlySet<number>>()
+  private readonly period: boolean
+
+  constructor(name: string, pattern: string, period = false, extglob = true) {
+    this.period = period && name.startsWith('.')
+    this.name = Array.from(name)
+    this.pattern = Array.from(pattern)
+    const p = this.pattern
+    const stack: { open: number; starts: number[]; literalDepth: number }[] = []
+    let i = 0
+    while (i < p.length) {
+      const c = p[i] ?? ''
+      if (c === '[') {
+        const end = classEnd(p, i, true, true)
+        if (end >= 0) {
+          this.classes.set(i, end + 1)
+          i = end + 1
+          continue
+        }
+      }
+      if (extglob && '@?*+!'.includes(c) && p[i + 1] === '(') {
+        stack.push({ open: i, starts: [i + 2], literalDepth: 0 })
+        i += 2
+        continue
+      }
+      const frame = stack.at(-1)
+      if (frame && c === '(') frame.literalDepth += 1
+      else if (frame && c === ')' && frame.literalDepth > 0) frame.literalDepth -= 1
+      else if (frame && c === '|' && frame.literalDepth === 0) frame.starts.push(i + 1)
+      else if (frame && c === ')') {
+        stack.pop()
+        this.groups.set(frame.open, {
+          end: i + 1,
+          branches: frame.starts.map((start, j) => [start, (frame.starts[j + 1] ?? i + 1) - 1]),
+        })
+      }
+      i += 1
+    }
+  }
+
+  matches(): boolean {
+    if (
+      this.groups.size === 0 &&
+      !this.pattern.join('').includes('[:') &&
+      !this.pattern.includes(QUOTED_BANG)
+    ) {
+      return fnmatch(this.name.join(''), this.pattern.join(''), false, this.period)
+    }
+    return this.ends(0, this.pattern.length, 0).has(this.name.length)
+  }
+
+  private ends(lo: number, hi: number, start: number): ReadonlySet<number> {
+    const key = `${String(lo)}:${String(hi)}:${String(start)}`
+    const cached = this.memo.get(key)
+    if (cached) return cached
+    let positions = new Set([start])
+    let i = lo
+    while (i < hi && positions.size > 0) {
+      const c = this.pattern[i] ?? ''
+      const group = this.groups.get(i)
+      if (group && group.end <= hi) {
+        const reached = new Set<number>()
+        for (const position of positions) {
+          const once = new Set<number>()
+          for (const [a, b] of group.branches) {
+            for (const target of this.ends(a, b, position)) once.add(target)
+          }
+          if (c === '!') {
+            if (this.period && position === 0) continue
+            for (let target = position; target <= this.name.length; target += 1) {
+              if (!once.has(target)) reached.add(target)
+            }
+          } else if (c === '*' || c === '+') {
+            const closure = new Set(once)
+            if (c === '*') closure.add(position)
+            const pending = [...once]
+            while (pending.length > 0) {
+              const current = pending.pop()
+              if (current === undefined) break
+              for (const [a, b] of group.branches) {
+                for (const target of this.ends(a, b, current)) {
+                  if (!closure.has(target)) {
+                    closure.add(target)
+                    pending.push(target)
+                  }
+                }
+              }
+            }
+            for (const target of closure) reached.add(target)
+          } else {
+            for (const target of once) reached.add(target)
+            if (c === '?') reached.add(position)
+          }
+        }
+        positions = reached
+        i = group.end
+        continue
+      }
+      if (c === '*') {
+        if (this.period) positions.delete(0)
+        if (positions.size === 0) break
+        let first = this.name.length
+        for (const position of positions) first = Math.min(first, position)
+        positions = new Set<number>()
+        for (let target = first; target <= this.name.length; target += 1) positions.add(target)
+        i += 1
+        continue
+      }
+      const end = this.classes.get(i) ?? i + 1
+      const token = this.pattern.slice(i, end).join('')
+      positions = new Set(
+        [...positions]
+          .filter(
+            (position) =>
+              position < this.name.length &&
+              !(this.period && position === 0 && (c === '?' || end > i + 1)) &&
+              (end > i + 1
+                ? extendedClassMatches(this.name[position] ?? '', token)
+                : c === '?' || (c === QUOTED_BANG ? '!' : c) === this.name[position]),
+          )
+          .map((position) => position + 1),
+      )
+      i = end
+    }
+    this.memo.set(key, positions)
+    return positions
+  }
+}
+
+function extendedClassMatches(char: string, pattern: string): boolean {
+  if (!pattern.includes('[:') && !pattern.includes(QUOTED_BANG)) return fnmatch(char, pattern)
+  const out: string[] = []
+  const source = pattern.startsWith('[!') ? '[^' + pattern.slice(2) : pattern
+  try {
+    translateBracket(source, 0, out)
+    return new RegExp('^(?:' + out.join('').replaceAll(QUOTED_BANG, '!') + ')$', 'u').test(char)
+  } catch (err) {
+    if (!(err instanceof SyntaxError)) throw err
+    console.debug(`Invalid glob character class ${pattern}: ${String(err)}`)
+    return false
+  }
+}
+
+/** Replace extended groups with a wildcard for word classification. */
+export function patternShape(pattern: string): string {
+  const groups = new Matcher('', pattern).groups
+  const chars = Array.from(pattern)
+  let out = ''
+  let i = 0
+  while (i < chars.length) {
+    const group = groups.get(i)
+    if (group) {
+      out += '*'
+      i = group.end
+    } else {
+      out += chars[i] ?? ''
+      i += 1
+    }
+  }
+  return out
+}
+
+/** CPython's fnmatchcase: a leading caret in a class is a literal member. */
 export function fnmatchcase(name: string, pattern: string): boolean {
   return match(characters(name), characters(pattern), false)
 }
@@ -93,11 +272,21 @@ function negates(c: string | undefined, caret: boolean): boolean {
 // The index of the ] closing the class that opens at `open`, or -1 when
 // none does and the [ is a literal. A ] right after the [ (or after its
 // negation) is a member, not the close.
-function classEnd(pattern: Characters, open: number, caret: boolean): number {
+function classEnd(pattern: Characters, open: number, caret: boolean, posix = false): number {
   let j = open + 1
   if (j < pattern.length && negates(pattern[j], caret)) j += 1
   if (j < pattern.length && pattern[j] === ']') j += 1
-  while (j < pattern.length && pattern[j] !== ']') j += 1
+  while (j < pattern.length && pattern[j] !== ']') {
+    if (posix && pattern[j] === '[' && pattern[j + 1] === ':') {
+      let end = j + 2
+      while (end < pattern.length && !(pattern[end] === ':' && pattern[end + 1] === ']')) end += 1
+      if (end < pattern.length) {
+        j = end + 2
+        continue
+      }
+    }
+    j += 1
+  }
   return j < pattern.length ? j : -1
 }
 

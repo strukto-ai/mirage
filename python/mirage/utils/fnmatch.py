@@ -13,6 +13,209 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import fnmatch as _stdlib_fnmatch
+import logging
+import re
+
+from mirage.utils.posix import translate_bracket
+
+logger = logging.getLogger(__name__)
+
+QUOTED_BANG = "\ufdd5"
+
+
+class _Matcher:
+    """Match extended groups by reachable character positions.
+
+    Each group/position pair is evaluated once. Repetition visits each
+    reachable position once, including alternatives that match nothing,
+    so nested alternatives do not trigger regex backtracking.
+
+    Deliberate GNU 5.2 divergence: empty subjects obey group composition.
+    GNU's star fast path accepts ``*!(a)x`` but rejects
+    ``*+([!a]|!([!a]))`` against empty text; this matcher requires the
+    former's suffix and accepts the latter's nullable group.
+
+    Args:
+        name (str): text to match.
+        pattern (str): glob with quoted characters encoded by glob_pattern.
+        period (bool): require an explicit dot at a pathname's start.
+        extglob (bool): recognize extended groups while reading the pattern.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        pattern: str,
+        period: bool = False,
+        extglob: bool = True,
+    ) -> None:
+        self.name = name
+        self.pattern = pattern
+        self.period = period and name.startswith(".")
+        self.classes: dict[int, int] = {}
+        self.groups: dict[int, tuple[int, tuple[tuple[int, int], ...]]] = {}
+        self.memo: dict[tuple[int, int, int], frozenset[int]] = {}
+        stack: list[tuple[int, list[int]]] = []
+        literal_depth: list[int] = []
+        i = 0
+        while i < len(pattern):
+            c = pattern[i]
+            if c == "[":
+                j = i + 1
+                if pattern[j : j + 1] in ("!", "^"):
+                    j += 1
+                if pattern[j : j + 1] == "]":
+                    j += 1
+                while j < len(pattern) and pattern[j] != "]":
+                    close = (
+                        pattern.find(":]", j + 2)
+                        if pattern.startswith("[:", j)
+                        else -1
+                    )
+                    j = close + 2 if close >= 0 else j + 1
+                end = j if j < len(pattern) else -1
+                if end >= 0:
+                    self.classes[i] = end + 1
+                    i = end + 1
+                    continue
+            if extglob and c in "@?*+!" and pattern[i + 1 : i + 2] == "(":
+                stack.append((i, [i + 2]))
+                literal_depth.append(0)
+                i += 2
+                continue
+            if stack and c == "(":
+                literal_depth[-1] += 1
+            elif stack and c == ")" and literal_depth[-1]:
+                literal_depth[-1] -= 1
+            elif stack and c == "|" and not literal_depth[-1]:
+                stack[-1][1].append(i + 1)
+            elif stack and c == ")":
+                opened, starts = stack.pop()
+                literal_depth.pop()
+                stops = [start - 1 for start in starts[1:]] + [i]
+                self.groups[opened] = (i + 1, tuple(zip(starts, stops)))
+            i += 1
+
+    def matches(self) -> bool:
+        if (
+            not self.groups
+            and "[:" not in self.pattern
+            and QUOTED_BANG not in self.pattern
+        ):
+            return fnmatch(self.name, self.pattern, period=self.period)
+        return len(self.name) in self.ends(0, len(self.pattern), 0)
+
+    def ends(self, lo: int, hi: int, start: int) -> frozenset[int]:
+        """Every end position at which a pattern slice matches.
+
+        Args:
+            lo (int): start of the pattern slice.
+            hi (int): end of the pattern slice.
+            start (int): first character to match.
+        """
+        key = (lo, hi, start)
+        if key in self.memo:
+            return self.memo[key]
+        positions = {start}
+        i = lo
+        while i < hi and positions:
+            c = self.pattern[i]
+            group = self.groups.get(i)
+            if group is not None and group[0] <= hi:
+                end, branches = group
+                reached: set[int] = set()
+                for position in positions:
+                    once = set().union(
+                        *(self.ends(a, b, position) for a, b in branches)
+                    )
+                    if c == "!":
+                        if self.period and position == 0:
+                            continue
+                        reached.update(
+                            set(range(position, len(self.name) + 1)) - once
+                        )
+                    elif c in ("*", "+"):
+                        closure = set(once)
+                        if c == "*":
+                            closure.add(position)
+                        pending = list(once)
+                        while pending:
+                            current = pending.pop()
+                            for a, b in branches:
+                                for target in self.ends(a, b, current):
+                                    if target not in closure:
+                                        closure.add(target)
+                                        pending.append(target)
+                        reached.update(closure)
+                    else:
+                        reached.update(once)
+                        if c == "?":
+                            reached.add(position)
+                positions, i = reached, end
+                continue
+            if c == "*":
+                if self.period:
+                    positions.discard(0)
+                if not positions:
+                    break
+                positions = set(range(min(positions), len(self.name) + 1))
+                i += 1
+                continue
+            end = self.classes.get(i, i + 1)
+            token = self.pattern[i:end]
+            positions = {
+                position + 1
+                for position in positions
+                if position < len(self.name)
+                and not (
+                    self.period and position == 0 and (c == "?" or end > i + 1)
+                )
+                and (
+                    _extended_class_matches(self.name[position], token)
+                    if end > i + 1
+                    else c == "?"
+                    or ("!" if c == QUOTED_BANG else c) == self.name[position]
+                )
+            }
+            i = end
+        result = frozenset(positions)
+        self.memo[key] = result
+        return result
+
+
+def _extended_class_matches(char: str, pattern: str) -> bool:
+    if "[:" not in pattern and QUOTED_BANG not in pattern:
+        return fnmatch(char, pattern)
+    out: list[str] = []
+    source = "[^" + pattern[2:] if pattern.startswith("[!") else pattern
+    try:
+        translate_bracket(source, 0, out)
+        return (
+            re.fullmatch("".join(out).replace(QUOTED_BANG, "!"), char)
+            is not None
+        )
+    except re.error:
+        logger.debug("invalid glob character class %r", pattern)
+        return False
+
+
+def pattern_shape(pattern: str) -> str:
+    """Replace extended groups with a wildcard for word classification.
+
+    Args:
+        pattern (str): a word with quote marks still intact.
+    """
+    groups = _Matcher("", pattern).groups
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        if i in groups:
+            out.append("*")
+            i = groups[i][0]
+        else:
+            out.append(pattern[i])
+            i += 1
+    return "".join(out)
 
 
 def _normalize_negation(pattern: str) -> str:
@@ -44,7 +247,9 @@ def _normalize_negation(pattern: str) -> str:
     return "".join(out)
 
 
-def fnmatch(name: str, pattern: str) -> bool:
+def fnmatch(
+    name: str, pattern: str, *, extglob: bool = False, period: bool = False
+) -> bool:
     """Case-sensitive shell glob match with bash class negation.
 
     Mirrors the TypeScript ``utils/fnmatch.ts`` port: always
@@ -54,7 +259,16 @@ def fnmatch(name: str, pattern: str) -> bool:
     Args:
         name (str): string to test.
         pattern (str): shell glob pattern.
+        extglob (bool): interpret Bash's extended pattern groups.
+        period (bool): require an explicit leading dot in pathname matches.
     """
+    if QUOTED_BANG in pattern or (
+        extglob
+        and ("[:" in pattern or any(c + "(" in pattern for c in "@?*+!"))
+    ):
+        return _Matcher(name, pattern, period, extglob).matches()
+    if period and name.startswith(".") and not pattern.startswith("."):
+        return False
     return _stdlib_fnmatch.fnmatchcase(name, _normalize_negation(pattern))
 
 

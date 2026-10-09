@@ -42,6 +42,7 @@ def check_syntax(
     command: str,
     aliases: frozenset[str] = frozenset(),
     own: Callable[[str, int], bool] | None = None,
+    extglob: bool = False,
 ) -> SyntaxDiagnostic | None:
     """Read a line as bash 5.2 does and report what it refuses.
 
@@ -68,7 +69,7 @@ def check_syntax(
         its status; None when bash reads the line.
     """
     try:
-        found = _LineReader(command, aliases, own).refusals()
+        found = _LineReader(command, aliases, own, extglob).refusals()
     except RecursionError:
         logger.debug("line nested past the host's stack, refused")
         found = [
@@ -84,6 +85,31 @@ def check_syntax(
         for line in refusal.lines
     )
     return SyntaxDiagnostic(found[0].offending, message, found[-1].status)
+
+
+def pattern_source(data: bytes) -> bytes:
+    """Shield pattern operators while preserving expansions and byte spans.
+
+    The syntax gate separately decides whether extglob is enabled. The
+    structural parser always recognizes it, including the implicit mode
+    on the right of a conditional comparison.
+
+    Args:
+        data (bytes): encoded shell source.
+    """
+    command = data.decode("utf-8", errors="surrogateescape")
+    if not any(c + "(" in command for c in constants.EXTGLOB_OPENERS):
+        return data
+    reader = _LineReader(command, frozenset(), None, True)
+    try:
+        reader.refusals()
+    except RecursionError:
+        logger.debug("pattern source nested past the host's stack")
+        return data
+    out = list(command)
+    for start, end in reader.patterns:
+        out[start:end] = ":" * (end - start)
+    return encode_text("".join(out))
 
 
 def heredoc_plan(command: str) -> HeredocPlan | None:
@@ -330,12 +356,15 @@ class _LineReader:
         text: str,
         aliases: frozenset[str],
         own: Callable[[str, int], bool] | None,
+        extglob: bool = False,
     ) -> None:
         self.text = text
         self.n = len(text)
         self.quoted_end = ends_escaped(text)
         self.aliases = aliases
         self.own = own
+        self.extglob = extglob
+        self.patterns: list[tuple[int, int]] = []
         self.subs: dict[
             tuple[int, int | None], tuple[int, tuple[ReaderHeredoc, ...]]
         ] = {}
@@ -618,6 +647,33 @@ class _LineReader:
         if self.char_at(at + 1) == "(":
             return self.matched(at + 1, i) + 1
         return self.substitution(i, at + 1)
+
+    def extended_pattern(self, i: int) -> int:
+        """Read a pattern group, shielding only its literal syntax.
+
+        Args:
+            i (int): the extended pattern's operator.
+        """
+        self.patterns.append((i, i + 2))
+        j, depth = i + 2, 1
+        while j < self.n:
+            c = self.text[j]
+            if c in "'\"`$\\":
+                j = self.word_char(j)
+                continue
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+            if c in "()| \t\n;&<>" or (
+                c in constants.EXTGLOB_OPENERS
+                and self.text[j + 1 : j + 2] == "("
+            ):
+                self.patterns.append((j, j + 1))
+            j += 1
+            if depth == 0:
+                return j
+        self.fail_match(")", i + 1)
 
     def brace(self, j: int, opened: int) -> int:
         """Skip an expansion's ``${...}``: the first unquoted ``}`` closes it.
@@ -1022,6 +1078,15 @@ class _LineReader:
                 plain = False
                 state = "none"
                 i += 2
+                continue
+            if (
+                self.extglob
+                and c in constants.EXTGLOB_OPENERS
+                and text[i + 1 : i + 2] == "("
+            ):
+                i = self.extended_pattern(i)
+                plain = False
+                state = "none"
                 continue
             if c in constants.WORD_BREAKS:
                 if c in "<>" and self.char_at(i + 1) == "(":
@@ -1922,7 +1987,7 @@ class _LineReader:
         while j < n:
             c = text[j]
             if c in constants.EXTGLOB_OPENERS and text[j + 1 : j + 2] == "(":
-                j = self.matched(j + 2, j + 1) + 1
+                j = self.extended_pattern(j)
                 extended = True
                 continue
             if c in constants.WORD_BREAKS:

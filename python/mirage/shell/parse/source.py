@@ -37,7 +37,8 @@ class SourceNode:
     """A node of a shielded parse that reads the original bytes.
 
     Every shield keeps the source's width, so a span names the same bytes
-    in both and only ``text`` differs. Reparsing the original against the
+    in both. Text and row/column positions use the original source:
+    pattern shielding can hide a newline inside a word. Reparsing against the
     shielded tree did the same until tree-sitter relexed a statement on
     its own, which it does at a line's end.
     """
@@ -55,6 +56,19 @@ class SourceNode:
     @property
     def text(self) -> bytes:
         return self._data[self._node.start_byte : self._node.end_byte]
+
+    def _point(self, at: int) -> tuple[int, int]:
+        return self._data.count(b"\n", 0, at), at - self._data.rfind(
+            b"\n", 0, at
+        ) - 1
+
+    @property
+    def start_point(self) -> tuple[int, int]:
+        return self._point(self._node.start_byte)
+
+    @property
+    def end_point(self) -> tuple[int, int]:
+        return self._point(self._node.end_byte)
 
     @property
     def children(self) -> list["SourceNode"]:

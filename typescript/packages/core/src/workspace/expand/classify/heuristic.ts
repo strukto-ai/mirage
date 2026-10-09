@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../../types.ts'
+import { getCurrentSession } from '../../../context/session_context.ts'
+import { patternShape } from '../../../utils/fnmatch.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { dottedSpelling, posixNormpath } from '../../../utils/path.ts'
 import { stripSlash } from '../../../utils/slash.ts'
@@ -36,7 +38,7 @@ export function classifyWord(
   // like a path at all is a question about the name itself, so the shape
   // tests below read the literal spelling.
   const wordHasGlob = hasGlob(word)
-  const shape = unmarkGlobs(word)
+  const shape = unmarkGlobs(getCurrentSession()?.shopts.extglob ? patternShape(word) : word)
 
   if (word.startsWith('/')) {
     const mount = registry.tryMountFor(word)

@@ -56,10 +56,11 @@ export function checkSyntax(
   command: string,
   aliases: ReadonlySet<string> = new Set(),
   own: ((name: string, at: number) => boolean) | null = null,
+  extglob = false,
 ): SyntaxDiagnostic | null {
   let found: ReaderRefusal[]
   try {
-    found = new LineReader(command, aliases, own).refusals()
+    found = new LineReader(command, aliases, own, extglob).refusals()
   } catch (err) {
     if (!(err instanceof RangeError && err.message.includes('call stack'))) throw err
     found = [new ReaderRefusal(['syntax error: nesting too deep'], 2, '', 0, 0, false)]
@@ -226,15 +227,31 @@ function isTestClose(tok: ReaderToken): boolean {
   return tok.kind === 'word' && tok.plain && tok.text === ']]'
 }
 
+/** Shield pattern operators while preserving expansions and source spans. */
+export function patternSource(text: string): string {
+  if (![...constants.EXTGLOB_OPENERS].some((c) => text.includes(c + '('))) return text
+  const reader = new LineReader(text, new Set(), null, true)
+  try {
+    reader.refusals()
+  } catch (err) {
+    if (!(err instanceof RangeError && err.message.includes('call stack'))) throw err
+    console.debug('Pattern source nested past the host stack', err)
+    return text
+  }
+  const out = text.split('')
+  for (const [start, end] of reader.patterns) {
+    for (let i = start; i < end; i += 1) out[i] = ':'
+  }
+  return out.join('')
+}
+
 /**
- * bash's reader over one line: a lexer whose modes the grammar sets. The line
- * is read as bash reads its input: a newline ends the input if none does, a
- * trailing backslash quotes the end of it, and each heredoc body is skipped
- * after the newline that ends its command. `frames` tracks the arrays and
- * substitutions being read, which decide the status of an error inside them;
- * `bodies` and `closes` keep the heredoc plan (see `heredocPlan`).
+ * Bash's reader over one line: a lexer whose modes the grammar sets.
+ * `frames` tracks arrays and substitutions; `bodies` and `closes` keep
+ * the heredoc plan. Pattern spans share this reader's quote boundaries.
  */
 class LineReader {
+  readonly patterns: [number, number][] = []
   private readonly n: number
   private readonly quotedEnd: boolean
   private pos = 0
@@ -259,6 +276,7 @@ class LineReader {
     private readonly text: string,
     private readonly aliases: ReadonlySet<string>,
     private readonly own: ((name: string, at: number) => boolean) | null,
+    private readonly extglob = false,
   ) {
     this.n = text.length
     this.quotedEnd = endsEscaped(text)
@@ -460,6 +478,30 @@ class LineReader {
     if (c === '`') return this.backtick(j)
     if (c === '$') return this.dollar(j, false)
     return j + 1
+  }
+
+  /** Read a pattern group, shielding only its literal syntax. */
+  extendedPattern(i: number): number {
+    this.patterns.push([i, i + 2])
+    let j = i + 2
+    let depth = 1
+    while (j < this.n) {
+      const c = this.text.charAt(j)
+      if ('\'"`$\\'.includes(c)) {
+        j = this.wordChar(j)
+        continue
+      }
+      if (c === '(') depth += 1
+      else if (c === ')') depth -= 1
+      if (
+        '()| \t\n;&<>'.includes(c) ||
+        (constants.EXTGLOB_OPENERS.has(c) && this.text.charAt(j + 1) === '(')
+      )
+        this.patterns.push([j, j + 1])
+      j += 1
+      if (depth === 0) return j
+    }
+    this.failMatch(')', i + 1)
   }
 
   /** Skip `<(` or `>(`: parsed, unless `((` follows, which bash matches as
@@ -821,6 +863,12 @@ class LineReader {
         plain = false
         state = 'none'
         i += 2
+        continue
+      }
+      if (this.extglob && constants.EXTGLOB_OPENERS.has(c) && text.charAt(i + 1) === '(') {
+        i = this.extendedPattern(i)
+        plain = false
+        state = 'none'
         continue
       }
       if (constants.WORD_BREAKS.has(c)) {
@@ -1601,7 +1649,7 @@ class LineReader {
     while (j < this.n) {
       const c = text.charAt(j)
       if (constants.EXTGLOB_OPENERS.has(c) && text.charAt(j + 1) === '(') {
-        j = this.matched(j + 2, j + 1) + 1
+        j = this.extendedPattern(j)
         extended = true
         continue
       }

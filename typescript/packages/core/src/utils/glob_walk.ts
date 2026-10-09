@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { dotglobActive, sessionVisibility } from '../context/session_context.ts'
+import { dotglobActive, getCurrentSession, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
 import type { ChildMounts } from '../view/types.ts'
 import { type FileStat, FileType, PathSpec } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
-import { fnmatch } from './fnmatch.ts'
+import { fnmatch, QUOTED_BANG } from './fnmatch.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 import { compareCodePoints } from './sort.ts'
@@ -79,6 +79,12 @@ export function globPrefix(pattern: string | null | undefined): string {
   for (const ch of GLOB_CHARS) {
     const idx = pattern.indexOf(ch)
     if (idx !== -1 && (metaIndex === -1 || idx < metaIndex)) metaIndex = idx
+  }
+  if (getCurrentSession()?.shopts.extglob) {
+    for (const opener of ['@(', '+(', '!(']) {
+      const idx = pattern.indexOf(opener)
+      if (idx !== -1 && (metaIndex === -1 || idx < metaIndex)) metaIndex = idx
+    }
   }
   if (metaIndex === -1) return ''
   return unmarkGlobs(pattern.slice(0, metaIndex))
@@ -172,6 +178,12 @@ const GLOB_MARKS: Readonly<Record<string, string>> = {
   '*': '\uFDD0',
   '?': '\uFDD1',
   '[': '\uFDD2',
+  '@': '\uFDD3',
+  '+': '\uFDD4',
+  '!': QUOTED_BANG,
+  '(': '\uFDD6',
+  ')': '\uFDD7',
+  '|': '\uFDD8',
 }
 const GLOB_CHAR_OF: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(GLOB_MARKS).map(([ch, mark]) => [mark, ch]),
@@ -179,13 +191,16 @@ const GLOB_CHAR_OF: Readonly<Record<string, string>> = Object.fromEntries(
 // One native pass, not a per-character rebuild: every expanded word is
 // marked and unmarked, so a JS-level loop made the cost quadratic in a
 // loop that grows one word (`while true; do export X=$X.; done`).
-const GLOB_CHAR_RE = /[*?[]/g
-const GLOB_MARK_RE = /[\uFDD0-\uFDD2]/g
+const GLOB_CHAR_RE = /[*?[@+!()|]/g
+const GLOB_MARK_RE = /[\uFDD0-\uFDD8]/g
 
 export const DEFAULT_MAX_GLOB_MATCHES = 10000
 
 export function hasGlob(segment: string): boolean {
-  return GLOB_CHARS.some((ch) => segment.includes(ch))
+  return (
+    GLOB_CHARS.some((ch) => segment.includes(ch)) ||
+    (!!getCurrentSession()?.shopts.extglob && ['@(', '+(', '!('].some((s) => segment.includes(s)))
+  )
 }
 
 // Quote every glob character, the way enclosing quotes would.
@@ -234,10 +249,14 @@ export function markEscapedGlobs(text: string): string {
  *
  * fnmatch has no escape character, so a quoted glob character is handed
  * over as its own one-character class, exactly what `escapeGlob` builds
- * for text that is literal throughout.
+ * for text that is literal throughout. A quoted bang keeps its mark until
+ * matching: `[!]` is not a one-character class, and unquoting it could
+ * create a `!(...)` group.
  */
 export function globPattern(segment: string): string {
-  return segment.replace(GLOB_MARK_RE, (ch) => `[${GLOB_CHAR_OF[ch] ?? ch}]`)
+  return segment.replace(GLOB_MARK_RE, (ch) =>
+    ch === QUOTED_BANG ? ch : `[${GLOB_CHAR_OF[ch] ?? ch}]`,
+  )
 }
 
 // Drop the marks from a spec, leaving the literal path it names.
@@ -284,14 +303,10 @@ export function literalWord(item: string | PathSpec): string | PathSpec {
  * fnmatch has no escape character, so each special is wrapped in its own
  * one-character class: `*` becomes `[*]`. A `]` needs no treatment: outside
  * a class it is already literal, and no class can open because every `[`
- * gets wrapped.
+ * gets wrapped. A bang retains the quote mark described by `globPattern`.
  */
 export function escapeGlob(text: string): string {
-  let out = ''
-  for (const c of text) {
-    out += GLOB_CHARS.includes(c) ? `[${c}]` : c
-  }
-  return out
+  return globPattern(markGlobs(text))
 }
 
 // Whether a pattern spec is a typed word (not a directory listing). A
@@ -471,8 +486,7 @@ export async function resolveGlobWith<A, I>(
  * `fnmatch` directly.
  */
 export function globNameMatches(name: string, pattern: string): boolean {
-  if (name.startsWith('.') && !pattern.startsWith('.') && !dotglobActive()) return false
-  return fnmatch(name, pattern)
+  return fnmatch(name, pattern, getCurrentSession()?.shopts.extglob ?? false, !dotglobActive())
 }
 
 /**

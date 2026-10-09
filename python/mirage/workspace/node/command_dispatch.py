@@ -199,6 +199,7 @@ async def execute_command(
                     line,
                     expanding_aliases(session) | names,
                     lambda name, at: name in owners[offsets[at]],
+                    extglob=session.shopts.get("extglob", False),
                 ) or find_syntax_issue(ast)
                 if found is not None:
                     io = syntax_error_result(found)

@@ -87,9 +87,9 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
     # side into the glob dialect, quoted segments escaped, so a
     # wholly-literal pattern matches exactly itself.
     if node.op in ("=", "=="):
-        return fnmatch(node.left, node.right)
+        return fnmatch(node.left, node.right, extglob=True)
     if node.op == "!=":
-        return not fnmatch(node.left, node.right)
+        return not fnmatch(node.left, node.right, extglob=True)
     if node.op == "=~":
         pattern = re.escape(node.right) if node.right_literal else node.right
         # bash hands the pattern to regcomp(REG_EXTENDED): glibc's

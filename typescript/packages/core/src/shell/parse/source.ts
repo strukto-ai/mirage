@@ -24,7 +24,8 @@ import type { ShellNode, TSNodeLike } from '../types.ts'
  * A node of a shielded parse that reads the original text.
  *
  * Every shield keeps the source's width, so a span names the same text in
- * both and only `text` differs. Reparsing the original against the
+ * both. Text and row/column positions use the original source: pattern
+ * shielding can hide a newline inside a word. Reparsing against the
  * shielded tree did the same until tree-sitter relexed a statement on its
  * own, which it does at a line's end. Mirrors Python's SourceNode.
  */
@@ -52,10 +53,14 @@ export class SourceNode implements WrappedNode {
     return this.node.endIndex
   }
   get startPosition() {
-    return this.node.startPosition
+    return this.point(this.node.startIndex)
   }
   get endPosition() {
-    return this.node.endPosition
+    return this.point(this.node.endIndex)
+  }
+  private point(at: number): { row: number; column: number } {
+    const before = this.original.slice(0, at)
+    return { row: before.split('\n').length - 1, column: at - before.lastIndexOf('\n') - 1 }
   }
   get isNamed(): boolean {
     return this.node.isNamed

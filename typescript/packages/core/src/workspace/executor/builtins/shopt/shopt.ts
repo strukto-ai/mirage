@@ -44,8 +44,7 @@ function row(name: string, on: boolean, reusable: boolean, setO: boolean): strin
  * answers 0 only when every named option is on, and `-o` moves all of
  * that onto the `set -o` vocabulary. An unknown name is `invalid shell
  * option name` (or `invalid option name` under `-o`), exit 1; `-s` with
- * `-u` is refused; an unknown letter is exit 2. `shopt -s extglob` is
- * refused: the parser has no such mode. `mark` is the read running it,
+ * `-u` is refused; an unknown letter is exit 2. `mark` is the read running it,
  * whose commands keep `expand_aliases` as that read began.
  */
 export function handleShopt(

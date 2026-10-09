@@ -52,10 +52,10 @@ async function evalCondBinary(
   // side into the glob dialect, quoted segments escaped, so a
   // wholly-literal pattern matches exactly itself.
   if (node.op === '=' || node.op === '==') {
-    return fnmatch(node.left, node.right)
+    return fnmatch(node.left, node.right, true)
   }
   if (node.op === '!=') {
-    return !fnmatch(node.left, node.right)
+    return !fnmatch(node.left, node.right, true)
   }
   if (node.op === '=~') {
     const pattern = node.rightLiteral

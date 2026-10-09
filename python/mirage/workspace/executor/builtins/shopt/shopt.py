@@ -74,10 +74,6 @@ async def handle_shopt(
     apply; `-s` with `-u` is refused before anything applies; an
     unknown letter is exit 2 with the usage line.
 
-    One deliberate refusal: `shopt -s extglob` exits 1 with a mirage
-    message, because the parser has no extglob mode and storing `on`
-    would promise a syntax that still fails to parse.
-
     Args:
         args (list[str]): the words after `shopt`.
         session (SessionState): shell session state.

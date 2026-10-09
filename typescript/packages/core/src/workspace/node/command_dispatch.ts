@@ -194,6 +194,7 @@ export async function executeCommand(
             line,
             new Set([...expandingAliases(session), ...names]),
             (name, at) => owners[at]?.has(name) ?? false,
+            session.shopts.extglob ?? false,
           ) ?? findSyntaxIssue(ast)
         if (found !== null) {
           const io = syntaxErrorResult(found)

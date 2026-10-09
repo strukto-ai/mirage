@@ -1,0 +1,158 @@
+{
+  "cases": [
+    {
+      "id": "extglob_operators",
+      "seq": 960800,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'mkdir /data/extglob-ops; touch /data/extglob-ops/a /data/extglob-ops/b /data/extglob-ops/c; printf \"<%s>\\n\" /data/extglob-ops/@(a|b) /data/extglob-ops/+(a|b) /data/extglob-ops/!(a|b); rm -r /data/extglob-ops'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "</data/extglob-ops/a>\n</data/extglob-ops/b>\n</data/extglob-ops/a>\n</data/extglob-ops/b>\n</data/extglob-ops/c>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_nested",
+      "seq": 960801,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'printf \"<%s>\\n\" /data/@(a|+(b|c)).txt'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "</data/a.txt>\n</data/b.txt>\n</data/c.txt>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_quotes",
+      "seq": 960802,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'x=a; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' /data/@(\"$x\"|$(printf b)).txt '\"'\"'\"'\"'\"'\"'\"'\"'/data/@(a|b).txt'\"'\"'\"'\"'\"'\"'\"'\"' /data/@(a\"|\"b|c).txt'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "</data/a.txt>\n</data/b.txt>\n</data/@(a|b).txt>\n</data/c.txt>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_conditional",
+      "seq": 960803,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'[[ ab == +(a|b) ]]; echo $?; [[ a == !(a)* ]]; echo $?; [[ 123 == +([[:digit:]]) ]]; echo $?; [[ '\"'\"'\"'\"'\"'\"'\"'\"'@(a|b)'\"'\"'\"'\"'\"'\"'\"'\"' == \"@(a|b)\" ]]; echo $?'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\n0\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_case",
+      "seq": 960804,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'case ab in +(a|b)) echo repeated;; *) echo missed;; esac; case c in !(a|b)) echo negative;; esac'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "repeated\nnegative\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_parameter",
+      "seq": 960805,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'x=aaab; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x##+(a)}\" \"${x//+(a)/X}\"; x=abc; echo \"${x^^@(a|c)}\"'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "<b>\n<Xb>\nAbC\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_no_match",
+      "seq": 960806,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' /data/@(missing|absent); shopt -s nullglob; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' /data/@(missing|absent)'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "</data/@(missing|absent)>\n<>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_hidden",
+      "seq": 960807,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'mkdir /data/extglob-dot; touch /data/extglob-dot/.h /data/extglob-dot/a; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' /data/extglob-dot/@(.h|a) /data/extglob-dot/!(a).h /data/extglob-dot/*(x).h; shopt -s dotglob; echo /data/extglob-dot/!(a); rm -r /data/extglob-dot'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "</data/extglob-dot/.h>\n</data/extglob-dot/a>\n</data/extglob-dot/!(a).h>\n</data/extglob-dot/.h>\n/data/extglob-dot/.h\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_expansion",
+      "seq": 960808,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'p='\"'\"'\"'\"'\"'\"'\"'\"'/data/@(a|b).txt'\"'\"'\"'\"'\"'\"'\"'\"'; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' $p; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' /data/@(a b|a).txt; [[ '\"'\"'\"'\"'\"'\"'\"'\"'a(b)'\"'\"'\"'\"'\"'\"'\"'\"' == @(a(b)|c) ]]; echo $?'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "</data/a.txt>\n</data/b.txt>\n</data/a.txt>\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_quoted_bang",
+      "seq": 960809,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'[[ '\"'\"'\"'\"'\"'\"'\"'\"'!'\"'\"'\"'\"'\"'\"'\"'\"' == '\"'\"'\"'\"'\"'\"'\"'\"'!'\"'\"'\"'\"'\"'\"'\"'\"' ]]; echo $?; p='\"'\"'\"'\"'\"'\"'\"'\"'(a|b)'\"'\"'\"'\"'\"'\"'\"'\"'; [[ '\"'\"'\"'\"'\"'\"'\"'\"'!(a|b)'\"'\"'\"'\"'\"'\"'\"'\"' == '\"'\"'\"'\"'\"'\"'\"'\"'!'\"'\"'\"'\"'\"'\"'\"'\"'$p ]]; echo $?; [[ c == '\"'\"'\"'\"'\"'\"'\"'\"'!'\"'\"'\"'\"'\"'\"'\"'\"'$p ]]; echo $?; case '\"'\"'\"'\"'\"'\"'\"'\"'a!(a|b)'\"'\"'\"'\"'\"'\"'\"'\"' in @(a'\"'\"'\"'\"'\"'\"'\"'\"'!'\"'\"'\"'\"'\"'\"'\"'\"'$p|d)) echo quoted;; esac; x='\"'\"'\"'\"'\"'\"'\"'\"'a!b'\"'\"'\"'\"'\"'\"'\"'\"'; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x##a'\"'\"'\"'\"'\"'\"'\"'\"'!'\"'\"'\"'\"'\"'\"'\"'\"'b}\"; mkdir /data/extglob-bang; touch '\"'\"'\"'\"'\"'\"'\"'\"'/data/extglob-bang/a!b'\"'\"'\"'\"'\"'\"'\"'\"' '\"'\"'\"'\"'\"'\"'\"'\"'/data/extglob-bang/a!c'\"'\"'\"'\"'\"'\"'\"'\"'; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' /data/extglob-bang/a'\"'\"'\"'\"'\"'\"'\"'\"'!'\"'\"'\"'\"'\"'\"'\"'\"'?; rm -r /data/extglob-bang'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\n1\nquoted\n<>\n</data/extglob-bang/a!b>\n</data/extglob-bang/a!c>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_posix_unicode",
+      "seq": 960810,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'[[ '\"'\"'\"'\"'\"'\"'\"'\"'1😀'\"'\"'\"'\"'\"'\"'\"'\"' == +([[:digit:]😀]) ]]; echo $?; [[ '\"'\"'\"'\"'\"'\"'\"'\"'😀😀'\"'\"'\"'\"'\"'\"'\"'\"' == +([[:digit:]😀]) ]]; echo $?; [[ a == +([[:digit:]😀]) ]]; echo $?'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\n1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

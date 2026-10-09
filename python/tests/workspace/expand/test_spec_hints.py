@@ -16,6 +16,7 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.spec import SPECS
+from mirage.utils.glob_walk import mark_globs
 from mirage.workspace.expand.spec_hints import (
     spec_for_command,
     spec_word_kinds,
@@ -47,6 +48,13 @@ def test_spec_for_command_unknown_name_is_none():
 def test_basic_grep_pattern_and_path():
     kinds = spec_word_kinds(SPECS["grep"], ["pattern", "file.txt"])
     assert kinds == [TEXT, PATH]
+
+
+def test_quoted_expression_tokens_keep_their_roles():
+    argv = ["/data", "!", "(", "-name", "a*", ")", "-print"]
+    assert spec_word_kinds(
+        SPECS["find"], [mark_globs(word) for word in argv], "find"
+    ) == [PATH, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT]
 
 
 def test_text_flag_values_positional():

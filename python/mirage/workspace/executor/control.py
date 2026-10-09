@@ -746,7 +746,17 @@ async def handle_case(
     # in one reaches an arm it falls into.
     bound = fd0_binding(context.session)
     for patterns, body, terminator in items:
-        if not (fallthrough or any(fnmatch(word, p) for p in patterns)):
+        if not (
+            fallthrough
+            or any(
+                fnmatch(
+                    word,
+                    p,
+                    extglob=context.session.shopts.get("extglob", False),
+                )
+                for p in patterns
+            )
+        ):
             continue
         try:
             stdout, io, last_exec = await execute_body(

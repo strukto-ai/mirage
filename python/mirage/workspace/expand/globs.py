@@ -57,17 +57,19 @@ class GlobOptions:
             expansion error, `bash: no match: WORD`.
         globstar (bool): a `**` segment matches zero or more directory
             levels instead of reading as `*`.
+        extglob (bool): expand extended groups before dispatching a command.
     """
 
     nullglob: bool = False
     failglob: bool = False
     globstar: bool = False
+    extglob: bool = False
 
     @property
     def needs_shell(self) -> bool:
         """Whether a mount command's glob has to expand here rather than
         be pushed down to the backend, which knows none of these."""
-        return self.nullglob or self.failglob or self.globstar
+        return self.nullglob or self.failglob or self.globstar or self.extglob
 
 
 def glob_options(session: SessionState) -> GlobOptions:
@@ -80,6 +82,7 @@ def glob_options(session: SessionState) -> GlobOptions:
         nullglob=session.shopts.get("nullglob", SHOPT_DEFAULTS["nullglob"]),
         failglob=session.shopts.get("failglob", SHOPT_DEFAULTS["failglob"]),
         globstar=session.shopts.get("globstar", SHOPT_DEFAULTS["globstar"]),
+        extglob=session.shopts.get("extglob", SHOPT_DEFAULTS["extglob"]),
     )
 
 

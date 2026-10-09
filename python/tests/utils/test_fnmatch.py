@@ -63,3 +63,163 @@ def test_normalize_negation_rewrites_class_openers():
 def test_caret_not_first_in_class_stays_literal():
     assert fnmatch("^", "[a^]") is True
     assert fnmatch("b", "[a^]") is False
+
+
+EXTGLOB_NAMES = [
+    "",
+    "a",
+    "b",
+    "c",
+    "ab",
+    "abc",
+    "bb",
+    "aa",
+    "ac",
+    "a(b)",
+    "a(b|d)",
+    "a|b",
+    "123",
+    "😀",
+    "a\nb",
+]
+
+
+@pytest.mark.parametrize(
+    "pattern,hits",
+    [
+        ("@(a|b)", ["a", "b"]),
+        ("?(a|b)", ["", "a", "b"]),
+        ("*(a|b)", ["", "a", "b", "ab", "bb", "aa"]),
+        ("+(a|b)", ["a", "b", "ab", "bb", "aa"]),
+        (
+            "!(a|b)",
+            [
+                "",
+                "c",
+                "ab",
+                "abc",
+                "bb",
+                "aa",
+                "ac",
+                "a(b)",
+                "a(b|d)",
+                "a|b",
+                "123",
+                "😀",
+                "a\nb",
+            ],
+        ),
+        (
+            "!(a)*",
+            [
+                "",
+                "a",
+                "b",
+                "c",
+                "ab",
+                "abc",
+                "bb",
+                "aa",
+                "ac",
+                "a(b)",
+                "a(b|d)",
+                "a|b",
+                "123",
+                "😀",
+                "a\nb",
+            ],
+        ),
+        ("a!(b)c", ["ac"]),
+        ("@(a|+(b|c))", ["a", "b", "c", "bb"]),
+        (
+            "*(!(a))",
+            [
+                "",
+                "b",
+                "c",
+                "ab",
+                "abc",
+                "bb",
+                "aa",
+                "ac",
+                "a(b)",
+                "a(b|d)",
+                "a|b",
+                "123",
+                "😀",
+                "a\nb",
+            ],
+        ),
+        ("+(?(a))", ["", "a", "aa"]),
+        ("@(|a)", ["", "a"]),
+        (
+            "!()",
+            [
+                "a",
+                "b",
+                "c",
+                "ab",
+                "abc",
+                "bb",
+                "aa",
+                "ac",
+                "a(b)",
+                "a(b|d)",
+                "a|b",
+                "123",
+                "😀",
+                "a\nb",
+            ],
+        ),
+        ("@(a(b)|c)", ["c", "a(b)"]),
+        ("@(a(b|d)|c)", ["c", "a(b|d)"]),
+        ("+([[:digit:]])", ["123"]),
+        ("@(😀|a)", ["a", "😀"]),
+        ("@([!a]|ab)", ["b", "c", "ab", "😀"]),
+        ("@(a[|]b|c)", ["c", "a|b"]),
+    ],
+)
+def test_extglob_matches_gnu_bash(pattern, hits):
+    for name in EXTGLOB_NAMES:
+        assert fnmatch(name, pattern, extglob=True) == (name in hits), name
+
+
+@pytest.mark.parametrize(
+    "name,pattern,expected",
+    [
+        (".h", "@(.h|a)", True),
+        (".h", "?(.h)", True),
+        (".h", "*(.h)", True),
+        (".h", "!(a)", False),
+        (".h", "!(a).h", False),
+        (".h", "*(x).h", True),
+        (".h", "*.h", False),
+        (".h", "@([.]h|a)", False),
+        (".h", "@(.*|a)", True),
+    ],
+)
+def test_extglob_pathname_period(name, pattern, expected):
+    assert fnmatch(name, pattern, extglob=True, period=True) is expected
+
+
+def test_extglob_is_opt_in_and_nullable_repetition_terminates():
+    assert not fnmatch("a", "@(a|b)")
+    assert fnmatch("@(a|b)", "@(a|b)")
+    assert fnmatch("a" * 80, "+(?(a))", extglob=True)
+    assert not fnmatch("a" * 80 + "b", "+(?(a))", extglob=True)
+
+
+def test_empty_negative_suffix_is_required():
+    assert not fnmatch("", "*!(a)x", extglob=True)
+    assert fnmatch("x", "*!(a)x", extglob=True)
+
+
+@pytest.mark.parametrize(
+    "name,expected", [("1😀", True), ("😀😀", True), ("a", False)]
+)
+def test_posix_classes_match_unicode_characters(name, expected):
+    assert fnmatch(name, "+([[:digit:]😀])", extglob=True) is expected
+
+
+def test_empty_negative_repetition_remains_nullable():
+    assert fnmatch("", "*+([!a]|!([!a]))", extglob=True)

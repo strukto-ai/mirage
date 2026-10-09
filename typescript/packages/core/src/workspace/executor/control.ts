@@ -738,7 +738,13 @@ export async function handleCase(
   // reaches an arm it falls into.
   const bound = fd0Binding(context.session)
   for (const [patterns, body, terminator] of items) {
-    if (!(fallthrough || patterns.some((p) => fnmatch(word, p)))) continue
+    if (
+      !(
+        fallthrough ||
+        patterns.some((p) => fnmatch(word, p, context.session.shopts.extglob ?? false))
+      )
+    )
+      continue
     try {
       const [stdout, io, execNode] = await executeBody(
         executeNode,

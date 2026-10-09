@@ -48,12 +48,13 @@ export interface GlobOptions {
   nullglob: boolean
   failglob: boolean
   globstar: boolean
+  extglob?: boolean
 }
 
 /** Whether a mount command's glob must expand here rather than push
  * down: the backend knows none of these. */
 export function globNeedsShell(opts: GlobOptions): boolean {
-  return opts.nullglob || opts.failglob || opts.globstar
+  return opts.nullglob || opts.failglob || opts.globstar || (opts.extglob ?? false)
 }
 
 export function globOptions(session: SessionState): GlobOptions {
@@ -61,6 +62,7 @@ export function globOptions(session: SessionState): GlobOptions {
     nullglob: session.shopts.nullglob ?? SHOPT_DEFAULTS.get('nullglob') ?? false,
     failglob: session.shopts.failglob ?? SHOPT_DEFAULTS.get('failglob') ?? false,
     globstar: session.shopts.globstar ?? SHOPT_DEFAULTS.get('globstar') ?? false,
+    extglob: session.shopts.extglob ?? SHOPT_DEFAULTS.get('extglob') ?? false,
   }
 }
 
