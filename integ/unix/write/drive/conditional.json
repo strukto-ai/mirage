@@ -1,0 +1,316 @@
+{
+  "cases": [
+    {
+      "id": "write_conditional_drive_rm_refuses_a_stale_delete",
+      "seq": 310093,
+      "targets": [
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/n1.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/n1.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/n1.txt > /dev/null; echo B > /data/n1.txt"
+          }
+        },
+        {
+          "command": "rm /data/n1.txt; echo $?"
+        },
+        {
+          "command": "rm /data/n1.txt; echo $?"
+        },
+        {
+          "command": "cat /data/n1.txt; rm /data/n1.txt; echo $?"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n1\n1\nB\n0\n",
+        "stderr": "rm: cannot remove '/data/n1.txt': changed since it was read; read it again before writing\nrm: cannot remove '/data/n1.txt': changed since it was read; read it again before writing\n"
+      },
+      "note": "A drive's delete is sent with the file's own version (Box If-Match on the etag, Dropbox parent_rev), measured against the content token mirage read; a refused delete keeps that version, so a second rm is refused too, and a read lets the next rm through."
+    },
+    {
+      "id": "write_conditional_drive_refuses_a_file_deleted_since_read",
+      "seq": 310094,
+      "targets": [
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/n3.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/n3.txt"
+        },
+        {
+          "mutate": {
+            "command": "rm /data/n3.txt"
+          }
+        },
+        {
+          "command": "echo A > /data/n3.txt; echo $?"
+        },
+        {
+          "command": "echo C > /data/n3.txt; echo $?; cat /data/n3.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n1\n0\nC\n",
+        "stderr": "/data/n3.txt: changed since it was read; read it again before writing\n"
+      },
+      "note": "A write over a file deleted since its read is refused; gone, it keeps no version, so the retry goes out plain."
+    },
+    {
+      "id": "write_conditional_drive_find_delete_refuses_a_stale_file",
+      "seq": 310095,
+      "targets": [
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/n4.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/n4.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/n4.txt > /dev/null; echo B > /data/n4.txt"
+          }
+        },
+        {
+          "command": "find /data/n4.txt -delete; echo $?"
+        },
+        {
+          "command": "cat /data/n4.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n1\nB\n",
+        "stderr": "find: cannot delete '/data/n4.txt': changed since it was read; read it again before writing\n"
+      },
+      "note": "find -delete removes file by file, each conditioned like rm."
+    },
+    {
+      "id": "write_conditional_drive_rm_r_names_the_changed_file",
+      "seq": 310096,
+      "targets": [
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "command": "mkdir -p /data/w"
+        },
+        {
+          "mutate": {
+            "path": "/data/w/a.txt",
+            "content": "a\n"
+          }
+        },
+        {
+          "mutate": {
+            "path": "/data/w/b.txt",
+            "content": "b\n"
+          }
+        },
+        {
+          "command": "cat /data/w/a.txt /data/w/b.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/w/a.txt > /dev/null; echo A > /data/w/a.txt"
+          }
+        },
+        {
+          "command": "rm -r /data/w; echo $?; ls /data/w"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n1\na.txt\n",
+        "stderr": "rm: cannot remove '/data/w/a.txt': changed since it was read; read it again before writing\n"
+      },
+      "note": "On a conditional drive mount rm -r walks the folder file by file instead of one recursive delete: the unchanged file goes, the changed one stays and is named, and the folder stays with it."
+    },
+    {
+      "id": "write_conditional_drive_mv_moves_a_changed_source",
+      "seq": 310097,
+      "targets": [
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/m1.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/m1.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/m1.txt > /dev/null; echo B > /data/m1.txt"
+          }
+        },
+        {
+          "command": "mv /data/m1.txt /data/m2.txt; echo $?; cat /data/m2.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n0\nB\n",
+        "stderr": ""
+      },
+      "note": "A drive moves the file whole in one call, which can neither lose nor overwrite a write, so mv does not measure its source: the newer bytes move with it. (On an object store mv is a copy then a delete, and a changed source is refused.)"
+    },
+    {
+      "id": "write_conditional_drive_mv_refuses_a_changed_destination",
+      "seq": 310098,
+      "targets": [
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/m3.txt",
+            "content": "src\n"
+          }
+        },
+        {
+          "mutate": {
+            "path": "/data/m4.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/m4.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/m4.txt > /dev/null; echo B > /data/m4.txt"
+          }
+        },
+        {
+          "command": "mv /data/m3.txt /data/m4.txt; echo $?; cat /data/m3.txt /data/m4.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n1\nsrc\nB\n",
+        "stderr": "mv: cannot move '/data/m3.txt' to '/data/m4.txt': '/data/m4.txt' changed since it was read; read it again before writing\n"
+      },
+      "note": "Replacing a destination deletes it first, and that delete carries the destination's version: one changed since it was read is refused, and both files stay."
+    },
+    {
+      "id": "write_conditional_drive_a_removal_lets_the_lines_write_through",
+      "seq": 310099,
+      "targets": [
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/r1.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/r1.txt > /dev/null; rm /data/r1.txt; echo x > /data/r1.txt; cat /data/r1.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      },
+      "note": "A removal the line made ends the version its read held, so the line's next write to that path goes out plain rather than being refused against the file it just removed."
+    },
+    {
+      "id": "write_conditional_drive_a_folder_move_lets_the_lines_write_through",
+      "seq": 310100,
+      "targets": [
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "command": "mkdir -p /data/rd"
+          }
+        },
+        {
+          "mutate": {
+            "path": "/data/rd/a.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/rd/a.txt > /dev/null; mv /data/rd /data/re; mkdir -p /data/rd; echo x > /data/rd/a.txt; cat /data/rd/a.txt /data/re/a.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "x\nv1\n",
+        "stderr": ""
+      },
+      "note": "A folder mv records both ends as subtrees, so a file the line read under the old name holds no version there afterwards and a new file written in its place goes out plain."
+    }
+  ]
+}

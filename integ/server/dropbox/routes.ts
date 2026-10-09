@@ -70,6 +70,22 @@ function argPath(ctx: Ctx<C>): string {
   return str(obj(JSON.parse(one) as JsonValue).path)
 }
 
+// The rev an update-mode upload names, or null for an add/overwrite upload.
+function updateRev(ctx: Ctx<C>): string | null {
+  const raw = ctx.headers['dropbox-api-arg']
+  const one = Array.isArray(raw) ? raw[0] : raw
+  if (one === undefined) return null
+  const mode = obj(JSON.parse(one) as JsonValue).mode
+  if (typeof mode !== 'object' || mode === null || Array.isArray(mode)) return null
+  return str(obj(mode)['.tag']) === 'update' ? str(obj(mode).update) : null
+}
+
+// The rev a file is at, as entryFor renders it, or null for a folder.
+function revOf(item: Parameters<typeof entryFor>[0]): string | null {
+  const rev = obj(entryFor(item)).rev
+  return typeof rev === 'string' ? rev : null
+}
+
 function formField(body: Buffer, name: string): string {
   return new URLSearchParams(body.toString('utf8')).get(name) ?? ''
 }
@@ -197,6 +213,13 @@ async function upload(ctx: Ctx<C>): Promise<Reply> {
   if (path === '') return malformed()
   const at = await itemAt(ctx.db, ctx.tenant, path)
   if (at !== null && at.isFolder) return apiError('path/conflict/folder/...')
+  // Update mode stores the upload only while the file is still the rev it
+  // names, and answers path/conflict otherwise (measured 2026-10-05). The rev
+  // here is content-derived, so any change of bytes moves it.
+  const want = updateRev(ctx)
+  if (want !== null && (at === null || revOf(at) !== want)) {
+    return apiError('path/conflict/file/...')
+  }
   // Uploads stamp the run clock, which is anchored at /reset rather than
   // pinned in the past, so `find -mtime -1` sees a just-written file as fresh
   // exactly as it does against MinIO in the s3 targets.
@@ -226,6 +249,12 @@ async function deleteItem(ctx: Ctx<C>): Promise<Reply> {
   if (path === '') return malformed()
   const item = await itemAt(ctx.db, ctx.tenant, path)
   if (item === null) return apiError('path_lookup/not_found/...')
+  // parent_rev deletes only while the file is still that rev (measured
+  // 2026-10-08).
+  const parentRev = obj(ctx.json()).parent_rev
+  if (typeof parentRev === 'string' && revOf(item) !== parentRev) {
+    return apiError('path_write/conflict/file/...')
+  }
   await remove(ctx.db, ctx.tenant, path, ctx.minter)
   return { status: 200, body: { metadata: entryFor(item) } }
 }
