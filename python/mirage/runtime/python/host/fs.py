@@ -16,6 +16,7 @@ import asyncio
 import errno
 import functools
 import genericpath
+import logging
 import os as _real_os
 import posixpath
 import shutil
@@ -51,6 +52,7 @@ from mirage.utils.path import owner_prefix
 from mirage.utils.stat_view import LINK_MODE
 from mirage.workspace.files import Files
 
+logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
@@ -140,7 +142,7 @@ def syscall(fn: Callable[..., T]) -> Callable[..., T]:
     return call
 
 
-ErrorHandler = Callable[[Callable[..., Any], str, OSError], object]
+ErrorHandler = Callable[[Callable[..., Any], str, OSError], None]
 
 
 def _ignored(func: Callable[..., Any], path: str, exc: OSError) -> None:
@@ -153,14 +155,14 @@ def _reraised(func: Callable[..., Any], path: str, exc: OSError) -> None:
 
 def _rmtree_handler(
     ignore_errors: bool,
-    onerror: Callable[..., object] | None,
+    onerror: Callable[..., None] | None,
     onexc: ErrorHandler | None,
 ) -> ErrorHandler:
     """What ``shutil.rmtree`` does with a failure, from its own arguments.
 
     Args:
         ignore_errors (bool): drop every failure.
-        onerror (Callable[..., object] | None): the old handler, given
+        onerror (Callable[..., None] | None): the old handler, given
             ``sys.exc_info()``-shaped arguments.
         onexc (ErrorHandler | None): the handler given the exception,
             which wins over ``onerror``.
@@ -196,7 +198,10 @@ def _remove_tree(path: str, onexc: ErrorHandler) -> None:
     for entry in entries:
         try:
             is_dir = entry.is_dir(follow_symlinks=False)
-        except OSError:
+        except OSError as err:
+            # shutil's own fallback: an entry it cannot classify goes as
+            # a file, and the unlink reports what is wrong with it.
+            logger.debug("rmtree: classifying %s failed: %s", entry.path, err)
             is_dir = False
         if is_dir:
             _remove_tree(entry.path, onexc)

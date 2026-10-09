@@ -1950,7 +1950,9 @@ export class Workspace {
       if (saved !== undefined) saved.index_config = indexConfigDump(mount.indexConfig, true)
     }
     const opts: WorkspaceOptions = {
-      mode: options.mode ?? MountMode.WRITE,
+      // Every restored mount keeps its saved mode, the scratch root
+      // included, unless the caller names one.
+      ...(options.mode !== undefined ? { mode: options.mode } : {}),
       // The declarations travel with the copy the way a live CLI
       // install does: an env pointer restores from state naming its
       // instance, and without the block the copy would answer the

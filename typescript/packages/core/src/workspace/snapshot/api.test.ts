@@ -83,6 +83,13 @@ describe('Workspace.snapshot', () => {
     }
   })
 
+  it('copies a read-only scratch root read-only', async () => {
+    const src = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.READ })
+    const copy = await src.copy()
+    expect(copy.syntheticRoot).toBe(true)
+    expect(copy.registry.rootMount?.mode).toBe(MountMode.READ)
+  })
+
   it('reports a missing key as not found', async () => {
     await expect(Workspace.load('nope.tar', { s3: STORE })).rejects.toMatchObject({
       code: 'ENOENT',

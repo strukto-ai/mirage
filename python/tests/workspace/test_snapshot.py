@@ -89,6 +89,13 @@ def test_the_scratch_root_stays_the_anchor_across_a_round_trip(tmp_path):
         asyncio.run(dst.vfs.write("/more.txt", b"m"))
 
 
+def test_a_read_only_scratch_root_copies_read_only():
+    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.READ)
+    dst = asyncio.run(src.copy())
+    assert dst.registry.root_mount is not None
+    assert dst.registry.root_mount.mode == MountMode.READ
+
+
 def test_history_survives_snapshot_round_trip(tmp_path):
     src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
     asyncio.run(src.shell("echo one"))
