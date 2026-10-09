@@ -1983,13 +1983,14 @@ def test_cache_miss_reads_from_vfs():
 
 
 def test_cache_invalidation_after_write():
+    # The write replaces what the read kept with the bytes it wrote.
     ws = _ws()
     _exec(ws, "cat /disk/readme.txt")
     cached = _run(ws._cache.get("/disk/readme.txt"))
     assert cached is not None
     _exec(ws, "echo updated > /disk/readme.txt")
     cached = _run(ws._cache.get("/disk/readme.txt"))
-    assert cached is None
+    assert cached == b"updated\n"
 
 
 def test_grep_uses_cache():

@@ -461,30 +461,11 @@ describe('a read given up on', () => {
 })
 
 // Record every prefix walk of the file cache and the mount's index.
-function countDrops(ws: Workspace, path: string): string[] {
-  const drops: string[] = []
-  const cache = ws.cache
-  const mount = ws.registry.tryMountFor(path)
-  if (mount === null) throw new Error(`no mount for ${path}`)
-  const index = mount.indexStore
-  const realEvict = cache.evictPrefix.bind(cache)
-  const realInvalidate = index.invalidatePrefix.bind(index)
-  cache.evictPrefix = (prefix, excluded) => {
-    drops.push(`body:${prefix}`)
-    return realEvict(prefix, excluded)
-  }
-  index.invalidatePrefix = (key, excluded) => {
-    drops.push(`index:${key}`)
-    return realInvalidate(key, excluded)
-  }
-  return drops
-}
-
 describe('mv and the caches', () => {
   it('mv of a file keeps every other cached read', async () => {
-    // `mv` of a plain file has nothing beneath it, so the backend's rename
-    // walks neither store, and the warm read of another folder survives. A
-    // folder `mv` still takes its subtree under the old name.
+    // The warm read of another folder survives an `mv` of a plain file,
+    // against a drop wider than /m/f. A folder `mv` still takes its subtree
+    // under the old name.
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
     const ws = new Workspace(
@@ -498,12 +479,7 @@ describe('mv and the caches', () => {
       await ws.shell('echo f > /m/f && mkdir /m/dir && echo x > /m/dir/x')
       await ws.shell('cat /m/dir/x')
       expect(await ws.cache.exists('/m/dir/x')).toBe(true)
-      const drops = countDrops(ws, '/m/f')
       await ws.shell('mv /m/f /m/g')
-      // The spies are what tell narrowed from not: a file has nothing cached
-      // beneath it, so the old subtree drop removed no body either. The warm
-      // read surviving guards the other way, against a drop wider than /m/f.
-      expect(drops).toEqual([])
       expect(await ws.cache.exists('/m/dir/x')).toBe(true)
       expect(DEC.decode((await ws.shell('cat /m/g')).stdout)).toBe('f\n')
       await ws.shell('mv /m/dir /m/dir2')

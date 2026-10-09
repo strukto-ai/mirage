@@ -530,16 +530,13 @@ describe('withPolicyGuard', () => {
         const copy = ops.copy
         if (copy === undefined) throw new Error('copy slot missing')
         await copy(accessor, spec('/data/src'), spec('/data/dst'))
-        // A write slot asks with write=true.
-        const unlink = ops.unlink
-        if (unlink === undefined) throw new Error('unlink slot missing')
-        await unlink(accessor, spec('/data/gone'))
+        // The other writes are the dispatcher's too.
+        expect(ops.unlink).toBe(raw.unlink)
       }),
     )
     expect(policy.asked).toContainEqual(['readdir', '/data/dir', false])
     expect(policy.asked).toContainEqual(['copy', '/data/src', false])
     expect(policy.asked).toContainEqual(['copy', '/data/dst', true])
-    expect(policy.asked).toContainEqual(['unlink', '/data/gone', true])
     expect(policy.asked.some(([op]) => op === 'stat')).toBe(false)
   })
 
@@ -651,84 +648,6 @@ describe('withDirGuard', () => {
     await expect(
       ops.readBytes(accessor, PathSpec.fromStrPath('/locked.txt'), undefined),
     ).rejects.toMatchObject({ code: 'EACCES' })
-  })
-})
-
-describe('withCommandGuards rmdir under namespace children', () => {
-  it('a visible mounted child keeps the rmdir refusal', async () => {
-    // The guard is applied over an adapter already stamped with the
-    // invocation's globChildren (the factory's per-invocation order),
-    // so the visible mounted child joins the emptiness judgment and
-    // the not-empty refusal stays with the cascade never started.
-    const removed: string[] = []
-    const notEmpty = (): Error => {
-      const err = new Error('ENOTEMPTY: directory not empty') as Error & { code: string }
-      err.code = 'ENOTEMPTY'
-      return err
-    }
-    const base: CommandIO = {
-      readdir: () => Promise.resolve(['h']),
-      readBytes: () => Promise.reject(new Error('not used')),
-      readStream: () => {
-        throw new Error('not used')
-      },
-      stat: (_a, path) =>
-        Promise.resolve(
-          new FileStat({ name: path.virtual, type: FileType.FILE, content: ContentType.TEXT }),
-        ),
-      isMounted: () => true,
-      unlink: (_a, path) => {
-        removed.push(path.virtual)
-        return Promise.resolve()
-      },
-      rmdir: () => Promise.reject(notEmpty()),
-      globChildren: (parent: string) => (parent === '/m/d' ? ['m'] : []),
-    }
-    const ops = withCommandGuards(base)
-    const rmdir = ops.rmdir
-    if (rmdir === undefined) throw new Error('rmdir slot missing')
-    const sess = new SessionState({ sessionId: 'narrowed' })
-    sess.visibility = { ...sess.visibility, paths: { paths: ['/m/d/h'] } }
-    const spec = new PathSpec({ virtual: '/m/d', directory: '/m', vfsPath: 'd' })
-    await runWithSession(sess, async () => {
-      await expect(rmdir(accessor, spec)).rejects.toMatchObject({ code: 'ENOTEMPTY' })
-    })
-    expect(removed).toEqual([])
-  })
-
-  it('a failed fallback listing keeps the rmdir refusal', async () => {
-    // A backend that cannot list the remnants keeps the original
-    // refusal, whatever error type it failed with: a raw backend
-    // failure here would reveal exactly what the refusal exists to
-    // hide.
-    const notEmpty = (): Error => {
-      const err = new Error('ENOTEMPTY: directory not empty') as Error & { code: string }
-      err.code = 'ENOTEMPTY'
-      return err
-    }
-    const base: CommandIO = {
-      readdir: () => Promise.reject(new Error('api exploded')),
-      readBytes: () => Promise.reject(new Error('not used')),
-      readStream: () => {
-        throw new Error('not used')
-      },
-      stat: (_a, path) =>
-        Promise.resolve(
-          new FileStat({ name: path.virtual, type: FileType.FILE, content: ContentType.TEXT }),
-        ),
-      isMounted: () => true,
-      unlink: () => Promise.reject(new Error('never reached')),
-      rmdir: () => Promise.reject(notEmpty()),
-    }
-    const ops = withCommandGuards(base)
-    const rmdir = ops.rmdir
-    if (rmdir === undefined) throw new Error('rmdir slot missing')
-    const sess = new SessionState({ sessionId: 'narrowed' })
-    sess.visibility = { ...sess.visibility, paths: { paths: ['/m/d/h'] } }
-    const spec = new PathSpec({ virtual: '/m/d', directory: '/m', vfsPath: 'd' })
-    await runWithSession(sess, async () => {
-      await expect(rmdir(accessor, spec)).rejects.toMatchObject({ code: 'ENOTEMPTY' })
-    })
   })
 })
 
@@ -879,10 +798,16 @@ function capabilityOps(backend?: () => Promise<void>): CommandIO {
   }
 }
 
-const capabilityCases = [false, true].flatMap((available) =>
-  (['write', 'mkdir', 'unlink', 'rename', 'copy', 'truncate'] as const).flatMap((operation) =>
-    (['locked', 'hidden', 'build'] as const).map((region) => ({ available, operation, region })),
-  ),
+// A write slot the backend has is the dispatcher's (`dispatchedIo`), which
+// judges it itself; the guards hold a missing one and a copy.
+const capabilityCases = [
+  ...(['write', 'mkdir', 'unlink', 'rename', 'copy', 'truncate'] as const).map((operation) => ({
+    available: false,
+    operation,
+  })),
+  { available: true, operation: 'copy' as const },
+].flatMap(({ available, operation }) =>
+  (['locked', 'hidden', 'build'] as const).map((region) => ({ available, operation, region })),
 )
 
 it.each(capabilityCases)(
@@ -960,7 +885,11 @@ it.each([false, true])(
     })
     await runWithSession(session, () =>
       runWithMountGate('/data', MountMode.WRITE, async () => {
-        const ops = withCommandGuards(capabilityOps(available ? backend : undefined))
+        const table = capabilityOps(available ? backend : undefined)
+        // A rename the backend has is the dispatcher's, so the guards judge
+        // only a missing one.
+        delete table.rename
+        const ops = withCommandGuards(table)
         const src = PathSpec.fromStrPath('/data/src'),
           dst = PathSpec.fromStrPath('/data/dst')
         const copy = requireOp(ops.copy, 'copy')
@@ -981,39 +910,6 @@ it.each([false, true])(
         expect(calls).toBe(Number(available))
       }),
     )
-  },
-)
-
-it.each([
-  [FileType.DIRECTORY, false, true],
-  [FileType.FILE, false, true],
-  [FileType.FILE, true, true],
-  [FileType.DIRECTORY, true, false],
-  [null, false, false],
-])(
-  'the command guards refuse a taken %s (parents=%s) on a writable mount: %s',
-  async (kind, parents, refused) => {
-    const made: string[] = []
-    const ops = withCommandGuards({
-      readdir: () => Promise.resolve([]),
-      readBytes: () => Promise.resolve(new Uint8Array()),
-      readStream: () => oneChunkStream(new Uint8Array()),
-      stat: (_accessor, path) =>
-        kind === null
-          ? Promise.reject(enoent(path.virtual))
-          : Promise.resolve(new FileStat({ name: 'd', type: kind })),
-      isMounted: () => true,
-      mkdir: (_accessor, path) => {
-        made.push(path.virtual)
-        return Promise.resolve()
-      },
-    })
-    await runWithMountGate('/data', MountMode.WRITE, async () => {
-      const call = ops.mkdir?.(accessor, PathSpec.fromStrPath('/data/d', 'd'), parents)
-      if (refused) await expect(call).rejects.toMatchObject({ code: 'EEXIST' })
-      else await call
-    })
-    expect(made).toEqual(refused ? [] : ['/data/d'])
   },
 )
 

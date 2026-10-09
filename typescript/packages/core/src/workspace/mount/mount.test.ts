@@ -28,6 +28,8 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
+import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import { MountEntry } from './mount.ts'
 
 class StubVFS extends BaseVFS {
@@ -238,6 +240,31 @@ describe('Mount.runCommand', () => {
       }
     },
   )
+
+  it('refuses the writes of a run with no dispatcher', async () => {
+    // The dispatcher is where a write is judged and settled, so a host
+    // running a command straight on its mount, with none, cannot write.
+    const vfs = new RAMVFS()
+    const m = new MountEntry({ prefix: '/rw/', vfs, mode: MountMode.WRITE })
+    const tee = commandsFor(vfs).find((cmd) => cmd.name === 'tee')
+    if (tee === undefined) throw new Error('missing tee')
+    m.register(tee)
+    const [stdout, io] = await m.runCommand(
+      'tee',
+      [PathSpec.fromStrPath('/rw/f')],
+      [],
+      {},
+      {
+        stdin: new TextEncoder().encode('x'),
+      },
+    )
+    await materialize(stdout)
+    expect(io.exitCode).toBe(1)
+    expect(new TextDecoder().decode(await io.materializeStderr())).toContain(
+      'Operation not supported',
+    )
+    expect(vfs.store.files.has('/f')).toBe(false)
+  })
 
   it('returns 127 for unknown command', async () => {
     const m = makeMount()
@@ -486,20 +513,25 @@ describe('ExecContext parity with CommandOpts', () => {
 it('a path-guarded command is still held at its write', async () => {
   const vfs = new RAMVFS()
   vfs.store.files.set('/a', new TextEncoder().encode('original'))
-  const mount = new MountEntry({ prefix: '/ram/', vfs, mode: MountMode.READ })
   const cmd = commandsFor(vfs).find((cmd) => cmd.name === 'gzip')
   if (cmd === undefined) throw new Error('missing gzip')
   expect(cmd.pathGuarded).toBe(true)
-  mount.register(cmd)
-  // The write is refused where it happens and gzip says so in its own words
-  // (the fatal write_error form), leaving the store untouched.
-  const [stdout, io] = await mount.runCommand('gzip', [PathSpec.fromStrPath('/ram/a')], [], {})
-  await materialize(stdout)
-  expect([io.exitCode, new TextDecoder().decode(await io.materializeStderr())]).toEqual([
-    1,
-    '\ngzip: /ram/a.gz: Read-only file system\n',
-  ])
-  expect([...vfs.store.files.entries()]).toEqual([['/a', new TextEncoder().encode('original')]])
+  const ws = new Workspace(
+    { '/ram/': [vfs, MountMode.READ] },
+    { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+  )
+  try {
+    // The write is refused where it happens and gzip says so in its own
+    // words (the fatal write_error form), leaving the store untouched.
+    const io = await ws.shell('gzip /ram/a')
+    expect([io.exitCode, new TextDecoder().decode(io.stderr)]).toEqual([
+      1,
+      '\ngzip: /ram/a.gz: Read-only file system\n',
+    ])
+    expect([...vfs.store.files.entries()]).toEqual([['/a', new TextEncoder().encode('original')]])
+  } finally {
+    await ws.close()
+  }
 })
 
 it.each([false, true])(

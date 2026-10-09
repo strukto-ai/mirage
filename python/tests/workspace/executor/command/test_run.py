@@ -26,7 +26,7 @@ from mirage.types import Limit, MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.command.run import drop_mount_caches
-from tests.fixtures.apply_marks import caching_ram_workspace, capture_marks
+from tests.fixtures.apply_marks import caching_ram_workspace
 
 
 @pytest.mark.parametrize("cmd", ["ls", "stat", "find", "du", "file"])
@@ -103,21 +103,6 @@ def restore_command_limits():
 
 def _writes_of(ws: Workspace, path: str) -> list[OpRecord]:
     return [r for r in ws.vfs.records if r.op == "write" and r.path == path]
-
-
-@pytest.mark.asyncio
-async def test_a_claimed_write_is_marked_with_the_claimed_value():
-    ws = caching_ram_workspace()
-    captured = capture_marks(ws)
-    try:
-        result = await ws.shell("echo a | tee /r/f")
-        assert result.exit_code == 0
-    finally:
-        await ws.close()
-    [(marks, writes)] = captured
-    claimed = [c for op, path, c in marks if (op, path) == ("write", "/r/f")]
-    assert len(claimed) == 1
-    assert claimed[0] is writes["/r/f"]
 
 
 @pytest.mark.asyncio

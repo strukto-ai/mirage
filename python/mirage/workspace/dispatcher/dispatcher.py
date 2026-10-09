@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import errno
 import functools
 import posixpath
@@ -32,6 +33,7 @@ from mirage.context import (
     hidden_refusal,
     session_visibility,
 )
+from mirage.context.session_context import effective_path_mode
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
@@ -42,6 +44,7 @@ from mirage.errors.fs import (
     enoent,
     enotdir,
     enotempty,
+    erofs,
     exdev,
     no_mount,
     no_xattr,
@@ -57,7 +60,7 @@ from mirage.observe.context import (
     record,
     start_op,
 )
-from mirage.observe.record import OpRecord
+from mirage.observe.record import WRITE_FINGERPRINT_OPS, OpRecord
 from mirage.policy.boundary import Boundary
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.types import EntryGate
@@ -216,6 +219,65 @@ def _appends_nothing(name: str, kwargs: dict[str, Any]) -> bool:
     return name == "append" and not kwargs.get("data")
 
 
+async def _mkdir_on_read_only(
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    prefix: str,
+    mode: MountMode,
+    path: PathSpec,
+    parents: bool,
+) -> None:
+    """Answer a mkdir on a read-only region the way the filesystem would.
+
+    A read-only filesystem refuses only a create it would really make,
+    so the answer is whatever the create runs into first, walking the
+    components from the mount root: a missing one is refused with EROFS,
+    a file in the chain is ENOTDIR, an existing leaf is EEXIST, and
+    ``mkdir -p`` of a directory that is already there succeeds. The
+    blamed path is the first component that would have been made, as
+    GNU's ``mkdir -p`` names it (``'/ro/n'`` for ``/ro/n/m``). Pinned
+    against GNU coreutils 9.7 on a read-only tmpfs.
+
+    Args:
+        stat (Callable[[PathSpec], Awaitable[FileStat]]): the
+            dispatcher's own stat, raising when nothing is there.
+        prefix (str): the mount prefix.
+        mode (MountMode): the mount's mode.
+        path (PathSpec): the directory to make.
+        parents (bool): ``-p``.
+    """
+    base = prefix.rstrip("/")
+    leaf = path.virtual.rstrip("/") or "/"
+    if leaf != base and not leaf.startswith(base + "/"):
+        raise erofs(path.virtual)
+    parts = [part for part in leaf[len(base) :].split("/") if part]
+    chain = [
+        PathSpec.from_str_path(f"{base}/{'/'.join(parts[:depth])}")
+        for depth in range(1, len(parts) + 1)
+    ]
+    for index, component in enumerate(chain):
+        try:
+            row = await stat(component)
+        except FileNotFoundError as exc:
+            if not parents and index < len(chain) - 1:
+                raise enoent(path) from exc
+            blame = next(
+                (
+                    spec
+                    for spec in chain[index:]
+                    if effective_path_mode(spec.virtual, prefix, mode)
+                    == MountMode.READ
+                ),
+                path,
+            )
+            raise erofs(blame.virtual) from exc
+        if row.type is not FileType.DIRECTORY:
+            if index == len(chain) - 1:
+                raise eexist(path)
+            raise enotdir(component if parents else path)
+    if not parents:
+        raise eexist(path)
+
+
 def _visible_entries(entries: list[str], parent: str) -> list[str]:
     """Drop listing entries the bound session hides.
 
@@ -294,10 +356,11 @@ class _MountChannel:
     entry point, which is what lets the cascade see hidden entries.
 
     Each deletion answers the same pre-vfs admission a dispatched op
-    answers, with its own child path: the gate that admitted the rmdir
-    judged the directory, not what the cascade found under it, and a
-    policy that protects one of those paths must refuse its deletion
-    exactly as it would refuse a first-class op. Each deletion also
+    answers, with its own child path, and the running command's path
+    rules: the gate that admitted the rmdir judged the directory, not
+    what the cascade found under it, and a policy or rule that protects
+    one of those paths must refuse its deletion exactly as it would
+    refuse a first-class op. Each deletion also
     discharges the dispatcher's own write invalidation, the way normal
     dispatch does for its one op and the TS ``fencedCall`` does per
     call: ``call`` runs outside the cache-manager context command
@@ -316,11 +379,14 @@ class _MountChannel:
             after the entry is gone and strand the cascade.
         invalidate (Callable): the dispatcher's write invalidation,
             bound to that mount.
+        rule_gate (EntryGate | None): the running command's gate, None
+            for a call no command issued.
     """
 
     mount: MountEntry
     boundary: Boundary
     invalidate: Callable[[PathSpec], Awaitable[None]]
+    rule_gate: EntryGate | None
 
     async def readdir(self, spec: PathSpec) -> list[str]:
         return await self.mount.call("readdir", spec.virtual)
@@ -329,6 +395,8 @@ class _MountChannel:
         return await self.mount.call("stat", spec.virtual)
 
     async def unlink(self, spec: PathSpec) -> None:
+        if self.rule_gate is not None:
+            self.rule_gate.check(spec.virtual)
         await self.boundary.admit("unlink", spec, True, check_hidden=False)
         try:
             await self.mount.call("unlink", spec.virtual)
@@ -336,6 +404,8 @@ class _MountChannel:
             await self.invalidate(spec)
 
     async def rmdir(self, spec: PathSpec) -> None:
+        if self.rule_gate is not None:
+            self.rule_gate.check(spec.virtual)
         await self.boundary.admit("rmdir", spec, True, check_hidden=False)
         try:
             await self.mount.call("rmdir", spec.virtual)
@@ -632,7 +702,28 @@ class Dispatcher:
         if mount is None:
             return await self._answer_unmounted(call), IOResult()
         await self._refuse_cross_mount(call, mount)
-        boundary = await self._admit(call, mount)
+        # mkdir(2) looks its name up first, so on a read-only region that
+        # lookup answers for the mode, after every other policy has spoken.
+        # A dry run never looks, so it explains the mode's refusal.
+        looks_up = (
+            name == "mkdir"
+            and explaining() is None
+            and effective_path_mode(
+                call.path.virtual, mount.prefix, mount.mode
+            )
+            == MountMode.READ
+        )
+        boundary = await self._admit(call, mount, judge_mode=not looks_up)
+        if looks_up:
+            await _mkdir_on_read_only(
+                self._walk_stat,
+                mount.prefix,
+                mount.mode,
+                call.path,
+                bool(call.kwargs.get("parents")),
+            )
+            await boundary.complete(name, call.path, call.write, None)
+            return None, IOResult()
         await mount.ensure_ready()
         served = await self._serve_cached(call, mount, boundary)
         if served is not None:
@@ -878,7 +969,9 @@ class Dispatcher:
             if self._namespace.try_mount_for(other.virtual) is not mount:
                 raise exdev(other)
 
-    async def _admit(self, call: _Call, mount: MountEntry) -> Boundary:
+    async def _admit(
+        self, call: _Call, mount: MountEntry, judge_mode: bool = True
+    ) -> Boundary:
         """Run admission for an op on a mounted path.
 
         Admission policies fire at the dispatcher, before the warm-cache early
@@ -892,6 +985,8 @@ class Dispatcher:
         Args:
             call (_Call): the followed op.
             mount (MountEntry): the mount serving its path.
+            judge_mode (bool): whether the mount's mode is judged here;
+                False when the op answers for it itself.
 
         Returns:
             Boundary: the boundary the op completes through.
@@ -901,6 +996,8 @@ class Dispatcher:
         # the VFS that defines it.
         call.write = call.write or mount.writes(call.name)
         boundary = self._boundary(mount)
+        if not judge_mode:
+            boundary = dataclasses.replace(boundary, mode=None)
         await boundary.admit(
             call.name,
             call.path,
@@ -1084,7 +1181,7 @@ class Dispatcher:
                 errno.EEXIST,
             ):
                 raise
-            await self._rmdir_remnants(mount, call.path, exc)
+            await self._rmdir_remnants(mount, call.path, exc, call.rule_gate)
             result = None
             if call.report is not None:
                 call.report.served(None, None)
@@ -1167,10 +1264,60 @@ class Dispatcher:
         async with AsyncExitStack() as held:
             for key in sorted(keys):
                 await held.enter_async_context(self._writers.with_lock(key))
-            result = await mount.call(call.name, call.path.virtual, **kwargs)
+            scope = RecordingScope(active=active_recorder() is None)
+            try:
+                with command_records() as mine:
+                    result = await mount.call(
+                        call.name, call.path.virtual, **kwargs
+                    )
+            finally:
+                scope.close()
             _served(call.report, result)
             await self._settle_write(mount, call.name, call.path, kwargs)
+            await self._keep_written(call, mount, mine)
         return result
+
+    async def _keep_written(
+        self, call: _Call, mount: MountEntry, records: list[OpRecord]
+    ) -> None:
+        """Keep a whole write's bytes for the next read, under its name's hold.
+
+        The write's own record labels them with the token the backend
+        answered, so a ``fresh`` mount does not refetch what it just wrote;
+        a record moving another length than was sent keeps nothing, and so
+        does a name another mount took while the write ran, read under the
+        cache's lock.
+
+        Args:
+            call (_Call): the write that ran.
+            mount (MountEntry): the mount it ran on.
+            records (list[OpRecord]): the records the write emitted.
+        """
+        data = call.kwargs.get("data")
+        if (
+            call.name != "write"
+            or not isinstance(data, bytes)
+            or not _facts_of(mount).cacheable
+        ):
+            return
+        # Copies, so the line's records do not hold the written bytes.
+        claims = [
+            dataclasses.replace(rec, claimed=data)
+            if rec.op in WRITE_FINGERPRINT_OPS
+            and rec.path == call.path.virtual
+            else rec
+            for rec in records
+        ]
+        await cache_io.set_cached(
+            self._cache,
+            call.path.virtual,
+            data,
+            data,
+            claims,
+            lambda path: _facts_of(
+                mount if self._namespace.try_mount_for(path) is mount else None
+            ),
+        )
 
     def _filter(self, call: _Call, result: Any) -> Any:
         """Merge the namespace into a backend answer and drop hidden names.
@@ -1224,11 +1371,13 @@ class Dispatcher:
         observed = (
             time.time() if name in STAMP_WRITE_OPS and not opened else None
         )
+        # rename(2) moves a file without touching its times, which the
+        # node table carries to the new name below.
         await self.invalidate_after_write(
             mount,
             path,
             observed=observed,
-            times=not opened,
+            times=not opened and name != "rename",
             removed=name in ("unlink", "rmdir"),
         )
         for _, other in _operands(name, kwargs):
@@ -1308,7 +1457,11 @@ class Dispatcher:
         return not isinstance(row, FileStat) or row.type is FileType.DIRECTORY
 
     async def _rmdir_remnants(
-        self, mount: MountEntry, path: PathSpec, refusal: OSError
+        self,
+        mount: MountEntry,
+        path: PathSpec,
+        refusal: OSError,
+        rule_gate: EntryGate | None,
     ) -> None:
         """Take a visibly-empty directory's hidden remnants with it.
 
@@ -1330,6 +1483,8 @@ class Dispatcher:
             mount (MountEntry): the mount owning the directory.
             path (PathSpec): the directory being removed.
             refusal (OSError): the backend's not-empty error.
+            rule_gate (EntryGate | None): the running command's gate,
+                judged on each deletion.
         """
         vis = session_visibility()
         if not hidden_under(vis, path.virtual):
@@ -1362,6 +1517,7 @@ class Dispatcher:
             functools.partial(
                 self.invalidate_after_write, mount, removed=True
             ),
+            rule_gate,
         )
         try:
             await remove_remnants(channel, visible, path)
@@ -2099,14 +2255,17 @@ class Dispatcher:
             removed (bool): the write removed ``path`` (unlink, rmdir),
                 so its own listing goes too, as a core's removal drops it.
         """
-        if times:
-            await self._namespace.clear_times(path.virtual, observed=observed)
-        manager = self._manager_for(mount)
-        if removed:
-            await manager.invalidate_after_unlink(path)
-        else:
-            await manager.invalidate_after_write(path)
-        await manager.invalidate_ancestors(path)
+        for owner, name in self._aliases(mount, path):
+            if times:
+                await self._namespace.clear_times(
+                    name.virtual, observed=observed
+                )
+            manager = self._manager_for(owner)
+            if removed:
+                await manager.invalidate_after_unlink(name)
+            else:
+                await manager.invalidate_after_write(name)
+            await manager.invalidate_ancestors(name)
 
     async def invalidate_after_rename(
         self, mount: MountEntry, source: PathSpec, dst: PathSpec
@@ -2125,7 +2284,35 @@ class Dispatcher:
             source (PathSpec): the name the subtree left.
             dst (PathSpec): the name it now lives under.
         """
-        manager = self._manager_for(mount)
-        await manager.invalidate_subtree(source)
-        await manager.invalidate_subtree(dst)
-        await manager.invalidate_ancestors(dst)
+        for owner, src in self._aliases(mount, source):
+            await self._manager_for(owner).invalidate_subtree(src)
+        for owner, to in self._aliases(mount, dst):
+            manager = self._manager_for(owner)
+            await manager.invalidate_subtree(to)
+            await manager.invalidate_ancestors(to)
+
+    def _aliases(
+        self, mount: MountEntry, path: PathSpec
+    ) -> list[tuple[MountEntry, PathSpec]]:
+        """``path`` under each mount of its store, its own mount first.
+
+        One store mounted at two prefixes holds one file under two names,
+        so what a write makes stale under one name is stale under each. A
+        name another mount holds is that mount's file and is left out.
+
+        Args:
+            mount (MountEntry): the mount the path was reached through.
+            path (PathSpec): the path written.
+        """
+        key = mount_key(path.virtual, mount.prefix.rstrip("/"))
+        found = [(mount, path)]
+        for other in self._namespace.registry.visible_mounts():
+            if other is mount or other.vfs is not mount.vfs:
+                continue
+            base = other.prefix.rstrip("/")
+            name = PathSpec.from_str_path(
+                f"{base}/{key}" if key else base or "/"
+            )
+            if self._namespace.try_mount_for(name.virtual) is other:
+                found.append((other, name))
+        return found

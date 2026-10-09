@@ -2428,14 +2428,17 @@ export async function openConsistency(
   const shadow = opened.shadow()
   const onShadow = async (command: string, stdin?: Uint8Array): Promise<void> => {
     const result = await shadow.shell(command, stdin === undefined ? {} : { stdin })
+    await shadow.cache.clear()
     if (result.exitCode !== 0) {
       throw new Error(`${command}: ${new TextDecoder().decode(result.stderr)}`)
     }
   }
-  // Through the dispatcher, as python's mutate_write: a shell tee would cache
-  // its bytes on the shadow, which a later shadow line would then read stale.
+  // The shadow is another client with no memory: a write keeps its bytes,
+  // and a later shadow line would read them stale. Mirrors python's
+  // mutate_write.
   const writeOut = async (path: string, content: Uint8Array): Promise<void> => {
     await shadow.dispatch('write', path, [content])
+    await shadow.cache.clear()
   }
   // A mount that cannot take a write (a Hub repo, where a change is a commit)
   // brings its own out-of-band change; every other one writes through the

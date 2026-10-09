@@ -3026,6 +3026,9 @@ async def mutate_write(
     shadow_ws: Workspace, path: str, content: bytes
 ) -> None:
     await shadow_ws.vfs.write(path, content)
+    # The shadow is another client with no memory: a write keeps its bytes,
+    # and a later shadow line would read them stale.
+    await shadow_ws.cache.clear()
 
 
 async def mutate_line(shadow_ws: Workspace, command: str) -> None:
@@ -3040,6 +3043,7 @@ async def mutate_line(shadow_ws: Workspace, command: str) -> None:
         command (str): the line to run.
     """
     result = await shadow_ws.shell(command)
+    await shadow_ws.cache.clear()
     if result.exit_code != 0:
         raise RuntimeError(f"{command}: {await result.stderr_str()}")
 

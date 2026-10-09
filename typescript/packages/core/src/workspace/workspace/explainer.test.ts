@@ -62,6 +62,19 @@ describe('session.explain.vfs', () => {
     expect(drift.pending).toBe(true)
   })
 
+  it('explains the mode for a mkdir on a read-only mount', async () => {
+    // The run answers from a name lookup; a dry run looks nothing up and
+    // explains the mode's refusal.
+    const ro = new Workspace({ '/ro': [new RAMVFS(), MountMode.READ] })
+    try {
+      ro.createSession('agent')
+      const said = await new Session(ro, 'agent').explain.vfs.mkdir('/ro/d')
+      expect([said.outcome, said.error]).toEqual([Outcome.DENY, 'EROFS'])
+    } finally {
+      await ro.close()
+    }
+  })
+
   it('lets a policy read for real while it decides', async () => {
     await ws.vfs.write('/data/flag', 'closed')
     const flagged: Policy = {

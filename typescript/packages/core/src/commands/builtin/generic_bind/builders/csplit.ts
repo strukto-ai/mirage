@@ -40,7 +40,6 @@ const csplit: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
           await dispatch('unlink', p)
         }
       : (p) => unlink(accessor, p),
-    dispatch !== undefined,
   )
 }
 

@@ -440,7 +440,6 @@ function companion(spec: PathSpec, suffix: string): PathSpec {
 // Where one section's report and bytes go.
 interface PatchSink {
   readonly report: string[]
-  readonly writes: Record<string, Uint8Array>
   readonly written: Set<string>
   readonly write: (p: PathSpec, data: Uint8Array) => Promise<void>
 }
@@ -463,7 +462,6 @@ async function saveRejects(
   const reject = companion(spec, '.rej')
   const data = rejectText(section, rejected, reverse)
   await sink.write(reject, data)
-  sink.writes[reject.mountPath] = data
 }
 
 // Apply one section to its file, GNU patch's way; true when a hunk of it was
@@ -514,13 +512,11 @@ async function patchFile(
       } else {
         const backup = companion(spec, '.orig')
         await sink.write(backup, original)
-        sink.writes[backup.mountPath] = original
       }
     }
     if (original !== null || outcome.rejected.length < section.hunks.length) {
       const data = ENC.encode(outcome.lines.map((line) => `${line}\n`).join(''))
       await sink.write(spec, data)
-      sink.writes[spec.mountPath] = data
       sink.written.add(spec.virtual)
     }
   }
@@ -613,7 +609,7 @@ export async function patchGeneric(
 
   const sections = parsePatch(DEC.decode(loaded), stripCount)
   const orig = paths[0] ?? null
-  const sink: PatchSink = { report: [], writes: {}, written: new Set<string>(), write }
+  const sink: PatchSink = { report: [], written: new Set<string>(), write }
   let failed = false
   for (const section of sections) {
     const spec =
@@ -627,5 +623,5 @@ export async function patchGeneric(
     failed = failed || refused
   }
   const out = sink.report.length > 0 ? ENC.encode(sink.report.map((l) => `${l}\n`).join('')) : null
-  return [out, new IOResult({ writes: sink.writes, exitCode: failed ? 1 : 0 })]
+  return [out, new IOResult({ exitCode: failed ? 1 : 0 })]
 }

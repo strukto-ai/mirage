@@ -358,8 +358,6 @@ async function runInPlace(
   utf8: boolean,
 ): Promise<CommandFnResult> {
   if (paths.length === 0) return failed(`${SED_NO_INPUT_FILES}\n`, SED_NO_INPUT_EXIT)
-  const writes: Record<string, Uint8Array> = {}
-  const edited: string[] = []
   const editedVirtual = new Set<string>()
   let err = ''
   let code = 0
@@ -376,7 +374,8 @@ async function runInPlace(
       continue
     }
     // An `r` file edited by an earlier file of this command reads new.
-    if (edited.length > 0) machine.setFiles(await readScriptFiles(program.rfiles, access, utf8))
+    if (editedVirtual.size > 0)
+      machine.setFiles(await readScriptFiles(program.rfiles, access, utf8))
     const out = machine.process([{ name: p.rawPath, text: byteView(data, utf8) }], false)
     if (machine.panicCode !== null) break
     const newData = fromByteView(out, utf8)
@@ -388,8 +387,6 @@ async function runInPlace(
       code = 4
       break
     }
-    writes[p.mountPath] = newData
-    edited.push(p.mountPath)
     editedVirtual.add(p.virtual)
   }
   const writeErr = await flushWriteFiles(machine, access, utf8, editedVirtual)
@@ -399,12 +396,7 @@ async function runInPlace(
   const stdout = machine.stdout.chunks.join('')
   return [
     stdout === '' ? null : fromByteView(stdout, utf8),
-    new IOResult({
-      writes,
-      cache: edited,
-      exitCode,
-      stderr: stderr === '' ? null : encodeText(stderr),
-    }),
+    new IOResult({ exitCode, stderr: stderr === '' ? null : encodeText(stderr) }),
   ]
 }
 

@@ -52,14 +52,12 @@ def _build(io: CommandIO) -> Callable[..., Any]:
             )
         fl = FlagView(opts.flags, spec=SPECS["touch"])
         paths = await resolve_glob(accessor, paths, opts.index)
-        writes: dict[str, ByteSource] = {}
         for p in paths:
             if fl.as_bool("no_create"):
                 continue
             if not await exists(accessor, p):
                 await write_bytes(accessor, p, b"")
-                writes[p.mount_path] = b""
-        return None, IOResult(writes=writes)
+        return None, IOResult()
 
     return touch
 

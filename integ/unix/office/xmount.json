@@ -8,12 +8,24 @@
         "sharepoint",
         "sharepoint-prefix"
       ],
-      "command": "cp /data/office/deck.pptx /data2/deck.pptx && wc -c /data2/deck.pptx && rm /data2/deck.pptx",
+      "read": "fresh",
+      "scenario": [
+        {
+          "command": "mkdir -p /data/office && printf slide-bytes | tee /data/office/deck.pptx > /dev/null"
+        },
+        {
+          "command": "printf seed | tee /data2/.seed > /dev/null && rm /data2/.seed"
+        },
+        {
+          "command": "cp /data/office/deck.pptx /data2/deck.pptx && wc -c /data2/deck.pptx"
+        }
+      ],
       "expect": {
         "exit": 0,
         "stdout": "27 /data2/deck.pptx\n",
         "stderr": ""
-      }
+      },
+      "note": "A scenario's account starts empty, so the folder /data2 roots at is made first, as the target's seed_root does for its shared workspace."
     }
   ]
 }

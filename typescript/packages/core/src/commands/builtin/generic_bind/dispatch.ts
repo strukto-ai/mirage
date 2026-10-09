@@ -36,12 +36,7 @@ import type { CommandIO } from '../../config.ts'
  * filesystem, `du -x`) a listing also leaves out the roots of the mounts
  * below it, which the walk must neither list nor stat. Mirrors Python's
  * dispatch_io. */
-export function dispatchIO(
-  dispatch: DispatchFn,
-  reads?: IOResult,
-  links?: LinkView,
-  bound?: MountView,
-): CommandIO {
+export function dispatchIO(dispatch: DispatchFn, links?: LinkView, bound?: MountView): CommandIO {
   return {
     readdir: async (_accessor, path) => {
       let entries = (await dispatch('readdir', path))[0] as string[]
@@ -58,12 +53,7 @@ export function dispatchIO(
     readBytes: async (_accessor, path) => {
       if (((await dispatch('stat', path))[0] as FileStat).type === FileType.DIRECTORY)
         throw eisdir(path)
-      const body = await materialize((await dispatch('read', path))[0] as ByteSource)
-      if (reads !== undefined) {
-        reads.reads[path.virtual] = body
-        if (!reads.cache.includes(path.virtual)) reads.cache.push(path.virtual)
-      }
-      return body
+      return materialize((await dispatch('read', path))[0] as ByteSource)
     },
     readStream: async function* (_accessor, path) {
       if (((await dispatch('stat', path))[0] as FileStat).type === FileType.DIRECTORY)
@@ -76,22 +66,18 @@ export function dispatchIO(
     maxDuEntries: null,
     unlink: async (_accessor, path) => {
       await dispatch('unlink', path)
-      if (reads !== undefined) Reflect.deleteProperty(reads.reads, path.virtual)
     },
     mkdir: async (_accessor, path, parents = false) => {
       await dispatch('mkdir', path, [], { parents })
     },
     truncate: async (_accessor, path, size, options) => {
       await dispatch('truncate', path, [size], { no_create: options ?? false })
-      if (reads !== undefined) Reflect.deleteProperty(reads.reads, path.virtual)
     },
     write: async (_accessor, path, data) => {
       await dispatch('write', path, [data])
-      if (reads !== undefined) Reflect.deleteProperty(reads.reads, path.virtual)
     },
     pwrite: async (_accessor, path, data, offset) => {
       await dispatch('pwrite', path, [data, offset])
-      if (reads !== undefined) Reflect.deleteProperty(reads.reads, path.virtual)
     },
   }
 }
@@ -147,9 +133,8 @@ export async function runDispatch(
     else if (Array.isArray(value))
       rebased[key] = value.map((item) => (item instanceof PathSpec ? whole(item) : item))
   }
-  const reads = new IOResult()
   const result = await builder.fn(
-    dispatchIO(dispatch, reads, ns?.links, bounded ? ns?.mounts : undefined),
+    dispatchIO(dispatch, ns?.links, bounded ? ns?.mounts : undefined),
     new NOOPAccessor(),
     paths.map(whole),
     [...texts],
@@ -165,12 +150,5 @@ export async function runDispatch(
     },
   )
   if (result === null) return [null, new IOResult()]
-  const body = await materialize(result[0])
-  const merged = await reads.merge(result[1])
-  // Every read went through the dispatcher, whose cold read keeps what the
-  // file cache may hold; listing a read path again would keep a filetype
-  // renderer's output there, which cat would then print. A written path
-  // stays listed. Mirrors Python's run_dispatch.
-  merged.cache = merged.cache.filter((p) => !(p in merged.reads))
-  return [body, merged]
+  return [await materialize(result[0]), result[1]]
 }

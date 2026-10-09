@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from functools import partial
 
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
@@ -122,7 +121,6 @@ async def handle_touch(
     no_create = fl.as_bool("no_create")
 
     errors: list[str] = []
-    writes: dict[str, bytes | AsyncIterator[bytes]] = {}
     for target in await expand_operands(namespace, operands):
         if fl.as_bool("no_dereference") and namespace.is_link(target.virtual):
             await apply_link_attrs(
@@ -209,7 +207,6 @@ async def handle_touch(
                         f"Read-only file system\n"
                     )
                     continue
-                writes[resolved.virtual] = b""
                 # A file touch creates is 0666 under the session's
                 # umask; only a mask away from bash's default is worth
                 # a mode write, since 644 is what a fresh file renders as.
@@ -237,4 +234,4 @@ async def handle_touch(
                 f"touch: cannot touch '{target.raw_path}': "
                 f"{fs_strerror(exc)}\n"
             )
-    return finish("touch", errors, io=IOResult(writes=writes))
+    return finish("touch", errors, io=IOResult())

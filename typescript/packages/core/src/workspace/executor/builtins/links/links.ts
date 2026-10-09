@@ -321,19 +321,6 @@ export async function prepareMv(
   return preparePair(namespace, dispatch, items, src, dst, fl)
 }
 
-/** Re-anchor completed renames, including backups, in execution order. */
-export async function settleMoves(
-  namespace: Namespace,
-  moves: readonly (readonly [string, string])[],
-): Promise<void> {
-  for (const [src, landing] of moves) {
-    await namespace.unlink(landing)
-    await namespace.purgeUnder(landing)
-    await namespace.rename(src, landing)
-    await namespace.renameUnder(src, landing)
-  }
-}
-
 function landingKey(path: string): string {
   return rstripSlash(path) || '/'
 }

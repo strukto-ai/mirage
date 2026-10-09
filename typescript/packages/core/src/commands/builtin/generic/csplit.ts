@@ -143,7 +143,6 @@ export async function csplitGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   unlink: (p: PathSpec) => Promise<void>,
-  relay = false,
 ): Promise<CommandFnResult> {
   // GNU wants FILE and a PATTERN before it opens anything.
   if (texts.length === 0) {
@@ -183,7 +182,6 @@ export async function csplitGeneric(
   const lines = splitLines(text)
   const [parts, splitError] = splitByPatterns(lines, texts, suppressMatched)
   let error = splitError
-  const writes: Record<string, Uint8Array> = {}
   const sizes: string[] = []
   const created: [string, PathSpec][] = []
   for (const part of parts) {
@@ -208,10 +206,6 @@ export async function csplitGeneric(
       break
     }
     created.push([name, spec])
-    // Relay writes land on whichever mount owns each path and invalidate
-    // through the dispatcher; keying them here would have the runner prefix
-    // them onto this mount.
-    if (!relay) writes[spec.mountPath] = data
     sizes.push(String(data.byteLength))
   }
   if (error !== null) diagnostics += error
@@ -232,7 +226,6 @@ export async function csplitGeneric(
   return [
     result,
     new IOResult({
-      writes,
       ...(diagnostics !== '' ? { stderr: ENC.encode(diagnostics) } : {}),
       ...(error !== null ? { exitCode: 1 } : {}),
     }),

@@ -544,7 +544,6 @@ async def test_workspace_execute_databricks_volume_touch_and_rm():
     rm_io = await ws.shell("rm /dbx/created.txt")
 
     assert touch_io.exit_code == 0
-    assert touch_io.writes == {"/dbx/created.txt": b""}
     assert files.delete_calls == [f"{root}/created.txt"]
     assert f"{root}/created.txt" not in files.downloads
     assert rm_io.exit_code == 0
@@ -587,7 +586,6 @@ async def test_workspace_execute_databricks_volume_touch_resolves_glob():
     assert io.exit_code == 0
     assert files.upload_calls == []
     assert f"{root}/*.txt" not in files.downloads
-    assert io.writes == {}
 
 
 @pytest.mark.asyncio

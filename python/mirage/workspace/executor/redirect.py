@@ -685,8 +685,6 @@ async def handle_redirect(
                     file.offset += len(data)
                 else:
                     await write_description(dispatch, session, file, data)
-                io.writes[file.scope.virtual] = data
-                io.cache = [p for p in io.cache if p != file.scope.virtual]
             except OSError as exc:
                 out, error, _ = await failed(
                     _redirect_failure(file.scope, exc), failed_file=file

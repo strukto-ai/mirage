@@ -35,11 +35,10 @@ def test_merge_combines_stderr():
 
 def test_merge_combines_cache():
     async def _run():
-        a = IOResult(cache=["/a"], renames=[("/dst", "/dst~")])
-        b = IOResult(cache=["/b"], renames=[("/src", "/dst")], exit_code=1)
+        a = IOResult(cache=["/a"])
+        b = IOResult(cache=["/b"], exit_code=1)
         merged = await a.merge(b)
         assert merged.cache == ["/a", "/b"]
-        assert merged.renames == [("/dst", "/dst~"), ("/src", "/dst")]
         assert merged.exit_code == 1
 
     asyncio.run(_run())

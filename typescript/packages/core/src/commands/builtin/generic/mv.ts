@@ -367,7 +367,6 @@ export async function mvGeneric(
     suffix: flags.suffix,
     ask: flags.interactive ? prompter('mv', stdin ?? null, errors, accepted) : null,
   }
-  const renames: [string, string][] = []
   const writes: Record<string, ByteSource> = {}
   const lines: string[] = []
   const created = new Set<string>()
@@ -518,9 +517,6 @@ export async function mvGeneric(
       copies,
     )
     if (!made.ok) continue
-    if (made.backup !== null && copies === undefined && !isPrimitiveMove(strategy)) {
-      renames.push([target.virtual, made.backup.virtual])
-    }
     if (copies !== undefined && sourceLink) {
       try {
         await renameLink(copies, src, target)
@@ -586,7 +582,6 @@ export async function mvGeneric(
       writes[src.mountPath] = new Uint8Array()
       writes[target.mountPath] = new Uint8Array()
     }
-    if (!sourceLink && !isPrimitiveMove(strategy)) renames.push([src.virtual, target.virtual])
     if (!srcIsDir) created.add(keyOf(target))
     if (flags.verbose) {
       let line = `renamed '${src.rawPath}' -> '${target.rawPath}'`
@@ -599,7 +594,6 @@ export async function mvGeneric(
     output,
     new IOResult({
       writes,
-      renames,
       stderr: stderrOf(errors),
       exitCode: errors.length > accepted.length ? 1 : 0,
     }),

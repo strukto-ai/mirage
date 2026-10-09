@@ -12,13 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type {
-  MkdirOp,
-  ReadBytesOp,
-  ResolveGlobOp,
-  SearchQuery,
-  StatOp,
-} from '../../../vfs/types.ts'
+import type { ReadBytesOp, ResolveGlobOp, SearchQuery } from '../../../vfs/types.ts'
 import type { BaseVFS } from '../../../vfs/base.ts'
 import type { FindOptions } from '../../../vfs/types.ts'
 import { getExtension } from '../../../utils/filetype.ts'
@@ -29,7 +23,6 @@ import { materialize, type ByteSource } from '../../../io/types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import {
   requirePathsWritable,
-  effectivePathMode,
   getAdmission,
   getCurrentSession,
   hiddenRefusal,
@@ -42,15 +35,12 @@ import { METADATA_OPS } from '../../../policy/constants.ts'
 import { preVfsGate, type Policies, getOpPolicies } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { hasAborted, makeAbortError } from '../../../utils/abort.ts'
-import { hiddenUnder, moveReveals, pathVisible } from '../../../utils/hidden.ts'
-import { removeRemnants, visibleBelow, type RemnantChannel } from '../../../utils/remnants.ts'
+import { moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { refuseTaken } from '../../../core/generic/rewrite.ts'
 import type { NamespaceView, StatOverlay } from '../../../view/types.ts'
 
 import {
   FileType,
-  MountMode,
   PathSpec,
   type FileStat,
   type SetAttrFields,
@@ -58,16 +48,11 @@ import {
 } from '../../../types.ts'
 import {
   eacces,
-  eexist,
   eisdir,
-  enoent,
-  enotdir,
   enotsup,
-  erofs,
   isDotWalkError,
   isEnoent,
   isEnotdir,
-  isMissError,
   walkRefusal,
 } from '../../../errors/fs.ts'
 import { dotRefusal } from '../utils/paths.ts'
@@ -297,17 +282,87 @@ async function* dispatchedStream(dispatch: DispatchFn, path: PathSpec): AsyncIte
   yield* ensureStream(data as ByteSource)
 }
 
+/** A command's write, at the dispatcher, its answer handed back. */
+async function dispatchedCall(
+  dispatch: DispatchFn,
+  name: string,
+  path: PathSpec,
+  args: readonly unknown[] = [],
+  kwargs: Record<string, unknown> = {},
+): Promise<unknown> {
+  const [result] = await dispatch(name, path, args, kwargs)
+  return result
+}
+
 /**
- * Return `ops` whose content reads go through the dispatcher.
+ * The write slots a backend has, each sent to the dispatcher. Mirrors the
+ * write half of Python's `dispatched_io`.
+ */
+function dispatchedWrites(ops: CommandIO, dispatch: DispatchFn): Partial<CommandIO> {
+  const writes: Partial<CommandIO> = {
+    write: async (_accessor, path, data) => {
+      await dispatchedCall(dispatch, 'write', path, [data])
+    },
+    append: async (_accessor, path, data) => {
+      await dispatchedCall(dispatch, 'append', path, [data])
+    },
+    pwrite: async (_accessor, path, data, offset) => {
+      await dispatchedCall(dispatch, 'pwrite', path, [data, offset])
+    },
+    create: async (_accessor, path) => {
+      await dispatchedCall(dispatch, 'create', path)
+    },
+    mkdir: async (_accessor, path, parents) => {
+      await dispatchedCall(dispatch, 'mkdir', path, [], { parents: parents ?? false })
+    },
+    unlink: async (_accessor, path) => {
+      await dispatchedCall(dispatch, 'unlink', path)
+    },
+    rmdir: async (_accessor, path) => {
+      await dispatchedCall(dispatch, 'rmdir', path)
+    },
+    rename: async (_accessor, src, dst) => {
+      await dispatchedCall(dispatch, 'rename', src, [dst])
+    },
+    truncate: async (_accessor, path, length, noCreate) => {
+      await dispatchedCall(dispatch, 'truncate', path, [length], { no_create: noCreate ?? false })
+    },
+    setAttrs: async (_accessor, path, fields) =>
+      (await dispatchedCall(dispatch, 'setattr', path, [], { ...fields })) as Record<
+        string,
+        number | string
+      >,
+  }
+  return Object.fromEntries(
+    Object.entries(writes).filter(([slot]) => ops[slot as keyof CommandIO] !== undefined),
+  )
+}
+
+/**
+ * Return `ops` whose content reads and writes go through the dispatcher.
  *
  * The dispatcher checks hides, the command's path rule, the mount's mode and
- * policy, serves a warm copy and fills a cold one, so a command's read
- * answers what the same read through `ws.vfs` or FUSE answers. Mirrors
- * Python's `dispatched_io`.
+ * policy, serves a warm copy and fills a cold one, and settles a write's
+ * caches and receipt under its name's hold, so a command's read or write
+ * answers what the same call through `ws.vfs` or FUSE answers. A slot the
+ * backend does not have stays absent. With no dispatcher (a host running a
+ * command straight on its mount) the reads stay the backend's and each write
+ * is refused as one the backend does not have: the dispatcher is where a
+ * write is judged and settled. Mirrors Python's `dispatched_io`.
  */
-export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn): CommandIO {
+export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): CommandIO {
+  if (dispatch === undefined) {
+    const refused: CommandIO = { ...ops }
+    for (const slot of mutationSlots) {
+      if (ops[slot] !== undefined && DISPATCHED_WRITES.has(slot)) {
+        Object.assign(refused, { [slot]: requireOp(undefined, slot) })
+      }
+    }
+    return refused
+  }
   return {
     ...ops,
+    ...dispatchedWrites(ops, dispatch),
     readBytes: (_accessor, path) => dispatchedBytes(dispatch, path),
     readStream: (_accessor, path) => dispatchedStream(dispatch, path),
     ...(ops.readRange === undefined
@@ -674,24 +729,6 @@ export function refuseReveal(src: PathSpec, dst: PathSpec): void {
   if (moveWouldReveal(src, dst)) throw eacces(src.virtual)
 }
 
-/** Whether a pair op's source stats as a directory, probed only when
- * the reveal check trips: an absent source moves nothing (the op
- * itself reports it), and an unanswerable one fails toward refusal. */
-async function pairSrcIsDir<A extends Accessor>(
-  stat: StatOp<A>,
-  accessor: A,
-  src: PathSpec,
-): Promise<boolean> {
-  let row: FileStat
-  try {
-    row = await stat(accessor, src, undefined)
-  } catch (err) {
-    if (isMissError(err)) return false
-    return true
-  }
-  return row.type === FileType.DIRECTORY
-}
-
 /**
  * Return `ops` whose slots refuse hidden paths like missing ones.
  *
@@ -716,93 +753,6 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
     guarded.exists = async (accessor, path) => {
       if (!pathVisible(sessionVisibility(), path.virtual)) return false
       return ex(accessor, path)
-    }
-  }
-  const rd = ops.rmdir
-  if (rd !== undefined) {
-    // The backend refuses a directory still holding entries, but when
-    // every remaining entry is hidden the refusal would leak that
-    // something invisible exists, so the remnants go with the
-    // directory: a session's mutation may destroy what it cannot see,
-    // never learn of it. Any visible child keeps the refusal, and a
-    // backend with no unlink keeps it too, having no way to take the
-    // remnants. The removal is the shared removeRemnants walk over the
-    // sibling slots, which revalidates visibility before every
-    // deletion and keeps the mode guard on each one; any cascade
-    // failure answers with the backend's original refusal, exactly as
-    // the ops plane does.
-    const rawReaddir = ops.readdir
-    const rawStat = ops.stat
-    const rawUnlink = ops.unlink
-    // Captured at wrap time, which holds the invocation's fact because
-    // the factory applies this guard per invocation, after stamping it.
-    const children = ops.globChildren
-    guarded.rmdir = async (accessor, path, index) => {
-      refuseHidden(path, false)
-      try {
-        await rd(accessor, path, index)
-        return
-      } catch (exc) {
-        const code = (exc as { code?: string }).code
-        const vis = sessionVisibility()
-        if (
-          rawUnlink === undefined ||
-          (code !== 'ENOTEMPTY' && code !== 'EEXIST') ||
-          !hiddenUnder(vis, path.virtual)
-        ) {
-          throw exc
-        }
-        // The fallback listing folds into the refusal exactly as the
-        // cascade below does: a backend that cannot list the remnants
-        // keeps the original refusal, whatever error type it failed
-        // with, because a raw backend failure here would reveal
-        // exactly what the refusal exists to hide.
-        let entries: string[]
-        try {
-          entries = await rawReaddir(accessor, path, index)
-        } catch {
-          throw exc
-        }
-        // The namespace children join the emptiness judgment, never
-        // the walk: a visible mounted child keeps the refusal exactly
-        // as the ops plane's merged listing does, while the cascade
-        // itself only ever removes what the backend holds.
-        const merged = children === undefined ? entries : [...entries, ...children(path.virtual)]
-        const visible = (virtual: string): boolean => pathVisible(vis, virtual)
-        if (entries.length === 0 || visibleBelow(path.virtual, merged, visible)) {
-          throw exc
-        }
-        const channel: RemnantChannel = {
-          readdir: (at) => rawReaddir(accessor, at, index),
-          stat: (at) => rawStat(accessor, at, index),
-          unlink: async (at) => {
-            checkCommandPaths([at], 'unlink', false)
-            await rawUnlink(accessor, at)
-          },
-          rmdir: async (at) => {
-            checkCommandPaths([at], 'rmdir', false)
-            await rd(accessor, at, index)
-          },
-        }
-        try {
-          await removeRemnants(channel, visible, path)
-        } catch {
-          throw exc
-        }
-      }
-    }
-  }
-  const rn = ops.rename
-  if (rn !== undefined) {
-    // Only a directory source can carry hidden content into view, so a
-    // rename whose source stats as a file passes the reveal check.
-    guarded.rename = async (accessor, src, dst) => {
-      refuseHidden(src, false)
-      refuseHidden(dst, true)
-      if (moveWouldReveal(src, dst) && (await pairSrcIsDir(ops.stat, accessor, src))) {
-        throw eacces(src.virtual)
-      }
-      return rn(accessor, src, dst)
     }
   }
   const dc = ops.dirCopy
@@ -841,6 +791,21 @@ const MUTATIONS = {
 
 type MutationSlot = keyof typeof MUTATIONS
 const mutationSlots = Object.keys(MUTATIONS) as MutationSlot[]
+
+// The write slots `dispatchedIo` sends to the dispatcher, which judges them
+// itself.
+const DISPATCHED_WRITES: ReadonlySet<string> = new Set([
+  'write',
+  'append',
+  'pwrite',
+  'create',
+  'mkdir',
+  'unlink',
+  'rmdir',
+  'setAttrs',
+  'rename',
+  'truncate',
+])
 type GuardedSlot =
   | 'du'
   | 'search'
@@ -861,77 +826,6 @@ function pathsOf(args: readonly unknown[]): PathSpec[] {
   return args
     .flatMap<unknown>((arg): readonly unknown[] => (Array.isArray(arg) ? arg : [arg]))
     .filter((arg): arg is PathSpec => arg instanceof PathSpec)
-}
-
-/**
- * Answer a mkdir on a read-only region the way the filesystem would. A
- * read-only filesystem refuses only a create it would really make, so the
- * answer is whatever the create runs into first, walking the components from
- * the mount root: a missing one is refused with EROFS, a file in the chain is
- * ENOTDIR, an existing leaf is EEXIST, and `mkdir -p` of a directory that is
- * already there succeeds. The blamed path is the first component that would
- * have been made, as GNU's `mkdir -p` names it (`'/ro/n'` for `/ro/n/m`).
- * Pinned against GNU coreutils 9.7 on a read-only tmpfs. Mirrors Python's
- * `_mkdir_on_read_only`.
- */
-async function mkdirOnReadOnly<A extends Accessor>(
-  stat: StatOp<A>,
-  gate: readonly [string, MountMode],
-  accessor: A,
-  path: PathSpec,
-  parents: boolean,
-): Promise<void> {
-  const [prefix, mode] = gate
-  const base = rstripSlash(prefix)
-  const leaf = rstripSlash(path.virtual) || '/'
-  if (leaf !== base && !leaf.startsWith(base + '/')) {
-    throw erofs(path.virtual, `mount ${prefix} is read-only`)
-  }
-  // Each component's backend key keeps the leaf's own key prefix, recovered
-  // from its (virtual, vfsPath) pair as PathSpec.dir does.
-  const cut = leaf.length - stripSlash(path.vfsPath).length
-  const parts = leaf
-    .slice(base.length)
-    .split('/')
-    .filter((part) => part !== '')
-  const chain = parts.map((_, index) => {
-    const virtual = `${base}/${parts.slice(0, index + 1).join('/')}`
-    return PathSpec.fromStrPath(virtual, stripSlash(virtual.slice(cut)))
-  })
-  for (const [index, component] of chain.entries()) {
-    let row: FileStat
-    try {
-      row = await stat(accessor, component)
-    } catch (err) {
-      if (!isEnoent(err)) throw err
-      if (!parents && index < chain.length - 1) throw enoent(path.virtual)
-      const blame =
-        chain
-          .slice(index)
-          .find((spec) => effectivePathMode(spec.virtual, prefix, mode) === MountMode.READ) ?? path
-      throw erofs(blame.virtual, `mount ${prefix} is read-only`)
-    }
-    if (row.type !== FileType.DIRECTORY) {
-      if (index === chain.length - 1) throw eexist(path.virtual)
-      throw enotdir(parents ? component.virtual : path.virtual)
-    }
-  }
-  if (!parents) throw eexist(path.virtual)
-}
-
-/**
- * mkdir on a writable region: a taken name is refused before the create, as
- * mkdir(2) does (`refuseTaken`). Mirrors Python's `_mkdir_on_writable`.
- */
-async function mkdirOnWritable<A extends Accessor>(
-  mkdir: MkdirOp<A>,
-  stat: StatOp<A>,
-  accessor: A,
-  path: PathSpec,
-  parents: boolean,
-): Promise<void> {
-  await refuseTaken((p) => stat(accessor, p), path, parents)
-  await mkdir(accessor, path, parents)
 }
 
 /** Raise what the first unwalkable operand's dots answer; `creates` when
@@ -1133,16 +1027,6 @@ export function withCommandGuards<A extends Accessor>(
 ): CommandIO<A> {
   const probe = prefix === undefined ? null : walkProbeFor(prefix)
   const prepared = namespaceOps(ops)
-  const mk = ops.mkdir
-  if (mk !== undefined) {
-    prepared.mkdir = (accessor, path, parents) => {
-      const gate = mountGateFor(path.virtual)
-      if (gate !== null && effectivePathMode(path.virtual, gate[0], gate[1]) === MountMode.READ) {
-        return mkdirOnReadOnly(ops.stat, gate, accessor, path, parents ?? false)
-      }
-      return mkdirOnWritable(mk, ops.stat, accessor, path, parents ?? false)
-    }
-  }
   const guarded = { ...prepared }
   for (const slot of [
     'readBytes',
@@ -1155,9 +1039,12 @@ export function withCommandGuards<A extends Accessor>(
   ] as const) {
     const fn = prepared[slot]
     if (fn === undefined) continue
-    // Hides and the path rule on a content read are the dispatcher's.
+    // Hides and the path rule on a content read or a write are the
+    // dispatcher's.
     const call =
-      slot === 'readBytes' || slot === 'readRange' ? fn : commandCall(fn, slot, slot !== 'mkdir')
+      slot === 'readBytes' || slot === 'readRange' || DISPATCHED_WRITES.has(slot)
+        ? fn
+        : commandCall(fn, slot)
     Object.assign(guarded, {
       [slot]: walkedCall(probe, call as (...args: unknown[]) => Promise<unknown>, slot === 'mkdir'),
     })
@@ -1282,7 +1169,7 @@ export function withPolicyGuard<A extends Accessor = Accessor>(
   const guarded: CommandIO<A> = { ...ops }
   for (const slot of ['readdir', ...mutationSlots] as const) {
     const fn = ops[slot]
-    if (fn !== undefined) {
+    if (fn !== undefined && !DISPATCHED_WRITES.has(slot)) {
       // All slots in this set return promises.
       Object.assign(guarded, { [slot]: policyCall(scope, fn, slot) })
     }

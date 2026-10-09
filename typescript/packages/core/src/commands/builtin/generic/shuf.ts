@@ -438,7 +438,7 @@ export async function shufGeneric(
         }),
       ]
     }
-    return [null, new IOResult({ writes: { [output.mountPath]: result } })]
+    return [null, new IOResult()]
   }
   return [result, new IOResult()]
 }

@@ -18,7 +18,8 @@ import { createServer } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../../types.ts'
-import { materialize, type IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { GENERAL_CURL } from './curl.ts'
 import { GENERAL_WGET } from './wget.ts'
@@ -51,14 +52,22 @@ async function runCurl(
 async function runWget(
   url: string,
   flags: Record<string, string | boolean | number | string[]> = {},
-): Promise<{ out: Uint8Array; io: IOResult }> {
+): Promise<{ out: Uint8Array; io: IOResult; writes: Uint8Array[] }> {
   const vfs = new RAMVFS()
   const cmd = GENERAL_WGET[0]
   if (cmd === undefined) throw new Error('wget not registered')
-  const result = await invoke(() => cmd.fn(vfs.accessor, [] as PathSpec[], [url], opts({ flags })))
+  // What each write sent through the dispatcher.
+  const writes: Uint8Array[] = []
+  const dispatch: DispatchFn = (_op, _path, args) => {
+    writes.push(args?.[0] as Uint8Array)
+    return Promise.resolve([null, new IOResult()])
+  }
+  const result = await invoke(() =>
+    cmd.fn(vfs.accessor, [] as PathSpec[], [url], { ...opts({ flags }), dispatch }),
+  )
   if (result === null) throw new Error('null result')
   const [out, io] = result
-  return { out: await materialize(out), io }
+  return { out: await materialize(out), io, writes }
 }
 
 describe.concurrent('net over local HTTP', () => {
@@ -111,11 +120,10 @@ describe.concurrent('net over local HTTP', () => {
   })
 
   it('wget downloads the response body', async () => {
-    const { io } = await runWget(base)
+    const { io, writes } = await runWget(base)
     expect(io.exitCode).toBe(0)
-    const writes = Object.values(io.writes)
     expect(writes).toHaveLength(1)
-    expect(DEC.decode(await materialize(writes[0]))).toBe(HTML)
+    expect(DEC.decode(writes[0])).toBe(HTML)
   })
 
   it('curl -X POST sends form data', async () => {

@@ -447,8 +447,9 @@ describe('a nested line', () => {
     // there could label bytes it never described.
     const ws = await cachingRamWorkspace()
     open.push(ws)
-    // Seeded via the ops API (no copy kept), so both cats read the backend.
+    // Seeded with no copy kept, so the first cat reads the backend.
     await ws.vfs.write('/r/f', new TextEncoder().encode('a\n'))
+    await ws.cache.remove('/r/f')
     const captured = captureMarks(ws)
     const line = 'cat /r/f; echo b | tee /r/g; x=$(cat /r/f; echo c | tee /r/h)'
     expect((await ws.shell(line)).exitCode).toBe(0)

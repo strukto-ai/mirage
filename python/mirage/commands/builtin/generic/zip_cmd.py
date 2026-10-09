@@ -381,10 +381,7 @@ async def zip_cmd(
             ).encode(),
         )
     stdout = ("\n".join(output_lines) + "\n").encode() if not q else None
-    return stdout, IOResult(
-        writes={archive_path.mount_path: archive},
-        stderr=_stderr(plan.warnings, q),
-    )
+    return stdout, IOResult(stderr=_stderr(plan.warnings, q))
 
 
 __all__ = ["plan_zip", "zip_cmd"]

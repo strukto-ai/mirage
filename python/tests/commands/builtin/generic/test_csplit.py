@@ -62,14 +62,13 @@ async def test_stdin_outputs_are_named_on_the_executing_mount(
     cwd: str, prefix: str | PathSpec, named: list[str]
 ):
     # With no -f, `xx` in the working directory names the outputs (GNU);
-    # a -f path names them by its virtual path. The writes keys stay
-    # mount-relative.
+    # a -f path names them by its virtual path.
     specs: list[PathSpec] = []
 
     async def write_bytes(path: PathSpec, data: bytes) -> None:
         specs.append(path)
 
-    _, io = await csplit_generic(
+    await csplit_generic(
         [],
         ["2"],
         read_bytes=_no_read,
@@ -81,7 +80,6 @@ async def test_stdin_outputs_are_named_on_the_executing_mount(
         cwd=cwd,
     )
     assert [p.virtual for p in specs] == named
-    assert list(io.writes) == [name[len("/data") :] for name in named]
 
 
 @pytest.mark.asyncio

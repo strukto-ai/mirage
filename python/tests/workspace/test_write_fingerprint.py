@@ -151,6 +151,56 @@ def test_always_reads_a_written_path_from_cache():
     )
 
 
+def test_a_write_outside_a_line_keeps_its_bytes_with_the_backend_token():
+    # The dispatcher keeps a whole write's bytes for every caller, so a
+    # `fresh` mount serves them back after one probe, without a download.
+    store: dict[str, bytes] = {}
+    with _workspace(store, ReadSpec(policy=ReadPolicy.FRESH)) as (ws, client):
+
+        async def run() -> tuple[bytes, bool]:
+            try:
+                await ws.vfs.write("/s3/x.txt", b"hello\n")
+                client.calls.clear()
+                served = await ws.vfs.read("/s3/x.txt")
+                return served, await ws.cache.is_fresh(
+                    "/s3/x.txt", _etag(b"hello\n")
+                )
+            finally:
+                await ws.close()
+
+        served, tokened = asyncio.run(run())
+
+    assert served == b"hello\n"
+    assert tokened
+    assert client.calls["get_object"] == 0
+
+
+def test_a_write_after_a_guarded_cp_keeps_its_own_bytes():
+    # Under a hide `cp` reads and writes entry by entry at the dispatcher;
+    # a later write keeps its own bytes and token, which the old read's
+    # must not replace when the command's result is applied.
+    store = {"a": b"old"}
+    with _workspace(store, ReadSpec(policy=ReadPolicy.BOUNDED)) as (ws, _):
+
+        async def run() -> tuple[int, bytes | None]:
+            try:
+                ws.create_session(
+                    "agent", profile={"paths": {"hide": ["*.secret"]}}
+                )
+                io = await ws.shell(
+                    "cp /s3/a /s3/b; printf new | tee /s3/a > /dev/null",
+                    session_id="agent",
+                )
+                return io.exit_code, await ws.cache.get("/s3/a")
+            finally:
+                await ws.close()
+
+        code, cached = asyncio.run(run())
+
+    assert code == 0
+    assert cached == b"new"
+
+
 def test_read_then_write_on_one_line_keeps_the_read_token():
     """`IOResult.merge` unions a line's reads and writes, and apply_io
     caches the read's bytes. If those bytes were stamped with the write's
@@ -407,3 +457,99 @@ def test_concurrent_writers_serve_what_the_backend_holds(line):
     )
     assert served == stored
     assert again == stored
+
+
+def _config(bucket: str) -> S3Config:
+    return S3Config(
+        bucket=bucket,
+        region="us-east-1",
+        aws_access_key_id="fake",
+        aws_secret_access_key="fake",
+    )
+
+
+def test_a_write_drops_what_another_mount_of_the_store_holds():
+    # One store mounted at two prefixes holds one file under two names,
+    # so the second write leaves no copy of the first under either.
+    session = MultiBucketSession({"test-bucket": {}}, etag_suffix=SUFFIX)
+    with patch_s3_session(session):
+        vfs = S3VFS(_config("test-bucket"))
+        ws = Workspace(
+            {"/a": (vfs, MountMode.WRITE), "/b": (vfs, MountMode.WRITE)},
+            mode=MountMode.WRITE,
+            read=ReadSpec(policy=ReadPolicy.BOUNDED),
+        )
+
+        async def run() -> bytes:
+            try:
+                await ws.vfs.write("/a/f", b"one")
+                await ws.vfs.write("/b/f", b"two")
+                return await ws.vfs.read("/a/f")
+            finally:
+                await ws.close()
+
+        assert asyncio.run(run()) == b"two"
+
+
+def test_a_write_keeps_nothing_for_a_name_a_new_mount_took():
+    # A mount added and readied (its cache cleared) while the write runs
+    # owns the name by the time the bytes would be kept, so the next read
+    # reaches the new mount.
+    session = MultiBucketSession(
+        {"test-bucket": {}, "child-bucket": {"f": b"child"}},
+        etag_suffix=SUFFIX,
+    )
+    with patch_s3_session(session):
+        ws = Workspace(
+            {"/s3": (S3VFS(_config("test-bucket")), MountMode.WRITE)},
+            mode=MountMode.WRITE,
+            read=ReadSpec(policy=ReadPolicy.BOUNDED),
+        )
+
+        async def mount_child() -> None:
+            child = ws.add_mount(
+                "/s3/c", S3VFS(_config("child-bucket")), MountMode.WRITE
+            )
+            await child.ensure_ready()
+
+        session._client.before("put_object", mount_child)
+
+        async def run() -> bytes:
+            try:
+                await ws.vfs.write("/s3/c/f", b"parent")
+                return await ws.vfs.read("/s3/c/f")
+            finally:
+                await ws.close()
+
+        assert asyncio.run(run()) == b"child"
+
+
+def test_a_write_leaves_a_name_another_mount_holds():
+    # /b/c is its own mount, so a write to /a/c/f through the store at /a
+    # and /b is not the file at /b/c/f and leaves its saved time alone.
+    session = MultiBucketSession(
+        {"test-bucket": {}, "child-bucket": {"f": b"x"}}, etag_suffix=SUFFIX
+    )
+    with patch_s3_session(session):
+        vfs = S3VFS(_config("test-bucket"))
+        ws = Workspace(
+            {
+                "/a": (vfs, MountMode.WRITE),
+                "/b": (vfs, MountMode.WRITE),
+                "/b/c": (S3VFS(_config("child-bucket")), MountMode.WRITE),
+            },
+            mode=MountMode.WRITE,
+            read=ReadSpec(policy=ReadPolicy.BOUNDED),
+        )
+
+        async def run() -> bytes:
+            try:
+                io = await ws.shell("touch -d '2001-02-03 04:05:06' /b/c/f")
+                await io.materialize_stdout()
+                await ws.vfs.write("/a/c/f", b"y")
+                io = await ws.shell("stat -c %y /b/c/f")
+                return await io.materialize_stdout()
+            finally:
+                await ws.close()
+
+        assert asyncio.run(run()).startswith(b"2001-02-03 04:05:06")

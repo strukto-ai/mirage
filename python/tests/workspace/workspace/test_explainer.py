@@ -54,6 +54,16 @@ async def test_a_dry_run_leaves_the_drift_checks_pending(ws):
     assert ws._drift.pending
 
 
+@pytest.mark.asyncio
+async def test_a_mkdir_on_a_read_only_mount_explains_the_mode():
+    # The run answers from a name lookup; a dry run looks nothing up and
+    # explains the mode's refusal.
+    with Workspace({"/ro": (RAMVFS(), MountMode.READ)}) as ws:
+        ws.create_session("agent")
+        said = await Session(ws, "agent").explain.vfs.mkdir("/ro/d")
+    assert (said.outcome, said.error) == (Outcome.DENY, "EROFS")
+
+
 class _Flag(Policy):
     """Refuses writes while ``/data/flag`` reads ``closed``."""
 

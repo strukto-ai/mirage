@@ -95,6 +95,7 @@ async function runCmd(
 ): Promise<CmdResult> {
   const cmd = reg[0]
   if (cmd === undefined) throw new Error('not registered')
+  const before = new Map(vfs.store.files)
   const result = await invoke(() =>
     cmd.fn(vfs.accessor, paths, texts, {
       stdin: null,
@@ -108,10 +109,7 @@ async function runCmd(
   if (result === null) {
     return { out: new Uint8Array(), writes: {}, exitCode: 0, stderr: new Uint8Array() }
   }
-  const [output, io] = result as [
-    unknown,
-    { writes: Record<string, Uint8Array>; exitCode: number; stderr: Uint8Array | null },
-  ]
+  const [output, io] = result as [unknown, { exitCode: number; stderr: Uint8Array | null }]
   let outBytes: Uint8Array = new Uint8Array()
   if (output !== null) {
     outBytes =
@@ -119,7 +117,10 @@ async function runCmd(
   }
   return {
     out: outBytes,
-    writes: io.writes,
+    // The files the command left with other bytes than it found.
+    writes: Object.fromEntries(
+      [...vfs.store.files].filter(([path, data]) => before.get(path) !== data),
+    ),
     exitCode: io.exitCode,
     stderr: io.stderr ?? new Uint8Array(),
   }

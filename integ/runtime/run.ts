@@ -671,6 +671,8 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
     }
     await ws.dispatch('write', `${prefix}/${name}`, [ENC.encode(content)])
   }
+  // A seed is a file the backend already holds, not one the case wrote.
+  await ws.cache.clear()
   return ws
 }
 

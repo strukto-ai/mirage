@@ -369,23 +369,6 @@ async def prepare_mv(
     return await _prepare_pair(namespace, dispatch, items, paths, fl)
 
 
-async def settle_moves(
-    namespace: Namespace, moves: list[tuple[str, str]]
-) -> None:
-    """Re-anchor only the renames the generic actually completed.
-
-    Args:
-        namespace (Namespace): Addressing authority holding node metadata.
-        moves (list[tuple[str, str]]): Completed source/destination pairs,
-            including backups, in execution order.
-    """
-    for src, landing in moves:
-        await namespace.unlink(landing)
-        await namespace.purge_under(landing)
-        await namespace.rename(src, landing)
-        await namespace.rename_under(src, landing)
-
-
 def _landing_key(path: str) -> str:
     return path.rstrip("/") or "/"
 

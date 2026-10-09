@@ -101,7 +101,6 @@ function copyResult(io: IOResult, outcome: IOResult): void {
   Object.assign(io.reads, outcome.reads)
   Object.assign(io.writes, outcome.writes)
   io.cache.splice(0, io.cache.length, ...outcome.cache)
-  io.renames.splice(0, io.renames.length, ...outcome.renames)
   io.matchedRuns = outcome.matchedRuns
   io.sizedRuns = outcome.sizedRuns
   io.countedRuns = outcome.countedRuns

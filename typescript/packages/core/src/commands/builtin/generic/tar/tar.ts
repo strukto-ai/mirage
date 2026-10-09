@@ -444,14 +444,7 @@ async function writeArchive(
   }
   const stderr = stderrOf(notices)
   const stdout = verbose && names.length > 0 ? ENC.encode(`${names.join('\n')}\n`) : null
-  return [
-    stdout,
-    new IOResult({
-      writes: { [archivePath.virtual]: archive },
-      exitCode,
-      ...(stderr !== null ? { stderr } : {}),
-    }),
-  ]
+  return [stdout, new IOResult({ exitCode, ...(stderr !== null ? { stderr } : {}) })]
 }
 
 function longMember(entry: TarEntry, name: string): string {
@@ -591,7 +584,6 @@ export async function tarGeneric(
     const raw = await readArchiveBytes(archiveStream, archiveSpec, deps.isDir, compression)
     if (raw instanceof IOResult) return [null, raw]
     const { entries, failure, notices, cut } = await readArchive(raw, compression)
-    const writes: Record<string, Uint8Array> = {}
     const listed = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
     const { keep, misses } = selectedMembers(listed, selectors)
     if (keep.size > 0) {
@@ -670,10 +662,6 @@ export async function tarGeneric(
         failed = true
         continue
       }
-      // Relay writes land on whichever mount owns each path and
-      // invalidate through the dispatcher; keying them here would have
-      // the runner prefix them onto this mount.
-      if (!relay) writes[outPath] = entry.data
       if (verbose) verboseLines.push(entry.name)
     }
     if (toStdout) {
@@ -712,10 +700,10 @@ export async function tarGeneric(
     const stdout =
       verbose && verboseLines.length > 0 ? ENC.encode(verboseLines.join('\n') + '\n') : null
     if (cut !== null) {
-      return [stdout, new IOResult({ writes, exitCode: 2, stderr: cutShort(failure, notices) })]
+      return [stdout, new IOResult({ exitCode: 2, stderr: cutShort(failure, notices) })]
     }
     if (failure !== null) {
-      return [stdout, new IOResult({ writes, exitCode: 2, stderr: childFailure(failure, notices) })]
+      return [stdout, new IOResult({ exitCode: 2, stderr: childFailure(failure, notices) })]
     }
     const errLines = [
       ...notices,
@@ -725,7 +713,6 @@ export async function tarGeneric(
     return [
       stdout,
       new IOResult({
-        writes,
         exitCode: misses.length > 0 || failed ? 2 : 0,
         ...(stderr !== null ? { stderr } : {}),
       }),

@@ -71,11 +71,13 @@ def test_gzip_roundtrip_stdin():
 def test_gzip_file():
     ws = _ws(**{"/f.txt": b"test content"})
     _, io_result = _run_raw(ws, "gzip /data/f.txt")
-    assert "/data/f.txt.gz" in io_result.writes
+    assert io_result.exit_code == 0
+    assert asyncio.run(ws.vfs.exists("/data/f.txt.gz"))
 
 
 def test_gunzip_file():
     compressed = gzip_lib.compress(b"original data")
     ws = _ws(**{"/f.txt.gz": compressed})
     _, io_result = _run_raw(ws, "gunzip /data/f.txt.gz")
-    assert "/data/f.txt" in io_result.writes
+    assert io_result.exit_code == 0
+    assert asyncio.run(ws.vfs.read("/data/f.txt")) == b"original data"

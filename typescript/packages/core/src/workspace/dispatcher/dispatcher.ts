@@ -14,7 +14,7 @@
 
 import type { OpKwargs } from '../../view/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { applyIo } from '../../cache/file/io.ts'
+import { applyIo, setCached } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { CacheManager } from '../../cache/manager.ts'
@@ -30,6 +30,8 @@ import {
   eisdir,
   enotdir,
   enotempty,
+  erofs,
+  isEnoent,
   isEnotdir,
   isMissError,
   isMissingOp,
@@ -59,7 +61,7 @@ import {
   startOp,
 } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
-import type { OpRecord } from '../../observe/record.ts'
+import { OpRecord, WRITE_FINGERPRINT_OPS } from '../../observe/record.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -99,6 +101,7 @@ import {
   XATTR_OPS,
 } from './constants.ts'
 import {
+  effectivePathMode,
   explaining,
   getCurrentSession,
   hiddenRefusal,
@@ -184,6 +187,57 @@ function factsOf(mount: MountEntry | null): CacheFacts {
     ttl: mount.read.ttl,
     keepsVersions: mount.write === WritePolicy.CONDITIONAL,
   }
+}
+
+/**
+ * Answer a mkdir on a read-only region the way the filesystem would. A
+ * read-only filesystem refuses only a create it would really make, so the
+ * answer is whatever the create runs into first, walking the components from
+ * the mount root: a missing one is refused with EROFS, a file in the chain is
+ * ENOTDIR, an existing leaf is EEXIST, and `mkdir -p` of a directory that is
+ * already there succeeds. The blamed path is the first component that would
+ * have been made, as GNU's `mkdir -p` names it (`'/ro/n'` for `/ro/n/m`).
+ * Pinned against GNU coreutils 9.7 on a read-only tmpfs. Mirrors Python's
+ * `_mkdir_on_read_only`.
+ */
+async function mkdirOnReadOnly(
+  stat: (path: PathSpec) => Promise<FileStat>,
+  prefix: string,
+  mode: MountMode,
+  path: PathSpec,
+  parents: boolean,
+): Promise<void> {
+  const base = rstripSlash(prefix)
+  const leaf = rstripSlash(path.virtual) || '/'
+  if (leaf !== base && !leaf.startsWith(base + '/')) {
+    throw erofs(path.virtual, `mount ${prefix} is read-only`)
+  }
+  const parts = leaf
+    .slice(base.length)
+    .split('/')
+    .filter((part) => part !== '')
+  const chain = parts.map((_, index) =>
+    PathSpec.fromStrPath(`${base}/${parts.slice(0, index + 1).join('/')}`),
+  )
+  for (const [index, component] of chain.entries()) {
+    let row: FileStat
+    try {
+      row = await stat(component)
+    } catch (err) {
+      if (!isEnoent(err)) throw err
+      if (!parents && index < chain.length - 1) throw enoent(path.virtual)
+      const blame =
+        chain
+          .slice(index)
+          .find((spec) => effectivePathMode(spec.virtual, prefix, mode) === MountMode.READ) ?? path
+      throw erofs(blame.virtual, `mount ${prefix} is read-only`)
+    }
+    if (row.type !== FileType.DIRECTORY) {
+      if (index === chain.length - 1) throw eexist(path.virtual)
+      throw enotdir(parents ? component.virtual : path.virtual)
+    }
+  }
+  if (!parents) throw eexist(path.virtual)
 }
 
 /** Ask a command's gate once about each distinct path an op reaches. */
@@ -457,10 +511,31 @@ export class Dispatcher {
     }
     if (name === 'statfs') return [await this.statfs(call.path, issuer), new IOResult()]
     const owner = this.namespace.tryMountFor(call.path.virtual)
-    const boundary = this.boundary(owner)
+    // mkdir(2) looks its name up first, so on a read-only region that lookup
+    // answers for the mode, after every other policy has spoken. A dry run
+    // never looks, so it explains the mode's refusal.
+    const looksUp =
+      owner !== null &&
+      name === 'mkdir' &&
+      explaining() === null &&
+      effectivePathMode(call.path.virtual, owner.prefix, owner.mode) === MountMode.READ
+    const boundary = looksUp
+      ? new Boundary(this.policies, owner.prefix, undefined, sessionId(), this.decisions)
+      : this.boundary(owner)
     if (owner !== null) {
       await this.refuseCrossMount(call, owner)
       await this.admit(call, owner, boundary)
+      if (looksUp) {
+        await mkdirOnReadOnly(
+          dispatchStat(this.dispatch),
+          owner.prefix,
+          owner.mode,
+          call.path,
+          call.kwargs?.parents === true,
+        )
+        await boundary.complete(name, call.path, call.write, null)
+        return [null, new IOResult()]
+      }
     }
     let resolved: [BaseVFS, PathSpec, MountMode]
     try {
@@ -1012,15 +1087,25 @@ export class Dispatcher {
         const keys = [...new Set([p.virtual, ...(renameDst !== null ? [renameDst.virtual] : [])])]
           .map((virtual) => `${String(this.storeId(vfs))}:${mountKey(virtual, prefix)}`)
           .sort(compareCodePoints)
+        let mine: OpRecord[] = []
+        const own = (onCall: (storeCall: Promise<unknown>) => void): Promise<unknown> =>
+          commandRecords((records) => {
+            mine = records
+            return run(fullKwargs, onCall)
+          })
         result = await this.holdWrite(
           keys,
           opTimeout,
           name,
           `${name} ${p.virtual}`,
-          (onCall) => run(fullKwargs, onCall),
+          (onCall) =>
+            activeRecords() === undefined
+              ? runWithRecording(() => own(onCall)).then(([value]) => value)
+              : own(onCall),
           async (value) => {
             served(report, value)
             await this.settleWrite(name, p, renameDst, fullArgs, operands(name, call.args, kwargs))
+            await this.keepWritten(call, mount, fullArgs, mine)
           },
         )
       } else {
@@ -1029,7 +1114,7 @@ export class Dispatcher {
     } catch (err) {
       const code = (err as { code?: string }).code
       if (name === 'rmdir' && (code === 'ENOTEMPTY' || code === 'EEXIST')) {
-        await this.rmdirRemnants(vfs, scope, mountPrefix, mode, err, call.issuer)
+        await this.rmdirRemnants(vfs, scope, mountPrefix, mode, err, call.ruleGate, call.issuer)
         result = null
       } else {
         const fallback =
@@ -1047,6 +1132,47 @@ export class Dispatcher {
     // erase a transfer the backend already made.
     served(report, result)
     return [result, renameDst, fullArgs]
+  }
+
+  /**
+   * Keep a whole write's bytes for the next read, under its name's hold.
+   *
+   * The write's own record labels them with the token the backend
+   * answered, so a `fresh` mount does not refetch what it just wrote; a
+   * record moving another length than was sent keeps nothing, and so does a
+   * name another mount took while the write ran, read under the cache's lock.
+   * The bytes kept are a copy, so a caller reusing its buffer cannot change
+   * them. Mirrors Python's Dispatcher._keep_written.
+   */
+  private async keepWritten(
+    call: Call,
+    mount: MountEntry,
+    args: readonly unknown[],
+    records: readonly OpRecord[],
+  ): Promise<void> {
+    const sent = args[0]
+    if (call.name !== 'write' || !(sent instanceof Uint8Array) || !factsOf(mount).cacheable) return
+    const data = sent.slice()
+    // Copies, so the line's records do not hold the written bytes.
+    const claims = records.map((rec) =>
+      WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === call.path.virtual
+        ? new OpRecord({
+            op: rec.op,
+            path: rec.path,
+            source: rec.source,
+            bytes: rec.bytes,
+            timestamp: rec.timestamp,
+            durationMs: rec.durationMs,
+            fingerprint: rec.fingerprint,
+            revision: rec.revision,
+            mountId: rec.mountId,
+            claimed: data,
+          })
+        : rec,
+    )
+    await setCached(this.cache, call.path.virtual, data, data, claims, (path) =>
+      factsOf(this.namespace.tryMountFor(path) === mount ? mount : null),
+    )
   }
 
   /**
@@ -1182,10 +1308,12 @@ export class Dispatcher {
   ): Promise<void> {
     const opened = appendsNothing(name, args)
     const observed = STAMP_WRITE_OPS.has(name) && !opened ? Date.now() / 1000 : null
+    // rename(2) moves a file without touching its times, which the node
+    // table carries to the new name below.
     await this.invalidateAfterWriteByPath(
       p.virtual,
       observed,
-      !opened,
+      !opened && name !== 'rename',
       name === 'unlink' || name === 'rmdir',
     )
     for (const [, other] of others) await this.invalidateAfterWriteByPath(other.virtual)
@@ -1437,6 +1565,7 @@ export class Dispatcher {
     mountPrefix: string,
     mode: MountMode,
     refusal: unknown,
+    ruleGate: EntryGate | null,
     issuer?: symbol,
   ): Promise<void> {
     const vis = sessionVisibility()
@@ -1466,10 +1595,14 @@ export class Dispatcher {
         return Array.isArray(listed) ? listed.map(String) : []
       },
       stat: (at) => this.fencedCall(vfs, mountPrefix, mode, 'stat', at, issuer),
+      // The command's path rules judge each deletion too: the gate that
+      // admitted the rmdir judged the directory, not what is under it.
       unlink: async (at) => {
+        ruleGate?.check(at.virtual)
         await this.fencedCall(vfs, mountPrefix, mode, 'unlink', at, issuer)
       },
       rmdir: async (at) => {
+        ruleGate?.check(at.virtual)
         await this.fencedCall(vfs, mountPrefix, mode, 'rmdir', at, issuer)
       },
     }
@@ -2068,11 +2201,13 @@ export class Dispatcher {
     const path = rstripSlash(rawPath) || '/'
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return
-    if (times) await this.namespace.clearTimes(path, observed)
-    const manager = this.managerFor(mount)
-    if (removed) await manager.invalidateAfterUnlink(path)
-    else await manager.invalidateAfterWrite(path)
-    await manager.invalidateAncestors(path)
+    for (const [owner, name] of this.aliases(mount, path)) {
+      if (times) await this.namespace.clearTimes(name, observed)
+      const manager = this.managerFor(owner)
+      if (removed) await manager.invalidateAfterUnlink(name)
+      else await manager.invalidateAfterWrite(name)
+      await manager.invalidateAncestors(name)
+    }
   }
 
   /**
@@ -2089,10 +2224,35 @@ export class Dispatcher {
     const to = rstripSlash(dst) || '/'
     const mount = this.namespace.tryMountFor(from)
     if (mount === null) return
-    const manager = this.managerFor(mount)
-    await manager.invalidateSubtree(from)
-    await manager.invalidateSubtree(to)
-    await manager.invalidateAncestors(to)
+    for (const [owner, src] of this.aliases(mount, from)) {
+      await this.managerFor(owner).invalidateSubtree(src)
+    }
+    for (const [owner, dst] of this.aliases(mount, to)) {
+      const manager = this.managerFor(owner)
+      await manager.invalidateSubtree(dst)
+      await manager.invalidateAncestors(dst)
+    }
+  }
+
+  /**
+   * `path` under each mount of its store, its own mount first.
+   *
+   * One store mounted at two prefixes holds one file under two names, so what
+   * a write makes stale under one name is stale under each. A name another
+   * mount holds is that mount's file and is left out. Mirrors Python's
+   * Dispatcher._aliases.
+   */
+  private aliases(mount: MountEntry, path: string): [MountEntry, string][] {
+    const key = mountKey(path, rstripSlash(mount.prefix))
+    const found: [MountEntry, string][] = [[mount, path]]
+    for (const prefix of this.namespace.mountPrefixes()) {
+      const other = this.namespace.mountFor(prefix)
+      if (other === mount || other.vfs !== mount.vfs) continue
+      const base = rstripSlash(other.prefix)
+      const name = key === '' ? base || '/' : `${base}/${key}`
+      if (this.namespace.tryMountFor(name) === other) found.push([other, name])
+    }
+    return found
   }
 
   // The file cache only holds paths for read-caching mounts, mirroring
