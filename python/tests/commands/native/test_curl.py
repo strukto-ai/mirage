@@ -27,6 +27,7 @@ from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.utils.http import HttpResponse
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
+from mirage.io.types import IOResult
 from mirage.types import PathSpec
 
 HEADERS = (("Content-Type", "text/plain"), ("Content-Length", "10"))
@@ -89,7 +90,7 @@ def _run(
 
 def _run_writing(
     *texts: str, **flags
-) -> tuple[bytes, object, dict[str, bytes]]:
+) -> tuple[bytes, IOResult, dict[str, bytes]]:
     """Run curl with a dispatcher that keeps what each write sent."""
     written: dict[str, bytes] = {}
 

@@ -511,21 +511,19 @@ export class Dispatcher {
     }
     if (name === 'statfs') return [await this.statfs(call.path, issuer), new IOResult()]
     const owner = this.namespace.tryMountFor(call.path.virtual)
-    const boundary = this.boundary(owner)
+    // mkdir(2) looks its name up first, so on a read-only region that lookup
+    // answers for the mode, after every other policy has spoken.
+    const looksUp =
+      owner !== null &&
+      name === 'mkdir' &&
+      effectivePathMode(call.path.virtual, owner.prefix, owner.mode) === MountMode.READ
+    const boundary = looksUp
+      ? new Boundary(this.policies, owner.prefix, undefined, sessionId(), this.decisions)
+      : this.boundary(owner)
     if (owner !== null) {
       await this.refuseCrossMount(call, owner)
-      try {
-        await this.admit(call, owner, boundary)
-      } catch (err) {
-        // mkdir(2) looks its name up first, so on a read-only region the
-        // answer is whatever that lookup finds.
-        if (
-          name !== 'mkdir' ||
-          (err as { code?: unknown } | null)?.code !== 'EROFS' ||
-          effectivePathMode(call.path.virtual, owner.prefix, owner.mode) !== MountMode.READ
-        ) {
-          throw err
-        }
+      await this.admit(call, owner, boundary)
+      if (looksUp) {
         await mkdirOnReadOnly(
           dispatchStat(this.dispatch),
           owner.prefix,
@@ -533,6 +531,7 @@ export class Dispatcher {
           call.path,
           call.kwargs?.parents === true,
         )
+        await boundary.complete(name, call.path, call.write, null)
         return [null, new IOResult()]
       }
     }
@@ -1138,12 +1137,9 @@ export class Dispatcher {
    *
    * The write's own record labels them with the token the backend
    * answered, so a `fresh` mount does not refetch what it just wrote; a
-   * record moving another length than was sent keeps nothing. On a mount
-   * whose reads carry a content token, a write that answered none keeps
-   * nothing either: the service may store other bytes than it was sent, as
-   * SharePoint rewrites an uploaded Office file. The bytes kept are a copy,
-   * so a caller reusing its buffer cannot change them. Mirrors Python's
-   * Dispatcher._keep_written.
+   * record moving another length than was sent keeps nothing. The bytes kept
+   * are a copy, so a caller reusing its buffer cannot change them. Mirrors
+   * Python's Dispatcher._keep_written.
    */
   private async keepWritten(
     call: Call,
@@ -1154,14 +1150,10 @@ export class Dispatcher {
     const sent = args[0]
     const facts = factsOf(mount)
     if (call.name !== 'write' || !(sent instanceof Uint8Array) || !facts.cacheable) return
-    const own = records.filter(
-      (rec) => WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === call.path.virtual,
-    )
-    if (mount.vfs.readRevalidatable && !own.at(-1)?.fingerprint) return
     const data = sent.slice()
     // Copies, so the line's records do not hold the written bytes.
     const claims = records.map((rec) =>
-      own.includes(rec)
+      WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === call.path.virtual
         ? new OpRecord({
             op: rec.op,
             path: rec.path,

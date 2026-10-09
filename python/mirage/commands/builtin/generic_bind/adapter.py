@@ -528,21 +528,6 @@ def _dispatched_writes(ops: CommandIO, dispatch: DispatchFn) -> dict[str, Any]:
     }
 
 
-async def _guarded_write(
-    fn: OperationFn, slot: str, *args: Any, **kwargs: Any
-) -> Any:
-    """A write slot no dispatcher judges, guarded at the call, inside the
-    command's scope, where its session, mount mode and policies are bound.
-
-    Args:
-        fn (OperationFn): the raw backend write.
-        slot (str): the slot it fills.
-        *args: the call's positionals.
-        **kwargs: forwarded untouched.
-    """
-    return await _with_operation_guards(fn, slot)(*args, **kwargs)
-
-
 def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
     """Return ``ops`` whose content reads and writes go through the
     dispatcher.
@@ -553,20 +538,22 @@ def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
     answers what the same call through ``ws.vfs`` or FUSE answers. A slot
     the backend does not have stays absent. With no dispatcher (a host
     running a command straight on its mount) the reads stay the backend's
-    and each write slot is guarded here, since the command guards leave
-    the write slots to the dispatcher.
+    and each write is refused as one the backend does not have: the
+    dispatcher is where a write is judged and settled.
 
     Args:
         ops (CommandIO): the mount's table.
         dispatch (DispatchFn | None): the command's dispatcher.
     """
     if dispatch is None:
-        guarded: dict[str, Any] = {
-            slot: functools.partial(_guarded_write, fn, slot)
+        refused: dict[str, Any] = {
+            slot: _with_operation_guards(
+                functools.partial(_refuse_missing, slot), slot
+            )
             for slot in _DISPATCHED_WRITES
-            if (fn := getattr(ops, slot)) is not None
+            if getattr(ops, slot) is not None
         }
-        return replace(ops, **guarded)
+        return replace(ops, **refused)
     reader = functools.partial(_dispatched_bytes, dispatch)
     return replace(
         ops,
@@ -577,16 +564,14 @@ def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
     )
 
 
-async def _refuse_missing(
-    op: Operation, *args: Any, **kwargs: Any
-) -> NoReturn:
+async def _refuse_missing(op: str, *args: Any, **kwargs: Any) -> NoReturn:
     """Refuse a call to an op the backend does not have.
 
     The path it names is the one the op would have written: a copy's
     destination, otherwise its first path.
 
     Args:
-        op (Operation): the missing operation.
+        op (str): the missing operation's slot.
         *args: the call's positionals, the accessor and PathSpecs among
             them.
         **kwargs: ignored.
@@ -595,7 +580,7 @@ async def _refuse_missing(
     access = _MUTATIONS.get(op)
     raise enotsup(
         "backend",
-        op.value,
+        str(op),
         specs[1] if access and access.first_source else specs[0],
     )
 

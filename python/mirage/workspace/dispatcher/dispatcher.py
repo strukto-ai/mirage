@@ -50,7 +50,6 @@ from mirage.errors.fs import (
     no_xattr,
     walk_refusal,
 )
-from mirage.errors.types import ReadOnlyError
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly
 from mirage.observe.context import (
@@ -703,19 +702,17 @@ class Dispatcher:
         if mount is None:
             return await self._answer_unmounted(call), IOResult()
         await self._refuse_cross_mount(call, mount)
-        try:
-            boundary = await self._admit(call, mount)
-        except ReadOnlyError:
-            # mkdir(2) looks its name up first, so on a read-only region
-            # the answer is whatever that lookup finds.
-            if (
-                name != "mkdir"
-                or effective_path_mode(
-                    call.path.virtual, mount.prefix, mount.mode
-                )
-                != MountMode.READ
-            ):
-                raise
+        # mkdir(2) looks its name up first, so on a read-only region that
+        # lookup answers for the mode, after every other policy has spoken.
+        looks_up = (
+            name == "mkdir"
+            and effective_path_mode(
+                call.path.virtual, mount.prefix, mount.mode
+            )
+            == MountMode.READ
+        )
+        boundary = await self._admit(call, mount, judge_mode=not looks_up)
+        if looks_up:
             await _mkdir_on_read_only(
                 self._walk_stat,
                 mount.prefix,
@@ -723,6 +720,7 @@ class Dispatcher:
                 call.path,
                 bool(call.kwargs.get("parents")),
             )
+            await boundary.complete(name, call.path, call.write, None)
             return None, IOResult()
         await mount.ensure_ready()
         served = await self._serve_cached(call, mount, boundary)
@@ -969,7 +967,9 @@ class Dispatcher:
             if self._namespace.try_mount_for(other.virtual) is not mount:
                 raise exdev(other)
 
-    async def _admit(self, call: _Call, mount: MountEntry) -> Boundary:
+    async def _admit(
+        self, call: _Call, mount: MountEntry, judge_mode: bool = True
+    ) -> Boundary:
         """Run admission for an op on a mounted path.
 
         Admission policies fire at the dispatcher, before the warm-cache early
@@ -983,6 +983,8 @@ class Dispatcher:
         Args:
             call (_Call): the followed op.
             mount (MountEntry): the mount serving its path.
+            judge_mode (bool): whether the mount's mode is judged here;
+                False when the op answers for it itself.
 
         Returns:
             Boundary: the boundary the op completes through.
@@ -992,6 +994,8 @@ class Dispatcher:
         # the VFS that defines it.
         call.write = call.write or mount.writes(call.name)
         boundary = self._boundary(mount)
+        if not judge_mode:
+            boundary = dataclasses.replace(boundary, mode=None)
         await boundary.admit(
             call.name,
             call.path,
@@ -1278,10 +1282,7 @@ class Dispatcher:
 
         The write's own record labels them with the token the backend
         answered, so a ``fresh`` mount does not refetch what it just wrote;
-        a record moving another length than was sent keeps nothing. On a
-        mount whose reads carry a content token, a write that answered
-        none keeps nothing either: the service may store other bytes than
-        it was sent, as SharePoint rewrites an uploaded Office file.
+        a record moving another length than was sent keeps nothing.
 
         Args:
             call (_Call): the write that ran.
@@ -1295,17 +1296,6 @@ class Dispatcher:
             or not isinstance(data, bytes)
             or not facts.cacheable
         ):
-            return
-        token = next(
-            (
-                rec.fingerprint
-                for rec in reversed(records)
-                if rec.op in WRITE_FINGERPRINT_OPS
-                and rec.path == call.path.virtual
-            ),
-            None,
-        )
-        if mount.vfs.read_revalidatable and not token:
             return
         # Copies, so the line's records do not hold the written bytes.
         claims = [

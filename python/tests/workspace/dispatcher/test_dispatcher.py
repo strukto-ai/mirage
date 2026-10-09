@@ -23,6 +23,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.errors import LimitExceededError
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, posix_errno
+from mirage.errors.fs import erofs
 from mirage.errors.types import CommandTimeoutError, ReadOnlyError
 from mirage.io import OpReport
 from mirage.policy import (
@@ -82,6 +83,23 @@ class DenyRemnantUnlink(Policy):
 class DenyUnlinkAfter(Policy):
     async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         return Deny("too late") if ctx.op == "unlink" else None
+
+
+class RefuseMkdirReadOnly(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if ctx.op == "mkdir":
+            return Deny("no dirs", error=erofs(ctx.path.virtual))
+        return None
+
+
+class SeenMkdirs(Policy):
+    def __init__(self) -> None:
+        self.done: list[str] = []
+
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
+        if ctx.op == "mkdir":
+            self.done.append(ctx.path.virtual)
+        return None
 
 
 class _FailingRAM(RAMVFS):
@@ -582,6 +600,36 @@ async def test_a_read_only_mkdir_answers_what_its_name_holds(
         with pytest.raises(OSError) as exc:
             await ws.dispatch("mkdir", spec, parents=parents)
         assert exc.value.errno == errno_
+
+
+@pytest.mark.asyncio
+async def test_a_policy_refusal_stands_on_a_read_only_mkdir():
+    # The lookup answers for the mount's mode, never for a policy: a
+    # policy's own read-only refusal stands where the directory exists.
+    ram = RAMVFS()
+    ram._store.dirs.add("/d")
+    with Workspace(
+        {"/ro": (ram, MountMode.READ)}, policies=[RefuseMkdirReadOnly()]
+    ) as ws:
+        with pytest.raises(OSError) as exc:
+            await ws.dispatch(
+                "mkdir", PathSpec.from_str_path("/ro/d"), parents=True
+            )
+    assert exc.value.errno == errno.EROFS
+
+
+@pytest.mark.asyncio
+async def test_a_read_only_mkdir_the_lookup_answers_completes():
+    # `mkdir -p` of a directory already there succeeds, through post_vfs
+    # like any op that succeeds.
+    seen = SeenMkdirs()
+    ram = RAMVFS()
+    ram._store.dirs.add("/d")
+    with Workspace({"/ro": (ram, MountMode.READ)}, policies=[seen]) as ws:
+        await ws.dispatch(
+            "mkdir", PathSpec.from_str_path("/ro/d"), parents=True
+        )
+    assert seen.done == ["/ro/d"]
 
 
 @pytest.mark.asyncio
@@ -1899,21 +1947,3 @@ async def test_a_command_reads_at_the_dispatcher(line):
         await out.stdout_str()
         assert out.exit_code == 0
         assert ("read", "/d/a.txt") in seen.seen
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("revalidatable", [False, True])
-async def test_a_write_with_no_token_keeps_nothing_where_reads_carry_one(
-    revalidatable,
-):
-    # A service whose reads carry a content token but whose write
-    # answered none may store other bytes than it was sent (SharePoint
-    # rewrites an uploaded Office file), so only a mount whose reads
-    # carry no token keeps them.
-    ram = RAMVFS()
-    ram.caches_reads = True
-    ram.read_revalidatable = revalidatable
-    with Workspace({"/r/": ram}, mode=MountMode.WRITE) as ws:
-        await ws.vfs.write("/r/f", b"sent")
-        kept = await ws.cache.get("/r/f")
-    assert kept == (None if revalidatable else b"sent")

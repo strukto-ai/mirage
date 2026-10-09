@@ -8,7 +8,15 @@
         "sharepoint",
         "sharepoint-prefix"
       ],
-      "command": "printf v2 | tee /data/office/deck.pptx > /dev/null && cat /data/office/deck.pptx",
+      "read": "fresh",
+      "scenario": [
+        {
+          "command": "mkdir -p /data/office && printf slide-bytes | tee /data/office/deck.pptx > /dev/null"
+        },
+        {
+          "command": "printf v2 | tee /data/office/deck.pptx > /dev/null && cat /data/office/deck.pptx"
+        }
+      ],
       "expect": {
         "exit": 0,
         "stdout": "v2<odsp-metadata/>",

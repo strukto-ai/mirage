@@ -224,33 +224,26 @@ async def test_a_directory_does_not_route_to_a_filetype_handler():
     assert fired == ["/file.tally"]
 
 
-def test_write_mode_allows_write_cmd():
-    reg = MountRegistry()
-    reg.mount("/rw/", RAMVFS(), MountMode.WRITE)
-    mount = reg.mount_for("/rw/file.txt")
-    scope = PathSpec(
-        vfs_path="rw/newdir",
-        virtual="/rw/newdir",
-        directory="/rw/",
-        resolved=True,
-    )
-    stdout, io = _run(mount.run_command("mkdir", [scope], [], {}))
+@pytest.mark.asyncio
+async def test_write_mode_allows_write_cmd():
+    ws = Workspace({"/rw/": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+    io = await ws.shell("mkdir /rw/newdir")
     assert io.exit_code == 0
 
 
-def test_a_write_with_no_dispatcher_still_answers_the_mount_mode():
-    # A host running a command straight on its mount has no dispatcher to
-    # judge the writes, so the slots are guarded here instead.
+def test_a_write_with_no_dispatcher_is_refused():
+    # The dispatcher is where a write is judged and settled, so a host
+    # running a command straight on its mount, with none, cannot write.
     ram = RAMVFS()
     reg = MountRegistry()
-    reg.mount("/ro/", ram, MountMode.READ)
-    mount = reg.mount_for("/ro/f")
-    scope = PathSpec.from_str_path("/ro/f")
+    reg.mount("/rw/", ram, MountMode.WRITE)
+    mount = reg.mount_for("/rw/f")
+    scope = PathSpec.from_str_path("/rw/f")
     _, io = _run(
         mount.run_command("tee", [scope], [], {}, ExecContext(stdin=b"x"))
     )
     assert io.exit_code == 1
-    assert b"Read-only file system" in _run(io.materialize_stderr())
+    assert b"Operation not supported" in _run(io.materialize_stderr())
     assert "/f" not in ram._store.files
 
 

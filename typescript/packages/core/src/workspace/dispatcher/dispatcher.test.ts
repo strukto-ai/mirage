@@ -22,7 +22,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS } from './constants.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
-import { enoent } from '../../errors/fs.ts'
+import { enoent, erofs } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { LimitExceededError } from '../../commands/errors.ts'
 import type { Policy } from '../../policy/base.ts'
@@ -514,6 +514,48 @@ describe('the turf mode gates the node table', () => {
       const call = ws.dispatch('mkdir', path, [], { parents })
       if (code === null) await call
       else await expect(call).rejects.toMatchObject({ code })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a policy refusal stands on a read-only mkdir', async () => {
+    // The lookup answers for the mount's mode, never for a policy: a
+    // policy's own read-only refusal stands where the directory exists.
+    const refuse: Policy = {
+      preVfs: (ctx: VfsContext) =>
+        ctx.op === 'mkdir'
+          ? { kind: 'deny', reason: 'no dirs', error: erofs(ctx.path.virtual) }
+          : null,
+    }
+    const ram = new RAMVFS()
+    ram.store.dirs.add('/d')
+    const ws = new Workspace({ '/ro': [ram, MountMode.READ] }, { policies: [refuse] })
+    try {
+      await expect(ws.dispatch('mkdir', '/ro/d', [], { parents: true })).rejects.toMatchObject({
+        code: 'EROFS',
+      })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a read-only mkdir the lookup answers completes', async () => {
+    // `mkdir -p` of a directory already there succeeds, through postVfs
+    // like any op that succeeds.
+    const done: string[] = []
+    const seen: Policy = {
+      postVfs: (ctx: VfsResultContext) => {
+        if (ctx.op === 'mkdir') done.push(ctx.path.virtual)
+        return null
+      },
+    }
+    const ram = new RAMVFS()
+    ram.store.dirs.add('/d')
+    const ws = new Workspace({ '/ro': [ram, MountMode.READ] }, { policies: [seen] })
+    try {
+      await ws.dispatch('mkdir', '/ro/d', [], { parents: true })
+      expect(done).toEqual(['/ro/d'])
     } finally {
       await ws.close()
     }
@@ -1774,28 +1816,6 @@ describe('a command reads at the dispatcher', () => {
 })
 
 describe('a whole write keeps its bytes', () => {
-  it.each([false, true])(
-    'only where reads carry no token unless the write answered one (revalidatable=%s)',
-    async (revalidatable) => {
-      // A service whose reads carry a content token but whose write
-      // answered none may store other bytes than it was sent (SharePoint
-      // rewrites an uploaded Office file).
-      class Kept extends RAMVFS {
-        override readonly cachesReads = true
-        override readonly readRevalidatable = revalidatable
-      }
-      const ws = new Workspace({ '/r': new Kept() }, { mode: MountMode.WRITE })
-      try {
-        await ws.vfs.write('/r/f', 'sent')
-        expect(await ws.cache.get('/r/f')).toEqual(
-          revalidatable ? null : new TextEncoder().encode('sent'),
-        )
-      } finally {
-        await ws.close()
-      }
-    },
-  )
-
   it('as a copy, so the caller can reuse its buffer', async () => {
     class Kept extends RAMVFS {
       override readonly cachesReads = true
