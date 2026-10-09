@@ -120,6 +120,78 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     },
   )
 
+  it('sends nothing more for a file whose write the mount refused until the file hears of it', async () => {
+    const files = new Map<string, Uint8Array>(
+      ['bad', 'good'].map((name) => [`/data/${name}`, ENC.encode('old')]),
+    )
+    const ops: string[] = []
+    const dispatch: BridgeDispatchFn = async (op, path, bytes) => {
+      await Promise.resolve()
+      ops.push(`${op} ${path}`)
+      const data = files.get(path)
+      if (data === undefined) throw Object.assign(new Error(path), { code: 'ENOENT' })
+      if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: data.length })
+      if (op === 'read') return data
+      if (op === 'pwrite') {
+        if (path === '/data/bad') throw new Error('denied')
+        files.set(path, bytes ?? new Uint8Array())
+        return
+      }
+      throw new Error(`unexpected op: ${op}`)
+    }
+    const rt = new PyodideRuntime()
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
+    try {
+      const result = await rt.run(
+        runArgs(
+          [
+            'import os',
+            "bad = open('/data/bad', 'r+')",
+            "good = open('/data/good', 'r+')",
+            "bad.write('new'); bad.flush()",
+            "good.write('new'); good.close()",
+            'try:',
+            "    os.rename('/data/bad', '/data/moved')",
+            'except OSError as e:',
+            "    print('rename', e.errno)",
+            "print(os.path.exists('/data/bad'), os.path.exists('/data/moved'))",
+            'bad.close()',
+          ].join('\n'),
+        ),
+      )
+      expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
+      expect(result.exitCode).toBe(0)
+      // The rename hears of the refused write and fails, so neither the
+      // mount nor the guest moves the file.
+      expect(DEC.decode(result.stdout)).toBe('rename 29\nTrue False\n')
+      expect(ops.filter((op) => op.startsWith('rename'))).toEqual([])
+      expect(DEC.decode(files.get('/data/bad'))).toBe('old')
+      expect(DEC.decode(files.get('/data/good'))).toBe('new')
+    } finally {
+      await rt.close()
+    }
+  })
+
+  it('refuses a console that started before its runtime was bound, and starts others', async () => {
+    const rt = new PyodideRuntime()
+    try {
+      expect((await rt.eval('x = 1', { session: 'early' })).exitCode).toBe(0)
+      rt.bind(
+        new WorkspaceBinding(
+          (_op, path) => Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' })),
+          new PrefixResolver(() => ['/data/']),
+        ),
+      )
+      await expect(rt.eval('print(x)', { session: 'early' })).rejects.toThrow(
+        'pyodide console "early" started before this runtime was bound to a workspace, so it cannot reach the mounts; start a new console',
+      )
+      const late = await rt.eval("import os; print(os.path.isdir('/data'))", { session: 'late' })
+      expect(DEC.decode(late.stdout)).toBe('True\n')
+    } finally {
+      await rt.close()
+    }
+  })
+
   it('drops the name of a mount a named console no longer sees', async () => {
     let prefixes = ['/data/', '/secret/']
     const dispatch: BridgeDispatchFn = (_op, path) =>

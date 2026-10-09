@@ -20,7 +20,7 @@ import { classify } from '../../../../errors/index.ts'
 import { isMissingPath } from '../../../../errors/fs.ts'
 import { isUnclassified } from '../../../files.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
-import type { MutationJournal } from './journal.ts'
+import type { MirageMutation, MutationJournal } from './journal.ts'
 import type { PyodideFsSeed } from './seed.ts'
 import { NodeTable } from './nodes.ts'
 import type {
@@ -431,9 +431,9 @@ export class PyodideFs {
    * Send the journal to the mount now, in guest order. An entry the mount
    * refuses fails the call that touched its path with the mount's errno,
    * this call or that file's next one (its close), as a deferred write
-   * error does; that path's later entries go with it, and every other
-   * file's still land. Without a worker there is no mount to send to
-   * yet, and the journal waits for the run's end.
+   * error does; until then nothing more for that path reaches the mount,
+   * and every other file's entries still land. Without a worker there is
+   * no mount to send to yet, and the journal waits for the run's end.
    *
    * Args:
    *   paths: the paths this call touched.
@@ -441,7 +441,9 @@ export class PyodideFs {
   private settle(...paths: string[]): void {
     const sync = this.sync
     if (sync === undefined) return
-    let pending = this.journal.takeMutations()
+    const sendable = (m: MirageMutation): boolean =>
+      !this.deferred.has(m.path) && !(m.kind === 'rename' && this.deferred.has(m.dst))
+    let pending = this.journal.takeMutations().filter(sendable)
     try {
       while (pending.length > 0) {
         const failure = sync.flush(pending)
@@ -450,9 +452,7 @@ export class PyodideFs {
         const failed = pending[rest - 1]
         if (failed === undefined) break
         this.deferred.set(failed.path, failure)
-        pending = pending
-          .slice(rest)
-          .filter((m) => m.path !== failed.path && !(m.kind === 'rename' && m.dst === failed.path))
+        pending = pending.slice(rest).filter(sendable)
       }
     } catch (error) {
       throw errnoError(this.host, this.errno, classify(error) ?? 'EIO')

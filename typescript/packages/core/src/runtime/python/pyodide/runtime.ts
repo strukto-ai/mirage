@@ -467,7 +467,13 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         context,
       )) as EvalResult
     }
-    if (context !== undefined && this.sync === undefined) throw noWorker()
+    // A console that ran before this runtime was bound keeps its names in
+    // an interpreter of its own, which has no bridge to the mounts.
+    if (context !== undefined && this.sync === undefined) {
+      throw new EvalError(
+        `pyodide console ${JSON.stringify(opts.session ?? '')} started before this runtime was bound to a workspace, so it cannot reach the mounts; start a new console`,
+      )
+    }
     if (opts.session !== undefined) {
       const repl = await this.runOneRepl(
         code,
