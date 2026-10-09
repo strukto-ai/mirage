@@ -14,8 +14,10 @@
 
 import json
 import logging
+from typing import Any
 
-from mirage.core.dropbox.constants import CONTENT_HASH, RESULT_HEADER
+from mirage.cache.types import LiveVersion
+from mirage.core.dropbox.constants import CONTENT_HASH, RESULT_HEADER, REV
 from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,20 @@ def token_of(value: JsonValue) -> str | None:
         value (JsonValue): a ``content_hash`` field as the API sent it.
     """
     return value if isinstance(value, str) and value else None
+
+
+def live_of(entry: dict[str, Any] | None) -> LiveVersion | None:
+    """A looked-up entry's live tokens, None when it is no file.
+
+    Args:
+        entry (dict[str, Any] | None): the entry's metadata, or None.
+    """
+    if entry is None or entry.get(".tag") != "file":
+        return None
+    return LiveVersion(
+        content=token_of(entry.get(CONTENT_HASH)),
+        native=token_of(entry.get(REV)),
+    )
 
 
 def result_token(raw: str | None) -> str | None:

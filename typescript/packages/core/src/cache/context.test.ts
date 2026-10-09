@@ -31,8 +31,11 @@ import {
   invalidateAncestors,
   invalidateSubtree,
   listingRefreshed,
+  nativeCondition,
   runWithCacheManager,
+  runWithWriteContext,
 } from './context.ts'
+import type { WriteContext } from './types.ts'
 
 class FakeManager {
   listingTrusted(_folder: string): boolean {
@@ -225,4 +228,32 @@ it.each([['verified'], [null], ['first', 'second']])(
 
 it('capture preserves non-byte results', async () => {
   expect(await captureRead('/m/x', () => Promise.resolve(42))).toEqual([42, []])
+})
+
+describe('nativeCondition', () => {
+  const path = new PathSpec({ virtual: '/box/f', directory: '/box/', vfsPath: '/f' })
+
+  function context(kept: string[]): WriteContext {
+    return {
+      vfs: 'box',
+      conditions: ['put', 'copy', 'delete'],
+      readVersion: () => Promise.resolve('v1'),
+      readVersions: (paths) => Promise.resolve(paths.map(() => 'v1')),
+      drop: () => Promise.resolve(),
+      keep: (_path, version) => {
+        kept.push(version)
+        return Promise.resolve()
+      },
+    }
+  }
+
+  it.each(['put', 'copy', 'delete'] as const)(
+    'names the op it cannot condition: %s',
+    async (kind) => {
+      const call = runWithWriteContext('/box/', context([]), () =>
+        nativeCondition(path, { ifMatch: 's1' }, { content: 's1', native: null }, kind),
+      )
+      await expect(call).rejects.toThrow(`conditional ${kind}`)
+    },
+  )
 })

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BoxTokenManager, boxGetBytes } from './client.ts'
+import { BoxTokenManager, boxGetBytes, conflictOf } from './client.ts'
 import { BOX_TOKEN_URL } from './constants.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 
@@ -156,5 +156,21 @@ describe('boxGetBytes', () => {
     const { out, sent } = await getBytes(200, BODY)
     expect(new TextDecoder().decode(out)).toBe(BODY)
     expect(sent.Range).toBeUndefined()
+  })
+})
+
+describe('conflictOf', () => {
+  it.each([
+    [
+      'list',
+      '{"code":"item_name_in_use","context_info":{"conflicts":[{"type":"folder"}]}}',
+      'folder',
+    ],
+    ['object', '{"context_info":{"conflicts":{"type":"file"}}}', 'file'],
+    ['empty', '{"context_info":{"conflicts":[]}}', null],
+    ['html', '<html>502 Bad Gateway</html>', null],
+    ['deep', '{"a":'.repeat(100000), null],
+  ])('reads the item a 409 names: %s', (_name, text, kind) => {
+    expect(conflictOf(text)).toBe(kind)
   })
 })

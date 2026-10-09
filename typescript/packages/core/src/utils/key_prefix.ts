@@ -161,3 +161,14 @@ export function respelled(path: PathSpec, rawPath: string): PathSpec {
     walkError: path.walkError,
   })
 }
+
+/** The path of `name` inside the directory `spec`, on its mount. Mirrors Python's `child_spec`. */
+export function childSpec(spec: PathSpec, name: string): PathSpec {
+  const base = rstripSlash(spec.virtual)
+  const key = rstripSlash(spec.vfsPath)
+  return new PathSpec({
+    virtual: `${base}/${name}`,
+    directory: spec.virtual,
+    vfsPath: key === '' ? name : `${key}/${name}`,
+  })
+}

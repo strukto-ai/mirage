@@ -14,10 +14,11 @@
 
 import asyncio
 import hashlib
+import itertools
 import json
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -41,6 +42,10 @@ def content_hash(data: bytes) -> str:
 
 def _norm(path: str) -> str:
     return "/" + "/".join(p for p in path.split("/") if p)
+
+
+def _within(path: str, root: str) -> bool:
+    return path == root or path.startswith(root.rstrip("/") + "/")
 
 
 @dataclass
@@ -69,6 +74,16 @@ class FakeDropbox:
         restricted (set[str]): paths that exist but answer get_metadata
             and download with a ``path/restricted_content`` 409, the way
             Dropbox refuses content it may not serve.
+        hooks (dict[str, Callable[[], None]]): one-shot callbacks run when
+            the named route (``upload``, ``delete``, ``move``, ``copy``) is
+            reached, before it acts: another writer landing between
+            mirage's lookup and its request.
+
+    Every content write mints a new ``rev``, as Dropbox does even for the
+    same bytes. An upload in ``update`` mode whose rev is not the file's
+    answers 409 ``path/conflict/file/``, and ``delete_v2`` with a stale
+    ``parent_rev`` answers 409 ``path_write/conflict/file/`` (measured
+    2026-10-05 and 2026-10-08).
     """
 
     files: dict[str, bytes] = field(default_factory=dict)
@@ -76,18 +91,45 @@ class FakeDropbox:
     url: str = ""
     listed: dict[str, str] = field(default_factory=dict)
     restricted: set[str] = field(default_factory=set)
+    hooks: dict[str, Callable[[], None]] = field(default_factory=dict)
+    revs: dict[str, str] = field(default_factory=dict)
+    dirs: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
+        self._serial = itertools.count(1)
         self.files = {_norm(k): v for k, v in self.files.items()}
+        for path in self.files:
+            self._mint(path)
+
+    def _mint(self, path: str) -> None:
+        self.revs[path] = f"{next(self._serial):09x}"
+        parts = path.strip("/").split("/")[:-1]
+        for i in range(1, len(parts) + 1):
+            self.dirs.add("/" + "/".join(parts[:i]))
+
+    def read(self, path: str) -> bytes | None:
+        return self.files.get(_norm(path))
+
+    def delete(self, path: str) -> None:
+        """Remove a file, or a folder with everything under it.
+
+        Args:
+            path (str): the entry, relative to the account root.
+        """
+        path = _norm(path)
+        for key in [k for k in self.files if _within(k, path)]:
+            del self.files[key]
+        self.dirs = {d for d in self.dirs if not _within(d, path)}
 
     def count(self, route: str) -> int:
         return sum(1 for name, _ in self.log if name == route)
 
     def write(self, path: str, data: bytes) -> None:
         self.files[_norm(path)] = data
+        self._mint(_norm(path))
 
     def _folders(self) -> set[str]:
-        out = {"/"}
+        out = {"/"} | self.dirs
         for key in self.files:
             parts = key.strip("/").split("/")[:-1]
             for i in range(1, len(parts) + 1):
@@ -106,6 +148,7 @@ class FakeDropbox:
             "server_modified": MODIFIED,
             "client_modified": MODIFIED,
             "content_hash": content_hash(data),
+            "rev": self.revs[path],
         }
 
     def _folder_entry(self, path: str) -> dict[str, Any]:
@@ -123,7 +166,7 @@ class FakeDropbox:
         folders = [
             self._folder_entry(f)
             for f in sorted(self._folders())
-            if f.startswith(base) and f.count("/") == depth
+            if f != path and f.startswith(base) and f.count("/") == depth
         ]
         files = [
             {**self._file_entry(k), **self._listed_hash(k)}
@@ -183,11 +226,86 @@ class FakeDropbox:
             return web.json_response(self._folder_entry(path))
         return self._missing()
 
+    def _hook(self, route: str) -> None:
+        hook = self.hooks.pop(route, None)
+        if hook is not None:
+            hook()
+
+    @staticmethod
+    def _conflict(summary: str) -> web.Response:
+        return web.json_response({"error_summary": summary}, status=409)
+
     async def upload(self, req: web.Request) -> web.Response:
-        path = _norm(json.loads(req.headers["Dropbox-API-Arg"])["path"])
+        arg = json.loads(req.headers["Dropbox-API-Arg"])
+        path = _norm(arg["path"])
         self.log.append(("upload", path))
+        self._hook("upload")
+        mode = arg.get("mode", "add")
+        if isinstance(mode, dict) and mode.get(".tag") == "update":
+            if self.revs.get(path) != mode["update"] or path not in self.files:
+                return self._conflict("path/conflict/file/..")
         self.files[path] = await req.read()
+        self._mint(path)
         return web.json_response(self._file_entry(path))
+
+    def _under(self, path: str) -> list[str]:
+        base = path.rstrip("/") + "/"
+        return [k for k in self.files if k == path or k.startswith(base)]
+
+    async def delete_v2(self, req: web.Request) -> web.Response:
+        body = await req.json()
+        path = _norm(body["path"])
+        self.log.append(("delete", path))
+        self._hook("delete")
+        if path not in self.files and path not in self._folders():
+            return self._conflict("path_lookup/not_found/..")
+        want = body.get("parent_rev")
+        if want is not None and self.revs.get(path) != want:
+            return self._conflict("path_write/conflict/file/..")
+        entry = (
+            self._file_entry(path)
+            if path in self.files
+            else self._folder_entry(path)
+        )
+        for key in self._under(path):
+            del self.files[key]
+        self.dirs = {d for d in self.dirs if not _within(d, path)}
+        return web.json_response({"metadata": entry})
+
+    async def _relocate(self, req: web.Request, route: str) -> web.Response:
+        body = await req.json()
+        src, dst = _norm(body["from_path"]), _norm(body["to_path"])
+        self.log.append((route, src))
+        self._hook(route)
+        if src not in self.files and src not in self._folders():
+            return self._conflict("from_lookup/not_found/..")
+        if dst in self.files:
+            return self._conflict("to/conflict/file/..")
+        if dst in self._folders():
+            return self._conflict("to/conflict/folder/..")
+        moved = {k: dst + k[len(src) :] for k in self._under(src)}
+        for old, new in moved.items():
+            self.files[new] = self.files[old]
+            self._mint(new)
+            if route == "move":
+                del self.files[old]
+                self.revs[new] = self.revs[old]
+        for d in [d for d in self.dirs if _within(d, src)]:
+            self.dirs.add(dst + d[len(src) :])
+            if route == "move":
+                self.dirs.discard(d)
+        entry = (
+            self._file_entry(dst)
+            if dst in self.files
+            else self._folder_entry(dst)
+        )
+        return web.json_response({"metadata": entry})
+
+    async def move(self, req: web.Request) -> web.Response:
+        return await self._relocate(req, "move")
+
+    async def copy(self, req: web.Request) -> web.Response:
+        return await self._relocate(req, "copy")
 
     async def download(self, req: web.Request) -> web.Response:
         path = _norm(json.loads(req.headers["Dropbox-API-Arg"])["path"])
@@ -235,6 +353,9 @@ def serve(dropbox: FakeDropbox | None = None) -> Iterator[FakeDropbox]:
     app.router.add_post("/2/files/get_metadata", dropbox.get_metadata)
     app.router.add_post("/2/files/download", dropbox.download)
     app.router.add_post("/2/files/upload", dropbox.upload)
+    app.router.add_post("/2/files/delete_v2", dropbox.delete_v2)
+    app.router.add_post("/2/files/move_v2", dropbox.move)
+    app.router.add_post("/2/files/copy_v2", dropbox.copy)
     loop = asyncio.new_event_loop()
     ready = threading.Event()
     runner = web.AppRunner(app)

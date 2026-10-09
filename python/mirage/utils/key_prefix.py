@@ -228,3 +228,19 @@ def key_path(root: PathSpec, key_prefix: str, key: str) -> PathSpec:
         key (str): The backend key, prefix included.
     """
     return mounted_path(root, "/" + strip(key_prefix, key).lstrip("/"))
+
+
+def child_spec(spec: PathSpec, name: str) -> PathSpec:
+    """The path of ``name`` inside the directory ``spec``, on its mount.
+
+    Args:
+        spec (PathSpec): the directory.
+        name (str): the child's bare name.
+    """
+    base = spec.virtual.rstrip("/")
+    key = spec.vfs_path.rstrip("/")
+    return PathSpec(
+        virtual=f"{base}/{name}",
+        directory=spec.virtual,
+        vfs_path=f"{key}/{name}" if key else name,
+    )

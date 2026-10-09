@@ -15,6 +15,7 @@
 import { RAMIndexCacheStore } from './cache/index/ram.ts'
 import type { IndexCacheStore } from './cache/index/store.ts'
 import type { OpKwargs } from './view/types.ts'
+import type { WriteContext } from './cache/types.ts'
 import { type FileStat, MountMode, type PathSpec } from './types.ts'
 import { BaseVFS } from './vfs/base.ts'
 import type { Accessor } from './accessor/base.ts'
@@ -202,4 +203,25 @@ export function ioFor<V extends BaseVFS>(
   facts: Partial<Record<keyof V, unknown>> = {},
 ): CommandIO {
   return commandIo(vfsOver(cls, accessor, facts) as BaseVFS)
+}
+
+/**
+ * A write context whose store holds `s0` and records what it keeps, for a
+ * refusal test where the store's version, the write's and the one sent all
+ * differ. Mirrors Python's `tests/fixtures/write_context.KeptVersions`.
+ */
+export function keptVersions(vfs: string): { context: WriteContext; kept: string[] } {
+  const kept: string[] = []
+  const context: WriteContext = {
+    vfs,
+    conditions: ['put', 'copy', 'delete'],
+    readVersion: () => Promise.resolve('s0'),
+    readVersions: (paths) => Promise.resolve(paths.map(() => 's0')),
+    drop: () => Promise.resolve(),
+    keep: (_path, version) => {
+      kept.push(version)
+      return Promise.resolve()
+    },
+  }
+  return { context, kept }
 }

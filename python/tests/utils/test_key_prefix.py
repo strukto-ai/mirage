@@ -14,7 +14,9 @@
 
 import pytest
 
+from mirage.types import PathSpec
 from mirage.utils.key_prefix import (
+    child_spec,
     mount_key,
     normalize,
     rekey,
@@ -140,3 +142,12 @@ def test_rekey_matches_mount_key():
     assert rekey(parent_original, parent_key, child) == mount_key(
         child, prefix
     )
+
+
+def test_child_spec_appends_to_the_vfs_key():
+    parent = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
+    child = child_spec(parent, "x")
+    assert child.virtual == "/m/d/x"
+    assert child.vfs_path == "d/x"
+    root = PathSpec(virtual="/m", directory="/", vfs_path="")
+    assert child_spec(root, "x").vfs_path == "x"

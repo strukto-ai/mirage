@@ -41,6 +41,14 @@ PLACE_EVENTS = frozenset(
 )
 TRASH_EVENTS = frozenset({"ITEM_TRASH"})
 
+# Box's answer to a request whose If-Match no longer holds, and to one on
+# a file that is gone (measured 2026-10-05 for uploads, 2026-10-08 for
+# deletes).
+LOST_STATUS = 412
+GONE_STATUS = 404
+# A name taken, or a non-recursive delete of a folder that is not empty.
+CONFLICT_STATUS = 409
+
 SHA1 = "sha1"
 ACTIVE = "active"
 ALL_FILES_FOLDER_ID = "0"

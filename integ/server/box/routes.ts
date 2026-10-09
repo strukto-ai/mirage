@@ -202,7 +202,8 @@ async function placement(ctx: Ctx<C>, parentId: string, name: string): Promise<P
   const parent = await folderItem(ctx.db, ctx.tenant, parentId, ctx.clock.nowIso(false))
   if (parent === null) return notFound('parent folder')
   if (name === '') return boxError(400, 'bad_request', 'name is required')
-  if ((await childByName(ctx.db, ctx.tenant, parentId, name)) !== null) return nameInUse(name)
+  const taken = await childByName(ctx.db, ctx.tenant, parentId, name)
+  if (taken !== null) return nameInUse(taken)
   return { parentId, name }
 }
 
@@ -269,10 +270,21 @@ async function upload(ctx: Ctx<C>): Promise<Reply> {
   return { status: 201, body: { total_count: 1, entries: [render(item)] } }
 }
 
+// If-Match names the etag (the item's version) a request was based on; Box
+// answers 412 when the file moved on since (measured 2026-10-05 for uploads,
+// 2026-10-08 for deletes).
+function staleIfMatch(ctx: Ctx<C>, item: { version: number }): Reply | null {
+  const want = ctx.headers['if-match']
+  if (want === undefined || want === String(item.version)) return null
+  return boxError(412, 'precondition_failed', 'the resource has been modified')
+}
+
 async function uploadVersion(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
   const item = await typedItem(ctx.db, ctx.tenant, ctx.params.file_id ?? '', 'file')
   if (item === null) return notFound('file')
+  const refused = staleIfMatch(ctx, item)
+  if (refused !== null) return refused
   const parts = await readMultipart(ctx)
   const next = await updateFile(
     ctx.db,
@@ -290,6 +302,8 @@ function deleteOf(kind: string, param: string) {
     if (!authed(ctx)) return unauthorized()
     const item = await typedItem(ctx.db, ctx.tenant, ctx.params[param] ?? '', kind)
     if (item === null) return notFound(kind)
+    const refused = staleIfMatch(ctx, item)
+    if (refused !== null) return refused
     if (kind === 'folder' && ctx.query.get('recursive') !== 'true') {
       if ((await children(ctx.db, ctx.tenant, item.id)).length > 0) {
         return boxError(409, 'folder_not_empty', 'folder is not empty')
@@ -314,7 +328,7 @@ function updateOf(kind: string, param: string) {
     const name = str(body.name, item.name)
     const parentId = str(obj(body.parent).id, item.parentId ?? '')
     const other = await childByName(ctx.db, ctx.tenant, parentId, name)
-    if (other !== null && other.id !== item.id) return nameInUse(name)
+    if (other !== null && other.id !== item.id) return nameInUse(other)
     const moved = await ctx.db.boxItem.update({
       where: { tenant_id: { tenant: ctx.tenant, id: item.id } },
       data: { name, parentId, modified: ctx.clock.nowIso(false) },
@@ -341,7 +355,8 @@ function copyOf(kind: string, param: string) {
     if ((await folderItem(ctx.db, ctx.tenant, parentId, ctx.clock.nowIso(false))) === null) {
       return notFound('parent folder')
     }
-    if ((await childByName(ctx.db, ctx.tenant, parentId, name)) !== null) return nameInUse(name)
+    const taken = await childByName(ctx.db, ctx.tenant, parentId, name)
+    if (taken !== null) return nameInUse(taken)
     const made = await copyTree(
       ctx.db,
       ctx.tenant,

@@ -64,11 +64,39 @@ function uploadBaseOf(config: BoxConfig): string {
 
 export class BoxApiError extends Error {
   readonly status: number
-  constructor(message: string, status: number) {
+  readonly conflict: string | null
+  constructor(message: string, status: number, conflict: string | null = null) {
     super(message)
     this.status = status
+    this.conflict = conflict
     this.name = 'BoxApiError'
   }
+}
+
+/**
+ * The type of the item a 409 names in `context_info.conflicts`, or null.
+ * Mirrors Python's `conflict_of`.
+ */
+export function conflictOf(text: string): string | null {
+  if (!text.trimStart().startsWith('{')) return null
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch (err) {
+    console.debug(`Box error body is not JSON: ${String(err)}`)
+    return null
+  }
+  const info = (body as { context_info?: { conflicts?: unknown } } | null)?.context_info
+  const conflicts: unknown = info?.conflicts
+  const first: unknown = Array.isArray(conflicts) ? conflicts[0] : conflicts
+  const kind = (first as { type?: unknown } | null | undefined)?.type
+  return typeof kind === 'string' ? kind : null
+}
+
+/** The error a Box call answers with. Mirrors Python's `_error_of`. */
+function errorOf(label: string, url: string): (r: Response, text: string) => BoxApiError {
+  return (r, text) =>
+    new BoxApiError(`Box ${label} ${url} → ${String(r.status)} ${text}`, r.status, conflictOf(text))
 }
 
 async function refreshAccessToken(
@@ -228,7 +256,7 @@ export async function boxGet(
   params?: Record<string, string | number>,
 ): Promise<unknown> {
   return apiRequest('GET', url, {
-    errorOf: (r, text) => new BoxApiError(`Box GET ${url} → ${String(r.status)} ${text}`, r.status),
+    errorOf: errorOf('GET', url),
     headers: await boxAuthHeaders(tm),
     params,
   })
@@ -236,8 +264,7 @@ export async function boxGet(
 
 export async function boxOptions(tm: BoxTokenManager, url: string): Promise<unknown> {
   return apiRequest('OPTIONS', url, {
-    errorOf: (r, text) =>
-      new BoxApiError(`Box OPTIONS ${url} → ${String(r.status)} ${text}`, r.status),
+    errorOf: errorOf('OPTIONS', url),
     headers: await boxAuthHeaders(tm),
   })
 }
@@ -249,7 +276,7 @@ export async function boxGetBytes(
   window?: ByteWindow,
 ): Promise<Uint8Array> {
   const data = await apiRequest('GET', url, {
-    errorOf: (r, text) => new BoxApiError(`Box GET ${url} → ${String(r.status)} ${text}`, r.status),
+    errorOf: errorOf('GET', url),
     headers: await boxAuthHeaders(tm),
     params,
     read: 'bytes',
@@ -284,8 +311,7 @@ export async function boxPostJson(
   body: Record<string, unknown>,
 ): Promise<unknown> {
   return apiRequest('POST', url, {
-    errorOf: (r, text) =>
-      new BoxApiError(`Box POST ${url} → ${String(r.status)} ${text}`, r.status),
+    errorOf: errorOf('POST', url),
     headers: { ...(await boxAuthHeaders(tm)), 'Content-Type': 'application/json' },
     json: body,
   })
@@ -297,7 +323,7 @@ export async function boxPutJson(
   body: Record<string, unknown>,
 ): Promise<unknown> {
   return apiRequest('PUT', url, {
-    errorOf: (r, text) => new BoxApiError(`Box PUT ${url} → ${String(r.status)} ${text}`, r.status),
+    errorOf: errorOf('PUT', url),
     headers: { ...(await boxAuthHeaders(tm)), 'Content-Type': 'application/json' },
     json: body,
   })
@@ -307,11 +333,11 @@ export async function boxDelete(
   tm: BoxTokenManager,
   url: string,
   params?: Record<string, string | number>,
+  headers: Record<string, string> = {},
 ): Promise<void> {
   await apiRequest('DELETE', url, {
-    errorOf: (r, text) =>
-      new BoxApiError(`Box DELETE ${url} → ${String(r.status)} ${text}`, r.status),
-    headers: await boxAuthHeaders(tm),
+    errorOf: errorOf('DELETE', url),
+    headers: { ...(await boxAuthHeaders(tm)), ...headers },
     params,
     read: 'none',
   })
@@ -323,14 +349,14 @@ export async function boxUploadMultipart(
   attributes: Record<string, unknown>,
   filename: string,
   data: Uint8Array,
+  headers: Record<string, string> = {},
 ): Promise<unknown> {
   const form = new FormData()
   form.set('attributes', JSON.stringify(attributes))
   form.set('file', new Blob([data as BlobPart]), filename)
   return apiRequest('POST', url, {
-    errorOf: (r, text) =>
-      new BoxApiError(`Box upload ${url} → ${String(r.status)} ${text}`, r.status),
-    headers: await boxAuthHeaders(tm),
+    errorOf: errorOf('upload', url),
+    headers: { ...(await boxAuthHeaders(tm)), ...headers },
     body: form,
   })
 }

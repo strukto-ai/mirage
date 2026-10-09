@@ -21,6 +21,7 @@ import { keyPath, underPath } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import {
   type KnownVersions,
+  type LiveVersion,
   OwnRead,
   type WriteCondition,
   type WriteContext,
@@ -263,16 +264,22 @@ export function runWithWriteContext<T>(
 function activeWriteContext(path: PathSpec): WriteContext | null {
   const states = writeStorage.liveStores()
   if (agree(states, (state) => state.context)) return states[0]?.context ?? null
+  const owners = ownersOf(path, states)
+  if (owners.length === 0 || !agree(owners, (state) => state.context)) throw overlapping(path)
+  return owners[0]?.context ?? null
+}
+
+/** The live frames of the longest prefix covering `path`, as the mount table routes. */
+function ownersOf<S extends { prefix: string }>(path: PathSpec, states: readonly S[]): S[] {
   let best = -1
-  let owners: (typeof states)[number][] = []
+  let owners: S[] = []
   for (const state of states) {
     if (!underPath(path.virtual, state.prefix)) continue
     const length = rstripSlash(state.prefix).length
     if (length > best) [best, owners] = [length, [state]]
     else if (length === best) owners.push(state)
   }
-  if (owners.length === 0 || !agree(owners, (state) => state.context)) throw overlapping(path)
-  return owners[0]?.context ?? null
+  return owners
 }
 
 /** Whether every state picks the same value. */
@@ -416,6 +423,63 @@ function require(context: WriteContext, path: PathSpec, kind: WriteKind): void {
 }
 
 /**
+ * The native token a write sends in place of the held content token, null when
+ * the write goes plain. Mirrors Python's `native_condition`.
+ */
+export async function nativeCondition(
+  path: PathSpec,
+  cond: WriteCondition | null,
+  live: LiveVersion | null,
+  kind: WriteKind,
+): Promise<string | null> {
+  const held = cond?.ifMatch
+  if (held === undefined || held === '') return null
+  if (live === null) throw await stale(path, { gone: true })
+  if (live.content !== held) throw await stale(path, { version: held })
+  if (live.native === null || live.native === '') {
+    const context = activeWriteContext(path)
+    if (context === null) throw new Error('nativeCondition: a held version outside a write context')
+    throw enotsup(context.vfs, `conditional ${kind}`, path)
+  }
+  return live.native
+}
+
+/**
+ * Keep the version of every file a walk left behind; refuse the first. Mirrors
+ * Python's `keep_refused`.
+ */
+export async function keepRefused(
+  lost: readonly (readonly [PathSpec, string | null])[],
+): Promise<StaleWriteError | null> {
+  const refusals: StaleWriteError[] = []
+  for (const [spec, version] of lost) refusals.push(await stale(spec, { version }))
+  return refusals[0] ?? null
+}
+
+/**
+ * The version the mount holds for each path, in one store round trip. Mirrors
+ * Python's `held_versions`.
+ */
+export async function heldVersions(paths: readonly PathSpec[]): Promise<(string | null)[]> {
+  const first = paths[0]
+  const context = first === undefined ? null : activeWriteContext(first)
+  if (context === null) return paths.map(() => null)
+  return context.readVersions(paths)
+}
+
+/**
+ * Whether the mount that owns `path` is a `write: conditional` one; true while
+ * overlapping lines leave the owner unclear. Mirrors Python's
+ * `writes_conditioned`.
+ */
+export function writesConditioned(path: PathSpec): boolean {
+  const states = writeStorage.liveStores()
+  if (agree(states, (state) => state.context)) return (states[0]?.context ?? null) !== null
+  const owners = ownersOf(path, states)
+  return owners.length === 0 || owners.some((state) => state.context !== null)
+}
+
+/**
  * Whether a `kind` on `path` goes out conditioned, for a prefix walk, which
  * conditions each key itself and needs no version for the operand. Mirrors
  * Python's `conditioned`.
@@ -427,6 +491,22 @@ export function conditioned(path: PathSpec, kind: 'copy' | 'delete'): boolean {
   if (context === null) return false
   require(context, path, kind)
   return true
+}
+
+/**
+ * Evict `path`'s cached bytes and listing, keeping the version held, for a
+ * request that raised and may have landed. Mirrors Python's
+ * `evict_keeping_version`.
+ */
+export async function evictKeepingVersion(path: PathSpec): Promise<void> {
+  const context = activeWriteContext(path)
+  if (context === null) {
+    await invalidateAfterWrite(path)
+    return
+  }
+  const version = await context.readVersion(path)
+  await context.drop(path)
+  if (version !== null && version !== '') await context.keep(path, version)
 }
 
 /** Drop the write context's cached copy of `path`, if there is one. */

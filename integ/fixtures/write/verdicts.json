@@ -34,6 +34,22 @@
       "expect": null
     },
     {
+      "name": "conditional on box",
+      "vfs": "box",
+      "policy": "conditional",
+      "mode": "write",
+      "caches": true,
+      "expect": null
+    },
+    {
+      "name": "conditional on dropbox",
+      "vfs": "dropbox",
+      "policy": "conditional",
+      "mode": "write",
+      "caches": true,
+      "expect": null
+    },
+    {
       "name": "staged is refused",
       "vfs": "s3",
       "policy": "staged",

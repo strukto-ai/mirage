@@ -33,6 +33,8 @@ export const WRITE_CONDITIONS: Readonly<Record<string, readonly WriteKind[]>> = 
   supabase: ALL,
   tencent: ALL,
   wasabi: ALL,
+  box: ALL,
+  dropbox: ALL,
 })
 
 /** A custom `vfs: s3` endpoint may be MinIO, so it gets MinIO's row. */

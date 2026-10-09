@@ -22,6 +22,7 @@ from mirage.core.box.client import (
     BoxTokenManager,
     api_base_of,
     box_get_bytes,
+    conflict_of,
     token_url_of,
     upload_base_of,
 )
@@ -170,3 +171,22 @@ async def test_no_window_sends_no_header_and_reads_whole():
 
     assert data == b"0123456789"
     assert "Range" not in sent["headers"]
+
+
+@pytest.mark.parametrize(
+    "text, kind",
+    [
+        (
+            '{"code": "item_name_in_use", '
+            '"context_info": {"conflicts": [{"type": "folder"}]}}',
+            "folder",
+        ),
+        ('{"context_info": {"conflicts": {"type": "file"}}}', "file"),
+        ('{"context_info": {"conflicts": []}}', None),
+        ("<html>502 Bad Gateway</html>", None),
+        ('{"a":' * 100000, None),
+    ],
+    ids=["list", "object", "empty", "html", "deep"],
+)
+def test_conflict_of_reads_the_item_a_409_names(text, kind):
+    assert conflict_of(text) == kind
