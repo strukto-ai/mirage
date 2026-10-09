@@ -118,14 +118,15 @@ def test_scan_io_guards_only_a_judged_mount():
     assert scan is not io and scoped
 
 
-def test_walked_sets_the_native_find_and_du_aside():
-    async def native(*args, **kwargs):
-        return None
+async def _native(*args, **kwargs):
+    return None
 
+
+def test_walked_sets_the_native_find_and_du_aside():
     io = replace(
         _ops(_CountingBackend(b"payload")),
-        find=native,
-        du=DuOps(size=native, entries=native),
+        find=_native,
+        du=DuOps(size=_native, entries=_native),
     )
     rest = walked(io)
     assert rest.find is None and rest.du is None
