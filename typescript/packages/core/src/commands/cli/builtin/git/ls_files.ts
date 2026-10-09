@@ -86,7 +86,7 @@ export async function lsTree(inv: CLIInvocation): Promise<CommandFnResult> {
     checkSwitches(inv, inv.texts)
     const [name, ...paths] = inv.texts
     if (name === undefined) throw new UsageError('', verbUsage(inv))
-    const repo = await opened(fl, inv.doors ?? {})
+    const repo = await opened(fl, inv.view ?? {})
     let tree: string
     try {
       tree = await resolveTree(repo, name)

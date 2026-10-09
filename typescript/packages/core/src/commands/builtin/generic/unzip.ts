@@ -16,7 +16,8 @@ import { specOf } from '../../spec/builtins.ts'
 import { OPERAND } from '../../spec/constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { ensureDir, extractDest, type StatFn } from './archive/extract.ts'
+import { ensureDir, extractDest } from './archive/extract.ts'
+import type { StatFn } from './archive/walk.ts'
 import {
   renderHeader,
   renderRow,

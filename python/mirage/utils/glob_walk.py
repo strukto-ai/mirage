@@ -663,7 +663,7 @@ async def resolve_glob_with(
             )
             # The hidden filter sits here, in the one loop every backend's
             # resolve_glob runs through, because per-backend glob modules
-            # bind raw readdirs that never pass the command-entry point guard.
+            # bind raw readdirs that never pass the command guards.
             # It runs before the empty-match test so an all-hidden match set
             # reads as no matches and falls back to the literal word,
             # exactly what bash prints when nothing matched.

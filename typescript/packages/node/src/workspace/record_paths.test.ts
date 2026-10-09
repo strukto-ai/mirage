@@ -341,7 +341,7 @@ describe('every record resolves to the mount whose id it carries (node backends)
 
 // The command entry point wraps a lazily consumed stream so its deferred backend
 // read records under the mount that produced it (`wrapMountStreams`).
-describe('command-entry point streams carry the mount id', () => {
+describe('command streams carry the mount id', () => {
   it('ram cat', async () => {
     const swept = await sweep(new RAMVFS(), 'mkdir -p /m/m')
     expect(swept.catRecords.map((r) => [r.op, r.path])).toEqual([['read', K]])
@@ -363,7 +363,7 @@ describe('command-entry point streams carry the mount id', () => {
 
 // The dispatcher (redirects, cp, a direct `ws.dispatch`) binds the
 // executing mount's id too, so no record of the sweep is left unattributed.
-describe('dispatch-entry point records carry the mount id', () => {
+describe('dispatcher records carry the mount id', () => {
   it('ram', async () => {
     const swept = await sweep(new RAMVFS(), 'mkdir -p /m/m')
     const unattributed = swept.records

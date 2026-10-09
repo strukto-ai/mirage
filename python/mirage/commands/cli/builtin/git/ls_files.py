@@ -112,9 +112,9 @@ async def ls_tree(
         check_switches(inv, inv.texts)
         if not inv.texts:
             raise UsageError("", verb_usage(inv))
-        doors = inv.doors or CLIDoors()
-        repo, location = await opened(fl, doors)
-        assert doors.dispatch is not None
+        view = inv.view or CLIView()
+        repo, location = await opened(fl, view)
+        assert view.dispatch is not None
         name, *paths = inv.texts
         try:
             tree = await asyncio.to_thread(resolve_tree, repo, name)
@@ -148,7 +148,7 @@ async def ls_tree(
             fl.as_bool("d"),
         )
         fully = await config_bool(
-            doors.dispatch, location, b"core", b"quotepath", True
+            view.dispatch, location, b"core", b"quotepath", True
         )
         nul = fl.as_bool("z")
         names = fl.as_bool("name_only") or fl.as_bool("name_status")

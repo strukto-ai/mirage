@@ -630,7 +630,7 @@ class OpRecorder(Policy):
 
 @pytest.mark.asyncio
 async def test_shell_rm_r_admits_through_pre_vfs():
-    # The cascade asymmetry closed: an ops-entry point rmdir cascade always
+    # The cascade asymmetry closed: a `ws.vfs` rmdir cascade always
     # admitted per deletion while a shell rm -r admitted nothing. The
     # shell tree removal now admits the op the backend performs (the
     # native rm_r here), and a write-deny refuses it outright.

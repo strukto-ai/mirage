@@ -590,7 +590,7 @@ class SessionProfile(BaseModel):
     restrict. Configuration, not enforcement: the resolver compiles it
     onto the session's narrowing fields and the entry points keep enforcing.
     Deliberately not named a View, which per the view convention is a
-    entry point-scoped handle an agent holds, while a profile is what the
+    handle an agent holds on one entry point, while a profile is what the
     embedder uses to *define* one. Frozen so two agents with the same
     profile share one object and neither can bend the other's view.
 

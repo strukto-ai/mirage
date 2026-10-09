@@ -742,7 +742,7 @@ describe('op hooks bind at the dispatcher and the command tier', () => {
   })
 
   it('shell rm -r admits through preVfs', async () => {
-    // The cascade asymmetry closed: an ops-entry point rmdir cascade always
+    // The cascade asymmetry closed: a `ws.vfs` rmdir cascade always
     // admitted per deletion while a shell rm -r admitted nothing. The
     // shell tree removal now admits the op the backend performs, and
     // the subtree write-deny refuses it outright.

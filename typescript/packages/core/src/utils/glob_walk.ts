@@ -410,7 +410,7 @@ export async function resolveGlobWith<A, I>(
         : p
       // The hidden filter sits here, in the one loop every backend's
       // resolveGlob runs through, because per-backend glob modules bind
-      // raw readdirs that never pass the command-entry point guard. It runs
+      // raw readdirs that never pass the command guards. It runs
       // before the empty-match test so an all-hidden match set reads as
       // no matches and falls back to the literal word, exactly what bash
       // prints when nothing matched.

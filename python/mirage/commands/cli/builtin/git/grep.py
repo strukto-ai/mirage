@@ -44,7 +44,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.errors import UsageError as PatternError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -253,9 +253,9 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             cut = words.index("--") if marked else len(words)
             words, paths = words[:cut], words[cut + 1 :]
         flags = parse_flags(fl, patterns, origin, utf8_locale(inv.env))
-        doors = inv.doors or CLIDoors()
-        repo, location = await opened(fl, doors)
-        assert doors.dispatch is not None
+        view = inv.view or CLIView()
+        repo, location = await opened(fl, view)
+        assert view.dispatch is not None
         start = start_point(fl).virtual
         prefix = repo_relative(location, start, ".")
         cached = fl.as_bool("cached")
@@ -278,7 +278,7 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 if not any(
                     char in word for char in "*?["
                 ) and not await exists(
-                    doors.dispatch, location.worktree.join(relative)
+                    view.dispatch, location.worktree.join(relative)
                 ):
                     raise AmbiguousArgumentError(word) from exc
                 logger.debug("Git grep operand is a pathspec: %s", word)
@@ -287,19 +287,19 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         if sources and cached:
             raise GitError("both --cached and trees are given")
         if not sources and not cached:
-            assert doors.stat_path is not None
+            assert view.stat_path is not None
             await require_work_tree(
-                doors.dispatch,
-                doors.stat_path,
+                view.dispatch,
+                view.stat_path,
                 location,
                 fl.as_path("work_tree") is not None,
             )
         specs = pathspec_patterns(location, start, tuple(paths)) or (prefix,)
         fully = await config_bool(
-            doors.dispatch, location, b"core", b"quotepath", True
+            view.dispatch, location, b"core", b"quotepath", True
         )
         if not sources:
-            state = await read_index(doors.dispatch, location.gitdir)
+            state = await read_index(view.dispatch, location.gitdir)
             entries: Tree = {
                 path: (entry.mode, entry.sha)
                 for path, entry in state.entries.items()
@@ -345,7 +345,7 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                         is not None
                     ):
                         continue
-                    data = await read_optional(doors.dispatch, target)
+                    data = await read_optional(view.dispatch, target)
                     if data is None:
                         continue
                 label = posixpath.relpath(relative or revision, prefix or ".")
