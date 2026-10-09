@@ -3,7 +3,7 @@ import type { PathSpec, ProcessScope } from '../types.ts'
 import { ProcessHandle } from './handle.ts'
 import type { ProcessRunner } from './types.ts'
 import type { ProcessView } from './view.ts'
-import { currentExecution, newExecutionId } from '../execution/context.ts'
+import { newExecutionId } from '../execution/context.ts'
 
 /** Workspace-owned live runners; exited handles retain their own results. */
 export class ProcessSupervisor {
@@ -42,14 +42,10 @@ export class ProcessSupervisor {
     )
       throw new Error('parent process is no longer accepting children')
     const pid = this.nextPid++
-    const ambient = currentExecution()
-    const executionId = init.executionId ?? newExecutionId()
     const handle = new ProcessHandle(
       {
         pid,
-        executionId,
-        parentExecutionId: parent?.handle.info.executionId ?? ambient?.id ?? null,
-        rootExecutionId: parent?.handle.info.rootExecutionId ?? ambient?.rootId ?? executionId,
+        executionId: init.executionId ?? newExecutionId(),
         parentPid: init.parentPid ?? null,
         groupId:
           (init.parentPid == null
@@ -122,22 +118,12 @@ export class ProcessSupervisor {
             return info === null ? [] : [info]
           }),
         ),
-      get: (pid: number) => {
-        const entry = this.runners.get(pid)
-        return entry === undefined ? null : visible(entry.handle)
-      },
       checkSpawn: () => {
         if (!valid())
           throw Object.assign(new Error('process spawn is not permitted'), { code: 'EACCES' })
       },
       probe: (pid: number) => signalTarget(pid) !== null,
       terminate: (pid: number) => signalTarget(pid)?.terminate() ?? false,
-      wait: async (pid: number) => {
-        const entry = this.runners.get(pid)
-        if (entry === undefined || visible(entry.handle) === null) return null
-        await entry.handle.join()
-        return visible(entry.handle)
-      },
     })
   }
 

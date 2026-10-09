@@ -54,8 +54,6 @@ export class Job {
 
   status: JobStatus = JobStatus.RUNNING
   exitCode = 0
-  executionNode: ExecutionNode | null = null
-  ioResult: IOResult | null = null
 
   constructor(init: {
     id: number

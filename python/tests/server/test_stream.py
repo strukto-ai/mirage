@@ -9,14 +9,13 @@ from mirage.io.pipe import CAPACITY
 from mirage.server.jobs import JobStatus, JobTable
 from mirage.server.stdin import UploadStdin
 from mirage.server.stream import ShellOutput, ShellResponse
-from mirage.shell.console.types import Channel
 
 
 @pytest.mark.asyncio
 async def test_a_larger_output_buffer_accepts_more_without_a_reader():
     output = ShellOutput(CAPACITY * 2)
     data = bytes(range(256)) * (CAPACITY // 256)
-    await asyncio.wait_for(output.emit(Channel.STDOUT, data), 1)
+    await asyncio.wait_for(output.emit("stdout", data), 1)
     output.pipe.end()
     encoded = b"".join([chunk async for chunk in output.pipe.stream()])
     records = [json.loads(line) for line in encoded.splitlines()]
@@ -26,13 +25,12 @@ async def test_a_larger_output_buffer_accepts_more_without_a_reader():
         b"".join(base64.b64decode(record["data"]) for record in records)
         == data
     )
-    await output.close()
 
 
 @pytest.mark.asyncio
 async def test_canceling_a_blocked_write_leaves_only_complete_wire_records():
     output = ShellOutput()
-    writing = asyncio.create_task(output.emit(Channel.STDOUT, b"x" * 65536))
+    writing = asyncio.create_task(output.emit("stdout", b"x" * 65536))
     await asyncio.sleep(0)
     assert not writing.done()
     writing.cancel()
@@ -47,7 +45,6 @@ async def test_canceling_a_blocked_write_leaves_only_complete_wire_records():
     prefix = b"".join(base64.b64decode(record["data"]) for record in records)
     assert 0 < len(prefix) < 65536
     assert prefix == b"x" * len(prefix)
-    await output.close()
 
 
 @pytest.mark.asyncio
@@ -66,7 +63,7 @@ async def test_disconnect_cancels_the_job_and_joins_its_cleanup():
 
     async def run(scope):
         await scope.start()
-        await output.emit(Channel.STDOUT, b"prefix")
+        await output.emit("stdout", b"prefix")
         entered.set()
         try:
             await asyncio.Event().wait()
@@ -87,7 +84,6 @@ async def test_disconnect_cancels_the_job_and_joins_its_cleanup():
     assert not sending.done()
     release.set()
     await asyncio.wait_for(sending, 1)
-    assert output.store.closed
     assert table.get(job.id).status == JobStatus.CANCELED
     await table.close()
 

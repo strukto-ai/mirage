@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from mirage.process.child import ChildProcess
@@ -23,17 +23,15 @@ from mirage.process.types import ProcessInfo, SpawnRequest
 class ProcessView:
     """Process operations scoped to one session incarnation and its profile.
 
-    An absent or invisible PID returns None. Seeing a process grants no
+    An absent or invisible PID is not found. Seeing a process grants no
     output access; stopping one the view sees but may not stop raises
     PermissionError (EPERM). The view carries no reference to mutable
     tasks.
     """
 
     list: Callable[[], tuple[ProcessInfo, ...]]
-    get: Callable[[int], ProcessInfo | None]
     check_spawn: Callable[[], None]
     probe: Callable[[int], bool]
     terminate: Callable[[int], bool]
-    wait: Callable[[int], Awaitable[ProcessInfo | None]]
     depth: int = 0
     spawn: Callable[[SpawnRequest], ChildProcess] | None = None

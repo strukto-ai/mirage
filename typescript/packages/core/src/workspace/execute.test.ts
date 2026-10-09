@@ -398,7 +398,7 @@ describe('native output', () => {
     let closed = false
     async function* source(): AsyncGenerator<Uint8Array> {
       try {
-        for (;;) yield new Uint8Array(16384).fill(120)
+        for (;;) yield await Promise.resolve(new Uint8Array(16384).fill(120))
       } finally {
         closed = true
       }

@@ -3,25 +3,25 @@ import { Readable } from 'node:stream'
 import type { FastifyReply } from 'fastify'
 import { CHUNK_SIZE } from '@struktoai/mirage-core/io/cooperative'
 import { CAPACITY, BytePipe } from '@struktoai/mirage-core/io/pipe'
-import { JobConsole } from '@struktoai/mirage-core/shell/console/job_console'
-import { Channel } from '@struktoai/mirage-core/shell/console/types'
+import type { StreamName } from '@struktoai/mirage-core/io/types'
 import type { JobEntry, JobTable } from './jobs.ts'
 import { UploadStdin } from './stdin.ts'
 
 const PAYLOAD_SIZE = CHUNK_SIZE / 2
 
-/** Bounded output; each encoded record fits one pipe chunk for cancellation safety. */
-export class ShellOutput extends JobConsole {
+/**
+ * A streamed shell's output records; each encoded record fits one pipe
+ * chunk, so cancelling a blocked write cannot leave an incomplete record.
+ */
+export class ShellOutput {
   readonly pipe: BytePipe
   private writing: Promise<void> = Promise.resolve()
 
   constructor(capacity = CAPACITY) {
-    super()
     this.pipe = new BytePipe(capacity)
   }
 
-  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    if (channel === Channel.CONTROL) return
+  async emit(stream: StreamName, data: Uint8Array): Promise<void> {
     const previous = this.writing
     let release!: () => void
     this.writing = new Promise((resolve) => {
@@ -33,7 +33,7 @@ export class ShellOutput extends JobConsole {
         await this.pipe.write(
           Buffer.from(
             JSON.stringify({
-              stream: channel,
+              stream,
               data: Buffer.from(data.subarray(offset, offset + PAYLOAD_SIZE)).toString('base64'),
             }) + '\n',
           ),
@@ -101,7 +101,6 @@ export function shellResponse(
         await jobs.drain(job.id)
       } finally {
         reply.raw.off('close', disconnected)
-        await output.close()
       }
     }
   }

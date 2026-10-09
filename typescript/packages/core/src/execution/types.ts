@@ -1,11 +1,5 @@
 import type { JsonValue } from '../types.ts'
 
-export interface ExecutionIdentity {
-  readonly id: string
-  readonly parentId: string | null
-  readonly rootId: string
-}
-
 export const ExecutionStatus = Object.freeze({
   PENDING: 'pending',
   RUNNING: 'running',

@@ -29,7 +29,6 @@ from mirage.server.registry import WorkspaceEntry
 from mirage.server.routers.vfs import session_of
 from mirage.server.stdin import LoopStdin, UploadStdin
 from mirage.server.stream import ShellOutput, ShellResponse
-from mirage.shell.console.types import Channel
 from mirage.types import JsonValue
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.workspace import Workspace
@@ -95,7 +94,7 @@ async def _invoke_shell(
             **kwargs, execution_scope=scope, stream=True
         ) as execution:
             async for chunk in execution.events:
-                await output.emit(Channel(chunk.stream), chunk.data)
+                await output.emit(chunk.stream, chunk.data)
             result = await execution.wait()
     return await io_result_to_dict(result)
 
@@ -148,8 +147,6 @@ async def shell(
     output = ShellOutput(entry.runner.ws.io.buffer_bytes) if stream else None
 
     async def run(scope: ExecutionScope) -> JsonValue:
-        if output is not None:
-            output.bind_execution(scope.id)
         return await entry.runner.call(
             _invoke_shell(entry.runner.ws, kwargs, scope, output)
         )

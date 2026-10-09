@@ -113,16 +113,18 @@ describe('runStream', () => {
 })
 
 it('drains an owned failed fetch before merging stderr and skips its stdout', async () => {
-  const run: RunSingle = async (_cmd, paths) =>
-    paths[0]?.virtual === '/b/missing'
-      ? [
-          ENC.encode('discarded'),
-          new IOResult({
-            stderr: ENC.encode('cat: /b/missing: No such file or directory\n'),
-            exitCode: 1,
-          }),
-        ]
-      : [ENC.encode('kept\n'), new IOResult()]
+  const run: RunSingle = (_cmd, paths) =>
+    Promise.resolve(
+      paths[0]?.virtual === '/b/missing'
+        ? [
+            ENC.encode('discarded'),
+            new IOResult({
+              stderr: ENC.encode('cat: /b/missing: No such file or directory\n'),
+              exitCode: 1,
+            }),
+          ]
+        : [ENC.encode('kept\n'), new IOResult()],
+    )
   const [out, io] = await runStream(Cmd.CAT, scopes('/a/file', '/b/missing'), [], {}, run)
   expect(DEC.decode(await materialize(out))).toBe('kept\n')
   expect(await io.stderrStr()).toBe('cat: /b/missing: No such file or directory\n')
@@ -130,7 +132,7 @@ it('drains an owned failed fetch before merging stderr and skips its stdout', as
 })
 
 it('merges late fetch diagnostics and claims in operand order', async () => {
-  const run: RunSingle = async (_cmd, paths) => {
+  const run: RunSingle = (_cmd, paths) => {
     const path = paths[0]?.virtual ?? ''
     const io = new IOResult()
     async function* source(): AsyncGenerator<Uint8Array> {
@@ -140,7 +142,7 @@ it('merges late fetch diagnostics and claims in operand order', async () => {
       io.cache.push(path)
       io.exitCode = 1
     }
-    return [source(), io]
+    return Promise.resolve([source(), io])
   }
   const [out, io] = await runStream(Cmd.CAT, scopes('/a/x', '/b/y'), [], {}, run)
   expect(DEC.decode(await materialize(out))).toBe('/a/x\n/b/y\n')
@@ -151,14 +153,14 @@ it('merges late fetch diagnostics and claims in operand order', async () => {
 })
 
 it('keeps the final command late diagnostic and status', async () => {
-  const run: RunSingle = async (_cmd, paths, _texts, _flags, extra) => {
+  const run: RunSingle = (_cmd, paths, _texts, _flags, extra) => {
     const io = new IOResult()
     async function* source(): AsyncGenerator<Uint8Array> {
       yield await materialize(extra?.stdin ?? null)
       io.stderr = ENC.encode('cut: late diagnostic\n')
       io.exitCode = 7
     }
-    return [paths.length > 0 ? ENC.encode('kept\n') : source(), io]
+    return Promise.resolve([paths.length > 0 ? ENC.encode('kept\n') : source(), io])
   }
   const [out, io] = await runStream(Cmd.CUT, scopes('/a/x'), [], {}, run)
   expect(DEC.decode(await materialize(out))).toBe('kept\n')
@@ -168,9 +170,12 @@ it('keeps the final command late diagnostic and status', async () => {
 
 it('closes every owned fetch before the first output pull', async () => {
   const closed: string[] = []
-  const run: RunSingle = async (_cmd, paths) => {
+  const run: RunSingle = (_cmd, paths) => {
     const path = paths[0]?.virtual ?? ''
-    return [new HeldSource(ENC.encode('ready'), () => closed.push(path)), new IOResult()]
+    return Promise.resolve([
+      new HeldSource(ENC.encode('ready'), () => closed.push(path)),
+      new IOResult(),
+    ])
   }
   const [out] = await runStream(Cmd.CAT, scopes('/a/x', '/b/y'), [], {}, run)
   await closeQuietly(out)
@@ -179,21 +184,23 @@ it('closes every owned fetch before the first output pull', async () => {
 
 it('closes an unread fetch when sort fails and respells the diagnostic', async () => {
   let closed = false
-  const run: RunSingle = async (_cmd, paths) =>
-    paths[0]?.virtual === '/b/missing'
-      ? [
-          null,
-          new IOResult({
-            stderr: ENC.encode('cat: /b/missing: No such file or directory\n'),
-            exitCode: 1,
-          }),
-        ]
-      : [
-          new HeldSource(ENC.encode('unread'), () => {
-            closed = true
-          }),
-          new IOResult(),
-        ]
+  const run: RunSingle = (_cmd, paths) =>
+    Promise.resolve(
+      paths[0]?.virtual === '/b/missing'
+        ? [
+            null,
+            new IOResult({
+              stderr: ENC.encode('cat: /b/missing: No such file or directory\n'),
+              exitCode: 1,
+            }),
+          ]
+        : [
+            new HeldSource(ENC.encode('unread'), () => {
+              closed = true
+            }),
+            new IOResult(),
+          ],
+    )
   const [out, io] = await runStream(Cmd.SORT, scopes('/a/x', '/b/missing'), [], {}, run)
   expect(out).toBeNull()
   expect(closed).toBe(true)
@@ -203,9 +210,12 @@ it('closes an unread fetch when sort fails and respells the diagnostic', async (
 
 it('closes while the next fetch pull is pending', async () => {
   const closed: string[] = []
-  const run: RunSingle = async (_cmd, paths) => {
+  const run: RunSingle = (_cmd, paths) => {
     const path = paths[0]?.virtual ?? ''
-    return [new HeldSource(ENC.encode(path), () => closed.push(path)), new IOResult()]
+    return Promise.resolve([
+      new HeldSource(ENC.encode(path), () => closed.push(path)),
+      new IOResult(),
+    ])
   }
   const [out] = await runStream(Cmd.CAT, scopes('/a/x', '/b/y'), [], {}, run)
   if (out === null || out instanceof Uint8Array) throw new Error('missing stream')

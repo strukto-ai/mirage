@@ -313,10 +313,10 @@ async def test_disowned_job_keeps_process_identity_until_runner_really_exits():
     view = table.processes.view("a")
     assert table.disown(job.id, "a")
     assert table.list_jobs("a") == []
-    assert view.get(process.info.pid) is not None
+    assert [i.pid for i in view.list()] == [process.info.pid]
     await table.kill_all()
     assert job.status == JobStatus.KILLED
-    assert view.get(process.info.pid).state == "stopping"
+    assert [i.state for i in view.list()] == ["stopping"]
     release.set()
     result = await process.join()
     assert result.exit_code == 0

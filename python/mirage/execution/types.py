@@ -4,13 +4,6 @@ from enum import Enum
 from mirage.types import JsonValue
 
 
-@dataclass(frozen=True, slots=True)
-class ExecutionIdentity:
-    id: str
-    parent_id: str | None
-    root_id: str
-
-
 class ExecutionStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"

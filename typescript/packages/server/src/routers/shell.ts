@@ -294,7 +294,6 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
         wsId,
         body.command,
         async (signal, executionScope) => {
-          output?.bindExecution(executionScope.id)
           const options = {
             sessionId,
             executionScope,

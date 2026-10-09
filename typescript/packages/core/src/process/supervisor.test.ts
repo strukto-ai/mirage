@@ -89,11 +89,7 @@ it('does not give execution ancestry cancellation ownership', async () => {
   await started.promise
   const child = children[0]
   if (child === undefined) throw new Error('child was not started')
-  expect(child.info).toMatchObject({
-    parentExecutionId: 'request',
-    rootExecutionId: 'request',
-    parentPid: null,
-  })
+  expect(child.info.parentPid).toBeNull()
   root.terminate()
   await root.join()
   expect(child.info.state).toBe('running')
@@ -138,7 +134,7 @@ it('does not claim exit before finally completes', async () => {
   expect(process.terminate()).toBe(true)
   expect(process.terminate()).toBe(false)
   await cleaning.promise
-  expect(view.get(process.info.pid)).toMatchObject({ state: 'stopping', exitCode: null })
+  expect(view.list()).toMatchObject([{ state: 'stopping', exitCode: null }])
   let joined = false
   const joining = process.join().then((info) => {
     joined = true
@@ -153,7 +149,7 @@ it('does not claim exit before finally completes', async () => {
     exitCode: 137,
     cancellationRequested: true,
   })
-  expect(view.get(process.info.pid)).toBeNull()
+  expect(view.list()).toEqual([])
   expect(process.terminate()).toBe(false)
 })
 
@@ -175,8 +171,6 @@ it('scopes immutable views and revokes them when a session ID is reused', async 
     b = start('b')
   const oldView = supervisor.view('a')
   expect(oldView.list()).toEqual([a.info])
-  expect(oldView.get(b.info.pid)).toBeNull()
-  expect(oldView.get(9999)).toBeNull()
   expect(Object.isFrozen(a.info)).toBe(true)
   expect(Object.isFrozen(oldView.list())).toBe(true)
   supervisor.revokeSession('a')
@@ -275,15 +269,14 @@ it('a workspace list grants no kill', async () => {
     kill: 'session',
     max: null,
   }))
-  expect(view.get(child.info.pid)).toMatchObject({ command: 'secret argument' })
+  expect(view.list()).toMatchObject([{ pid: child.info.pid, command: 'secret argument' }])
   expect(() => view.terminate(child.info.pid)).toThrow(expect.objectContaining({ code: 'EPERM' }))
-  const waiter = view.wait(child.info.pid)
   supervisor.revokeSession('observer')
   expect(() => {
     view.checkSpawn()
   }).toThrow('not permitted')
+  expect(view.list()).toEqual([])
   release.release()
-  expect(await waiter).toBeNull()
   await child.join()
 })
 

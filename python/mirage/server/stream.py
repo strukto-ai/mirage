@@ -10,48 +10,44 @@ from starlette.types import Receive, Scope, Send
 from mirage.concurrency.limiter import settle
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.pipe import CAPACITY, BytePipe
+from mirage.io.types import StreamName
 from mirage.server.jobs import JobEntry, JobTable
 from mirage.server.stdin import UploadStdin
-from mirage.shell.console.job_console import JobConsole
-from mirage.shell.console.types import Channel
 
 logger = logging.getLogger(__name__)
 PAYLOAD_SIZE = CHUNK_SIZE // 2
 
 
-class ShellOutput(JobConsole):
-    """A foreground transport, with bounded writes on the server loop.
+class ShellOutput:
+    """A streamed shell's output records, written on the server loop.
 
     Each encoded record fits one pipe chunk, so cancelling a blocked write
     cannot leave an incomplete record among the accepted output bytes.
     """
 
     def __init__(self, capacity: int = CAPACITY) -> None:
-        super().__init__()
         self.pipe = BytePipe(capacity)
         self._loop = asyncio.get_running_loop()
         self._write_lock = asyncio.Lock()
 
-    async def emit(self, channel: Channel, data: bytes) -> None:
-        if channel == Channel.CONTROL:
-            return
+    async def emit(self, stream: StreamName, data: bytes) -> None:
         if asyncio.get_running_loop() is self._loop:
-            await self._emit(channel, data)
+            await self._emit(stream, data)
         else:
             await asyncio.wrap_future(
                 asyncio.run_coroutine_threadsafe(
-                    self._emit(channel, data), self._loop
+                    self._emit(stream, data), self._loop
                 )
             )
 
-    async def _emit(self, channel: Channel, data: bytes) -> None:
+    async def _emit(self, stream: StreamName, data: bytes) -> None:
         async with self._write_lock:
             for offset in range(0, len(data), PAYLOAD_SIZE):
                 await self.pipe.write(
                     (
                         json.dumps(
                             {
-                                "stream": channel.value,
+                                "stream": stream,
                                 "data": base64.b64encode(
                                     data[offset : offset + PAYLOAD_SIZE]
                                 ).decode("ascii"),
@@ -196,4 +192,3 @@ class ShellResponse(Response):
             for result in await asyncio.gather(*tasks, return_exceptions=True):
                 if isinstance(result, Exception):
                     logger.debug("stream transport closed: %r", result)
-            await self._output.close()
