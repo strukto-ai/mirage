@@ -83,6 +83,25 @@ command's folder whose run of it names paths on both `/data` and `/data2`
 channels, and targets RAM and disk; it also rejects duplicate IDs. It is a registration floor, not proof of every option or
 backend.
 
+## CLI coverage
+
+`cli/` owns observable command results on both hosts. Keep parser/help smoke
+checks here and use unit tests for spec structure, write classification,
+request construction, config validation and VFS/policy boundaries.
+
+The consolidated smoke coverage is `sl_send_message`, `sl_missing_required`,
+`dc_send`, `ln_cli_missing_team`, `gw_gmail_missing_to`,
+`gw_unknown_nested_verb`, `at_cli_help` and `at_cli_usage_missing_base`.
+These replace the equivalent Python workspace smoke tests; the refusal cases
+assert exit code, stdout and stderr directly. Stateful account and mount
+tests remain separate because their setup and assertions are different.
+
+The CLI reference tables are generated from the registered `CLISpec` trees:
+run `python/.venv/bin/python scripts/gen_cli_docs.py` after changing a tree.
+CI runs the same command with `--check` to detect stale or missing references,
+then `typescript/scripts/check-cli-docs.ts` checks the inventory and command
+paths against the built TypeScript specs.
+
 ## Runs and tenants
 
 A run is an isolated world; a tenant is an account inside it. The runner mints

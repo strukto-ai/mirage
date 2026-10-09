@@ -253,11 +253,11 @@
       "targets": [
         "cli-linear"
       ],
-      "command": "linear issue list 2>/dev/null; echo exit=$?",
+      "command": "linear issue list",
       "expect": {
-        "exit": 0,
-        "stdout": "exit=2\n",
-        "stderr": ""
+        "exit": 2,
+        "stdout": "",
+        "stderr": "linear issue list: option '--team' is required\nTry 'linear issue list --help' for more information.\n"
       }
     },
     {

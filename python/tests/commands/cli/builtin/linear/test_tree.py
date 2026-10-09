@@ -12,13 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
-
-from mirage import Workspace
 from mirage.commands.cli.builtin.linear import LINEAR
 from mirage.core.linear.config import LinearConfig
-
-CONFIG = {"api_key": "lin_api_test"}
 
 NOUNS = [
     "team",
@@ -88,12 +83,3 @@ def test_issue_operand_is_positional():
     assert leaf("issue", "get").rest is not None
     assert leaf("issue", "update").rest is not None
     assert leaf("issue", "list").rest is None
-
-
-@pytest.mark.asyncio
-async def test_missing_required_team_flag_exits_2():
-    ws = Workspace({})
-    ws.register_cli("linear", LINEAR, CONFIG)
-    io = await ws.shell("linear issue list")
-    assert io.exit_code == 2
-    await ws.close()

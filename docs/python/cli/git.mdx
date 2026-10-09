@@ -1,529 +1,224 @@
 ---
 title: git
-description: "Read and change a git repository that lives on any mount, in git's own vocabulary."
+description: "Supported Git commands for repositories and working trees on Mirage mounts."
 icon: git-alt
 ---
 
-Mirage's built-in `git` is an independent implementation that follows the
-command-line interface of upstream [Git](https://github.com/git/git). It reads
-and changes a repository on any mount. Unlike the account CLIs, `git` needs no
-credentials and takes no config: it is a program tree with nothing to
-authenticate to.
+Inspect and modify repositories using a subset of the [Git command line](https://git-scm.com/docs/git). Mirage routes repository files through the workspace dispatcher, so the same commands can operate on RAM, disk or another backend with the required filesystem operations.
 
-**Licenses:** The upstream Git source uses
-[GPLv2](https://github.com/git/git/blob/master/COPYING). Mirage does not
-distribute that source; its independent implementation uses
-[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
+The Python implementation uses [Dulwich](https://github.com/jelmer/dulwich);
+the TypeScript implementation uses [isomorphic-git](https://github.com/isomorphic-git/isomorphic-git).
+Mirage supplies the command grammar, output and VFS integration on both hosts.
+The compatibility target is native Git's supported behavior, with the
+[differences below](#limits-and-intentional-differences). These libraries are
+implementation dependencies; their own command interfaces do not define
+Mirage's supported commands.
 
-## Install
+## Setup
+
+`git` has no account config. It needs an existing repository to inspect, or
+a writable mount on which to initialize or clone one.
 
 ```python
-from mirage import Workspace
+from mirage import MountMode, Workspace
 from mirage.commands.cli.builtin.git import GIT
 from mirage.vfs.ram import RAMVFS
 
-ws = Workspace({"/repo": RAMVFS()})
+ws = Workspace({"/repo": RAMVFS()}, mode=MountMode.WRITE)
 ws.register_cli("git", GIT)
-
-await ws.shell("git -C /repo status --short")
+await ws.shell("git -C /repo init -b main")
 ```
 
-In YAML the same install rides the `clis:` section; see the
-[CLI overview](/python/cli/index).
+For YAML registration, see the [CLI overview](/python/cli/index#register-a-cli).
 
-## The repository is read through the mount
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
 
-`-C` names a directory inside a mount, and everything under it is read
-with the same ops any command uses. The repository is never opened from
-the host filesystem, so a repository on a RAM mount, a disk mount or an
-object store all read the same way, and packfiles, loose objects and the
-index are all read through the mount.
+Run `git <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
 
-A write the mount refuses as read-only is answered in git's words,
-naming the lock git would have taken first: `Unable to create
-'/repo/.git/index.lock': Read-only file system` for a verb that writes
-the index, `cannot lock ref 'refs/heads/topic'` for one that writes a
-ref, and `could not create work tree dir` for `clone`. `commit` takes
-the index's lock before it looks for anything to commit, as git does,
-so an empty one is refused too, and `init` names the directory it could
-not make, or the config's lock when it reinitializes.
+| Command | Description |
+| --- | --- |
+| `git reflog` | Show reference history |
+| `git for-each-ref` | List references with a format |
+| `git cat-file` | Provide contents or details of repository objects |
+| `git hash-object` | Compute object ID and optionally create an object from a file |
+| `git grep` | Search tracked files in the working tree, index or named trees |
+| `git ls-tree` | List the contents of a tree object |
+| `git ls-files` | Show files in the index |
+| `git fetch` | Download objects and refs from another repository |
+| `git clone` | Clone a repository into a new directory |
+| `git help` | Show command help |
+| `git init` | Create an empty Git repository or reinitialize an existing one |
+| `git fsck` | Verify object hashes and connectivity |
+| `git stash list` | List stashed changes |
+| `git stash show` | Show stashed changes |
+| `git version` | Show the Mirage Git implementation version. Aliases: `--version`, `-v`. |
+| `git remote` | List remotes and inspect their URLs |
+| `git config` | Read repository configuration |
+| `git show-ref` | List references |
+| `git symbolic-ref` | Read, change or delete a symbolic ref |
+| `git shortlog` | Summarize commit history |
+| `git rev-parse` | Resolve revisions |
+| `git rev-list` | List reachable commits |
+| `git diff-tree` | Compare a commit with its parent |
+| `git status` | Show the working tree status |
+| `git log` | Show commit logs |
+| `git show` | Show a commit and its diff |
+| `git diff` | Show changes between commits |
+| `git branch` | List, create or delete branches |
+| `git add` | Stage working tree content |
+| `git reset` | Unstage, putting the index back to HEAD |
+| `git commit` | Record the index as a new commit |
+| `git checkout` | Switch branches |
+| `git switch` | Switch branches |
+| `git restore` | Restore working tree files |
+| `git rm` | Remove files from the working tree and the index |
+| `git mv` | Move or rename a file, a directory, or a symlink |
+| `git tag` | Create, list or delete a tag |
+{/* END GENERATED CLI COMMANDS */}
 
-`-C` defaults to the working directory, and the repository is found by
-walking up from there, so a path inside the tree works:
-
-```bash
-git -C /repo/src status
-```
-
-`--git-dir` and `--work-tree` name the two halves directly, as do
-`GIT_DIR` and `GIT_WORK_TREE`, which the options override. Both resolve
-against the `-C` directory. With `--git-dir` alone nothing is
-discovered and the working directory is the work tree. A repository's
-own `core.worktree` and `core.bare` apply as they do in git, and a
-linked worktree ignores both. `core.bare` reads as git reads any
-boolean, its name and value in either letter case or the value as an
-integer such as `1`, `0x10` or `2k`, and a value git cannot read fails
-every verb, even under `--work-tree` or in a linked worktree. A verb
-that reads or writes working files
-(`status`, `add`, `commit`, `checkout`, `switch`, `restore`, `mv`,
-`reset`, and `rm` without `--cached`) refuses a bare repository or a
-work tree that is not a directory, in git's words:
-
-```bash
-git --git-dir=/repo/.git --work-tree=/repo status --short
-GIT_DIR=/repo/.git git log --oneline -1
-```
-
-## Initialization and repository checks
-
-`git init [-q] [-b <branch>] [--bare] [<directory>]` creates a repository
-through the mount dispatcher. Reinitializing preserves existing objects,
-configuration and HEAD. The default initial branch is `master`; use `-b`
-to choose another. Host templates, hooks and the default-branch advisory
-are omitted. Reinitializing takes the config's lock, as git does, so a
-read-only mount refuses it.
-
-`git help [<command>]` renders the same declared grammar as `--help`.
-`git stash list` reads the stash reflog, and `git stash show [-p | --stat |
---name-only] [<stash>]` compares the saved working tree with its original
-base. Numeric selectors and `stash@{n}` work with stashes made by native Git.
-Stash creation, application and deletion are not implemented.
-
-`git fsck [--full] [--no-dangling] [--unreachable]` checks loose and packed object hashes,
-decoding and connectivity, using refs, the index and reflogs as roots.
-Missing and corrupt objects cause a nonzero exit. Corruption diagnostics
-retain the object ID and cause; their wording can differ from native Git.
-`--unreachable` lists every object outside the reachability of those roots,
-including trees and blobs below an abandoned commit. `--no-dangling`
-suppresses dangling tips independently of unreachable-object reporting.
-
-## Verbs
-
-An option a verb does not take is refused in git's words and followed
-by the verb's usage block: git's synopsis lines, cut down to the forms
-this build implements, then a row per option in git's layout. `-h`
-prints the same block on stdout (on stderr for `diff`) and exits 129.
-The rows carry mirage's own help for each option, so only
-`symbolic-ref`, which has every option git's has, prints git's block
-byte for byte. `log`, `show` and `reflog` refuse with `unrecognized
-argument`, `diff` with `invalid option` unless the line names a
-revision or `--cached`, and `rev-list`, `diff-tree` and such a `diff`
-print the block alone, as git does.
-`rev-parse` refuses an option it does not know where git would print it
-back, because it cannot tell one git does not know from one this build
-lacks. `remote` lists remotes and refuses any subcommand as git refuses
-one it does not know.
-
-### Inspect
+## Create and inspect a repository
 
 ```bash
-git -C /repo status
+git -C /repo init -b main
+echo hello > /repo/hello.txt
+git -C /repo add hello.txt
+git -C /repo commit -m 'Initial commit'
 git -C /repo status --short
-git -C /repo status --porcelain -b
-git -C /repo status -uall
-git -C /repo log --oneline -n 20
-git -C /repo log --reverse
-git -C /repo log -S delta
-git -C /repo log -G 'del.a' --oneline
-git -C /repo log -G 'del.a' --text -p
-git -C /repo grep -n delta
-git -C /repo grep --cached -n delta
-git -C /repo grep -n delta HEAD~1 -- src
-git -C /repo ls-tree -r --name-only HEAD
-git -C /repo cat-file -p 'HEAD^{tree}'
-printf 'HEAD\n' | git -C /repo cat-file --batch-check
-git -C /repo hash-object -w notes.txt
-git -C /repo log --all --oneline --grep=fix -i --max-count=5
-git -C /repo log HEAD~2
-git -C /repo log --oneline main..topic
-git -C /repo log --all --oneline
-git -C /repo log --format='%h %an %s'
-git -C /repo log --pretty=fuller -n 3
-git -C /repo show 265ec3a
-git -C /repo show --stat HEAD
-git -C /repo show --name-only HEAD
-git -C /repo show -s --format=%H HEAD
-git -C /repo show -s --oneline --decorate=full HEAD
-git -C /repo symbolic-ref --short HEAD
-git -C /repo rev-parse --short HEAD
-git -C /repo diff HEAD~1 HEAD
-git -C /repo diff --stat main...topic
-git -C /repo branch
+git -C /repo log --oneline -5
+git -C /repo show HEAD
+git -C /repo diff
+git -C /repo diff --cached
+git -C /repo grep -n hello
+git -C /repo ls-files --stage
+git -C /repo fsck
 ```
 
-`git grep` searches tracked files using their current working-tree content.
-`--cached` searches the index instead, and tree-ish operands search stored
-blobs from those revisions. Path operands after `--` limit the search.
-It shares the shell search matcher, with Git's filename labels, line numbers,
-counts and match status.
+`-C` selects a workspace directory and defaults to the session's working
+directory. Repository discovery walks upward, so commands also work from
+subdirectories. Loose objects, packs, refs, the index and working files all
+use the same VFS operations as the shell.
 
-`git ls-tree` lists the entries of a tree-ish with their modes, object types
-and IDs. `-r` traverses subtrees, `--name-only` prints paths, and `-z` writes
-verbatim paths with NUL terminators. Literal directory operands select
-subtrees; shell wildcard expansion is separate from tree selection.
+`init` supports `-b`, `--bare` and reinitialization. The default branch is
+`master` unless `-b` chooses another. `commit` requires `-m` and records
+`mirage <mirage@localhost>` unless `--author 'Name <email>'` overrides it.
+`fsck` checks the object database without modifying it.
 
-`-a` / `--text` makes the diff family render binary content as text and lets
-`log -G` search changes in binary files. `-S` already counts occurrences in
-binary content. Binary `--stat` and `--numstat` rows retain their binary
-classification when a text patch is requested. Combined merge output keeps
-its binary marker; ordinary and per-parent patches honor `--text`.
-
-`log` and `show` take `--pretty`/`--format` with git's grammar: the
-`oneline`, `short`, `medium`, `full` and `fuller` presets, plus
-`format:`/`tformat:` placeholder strings (a bare `%` string is
-`tformat:`). Placeholders cover ids (`%H %h %T %t %P %p`), author and
-committer fields (`%an %ae %ad %at %cn %ce %cd %ct`), the message
-(`%s %b %B`), decorations (`%d %D`), and `%n %% %xHH`; an unknown
-placeholder stays verbatim, exactly as git prints it. `log --all` walks
-every ref, tags peeled. `show` takes `--stat` (git's scaled diffstat
-table), `--name-only`, and `-s`/`--no-patch`, which suppresses every
-diff section just as it does in git.
-
-`log -G` keeps the commits whose diff adds or removes a line matching a
-POSIX extended regex, and `-S` with `--pickaxe-regex` counts regex
-matches. `cat-file` answers `-t`, `-s`, `-e`, `-p`, `<type> <object>` and
-`--batch`/`--batch-check` with git's format atoms. `hash-object` hashes
-files or stdin (`-t`, `--stdin-paths`, `--literally`) and `-w` writes the
-object; a malformed one is refused with git's last line only, not the
-fsck detail before it.
-
-`log` and `show` label each commit with the refs that point at it under
-`--decorate` (`short`, `full` or `no`), and `log.decorate` sets the same
-style from the repository's config; `--no-decorate` turns it off and the
-last one on the line wins. A `%d`/`%D` placeholder decorates by short
-names unless a style says full. `symbolic-ref` reads a symbolic ref
-(`--short`, `--no-recurse`, `-q`), points one at another (`-m` gives the
-reflog its reason) and deletes one with `-d`, never HEAD.
-
-`show` takes several objects and prints each in turn: a commit as its
-entry, an annotated tag as `tag <name>`, its tagger and its message
-ahead of the object it points at, a tree as its listing and a blob as
-its bytes; a commit named twice prints once. A name a branch and a tag
-both answer to reads as git reads it, the tag first, and every read of it
-warns `refname '<name>' is ambiguous.` on stderr, as git does each time;
-`rev-parse -q` and `core.warnAmbiguousRefs=false` leave the warning out.
-`checkout` and `switch` take such a name as the branch, and `branch`,
-`switch -c` and `checkout -b` refuse it as a start point.
-`rev-parse --abbrev-ref` prints `error: refname '<name>' is ambiguous`
-for such a name, right after its warning, and takes `strict` or
-`loose`; a missing path
-in `<rev>:<path>` or `:<path>` is refused in git's words (`does not
-exist in 'HEAD'`, `exists on disk, but not in 'HEAD~1'`, `is in the
-index, but not at stage 2`).
-
-`log` and `rev-list` read revisions the way git does: `A..B` walks B and
-hides what A reaches, `A...B` walks both and hides what they share, `^A`
-hides A, and several revisions walk together. `diff` takes `A..B` and
-`A...B` as one operand, the second comparing B with the merge base.
-Paths are quoted the way git quotes them, and `core.quotePath=false` in
-the repository's config leaves bytes outside ASCII as they are.
-
-`status` honors `.gitignore` at every level, including negated rules, and
-collapses an untracked directory to one entry the way git does (`-uall`
-descends, `-uno` hides untracked files entirely).
-
-### Change
+## Stage and change files
 
 ```bash
 git -C /repo add -A
-git -C /repo add src/main.py
-git -C /repo add -u
-git -C /repo reset
-git -C /repo reset src/main.py
-git -C /repo commit -m "message"
-git -C /repo commit -a -m "message"
-git -C /repo branch topic
-git -C /repo branch -d topic
-git -C /repo branch -D topic
-git -C /repo checkout topic
-git -C /repo switch topic
-git -C /repo switch -c feature HEAD~1
-git -C /repo switch --detach HEAD~1
-git -C /repo restore src/main.py
-git -C /repo restore --staged src/main.py
-git -C /repo restore --source HEAD~1 -SW src/main.py
-git -C /repo rm old.py
-git -C /repo rm -r --cached build
-git -C /repo mv src/old.py src/new.py
-git -C /repo tag v1.0
-git -C /repo tag -a v1.1 -m "release"
-git -C /repo tag -d v1.0
+git -C /repo reset -- hello.txt
+git -C /repo restore -- hello.txt
+git -C /repo restore --staged -- hello.txt
+git -C /repo restore --source HEAD~1 -- hello.txt
+git -C /repo mv hello.txt greeting.txt
+git -C /repo rm greeting.txt
+git -C /repo commit -am 'Update tracked files'
 ```
 
-| Verb       | Notes                                                                                                                                  |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path, `-v` names each path it stages or removes                            |
-| `reset`    | mixed only, from HEAD; a pathspec limits it to those paths; `-q` leaves out the report                                                  |
-| `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` takes any tree-ish, spelled as a peel (`HEAD^{tree}`), a subtree (`HEAD:sub`) or a raw id, and is required before the first commit since the implicit HEAD source has nothing to read; a path it lacks is removed from the target, a path still in conflict is named rather than half-restored, a file replaces a directory standing in its place, as it replaces a symlink standing on one of its parents, and a gitlink keeps whatever working tree it has |
-| `rm`       | refuses a path with uncommitted work unless `-f`, a path a symlinked ancestor now hides included; `--cached` keeps the file; `-r` for a directory; `-q`, `--ignore-unmatch`; the index is written only once the working tree is done with, so a deletion the mount refuses leaves the entry staged as it stood |
-| `mv`       | files and directories, `-f` over an existing file and over the conflict stages it was holding, `-k` skips what cannot move, `-n` dry run, `-v`; two sources cannot land on one name, a directory and something inside it cannot both move, an unmerged path moves nowhere as a source, and a move that would cross a mount boundary at either end is refused rather than half-moved |
-| `commit`   | `-m` required, `--author "Name <email>"` optional, `-a` restages tracked files first, `--allow-empty` records a commit that changes nothing |
-| `branch`   | `-d` deletes a merged branch, `-D` any branch, `-q` leaves out the report; a name whose ref path another branch already holds is refused, and so is a start point a branch and a tag both answer to; a new branch's reflog records where it started (`branch: Created from <start>`) |
-| `checkout` | refuses rather than overwrite work you have not committed, an untracked file the target needs the room for included and an index still holding conflict stages too, the branch HEAD already names included, since moving nothing is not the same as having nothing to check; `--detach` leaves HEAD on the commit itself, and `checkout [<tree-ish>] [--] <path>...` restores paths from the index or a tree-ish, as `restore` does |
-| `switch`   | the same move for a branch only; `-c` creates and checks the name against git's ref rules and works before the first commit, `--detach` is the only way onto a bare commit and takes HEAD when nothing is named; a staged addition, deletion or edit both branches agree about is carried across and reported with its status letter |
-| `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`, where `-n-1` says nothing at all and any count below it is refused; a name is a lightweight tag, `-a`/`-m` an annotated one; any object is a legal target, `HEAD^{tree}`, `HEAD:a.txt`, `v1^{tag}` and `v1^{object}` included, and the type recorded is the one the target really is; a name whose ref path another tag already holds is refused; `-d` deletes atomically, `-f`; a creation option needs a name, and `-n` needs a listing |
+| Command | Behavior |
+| --- | --- |
+| `add` | `-A` stages all changes, `-u` tracked changes, `-f` allows ignored paths |
+| `reset` | Mixed reset from HEAD, optionally limited by paths; no revision operand or hard reset |
+| `restore` | Worktree by default, `--staged` for the index, `-SW` for both; `--source` accepts a tree-ish |
+| `rm` | Refuses uncommitted changes unless `-f`; `--cached` keeps working files; `-r` allows directories |
+| `mv` | Files or directories; supports force, dry-run, verbose and skip-failure modes; cannot cross mounts |
+| `commit` | Commits the whole index; `-a` restages tracked files, `--allow-empty` permits an empty change |
 
-`commit` records `mirage <mirage@localhost>` unless `--author` says
-otherwise: git reads `user.name` from config files that a mount does not
-serve, and inventing a name would put an unreviewed one into history.
+`restore` can discard changes in the selected destination. Use `--` before a
+path beginning with `-`. Permission and read-only refusals go through the
+workspace dispatcher and are reported in Git's command-specific wording.
 
-## Deliberate limits
+## Branches, tags and history
 
-- **No `config.worktree`.** The per-worktree config that
-  `extensions.worktreeConfig` enables is not read, so a linked worktree
-  never takes a `core.worktree` or `core.bare` of its own.
-- **No warning for `core.bare` beside `core.worktree`.** git warns that
-  the pair does not make sense and refuses a work-tree verb as invalid
-  config; mirage keeps the repository bare, so `log` runs silently and
-  `status` gives the bare refusal.
-- **No `pull` or `push`.** `clone` and `fetch` read a repository inside
-  the workspace or over smart HTTP; nothing writes to a remote.
-- **A pathspec that begins with a dash needs `--`.** `git rm -draft` is a
-  refused switch and `git rm -- -draft` removes the file, which is what
-  every synopsis ending `[--] [<pathspec>...]` promises. The marker
-  itself is consumed by the parser, so a verb reading a *revision* still
-  resolves an escaped word as one rather than narrowing by it.
-- **No `reset --hard`.** It destroys uncommitted work with no reflog here
-  to recover it from. `rm` and `restore` are the way to discard a file's
-  changes on purpose, and `rm` refuses unless `-f` says so.
-- **No `switch -`.** The previous branch lives in the reflog, which this
-  build writes but does not read back.
-- **`commit` takes no paths.** Real git commits only the paths named;
-  this build commits the whole index, so it refuses the operand rather
-  than record changes nobody named. `commit -a` restages tracked files
-  as git does, but git's `-a` also resolves conflicts into a merge
-  commit, which this build does not write, so an unmerged index is
-  refused either way.
-- **An unmerged index stops a branch move.** Every collision check reads
-  stage 0, so a path held only as conflict stages would be carried past
-  all of them and then cleared. `switch` and `checkout` name each such
-  path and refuse first. Creating a branch where HEAD already is
-  (`switch -c topic`, no start point) moves nothing and is allowed, which
-  is git's own reading of the line.
-- **A branch with no commit is a name and nothing else.** `switch -c topic`
-  before the first commit repoints HEAD and writes neither a ref nor a
-  reflog line, which is how git leaves an unborn branch too. Naming a
-  start point there is a different line and stays unresolvable.
-- **A revision is read left to right.** `~n`, `^n` and `^{<type>}` are
-  operators applied in the order they are written, so `HEAD^{commit}~1`
-  is HEAD's parent, `HEAD~1^{tree}` is that parent's tree, and the two
-  chain further (`HEAD^{commit}~1^{tree}`). A peel was read as a
-  trailing thing until this round, so every chain that went on after one
-  was refused although git takes it. A step off something with no
-  parents is still refused, which is what `HEAD^{tree}~1` is.
-- **`^{tag}` stops above the commit.** Every other peel type sits at or
-  below it, so an annotated tag is unwrapped on the way; `v1^{tag}` is
-  the one spelling that names the tag object itself, and a lightweight
-  tag has none to stop at.
-- **`^{object}` peels nothing.** It is an existence check rather than a
-  type, so it hands back whatever the name resolved to and an annotated
-  tag stays a tag where `^{}` would unwrap it. Every object reports a
-  concrete type, so reading `object` as one refused every expression
-  that spelled it.
-- **A name or id stands for the object it names.** `rev-parse v1`,
-  `show v1` and `tag nested v1` read an annotated tag as the tag object
-  itself, as git does; a verb that wants a commit or a tree (`log`,
-  `restore --source=v1`, a `~` or `^` step) unwraps it on the way. That
-  is how `git tag nested v1` records the nested tag git itself warns
-  about rather than quietly flattening it.
-- **A path is only a way through while every parent is a directory.**
-  Anything else standing on one is not, whatever kind it is: a symlink,
-  a regular file, tracked or not. The two directions differ and both are
-  git's. Writing an entry *replaces* what stands above it with the
-  directory the entry needs, so `restore` and `switch` both land the
-  blob where the branch says and leave a link's target tree, a path no
-  branch named, untouched. Removing an entry does nothing at all,
-  because the path never led there. The checks are one helper, so a
-  third caller inherits both halves rather than re-deriving one.
-- **A switch replaces an ignored parent and refuses an uncommitted
-  one.** The untracked case git refuses by name, and that is unchanged.
-  An *ignored* file or link is in neither tree and on no collision list,
-  so it reaches the write and is replaced in silence, which is git's own
-  split. The deliberate divergence is the third: where an index entry
-  stands in the way of a directory the target records, git allows the
-  switch and discards the staged addition with nothing left pointing at
-  the blob, and this build refuses and names the path instead. Same
-  trade as the staged-change refusal above: no reflog here means a
-  silent discard cannot be undone, and a refusal can be acted on.
-- **The divergence runs both ways round the same collision.** A staged
-  path *inside* a directory the target replaces with a file is refused
-  and named too. git succeeds there as well, removing the directory and
-  dropping the staged entry, which would otherwise leave an index
-  holding both `slot` and `slot/child`: a shape git's own index has no
-  room for. The two halves are one decision, so neither is quietly
-  more permissive than the other.
-- **A directory is replaced without following a link out of it.** A
-  listing dereferences, so a link to a directory lists that directory's
-  contents; walking them would delete a tree no branch named. The name
-  plane is asked for each child, and a link is unlinked where a
-  directory is descended into, which is what `rm -r` does too.
-- **Two refs cannot hold one path.** A ref is a file below `.git`, so
-  `foo` and `foo/bar` cannot both exist, in `refs/tags/` or in
-  `refs/heads/`. Creating either over the other is refused with git's
-  own lock wording and exit 128, before the working tree moves, and
-  `-f` does not help because the obstacle is the path rather than the
-  value. Left to the mount, a disk backend raised its host's error and
-  a prefix store took both keys and left a ref the loose-ref walk could
-  not find.
-- **`mv` refuses a directory and something inside it**, whatever order
-  the line puts them in and whether or not `-k` is given. The check
-  reads the whole line once every source has passed its own, so a
-  source with a fault of its own and a same-target collision are both
-  reported first, and a source `-k` already skipped is out of the
-  comparison. `-k` cannot apply here: moving the directory is what
-  makes the other source disappear, so skipping the second move would
-  leave the first one applied and unstaged.
-- **The same split applies to a directory standing on the name itself**,
-  not only above it. A directory holding untracked files is refused and
-  named (`Updating the following directories would lose untracked files
-  in them`); one holding nothing but ignored files is removed whole and
-  the target's file written in its place, since `--overwrite-ignore` is
-  git's default and the refusal is about untracked content rather than
-  about the directory.
-- **A tree entry's executable bit is restored with its content.** git
-  records exactly one permission bit and puts it back in both
-  directions, so `chmod -x` on a `100755` path and `chmod +x` on a
-  `100644` one are both modifications that `restore` and `switch` undo.
-  The mode is written unconditionally rather than probed first: deciding
-  costs the same op as setting, and the backends a repository is served
-  from apply it natively.
-- **An unborn branch is not a branch you can be on.** A fresh
-  repository's HEAD names one that has never been written, and
-  `switch <that name>` is `fatal: invalid reference: <name>` rather than
-  `Already on`, because there is no commit to be on; `switch -c <new>`
-  stays the one line an unborn HEAD accepts. `checkout` answers the same
-  line differently, as git does, through its pathspec fallback.
-- **A move never crosses a mount boundary**, at either end. The rename op
-  binds to the backend serving the source, so a destination another mount
-  serves would be written into the source's backend at a path it does not
-  own: the file lands hidden behind that mount while the index names the
-  new path. A source that is a mount root, or holds one, is refused for
-  the same reason one level up.
-- **A rename moves what the node table holds at the path, not just below
-  it.** A symlink and an attr overlay live above every backend, addressed
-  by absolute path, so a move has to re-anchor the source's own entry and
-  its whole subtree or the link is destroyed and the mode is inherited by
-  whatever is written at the old name next. `git mv` renames through the
-  dispatcher, which does this for every caller that reaches it; a
-  single-mount shell `mv` renames through the backend op directly and so
-  repeats it, for a two-operand line only.
-- **A rename onto a directory the namespace has filled is `ENOTEMPTY`.**
-  A symlink is namespace state no backend can see, so a destination the
-  backend reads as empty can still hold one, and replacing it would
-  delete the link with it. The merged view decides, which is what POSIX
-  promises.
-- **`tag -a` needs `-m`**, for the reason `commit` does: there is no
-  editor to open.
-- **`tag -n` asks for a listing, so `-d` cannot also be on the line.**
-  With nothing else there `-n` *makes* the line a listing, which is why
-  `tag -n1 nosuch` is a pattern matching nothing at exit 0; once `-d`
-  has chosen the mode there is nothing left to imply, and the line dies
-  with every tag still standing.
-- **`tag -d` deletes every name or none of them.** One ref transaction
-  carries the whole line, and a name given twice is two updates for one
-  ref, which the transaction refuses before applying any of them. A name
-  no ref answers is reported and skipped instead, since it never reaches
-  the transaction at all. The one divergence is the wording of the
-  `-l`/`-d` refusal: git names the two options in the order they were
-  typed and in the spelling used, where this build has one fixed order.
-- **`tag -n-1` is not a `-n` at all.** git's option parser starts the
-  count at -1 to mean "never given", so the sentinel reaches the verb
-  looking like an absent flag: `tag -d -n-1 v` deletes and
-  `tag -n-1 -a v -m m` creates, where either line with a real `-n`
-  refuses. Anything below -1 is a count, and a count has to be positive:
-  the refusal names the format field git was building
-  (`positive value expected contents:lines=-2`) rather than the option,
-  because that is where git discovers it, which is also why it fires in
-  a repository holding no tags and why `-d -n-2` still dies on the
-  list-mode refusal first.
-- **A symlinked ancestor hides a tracked file from the walk, not from
-  `rm`.** git's own diff refuses to follow a link in a leading path and
-  reports the file deleted, which is why `status` shows `D` for it; `rm`
-  lstats instead, and that lstat resolves the link and finds whatever
-  lies at the other end. So a tracked `slot/child` behind
-  `slot -> /elsewhere` is a local modification and is refused without
-  `-f`, even when the file at the other end is byte for byte the same
-  one: two files agreeing is still two files. A link pointing past the
-  name entirely leaves nothing to lose, and the removal goes through.
-- **A nested mount stops a working-tree removal.** Replacing a directory
-  with a file takes the whole directory, and `readdir` merges a mount
-  nested inside it into the listing, so the walk would empty a backend
-  no branch ever recorded and then remove its root. The mount table is
-  asked first and the verb refuses, naming the mount when the session
-  may be told about it and saying only that one is there when it may
-  not. **Every destination is asked before the first one is written**,
-  which is what the other collision checks already do and what keeps
-  the refusal from landing halfway: a `switch` that had written an
-  earlier path would leave the working tree on the target's content
-  with HEAD and the index still on the branch being left, and
-  `restore -SW` stages before it writes, so a refusal in the second
-  pass would move the index and nothing else. The same boundary stops
-  the tidying pass that drops a directory emptied by `rm`: it halts at
-  the mount root rather than removing it, since nothing the caller
-  asked for has failed. This is the rule `MountRootPolicy` already
-  applies to `rm` and `mv` at the command tier, which a git verb
-  reaching the dispatcher directly has to ask for itself.
-- **`mv -f` onto an unmerged path takes its stages with it.** `-f` is
-  the only way to reach a destination that already exists, and git's
-  answer there is one stage-0 entry holding the source: `ls-files -u` is
-  empty afterwards. Leaving the stages behind is the worse divergence
-  rather than the smaller one, since the index writer lays them back
-  over the entry and the blob that just moved is the copy that
-  disappears. An unmerged *source* still moves nowhere, and a plain `mv`
-  onto an occupied destination is still the ordinary refusal.
-- **An ancestry suffix is only `~` and `^`.** Every other character
-  used to count as another first-parent hop, so `HEAD^x` resolved to
-  `HEAD^^` and `git tag release HEAD^x` wrote the tag at a commit
-  nobody named. The whole expression is refused now, which is git's own
-  answer, and `main~٣` goes with it: the count scans ASCII digits, so
-  what a unicode digit leaves behind is not a step either. The wording
-  follows the verb, since git's does: `tag` says
-  `Failed to resolve '<rev>' as a valid ref.` and `log` and `show` say
-  `ambiguous argument '<rev>'`. `HEAD^0`, `HEAD^~` and `HEAD~2^2~1` are
-  steps git takes and still parse.
-- **A gitlink is a directory placeholder, not a blob.** A `160000`
-  entry names a commit in another repository, which this one does not
-  hold, so reading it as content is either a miss or, when the id does
-  happen to resolve here, an empty string written over the whole
-  directory. git checks out no submodule content at all without
-  `--recurse-submodules`; all the entry asks of the working tree is
-  that a directory stand at the name, so an existing one is left
-  exactly as it is with its untracked work, a regular file or a link is
-  replaced by an empty directory, and a missing one is created. What is
-  under the name is never touched either: a tracked child the restored
-  source drops loses its index entry and keeps its working-tree copy,
-  and a directory full of untracked files is what the entry asked for
-  rather than a collision, where an untracked *file* at the name still
-  refuses. Taking the entry away is an `rmdir` rather than an unlink,
-  and it warns rather than failing: an empty directory goes, one that
-  still holds anything stays with
-  `warning: unable to rmdir '<name>': Directory not empty`, a file or a
-  link at the name is the `Not a directory` wording of the same line,
-  and the switch or restore succeeds either way. A gitlink is also
-  invisible to the unstaged comparison, because the submodule's own HEAD
-  is what git compares and this build cannot read it: reporting the
-  directory as a deleted file is worse than saying nothing, and it
-  refused every branch switch away from a submodule. What is left of the
-  divergence is the untracked side: files inside a submodule's directory
-  are still listed as untracked, where git says nothing about them.
-- **`reset` takes no revision.** Real git resets the index to any commit
-  named as an operand; this build resets it from HEAD only and refuses a
-  revision by name rather than doing nothing quietly.
-- **`checkout` refuses a staged change** rather than merging it into the
-  target, so nothing is silently resolved.
-- **Diff hunk bodies can differ from git's** on the same change. Headers,
-  mode lines and blob abbreviations match; the line grouping inside a
-  hunk comes from a different algorithm than git's xdiff. `show --stat`
-  line counts come from the same algorithm, so a rewritten hunk can
-  count slightly differently than git counts it.
-- **`--pretty` knows the block presets, not the wire formats.** `email`,
-  `mboxrd` and `reference` are refused by name (`unsupported --pretty
-  format`), not silently misrendered.
-- **History searches use ASCII case folding.** `-i` /
-  `--regexp-ignore-case` folds ASCII letters in `--grep`, `--author` and
-  `-S` on both hosts. Non-ASCII letters keep their exact spelling, matching
-  Git's literal searches under `LC_ALL=C`. `--grep` values containing
-  newlines are lists of alternative patterns.
-- **`log` dates are strict.** `--since`/`--until` read ISO-8601 or an
-  epoch second; git's relative wording (`2 weeks ago`) is refused
-  rather than misread.
+```bash
+git -C /repo branch topic
+git -C /repo switch topic
+git -C /repo switch -c experiment
+git -C /repo checkout --detach HEAD~1
+git -C /repo branch --contains HEAD
+git -C /repo tag v1.0
+git -C /repo tag -a v1.1 -m 'Release'
+git -C /repo for-each-ref --format='%(refname:short)' refs/heads
+git -C /repo reflog
+git -C /repo stash list
+```
+
+Annotated tags need `-m`; lightweight tags can point to any object. Revision
+expressions include parent/ancestor operators (`^`, `~`), typed peels such as
+`HEAD^{tree}`, and paths such as `HEAD:hello.txt`. Operators apply left to
+right. Invalid suffixes are refused as part of the whole revision.
+
+`log`, `show`, `rev-list`, `diff-tree`, `shortlog`, `cat-file`, `hash-object`
+and `ls-tree` provide inspection without a host Git process. Run each command's
+`--help` for supported formatting, filtering, path and diff options.
+
+## Clone, fetch and repository configuration
+
+```bash
+git clone /repo /work/copy
+git clone https://github.com/acme/tools.git /work/tools
+git -C /work/tools fetch origin
+git -C /work/tools remote -v
+git -C /work/tools config --get remote.origin.url
+git --git-dir=/repo/.git --work-tree=/repo status --short
+```
+
+Clone and fetch can read another workspace repository or a smart-HTTP remote.
+Destinations must be writable mounts. There is no push or pull command.
+For authenticated GitHub clones, `gh repo clone` supplies its configured token.
+
+`--git-dir` and `--work-tree` override `GIT_DIR` and `GIT_WORK_TREE` and resolve
+against `-C`. Repository `core.worktree` and `core.bare` affect discovery;
+linked worktrees use their recorded layout. Working-tree commands refuse bare
+repositories. No repository operation opens a host path behind the VFS.
+
+## Limits and intentional differences
+
+- Only the listed command subset is implemented. Merge, rebase, push, pull,
+  `reset --hard` and `switch -` are absent; stash supports inspection only.
+- Commits accept no path operands and do not create merge commits. An unmerged
+  index blocks commits and branch moves. `checkout` is stricter than Git about
+  staged changes; `switch` can carry compatible staged changes but refuses
+  file/directory collisions that would discard them.
+- Host templates, hooks, editors and Git's initial-branch advisory are absent.
+  Per-worktree `config.worktree` is not read. With conflicting `core.bare` and
+  `core.worktree`, Mirage keeps the repository bare without Git's warning.
+- Working-tree replacements preserve executable modes and symlink semantics.
+  They do not follow a symlink out of a directory being replaced. Nested mounts
+  block removals or replacements that would consume their contents; destinations
+  are checked before writes begin. Renames preserve namespace metadata and
+  cannot cross mount boundaries at either end.
+- Gitlinks create or retain directory placeholders. Mirage does not check out
+  submodule content or compare a submodule's HEAD; files inside a submodule
+  directory can still appear as untracked. Removing a nonempty gitlink directory
+  warns and leaves it in place.
+- Diff hunk bodies and diffstat counts can differ from native Git because
+  the line-diff algorithm differs from xdiff. Headers, ordering and supported
+  formatting are pinned by the shared corpus. Pretty formats `email`, `mboxrd` and `reference` are refused.
+- History searches use ASCII case folding. `--since` and `--until` accept
+  ISO-8601 or epoch seconds; relative date phrases are refused.
+- `tag -l`/`-d` conflict wording uses a fixed option order. Tag deletion uses a
+  ref transaction: duplicate updates are refused atomically, while missing
+  names are reported and skipped.
+
+These boundaries are exercised by the shared Git integration corpus on RAM
+and disk mounts. The VFS determines which filesystem operations are available;
+registering `git` does not make a read-only mount writable.
+
+## Upstream and dependency licenses
+
+| Project | Role in Mirage | License |
+| --- | --- | --- |
+| [Git](https://github.com/git/git) | Command behavior and repository-format reference; Mirage's CLI does not launch the native Git executable | [GPL-2.0, with the qualifications in Git's COPYING file](https://github.com/git/git/blob/master/COPYING) |
+| [Dulwich](https://github.com/jelmer/dulwich) | Python Git implementation dependency | [Apache-2.0 OR GPL-2.0-or-later](https://github.com/jelmer/dulwich/blob/main/COPYING) |
+| [isomorphic-git](https://github.com/isomorphic-git/isomorphic-git) | TypeScript Git implementation dependency | [MIT](https://github.com/isomorphic-git/isomorphic-git/blob/main/LICENSE.md) |
+| [Mirage](https://github.com/strukto-ai/mirage) | Command layer and VFS adapters | [Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE) |
+
+Dulwich offers an Apache-2.0 option; using it does not require choosing its
+GPL alternative. Matching Git behavior does not relicense Git, Dulwich or
+isomorphic-git. Copied or ported source and redistributed dependencies still
+carry their applicable terms and notices; see
+[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).

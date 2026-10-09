@@ -1,138 +1,116 @@
 ---
 title: airtable
-description: "Airtable Web API client: records and comments by base and table id, one record from flags or many as records.jsonl lines."
-icon: table
+description: "Supported Airtable commands for querying and changing records and comments."
+icon: /images/airtable-logo.svg
 ---
 
-Mirage's built-in client for the
-[Airtable Web API](https://airtable.com/developers/web/api/introduction). The
-[Airtable mount](/python/vfs/airtable) reads bases as files; a record write is
-not a file write, so writes go through this CLI, which also reaches what a file
-cannot: server-side filters, one record by id, and comments. The command tree
-is discoverable with `airtable --help`.
+Query Airtable bases, tables, records and comments, and create, update or delete records. Mirage defines this command tree over the [Airtable Web API](https://airtable.com/developers/web/api/introduction).
 
-## Install
+## Setup
+
+Create a token with the scopes in [Airtable setup](/home/setup/airtable). Reads need record and schema read scopes; writes and comments need their corresponding write scopes.
 
 ```python
-import os
-
-from mirage import MountMode, Workspace
+from mirage import Workspace
 from mirage.commands.cli.builtin.airtable import AIRTABLE
-from mirage.vfs.airtable import AirtableConfig, AirtableVFS
+from mirage.core.airtable.config import AirtableConfig
 
-config = AirtableConfig(token=os.environ["AIRTABLE_TOKEN"])
-ws = Workspace({"/airtable": AirtableVFS(config)}, mode=MountMode.READ)
-ws.register_cli("airtable", AIRTABLE, config.model_dump())
+config = AirtableConfig(token="pat_...")
+ws = Workspace({})
+ws.register_cli("airtable", AIRTABLE, config)
 ```
 
-The CLI takes the mount's own config: `token`, `base_ids`, `base_url`,
-`max_read_records` and `requests_per_second`.
+No service mount is required. For YAML and multiple accounts, see the
+[CLI overview](/python/cli/index#register-a-cli).
 
-Two installs under different names are two accounts. In YAML, the same
-install rides the `clis:` section; see the [CLI overview](/python/cli/index).
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
 
-Reads need the mount's scopes (`data.records:read`, `schema.bases:read`);
-writes add `data.records:write`, and comments `data.recordComments:read` and
-`data.recordComments:write`. See [Airtable Setup](/home/setup/airtable).
+Run `airtable <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
 
-## Ids
+| Command | Description |
+| --- | --- |
+| `airtable base list` | List the bases the token reaches as JSON |
+| `airtable base get` | Get one base and its tables (base.json) |
+| `airtable table get` | Get one table's fields and views (table.json) |
+| `airtable record list` | List records as JSONL (records.jsonl) |
+| `airtable record get` | Get one record as a JSONL line |
+| `airtable record create` | Create records from --fields or stdin |
+| `airtable record update` | Update records' cells (PATCH) from RECORD --fields or stdin |
+| `airtable record delete` | Delete records by RECORD or from stdin |
+| `airtable comment list` | List a record's comments, newest first |
+| `airtable comment add` | Comment on a record |
+{/* END GENERATED CLI COMMANDS */}
 
-Every verb below a base names it with `--base` and its table with `--table`.
-Take the ids from the mount's directory names, after the last `__`, and a
-record's from its `record_id`:
-
-```text
-/airtable/bases/Product_Roadmap__appRoadmapBase001/            --base appRoadmapBase001
-/airtable/bases/.../Features__tblFeatures000001/records.jsonl  --table tblFeatures000001
-{"record_id": "recFeat0000000003", ...}                        RECORD
-```
-
-`--table` and `table get` also take the table's name.
-
-## Reads
+## Read and filter records
 
 ```bash
 airtable base list
-airtable base get appRoadmapBase001
 airtable table get --base appRoadmapBase001 Features
 airtable record list --base appRoadmapBase001 --table tblFeatures000001 --formula "{Status} = 'Done'"
-airtable record list --base appRoadmapBase001 --table tblFeatures000001 --view "Done" --max-records 50
 airtable record get --base appRoadmapBase001 --table tblFeatures000001 recFeat0000000003
-airtable comment list --base appRoadmapBase001 --table tblFeatures000001 recFeat0000000001
+airtable comment list --base appRoadmapBase001 --table tblFeatures000001 recFeat0000000003
 ```
 
-| Verb | Prints |
-| --- | --- |
-| `base list` | JSON array of `{base_id, base_name, permission_level}`, filtered by `base_ids` |
-| `base get BASE` | the mount's `base.json` |
-| `table get --base B TABLE` | the mount's `table.json` |
-| `record list` | JSONL, one `records.jsonl` line per record |
-| `record get RECORD` | one `records.jsonl` line |
-| `comment list RECORD` | JSON array of `{comment_id, author_id, author_email, author_name, text, created_time, last_updated_time}`, newest first |
+`--base` takes a base ID. `--table` takes a table ID or name. Find these in
+API output or in the VFS's `name__id` directory names; record lines carry
+`record_id` explicitly. `--formula` and `--view` filter on the server.
 
-`--formula` is Airtable's `filterByFormula` and `--view` takes a view id or
-name, so both filter on the server. `record list` is bounded like the mount:
-without `--max-records` it asks for `max_read_records + 1` records and, if that
-many come back, fails (exit 1) rather than paging the rest of the table. An
-explicit `--max-records N` is honored as asked.
+`base list` and `comment list` return JSON arrays. `base get` and `table get`
+return the same schema objects as the mount. Record commands return JSONL.
 
-## Writes
+## Write records
 
 ```bash
-airtable record create --base appRoadmapBase001 --table tblFeatures000001 --fields '{"Name": "Search"}'
-airtable record update --base appRoadmapBase001 --table tblFeatures000001 recFeat0000000003 --fields '{"Status": "Done"}'
-airtable record delete --base appRoadmapBase001 --table tblFeatures000001 recFeat0000000003 recFeat0000000004
-airtable comment add --base appRoadmapBase001 --table tblFeatures000001 recFeat0000000003 --text "Ship it"
+airtable record create --base appRoadmapBase001 --table tblFeatures000001 --fields '{"Name":"Search"}'
+airtable record update --base appRoadmapBase001 --table tblFeatures000001 recFeat0000000003 --fields '{"Status":"Done"}'
+airtable record delete --base appRoadmapBase001 --table tblFeatures000001 recFeat0000000003
+echo 'Ready to ship' | airtable comment add --base appRoadmapBase001 --table tblFeatures000001 recFeat0000000003
 ```
 
-Without that single-record form, `record create`, `update` and `delete` read
-JSONL from stdin, one `records.jsonl` line per record, so a mount read edited
-with `jq` pipes straight back:
+For bulk writes, pipe record JSONL into `record create`, `record update` or
+`record delete` without the single-record arguments:
 
 ```bash
-jq -c 'select(.fields.Status == "Todo") | .fields.Status = "Done"' \
-  /airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl \
+jq -c 'select(.fields.Status == "Todo") | .fields.Status = "Done"' /work/records.jsonl \
   | airtable record update --base appRoadmapBase001 --table tblFeatures000001
 ```
 
-| Verb | A stdin line needs | Prints |
-| --- | --- | --- |
-| `record create` | `fields` (`record_id` and `created_time` are ignored, so lines copy into another table) | the created records, JSONL |
-| `record update` | `record_id` and `fields` | the updated records, JSONL |
-| `record delete` | `record_id` | `{"record_id": ..., "deleted": true}` per record |
-
-- A line may hold only `record_id`, `created_time` and `fields`. Any other key,
-  a line that is not an object, or a `fields` that is not an object is a usage
-  error naming the 1-based line, and every line is checked before the first
-  request.
-- Computed fields (formula, rollup, lookup, count, autonumber, created and
-  modified time or by, button, AI text, sync source) are dropped from a stdin
-  line, because a mount line carries them and Airtable refuses a write to one.
-  `--fields` is sent as given.
-- Writes go ten records to a request, Airtable's limit. `update` is a PATCH, so
-  a field a line leaves out keeps its value. If a later request fails, the
-  records the earlier ones wrote are still printed, with the error on stderr
-  and exit 1.
-- `--typecast` lets Airtable convert string values to the field types.
-- `comment add` takes `--text` or the text on stdin, with one trailing newline
-  stripped: `echo "Ship it" | airtable comment add ... RECORD`.
-
-## Errors
-
-| Exit | When |
+| Operation | Required fields in each stdin line |
 | --- | --- |
-| `1` | an API error (`airtable record get: Airtable API error (GET /app.../tbl.../rec...): HTTP 403: INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND: ...`, Airtable's answer for a record that does not exist), a `record list` past the cap |
-| `1` | a partial write: the records that landed on stdout, and the error that stopped the rest on stderr without a prefix, `Airtable API error (POST ...): ...` |
-| `1` | a base outside `base_ids`: `airtable <verb>: <base-id>: Permission denied`, refused before any request |
-| `2` | a usage error: a missing flag or operand, malformed `--fields`, or a bad stdin line (`stdin line 2: unknown key "id"`) |
+| `record create` | `fields`; existing `record_id` and `created_time` are ignored |
+| `record update` | `record_id` and `fields`; omitted fields remain unchanged |
+| `record delete` | `record_id` |
 
-The `airtable <verb>:` prefix is the head word the CLI was installed under, so a
-second install under another name refuses in that name. A refusal the verb
-decides itself (bad `--fields`, a bad stdin line) prints its message alone, the
-way the `gh` and `ntn` CLIs do; one the argument parser decides (a missing
-required flag) keeps the parser's prefix and `--help` hint.
+Each line may contain only `record_id`, `created_time` and `fields`. Mirage
+validates every line before the first request, drops computed fields from
+stdin writes, and sends batches of at most ten records. Inline `--fields`
+is sent as given. Use `--typecast` to allow Airtable's type conversion.
 
-Requests are paced per base at `requests_per_second`. A read retries a `429`,
-`502` or `503`; a write retries only a `429` for the rate limit, after
-Airtable's 30 second penalty, since a write answered `502` or `503` may have
-landed.
+## VFS and limits
+
+The optional [Airtable VFS](/python/vfs/airtable) exposes bases and tables as
+files. Record output uses the same JSONL shape, so mounted records can feed
+the CLI through stdin. The CLI uses its own account config and needs no
+Airtable mount.
+
+- `base_ids` restricts accessible bases, including writes; an excluded base
+  is refused before a request.
+- Without `--max-records`, a list exceeding `max_read_records` fails with
+  exit 1. An explicit `--max-records N` sets the requested cap.
+- Bad flags, malformed JSON and invalid stdin lines exit 2. API failures
+  exit 1. A partial write prints the completed records and exits 1; it
+  does not roll them back.
+- Requests use the config's per-base rate limit. Reads retry `429`, `502`
+  and `503`; writes retry only `429`, to avoid repeating a write that may
+  already have succeeded.
+
+The service is reached by IDs and the CLI's config. Input files such as
+`/work/records.jsonl` enter through shell stdin; they can live on any
+readable workspace mount.
+
+This is Mirage's Apache-2.0 command implementation for the Web API.
+No compatibility with a separate Airtable CLI is claimed; the API link
+documents the service rather than an upstream CLI implementation. See
+[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).

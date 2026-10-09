@@ -1,135 +1,115 @@
 ---
 title: ntn
-description: "Notion API client following the official Notion CLI grammar."
+description: "Supported Notion commands for Markdown pages, data sources and API calls."
 icon: /images/notion-logo.svg
 ---
 
-Mirage's built-in Notion API client follows the grammar of Notion's official
-[`ntn` CLI](https://www.npmjs.com/package/ntn). The Mirage command tree is
-discoverable with `ntn --help` or `man ntn`.
+Read and edit Notion page bodies as Markdown, query data sources, or call the Notion API directly. Mirage implements the command subset below using the [official `ntn` grammar](https://www.npmjs.com/package/ntn).
 
-**Licenses:** The official `ntn` package declares the
-[MIT License](https://www.npmjs.com/package/ntn); Mirage's independent
-implementation uses
-[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
+## Setup
 
-## Install
+Create an integration and grant it access to the relevant pages using [Notion setup](/home/setup/notion).
 
 ```typescript
-import { NTN } from '@struktoai/mirage-core'
-import { NotionVFS, Workspace } from '@struktoai/mirage-node'
+import { NTN, Workspace } from '@struktoai/mirage-node'
 
 const config = { apiKey: 'secret_...' }
-const ws = new Workspace({ '/notion': new NotionVFS(config) })
+const ws = new Workspace({})
 ws.registerCli('ntn', NTN, config)
 ```
 
-Two installs under different names are two accounts. In YAML, the same
-install rides the `clis:` section; see the [CLI overview](/typescript/cli/index).
+No service mount is required. For YAML and multiple accounts, see the
+[CLI overview](/typescript/cli/index#register-a-cli).
 
-## Verbs
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
 
-The grammar matches the official
-[Notion CLI](https://developers.notion.com/cli) verb for verb, and every
-case is gated against the real `ntn` binary in CI, so what is written
-here is what the program does.
+Run `ntn <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
 
-**Ids are positional, not flags.** There is no `--page`, `--block` or
-`--datasource`; each verb names its own operand.
+| Command | Description |
+| --- | --- |
+| `ntn api` | Call the public Notion API (beta) |
+| `ntn auth token` | Print the current authentication token |
+| `ntn datasources query` | Query pages in a data source |
+| `ntn datasources resolve` | Resolve a Notion database ID to its data source IDs |
+| `ntn pages get` | Retrieve a page as Markdown |
+| `ntn pages create` | Create a page from Markdown content |
+| `ntn pages edit` | Edit a page's content from Markdown |
+| `ntn pages trash` | Trash a page |
+| `ntn whoami` | Show the authenticated Notion user |
+{/* END GENERATED CLI COMMANDS */}
 
-```
-ntn api          <PATH>...     Call the public Notion API (beta)
-ntn auth token                 Print the current authentication token
-ntn datasources query    <ID_OR_URL>
-ntn datasources resolve  <ID>
-ntn pages get    <PAGE_ID>     Retrieve a page as Markdown
-ntn pages create               Create a page from Markdown content
-ntn pages edit   <PAGE_ID>     Edit a page's content from Markdown
-ntn pages trash  <PAGE_ID>     Trash a page
-ntn whoami                     Show the authenticated Notion user
-```
-
-There is no `ntn blocks`, `ntn comments` or `ntn search`. Those are
-reached through `ntn api` with the REST API's own paths, exactly as
-upstream reaches them. Upstream's interactive and deploy verbs (`login`,
-`logout`, `update`, `workers`, `notion-as-code`, `doctor`, `files`) are
-out of scope for a virtualized CLI.
-
-### Pages
-
-Page bodies are **Markdown**, not property JSON. `create` takes the body
-on `--content` or from stdin, and the first heading becomes the title.
+## Read and edit pages
 
 ```bash
-ntn pages get a1b2c3d4-...
-ntn pages get a1b2c3d4-... --json
-
-ntn pages create --content '# Title' --parent page:a1b2c3d4-...
-echo '# Title' | ntn pages create --parent data-source:e5f6a7b8-...
-
-ntn pages edit a1b2c3d4-... --content '# Replaced body'
-ntn pages trash a1b2c3d4-... --yes
+ntn whoami
+ntn pages get PAGE_ID
+ntn pages get PAGE_ID --json
+ntn pages create --parent page:PARENT_ID --content '# Release notes'
+echo '# Release notes' | ntn pages create --parent data-source:SOURCE_ID
+ntn pages edit PAGE_ID --content '# Updated body'
+ntn pages trash PAGE_ID --yes
 ```
 
-| Verb     | Operand     | Options                                | Writes |
-| -------- | ----------- | -------------------------------------- | ------ |
-| `get`    | `<PAGE_ID>` | `--json`                               | no     |
-| `create` | none        | `--content` `--parent` `--json`        | yes    |
-| `edit`   | `<PAGE_ID>` | `--content` `--json`                   | yes    |
-| `trash`  | `<PAGE_ID>` | `--yes`                                | yes    |
+Page IDs are positional. Bodies are Markdown; the first heading becomes the
+title when creating a page. `--parent` accepts `page:`, `database:` or
+`data-source:` followed by an ID. **`pages edit` replaces the entire body.**
+Trashing requires confirmation; pass `--yes` for noninteractive use.
 
-`--parent` takes `page:<id>`, `database:<id>` or `data-source:<id>`.
-`edit` replaces the page body wholesale. `trash` refuses without `--yes`
-unless a prompt can be answered, and sets `in_trash`.
-
-To set a row's **property values** rather than its body, use `ntn api`:
+To update database-row properties, use the API rather than page-body editing:
 
 ```bash
-ntn api v1/pages/<row-id> -X PATCH \
-  -d '{"properties":{"Stage":{"select":{"name":"Draft"}}}}'
+ntn api v1/pages/PAGE_ID -X PATCH -d '{"properties":{"Stage":{"select":{"name":"Draft"}}}}'
 ```
 
-### Data sources
-
-Since `2025-09-03` a database is a container of *data sources*, and the
-rows and the column schema live on the data source. `resolve` turns a
-database id into its data source ids; `query` accepts either in the same
-slot.
+## Query data sources
 
 ```bash
-ntn datasources resolve e5f6a7b8-...
-ntn datasources query d5000000-... --limit 10
-ntn datasources query d5000000-... -s 'Priority desc'
-ntn datasources query d5000000-... --filter '{"property":"Stage","select":{"equals":"Done"}}'
-ntn datasources query d5000000-... --json
+ntn datasources resolve DATABASE_ID
+ntn datasources query SOURCE_ID --limit 10 -s 'Priority desc'
+ntn datasources query SOURCE_ID --filter '{"property":"Stage","select":{"equals":"Done"}}'
+ntn datasources query SOURCE_ID --filter-file /work/filter.json --json
 ```
 
-`query` prints one tab-separated line per row: the page id, then the
-property values in alphabetical order by column name. The columns are the
-ones the returned rows actually carry, so a result set that does not cover
-the whole schema prints narrower.
+`resolve` returns a database's data source IDs. `query` accepts a data source
+or database ID/URL. Its default output is tab-separated: page ID followed by
+property values, with columns sorted by name from the returned rows.
+`--json` returns the API response. `--filter-file` reads through the workspace
+VFS, relative to the session's working directory.
 
-### Raw API
-
-`ntn api` reaches every route that has no typed verb, including the only
-delete verb the public API has (`DELETE /v1/blocks/{id}`, which trashes a
-block, a page, or a database row).
+## Call the API
 
 ```bash
 ntn api v1/users/me
 ntn api v1/search -d '{"query":"Roadmap"}'
-ntn api v1/search query=Roadmap
-ntn api v1/blocks/<page-id>/children page_size==10
-ntn api v1/blocks/<block-id> -X DELETE
-ntn api v1/comments -d '{"parent":{"page_id":"a1b2c3d4"},"rich_text":[{"text":{"content":"hi"}}]}'
+ntn api v1/blocks/PAGE_ID/children page_size==10
+ntn api v1/blocks/BLOCK_ID -X DELETE
 printf '{"query":"Roadmap"}' | ntn api v1/search
 ```
 
-The body comes from exactly one source: stdin, `--data`/`-d`, or inline
-`path=value` / `path:=json` inputs. Naming two is an error. `name==value`
-stays a query parameter whatever the method is, and `Header:Value` sets a
-header. Any body source makes the call a POST unless `-X`/`--method` says
-otherwise; `GET`, `POST`, `PATCH`, `PUT` and `DELETE` are accepted.
+| Input | Meaning |
+| --- | --- |
+| `-d` / `--data`, stdin, or inline fields | Request body; choose one source |
+| `name=value` | String body field |
+| `name:=json` | Typed JSON body field |
+| `name==value` | Query parameter, regardless of method |
+| `Header:Value` | Request header |
+| `-X` / `--method` | `GET`, `POST`, `PATCH`, `PUT` or `DELETE` |
 
-Use the `<page-id>` / `<database-id>` / `<data-source-id>` from a mounted
-path segment as the operand.
+A body selects POST unless a method is explicit. Blocks, comments and search
+use API paths; they are not separate command groups.
+
+## VFS and limits
+
+The optional [Notion VFS](/typescript/setup/notion) provides page and database
+files. Reuse its IDs, or obtain them through the API; no mount is required.
+Interactive login/logout, update, workers, deployment and file-management
+commands are absent. The config supplies the credential.
+
+Parser errors follow CLAP style and exit 5; malformed request bodies exit 1.
+The shared conformance suite checks the implemented surface against `ntn`.
+The suite pins `ntn` 0.21.9, whose
+[package metadata](https://registry.npmjs.org/ntn/0.21.9) declares MIT.
+Mirage's command implementation is Apache-2.0; see
+[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).

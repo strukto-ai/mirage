@@ -1,333 +1,203 @@
 ---
 title: gh
-description: "Act on GitHub in the official CLI's vocabulary, alongside a github mount that reads the repository as files."
+description: "Supported GitHub commands for repositories, issues, pull requests, Actions and API calls."
 icon: github
 ---
 
-Mirage's built-in `gh` implementation uses the vocabulary of the official
-[`cli/cli`](https://github.com/cli/cli) project. A repository is a tree, so
-mirage already reads one as files: the
-[`github` mount](/python/vfs/github) is the read half, and `ls`, `cat`
-and `grep` are how an agent explores it. `gh` is the write half, plus the
-account-level operations a filesystem has no shape for.
+Work with GitHub repositories, issues, pull requests, releases and Actions, or call REST and GraphQL directly. Mirage implements the supported subset below of the [GitHub CLI (`gh`)](https://github.com/cli/cli), with workspace files and configured account credentials.
 
-**Licenses:** The upstream `cli/cli` project uses the
-[MIT License](https://github.com/cli/cli/blob/trunk/LICENSE); Mirage's
-independent implementation uses
-[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
+## Setup
 
-## Install
+Use [GitHub setup](/home/setup/github) for token permissions. No GitHub mount
+or local checkout is required.
 
 ```python
-import os
-
 from mirage import Workspace
 from mirage.commands.cli.builtin.gh import GH
-from mirage.core.github.config import GhConfig, GitHubConfig
-from mirage.vfs.github import GitHubVFS
+from mirage.core.github.config import GhConfig
 
-token = os.environ["GITHUB_TOKEN"]
-repo = GitHubVFS(
-    config=GitHubConfig(token=token), owner="acme", repo="tools", ref="main")
-
-ws = Workspace({"/repo": repo})
-ws.register_cli("gh", GH, GhConfig(token=token, repo="acme/tools"))
-
-await ws.shell("gh repo view")
+ws = Workspace({})
+ws.register_cli("gh", GH, GhConfig(token="ghp_...", repo="acme/tools"))
 ```
 
-In YAML the same install rides the `clis:` section; see the
-[CLI overview](/python/cli/index).
+`repo` is the default repository and `branch` supplies the API's `{branch}`
+placeholder. `base_url` (`baseUrl` in TypeScript) selects an API host. An
+Enterprise REST base ending in `/api/v3` uses `/api/graphql` for GraphQL;
+other bases use `/graphql` beneath that base.
 
-| Field      | Meaning                                                      |
-| ---------- | ------------------------------------------------------------ |
-| `token`    | the API token, as `GH_TOKEN` carries for real gh              |
-| `repo`     | the default repository, as `[HOST/]OWNER/REPO`                |
-| `branch` | the current branch, for `{branch}` in an endpoint |
-| `base_url` | the REST API base, for GitHub Enterprise Server              |
+For YAML and multiple accounts, see [registration](/python/cli/index#register-a-cli).
 
-An Enterprise Server base ends in `/api/v3`, and GraphQL (`gh api graphql`
-and the verbs that query it, such as `repo view --json`) then goes to
-`/api/graphql` on the same host, outside the REST base, as real gh sends
-it. Any other `base_url` answers GraphQL at `base_url/graphql`.
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
 
-`repo` and `branch` are what real gh reads off the current directory's git
-remote and checkout. A workspace has neither, so the install carries them:
-`repo` answers a line that names no repository, and both feed the
-`{owner}`/`{repo}`/`{branch}` placeholders. Two installs under different head words are two
-accounts.
+Run `gh <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
 
-## Authentication status
+| Command | Description |
+| --- | --- |
+| `gh auth status` | Check the configured token |
+| `gh auth token` | Print the authentication token gh uses for a hostname and account |
+| `gh help` | Help about any command |
+| `gh version` | Show the Mirage GitHub CLI implementation version. Aliases: `--version`. |
+| `gh api` | Make an authenticated GitHub API request |
+| `gh issue list` | List issues. Aliases: `ls`. |
+| `gh issue view` | View an issue |
+| `gh issue create` | Create an issue. Aliases: `new`. |
+| `gh issue edit` | Edit an issue |
+| `gh issue close` | Close an issue |
+| `gh issue reopen` | Reopen an issue |
+| `gh issue comment` | Add a comment to an issue |
+| `gh pr list` | List pull requests. Aliases: `ls`. |
+| `gh pr view` | View a pull request |
+| `gh pr create` | Create a pull request. Aliases: `new`. |
+| `gh pr edit` | Edit a pull request |
+| `gh pr merge` | Merge a pull request |
+| `gh pr close` | Close a pull request |
+| `gh pr comment` | Add a comment to a pull request |
+| `gh pr diff` | View changes in a pull request |
+| `gh pr checks` | Show CI checks for a pull request |
+| `gh repo list` | List repositories. Aliases: `ls`. |
+| `gh repo clone` | Clone a repository locally |
+| `gh repo view` | View a repository |
+| `gh repo create` | Create a repository |
+| `gh repo fork` | Create a fork of a repository |
+| `gh repo rename` | Rename a repository |
+| `gh repo edit` | Edit repository settings |
+| `gh repo delete` | Delete a repository |
+| `gh release list` | List releases. Aliases: `ls`. |
+| `gh release view` | View a release |
+| `gh release create` | Create a release |
+| `gh run list` | List workflow runs. Aliases: `ls`. |
+| `gh run view` | View a workflow run |
+| `gh run rerun` | Rerun a workflow run |
+| `gh workflow list` | List workflows. Aliases: `ls`. |
+| `gh workflow view` | View a workflow |
+| `gh workflow run` | Run a workflow |
+| `gh search issues` | Search for issues |
+| `gh search prs` | Search for prs |
+| `gh search repos` | Search for repos |
+| `gh search code` | Search for code |
+| `gh search commits` | Search for commits |
+{/* END GENERATED CLI COMMANDS */}
 
-`gh auth status` checks the configured token with `GET /user`, reports the
-host and account, and exits 1 when GitHub rejects the credential. It needs
-no mount. The token source is reported as `Mirage configuration`: configuration
-retains the resolved secret, not the environment variable or file that supplied
-it. The credential itself is never printed.
-
-`gh auth token` is refused with exit 1 for the same reason: the token stays
-in Mirage configuration, where every `gh` verb reads it.
-
-## Reading is the mount, acting is the CLI
+## Issues, pull requests and Actions
 
 ```bash
-ls /repo/src              # the tree, from the mount
-cat /repo/README.md       # a blob, from the mount
-grep -r TODO /repo        # the mount again
-
-gh api repos/acme/tools/contents/README.md -X PUT \
-  -f message='docs: fix a typo' -f content="$(base64 -w0 new.md)" -f sha=<blob-sha>
-```
-
-A write through `gh` lands on the same repository the mount reads, but it
-lands **by repository name rather than by any vfs path**, so the mount has
-nothing to aim a per-path invalidation at. The executor expires every
-mount's caches after a write verb of an account CLI, so the next `cat` or
-`ls` refetches instead of serving the pre-write bytes. Nothing is required
-of the caller, and nothing on the spec names the mount.
-
-## Verbs
-
-```
-gh api       <ENDPOINT>
-gh issue     list | view | create | edit | close | reopen | comment
-gh pr        list | view | create | edit | merge | close | comment | diff | checks
-gh repo      list | clone | view | create | fork | rename | edit | delete
-gh release   list | view | create
-gh run       list | view | rerun
-gh workflow  list | view | run
-```
-
-Every level answers `--help`; `man gh`, `man gh issue`, and `man gh pr
-create` render the same text from the same spec. `list` also accepts `ls`,
-and issue and pull request `create` also accept `new`.
-
-## Typed workflows
-
-Typed read commands accept `-R/--repo [HOST/]OWNER/REPO` where applicable.
-Most also accept `--json field1,field2` and `-q/--jq EXPRESSION`; `--jq`
-requires `--json`, so the selected field set stays explicit and bounded.
-List commands use `-L/--limit` and fetch as many pages as needed.
-
-`gh issue view`, `gh issue list`, `gh pr view` and `gh pr list` accept every
-`--json` field gh 2.85 does, and `gh repo view` and `gh repo list` every
-repository field. Like gh, they ask GraphQL for exactly the fields named and
-print each in gh's own shape, so `files`, `commits`, `reviews`,
-`statusCheckRollup` and `closedByPullRequestsReferences` need no fallback to
-`gh api`. `pr view` reads reviews, comments, closing issues and checks past
-their first 100, and `issue view` its comments and closing pull requests.
-`issue view` answers a pull request's number too, as gh does, with the
-fields only an issue has at their zero. The JSON prints compact, one value
-per line, the way gh prints it to anything but a terminal.
-
-```bash
+gh auth status
 gh issue list --state open --label bug --limit 20
 gh issue view 42 --json number,title,labels,url --jq '.url'
 gh pr view 17 --json files,commits,reviews --jq '.files[].path'
 gh pr checks 17 --json name,bucket,state
-gh repo list acme --json nameWithOwner,visibility
-gh release list --json tagName,isLatest
 gh run list --workflow ci.yml --json databaseId,status,conclusion
 gh run view 123456 --log-failed
 gh workflow view ci.yml --yaml --ref release
 ```
 
-Mutations never open an editor or prompt. Supply the values on the line,
-through a workspace file, or through stdin with `-`:
+Use `-R/--repo [HOST/]OWNER/REPO` where supported to override the configured
+repository. Typed `--jq` requires `--json`. List commands paginate up to
+`-L/--limit`; issue, pull-request and repository JSON fields follow the
+supported upstream field sets. Other typed groups expose smaller REST-backed
+field sets; use `gh api` for additional data.
 
 ```bash
-gh issue create --title 'Broken build' --body-file /scratch/issue.md --label bug
+gh issue create --title 'Broken build' --body-file /work/issue.md --label bug
+gh issue comment 42 --body-file - < /work/comment.md
 gh issue edit 42 --add-label confirmed --remove-assignee octocat
-gh issue comment 42 --body-file - < /scratch/comment.md
-gh issue close 42
-
-gh pr create --title 'Fix build' --head fix-build --base main --body-file /scratch/pr.md
-gh pr edit 17 --base release --body 'Updated scope'
-gh pr merge 17 --squash --subject 'fix: build'
-
-gh repo create acme/tools-next --private --add-readme
-gh release create v1.2.0 --title '1.2.0' --notes-file /scratch/notes.md
+gh pr create --title 'Fix build' --head fix-build --base main --body-file /work/pr.md
+gh pr merge 17 --squash --subject 'Fix build'
+gh release create v1.2.0 --title '1.2.0' --notes-file /work/notes.md
 gh workflow run ci.yml --ref main -f mode=full
 gh run rerun 123456 --failed
 ```
 
-Body and notes files are read through the workspace dispatcher, not the host
-filesystem. That keeps an agent inside mirage while still supporting the
-official CLI's file-oriented grammar.
+Commands are noninteractive: supply titles, bodies, branches and confirmation
+flags explicitly. Body/notes files and `--input` files use the workspace VFS;
+`-` selects stdin. Workflow YAML is read at the selected ref. Run logs are
+available only after completion; `--log-failed` selects failed steps.
 
-`gh workflow view --yaml` prints the workflow's file as the repository holds
-it at `-r/--ref`, a branch or tag, or on the default branch; that is the one
-read gh makes, and `--ref` without `--yaml` is refused as gh refuses it.
-`gh run view --log` prints a completed run's log a line at a time, each line
-behind its job and step name, from the log archive GitHub ships; a job the
-archive has no log for is fetched on its own, and `--log-failed` keeps only the
-failed steps of failed jobs. A run still going is refused in gh's words, `run
-N is still in progress; logs will be available when it is complete`, before
-any log is asked for.
-
-### repo
+## Repositories
 
 ```bash
-gh repo view                        # the install's repository
-gh repo view acme/tools
-gh repo view github.com/acme/tools  # the host segment is accepted
 gh repo view --json nameWithOwner,defaultBranchRef,url
-
 gh repo list acme --limit 50
 gh repo clone acme/tools /work/tools -- --branch dev
-gh repo create tools-next --private --description 'Next generation'
-
-gh repo fork acme/tools
+gh repo create acme/tools-next --private --add-readme
 gh repo fork acme/tools --fork-name tools-patched
-gh repo fork https://github.com/acme/tools --org acme-labs --default-branch-only
-
 gh repo rename tools-v2 -R acme/tools
-
-gh repo edit --description 'Agent tools' --homepage https://tools.example
-gh repo edit acme/tools --enable-wiki=false --delete-branch-on-merge
-gh repo edit --add-topic cli,agents --remove-topic legacy
-gh repo edit --visibility private --accept-visibility-change-consequences
-
+gh repo edit acme/tools --enable-wiki=false --add-topic cli,agents
+gh repo edit acme/tools --visibility private --accept-visibility-change-consequences
 gh repo delete acme/tools-old --yes
 ```
 
-The default `view` prints a `name:` line, a `description:` line, then `--`
-and the README, with the separator omitted when the repository has none.
-Use `--json` for any of gh's repository fields or `gh api` for the complete
-REST object.
+`repo clone` uses Mirage's Git implementation and needs a writable destination
+mount. The token travels in the HTTP authorization header, not in the command
+line, output or `.git/config`. Fork clones do not add an `upstream` remote.
 
-`clone` runs Mirage's own `git clone` into DIRECTORY, else a directory
-named after the repository, and the words after `--` are git's clone
-options. A bare `REPO` is the account's own. The token travels as the
-request's `Authorization` and never reaches the line, `.git/config` or the
-output. The `upstream` remote gh adds for a fork is not added, so `-u`
-names a remote Mirage never adds and `--no-upstream` is what it always does.
+`repo rename` takes the **new name** as its operand; `-R` selects the repository
+to rename. `repo edit` changes only the named settings, and bare boolean
+settings can be disabled with `=false`. Deletion needs both a repository name
+and `--yes`. Repository URLs and `[HOST/]OWNER/REPO` are accepted, but the host
+must match the configured API host; use a separate install for another host.
 
-`rename` takes the **new name** as the operand and the repository to
-rename on `-R`, which is the reverse of what the shape of the line
-suggests; that is upstream's grammar, not a mirage choice.
-
-`edit` sends the settings named on the line in one `PATCH`, as gh does, and
-reads and replaces the topic list when `--add-topic` or `--remove-topic`
-changes it. A switch such as `--enable-wiki` is on when bare and off as
-`--enable-wiki=false`. With no setting named gh would prompt, so it is
-refused, and `--visibility` needs `--accept-visibility-change-consequences`.
-`delete` needs `--yes` and a named repository, since gh only prompts for the
-current one; a name with no owner is the viewer's. Both print nothing on
-success, as gh does when it is not writing to a terminal.
-
-`[HOST/]OWNER/REPO` is parsed from the right, so the owner and the
-repository are the last two segments. A repository URL (`https://HOST/OWNER/REPO`,
-`git@HOST:OWNER/REPO.git`) reads the same way. Every call goes to the
-install's `base_url`, so the host must be github.com or the host `base_url`
-names; any other is refused the way gh refuses a host it cannot reach,
-`error connecting to HOST`, rather than asked of the install's own host. A
-second host means a second install.
-
-### api
-
-`gh api` reaches every endpoint that has no typed verb, which is most of
-them.
+## REST and GraphQL API
 
 ```bash
-gh api repos/acme/tools
 gh api /user
-gh api repos/acme/tools/issues -f title='Bug' -f body='Steps...'
-gh api -X GET search/code -f q='repo:acme/tools TODO'
-gh api repos/acme/tools/issues -F draft=false -F milestone=3
+gh api 'repos/{owner}/{repo}/issues' -f title='Bug' -f body='Steps to reproduce'
 gh api repos/acme/tools/issues -F 'labels[]=bug' -F 'metadata[agent]=worker'
-gh api repos/acme/tools/issues --input /scratch/issue.json --silent
-gh api repos/acme/tools/issues --input - < /scratch/issue.json
+gh api repos/acme/tools/issues --input /work/issue.json --silent
 gh api 'repos/acme/tools/issues?per_page=50' --paginate --slurp
 gh api repos/acme/tools/pulls/17 -H 'Accept: application/vnd.github.v3.diff'
-gh api repos/acme/tools/contents/NOTES.md -X DELETE -f message=rm -f sha=<blob-sha>
 gh api graphql -f query='{viewer{login}}'
-
-gh api 'repos/{owner}/{repo}/releases'
-gh api 'repos/{owner}/{repo}/branches/{branch}'
 ```
 
-`{owner}`, `{repo}` and `{branch}` expand from the install, the way real
-gh expands them from the current repository. Any other brace pair is left
-exactly as typed and reaches the wire, which is gh's behavior too. Quote
-the endpoint so the shell does not eat the braces.
-
-The rules are gh's own:
-
-- The method is `GET` with no fields and `POST` once a field is given,
-  unless `-X` says otherwise.
-- A `GET` carries its fields in the **query string**; every other method
-  carries them in a **JSON body**.
-- `-f/--raw-field` is always a string. `-F/--field` reads `true`, `false`,
-  `null` and integers as their JSON types. A typed value beginning with `@`
-  reads that workspace file, and `@-` reads stdin.
-- Object keys such as `config[enabled]` and arrays such as `labels[]` build
-  nested JSON rather than flat keys.
-- `--input FILE` sends that JSON document as the body and moves any fields
-  to the query string. `--input -` reads stdin.
-- `-H/--header` adds or replaces request headers.
-- `--paginate` follows REST `Link` headers, and pages that are arrays print
-  as one array, joined the way gh joins them; `--slurp` wraps every page in
-  one array instead.
-- `--silent` suppresses response output without suppressing the request.
-- `-i/--include` prints each response's status line and headers before its
-  body: `HTTP/1.1 200 OK`, then the headers in name order, each line ending
-  `\r\n`, then a blank line. Pages print as they came, a newline between
-  two, and `--silent` still prints the headers. A failing response is headed
-  too.
-- A call with no fields sends **no body at all**, so a bare `DELETE` is a
-  bare `DELETE` rather than an empty JSON object with a content type. Some
-  endpoints read those differently.
-- The leading slash is optional.
-- A placeholder expands in an endpoint and in a `-F` value, but not in a
-  `-f` one, which is the split gh's own `--help` describes.
-- A read (`GET`, `HEAD`, `OPTIONS`) leaves the mount's cache alone; only a
-  write expires it.
-- A request that gets no response at all fails at once, with exit 1 and gh's
-  words: `error connecting to HOST` and a pointer at githubstatus.com for a
-  host that does not resolve, `Get "URL": dial tcp ADDR: connect: connection
-  refused` for a refused connection. It is never retried, and neither is a
-  `500`. This holds for every verb, not only `api`.
-
-A response prints as the server sent it, which is how gh prints it to
-anything but a terminal: GitHub's JSON arrives compact, with no newline at
-the end. `-q/--jq` evaluates in-process and prints each output as gh does:
-a string raw, null as an empty line, a number in fixed notation with two
-decimals unless it is whole (`1.50`, `3`), and anything else as compact JSON
-with its keys sorted and `<`, `>` and `&` escaped. The rest of the shell can
-consume stdout just as well:
-
-```bash
-gh api repos/acme/tools | jq -r .default_branch
-gh api repos/acme/tools/issues --jq '.[].title'
-```
-
-A `--jq` program that fails ends the command with exit 1, after the lines
-it printed first. The report follows gh's gojq where mirage's jq can tell
-what gojq would say: an error the program raises with `error(v)` reads
-`error: <v>`, with `v` as it is when it is a string and as compact JSON with
-sorted keys otherwise; `halt_error` reads `halt error: <v>`; and `halt`, like
-`halt_error` on null, only ends the output. As with every CLI failure,
-mirage puts the command's name first (`gh api: error: boom`), where gh
-prints `error: boom` alone.
-
-## Divergences from upstream gh
-
-`gh` is virtualized, not wrapped. The intentional boundaries are:
-
-| Divergence | Reason |
+| Option or input | Behavior |
 | --- | --- |
-| Only the command groups listed above are installed | `auth`, `browse`, `codespace`, `extension`, `gist`, and host checkout operations do not act on virtual workspace state |
-| Commands never prompt, open an editor, or launch a browser | agents need deterministic, noninteractive execution |
-| `pr create` requires explicit title, head, base, and body/body-file | there is no host checkout from which to infer or fill them |
-| `repo fork` refuses `--clone`, and `--remote` without a repository; release asset upload and `run watch` are absent | those require host files, checkout state, or a streaming surface not modeled here |
-| `gh help` answers the `environment` and `exit-codes` topics only; `formatting`, `mintty`, `reference` and `telemetry` are unknown topics | those describe a terminal, a config directory or a manual a workspace does not have |
-| `repo` has no `archive`, `unarchive`, `sync`, `deploy-key`, `autolink`, `gitignore`, `license` or `set-default` | `set-default` acts on a host checkout; the others are not implemented |
-| Outside `issue`, `pr` and `repo`, typed `--json` exposes a REST-backed field subset | upstream's full field sets include GraphQL-only data; use `gh api` for arbitrary REST fields |
-| `gh api --input` accepts JSON, and pagination follows REST `Link` headers only | arbitrary byte bodies and GraphQL cursor pagination are not implemented |
-| `gh api` has no verbose/cache flags | output is optimized for agents and shell composition rather than wire debugging |
-| `gh api -i` reports `HTTP/1.1` where gh against github.com reports `HTTP/2.0` | mirage's clients speak HTTP/1.1; the reason phrase is Go's for the code, as gh's is |
-| `gh api --slurp` also takes `--jq`, running it once on the array of pages | gh refuses the pair; the combination is the one-call way to filter every page together |
-| A builtin's `--jq` error keeps jq 1.8.2's wording: `Cannot index number with string ("a")` where gh says `expected an object but got: number (5000)` | mirage evaluates `--jq` with jq, and gojq's messages carry values jq's leave out. The negative-count errors of `limit`, `skip` and `nth`, which gojq raises with `error`, still read `error: ...` as in gh. An `error(v)` built outside a `catch` from a value that `catch` took from another `error` also reads as a builtin's, because the reruns that tell the two apart cannot follow it |
-| `--jq` numbers are jq's doubles: `nan` prints as an empty line, an infinity as the largest finite number, a negative zero as `0`, and an integer literal past 2^53 as its nearest double | jq has made `nan`, an infinity and a big literal that before mirage sees them, and jq.py hands a negative zero to Python as `0`, which TypeScript matches; gh prints `NaN`, `+Inf` and `-0` (refusing the first two inside an array or object) and keeps a big literal's digits |
-| A repository on another host is refused rather than routed there | one install is one account on one host; use another install for another host |
+| No fields | GET by default; no request body |
+| `-f` / `--raw-field` | String field; supplying fields selects POST unless `-X` overrides it |
+| `-F` / `--field` | Typed booleans, null and integers; `@FILE` reads a workspace file and `@-` reads stdin |
+| `-X` / `--method` | Explicit method; GET fields become query parameters, other methods use JSON |
+| `key[nested]`, `key[]` | Nested objects and arrays |
+| `--input FILE` | JSON body from a file or `-`; additional fields move to the query string |
+| `-H` / `--header` | Add or replace a header |
+| `--paginate` | Follow REST Link headers; array pages are joined |
+| `--slurp` | Wrap pages in an array; Mirage also permits `--jq` on that array |
+| `-i` / `--include` | Print status and headers for each response, including failures |
+| `--silent` | Suppress the response body; `--include` still prints headers |
+| `-q` / `--jq` | Filter API output in process; unlike typed commands, needs no `--json` |
+
+Quote endpoints containing `{owner}`, `{repo}` or `{branch}`. These expand
+from config in endpoints and `-F` values, but not `-f` values. Other brace
+pairs remain unchanged. A leading endpoint slash is optional.
+
+Unfiltered output preserves the server's response bytes. Typed `--json`
+output is compact JSON followed by a newline. `--jq` prints strings raw,
+null as an empty line, and objects/arrays as compact JSON. A jq error exits 1
+and can leave earlier output on stdout. Connection failures and HTTP 500
+responses are not retried.
+
+## VFS and limits
+
+A [GitHub VFS](/python/vfs/github) can expose the same remote repository
+as files, independently of the CLI. The configured `repo` and `branch` supply
+context that a host `gh` would infer from a checkout. CLI service writes
+invalidate mounted caches; read API methods leave them intact.
+
+| Boundary | Mirage behavior |
+| --- | --- |
+| Authentication | `auth status` checks the token; `auth token` refuses to print it. No login/logout flow. |
+| Interactive tools | No editor, browser, extension manager, codespace or host-checkout workflow. |
+| Pull-request creation | Requires explicit title, head, base and body/body-file. |
+| Forks | `--clone` is refused; `--remote` without a repository is refused. |
+| Repository operations | No archive, unarchive, sync, deploy-key, autolink, gitignore, license or set-default verbs. |
+| Release assets and live runs | Asset upload and `run watch` are absent. |
+| Raw API | JSON `--input` only; REST pagination only; no verbose or cache flags. |
+| Help topics | `environment` and `exit-codes` are supported, alongside command help. |
+| HTTP display | `--include` prints HTTP/1.1 rather than upstream's HTTP/2.0 display. |
+| jq compatibility | Uses jq rather than gojq: builtin error wording and floating-point edge cases can differ. Numbers above 2^53 can lose precision; NaN, infinities and negative zero follow jq's values. |
+
+The original GitHub CLI uses the
+[MIT license](https://github.com/cli/cli/blob/trunk/LICENSE). Mirage's command
+implementation is Apache-2.0; the listed subset and differences define its
+compatibility scope. See
+[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
