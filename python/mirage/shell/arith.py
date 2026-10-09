@@ -119,6 +119,21 @@ def _digits_value(digits: str, base: int) -> int | None:
     return value
 
 
+def plain_decimal(text: str) -> int | None:
+    """``text`` as a plain decimal (ASCII digits, no leading ``0``, which
+    would read as octal), wrapped to 64 bits; None when it is anything
+    else and has to be evaluated.
+
+    Args:
+        text (str): a stored value or a subscript.
+    """
+    number = text.strip(ARITH_BLANKS)
+    if not (number.isdecimal() and number.isascii() and number[0] != "0"):
+        return None
+    value = _digits_value(number, 10)
+    return None if value is None else wrap_int64(value)
+
+
 def _constant(text: str) -> int | str:
     """The value of an integer constant, or what bash says of a bad one.
 
@@ -622,12 +637,12 @@ class _ArithRecord:
             subscript (bool): that expression is a subscript's.
         """
         raw = raw or ""
-        number = raw.strip(ARITH_BLANKS)
-        if number.isdecimal() and number.isascii() and number[0] != "0":
-            value = _digits_value(number, 10)
-            if value is not None:
-                return wrap_int64(value)
-        return self.evaluate(raw, depth + 1, subscript)
+        value = plain_decimal(raw)
+        return (
+            self.evaluate(raw, depth + 1, subscript)
+            if value is None
+            else value
+        )
 
     def merged_env(self) -> dict[str, str]:
         merged = {
@@ -660,9 +675,8 @@ class _ArithRecord:
         is_assoc = elements.is_assoc
         if is_assoc is None or is_assoc(name):
             return elements.resolve(name, inner, self.merged_env())
-        try:
-            index = int(inner.strip())
-        except ValueError:
+        index = plain_decimal(inner)
+        if index is None:
             try:
                 index = self.evaluate(inner, depth + 1, True)
             except ArithError as exc:

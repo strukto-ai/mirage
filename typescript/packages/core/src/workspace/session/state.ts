@@ -14,7 +14,7 @@
 
 import type { SessionView } from '../../view/types.ts'
 import { PolicyDenied, preSessionGate, type Policies } from '../../policy/index.ts'
-import { evaluateArith } from '../../shell/arith.ts'
+import { evaluateArith, plainDecimal } from '../../shell/arith.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import {
   arrayExtent,
@@ -305,8 +305,8 @@ export function elementIndex(
   readVar: ((name: string) => string | null) | null = null,
   wroteVar: ((name: string, value: string) => void) | null = null,
 ): number {
-  const trimmed = subscript.trim()
-  if (/^-?\d+$/.test(trimmed)) return Number(trimmed)
+  const plain = plainDecimal(subscript)
+  if (plain !== null) return Number(plain)
   try {
     return Number(evaluateArith(subscript, env, 0, elements, readVar, wroteVar).value)
   } catch (error) {
@@ -450,8 +450,8 @@ export async function subscriptIndex(
   subscript: string,
   view: SessionView | null = null,
 ): Promise<number> {
-  const trimmed = subscript.trim()
-  if (/^-?\d+$/.test(trimmed)) return Number(trimmed)
+  const plain = plainDecimal(subscript)
+  if (plain !== null) return Number(plain)
   const reader = randomReader(session)
   let idx = 0
   let writes: readonly ArithWrite[]
