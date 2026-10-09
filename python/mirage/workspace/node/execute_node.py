@@ -1345,7 +1345,7 @@ async def _execute_node(
         # redirect followed by `|` closes over everything to its left, so
         # the stages are read the way bash reads them rather than as the
         # parse nested them (see get_pipeline_stages).
-        result = await _run_pipeline(
+        ran = await _run_pipeline(
             recurse,
             dispatch,
             execute_fn,
@@ -1358,7 +1358,7 @@ async def _execute_node(
             job_table.processes if job_table is not None else None,
             sink,
         )
-        return result if sink is None else await drained(sink, *result)
+        return ran if sink is None else await drained(sink, *ran)
 
     if kind == NodeKind.LIST:
         left, op, right = get_list_parts(node)

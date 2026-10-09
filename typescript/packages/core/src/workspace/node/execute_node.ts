@@ -1218,7 +1218,7 @@ async function executeNodeBody(
     // followed by `|` closes over everything to its left, so the stages
     // are read the way bash reads them rather than as the parse nested
     // them (see getPipelineStages).
-    const result = await runPipeline(
+    const ran = await runPipeline(
       recurse,
       dispatch,
       executeFn,
@@ -1232,7 +1232,7 @@ async function executeNodeBody(
       jobTable.processes,
       sink,
     )
-    return sink === undefined ? result : drained(sink, ...result)
+    return sink === undefined ? ran : drained(sink, ...ran)
   }
 
   if (kind === NodeKind.LIST) {
