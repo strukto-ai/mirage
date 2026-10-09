@@ -31,12 +31,11 @@ import { CommandSpec, type CommandSpecInit, type FlagValue, UsageStyle } from '.
 /**
  * One entry point per state plane, for the CLI verb that needs one.
  *
- * Most CLIs want none of this: an account CLI reaches a service and has
- * no filesystem, while `git`'s whole subject is a repository that lives
- * on a mount. So this rides `CLIInvocation.view` and is absent outside a
- * workspace (a spec exercised directly in a test), and a verb that never
- * reads it cannot touch a mount. That is the same opt-in a declared
- * parameter gave, moved onto the one record every leaf already takes.
+ * Account CLIs reach services through their own config. File arguments
+ * such as attachments, query filters and upload paths use this view,
+ * just as `git` uses it for repositories. The executor supplies it on
+ * `CLIInvocation.view`; callers exercising a handler directly may omit
+ * it when the handler needs no workspace operations.
  *
  * The field names and types are `CommandOpts`' (commands/config.ts),
  * deliberately: a fact reached from a CLI leaf and the same fact reached
@@ -84,10 +83,9 @@ export interface CLIView {
  * executor. The record carries both views of the invocation: the process
  * view (`argv`, `stdin`, `env`, `cwd`) and the parsed view (`config`, `paths`,
  * `texts`, `flags`), so every handler tier renders whichever its
- * substrate can express. Narrower than CommandOpts on purpose: a CLI
- * consults no mount, so there is no VFS, no mount prefix, and no
- * filetype cascade; the config carries whatever the handler needs, and a
- * verb whose subject is files reads `view`.
+ * substrate can express. A CLI is installed by name with its own config,
+ * so the invocation carries no backend accessor, mount prefix or filetype
+ * cascade. File operations use `view`.
  */
 export interface CLIInvocation<ConfigT = unknown> {
   /** The installation's validated config, null without a configModel. */
@@ -112,9 +110,8 @@ export interface CLIInvocation<ConfigT = unknown> {
    */
   env: Readonly<Record<string, string>>
   /**
-   * The workspace entry points a mount-reading verb needs (`git`), absent
-   * outside a workspace and for every CLI that reaches a service instead
-   * of a filesystem.
+   * Workspace entry points, including for account CLIs that read attachments
+   * or other file arguments. Absent when the caller provides no workspace view.
    */
   view?: CLIView
   /**

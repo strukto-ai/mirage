@@ -356,7 +356,7 @@ class SessionElements implements ElementOps {
       const arr = visibleArrays(this.session)[name]
       if (arr !== undefined) idx += arrayExtent(arr)
       else if (envGet(this.session, name) !== null) idx += 1
-      if (idx < 0) throw new ArithError(`${name}[${subscript}]: bad array subscript`)
+      if (idx < 0) throw new ArithError('bad array subscript', `${name}[${subscript}]`)
     }
     return String(idx)
   }
@@ -475,7 +475,7 @@ export async function subscriptIndex(
   )
   reader.settle()
   if (error instanceof ReadonlyError) throw error.signal(true)
-  if (error !== null) throw new ArithError(`${subscript.trim()}: ${error.message}`)
+  if (error !== null) throw error
   return idx
 }
 
@@ -652,13 +652,15 @@ export function randomReader(session: SessionState): RandomReader {
  * stopping at a write to a readonly name, as bash's evaluation does
  * (`(( X=5, R=3 ))` binds X and refuses R). Throws ArithError when the text
  * does not evaluate, and ReadonlyError, carrying the writes made before it,
- * for a readonly name.
+ * for a readonly name. `added` is an integer `+=`'s added text, read after
+ * `text` in the same evaluation and added to it.
  */
 export function sessionArith(
   session: SessionState,
   text: string,
   reader: RandomReader,
   nounset = false,
+  added: string | null = null,
 ): ArithResult {
   return evaluateArith(
     text,
@@ -669,6 +671,7 @@ export function sessionArith(
     reader.wrote,
     nounset,
     (name) => readonlyTarget(session, name),
+    added,
   )
 }
 
@@ -705,9 +708,9 @@ class IntegerCoercion {
     this.reader = randomReader(session)
   }
 
-  readonly run = (text: string): string => {
+  readonly run = (text: string, added: string | null = null): string => {
     try {
-      return this.evaluate(text)
+      return this.evaluate(text, added)
     } catch (err) {
       if (err instanceof ReadonlyError) throw err.signal(true)
       throw err
@@ -716,25 +719,30 @@ class IntegerCoercion {
 
   /**
    * The value `text` evaluates to, keeping the writes it made before an
-   * ArithError or a ReadonlyError.
+   * ArithError or a ReadonlyError. With `added`, the two sides of an
+   * integer `+=` (`appended`) evaluate in turn in one evaluation and add:
+   * the second sees what the first assigned, and an error names the side
+   * that made it, as bash's does (`N+=1+` is `1+: syntax error`).
    */
-  evaluate(text: string): string {
+  evaluate(text: string, added: string | null = null): string {
     const session = this.session
     // Inside a `declare -g` the expression still reads the function's
     // scope, as bash's does (`local H=2; declare -gi G=H` stores 2), while
     // the value lands on the global.
     const reachAgain = stepBack(session)
+    let result: ArithResult
     try {
-      const result = sessionArith(session, text, this.reader)
-      this.writes.push(...result.writes)
-      return result.value.toString()
+      result = sessionArith(session, text, this.reader, false, added)
     } catch (err) {
-      if (err instanceof ArithError || err instanceof ReadonlyError) this.writes.push(...err.writes)
-      if (err instanceof ArithError) throw new ArithError(`${text}: ${err.message}`)
+      if (err instanceof ArithError || err instanceof ReadonlyError) {
+        this.writes.push(...err.writes)
+      }
       throw err
     } finally {
       reachAgain()
     }
+    this.writes.push(...result.writes)
+    return result.value.toString()
   }
 }
 
@@ -759,22 +767,25 @@ async function landCoercion(
 }
 
 /**
- * Evaluate `text` as an `-i` write coerces it and land what it assigns
- * through `view`, storing no result: a `declare -ni r=M` value, which bash
- * evaluates before refusing the reference (`M='X=5'` sets X). Inside a
- * `declare -g` it reads the function's scope, as the coercion does. A hidden
- * name throws PolicyDenied and a readonly one ExitSignal, which ends the
- * shell as bash's does, the assignments before it landed; a malformed text
- * throws ArithError once the ones before the error land.
+ * Evaluate `text` as an `-i` write coerces it, land what it assigns through
+ * `view`, and give back the value: a `declare -ni r=M` value, which bash
+ * evaluates before refusing the reference (`M='X=5'` sets X), and its
+ * `r+=M` form, whose `added` text evaluates after `text` in the same
+ * evaluation and adds to it. Inside a `declare -g` it reads the
+ * function's scope, as the coercion does. A hidden name throws
+ * PolicyDenied and a readonly one ExitSignal, which ends the shell as
+ * bash's does, the assignments before it landed; a malformed text throws
+ * ArithError once the ones before the error land.
  */
 export async function evaluateInteger(
   session: SessionState,
   view: SessionView,
   text: string,
-): Promise<void> {
+  added: string | null = null,
+): Promise<string> {
   const coercion = new IntegerCoercion(session)
   try {
-    coercion.run(text)
+    return coercion.run(text, added)
   } finally {
     await landCoercion(
       session,
@@ -782,6 +793,17 @@ export async function evaluateInteger(
       coercion,
     )
   }
+}
+
+/**
+ * What a `+=` hands `setVar`: the held text then the added one, or on an
+ * integer the held text with the added one as `added`, the two evaluating
+ * there in turn and summing behind the store's refusals. The held value
+ * evaluates too, so `n='x=5'; declare -i n; n+=x` stores 10, and an empty
+ * side counts as 0.
+ */
+export function appended(held: string, added: string, integer: boolean): [string, string | null] {
+  return integer ? [held, added] : [held + added, null]
 }
 
 export function ensureVarVisible(session: SessionState, name: string): void {
@@ -798,6 +820,7 @@ async function setVar(
   followRef = true,
   diagnostics?: (string | Uint8Array)[],
   assigned: ReadonlySet<number | string> | null = null,
+  added: string | null = null,
 ): Promise<void> {
   if (followRef) name = deref(session, name) || name
   ensureVarVisible(session, name)
@@ -823,7 +846,7 @@ async function setVar(
   let shaped: ShellValue = value
   if (existing !== undefined && existing.attrs.size > 0) {
     try {
-      shaped = coerceValue(value, existing.attrs, coercion.run, assigned)
+      shaped = coerceValue(value, existing.attrs, (text) => coercion.run(text, added), assigned)
     } catch (err) {
       // bash bound what the expression assigned before it failed
       // (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a RANDOM
@@ -1208,8 +1231,8 @@ export function sessionView(
   return {
     get: (name) => envGet(session, name),
     snapshot: () => envSnapshot(session),
-    set: (name, value, followRef = true, assigned = null) =>
-      setVar(session, policies, name, value, followRef, diagnostics, assigned),
+    set: (name, value, followRef = true, assigned = null, added = null) =>
+      setVar(session, policies, name, value, followRef, diagnostics, assigned, added),
     unset: (name, followRef = true) => unsetVar(session, policies, name, followRef),
     mark: (name, attr, on, followRef = true) =>
       markVar(session, policies, name, attr, on, followRef),

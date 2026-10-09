@@ -235,7 +235,7 @@
       "expect": {
         "exit": 0,
         "stdout": "visible\n0\nexmissing.txt: No such file or directory\nrestored\n0\n",
-        "stderr": "exmissing.txt: No such file or directory\ntoerr\nbash: 1/0: division by 0\n"
+        "stderr": "exmissing.txt: No such file or directory\ntoerr\nbash: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {

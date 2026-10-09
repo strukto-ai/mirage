@@ -1,56 +1,53 @@
 ---
 title: slack
-description: "Slack Web API client speaking the OpenClaw Slack action vocabulary."
+description: "Supported Slack commands for messages, reactions, pins, members and search."
 icon: slack
 ---
 
-Mirage's built-in Slack Web API client follows the Slack action vocabulary
-from the upstream [OpenClaw](https://github.com/openclaw/openclaw) project.
-The Mirage command tree is discoverable with `slack --help`.
+Read and send Slack messages, manage reactions and pins, and look up members or search messages. The action names follow [OpenClaw](https://github.com/openclaw/openclaw); `search` and `list-members` are Mirage extensions.
 
-**Licenses:** OpenClaw uses the
-[MIT License](https://github.com/openclaw/openclaw/blob/main/LICENSE); Mirage's
-independent Slack implementation uses
-[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
+## Setup
 
-## Install
+Use the bot and user token scopes in [Slack setup](/home/setup/slack). The bot token handles ordinary actions; `search` needs `search_token` (`searchToken` in TypeScript).
 
 ```typescript
-import { SLACK } from '@struktoai/mirage-core'
-import { SlackVFS, Workspace } from '@struktoai/mirage-node'
+import { SLACK, Workspace } from '@struktoai/mirage-node'
 
 const config = { token: 'xoxb-...', searchToken: 'xoxp-...' }
-const ws = new Workspace({ '/slack': new SlackVFS(config) })
+const ws = new Workspace({})
 ws.registerCli('slack', SLACK, config)
 ```
 
-Two installs under different names are two accounts. In YAML, the same
-install rides the `clis:` section; see the [CLI overview](/typescript/cli/index).
+No service mount is required. For YAML and multiple accounts, see the
+[CLI overview](/typescript/cli/index#register-a-cli).
 
-## Verbs
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
 
-The verbs follow that OpenClaw Slack action vocabulary (kebab verbs:
-`send-message`, `read-messages`, `pin-message`, `list-pins`,
-`member-info`, `emoji-list`); `search` and `list-members` are mirage
-extensions. Search needs a user token (`search_token`), the rest run on
-the bot token.
+Run `slack <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
 
-### Messages
+| Command | Description |
+| --- | --- |
+| `slack send-message` | Post a message to a channel or thread |
+| `slack read-messages` | Read the most recent messages of a channel |
+| `slack react` | Add an emoji reaction to a message |
+| `slack reactions` | List the reactions on a message |
+| `slack pin-message` | Pin a message to its channel |
+| `slack unpin-message` | Remove a pin from a message |
+| `slack list-pins` | List the pinned items of a channel |
+| `slack member-info` | Fetch one user's profile |
+| `slack list-members` | List workspace members, optionally filtered |
+| `slack emoji-list` | List the workspace's custom emoji |
+| `slack search` | Search messages with Slack query operators |
+{/* END GENERATED CLI COMMANDS */}
+
+## Messages, reactions and pins
 
 ```bash
-slack send-message --channel C04KEPWF6V7 --text "Hello from MIRAGE"
-slack send-message --channel C04KEPWF6V7 --thread-ts 1712345678.123456 --text "Thread reply"
 slack read-messages --channel C04KEPWF6V7 --limit 20
-```
-
-| Verb           | Flags                                          | Writes |
-| -------------- | ---------------------------------------------- | ------ |
-| `send-message` | `--channel --text [--thread-ts]`               | yes    |
-| `read-messages`| `--channel [--limit]`                          | no     |
-
-### Reactions and pins
-
-```bash
+slack send-message --channel C04KEPWF6V7 --text "Release is ready"
+slack send-message --channel C04KEPWF6V7 --thread-ts 1712345678.123456 --text "Thread reply"
 slack react --channel C04KEPWF6V7 --ts 1712345678.123456 --emoji thumbsup
 slack reactions --channel C04KEPWF6V7 --ts 1712345678.123456
 slack pin-message --channel C04KEPWF6V7 --ts 1712345678.123456
@@ -58,29 +55,31 @@ slack list-pins --channel C04KEPWF6V7
 slack unpin-message --channel C04KEPWF6V7 --ts 1712345678.123456
 ```
 
-| Verb            | Flags                       | Writes |
-| --------------- | --------------------------- | ------ |
-| `react`         | `--channel --ts --emoji`    | yes    |
-| `reactions`     | `--channel --ts`            | no     |
-| `pin-message`   | `--channel --ts`            | yes    |
-| `unpin-message` | `--channel --ts`            | yes    |
-| `list-pins`     | `--channel`                 | no     |
+Channels and users are Slack IDs. A message is identified by its channel
+and timestamp (`--ts`); replies use the parent's timestamp in `--thread-ts`.
 
-### Members, emoji, search
+## Find people and messages
 
 ```bash
 slack member-info --user U04K21SEVR9
-slack list-members --query "alice"
+slack list-members --query alice
 slack emoji-list
 slack search --query 'from:@priya in:#general launch' --count 20 --page 1
 ```
 
-| Verb           | Flags                          | Writes |
-| -------------- | ------------------------------ | ------ |
-| `member-info`  | `--user`                       | no     |
-| `list-members` | `[--query]`                    | no     |
-| `emoji-list`   |                                | no     |
-| `search`       | `--query [--count] [--page]`   | no     |
+Search accepts Slack operators such as `from:`, `in:` and `after:`. Results
+are JSON and can be piped to `jq`.
 
-`search` supports Slack query operators (`from:@user`, `in:#channel`,
-`after:YYYY-MM-DD`).
+## VFS and limits
+
+The optional [Slack VFS](/typescript/slack) exposes channels and messages
+as files. Its IDs can be passed to this CLI, but the CLI gets credentials
+from its own registration and does not need the mount.
+
+Only the listed actions are implemented; this is not Slack's app-development
+CLI. Mount read-only mode does not prevent service writes—use command policy
+to restrict sending messages, reactions or pin changes.
+
+OpenClaw's source uses the [MIT license](https://github.com/openclaw/openclaw/blob/main/LICENSE).
+Mirage's command implementation is Apache-2.0; see
+[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).

@@ -66,7 +66,9 @@ async def test_an_unevaluable_word_leaves_the_generator_alone():
     assert next_random(s, "0") == 20814
     diagnostics: list[str | bytes] = []
     await set_var(s, None, RANDOM, "1.5", diagnostics=diagnostics)
-    assert diagnostics == ['1.5: syntax error: invalid character "."']
+    assert diagnostics == [
+        '1.5: syntax error: invalid arithmetic operator (error token is ".5")'
+    ]
     assert next_random(s, s.vars[RANDOM].value) == 24386
     assert next_random(s, s.vars[RANDOM].value) == 149
 
@@ -504,17 +506,32 @@ def test_random_reader_draws_from_the_pending_seed_and_settles():
         # bash's words, after landing what was assigned before it.
         (
             'v=abc; echo "${v:1/0}"; echo after',
-            "bash: v: 1/0: division by 0\n",
+            'bash: v: 1/0: division by 0 (error token is "0")\n',
         ),
         (
             'a=(1 2 3); echo "${a[@]:1/0}"; echo after',
-            "bash: a[@]: 1/0: division by 0\n",
+            'bash: a[@]: 1/0: division by 0 (error token is "0")\n',
         ),
-        ('a=(1); echo "${a[1/0]}"; echo after', "bash: 1/0: division by 0\n"),
-        ("a=(1); a[1/0]=v; echo after", "bash: 1/0: division by 0\n"),
-        ('a=(1); unset "a[1/0]"; echo after', "bash: 1/0: division by 0\n"),
-        ("a=(1); [[ -v a[1/0] ]]; echo after", "bash: 1/0: division by 0\n"),
-        ("a=(1); a[x=3,1/0]=v; echo after", "bash: x=3,1/0: division by 0\n"),
+        (
+            'a=(1); echo "${a[1/0]}"; echo after',
+            'bash: 1/0: division by 0 (error token is "0")\n',
+        ),
+        (
+            "a=(1); a[1/0]=v; echo after",
+            'bash: 1/0: division by 0 (error token is "0")\n',
+        ),
+        (
+            'a=(1); unset "a[1/0]"; echo after',
+            'bash: 1/0: division by 0 (error token is "0")\n',
+        ),
+        (
+            "a=(1); [[ -v a[1/0] ]]; echo after",
+            'bash: 1/0: division by 0 (error token is "0")\n',
+        ),
+        (
+            "a=(1); a[x=3,1/0]=v; echo after",
+            'bash: x=3,1/0: division by 0 (error token is "0")\n',
+        ),
     ],
 )
 @pytest.mark.asyncio

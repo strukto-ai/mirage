@@ -501,7 +501,7 @@ async def subscript_index(
     if isinstance(error, ReadonlyError):
         raise error.signal(fatal=True) from error
     if error is not None:
-        raise ArithError(f"{subscript.strip()}: {error}") from error
+        raise error
     return idx
 
 
@@ -553,7 +553,7 @@ class _SessionElements:
             elif env_get(self._session, name) is not None:
                 idx += 1
             if idx < 0:
-                raise ArithError(f"{name}[{subscript}]: bad array subscript")
+                raise ArithError("bad array subscript", f"{name}[{subscript}]")
         return str(idx)
 
     def is_assoc(self, name: str) -> bool:
@@ -813,6 +813,7 @@ def session_arith(
     text: str,
     reader: RandomReader,
     nounset: bool = False,
+    added: str | None = None,
 ) -> ArithResult:
     """Evaluate ``text`` as every arithmetic context of the shell does:
     against the visible env and the session's elements, drawing through
@@ -824,6 +825,8 @@ def session_arith(
         text (str): the expression.
         reader (RandomReader): the expression's ``RANDOM`` reader.
         nounset (bool): ``set -u`` for the names it reads.
+        added (str | None): an integer ``+=``'s added text, read after
+            ``text`` in the same evaluation and added to it.
 
     Raises:
         ArithError: the text does not evaluate.
@@ -838,6 +841,7 @@ def session_arith(
         wrote_var=reader.wrote,
         nounset=nounset,
         frozen=functools.partial(_readonly_target, session),
+        added=added,
     )
 
 
@@ -880,18 +884,24 @@ class _IntegerCoercion:
         self.reader = random_reader(session)
         self.writes: list[ArithWrite] = []
 
-    def __call__(self, text: str) -> str:
+    def __call__(self, text: str, added: str | None = None) -> str:
         try:
-            return self.evaluate(text)
+            return self.evaluate(text, added)
         except ReadonlyError as exc:
             raise exc.signal(fatal=True) from exc
 
-    def evaluate(self, text: str) -> str:
+    def evaluate(self, text: str, added: str | None = None) -> str:
         """The value ``text`` evaluates to, keeping the writes it made
         before an ``ArithError`` or a ``ReadonlyError``.
 
+        With ``added``, the two sides of an integer ``+=`` (``appended``)
+        evaluate in turn in one evaluation and add: the second sees what
+        the first assigned, and an error names the side that made it, as
+        bash's does (``N+=1+`` is ``1+: syntax error``).
+
         Args:
-            text (str): the expression.
+            text (str): the expression, the held value for a ``+=``.
+            added (str | None): a ``+=``'s added text.
         """
         session = self.session
         # Inside a `declare -g` the expression still reads the
@@ -899,11 +909,9 @@ class _IntegerCoercion:
         # G=H` stores 2), while the value lands on the global.
         reach_again = _step_back(session)
         try:
-            result = session_arith(session, text, self.reader)
+            result = session_arith(session, text, self.reader, added=added)
         except (ArithError, ReadonlyError) as exc:
             self.writes.extend(exc.writes)
-            if isinstance(exc, ArithError):
-                raise ArithError(f"{text}: {exc}") from exc
             raise
         finally:
             reach_again()
@@ -935,18 +943,23 @@ async def _land_coercion(
 
 
 async def evaluate_integer(
-    session: SessionState, view: SessionView, text: str
-) -> None:
-    """Evaluate ``text`` as an ``-i`` write coerces it and land what it
-    assigns through ``view``, storing no result: a ``declare -ni r=M``
-    value, which bash evaluates before refusing the reference
+    session: SessionState,
+    view: SessionView,
+    text: str,
+    added: str | None = None,
+) -> str:
+    """Evaluate ``text`` as an ``-i`` write coerces it, land what it
+    assigns through ``view``, and give back the value: a ``declare -ni
+    r=M`` value, which bash evaluates before refusing the reference
     (``M='X=5'`` sets X). Inside a ``declare -g`` it reads the
     function's scope, as the coercion does.
 
     Args:
         session (SessionState): shell session state.
         view (SessionView): the gated session view.
-        text (str): the value.
+        text (str): the value, the held one for a ``r+=M``.
+        added (str | None): a ``r+=M``'s added text, evaluated after
+            ``text`` in the same evaluation and added to it.
 
     Raises:
         PolicyDenied: an assignment named a hidden variable or the gate
@@ -958,9 +971,24 @@ async def evaluate_integer(
     """
     coercion = _IntegerCoercion(session)
     try:
-        coercion(text)
+        return coercion(text, added)
     finally:
         await _land_coercion(session, view.set, coercion)
+
+
+def appended(held: str, added: str, integer: bool) -> tuple[str, str | None]:
+    """What a ``+=`` hands ``set_var``: the held text then the added one,
+    or on an integer the held text with the added one as ``added``, the
+    two evaluating there in turn and summing behind the store's
+    refusals. The held value evaluates too, so ``n='x=5'; declare -i n;
+    n+=x`` stores 10, and an empty side counts as 0.
+
+    Args:
+        held (str): what the slot holds, "" when unset.
+        added (str): the text appended.
+        integer (bool): the variable carries ``-i``.
+    """
+    return (held, added) if integer else (held + added, None)
 
 
 def ensure_var_visible(session: SessionState, name: str) -> None:
@@ -1053,6 +1081,7 @@ async def set_var(
     follow_ref: bool = True,
     *,
     assigned: frozenset[int | str] | None = None,
+    added: str | None = None,
     diagnostics: list[str | bytes] | None = None,
 ) -> None:
     """Write one variable through the session plane's gate.
@@ -1066,8 +1095,10 @@ async def set_var(
     every writer states them the same way whichever tier or spelling
     asked. Writers with richer mechanics (subscripts, appends, holes)
     compute the resulting value on a copy and hand it here, so a
-    denial never leaves a half-applied write. None policies gate
-    nothing (a writer outside a workspace).
+    denial never leaves a half-applied write; an integer ``+=`` hands
+    its held text and the added one (``appended``), which evaluate here
+    behind the same refusals. None policies gate nothing (a writer
+    outside a workspace).
 
     Args:
         session (SessionState): the session being written.
@@ -1082,6 +1113,8 @@ async def set_var(
             writer that re-aims the reference instead, and passes False.
         assigned (frozenset[int | str] | None): the elements an array
             write assigns (``coerce_value``), None for the whole value.
+        added (str | None): an integer ``+=``'s text, which the assigned
+            value evaluates after its held one in one evaluation.
 
     Raises:
         ReadonlyVariableError: the name is readonly.
@@ -1118,7 +1151,12 @@ async def set_var(
     )
     if existing is not None and existing.attrs:
         try:
-            value = coerce_value(value, existing.attrs, coercion, assigned)
+            value = coerce_value(
+                value,
+                existing.attrs,
+                functools.partial(coercion, added=added),
+                assigned,
+            )
         except (ArithError, ExitSignal):
             # bash bound what the expression assigned before it failed
             # (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a

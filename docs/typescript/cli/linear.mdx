@@ -1,88 +1,115 @@
 ---
 title: linear
-description: "Linear GraphQL API client with the noun/verb grammar of the mount commands."
+description: "Supported Linear commands for issues, comments, teams, projects and search."
 icon: /images/linear-logo.svg
 ---
 
-Mirage's built-in client for Linear's
-[GraphQL API](https://linear.app/developers/graphql) has a Mirage-native
-noun/verb command grammar partly inspired by
-[schpet/linear-cli](https://github.com/schpet/linear-cli). The Mirage command
-tree is discoverable with `linear --help`.
+Query Linear teams, issues, projects, cycles, comments, users and documents. Mirage's noun/verb interface draws partly on [schpet/linear-cli](https://github.com/schpet/linear-cli), with its own supported command tree and normalized JSON output for `jq`.
 
-**Licenses:** `schpet/linear-cli` uses the
-[ISC License](https://github.com/schpet/linear-cli/blob/main/LICENSE); Mirage's
-independent implementation uses
-[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
+## Setup
 
-## Install
+Create an API key using [Linear setup](/home/setup/linear).
 
 ```typescript
-import { LINEAR } from '@struktoai/mirage-core'
-import { LinearVFS, Workspace } from '@struktoai/mirage-node'
+import { LINEAR, Workspace } from '@struktoai/mirage-node'
 
 const config = { apiKey: 'lin_api_...' }
-const ws = new Workspace({ '/issues': new LinearVFS(config) })
+const ws = new Workspace({})
 ws.registerCli('linear', LINEAR, config)
 ```
 
-Two installs under different names are two accounts. In YAML, the same
-install rides the `clis:` section; see the [CLI overview](/typescript/cli/index).
+No service mount is required. For YAML and multiple accounts, see the
+[CLI overview](/typescript/cli/index#register-a-cli).
 
-## Verbs
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
 
-The shared shape is `linear issue ...` and noun groups such as `team`, `user`,
-`project`, and `document`. Mirage keeps the exact command tree from its former
-mount commands (`linear issue create`, `linear team list`). Issues are
-addressed by a positional key or ID (`linear issue get ENG-42`); every command
-emits normalized JSON, so output pipes straight into `jq`.
+Run `linear <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
 
-### Reads
+| Command | Description |
+| --- | --- |
+| `linear team list` | List teams as JSON |
+| `linear team get` | Get one team by key, name, or ID |
+| `linear team members` | List a team's members |
+| `linear issue list` | List a team's issues |
+| `linear issue get` | Get one issue by key or ID |
+| `linear issue create` | Create an issue |
+| `linear issue update` | Update an issue's title or description |
+| `linear issue assign` | Assign an issue to a user |
+| `linear issue transition` | Move an issue to a workflow state |
+| `linear issue set-priority` | Set an issue's priority |
+| `linear issue set-project` | Attach an issue to a project |
+| `linear issue add-label` | Add a label to an issue |
+| `linear project list` | List a team's projects |
+| `linear project get` | Get one project by ID |
+| `linear cycle list` | List a team's cycles |
+| `linear cycle current` | Get a team's current cycle |
+| `linear cycle get` | Get one cycle by ID |
+| `linear label list` | List a team's labels |
+| `linear comment list` | List an issue's comments |
+| `linear comment add` | Comment on an issue |
+| `linear comment update` | Edit a comment |
+| `linear user list` | List workspace users |
+| `linear user get` | Get one user by email |
+| `linear document list` | List a team's documents |
+| `linear document get` | Get one document by ID |
+| `linear search` | Search issues by text |
+{/* END GENERATED CLI COMMANDS */}
+
+## Find work
 
 ```bash
 linear team list
-linear team get ENG
 linear team members ENG
 linear issue list --team ENG
 linear issue get ENG-42
 linear project list --team ENG
-linear project get <project-id> --team ENG
-linear cycle list --team ENG
 linear cycle current --team ENG
-linear label list --team ENG
 linear comment list ENG-42
-linear user list
 linear user get sam@example.com
 linear document list --team ENG
-linear document get <document-id> --team ENG
 linear search "login bug"
 ```
 
-`--team` accepts a team key, name, or ID.
+Issues take a positional key such as `ENG-42` or a raw ID. `--team` accepts
+a team key, name or ID. Use the list commands to discover project, cycle,
+label and document IDs.
 
-### Writes
+## Update work
 
 ```bash
-linear issue create --team ENG --title "Title" --description "Body"
-linear issue update ENG-42 --title "New title"
+linear issue create --team ENG --title "Fix login" --description "Reproduction steps"
+linear issue update ENG-42 --title "Fix expired-session login"
 linear issue assign ENG-42 --assignee-email user@example.com
 linear issue transition ENG-42 --state-name "In Review"
 linear issue set-priority ENG-42 --priority 2
 linear issue set-project ENG-42 --project-name "Search"
-linear issue add-label ENG-42 --label-name "bug"
-linear comment add ENG-42 --body "comment"
-linear comment update --comment <comment-id> --body "edited"
+linear issue add-label ENG-42 --label-name bug
+echo 'Ready for review' | linear comment add ENG-42
+linear comment update --comment COMMENT_ID --body "Reviewed"
 ```
 
-| Verb                   | Notes                                          |
-| ---------------------- | ---------------------------------------------- |
-| `issue create`         | `--team` and `--title` required                |
-| `issue update`         | `--title` and/or `--description`               |
-| `issue assign`         | `--assignee-email` or `--assignee-id`          |
-| `issue transition`     | `--state-name` or `--state-id`                 |
-| `issue set-priority`   | `--priority 0..4` (0=none, 1=urgent, ... 4=low) |
-| `issue set-project`    | `--project-name` or `--project` (ID)           |
-| `issue add-label`      | `--label-name` or `--label` (ID); appends to the issue's existing labels |
+| Value | Accepted forms |
+| --- | --- |
+| Assignee | `--assignee-email` or `--assignee-id` |
+| Workflow state | `--state-name` or `--state-id` |
+| Project | `--project-name` or `--project` with an ID |
+| Label | `--label-name` or `--label` with an ID; preserves existing labels |
+| Priority | `0` none, `1` urgent, `2` high, `3` normal, `4` low |
 
-Descriptions and comment bodies also read from stdin:
-`echo "body" | linear comment add ENG-42`.
+Descriptions and comment bodies can come from stdin. Issue creation requires
+`--team` and `--title`; updates use the values explicitly supplied.
+
+## VFS and limits
+
+The [Linear VFS](/typescript/setup/linear) lets agents browse the same service
+as files. The CLI takes service IDs and its own config; piping a mounted
+file into a body does not make that mount the CLI's account.
+
+Only the commands above are implemented. Commands, flags and JSON output
+follow this reference; Mirage does not promise full compatibility with
+`schpet/linear-cli`. That project uses the
+[ISC license](https://github.com/schpet/linear-cli/blob/main/LICENSE).
+Mirage's command implementation is Apache-2.0; see
+[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).

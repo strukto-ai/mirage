@@ -1570,9 +1570,9 @@ jobs:
             --predicate '(process == "fskitd" OR process == "fskit_agent") AND messageType == error' \
             2>/dev/null | tail -40 || true
 
-  # The suite battery is split in two: the runner, both in-process hosts and
+  # The suite battery is split in three: the runner, both in-process hosts and
   # the CLI driver all take the same suite-name filter, so one leg's list
-  # drives every step that costs time. Leg A's folders are named and leg B
+  # drives every step that costs time. Legs A and B name folders; leg C
   # is whatever is left, so a new folder under integ/runtime joins a leg
   # instead of leaving CI.
   integ-runtime:
@@ -1583,7 +1583,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [a, b]
+        leg: [a, b, c]
     services:
       redis:
         image: redis:7
@@ -1626,12 +1626,13 @@ jobs:
       # cli.sh runs both hosts at once, each over two lanes that take the
       # next suite nobody has claimed, so a leg costs about half of
       # max(python, typescript) rather than their sum. Legs split by
-      # top-level folder of integ/runtime, picked off measured per-suite
-      # wall clock to halve both hosts. Re-read the `suite <host>/<name>
+      # top-level folder of integ/runtime, balanced using the per-suite
+      # timings in run 37891950998. Re-read the `suite <host>/<name>
       # <n>s` lines cli.sh prints before moving a folder across; that step
       # is most of the job's test time, and it is the only one timed per
       # suite.
-      LEG_A_FOLDERS: "dir facade open policy quickjs read routing"
+      LEG_A_FOLDERS: "dir facade open quickjs"
+      LEG_B_FOLDERS: "path policy read routing"
     steps:
       - uses: actions/checkout@v7
 
@@ -1686,23 +1687,33 @@ jobs:
           done < <(find integ/runtime -name '*.json' | sort)
           all=$(printf '%s\n' "${names[@]}" | sort -u)
           folders=$(printf '%s\n' "${names[@]}" | cut -d/ -f1 | sort -u)
-          wanted=$(printf '%s' "$LEG_A_FOLDERS" | tr ' ' '\n' | grep -v '^$' | sort -u)
-          unknown=$(comm -13 <(printf '%s\n' "$folders") <(printf '%s\n' "$wanted"))
-          if [ -n "$unknown" ]; then
-            echo "LEG_A_FOLDERS names folders with no suite: $unknown" >&2
+          select_folders() {
+            local wanted unknown
+            wanted=$(printf '%s' "$1" | tr ' ' '\n' | grep -v '^$' | sort -u)
+            unknown=$(comm -13 <(printf '%s\n' "$folders") <(printf '%s\n' "$wanted"))
+            if [ -n "$unknown" ]; then
+              echo "leg names folders with no suite: $unknown" >&2
+              return 1
+            fi
+            grep -E "^($(printf '%s' "$wanted" | paste -sd'|' -))/" <<<"$all" || true
+          }
+          a=$(select_folders "$LEG_A_FOLDERS")
+          b=$(select_folders "$LEG_B_FOLDERS")
+          overlap=$(comm -12 <(printf '%s\n' "$a") <(printf '%s\n' "$b"))
+          if [ -n "$overlap" ]; then
+            echo "suites claimed by both legs: $overlap" >&2
             exit 1
           fi
-          a=$(grep -E "^($(printf '%s' "$wanted" | paste -sd'|' -))/" <<<"$all" || true)
-          b=$(comm -23 <(printf '%s\n' "$all") <(printf '%s\n' "$a"))
-          if [ -z "$a" ] || [ -z "$b" ]; then
-            echo "a leg is empty: every suite would run twice or not at all" >&2
+          c=$(comm -23 <(printf '%s\n' "$all") <(printf '%s\n%s\n' "$a" "$b" | sort -u))
+          if [ -z "$a" ] || [ -z "$b" ] || [ -z "$c" ]; then
+            echo "a leg is empty" >&2
             exit 1
           fi
-          # Exhaustive on purpose: a third matrix leg falling into an
-          # `else` would silently re-run leg B's suites and still exit 0.
+          # Refuse a matrix leg with no corresponding suite selection.
           case "$LEG" in
             a) suites="$a" ;;
             b) suites="$b" ;;
+            c) suites="$c" ;;
             *) echo "no suite list for leg '$LEG'" >&2; exit 1 ;;
           esac
           echo "SUITES=$(printf '%s' "$suites" | tr '\n' ' ')" >> "$GITHUB_ENV"

@@ -40,14 +40,11 @@ ConfigT = TypeVar("ConfigT")
 class CLIView:
     """One entry point per state plane, for the CLI verb that needs one.
 
-    Most CLIs want none of this: an account CLI reaches a service and
-    has no filesystem, while ``git``'s whole subject is a repository
-    that lives on a mount. So this rides ``CLIInvocation.view`` and is
-    None outside a workspace (a spec exercised directly in a test), and
-    a verb that never reads it cannot touch a mount. That is the same
-    opt-in the parameter-injection form gave, moved onto the one record
-    every leaf already takes: the dispatcher is a field read instead of a
-    signature the dispatcher inspects.
+    Account CLIs reach services through their own config. File arguments
+    such as attachments, query filters and upload paths use this view,
+    just as ``git`` uses it for repositories. The executor supplies it on
+    ``CLIInvocation.view``; callers exercising a handler directly may omit
+    it when the handler needs no workspace operations.
 
     The field names and types are ``CommandOpts``' (commands/config.py),
     deliberately: a fact reached from a CLI leaf and the same fact
@@ -120,9 +117,9 @@ class CLIInvocation(Generic[ConfigT]):
         env (Mapping[str, str]): the session's environment variables,
             as one frozen process-view snapshot. A leaf that wants the
             live, gated handle reads ``view.session_view``.
-        view (CLIView | None): one entry point per state plane, None outside
-            a workspace and for every CLI that reaches a service
-            instead of a filesystem.
+        view (CLIView | None): workspace entry points, including for account
+            CLIs that read attachments or other file arguments. None when
+            the caller provides no workspace view.
         shell (Callable[[str], Awaitable[IOResult]] | None): evaluate a
             nested line in this invocation's exact session. Host callbacks
             use this for portable re-entry, including after awaits and in

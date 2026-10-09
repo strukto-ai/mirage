@@ -121,12 +121,14 @@ export interface SessionView {
   // target first, which is what every ordinary assignment does;
   // `declare -n r=w` on an existing reference re-aims it and passes
   // false. `assigned` names the elements an array write assigns; the rest
-  // are carried over as stored.
+  // are carried over as stored. `added` is an integer `+=`'s text, which
+  // they evaluate after their held one.
   set(
     name: string,
     value: ShellValue,
     followRef?: boolean,
     assigned?: ReadonlySet<number | string> | null,
+    added?: string | null,
   ): Promise<void>
   // Drop one variable through the session plane; a missing name is quiet.
   // `followRef` (default true) resolves a reference to its target;

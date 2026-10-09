@@ -21,7 +21,7 @@ from mirage.core.linear.client import (
     resolve_issue_id,
 )
 from mirage.core.linear.config import LinearConfig
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, materialize
 
 ISSUE_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-[0-9]+$")
 
@@ -146,13 +146,7 @@ async def text_or_stdin(
     if inline_text:
         return inline_text
     if stdin is not None:
-        if isinstance(stdin, bytes):
-            raw = stdin
-        else:
-            chunks: list[bytes] = []
-            async for chunk in stdin:
-                chunks.append(chunk)
-            raw = b"".join(chunks)
+        raw = await materialize(stdin)
         # Piped text ends with the pipe's newline (echo body | ...);
         # the API body should not.
         return raw.decode(errors="replace").rstrip("\n")

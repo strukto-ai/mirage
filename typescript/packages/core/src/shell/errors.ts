@@ -18,18 +18,50 @@ import type { ArithWrite } from './types.ts'
 import { encodeText } from './bytes.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// A bash arithmetic syntax or evaluation error. Mirrors Python's
-// mirage.shell.errors.ArithError.
 /**
- * A bash arithmetic syntax or evaluation error. `writes` carries the
- * assignments the expression made before it failed: bash binds each at
- * once, so `x=5, 1/0` leaves `x` at 5 and `RANDOM=42, RANDOM + 1/0`
- * leaves the generator seeded and drawn from. The evaluator fills it as
- * it throws; a caller lands them the way it lands a successful result's,
- * then reports the error.
+ * A bash arithmetic syntax or evaluation error, worded as bash's line: the
+ * expression, what went wrong, and the text from the token the reader
+ * stood on to the end (`1+: syntax error: operand expected (error token is
+ * "+")`). `writes` carries the assignments the expression made before it
+ * failed: bash binds each at once, so `x=5, 1/0` leaves `x` at 5 and
+ * `RANDOM=42, RANDOM + 1/0` leaves the generator seeded and drawn from.
+ * The evaluator fills it as it throws; a caller lands them the way it
+ * lands a successful result's, then reports the error. `inSubscript`
+ * marks one made while an array subscript evaluated, which ends the shell
+ * wherever the subscript is (`let 'a[1+]'`), where `let` would otherwise
+ * fail with 1. Mirrors Python's mirage.shell.errors.ArithError.
  */
 export class ArithError extends Error {
+  readonly reason: string
+  readonly expression: string
+  readonly token: string | null
   writes: ArithWrite[] = []
+  inSubscript = false
+
+  constructor(reason: string, expression = '', token: string | null = null) {
+    let line = expression === '' ? reason : `${expression}: ${reason}`
+    if (token !== null) line = `${line} (error token is "${token}")`
+    super(line)
+    this.name = 'ArithError'
+    this.reason = reason
+    this.expression = expression
+    this.token = token
+  }
+
+  /**
+   * How the error unwinds where no status answers it: one in a subscript,
+   * or in an `-i` value (`fatal`), ends the shell with 1; any other
+   * discards the line, as `$((1/0))` does. The command the error belongs
+   * to leads the line (`bash: read: 1+: ...`, `bash: x: 1/0: ...` for
+   * `${x:1/0}`), except one in a subscript, which bash names by the
+   * subscript alone.
+   */
+  signal(cmd = '', fatal = false): ExitSignal {
+    const lead = cmd !== '' && !this.inSubscript ? `${cmd}: ` : ''
+    const stderr = encodeText(`bash: ${lead}${this.message}\n`)
+    if (fatal || this.inSubscript) return new ExitSignal(1, stderr, null, 1)
+    return new DiscardSignal(stderr)
+  }
 }
 
 /**

@@ -41,7 +41,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.errors import ExitSignal
+from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.helpers import (
     get_command_name,
     get_parts,
@@ -832,22 +832,28 @@ async def _route_argv(
     # interpreters are not in the table; they route below.
     builtin = BUILTINS.get(name)
     if builtin is not None:
-        return await builtin(
-            BuiltinCall(
-                argv=argv,
-                context=context,
-                stdin=stdin,
-                call_stack=call_stack,
-                cancel=cancel,
-                row=row,
-                dispatch=dispatch,
-                registry=registry,
-                namespace=namespace,
-                execute_fn=execute_fn,
-                sink=sink,
-                job_table=job_table,
+        try:
+            return await builtin(
+                BuiltinCall(
+                    argv=argv,
+                    context=context,
+                    stdin=stdin,
+                    call_stack=call_stack,
+                    cancel=cancel,
+                    row=row,
+                    dispatch=dispatch,
+                    registry=registry,
+                    namespace=namespace,
+                    execute_fn=execute_fn,
+                    sink=sink,
+                    job_table=job_table,
+                )
             )
-        )
+        except ArithError as exc:
+            # A value a builtin stores into an `-i` name did not
+            # evaluate: bash discards the line in that builtin's voice
+            # (`bash: getopts: ?: syntax error: ...`).
+            raise exc.signal(name, fatal=True) from exc
 
     # ── pathname resolution (POSIX): every component of an operand but
     #    the last resolves for every command, so `stat dlink/f2` reports

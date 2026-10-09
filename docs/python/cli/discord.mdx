@@ -1,88 +1,85 @@
 ---
 title: discord
-description: "Discord REST API client speaking the OpenClaw Discord action vocabulary."
+description: "Supported Discord commands for messages, threads, polls and guild information."
 icon: discord
 ---
 
-Mirage's built-in Discord REST API client follows the Discord action
-vocabulary from the upstream
-[OpenClaw](https://github.com/openclaw/openclaw) project. The Mirage command
-tree is discoverable with `discord --help`.
+Read and send Discord messages, edit or delete messages, add reactions, create threads and polls, and inspect guilds. The action names follow [OpenClaw](https://github.com/openclaw/openclaw); `members` and `server-info` are Mirage extensions.
 
-**Licenses:** OpenClaw uses the
-[MIT License](https://github.com/openclaw/openclaw/blob/main/LICENSE); Mirage's
-independent Discord implementation uses
-[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
+## Setup
 
-## Install
+Configure a bot token and its permissions with [Discord setup](/home/setup/discord).
 
 ```python
 from mirage import Workspace
 from mirage.commands.cli.builtin.discord import DISCORD
 from mirage.core.discord.config import DiscordConfig
-from mirage.vfs.discord import DiscordVFS
 
 config = DiscordConfig(token="bot-token")
-ws = Workspace({"/discord": DiscordVFS(config)})
-ws.register_cli("discord", DISCORD, config.model_dump())
+ws = Workspace({})
+ws.register_cli("discord", DISCORD, config)
 ```
 
-Two installs under different names are two accounts. In YAML, the same
-install rides the `clis:` section; see the [CLI overview](/python/cli/index).
+No service mount is required. For YAML and multiple accounts, see the
+[CLI overview](/python/cli/index#register-a-cli).
 
-## Verbs
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
 
-The verbs follow that OpenClaw Discord action vocabulary (bare verbs:
-`send`, `read`, `edit`, `delete`, `react`, `search`, `thread-create`,
-`poll`); `members` and `server-info` are mirage extensions. IDs are
-Discord snowflakes, discoverable from the mounted tree
-(`<name>__<id>` path segments).
+Run `discord <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
 
-### Messages
+| Command | Description |
+| --- | --- |
+| `discord send` | Send a message to a channel |
+| `discord read` | Read the most recent messages of a channel |
+| `discord edit` | Edit a message the bot authored |
+| `discord delete` | Delete a message |
+| `discord react` | Add an emoji reaction to a message |
+| `discord search` | Search a guild's messages by content |
+| `discord thread-create` | Create a thread, standalone or from a message |
+| `discord poll` | Post a poll message to a channel |
+| `discord members` | List a guild's members, optionally filtered |
+| `discord server-info` | Fetch a guild's metadata |
+{/* END GENERATED CLI COMMANDS */}
+
+## Messages
 
 ```bash
-discord send --channel 1256522563555819574 --text "Hello from MIRAGE"
-discord send --channel 1256522563555819574 --text "A reply" --reply-to 1489887688978075769
 discord read --channel 1256522563555819574 --limit 20
-discord edit --channel 1256522563555819574 --message 1489887688978075769 --text "Edited"
+discord send --channel 1256522563555819574 --text "Release is ready"
+discord send --channel 1256522563555819574 --text "A reply" --reply-to 1489887688978075769
+discord edit --channel 1256522563555819574 --message 1489887688978075769 --text "Updated"
 discord delete --channel 1256522563555819574 --message 1489887688978075769
 ```
 
-| Verb     | Flags                                   | Writes |
-| -------- | --------------------------------------- | ------ |
-| `send`   | `--channel --text [--reply-to]`         | yes    |
-| `read`   | `--channel [--limit]`                   | no     |
-| `edit`   | `--channel --message --text`            | yes    |
-| `delete` | `--channel --message`                   | yes    |
+`edit` works only on messages authored by the bot. Channel, guild and message
+arguments are Discord snowflake IDs, not workspace paths.
 
-`edit` only works on messages the bot authored.
-
-### Reactions, threads, polls
+## Threads, polls and search
 
 ```bash
 discord react --channel 1256522563555819574 --message 1489887688978075769 --emoji "👍"
-discord thread-create --channel 1256522563555819574 --message 1489887688978075769 --name "Budget talk"
-discord poll --channel 1256522563555819574 --question "Lunch?" --answer Pizza --answer Sushi --duration 24
-```
-
-| Verb            | Flags                                                        | Writes |
-| --------------- | ------------------------------------------------------------ | ------ |
-| `react`         | `--channel --message --emoji`                                | yes    |
-| `thread-create` | `--channel --name [--message]`                               | yes    |
-| `poll`          | `--channel --question --answer... [--duration] [--multiselect]` | yes |
-
-`--answer` repeats, one per poll option.
-
-### Guild metadata and search
-
-```bash
+discord thread-create --channel 1256522563555819574 --message 1489887688978075769 --name "Release review"
+discord poll --channel 1256522563555819574 --question "Ship today?" --answer Yes --answer Tomorrow --duration 24
 discord server-info --guild 1256522563555819574
-discord members --guild 1256522563555819574 --query "alice"
-discord search --guild 1256522563555819574 --query "deploy" --channel 1256522563555819574
+discord members --guild 1256522563555819574 --query alice
+discord search --guild 1256522563555819574 --query deploy --channel 1256522563555819574
 ```
 
-| Verb          | Flags                              | Writes |
-| ------------- | ---------------------------------- | ------ |
-| `server-info` | `--guild`                          | no     |
-| `members`     | `--guild [--query]`                | no     |
-| `search`      | `--guild --query [--channel]`      | no     |
+Omit `--message` on `thread-create` to create a standalone thread. Repeat
+`--answer` for each poll option; `--multiselect` allows multiple choices.
+Responses are JSON.
+
+## VFS and limits
+
+The optional [Discord VFS](/python/vfs/discord) exposes the guild's
+channels and messages as files. Use the IDs in its `name__id` path segments
+with the CLI. Registration remains independent of the mount, and command
+policy controls service writes.
+
+Only the listed actions are implemented.
+
+OpenClaw's source uses the [MIT license](https://github.com/openclaw/openclaw/blob/main/LICENSE).
+Mirage's command implementation is Apache-2.0; see
+[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).

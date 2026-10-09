@@ -445,6 +445,8 @@ async def handle_for(
                 IOResult(exit_code=1, stderr=encode_text(f"{exc.strerror}\n"))
             )
             break
+        except ArithError as exc:
+            raise exc.signal(fatal=True) from exc
         try:
             stdout, io, _ = await execute_body(
                 execute_node,
@@ -626,13 +628,17 @@ async def handle_cfor(
             await eval_expr(exprs[2], 0)
     except (ArithError, PolicyDenied, ReadonlyError) as exc:
         # bash: the loop aborts with status 1, keeping the output
-        # of iterations that already ran. PolicyDenied is a header
-        # expression assigning a hidden name, refused by the same
-        # session view as any denied assignment.
+        # of iterations that already ran, or ends the shell with it on
+        # an error in a subscript. PolicyDenied is a header expression
+        # assigning a hidden name, refused by the same session view as
+        # any denied assignment.
         if isinstance(exc, ReadonlyError):
             err = encode_text(f"bash: {exc}\n")
         elif isinstance(exc, PolicyDenied):
             err = encode_text(f"bash: {exc.strerror}\n")
+        elif exc.in_subscript:
+            stdout = _chain_streams(all_stdout)
+            raise await carried(exc.signal(), stdout, merged_io) from exc
         else:
             err = encode_text(f"bash: ((: {exc}\n")
         merged_io = await merged_io.merge(IOResult(exit_code=1, stderr=err))
@@ -895,6 +901,8 @@ async def handle_select(
                 IOResult(exit_code=1, stderr=encode_text(f"{exc.strerror}\n"))
             )
             break
+        except ArithError as exc:
+            raise exc.signal(fatal=True) from exc
         try:
             stdout, io, _ = await execute_body(
                 execute_node,

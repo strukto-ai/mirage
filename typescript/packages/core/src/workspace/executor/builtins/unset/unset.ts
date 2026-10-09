@@ -14,7 +14,7 @@
 
 import { FUNCNAME } from '../../../../shell/constants.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { ArithError, ExitSignal } from '../../../../shell/errors.ts'
+import { ArithError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { arrayExtent, arrayUnset } from '../../../../shell/array.ts'
 import { sessionEntry } from '../../../session/session.ts'
@@ -72,9 +72,7 @@ async function fatalIndex(
   try {
     return await subscriptIndex(session, subscript, view)
   } catch (err) {
-    if (err instanceof ArithError) {
-      throw new ExitSignal(1, encodeText(`bash: ${err.message}\n`), null, 1)
-    }
+    if (err instanceof ArithError) throw err.signal('', true)
     throw err
   }
 }

@@ -29,11 +29,14 @@ implementations cannot drift apart.
   the in-app answer, and every other access must give it. `run.py` also
   checks auth per deployment, the CLI's daemon lifecycle and config, and
   gates that every HTTP route and CLI command was exercised. `inapp.ts` is
-  the in-app access on TypeScript. Shell and stdin cases with `output_stream`
-  also exercise HTTP `?stream=true` and the CLI’s default raw output, checking both output
-  channels, bounded byte chunks, Unicode, NUL bytes and the terminal exit status.
-  MCP progress cases wait on a VFS gate released by the first preview, proving
-  that HTTP SSE and the stdio relay deliver progress before the final tool result.
+  the in-app access on TypeScript. CI uses `--host-jobs 2` to overlap both
+  hosts on one runner; each host keeps its own home, ports and snapshot
+  prefix, and the route and command gates still cover both hosts. Shell and
+  stdin cases with `output_stream` also run over HTTP `?stream=true` and the
+  CLI's raw output. A case with `output_gate` holds its line on a VFS file
+  the access creates only once the first output byte reaches it, so HTTP,
+  the CLI and SSH must deliver output before the line ends; MCP progress
+  cases gate the same way on the first preview.
 - `policy/`: the policy corpus. Each case binds sessions to profiles and
   registers coded policies, then drives lines, VFS calls, tools, asks and
   explain, pinning what each refuses, asks or lets through: the allow list,
@@ -94,6 +97,25 @@ command's folder whose run of it names paths on both `/data` and `/data2`
 (directly, or through a symlink the line makes), asserts all three result
 channels, and targets RAM and disk; it also rejects duplicate IDs. It is a registration floor, not proof of every option or
 backend.
+
+## CLI coverage
+
+`cli/` owns observable command results on both hosts. Keep parser/help smoke
+checks here and use unit tests for spec structure, write classification,
+request construction, config validation and VFS/policy boundaries.
+
+The consolidated smoke coverage is `sl_send_message`, `sl_missing_required`,
+`dc_send`, `ln_cli_missing_team`, `gw_gmail_missing_to`,
+`gw_unknown_nested_verb`, `at_cli_help` and `at_cli_usage_missing_base`.
+These replace the equivalent Python workspace smoke tests; the refusal cases
+assert exit code, stdout and stderr directly. Stateful account and mount
+tests remain separate because their setup and assertions are different.
+
+The CLI reference tables are generated from the registered `CLISpec` trees:
+run `python/.venv/bin/python scripts/gen_cli_docs.py` after changing a tree.
+CI runs the same command with `--check` to detect stale or missing references,
+then `typescript/scripts/check-cli-docs.ts` checks the inventory and command
+paths against the built TypeScript specs.
 
 ## Runs and tenants
 
@@ -174,7 +196,7 @@ flowchart LR
     database --> J5["integ-database"]
     observability --> J6["integ-observability"]
     fuse --> J7["integ-fuse · integ-fuse-windows<br/>integ-fskit-macos"]
-    runtime --> J8["integ-runtime · integ-e2b"]
+    runtime --> J8["integ-runtime (3 legs) · integ-e2b"]
 ```
 
 The same wiring from the side of a change. Every file under `python/` sets

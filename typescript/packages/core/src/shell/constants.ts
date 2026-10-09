@@ -17,29 +17,22 @@ import { BuiltinGroup, BuiltinTier, NodeType, ShellBuiltin } from './types.ts'
 
 export const PARAMETER_NAME = /^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-])/
 
-// Bash arithmetic tokens: integer literals (base#value/decimal/hex/
-// octal), variable names, then operators longest-first so `<<=` never
-// lexes as `<<` + `=`.
-export const ARITH_TOKEN = new RegExp(
-  [
-    '(\\d+#[0-9a-zA-Z@_]+|0[xX][0-9a-fA-F]+|\\d+)',
-    '([A-Za-z_]\\w*)',
-    '(<<=|>>=|\\*\\*|\\+\\+|--|<<|>>|<=|>=|==|!=|&&|\\|\\||\\+=|-=|\\*=|/=|%=|&=|\\^=|\\|=|[-+*/%<>=!~&|^?:(),])',
-    '(\\s+)',
-    '(.)',
-  ].join('|'),
-  'g',
-)
+// The blanks bash skips between arithmetic tokens.
+export const ARITH_BLANKS = ' \t\n'
 
-export const ARITH_NAME = /^[A-Za-z_]\w*$/
+// A variable name in an expression: ASCII, as bash's names are.
+export const ARITH_NAME = /[A-Za-z_][A-Za-z0-9_]*/y
 
-// An element reference token the tokenizer stitched: the name adjacent
-// to a bracket-matched subscript, whose interior is resolved by the
-// element callbacks rather than the tokenizer (an associative key can
-// hold characters no arithmetic token may).
-export const ARITH_ELEM = /^([A-Za-z_]\w*)\[([\s\S]*)\]$/
+// An integer constant as bash reads one off an expression: a digit and the
+// name characters, `@` and `#` after it, judged whole once read (`1a` and
+// `08` are each one constant, too great for their base).
+export const ARITH_LITERAL = /[0-9][0-9A-Za-z_@#]*/y
 
-export const ARITH_ASSIGN_OPS = new Set([
+// Operators longest-first, so `<<=` never lexes as `<<` then `=`.
+export const ARITH_OPERATOR =
+  /<<=|>>=|\*\*|\+\+|--|<<|>>|<=|>=|==|!=|&&|\|\||[-+*/%&^|]=|[-+*/%<>=!~&|^?:(),]/y
+
+export const ARITH_ASSIGN_OPS: ReadonlySet<string> = new Set([
   '=',
   '+=',
   '-=',
@@ -53,9 +46,40 @@ export const ARITH_ASSIGN_OPS = new Set([
   '|=',
 ])
 
-// Recursion budget for variables holding expressions (`x="1+2"; $((x))`),
-// mirroring bash's expression recursion limit.
-export const ARITH_MAX_DEPTH = 16
+export const ARITH_UNARY_OPS: ReadonlySet<string> = new Set(['!', '~', '-', '+'])
+
+// Binary operators by how tightly they bind, loosest first; `**` alone
+// groups from the right, and a unary operator binds tighter than all of
+// them (`-2**2` is 4).
+export const ARITH_PRECEDENCE: ReadonlyMap<string, number> = new Map([
+  ['||', 1],
+  ['&&', 2],
+  ['|', 3],
+  ['^', 4],
+  ['&', 5],
+  ['==', 6],
+  ['!=', 6],
+  ['<', 7],
+  ['<=', 7],
+  ['>', 7],
+  ['>=', 7],
+  ['<<', 8],
+  ['>>', 8],
+  ['+', 9],
+  ['-', 9],
+  ['*', 10],
+  ['/', 10],
+  ['%', 10],
+  ['**', 11],
+])
+
+// How deep variables holding expressions may nest (`x="1+2"; $((x))`): a
+// variable read from an expression this many values deep is past the
+// limit. bash's is 1023; Python's stack holds about a dozen frames per
+// level, so mirage stops at 27, which names the same expression of a
+// reference cycle of 1, 2, 3, 4, 6 or 12 names as bash's limit does (27
+// and 1023 agree modulo 12).
+export const ARITH_MAX_DEPTH = 27
 
 // The descriptors the shell models: stdin, stdout and stderr, and no
 // table above them. A redirect naming any other number is refused before

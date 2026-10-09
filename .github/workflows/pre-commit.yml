@@ -265,6 +265,11 @@ jobs:
       - name: Docs frontmatter
         run: ./python/.venv/bin/python scripts/check_docs_frontmatter.py
 
+      - name: Supported CLI documentation
+        run: |
+          ./python/.venv/bin/python scripts/gen_cli_docs.py --check
+          node --experimental-strip-types typescript/scripts/check-cli-docs.ts
+
       # The Test (TypeScript) leg table is split across two files -- the
       # `test:leg:*` scripts carry the package selections, the workflow matrix
       # decides which of them run -- so either half can drift into silence: a

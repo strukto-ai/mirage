@@ -130,9 +130,11 @@ async function evalCondBinary(
         throw new CondError(`bash: ${error.message}`, 1, false)
       }
       // bash: `[[: 1/0: division by 0`, status 1, and the line goes on;
-      // only a grammar error is fatal.
-      if (error !== null)
-        throw new CondError(`bash: ${ctx.name}: ${operand}: ${error.message}`, 1, false)
+      // one in a subscript discards it.
+      if (error !== null) {
+        if (error.inSubscript) throw error.signal()
+        throw new CondError(`bash: ${ctx.name}: ${error.message}`, 1, false)
+      }
       values.push(value)
     }
     return compare(values[0] ?? 0n, values[1] ?? 0n)
