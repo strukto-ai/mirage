@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
 
@@ -27,12 +28,18 @@ vi.mock('./client.ts', async () => {
 })
 
 import * as client from './client.ts'
-import { BoxTokenManager } from './client.ts'
+import { BoxApiError, BoxTokenManager } from './client.ts'
+import { runWithWriteContext } from '../../cache/context.ts'
+import { keptVersions } from '../../test-utils.ts'
+import { isStaleWrite } from '../../errors/fs.ts'
+import type { StaleWriteError } from '../../errors/types.ts'
+import { PathSpec } from '../../types.ts'
 import {
   createFolder,
   eventsNow,
   eventsSince,
   realtimeServer,
+  refused,
   uploadFileVersion,
   uploadNewFile,
 } from './api.ts'
@@ -151,5 +158,42 @@ describe('box upload host', () => {
       'http://127.0.0.1:5096/2.0/files/content',
       'http://127.0.0.1:5096/2.0/files/7/content',
     ])
+  })
+})
+
+interface LostCase {
+  name: string
+  status: number
+  outcome: 'lost' | 'gone' | 'other'
+}
+
+const LOST = JSON.parse(
+  readFileSync(
+    new URL('../../../../../../integ/fixtures/write/drive_lost_codes.json', import.meta.url),
+    'utf-8',
+  ),
+) as { box: LostCase[] }
+
+async function refuse(
+  err: BoxApiError,
+  sent: string | null,
+): Promise<[string[], StaleWriteError | null]> {
+  const { context, kept } = keptVersions('box')
+  const path = new PathSpec({ virtual: '/box/f', directory: '/box/', vfsPath: '/f' })
+  const got = await runWithWriteContext('/box/', context, () =>
+    refused(path, err, { ifMatch: 's1' }, sent),
+  )
+  return [kept, got]
+}
+
+describe('refused', () => {
+  const rows = LOST.box.flatMap((c) => [[c.name, 'e1', c] as const, [c.name, null, c] as const])
+  it.each(rows)('reads Box answers like the shared table: %s, sent %s', async (_name, sent, c) => {
+    const [kept, got] = await refuse(new BoxApiError('x', c.status), sent)
+    if (sent === null || c.outcome === 'other') expect([kept, got]).toEqual([[], null])
+    else {
+      expect(isStaleWrite(got)).toBe(true)
+      expect(kept).toEqual(c.outcome === 'lost' ? ['s1'] : [])
+    }
   })
 })

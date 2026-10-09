@@ -33,6 +33,7 @@ WRITE_CONDITIONS: dict[str, frozenset[WriteKind]] = {
     "supabase": _ALL,
     "tencent": _ALL,
     "wasabi": _ALL,
+    "box": _ALL,
 }
 
 # A custom `vfs: s3` endpoint may be MinIO, so it gets MinIO's row.

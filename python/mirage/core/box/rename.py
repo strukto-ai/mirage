@@ -14,15 +14,17 @@
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import invalidate_after_move
+from mirage.cache.types import WriteCondition
 from mirage.core.box.api import (
-    delete_file,
-    delete_folder,
     update_file,
     update_folder,
 )
 from mirage.core.box.client import BoxApiError
+from mirage.core.box.copy import replace_file, retaken
 from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
-from mirage.errors.fs import eisdir, enoent, enotdir, enotempty
+from mirage.core.box.rmdir import delete_empty_folder
+from mirage.errors.fs import eisdir, enoent, enotdir
+from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
 
 
@@ -44,31 +46,46 @@ async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     # a folder gives way to a folder, and then only an empty one: a non-empty
     # one is mv's "Directory not empty", which recursive=false gets from Box
     # for free, exactly as rmdir does.
+    # Only dst is measured: Box moves the item whole.
+    upto = lost_count()
+    timer = start_op()
+    cond: WriteCondition | None = None
     existing = await resolve_item(accessor, dst_parts)
+    if existing is None and item.get("type") == "file":
+        cond = await replace_file(accessor, dst, None)
     if existing is not None and existing["id"] != item["id"]:
         src_is_folder = item.get("type") == "folder"
         if existing.get("type") == "folder":
             if not src_is_folder:
                 raise eisdir(dst.virtual)
-            try:
-                await delete_folder(tm, existing["id"], recursive=False)
-            except BoxApiError as exc:
-                if exc.status == 409:
-                    raise enotempty(dst) from exc
-                raise
+            await delete_empty_folder(tm, existing["id"], dst)
         else:
             if src_is_folder:
                 raise enotdir(dst.virtual)
-            await delete_file(tm, existing["id"])
-    if item.get("type") == "folder":
-        await update_folder(
-            tm, item["id"], name=new_name, parent_id=dst_parent
-        )
-    else:
-        await update_file(tm, item["id"], name=new_name, parent_id=dst_parent)
+            cond = await replace_file(accessor, dst, existing)
+    try:
+        if item.get("type") == "folder":
+            await update_folder(
+                tm, item["id"], name=new_name, parent_id=dst_parent
+            )
+        else:
+            await update_file(
+                tm, item["id"], name=new_name, parent_id=dst_parent
+            )
+    except BoxApiError as exc:
+        lost = await retaken(exc, cond, dst)
+        if lost is not None:
+            raise lost from exc
+        raise
     # Only a folder has a subtree to drop, and only a positive "file"
     # rules one out. The type checks above refused a file onto a folder,
     # so dst held nothing below it unless the moved item is a folder.
     folder = item.get("type") != "file"
+    # Both ends changed: src left and dst was replaced.
+    op = "rename_prefix" if folder else "rename"
+    record(op, src.virtual, "box", 0, timer)
+    record(op, dst.virtual, "box", 0, timer)
     await invalidate_after_move(dst, folder)
     await invalidate_after_move(src, folder)
+    lift_lost(src, upto, subtree=folder)
+    lift_lost(dst, upto, subtree=folder)

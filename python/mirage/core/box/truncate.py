@@ -12,8 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
+
 from mirage.accessor.box import BoxAccessor
+from mirage.cache.context import own_write_version, writes_conditioned
+from mirage.cache.types import OwnRead
 from mirage.core.box.api import download_file
+from mirage.core.box.fingerprint import live_of
 from mirage.core.box.resolve import path_parts, resolve_item
 from mirage.core.box.write import write
 from mirage.errors.fs import enotsup
@@ -25,12 +30,20 @@ async def truncate(
 ) -> None:
     if no_create:
         raise enotsup("box", "truncate --no-create", path)
+    if length == 0 and writes_conditioned():
+        # Emptying carries the agent's version; no read needed.
+        await write(accessor, path, b"")
+        return
     item = await resolve_item(accessor, path_parts(path))
+    live = live_of(item)
     data = b""
-    if item is not None and item.get("type") == "file":
+    own: str | OwnRead | None = OwnRead.ABSENT
+    if item is not None and live is not None:
         data = await download_file(accessor.token_manager, item["id"])
+        own = hashlib.sha1(data).hexdigest()
     if length <= len(data):
         new = data[:length]
     else:
         new = data + b"\x00" * (length - len(data))
-    await write(accessor, path, new)
+    with own_write_version(path, own):
+        await write(accessor, path, new)

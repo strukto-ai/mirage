@@ -12,7 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.cache.index import IndexEntry
+from mirage.cache.types import LiveVersion
 from mirage.core.box.constants import SHA1
 from mirage.types import JsonValue
 
@@ -28,6 +31,19 @@ def token_of(value: JsonValue) -> str | None:
         value (JsonValue): a ``sha1`` field as the API sent it.
     """
     return value if isinstance(value, str) and value else None
+
+
+def live_of(item: dict[str, Any] | None) -> LiveVersion | None:
+    """A looked-up item's live tokens, None when it is no file.
+
+    Args:
+        item (dict[str, Any] | None): the item a resolve found.
+    """
+    if item is None or item.get("type") != "file":
+        return None
+    return LiveVersion(
+        content=token_of(item.get(SHA1)), native=token_of(item.get("etag"))
+    )
 
 
 def entry_token(entry: IndexEntry) -> str | None:

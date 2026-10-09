@@ -24,8 +24,37 @@ import {
   boxUploadMultipart,
 } from './client.ts'
 import type { BoxTokenManager } from './client.ts'
+import { stale } from '../../cache/context.ts'
+import type { WriteCondition } from '../../cache/types.ts'
 import { enoent } from '../../errors/fs.ts'
+import type { StaleWriteError } from '../../errors/types.ts'
+import type { PathSpec } from '../../types.ts'
+import { GONE_STATUS, LOST_STATUS } from './constants.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
+
+/**
+ * The refusal a request sent with `If-Match` met, null for any other: Box
+ * answers 412 when the file changed since the etag sent and 404 when it is
+ * gone; anything else keeps its own meaning, as does any answer to a request
+ * that went plain (`etag` null). A refusal keeps `cond`'s content token.
+ * Mirrors Python's `refused`.
+ */
+export async function refused(
+  path: PathSpec,
+  err: unknown,
+  cond: WriteCondition | null,
+  etag: string | null,
+): Promise<StaleWriteError | null> {
+  if (etag === null || etag === '' || !(err instanceof BoxApiError)) return null
+  if (err.status === LOST_STATUS) return stale(path, { version: cond?.ifMatch ?? null })
+  if (err.status === GONE_STATUS) return stale(path, { gone: true })
+  return null
+}
+
+/** The header that conditions a request on `etag`, empty to go plain. */
+export function ifMatch(etag: string | null): Record<string, string> {
+  return etag !== null && etag !== '' ? { 'If-Match': etag } : {}
+}
 
 // Box answers a folder id that has been deleted, or was never reachable,
 // with 404, and BoxApiError carries only an HTTP status. Stamping that one
@@ -290,8 +319,16 @@ export async function uploadFileVersion(
   fileId: string,
   name: string,
   data: Uint8Array,
+  etag: string | null = null,
 ): Promise<unknown> {
-  return boxUploadMultipart(tm, `${tm.uploadBase}/files/${fileId}/content`, { name }, name, data)
+  return boxUploadMultipart(
+    tm,
+    `${tm.uploadBase}/files/${fileId}/content`,
+    { name },
+    name,
+    data,
+    ifMatch(etag),
+  )
 }
 
 export async function createFolder(
@@ -305,8 +342,16 @@ export async function createFolder(
   })) as BoxItem
 }
 
-export async function deleteFile(tm: BoxTokenManager, fileId: string): Promise<void> {
-  await boxDelete(tm, `${tm.apiBase}/files/${fileId}`)
+export async function deleteFile(
+  tm: BoxTokenManager,
+  fileId: string,
+  etag: string | null = null,
+): Promise<void> {
+  await boxDelete(tm, `${tm.apiBase}/files/${fileId}`, undefined, ifMatch(etag))
+}
+
+export async function deleteWebLink(tm: BoxTokenManager, linkId: string): Promise<void> {
+  await boxDelete(tm, `${tm.apiBase}/web_links/${linkId}`)
 }
 
 export async function deleteFolder(

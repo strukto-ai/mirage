@@ -14,18 +14,21 @@
 
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { invalidateAfterMove } from '../../cache/context.ts'
+import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
+import type { WriteCondition } from '../../cache/types.ts'
 import type { PathSpec } from '../../types.ts'
-import { eisdir, enoent, enotdir, enotempty } from '../../errors/fs.ts'
-import { BoxApiError } from './client.ts'
-import { deleteFile, deleteFolder, updateFile, updateFolder, type BoxItem } from './api.ts'
+import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
+import { updateFile, updateFolder, type BoxItem } from './api.ts'
+import { replaceFile, retaken } from './copy.ts'
 import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
+import { deleteEmptyFolder } from './rmdir.ts'
 
 async function clearDest(
   accessor: BoxAccessor,
   dst: PathSpec,
   dstParts: string[],
   src: BoxItem,
-): Promise<void> {
+): Promise<WriteCondition | null> {
   // GNU mv/cp overwrite; Box 409s on a name clash, so clear an existing dst.
   // A type mismatch is refused with rename(2)'s own errnos and outranks
   // emptiness, since real rename answers EISDIR for a file onto a directory
@@ -33,20 +36,16 @@ async function clearDest(
   // folder, and then only an empty one: a non-empty one is mv's "Directory not
   // empty", which recursive=false gets from Box for free, as rmdir does.
   const existing = await resolveItem(accessor, dstParts)
-  if (existing === null || existing.id === src.id) return
+  if (existing === null) return src.type === 'file' ? replaceFile(accessor, dst, null) : null
+  if (existing.id === src.id) return null
   const tm = accessor.tokenManager
   if (existing.type !== 'folder') {
     if (src.type === 'folder') throw enotdir(dst.virtual)
-    await deleteFile(tm, existing.id)
-    return
+    return replaceFile(accessor, dst, existing)
   }
   if (src.type !== 'folder') throw eisdir(dst.virtual)
-  try {
-    await deleteFolder(tm, existing.id, false)
-  } catch (error) {
-    if (error instanceof BoxApiError && error.status === 409) throw enotempty(dst)
-    throw error
-  }
+  await deleteEmptyFolder(tm, existing.id, dst)
+  return null
 }
 
 export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
@@ -56,15 +55,28 @@ export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec
   const dstParts = pathParts(dst)
   const dstParent = await resolveParentId(accessor, dstParts)
   if (dstParent === null) throw enoent(dst.virtual)
-  await clearDest(accessor, dst, dstParts, item)
+  // Only dst is measured: Box moves the item whole.
+  const upto = lostCount()
+  const timer = startOp()
+  const cond = await clearDest(accessor, dst, dstParts, item)
   const newName = dstParts[dstParts.length - 1] ?? ''
-  if (item.type === 'folder')
-    await updateFolder(tm, item.id, { name: newName, parentId: dstParent })
-  else await updateFile(tm, item.id, { name: newName, parentId: dstParent })
+  try {
+    if (item.type === 'folder')
+      await updateFolder(tm, item.id, { name: newName, parentId: dstParent })
+    else await updateFile(tm, item.id, { name: newName, parentId: dstParent })
+  } catch (err) {
+    throw (await retaken(err, cond, dst)) ?? err
+  }
   // Only a folder has a subtree to drop, and only a positive "file" rules
   // one out. clearDest refused a file onto a folder, so dst held nothing
   // below it unless the moved item is a folder.
   const folder = item.type !== 'file'
+  // Both ends changed: src left and dst was replaced.
+  const op = folder ? 'rename_prefix' : 'rename'
+  record(op, src.virtual, 'box', 0, timer)
+  record(op, dst.virtual, 'box', 0, timer)
   await invalidateAfterMove(dst, folder)
   await invalidateAfterMove(src, folder)
+  liftLost(src, upto, folder)
+  liftLost(dst, upto, folder)
 }

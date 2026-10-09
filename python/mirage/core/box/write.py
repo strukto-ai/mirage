@@ -13,8 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import evict_after, invalidate_after_write
-from mirage.core.box.api import upload_file_version, upload_new_file
+from mirage.cache.context import (
+    evict_after,
+    invalidate_after_write,
+    native_condition,
+    write_condition,
+)
+from mirage.core.box.api import refused, upload_file_version, upload_new_file
+from mirage.core.box.client import BoxApiError
+from mirage.core.box.fingerprint import live_of
 from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
 from mirage.core.box.stat import stat_from_item
 from mirage.errors.fs import eisdir, enoent
@@ -27,7 +34,9 @@ async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
     """Upload a new file, or a new version of an existing one.
 
     A failed upload still evicts the path: Box may have stored the bytes
-    before its reply broke off.
+    before its reply broke off. On a ``write: conditional`` mount the
+    version held is checked against the file's live sha1 and its etag goes
+    out as ``If-Match``, so a file changed since it was read is refused.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -38,13 +47,15 @@ async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
     if not parts:
         raise eisdir(path.virtual)
     tm = accessor.token_manager
+    cond = await write_condition(path, "put")
     timer = start_op()
     existing = await resolve_item(accessor, parts)
+    etag = await native_condition(path, cond, live_of(existing), "put")
     if existing is not None and existing.get("type") == "file":
         # Overwrite uploads a new version under the same id, keeping Box's
         # own name so a box-native file isn't renamed with the vfs suffix.
         upload = upload_file_version(
-            tm, existing["id"], existing["name"], data
+            tm, existing["id"], existing["name"], data, etag
         )
     else:
         parent_id = await resolve_parent_id(accessor, parts)
@@ -61,4 +72,10 @@ async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
             "write", path.virtual, "box", len(data), timer, fingerprint=token
         )
 
-    await evict_after(send(), lambda _: invalidate_after_write(path))
+    try:
+        await evict_after(send(), lambda _: invalidate_after_write(path))
+    except BoxApiError as exc:
+        lost = await refused(path, exc, cond, etag)
+        if lost is not None:
+            raise lost from exc
+        raise

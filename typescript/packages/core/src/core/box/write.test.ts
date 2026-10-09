@@ -52,6 +52,7 @@ vi.mock('./api.ts', async () => {
 vi.mock('../../cache/context.ts', async () => {
   const actual = await vi.importActual<typeof ContextModule>('../../cache/context.ts')
   return {
+    ...actual,
     evictAfter: actual.evictAfter,
     invalidateAfterWrite: vi.fn(() => Promise.resolve()),
     invalidateAfterUnlink: vi.fn(() => Promise.resolve()),
@@ -136,6 +137,7 @@ describe('box write ops', () => {
       '200',
       'a.txt',
       new Uint8Array([9]),
+      null,
     )
   })
 
@@ -178,7 +180,7 @@ describe('box write ops', () => {
 
   it('unlink deletes a file by id', async () => {
     await unlink(makeAccessor(), spec('/data/a.txt'))
-    expect(vi.mocked(api.deleteFile)).toHaveBeenCalledWith(STUB_TM, '200')
+    expect(vi.mocked(api.deleteFile)).toHaveBeenCalledWith(STUB_TM, '200', null)
   })
 
   it('unlink on a folder throws EISDIR', async () => {
@@ -306,9 +308,12 @@ describe('box write ops', () => {
     expect(vi.mocked(api.deleteFile)).not.toHaveBeenCalled()
   })
 
-  it('copy copies a file into the dst parent', async () => {
-    await copy(makeAccessor(), spec('/data/a.txt'), spec('/data/c.txt'))
+  it('copy copies a file into the dst parent, recorded once', async () => {
+    const [, records] = await runWithRecording(() =>
+      copy(makeAccessor(), spec('/data/a.txt'), spec('/data/c.txt')),
+    )
     expect(vi.mocked(api.copyFile)).toHaveBeenCalledWith(STUB_TM, '200', '100', 'c.txt')
+    expect(records.map((r) => [r.op, r.path])).toEqual([['copy', '/data/c.txt']])
   })
 
   const COPY_TREE: Record<string, ApiModule.BoxItem[]> = {
