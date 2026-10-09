@@ -14,7 +14,7 @@
 
 import { encodeText } from './bytes.ts'
 
-const META = /[ \t\n!"$&'()*;<>?[\\\]^`{|}]/
+const META = /[ \t\n!"$&'()*;<>?[\\\]^`{|}]|^[#~]|[=:]~/
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\x00-\x1f\x7f]/g
 const CONTROL_ESCAPES: Record<string, string> = {
@@ -37,13 +37,12 @@ function controlEscape(char: string): string {
 /**
  * One word as bash's trace writes it (pinned on 5.2.37 in a UTF-8 locale):
  * single-quoted, each `'` spelled `'\''`, when it is empty, holds a blank or
- * a shell metacharacter, or starts with `#` or `~`; else `$'...'` when it
- * holds a control character; else bare, non-ASCII letters included.
+ * a shell metacharacter, starts with `#` or `~`, or has a `~` after `=` or
+ * `:`; else `$'...'` when it holds a control character; else bare, non-ASCII
+ * letters included.
  */
 function traceQuote(word: string): string {
-  if (word === '' || word.startsWith('#') || word.startsWith('~') || META.test(word)) {
-    return quoted(word)
-  }
+  if (word === '' || META.test(word)) return quoted(word)
   const escaped = word.replace(CONTROL, controlEscape)
   return escaped === word ? word : `$'${escaped}'`
 }

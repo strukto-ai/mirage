@@ -17,7 +17,7 @@ from collections.abc import Iterable
 
 from mirage.shell.bytes import encode_text
 
-_META = re.compile(r"[ \t\n!\"$&'()*;<>?\[\\\]^`{|}]")
+_META = re.compile(r"[ \t\n!\"$&'()*;<>?\[\\\]^`{|}]|^[#~]|[=:]~")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _CONTROL_ESCAPES = {
     "\a": "\\a",
@@ -41,14 +41,14 @@ def _control_escape(match: re.Match[str]) -> str:
 def _trace_quote(word: str) -> str:
     """One word as bash's trace writes it (pinned on 5.2.37 in a UTF-8
     locale): single-quoted, each ``'`` spelled ``'\\''``, when it is
-    empty, holds a blank or a shell metacharacter, or starts with ``#``
-    or ``~``; else ``$'...'`` when it holds a control character; else
-    bare, non-ASCII letters included.
+    empty, holds a blank or a shell metacharacter, starts with ``#`` or
+    ``~``, or has a ``~`` after ``=`` or ``:``; else ``$'...'`` when it
+    holds a control character; else bare, non-ASCII letters included.
 
     Args:
         word (str): the expanded word.
     """
-    if not word or word[0] in "#~" or _META.search(word):
+    if not word or _META.search(word):
         return _quoted(word)
     if _CONTROL.search(word):
         return "$'" + _CONTROL.sub(_control_escape, word) + "'"
