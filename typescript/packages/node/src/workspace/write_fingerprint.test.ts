@@ -155,6 +155,42 @@ describe('object-store write fingerprint (mocked S3)', () => {
     }
   })
 
+  it('a write drops what another mount of the store holds', async () => {
+    // One store mounted at two prefixes holds one file under two names, so
+    // the second write leaves no copy of the first under either.
+    const vfs = new S3VFS(makeConfig())
+    const ws = new Workspace({ '/a': vfs, '/b': vfs }, { mode: MountMode.WRITE, read: BOUNDED })
+    try {
+      await ws.vfs.write('/a/f', ENC.encode('one'))
+      await ws.vfs.write('/b/f', ENC.encode('two'))
+      expect(DEC.decode(await ws.vfs.read('/a/f'))).toBe('two')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a write keeps nothing for a name a new mount took', async () => {
+    // A mount added and readied (its cache cleared) while the write runs
+    // owns the name by the time the bytes would be kept, so the next read
+    // reaches the new mount.
+    mock.store.set('child-bucket', 'f', ENC.encode('child'))
+    const ws = makeWorkspace(BOUNDED)
+    try {
+      mock.before('PutObject', async () => {
+        const child = ws.addMount(
+          '/s3/c',
+          new S3VFS({ ...makeConfig(), bucket: 'child-bucket' }),
+          MountMode.WRITE,
+        )
+        await child.ensureReady()
+      })
+      await ws.vfs.write('/s3/c/f', ENC.encode('parent'))
+      expect(DEC.decode(await ws.vfs.read('/s3/c/f'))).toBe('child')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('read-then-write on one line keeps the read token', async () => {
     // `IOResult.merge` unions a line's reads and writes, and applyIo
     // caches the read's bytes. If those bytes were stamped with the

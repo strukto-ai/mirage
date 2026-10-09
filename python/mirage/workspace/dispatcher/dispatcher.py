@@ -1284,7 +1284,9 @@ class Dispatcher:
 
         The write's own record labels them with the token the backend
         answered, so a ``fresh`` mount does not refetch what it just wrote;
-        a record moving another length than was sent keeps nothing.
+        a record moving another length than was sent keeps nothing, and so
+        does a name another mount took while the write ran, read under the
+        cache's lock.
 
         Args:
             call (_Call): the write that ran.
@@ -1292,11 +1294,10 @@ class Dispatcher:
             records (list[OpRecord]): the records the write emitted.
         """
         data = call.kwargs.get("data")
-        facts = _facts_of(mount)
         if (
             call.name != "write"
             or not isinstance(data, bytes)
-            or not facts.cacheable
+            or not _facts_of(mount).cacheable
         ):
             return
         # Copies, so the line's records do not hold the written bytes.
@@ -1313,7 +1314,9 @@ class Dispatcher:
             data,
             data,
             claims,
-            lambda _: facts,
+            lambda path: _facts_of(
+                mount if self._namespace.try_mount_for(path) is mount else None
+            ),
         )
 
     def _filter(self, call: _Call, result: Any) -> Any:
@@ -2252,14 +2255,17 @@ class Dispatcher:
             removed (bool): the write removed ``path`` (unlink, rmdir),
                 so its own listing goes too, as a core's removal drops it.
         """
-        if times:
-            await self._namespace.clear_times(path.virtual, observed=observed)
-        manager = self._manager_for(mount)
-        if removed:
-            await manager.invalidate_after_unlink(path)
-        else:
-            await manager.invalidate_after_write(path)
-        await manager.invalidate_ancestors(path)
+        for owner, name in self._aliases(mount, path):
+            if times:
+                await self._namespace.clear_times(
+                    name.virtual, observed=observed
+                )
+            manager = self._manager_for(owner)
+            if removed:
+                await manager.invalidate_after_unlink(name)
+            else:
+                await manager.invalidate_after_write(name)
+            await manager.invalidate_ancestors(name)
 
     async def invalidate_after_rename(
         self, mount: MountEntry, source: PathSpec, dst: PathSpec
@@ -2278,7 +2284,40 @@ class Dispatcher:
             source (PathSpec): the name the subtree left.
             dst (PathSpec): the name it now lives under.
         """
-        manager = self._manager_for(mount)
-        await manager.invalidate_subtree(source)
-        await manager.invalidate_subtree(dst)
-        await manager.invalidate_ancestors(dst)
+        for (owner, src), (_, to) in zip(
+            self._aliases(mount, source),
+            self._aliases(mount, dst),
+            strict=True,
+        ):
+            manager = self._manager_for(owner)
+            await manager.invalidate_subtree(src)
+            await manager.invalidate_subtree(to)
+            await manager.invalidate_ancestors(to)
+
+    def _aliases(
+        self, mount: MountEntry, path: PathSpec
+    ) -> list[tuple[MountEntry, PathSpec]]:
+        """``path`` under each mount of its store, its own mount first.
+
+        One store mounted at two prefixes holds one file under two names,
+        so what a write makes stale under one name is stale under each.
+
+        Args:
+            mount (MountEntry): the mount the path was reached through.
+            path (PathSpec): the path written.
+        """
+        key = mount_key(path.virtual, mount.prefix.rstrip("/"))
+        found = [(mount, path)]
+        for other in self._namespace.registry.visible_mounts():
+            if other is mount or other.vfs is not mount.vfs:
+                continue
+            base = other.prefix.rstrip("/")
+            found.append(
+                (
+                    other,
+                    PathSpec.from_str_path(
+                        f"{base}/{key}" if key else base or "/"
+                    ),
+                )
+            )
+        return found

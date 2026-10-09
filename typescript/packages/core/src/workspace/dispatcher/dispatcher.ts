@@ -1139,9 +1139,10 @@ export class Dispatcher {
    *
    * The write's own record labels them with the token the backend
    * answered, so a `fresh` mount does not refetch what it just wrote; a
-   * record moving another length than was sent keeps nothing. The bytes kept
-   * are a copy, so a caller reusing its buffer cannot change them. Mirrors
-   * Python's Dispatcher._keep_written.
+   * record moving another length than was sent keeps nothing, and so does a
+   * name another mount took while the write ran, read under the cache's lock.
+   * The bytes kept are a copy, so a caller reusing its buffer cannot change
+   * them. Mirrors Python's Dispatcher._keep_written.
    */
   private async keepWritten(
     call: Call,
@@ -1150,8 +1151,7 @@ export class Dispatcher {
     records: readonly OpRecord[],
   ): Promise<void> {
     const sent = args[0]
-    const facts = factsOf(mount)
-    if (call.name !== 'write' || !(sent instanceof Uint8Array) || !facts.cacheable) return
+    if (call.name !== 'write' || !(sent instanceof Uint8Array) || !factsOf(mount).cacheable) return
     const data = sent.slice()
     // Copies, so the line's records do not hold the written bytes.
     const claims = records.map((rec) =>
@@ -1170,7 +1170,9 @@ export class Dispatcher {
           })
         : rec,
     )
-    await setCached(this.cache, call.path.virtual, data, data, claims, () => facts)
+    await setCached(this.cache, call.path.virtual, data, data, claims, (path) =>
+      factsOf(this.namespace.tryMountFor(path) === mount ? mount : null),
+    )
   }
 
   /**
@@ -2199,11 +2201,13 @@ export class Dispatcher {
     const path = rstripSlash(rawPath) || '/'
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return
-    if (times) await this.namespace.clearTimes(path, observed)
-    const manager = this.managerFor(mount)
-    if (removed) await manager.invalidateAfterUnlink(path)
-    else await manager.invalidateAfterWrite(path)
-    await manager.invalidateAncestors(path)
+    for (const [owner, name] of this.aliases(mount, path)) {
+      if (times) await this.namespace.clearTimes(name, observed)
+      const manager = this.managerFor(owner)
+      if (removed) await manager.invalidateAfterUnlink(name)
+      else await manager.invalidateAfterWrite(name)
+      await manager.invalidateAncestors(name)
+    }
   }
 
   /**
@@ -2220,10 +2224,33 @@ export class Dispatcher {
     const to = rstripSlash(dst) || '/'
     const mount = this.namespace.tryMountFor(from)
     if (mount === null) return
-    const manager = this.managerFor(mount)
-    await manager.invalidateSubtree(from)
-    await manager.invalidateSubtree(to)
-    await manager.invalidateAncestors(to)
+    const targets = this.aliases(mount, to)
+    for (const [index, [owner, src]] of this.aliases(mount, from).entries()) {
+      const dst = targets[index]?.[1] ?? to
+      const manager = this.managerFor(owner)
+      await manager.invalidateSubtree(src)
+      await manager.invalidateSubtree(dst)
+      await manager.invalidateAncestors(dst)
+    }
+  }
+
+  /**
+   * `path` under each mount of its store, its own mount first.
+   *
+   * One store mounted at two prefixes holds one file under two names, so what
+   * a write makes stale under one name is stale under each. Mirrors Python's
+   * Dispatcher._aliases.
+   */
+  private aliases(mount: MountEntry, path: string): [MountEntry, string][] {
+    const key = mountKey(path, rstripSlash(mount.prefix))
+    const found: [MountEntry, string][] = [[mount, path]]
+    for (const prefix of this.namespace.mountPrefixes()) {
+      const other = this.namespace.mountFor(prefix)
+      if (other === mount || other.vfs !== mount.vfs) continue
+      const base = rstripSlash(other.prefix)
+      found.push([other, key === '' ? base || '/' : `${base}/${key}`])
+    }
+    return found
   }
 
   // The file cache only holds paths for read-caching mounts, mirroring

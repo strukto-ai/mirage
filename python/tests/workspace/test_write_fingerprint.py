@@ -457,3 +457,68 @@ def test_concurrent_writers_serve_what_the_backend_holds(line):
     )
     assert served == stored
     assert again == stored
+
+
+def _config(bucket: str) -> S3Config:
+    return S3Config(
+        bucket=bucket,
+        region="us-east-1",
+        aws_access_key_id="fake",
+        aws_secret_access_key="fake",
+    )
+
+
+def test_a_write_drops_what_another_mount_of_the_store_holds():
+    # One store mounted at two prefixes holds one file under two names,
+    # so the second write leaves no copy of the first under either.
+    session = MultiBucketSession({"test-bucket": {}}, etag_suffix=SUFFIX)
+    with patch_s3_session(session):
+        vfs = S3VFS(_config("test-bucket"))
+        ws = Workspace(
+            {"/a": (vfs, MountMode.WRITE), "/b": (vfs, MountMode.WRITE)},
+            mode=MountMode.WRITE,
+            read=ReadSpec(policy=ReadPolicy.BOUNDED),
+        )
+
+        async def run() -> bytes:
+            try:
+                await ws.vfs.write("/a/f", b"one")
+                await ws.vfs.write("/b/f", b"two")
+                return await ws.vfs.read("/a/f")
+            finally:
+                await ws.close()
+
+        assert asyncio.run(run()) == b"two"
+
+
+def test_a_write_keeps_nothing_for_a_name_a_new_mount_took():
+    # A mount added and readied (its cache cleared) while the write runs
+    # owns the name by the time the bytes would be kept, so the next read
+    # reaches the new mount.
+    session = MultiBucketSession(
+        {"test-bucket": {}, "child-bucket": {"f": b"child"}},
+        etag_suffix=SUFFIX,
+    )
+    with patch_s3_session(session):
+        ws = Workspace(
+            {"/s3": (S3VFS(_config("test-bucket")), MountMode.WRITE)},
+            mode=MountMode.WRITE,
+            read=ReadSpec(policy=ReadPolicy.BOUNDED),
+        )
+
+        async def mount_child() -> None:
+            child = ws.add_mount(
+                "/s3/c", S3VFS(_config("child-bucket")), MountMode.WRITE
+            )
+            await child.ensure_ready()
+
+        session._client.before("put_object", mount_child)
+
+        async def run() -> bytes:
+            try:
+                await ws.vfs.write("/s3/c/f", b"parent")
+                return await ws.vfs.read("/s3/c/f")
+            finally:
+                await ws.close()
+
+        assert asyncio.run(run()) == b"child"
