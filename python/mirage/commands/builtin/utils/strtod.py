@@ -38,6 +38,15 @@ STRTOD = re.compile(
 # exactly only on the subnormal grid of 2**-16494.
 _OVERFLOW = ((1 << 114) - 1) << 16270
 
+# The leading digits that settle the range exactly, the rest only saying
+# whether anything nonzero was dropped. 32 hex digits hold the 113 bits a
+# long double keeps and more. In decimal the overflow edge is an integer
+# of 4,933 digits, and a tiny value needs at most 11,563 digits past its
+# lead to land on the grid or to be compared with the least normal one,
+# so 12,000 settle both.
+_HEX_KEPT = 32
+_DECIMAL_KEPT = 12000
+
 
 def strtod_whole(text: str) -> re.Match[str] | None:
     """A STRTOD match spanning the whole word, as xstrtod demands, or None.
@@ -104,7 +113,9 @@ def strtold_erange(found: re.Match[str]) -> bool:
     exactly: tininess is judged before rounding, so a value that rounds
     up to the least normal one is still out of range. An infinity or nan
     as typed is no error. The long double is binary128, as on arm64;
-    x86-64's 80-bit format has the same exponent range.
+    x86-64's 80-bit format has the same exponent range. Only the leading
+    digits that settle the answer are read into numbers, so the cost
+    stays bounded however long the argument is.
 
     Args:
         found (re.Match[str]): a STRTOD match.
@@ -113,15 +124,20 @@ def strtold_erange(found: re.Match[str]) -> bool:
     if hexa is not None:
         mantissa, _, power = hexa[2:].lower().partition("p")
         whole, _, fraction = mantissa.partition(".")
-        significand = int(whole + fraction or "0", 16)
-        if significand == 0:
+        digits = (whole + fraction).lstrip("0")
+        if not digits:
             return False
         exponent = _saturated(power) - 4 * len(fraction)
-        top = significand.bit_length() - 1 + exponent
+        lead = int(digits[0], 16).bit_length()
+        top = 4 * len(digits) - 5 + lead + exponent
         if -16382 <= top < 16383:
             return False
         if top >= 16384 or top < -16495:
             return True
+        kept = digits[:_HEX_KEPT]
+        dropped = digits[_HEX_KEPT:].strip("0") != ""
+        significand = int(kept, 16)
+        exponent += 4 * (len(digits) - len(kept))
         base = 2
     elif decimal is not None:
         mantissa, _, power = decimal.lower().partition("e")
@@ -137,11 +153,13 @@ def strtold_erange(found: re.Match[str]) -> bool:
             return False
         if scale >= 4934 or scale <= -4966:
             return True
+        kept = digits[:_DECIMAL_KEPT]
+        dropped = len(digits) > len(kept)
         significand = 0
-        for at in range(0, len(digits), 4000):
-            piece = digits[at : at + 4000]
+        for at in range(0, len(kept), 4000):
+            piece = kept[at : at + 4000]
             significand = significand * 10 ** len(piece) + int(piece)
-        exponent = scale - len(digits)
+        exponent = scale - len(kept)
         base = 10
     else:
         return False
@@ -149,4 +167,4 @@ def strtold_erange(found: re.Match[str]) -> bool:
     den: int = base ** max(-exponent, 0)
     if num >= _OVERFLOW * den:
         return True
-    return (num << 16382) < den and (num << 16494) % den != 0
+    return (num << 16382) < den and (dropped or (num << 16494) % den != 0)

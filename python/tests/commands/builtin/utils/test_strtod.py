@@ -132,6 +132,12 @@ with localcontext() as _context:
         ("1e" + "9" * 5000, True),
         ("1e" + "0" * 5000 + "1", False),
         (_EXACT_SUBNORMAL, False),
+        ("1" * 20000 + "e-15067", False),
+        (
+            "3.3621031431120935062626778173217526" + "0" * 20000 + "1e-4932",
+            True,
+        ),
+        ("0x1." + "f" * 20000 + "p16383", True),
     ],
 )
 def test_strtold_erange_marks_what_a_long_double_cannot_hold(text, erange):

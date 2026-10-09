@@ -29,6 +29,15 @@ export const STRTOD =
 // exactly only on the subnormal grid of 2**-16494.
 const OVERFLOW = ((1n << 114n) - 1n) << 16270n
 
+// The leading digits that settle the range exactly, the rest only saying
+// whether anything nonzero was dropped. 32 hex digits hold the 113 bits a
+// long double keeps and more. In decimal the overflow edge is an integer of
+// 4,933 digits, and a tiny value needs at most 11,563 digits past its lead
+// to land on the grid or to be compared with the least normal one, so
+// 12,000 settle both.
+const HEX_KEPT = 32
+const DECIMAL_KEPT = 12000
+
 // A STRTOD match spanning the whole word, as xstrtod demands, or null.
 // Mirrors Python's strtod_whole.
 export function strtodWhole(text: string): RegExpExecArray | null {
@@ -95,39 +104,53 @@ function saturated(power: string): number {
 // rounding, so a value that rounds up to the least normal one is still out
 // of range. An infinity or nan as typed is no error. The long double is
 // binary128, as on arm64; x86-64's 80-bit format has the same exponent
-// range. Mirrors Python's strtold_erange.
+// range. Only the leading digits that settle the answer are read into
+// numbers, so the cost stays bounded however long the argument is. Mirrors
+// Python's strtold_erange.
 export function strtoldErange(found: RegExpExecArray): boolean {
   const [, , hexa, decimal] = found
   let significand: bigint
   let exponent: number
   let base: bigint
+  let dropped: boolean
   if (hexa !== undefined) {
     const [mantissa = '', power = ''] = hexa.slice(2).toLowerCase().split('p')
     const [whole = '', fraction = ''] = mantissa.split('.')
-    significand = BigInt('0x' + (whole + fraction || '0'))
-    if (significand === 0n) return false
+    const digits = (whole + fraction).replace(/^0+/, '')
+    if (digits === '') return false
     exponent = saturated(power) - 4 * fraction.length
-    const top = significand.toString(2).length - 1 + exponent
+    const lead = parseInt(digits.charAt(0), 16).toString(2).length
+    const top = 4 * digits.length - 5 + lead + exponent
     if (top >= -16382 && top < 16383) return false
     if (top >= 16384 || top < -16495) return true
+    const kept = digits.slice(0, HEX_KEPT)
+    dropped = /[^0]/.test(digits.slice(HEX_KEPT))
+    significand = BigInt('0x' + kept)
+    exponent += 4 * (digits.length - kept.length)
     base = 2n
   } else if (decimal !== undefined) {
     const [mantissa = '', power = ''] = decimal.toLowerCase().split('e')
     const [whole = '', fraction = ''] = mantissa.split('.')
     const joined = whole + fraction
     const unled = joined.replace(/^0+/, '')
-    const digits = unled.replace(/0+$/, '')
+    // A scan, not /0+$/: a regex retries from every zero of a long inner
+    // run, which is quadratic in the argument's length.
+    let end = unled.length
+    while (end > 0 && unled.charCodeAt(end - 1) === 48) end -= 1
+    const digits = unled.slice(0, end)
     if (digits === '') return false
     // The value is 0.DIGITS x 10**scale.
     const scale = whole.length - (joined.length - unled.length) + saturated(power)
     if (scale >= -4930 && scale <= 4932) return false
     if (scale >= 4934 || scale <= -4966) return true
-    significand = BigInt(digits)
-    exponent = scale - digits.length
+    const kept = digits.slice(0, DECIMAL_KEPT)
+    dropped = digits.length > kept.length
+    significand = BigInt(kept)
+    exponent = scale - kept.length
     base = 10n
   } else return false
   const num = significand * base ** BigInt(Math.max(exponent, 0))
   const den = base ** BigInt(Math.max(-exponent, 0))
   if (num >= OVERFLOW * den) return true
-  return num << 16382n < den && (num << 16494n) % den !== 0n
+  return num << 16382n < den && (dropped || (num << 16494n) % den !== 0n)
 }

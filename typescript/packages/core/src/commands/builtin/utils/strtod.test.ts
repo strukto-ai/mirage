@@ -99,6 +99,9 @@ describe('strtod', () => {
     ['1e' + '0'.repeat(5000) + '1', false],
     // 2**-16400 spelled out in decimal: a subnormal held exactly.
     [`${(5n ** 16400n).toString()}e-16400`, false],
+    ['1'.repeat(20000) + 'e-15067', false],
+    ['3.3621031431120935062626778173217526' + '0'.repeat(20000) + '1e-4932', true],
+    ['0x1.' + 'f'.repeat(20000) + 'p16383', true],
   ])('marks %s out of a long double range: %j', (text, erange) => {
     const found = STRTOD.exec(text)
     if (found === null) throw new Error(`no number in ${text}`)
