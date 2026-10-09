@@ -36,7 +36,7 @@ def load_attr(spec: str) -> Any:
 
     Returns:
         Any: The loaded attribute; callers type-check what they expect
-        (a VFS class, a CLISpec tree).
+        (a VFS class, a CLI tree).
     """
     if ":" not in spec:
         raise ValueError(

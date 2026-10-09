@@ -1013,7 +1013,7 @@ export class MountEntry {
       command: cmdName,
       cwd: context.cwd ?? ROOT_CWD,
       index: this.index,
-      io: context.dispatch === undefined ? this.io : dispatchedIo(this.io, context.dispatch),
+      io: dispatchedIo(this.io, context.dispatch),
       ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
       ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
       ...(context.env !== undefined ? { env: context.env } : {}),

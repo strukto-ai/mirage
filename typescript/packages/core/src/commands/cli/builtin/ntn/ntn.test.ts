@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec } from '../../../spec/compile.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as UtilModule from './util.ts'
 import type { RestCall } from '../../../../core/notion/client.ts'
@@ -73,7 +74,7 @@ function makeInv(
 }
 
 function leaf(...path: string[]) {
-  let node = NTN
+  let node = NTN.spec
   for (const name of path) {
     const child = node.subcommands.find((c) => c.name === name)
     if (child === undefined) throw new Error(`no subcommand ${name}`)
@@ -84,7 +85,7 @@ function leaf(...path: string[]) {
 
 describe('ntn tree', () => {
   it('matches the official grammar and registers itself', () => {
-    expect(NTN.subcommands.map((g) => g.name)).toEqual([
+    expect(NTN.spec.subcommands.map((g) => g.name)).toEqual([
       'api',
       'auth',
       'datasources',
@@ -109,11 +110,11 @@ describe('ntn tree', () => {
     ]
     for (const [path, slot] of named) {
       const node = leaf(...path)
-      expect(node.rest).toBeNull()
-      expect(node.positional.length).toBe(1)
-      expect(node.positional[0]?.name).toBe(slot)
-      expect(node.positional[0]?.required).toBe(true)
-      expect(node.options.some((o) => o.long === '--page')).toBe(false)
+      expect(compileSpec(node).rest).toBeNull()
+      expect(compileSpec(node).positional.length).toBe(1)
+      expect(compileSpec(node).positional[0]?.names[0]).toBe(slot)
+      expect(compileSpec(node).positional[0]?.nargs).toBeNull()
+      expect(compileSpec(node).options.some((o) => o.names.includes('--page'))).toBe(false)
     }
   })
 
@@ -121,28 +122,30 @@ describe('ntn tree', () => {
     // `ntn api` with no operand prints its help rather than refusing, so its
     // slot is the one that must not be required.
     const node = leaf('api')
-    expect(node.rest).not.toBeNull()
-    expect(node.rest?.name).toBe('PATH')
-    expect(node.rest?.required).toBe(false)
+    expect(compileSpec(node).rest).not.toBeNull()
+    expect(compileSpec(node).rest?.names[0]).toBe('PATH')
+    expect(compileSpec(node).rest?.nargs).toBe('*')
   })
 
   it('backs --notion-version with the environment', () => {
     // Declared once on the shared option, so every verb that carries it honors
     // NOTION_API_VERSION identically.
     for (const path of [['pages', 'get'], ['datasources', 'query'], ['whoami']]) {
-      const option = leaf(...path).options.find((o) => o.long === '--notion-version')
+      const option = compileSpec(leaf(...path)).options.find((o) =>
+        o.names.includes('--notion-version'),
+      )
       expect(option?.env).toBe('NOTION_API_VERSION')
       expect(option?.metavar).toBe('VERSION')
     }
   })
 
   it('classifies writers', () => {
-    expect(leaf('pages', 'get').write).toBe(false)
+    expect(NTN.handlers[['pages', 'get'].join(' ')]?.write).toBe(false)
     for (const verb of ['create', 'edit', 'trash']) {
-      expect(leaf('pages', verb).write).toBe(true)
+      expect(NTN.handlers[['pages', verb].join(' ')]?.write).toBe(true)
     }
-    expect(leaf('datasources', 'query').write).toBe(false)
-    expect(leaf('datasources', 'resolve').write).toBe(false)
+    expect(NTN.handlers[['datasources', 'query'].join(' ')]?.write).toBe(false)
+    expect(NTN.handlers[['datasources', 'resolve'].join(' ')]?.write).toBe(false)
   })
 })
 

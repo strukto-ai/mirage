@@ -19,14 +19,15 @@ import {
   MountMode,
   ReadPolicy,
 } from '@struktoai/mirage-core/types'
-
-const FRESH: ReadSpec = { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL }
-const BOUNDED: ReadSpec = { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL }
+import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { S3Config } from '../vfs/s3/config.ts'
 import { installS3Mock, type S3Mock } from '../vfs/s3/mock.ts'
 import { S3VFS } from '../vfs/s3/s3.ts'
 import { Workspace } from '../workspace.ts'
+
+const FRESH: ReadSpec = { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL }
+const BOUNDED: ReadSpec = { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL }
 
 const BUCKET = 'wf-bucket'
 const ENC = new TextEncoder()
@@ -114,6 +115,96 @@ describe('object-store write fingerprint (mocked S3)', () => {
       expect(DEC.decode(read.stdout)).toBe('hello\n')
       expect(mock.calls.get('HeadObject') ?? 0).toBe(1)
       expect(mock.calls.get('GetObject') ?? 0).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a write outside a line keeps its bytes with the backend token', async () => {
+    // The dispatcher keeps a whole write's bytes for every caller, so a
+    // `fresh` mount serves them back after one probe, without a download.
+    const ws = makeWorkspace(FRESH)
+    try {
+      await ws.vfs.write('/s3/x.txt', 'hello\n')
+      mock.calls.clear()
+      expect(await ws.vfs.cat('/s3/x.txt')).toBe('hello\n')
+      expect(await ws.cache.isFresh('/s3/x.txt', etagOf('hello\n'))).toBe(true)
+      expect(mock.calls.get('GetObject') ?? 0).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a write after a guarded cp keeps its own bytes', async () => {
+    // Under a hide `cp` reads and writes entry by entry at the dispatcher;
+    // a later write keeps its own bytes and token, which the old read's
+    // must not replace when the command's result is applied.
+    mock.store.set(BUCKET, 'a', ENC.encode('old'))
+    const ws = makeWorkspace(BOUNDED)
+    try {
+      ws.createSession('agent', {
+        profile: parseSessionProfile({ paths: { hide: ['*.secret'] } }),
+      })
+      const io = await ws.shell('cp /s3/a /s3/b; printf new | tee /s3/a > /dev/null', {
+        sessionId: 'agent',
+      })
+      expect(io.exitCode).toBe(0)
+      expect(await ws.cache.get('/s3/a')).toEqual(ENC.encode('new'))
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a write drops what another mount of the store holds', async () => {
+    // One store mounted at two prefixes holds one file under two names, so
+    // the second write leaves no copy of the first under either.
+    const vfs = new S3VFS(makeConfig())
+    const ws = new Workspace({ '/a': vfs, '/b': vfs }, { mode: MountMode.WRITE, read: BOUNDED })
+    try {
+      await ws.vfs.write('/a/f', ENC.encode('one'))
+      await ws.vfs.write('/b/f', ENC.encode('two'))
+      expect(DEC.decode(await ws.vfs.read('/a/f'))).toBe('two')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a write keeps nothing for a name a new mount took', async () => {
+    // A mount added and readied (its cache cleared) while the write runs
+    // owns the name by the time the bytes would be kept, so the next read
+    // reaches the new mount.
+    mock.store.set('child-bucket', 'f', ENC.encode('child'))
+    const ws = makeWorkspace(BOUNDED)
+    try {
+      mock.before('PutObject', async () => {
+        const child = ws.addMount(
+          '/s3/c',
+          new S3VFS({ ...makeConfig(), bucket: 'child-bucket' }),
+          MountMode.WRITE,
+        )
+        await child.ensureReady()
+      })
+      await ws.vfs.write('/s3/c/f', ENC.encode('parent'))
+      expect(DEC.decode(await ws.vfs.read('/s3/c/f'))).toBe('child')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a write leaves a name another mount holds', async () => {
+    // /b/c is its own mount, so a write to /a/c/f through the store at /a
+    // and /b is not the file at /b/c/f and leaves its saved time alone.
+    mock.store.set('child-bucket', 'f', ENC.encode('x'))
+    const vfs = new S3VFS(makeConfig())
+    const ws = new Workspace(
+      { '/a': vfs, '/b': vfs, '/b/c': new S3VFS({ ...makeConfig(), bucket: 'child-bucket' }) },
+      { mode: MountMode.WRITE, read: BOUNDED },
+    )
+    try {
+      await ws.shell("touch -d '2001-02-03 04:05:06' /b/c/f")
+      await ws.vfs.write('/a/c/f', ENC.encode('y'))
+      const io = await ws.shell('stat -c %y /b/c/f')
+      expect(DEC.decode(io.stdout)).toMatch(/^2001-02-03 04:05:06/)
     } finally {
       await ws.close()
     }

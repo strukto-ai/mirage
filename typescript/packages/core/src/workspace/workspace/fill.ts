@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { invokedEnvNames, suppliedEnvNames } from '../../commands/cli/walk.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
@@ -34,8 +33,7 @@ import {
   sameNode,
 } from '../../shell/parse/index.ts'
 import { walkNamedOutsideDefs } from '../../shell/parse/names.ts'
-import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
-import { VarAttr, withValue } from '../../shell/variable.ts'
+import { type ManagedRef, type ShellVar, VarAttr, withValue } from '../../shell/variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { varHidden } from '../../utils/hidden.ts'
@@ -43,9 +41,8 @@ import { abortable, makeAbortError } from '../../utils/abort.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { sessionEntry } from '../session/session.ts'
 import { parseFunction } from '../../shell/helpers.ts'
-import { setSessionEntry, type SessionState } from '../session/session.ts'
+import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
 import { deref } from '../session/state.ts'
 
 // Appended to an alias value before parsing it for the read walk: the
@@ -187,7 +184,7 @@ export function guestBound(
 /**
  * Env names the line's installed CLIs are about to read.
  *
- * An installed CLI reads a managed name through `Option.env` with no
+ * An installed CLI reads a managed name through `Argument.env` with no
  * `$NAME` in the line's text, so the fill set has to be told. A head
  * word counts only when dispatch would actually run the CLI (`lookup`):
  * a function, builtin or namespace command shadowing the name wins
@@ -211,13 +208,13 @@ export function cliEnvNames(
       if (install === null) continue
       if (lookup(head, session, registry) !== Consumer.CLI) continue
       if (args.includes(null)) {
-        for (const name of invokedEnvNames(install.spec, null)) out.add(name)
+        for (const name of invokedEnvNames(install.cli.spec, null)) out.add(name)
         continue
       }
       const literal = args.filter((arg): arg is string => arg !== null)
       const words = new Set(literal.filter((arg) => !arg.startsWith('-')))
-      const supplied = suppliedEnvNames(install.spec, literal)
-      for (const name of invokedEnvNames(install.spec, words)) {
+      const supplied = suppliedEnvNames(install.cli.spec, literal)
+      for (const name of invokedEnvNames(install.cli.spec, words)) {
         if (!supplied.has(name)) out.add(name)
       }
     }

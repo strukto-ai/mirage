@@ -11,8 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec, type CommandSpecInit } from '../../../commands/spec/types.ts'
 
 import {
+  ARGPARSE_EXIT,
   directoryRefusal,
   clapMissingOperands,
   leafRefusal,
@@ -22,13 +24,14 @@ import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
 import type { ProcessView } from '../../../process/view.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
-import { CLISpec, type CLIInvocation, type CLIView } from '../../../commands/cli/types.ts'
+import type { CLI } from '../../../commands/cli/types.ts'
+import { type CLIInvocation, type CLIView } from '../../../commands/cli/types.ts'
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import { verbVisible } from '../../lookup/lookup.ts'
 import { type DispatchFn, type RunResult, type ScriptSource } from '../../../runtime/types.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../../view/types.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
-import { UsageStyle, Operand, type FlagValue } from '../../../commands/spec/types.ts'
+import { UsageStyle, Argument, type FlagValue } from '../../../commands/spec/types.ts'
 import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -57,7 +60,7 @@ import { encodeText } from '../../../shell/bytes.ts'
 // 'path', so nothing is cwd-resolved or routed. Only that parse reads the
 // rest kind this way: a GNU command's textual rest is a list of operands,
 // which is why basename has one and still refuses an option it does not know.
-const PASSTHROUGH_REST = new Operand({ type: 'str' })
+const PASSTHROUGH_REST = new Argument('args', { metavar: '', nargs: '*' })
 
 /**
  * The spec a leaf's argv parses against, and who answers `--help`.
@@ -70,15 +73,21 @@ const PASSTHROUGH_REST = new Operand({ type: 'str' })
  * refusing `--width` on behalf of a program that accepts it would make
  * the tier unusable, since a YAML `clis:` entry cannot declare options at
  * all. Returns the spec to parse with and whether the injected `--help`
- * is mirage's to answer. CLISpec init accepts instance fields, so each
+ * is mirage's to answer. CLI init accepts instance fields, so each
  * spread is a plain init bag (the withHelpSupport pattern).
  */
-function parseSpecFor(leaf: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): [CLISpec, boolean] {
-  // eslint-disable-next-line @typescript-eslint/no-misused-spread
-  if (ownsArgv(leaf)) return [new CLISpec({ ...leaf, rest: PASSTHROUGH_REST }), false]
-  if (leaf.options.some((option) => option.long === '--help')) return [leaf, false]
-  // eslint-disable-next-line @typescript-eslint/no-misused-spread
-  return [new CLISpec({ ...leaf, options: listedNode(leaf, style).options }), true]
+function parseSpecFor(
+  leaf: CommandSpec,
+  style: UsageStyle = UsageStyle.ARGPARSE,
+  passthrough = false,
+): [CommandSpec, boolean] {
+  if (passthrough) {
+    const spec: CommandSpecInit = leaf
+    return [new CommandSpec({ ...spec, arguments: [...leaf.arguments, PASSTHROUGH_REST] }), false]
+  }
+  if (!leaf.addHelp || leaf.arguments.some((argument) => argument.names.includes('--help')))
+    return [leaf, false]
+  return [listedNode(leaf, style), true]
 }
 
 /**
@@ -100,7 +109,7 @@ function parseSpecFor(leaf: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): [
  */
 function selectRuntime(
   prog: string,
-  leaf: CLISpec,
+  leaf: CLI,
   entries: readonly Runtime[],
   routing?: RouteDecision<Runtime>,
 ): [LanguageRuntime, null] | [null, IOResult] {
@@ -240,7 +249,7 @@ export interface CLIContext {
  * dispatcher, which invalidates as it goes, so a blanket drop would only cost
  * every other mount a reload.
  */
-export function dropsMountCaches(spec: CLISpec): boolean {
+export function dropsMountCaches(spec: CLI): boolean {
   return spec.configModel !== null || spec.script !== null
 }
 
@@ -251,8 +260,7 @@ export function dropsMountCaches(spec: CLISpec): boolean {
  * validated config; no mount is consulted and no operand path picks a
  * backend (the one executor divergence from mount commands). The walk
  * consumes subcommand words and group options; the leaf's own argv
- * rides the ordinary spec machinery because a CLISpec IS a
- * CommandSpec. The leaf handler renders the line's one CLIInvocation,
+ * uses the shared CommandSpec parser. The leaf handler renders the line's one CLIInvocation,
  * built here and nowhere else: an fn leaf runs as `fn(inv)`, a script
  * leaf runs its embedded program on a workspace runtime
  * (scriptOutput), so usage refusals, limits, and classification all
@@ -278,10 +286,15 @@ export async function handleCli(
   const argv = words.slice(1)
 
   // The walk takes the same environment the leaf parse below does, so
-  // a group-level option declaring `Option.env` fills at its own
+  // a group-level option declaring `Argument.env` fills at its own
   // level; without it the fetched credential never enters groupFlags.
-  const result = walk(install.name, install.spec, argv, session.cwd, envSnapshot(session), (path) =>
-    verbVisible(install.name, path, session),
+  const result = walk(
+    install.name,
+    install.cli.spec,
+    argv,
+    session.cwd,
+    envSnapshot(session),
+    (path) => verbVisible(install.name, path, session),
   )
   if (result.leaf === null) {
     const stderr = result.stream === 'stderr' ? result.output : new Uint8Array(0)
@@ -299,7 +312,7 @@ export async function handleCli(
         install.name,
         base.rawPath,
         reason,
-        install.spec.usageStyle,
+        install.cli.spec.usageStyle,
       )
       return [
         null,
@@ -311,20 +324,28 @@ export async function handleCli(
 
   const prog = [install.name, ...result.path].join(' ')
   const leaf = result.leaf
+  const binding = install.cli.handlers[result.path.join(' ')]
+  if (binding === undefined) throw new Error(`cli '${prog}': missing handler`)
   // No injected --version: that is a GNU coreutils convention, not an
   // argparse one.
-  const [parseSpec, mirageHelp] = parseSpecFor(leaf, install.spec.usageStyle)
+  const [parseSpec, mirageHelp] = parseSpecFor(
+    leaf,
+    install.cli.spec.usageStyle,
+    ownsArgv(install.cli),
+  )
 
   // The dialect is the root's, not the leaf's: a program answers in one voice
   // at every level.
-  const style = install.spec.usageStyle
+  const style = install.cli.spec.usageStyle
   // The environment goes into the parse, not on top of it: an option
   // declaring one is coerced, choice-checked, path-resolved and credited
   // against required exactly as a typed value is.
   // git resolves an abbreviated long option against the verb's own full table
   // (parse-options), and its revision walkers take whole words only.
   const abbreviations =
-    install.spec.name === 'git' ? (GIT_LONG_OPTIONS.get(result.path.join(' ')) ?? []) : undefined
+    install.cli.spec.name === 'git'
+      ? (GIT_LONG_OPTIONS.get(result.path.join(' ')) ?? [])
+      : undefined
   const parsed = parseFlags(
     [...result.argv],
     parseSpec,
@@ -347,9 +368,6 @@ export async function handleCli(
   if (refusal !== null) {
     ;[msg, code, shown] = leafRefusal(style, refusal[0], parsed, result.path.join(' '), leaf)
   } else if (parsed.missingRequiredOperands.length > 0 && style === UsageStyle.CLAP) {
-    // Only clap names the empty slots. Under every other style a required
-    // operand stays the leaf's own business, worded by the command, which is
-    // what every mirage CLI did before this.
     msg = clapMissingOperands(
       prog,
       parseSpec,
@@ -358,6 +376,11 @@ export async function handleCli(
       session.env,
     )
     code = CLAP_EXIT
+  } else if (parsed.missingRequiredOperands.length > 0 && style === UsageStyle.ARGPARSE) {
+    const usage = nodeHelp(prog, parseSpec, style).split('\n')[0] ?? ''
+    const missing = [...new Set(parsed.missingRequiredOperands)].join(', ')
+    msg = encodeText(`${usage}\n${prog}: error: the following arguments are required: ${missing}\n`)
+    code = ARGPARSE_EXIT
   }
   if (msg !== null) {
     return [
@@ -368,7 +391,7 @@ export async function handleCli(
   }
 
   // Group flags merge into the one bag: ancestor/descendant collisions
-  // are a build-time CLISpec error, so a group flag can never shadow a
+  // are a build-time CLI error, so a group flag can never shadow a
   // leaf flag.
   const flags: Record<string, FlagValue> = {}
   for (const [spelling, value] of Object.entries(result.groupFlags)) {
@@ -419,7 +442,7 @@ export async function handleCli(
   const limit = resolveLimit(
     prog,
     [],
-    leaf.limit,
+    binding.limit,
     null,
     context.commandLimits,
     session.commandLimits,
@@ -427,9 +450,14 @@ export async function handleCli(
   const timeout = limit?.timeoutSeconds ?? null
   const abort = new AbortController()
   let body: Promise<[ByteSource | null, IOResult] | null>
-  const native = leaf.script === null
-  if (leaf.script !== null) {
-    const [runtime, refused] = selectRuntime(prog, leaf, context.entries ?? [], context.routing)
+  const native = install.cli.script === null
+  if (install.cli.script !== null) {
+    const [runtime, refused] = selectRuntime(
+      prog,
+      install.cli,
+      context.entries ?? [],
+      context.routing,
+    )
     if (runtime === null) {
       // The interpreter is missing, not the command: 127 like an
       // interpreter command no runtime entry captures, or 126 when this
@@ -441,9 +469,9 @@ export async function handleCli(
         new ExecutionNode({ command: cmdStr, exitCode: refused.exitCode, stderr }),
       ]
     }
-    body = scriptOutput(inv, leaf.script, runtime, prog, timeout, abort.signal)
+    body = scriptOutput(inv, install.cli.script, runtime, prog, timeout, abort.signal)
   } else {
-    const fn = leaf.fn
+    const fn = binding.fn
     if (fn === null) {
       // validateCli guarantees fn XOR subcommands XOR script and walk
       // only returns handler-bearing nodes as leaf; reaching this is a
@@ -485,7 +513,7 @@ export async function handleCli(
       // the abort signal keeps running, and its request may land after
       // exit 124. Drop now, for a write the service already accepted, and
       // again when the body settles, for one still in flight.
-      if (leaf.write && dropCaches !== null) {
+      if (binding.write && dropCaches !== null) {
         await dropCaches()
         const settle = (): Promise<void> => dropCaches()
         void body.then(settle, settle).catch((dropErr: unknown) => {
@@ -506,7 +534,7 @@ export async function handleCli(
     // request (a PUT whose --jq program fails filters a response the
     // service already applied); without the drop a github mount keeps
     // serving its pre-write bytes.
-    if (leaf.write && dropCaches !== null) await dropCaches()
+    if (binding.write && dropCaches !== null) await dropCaches()
     const message = err instanceof Error ? err.message : String(err)
     const stderr = encodeText(`${prog}: ${message}\n`)
     return [
@@ -520,9 +548,9 @@ export async function handleCli(
   // The spec's `write` is the one answer: what policy calls a write, the
   // cache does too, so a verb that can mutate (`gh api` under any method)
   // costs the mounts a reload rather than a stale read.
-  if (leaf.write && dropCaches !== null) await dropCaches()
+  if (binding.write && dropCaches !== null) await dropCaches()
 
-  io.producer = { command: prog, prefixes: [], declared: leaf.limit ?? null }
+  io.producer = { command: prog, prefixes: [], declared: binding.limit ?? null }
 
   if (warnings.length > 0) {
     const warn = encodeText(warnings.map((w) => `${prog}: ${w}\n`).join(''))

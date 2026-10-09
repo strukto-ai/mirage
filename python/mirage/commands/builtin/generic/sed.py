@@ -366,7 +366,6 @@ async def _run_in_place(
         raise NotImplementedError(
             "sed: in-place edit (-i) is not supported on this backend"
         )
-    writes: dict[str, ByteSource] = {}
     edited: list[PathSpec] = []
     err = ""
     code = 0
@@ -399,7 +398,6 @@ async def _run_in_place(
             err += _edit_failure(p.raw_path, exc)
             code = 4
             break
-        writes[p.mount_path] = new_data
         edited.append(p)
     write_err = await _flush_write_files(
         machine, access, frozenset(p.virtual for p in edited)
@@ -413,8 +411,6 @@ async def _run_in_place(
         exit_code = code or machine.exit_code()
     stdout = "".join(machine.stdout.chunks)
     return from_byte_view(stdout, utf8) if stdout else None, IOResult(
-        writes=writes,
-        cache=[p.mount_path for p in edited],
         exit_code=exit_code,
         stderr=encode_text(stderr) if stderr else None,
     )

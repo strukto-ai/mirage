@@ -10,7 +10,12 @@
         "sharepoint",
         "sharepoint-prefix"
       ],
-      "command": "printf plain | tee /data/office/notes.txt > /dev/null && cat /data/office/notes.txt",
+      "read": "fresh",
+      "scenario": [
+        {
+          "command": "mkdir -p /data/office && printf plain | tee /data/office/notes.txt > /dev/null && cat /data/office/notes.txt"
+        }
+      ],
       "expect": {
         "exit": 0,
         "stdout": "plain",

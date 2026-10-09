@@ -57,13 +57,7 @@ export function checkSyntax(
   aliases: ReadonlySet<string> = new Set(),
   own: ((name: string, at: number) => boolean) | null = null,
 ): SyntaxDiagnostic | null {
-  let found: ReaderRefusal[]
-  try {
-    found = new LineReader(command, aliases, own).refusals()
-  } catch (err) {
-    if (!(err instanceof RangeError && err.message.includes('call stack'))) throw err
-    found = [new ReaderRefusal(['syntax error: nesting too deep'], 2, '', 0, 0, false)]
-  }
+  const found = new LineReader(command, aliases, own).refusals()
   const first = found[0]
   const last = found.at(-1)
   if (first === undefined || last === undefined) return null
@@ -80,12 +74,7 @@ export function checkSyntax(
  * read. `null` when bash refuses the line, whose heredocs nothing reads. */
 export function heredocPlan(command: string): HeredocPlan | null {
   const reader = new LineReader(command, new Set(), null)
-  try {
-    if (reader.refusals().length > 0) return null
-  } catch (err) {
-    if (!(err instanceof RangeError && err.message.includes('call stack'))) throw err
-    return null
-  }
+  if (reader.refusals().length > 0) return null
   return {
     order: [...reader.bodies].map(([at, [start, end]]) => [at, start, end] as const),
     closes: reader.closes,
@@ -168,10 +157,12 @@ function mirageWording(line: string): string {
   return `mirage: ${line}`
 }
 
-function isName(text: string): boolean {
-  if (text.length === 0 || !constants.NAME_START.has(text.charAt(0))) return false
-  for (const c of text) if (!constants.NAME_CHARS.has(c)) return false
-  return true
+function isRedirect(tok: ReaderToken): boolean {
+  return (
+    tok.kind === 'number' ||
+    tok.kind === 'redirvar' ||
+    (tok.kind === 'op' && constants.REDIRECTIONS.has(tok.text))
+  )
 }
 
 /** Whether a heredoc line's text after its delimiter holds an unquoted `)`:
@@ -283,7 +274,8 @@ class LineReader {
 
   /** Every error bash reports for the line, in order. An array bash cannot
    * read discards the rest of its line only, so the next line is read on; an
-   * end of input inside a quote then leaves the status as it was. */
+   * end of input inside a quote then leaves the status as it was. A line
+   * nested past the host's stack is refused whole. */
   refusals(): ReaderRefusal[] {
     const found: ReaderRefusal[] = []
     for (;;) {
@@ -291,6 +283,8 @@ class LineReader {
         this.program()
         return found
       } catch (err) {
+        if (err instanceof RangeError && err.message.includes('call stack'))
+          return [new ReaderRefusal(['syntax error: nesting too deep'], 2, '', 0, false)]
         if (!(err instanceof ReaderRefusal)) throw err
         const previous = found.at(-1)
         if (previous !== undefined && this.matching) err.status = previous.status
@@ -314,8 +308,8 @@ class LineReader {
     return frame === 'array' ? 1 : 127
   }
 
-  refuse(lines: string[], eof: boolean, offending: string, start: number, end: number): never {
-    throw new ReaderRefusal(lines, this.status(eof), offending, start, end, eof)
+  refuse(lines: string[], eof: boolean, offending: string, end: number): never {
+    throw new ReaderRefusal(lines, this.status(eof), offending, end, eof)
   }
 
   /** Refuse the line at a token bash cannot take where it stands. */
@@ -324,25 +318,25 @@ class LineReader {
     if (tok.kind === 'redirvar') {
       const [start, end] = this.nearSpan(tok.end + 1)
       const word = this.text.slice(start, end)
-      this.refuse([`syntax error near \`${word}'`], false, word, start, end)
+      this.refuse([`syntax error near \`${word}'`], false, word, end)
     }
     let text = tok.text
     if (tok.kind === 'newline') text = 'newline'
     else if (tok.kind === 'arith') text = tok.text.slice(2, -2)
     else if (this.quotedEnd && tok.end >= this.n && text.endsWith('\\')) text += '\\'
-    this.refuse([`syntax error near unexpected token \`${text}'`], false, text, tok.start, tok.end)
+    this.refuse([`syntax error near unexpected token \`${text}'`], false, text, tok.end)
   }
 
   /** Refuse a line that ends inside a quote or expansion, naming the
    * character bash was looking for. */
   failMatch(closer: string, at: number): never {
     this.matching = true
-    this.refuse([`unexpected EOF while looking for matching \`${closer}'`], true, '', at, at)
+    this.refuse([`unexpected EOF while looking for matching \`${closer}'`], true, '', at)
   }
 
   failEof(): never {
     if (this.limit !== null) this.failNear(this.limit)
-    this.refuse([this.eofLine()], true, '', this.n, this.n)
+    this.refuse([this.eofLine()], true, '', this.n)
   }
 
   eofLine(): string {
@@ -376,7 +370,7 @@ class LineReader {
     const [start, end] = this.nearSpan(at)
     if (start === end) this.failEof()
     const word = this.text.slice(start, end)
-    this.refuse([`syntax error near \`${word}'`], eof, word, start, end)
+    this.refuse([`syntax error near \`${word}'`], eof, word, end)
   }
 
   // -- quotes and expansions -------------------------------------------------
@@ -387,18 +381,6 @@ class LineReader {
     return k + 1
   }
 
-  ansiQuote(i: number): number {
-    const text = this.text
-    let j = i + 1
-    while (j < this.n) {
-      const c = text.charAt(j)
-      if (c === '\\') j += 2
-      else if (c === "'") return j + 1
-      else j += 1
-    }
-    this.failMatch("'", i)
-  }
-
   doubleQuote(i: number): number {
     const text = this.text
     let j = i + 1
@@ -406,25 +388,26 @@ class LineReader {
       const c = text.charAt(j)
       if (c === '"') return j + 1
       if (c === '\\') j += 2
-      else if (c === '`') j = this.backtick(j)
+      else if (c === '`') j = this.escapedQuote(j, '`')
       else if (c === '$') j = this.dollar(j, true)
       else j += 1
     }
     this.failMatch('"', i)
   }
 
-  /** Skip a backquoted substitution, whose body bash parses only when it
-   * runs. */
-  backtick(i: number): number {
+  /** Skip a quote whose backslash escapes the next character: an ANSI-C
+   * `$'` string, or a backquoted substitution, whose body bash parses only
+   * when it runs. `closer` is the quote that closes it. */
+  escapedQuote(i: number, closer: string): number {
     const text = this.text
     let j = i + 1
     while (j < this.n) {
       const c = text.charAt(j)
       if (c === '\\') j += 2
-      else if (c === '`') return j + 1
+      else if (c === closer) return j + 1
       else j += 1
     }
-    this.failMatch('`', i)
+    this.failMatch(closer, i)
   }
 
   /** Skip what a `$` opens: a substitution (parsed), arithmetic, an
@@ -447,7 +430,7 @@ class LineReader {
     }
     if (next === '{') return this.brace(at + 1, i)
     if (next === '[') return this.matched(at + 1, i, '[', ']') + 1
-    if (!quoted && next === "'") return this.ansiQuote(at)
+    if (!quoted && next === "'") return this.escapedQuote(at, "'")
     if (!quoted && next === '"') return this.doubleQuote(at)
     return i + 1
   }
@@ -457,7 +440,7 @@ class LineReader {
     if (c === '\\') return j + 2
     if (c === "'") return this.singleQuote(j)
     if (c === '"') return this.doubleQuote(j)
-    if (c === '`') return this.backtick(j)
+    if (c === '`') return this.escapedQuote(j, '`')
     if (c === '$') return this.dollar(j, false)
     return j + 1
   }
@@ -518,7 +501,7 @@ class LineReader {
       } else if (c === '\\') j += 2
       else if (c === "'") j = this.singleQuote(j)
       else if (c === '"') j = this.doubleQuote(j)
-      else if (c === '`') j = this.backtick(j)
+      else if (c === '`') j = this.escapedQuote(j, '`')
       else if (c === '$' && this.charAt(j + 1) === '(') j = this.dollar(j, false)
       else j += 1
     }
@@ -560,15 +543,10 @@ class LineReader {
     for (;;) {
       tok = this.peek(constants.READ_COMMAND)
       if (tok.kind === 'op' && tok.text === ')') break
-      if (tok.kind === 'eof') this.refuse([this.eofLine()], true, '', j, j)
+      if (tok.kind === 'eof') this.refuse([this.eofLine()], true, '', j)
       this.andOr()
-      tok = this.peekAfter()
-      if (tok.kind === 'op' && (tok.text === ';' || tok.text === '&')) {
-        this.take(tok)
-        this.linebreak()
-      } else if (tok.kind === 'newline') this.linebreak()
-      else if (tok.kind === 'op' && tok.text === ')') break
-      else this.failToken(tok)
+      const after = this.separator()
+      if (after !== null && !(after.kind === 'op' && after.text === ')')) this.failToken(after)
     }
     this.nesting -= 1
     this.frames.pop()
@@ -783,7 +761,7 @@ class LineReader {
       const after = text.charAt(close + 1)
       if (
         close > i &&
-        isName(text.slice(i + 1, close)) &&
+        /^[A-Za-z_]\w*$/.test(text.slice(i + 1, close)) &&
         (after === '<' || after === '>') &&
         text.charAt(close + 2) !== '('
       )
@@ -930,16 +908,21 @@ class LineReader {
   program(): void {
     this.linebreak()
     for (;;) {
-      let tok = this.peek(constants.READ_COMMAND)
-      if (tok.kind === 'eof') return
+      if (this.peek(constants.READ_COMMAND).kind === 'eof') return
       this.andOr()
-      tok = this.peekAfter()
-      if (tok.kind === 'op' && (tok.text === ';' || tok.text === '&')) {
-        this.take(tok)
-        this.linebreak()
-      } else if (tok.kind === 'newline') this.linebreak()
-      else if (tok.kind !== 'eof') this.failToken(tok)
+      const after = this.separator()
+      if (after !== null && after.kind !== 'eof') this.failToken(after)
     }
+  }
+
+  /** Take the separator after a command and the newlines after it; return
+   * the token after the command instead when it is none. */
+  separator(): ReaderToken | null {
+    const tok = this.peekAfter()
+    if (tok.kind === 'op' && (tok.text === ';' || tok.text === '&')) this.take(tok)
+    else if (tok.kind !== 'newline') return tok
+    this.linebreak()
+    return null
   }
 
   stops(tok: ReaderToken, words: ReadonlySet<string>, ops: ReadonlySet<string>): boolean {
@@ -955,7 +938,7 @@ class LineReader {
     this.linebreak()
     let seen = false
     for (;;) {
-      let tok = this.peek(constants.READ_COMMAND)
+      const tok = this.peek(constants.READ_COMMAND)
       if (this.stops(tok, words, ops)) {
         if (!seen && !empty) this.failToken(tok)
         return tok
@@ -963,12 +946,8 @@ class LineReader {
       if (tok.kind === 'eof') this.failEof()
       this.andOr()
       seen = true
-      tok = this.peekAfter()
-      if (tok.kind === 'op' && (tok.text === ';' || tok.text === '&')) {
-        this.take(tok)
-        this.linebreak()
-      } else if (tok.kind === 'newline') this.linebreak()
-      else if (!this.stops(tok, words, ops)) this.failToken(tok)
+      const after = this.separator()
+      if (after !== null && !this.stops(after, words, ops)) this.failToken(after)
     }
   }
 
@@ -1011,7 +990,7 @@ class LineReader {
         return
       }
     }
-    this.command(false)
+    this.command()
     for (
       let tok = this.peekAfter();
       tok.kind === 'op' && (tok.text === '|' || tok.text === '|&');
@@ -1019,38 +998,22 @@ class LineReader {
     ) {
       this.take(tok)
       this.linebreak()
-      this.command(true)
+      this.command()
     }
   }
 
-  /** Parse one command where a command starts; `piped` after a `|`, where
-   * `time` is a command. */
-  command(piped: boolean): void {
+  /** Parse one command where a command starts. `time` is a command here:
+   * `pipeline` has taken a leading one. */
+  command(): void {
     const tok = this.peek(constants.READ_COMMAND)
-    let word = this.keyword(tok)
-    if (piped && word === 'time') word = null
-    if (word !== null) {
-      if (!constants.COMPOUND_OPENERS.has(word) && word !== 'function' && word !== 'coproc')
-        this.failToken(tok)
-      this.compound(tok)
-      this.redirects()
-      return
-    }
-    if (tok.kind === 'arith' || (tok.kind === 'op' && tok.text === '(')) {
-      this.compound(tok)
-      this.redirects()
-      return
-    }
-    if (
-      tok.kind === 'word' ||
-      tok.kind === 'number' ||
-      tok.kind === 'redirvar' ||
-      (tok.kind === 'op' && constants.REDIRECTIONS.has(tok.text))
-    ) {
+    const word = this.keyword(tok)
+    if (word === 'function' || word === 'coproc') this.compound(tok)
+    else if (!this.opensCompound(tok)) {
+      if (tok.kind !== 'word' && !isRedirect(tok)) this.failToken(tok)
       this.simple()
       return
     }
-    this.failToken(tok)
+    this.redirects()
   }
 
   /** Parse a compound command, a function definition or a coproc; one nested
@@ -1086,11 +1049,7 @@ class LineReader {
   redirects(): void {
     for (;;) {
       const tok = this.peekAfter()
-      if (
-        tok.kind === 'number' ||
-        tok.kind === 'redirvar' ||
-        (tok.kind === 'op' && constants.REDIRECTIONS.has(tok.text))
-      ) {
+      if (isRedirect(tok)) {
         this.redirect(tok)
         this.after = false
       } else return
@@ -1135,11 +1094,7 @@ class LineReader {
     let tok: ReaderToken
     for (;;) {
       tok = this.peek(mode)
-      if (
-        tok.kind === 'number' ||
-        tok.kind === 'redirvar' ||
-        (tok.kind === 'op' && constants.REDIRECTIONS.has(tok.text))
-      ) {
+      if (isRedirect(tok)) {
         this.redirect(tok)
         mode = assigned ? 0 : constants.READ_PREFIX | constants.READ_KEYS
         prefixed = true
@@ -1168,11 +1123,7 @@ class LineReader {
       for (;;) {
         tok = this.peek(mode)
         if (tok.kind === 'word') this.take(tok)
-        else if (
-          tok.kind === 'number' ||
-          tok.kind === 'redirvar' ||
-          (tok.kind === 'op' && constants.REDIRECTIONS.has(tok.text))
-        ) {
+        else if (isRedirect(tok)) {
           this.redirect(tok)
           mode = 0
         } else break
@@ -1181,19 +1132,22 @@ class LineReader {
     if (tok.kind === 'op' && tok.text === '(') this.failToken(tok)
   }
 
+  /** Parse the compound command `tok` opens and return true, or return false
+   * when it opens none (`time` opens none). Another reserved word is refused. */
+  opensCompound(tok: ReaderToken): boolean {
+    let word = this.keyword(tok)
+    if (word === 'time') word = null
+    if (word === null && tok.kind !== 'arith' && !(tok.kind === 'op' && tok.text === '('))
+      return false
+    if (word !== null && !constants.COMPOUND_OPENERS.has(word)) this.failToken(tok)
+    this.compound(tok)
+    return true
+  }
+
   functionBody(): void {
     const tok = this.peek(constants.READ_COMMAND | constants.READ_BODY)
-    const word = this.keyword(tok)
-    if (
-      (word !== null && constants.COMPOUND_OPENERS.has(word)) ||
-      tok.kind === 'arith' ||
-      (tok.kind === 'op' && tok.text === '(')
-    ) {
-      this.compound(tok)
-      this.redirects()
-      return
-    }
-    this.failToken(tok)
+    if (!this.opensCompound(tok)) this.failToken(tok)
+    this.redirects()
   }
 
   /** Parse `function NAME [()] body`; a `(` not followed by `)` opens a
@@ -1220,24 +1174,11 @@ class LineReader {
   coproc(tok: ReaderToken): void {
     this.take(tok)
     tok = this.peek(constants.READ_COMMAND)
-    let word = this.keyword(tok)
-    if (word === 'time') word = null
-    if (word !== null || tok.kind === 'arith' || (tok.kind === 'op' && tok.text === '(')) {
-      if (word !== null && !constants.COMPOUND_OPENERS.has(word)) this.failToken(tok)
-      this.compound(tok)
-      return
-    }
+    if (this.opensCompound(tok)) return
     if (tok.kind === 'word' && !tok.assign) {
       const state = this.save()
       this.take(tok)
-      const next = this.peek(constants.READ_COMMAND)
-      let after = this.keyword(next)
-      if (after === 'time') after = null
-      if (after !== null || next.kind === 'arith' || (next.kind === 'op' && next.text === '(')) {
-        if (after !== null && !constants.COMPOUND_OPENERS.has(after)) this.failToken(next)
-        this.compound(next)
-        return
-      }
+      if (this.opensCompound(this.peek(constants.READ_COMMAND))) return
       this.restore(state)
     }
     if (
@@ -1334,7 +1275,7 @@ class LineReader {
     if (parts !== 2) {
       const first = parts < 2 ? 'arithmetic expression required' : "`;' unexpected"
       const whole = text.slice(i, end + 2)
-      this.refuse([`syntax error: ${first}`, `syntax error: \`${whole}'`], false, whole, i, end + 2)
+      this.refuse([`syntax error: ${first}`, `syntax error: \`${whole}'`], false, whole, end + 2)
     }
   }
 
@@ -1403,13 +1344,13 @@ class LineReader {
       const lines = [...err.lines]
       if (err.eof) {
         lines.push(this.eofLine())
-        this.refuse(lines, true, '', this.n, this.n)
+        this.refuse(lines, true, '', this.n)
       }
       const stop = err.token
       const [start, end] = this.nearSpan(stop.end + (stop.kind === 'newline' ? 0 : 1))
       const word = this.text.slice(start, end)
       lines.push(`syntax error near \`${word}'`)
-      this.refuse(lines, false, word, start, end)
+      this.refuse(lines, false, word, end)
     } finally {
       this.depth = outer
     }
@@ -1427,13 +1368,8 @@ class LineReader {
   /** The token after a whole test; ending inside a quote there, bash adds
    * that it was looking for `]]`. */
   testAfter(): ReaderToken {
-    try {
-      return this.testPeek()
-    } catch (err) {
-      if (err instanceof ReaderRefusal && err.eof && this.depth === 0)
-        err.lines.push("unexpected EOF while looking for `]]'")
-      throw err
-    }
+    if (this.depth > 0) return this.testPeek()
+    return this.testOperand("unexpected EOF while looking for `]]'", () => this.testPeek())
   }
 
   testClose(): void {
@@ -1495,7 +1431,9 @@ class LineReader {
       throw new TestFailure([`unexpected token \`${testText(tok)}' in conditional command`], tok)
     if (tok.plain && constants.UNARY_TESTS.has(tok.text)) {
       this.take(tok)
-      const arg = this.testOperand('unary', () => this.testWord())
+      const arg = this.testOperand('unexpected argument to conditional unary operator', () =>
+        this.testWord(),
+      )
       if (arg.kind !== 'word' || isTestClose(arg))
         throw new TestFailure(
           [`unexpected argument \`${testText(arg)}' to conditional unary operator`],
@@ -1505,14 +1443,7 @@ class LineReader {
       return
     }
     this.take(tok)
-    let op: ReaderToken
-    try {
-      op = this.peek(constants.READ_TEST)
-    } catch (err) {
-      if (err instanceof ReaderRefusal && err.eof)
-        err.lines.push('conditional binary operator expected')
-      throw err
-    }
+    const op = this.testOperand('conditional binary operator expected', () => this.testWord())
     if (
       (op.kind === 'word' && op.plain && constants.BINARY_TESTS.has(op.text)) ||
       (op.kind === 'op' && (op.text === '<' || op.text === '>'))
@@ -1522,7 +1453,7 @@ class LineReader {
       if (op.text === '=~') reader = () => this.regexWord()
       else if (op.text === '==' || op.text === '=' || op.text === '!=')
         reader = () => this.patternWord()
-      const arg = this.testOperand('binary', reader)
+      const arg = this.testOperand('unexpected argument to conditional binary operator', reader)
       if (arg.kind !== 'word' || isTestClose(arg))
         throw new TestFailure(
           [`unexpected argument \`${testText(arg)}' to conditional binary operator`],
@@ -1574,14 +1505,13 @@ class LineReader {
     )
   }
 
-  /** Read an operator's operand; ending inside a quote there, bash adds that
-   * the operator's argument is missing. */
-  testOperand(kind: string, reader: () => ReaderToken): ReaderToken {
+  /** Read the next token of a test; ending inside a quote there, bash adds
+   * `line`. */
+  testOperand(line: string, reader: () => ReaderToken): ReaderToken {
     try {
       return reader()
     } catch (err) {
-      if (err instanceof ReaderRefusal && err.eof)
-        err.lines.push(`unexpected argument to conditional ${kind} operator`)
+      if (err instanceof ReaderRefusal && err.eof) err.lines.push(line)
       throw err
     }
   }

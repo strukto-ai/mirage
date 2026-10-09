@@ -134,9 +134,7 @@ def test_report_prints_the_title_then_the_changes():
     out = report(commit, "main", b" 1 file changed\n", 7, False)
     assert (
         out
-        == (
-            f"[main {short(commit.id, 7)}] add binary\n 1 file changed\n"
-        ).encode()
+        == f"[main {short(commit.id, 7)}] add binary\n 1 file changed\n".encode()
     )
 
 
@@ -144,9 +142,7 @@ def test_report_marks_a_root_commit_and_a_detached_head():
     commit = pinned_commit(b"first")
     assert (
         report(commit, None, b"", 7, True)
-        == (
-            f"[detached HEAD (root-commit) {short(commit.id, 7)}] first\n"
-        ).encode()
+        == f"[detached HEAD (root-commit) {short(commit.id, 7)}] first\n".encode()
     )
 
 

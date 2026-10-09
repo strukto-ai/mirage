@@ -42,15 +42,11 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
     const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
     const fl = new FlagView(opts.flags, specOf('touch'))
     const createOnly = fl.asBool('no_create')
-    const writes: Record<string, Uint8Array> = {}
     for (const p of resolved) {
       if (createOnly) continue
-      if (!(await exists(accessor, p))) {
-        await writeBytes(accessor, p, new Uint8Array(0))
-        writes[p.mountPath] = new Uint8Array()
-      }
+      if (!(await exists(accessor, p))) await writeBytes(accessor, p, new Uint8Array(0))
     }
-    return [null, new IOResult({ writes })]
+    return [null, new IOResult()]
   }
 
   return touchCommand

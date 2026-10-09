@@ -11,12 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { IndexEntry } from '../../cache/index/config.ts'
 import { command } from '../../commands/config.ts'
-import { CommandSpec, Operand } from '../../commands/spec/types.ts'
+import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { CapacityState } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -379,7 +378,9 @@ it.each(
     const [registered] = command({
       name: 'readvalue',
       vfs: 'ram',
-      spec: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
+      spec: new CommandSpec({
+        arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+      }),
       fn: async () => [await read(), new IOResult()],
     })
     if (registered === undefined) throw new Error('missing command')

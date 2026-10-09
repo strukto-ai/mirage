@@ -81,13 +81,9 @@ def hub_for(
 def require_operands(inv: CLIInvocation[HfConfig], names: list[str]) -> None:
     """Refuse a line that left a required operand empty.
 
-    ``Operand.required`` is inert outside the clap dialect on purpose:
-    only clap names the empty slots, and under every other style the
-    refusal "stays the leaf's own business, worded by the command"
-    (``executor/command/cli.py``). hf is argparse, so each leaf that
-    takes operands calls this, and it words the refusal the way argparse
-    does rather than letting the line reach the Hub and come back as an
-    authentication error.
+    Installed CLI invocations validate required arguments before calling
+    the handler. This guard also protects callers that invoke a handler
+    directly from reaching the Hub with missing operands.
 
     Args:
         inv (CLIInvocation[HfConfig]): the invocation.

@@ -11,10 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CLIHandler } from '../../commands/cli/types.ts'
 
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { CLISpec } from '../../commands/cli/types.ts'
+import { CLI } from '../../commands/cli/types.ts'
 import { command, type CommandFn } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
@@ -375,9 +376,9 @@ describe('MountRegistry.matchCommandPrefix', () => {
     const reg = regWith(['gws docs documents get'])
     reg.clis.install(
       'gws',
-      new CLISpec({
-        name: 'gws',
-        subcommands: [new CLISpec({ name: 'run', fn: () => [null, new IOResult()] })],
+      new CLI({
+        spec: new CommandSpec({ name: 'gws', subcommands: [new CommandSpec({ name: 'run' })] }),
+        handlers: { run: new CLIHandler({ fn: () => [null, new IOResult()] }) },
       }),
     )
     expect(reg.matchCommandPrefix(['gws', 'docs', 'documents', 'get'])).toBe(1)

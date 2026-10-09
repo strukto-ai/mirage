@@ -298,7 +298,15 @@ async def handle_redirect(
     Each target expands, is admitted, and opens before the next target
     expands. Earlier opens therefore affect later globs and substitutions,
     and a failure stops the remaining redirects. Descriptors alias shared
-    file descriptions, including their read/write offsets.
+    file descriptions, including their read/write offsets. A stream the
+    statement redirects is its own while it runs, in the lines it runs too
+    (``eval``, ``exec CMD``, ``bash -c``): an earlier ``exec >`` binding
+    of it waits until the statement ends. What the command wrote on its
+    way out goes where it writes, and only adjacent writes to one file
+    combine, as distinct descriptions may reach it through aliases. A job
+    it started writes after its output, or straight through once it
+    raised. When the program an ``exec`` ran cannot write its output, that
+    failure's status is the shell's.
 
     Args:
         execute_node (Callable): executor for the redirected command.
@@ -574,9 +582,6 @@ async def handle_redirect(
     )
     session.job_output = route
     enclosing = ENCLOSING.set(recorder)
-    # A stream the statement redirects is its own while it runs, in the
-    # lines it runs too (`eval`, `exec CMD`, `bash -c`): an earlier
-    # `exec >` binding of it waits until the statement ends.
     unbound = {
         field: value
         for fd, fields in EXEC_STREAM_UNBOUND.items()
@@ -607,8 +612,6 @@ async def handle_redirect(
             refused = exec_node.refused
     except UNWINDING as sig:
         unwound, io = sig, IOResult()
-        # What the command wrote on its way out goes where it writes; an
-        # error expanding its own words came before its redirects.
         output = await take_stdout(sig)
         if output:
             await recorder.emit(Channel.STDOUT, output)
@@ -624,8 +627,6 @@ async def handle_redirect(
         for field, value in held.items():
             setattr(session, field, value)
         ENCLOSING.reset(enclosing)
-        # A body that raised (a cancel, an error) skips the writes below:
-        # its jobs write straight through.
         route.recorder = None
         session.job_output = job_output
         for file in files:
@@ -639,8 +640,6 @@ async def handle_redirect(
             else:
                 session.descriptors.pop(fd, None)
     stdout: bytes | None = None
-    # What a job writes from here waits until the command's own output is
-    # written (`route.release()`).
     route.recorder = Recorder()
     try:
         chunks = recorder.chunks
@@ -680,16 +679,12 @@ async def handle_redirect(
         ) -> None:
             try:
                 if replace and file.source is None and file.offset == 0:
-                    # An output-only command's complete output needs no read of
-                    # its freshly opened, unshared target, even on object stores.
                     await create_file(
                         dispatch, session, file.scope, data, append=file.append
                     )
                     file.offset += len(data)
                 else:
                     await write_description(dispatch, session, file, data)
-                io.writes[file.scope.virtual] = data
-                io.cache = [p for p in io.cache if p != file.scope.virtual]
             except OSError as exc:
                 out, error, _ = await failed(
                     _redirect_failure(file.scope, exc), failed_file=file
@@ -711,8 +706,6 @@ async def handle_redirect(
                 target = dest(key)
                 chunk = next(pending, None)
                 if isinstance(target, FileDescription):
-                    # Only adjacent writes can combine: distinct descriptions
-                    # may reach the same file through aliases.
                     parts = [data]
                     while chunk is not None and dest(chunk[0]) is target:
                         parts.append(chunk[1])
@@ -761,8 +754,6 @@ async def handle_redirect(
             and unwound.replaced
             and io.exit_code
         ):
-            # The replacing program's own write failed: its status is the
-            # shell's.
             unwound.exit_code = unwound.contained_code = io.exit_code
         raise await carried(unwound, stdout, IOResult(stderr=io.stderr))
     return (

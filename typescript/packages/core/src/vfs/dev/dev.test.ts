@@ -11,9 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../commands/spec/types.ts'
+import { CLIHandler } from '../../commands/cli/types.ts'
 
 import { Mount } from '../../workspace/mount/spec.ts'
-import { CLISpec } from '../../commands/cli/types.ts'
+import { CLI } from '../../commands/cli/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { SessionState } from '../../workspace/session/session.ts'
 import { IOResult } from '../../io/types.ts'
@@ -257,12 +259,16 @@ it('keeps process substitution private while another session runs', async () => 
   ws.createSession('peer')
   ws.registerCli(
     'hold',
-    new CLISpec({
-      name: 'hold',
-      fn: async () => {
-        readyResolve()
-        await release
-        return [null, new IOResult()]
+    new CLI({
+      spec: new CommandSpec({ name: 'hold' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async () => {
+            readyResolve()
+            await release
+            return [null, new IOResult()]
+          },
+        }),
       },
     }),
   )
@@ -324,23 +330,31 @@ it('preserves a reused descriptor when an earlier substitution finishes', async 
   ws.createSession('peer')
   ws.registerCli(
     'hold-old',
-    new CLISpec({
-      name: 'hold-old',
-      fn: async () => {
-        oldReadyResolve()
-        await oldRelease
-        return [null, new IOResult()]
+    new CLI({
+      spec: new CommandSpec({ name: 'hold-old' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async () => {
+            oldReadyResolve()
+            await oldRelease
+            return [null, new IOResult()]
+          },
+        }),
       },
     }),
   )
   ws.registerCli(
     'hold-new',
-    new CLISpec({
-      name: 'hold-new',
-      fn: async () => {
-        newReadyResolve()
-        await newRelease
-        return [null, new IOResult()]
+    new CLI({
+      spec: new CommandSpec({ name: 'hold-new' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async () => {
+            newReadyResolve()
+            await newRelease
+            return [null, new IOResult()]
+          },
+        }),
       },
     }),
   )

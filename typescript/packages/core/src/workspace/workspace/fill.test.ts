@@ -11,12 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
+import { CLIHandler } from '../../commands/cli/types.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
-import { Option, type FlagValue } from '../../commands/spec/types.ts'
-import { CLISpec, type CLIVerbFn } from '../../commands/cli/types.ts'
+import { Argument, type FlagValue } from '../../commands/spec/types.ts'
+import { CLI, type CLIVerbFn } from '../../commands/cli/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
@@ -97,37 +98,31 @@ async function makeWs(
   )
 }
 
-function envCliSpec(): CLISpec {
+function envCliSpec(): CLI {
   const leaf: CLIVerbFn = () => null
-  return new CLISpec({
-    name: 'mycli',
-    options: [new Option({ long: '--token', type: 'str', env: 'CLI_ROOT' })],
-    subcommands: [
-      new CLISpec({
-        name: 'alpha',
-        fn: leaf,
-        options: [new Option({ long: '--a', type: 'str', env: 'CLI_ALPHA' })],
-      }),
-      new CLISpec({
-        name: 'beta',
-        fn: leaf,
-        options: [new Option({ long: '--b', type: 'str', env: 'CLI_BETA' })],
-      }),
-    ],
+  return new CLI({
+    spec: new CommandSpec({
+      name: 'mycli',
+      arguments: [new Argument('--token', { env: 'CLI_ROOT' })],
+      subcommands: [
+        new CommandSpec({ name: 'alpha', arguments: [new Argument('--a', { env: 'CLI_ALPHA' })] }),
+        new CommandSpec({ name: 'beta', arguments: [new Argument('--b', { env: 'CLI_BETA' })] }),
+      ],
+    }),
+    handlers: { alpha: new CLIHandler({ fn: leaf }), beta: new CLIHandler({ fn: leaf }) },
   })
 }
 
-function sharedCliSpec(probe: CLIVerbFn): CLISpec {
-  return new CLISpec({
-    name: 'mycli',
-    options: [new Option({ long: '--token', type: 'str', env: 'CLI_SHARED' })],
-    subcommands: [
-      new CLISpec({
-        name: 'alpha',
-        fn: probe,
-        options: [new Option({ long: '--a', type: 'str', env: 'CLI_SHARED' })],
-      }),
-    ],
+function sharedCliSpec(probe: CLIVerbFn): CLI {
+  return new CLI({
+    spec: new CommandSpec({
+      name: 'mycli',
+      arguments: [new Argument('--token', { env: 'CLI_SHARED' })],
+      subcommands: [
+        new CommandSpec({ name: 'alpha', arguments: [new Argument('--a', { env: 'CLI_SHARED' })] }),
+      ],
+    }),
+    handlers: { alpha: new CLIHandler({ fn: probe }) },
   })
 }
 
@@ -1458,10 +1453,13 @@ describe('fillEnv through execute', () => {
     try {
       ws.registerCli(
         'mycli',
-        new CLISpec({
-          name: 'mycli',
-          options: [new Option({ long: '--token', type: 'str', env: 'CLI_ROOT' })],
-          subcommands: [new CLISpec({ name: 'alpha', fn: probe })],
+        new CLI({
+          spec: new CommandSpec({
+            name: 'mycli',
+            arguments: [new Argument('--token', { env: 'CLI_ROOT' })],
+            subcommands: [new CommandSpec({ name: 'alpha' })],
+          }),
+          handlers: { alpha: new CLIHandler({ fn: probe }) },
         }),
       )
       const io = await ws.shell('mycli alpha')

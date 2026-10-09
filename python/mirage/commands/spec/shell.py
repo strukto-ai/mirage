@@ -14,255 +14,238 @@
 
 from dataclasses import dataclass, field
 
-from mirage.commands.spec.compile import compile_spec, expand_long
+from mirage.commands.spec.compile import (
+    compile_spec,
+    expand_long,
+    option_spellings,
+)
 from mirage.commands.spec.constants import HELP_OPTION, VERSION_OPTION
-from mirage.commands.spec.types import CommandSpec, Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 
 SHELL_SPECS: dict[str, CommandSpec] = {
     "xargs": CommandSpec(
         description="Build and run command lines from standard input.",
-        options=(
-            Option(
-                short="-0",
-                long="--null",
-                description="Input items are terminated by NUL.",
+        arguments=(
+            Argument(
+                "-0",
+                "--null",
+                action="store_true",
+                help="Input items are terminated by NUL.",
             ),
-            Option(
-                short="-a",
-                long="--arg-file",
+            Argument(
+                "-a",
+                "--arg-file",
                 type="str",
-                description="Read items from this file, not standard input.",
+                help="Read items from this file, not standard input.",
             ),
-            Option(
-                short="-d",
-                long="--delimiter",
+            Argument(
+                "-d",
+                "--delimiter",
                 type="str",
-                description="Input items are separated by this character.",
+                help="Input items are separated by this character.",
             ),
-            Option(
-                short="-E",
+            Argument(
+                "-E",
                 type="str",
-                description="Stop reading at this logical end-of-file string.",
+                help="Stop reading at this logical end-of-file string.",
             ),
-            Option(
-                short="-e",
-                long="--eof",
+            Argument(
+                "-e",
+                "--eof",
                 type="str",
-                value_optional=True,
-                description="Same as -E; no string turns it off.",
+                nargs="?",
+                attached_only=True,
+                help="Same as -E; no string turns it off.",
             ),
-            Option(
-                short="-I",
+            Argument(
+                "-I",
                 type="str",
-                description="Replace this string in the initial "
+                help="Replace this string in the initial "
                 "arguments with each input line.",
             ),
-            Option(
-                short="-i",
-                long="--replace",
+            Argument(
+                "-i",
+                "--replace",
                 type="str",
-                value_optional=True,
-                description="Same as -I, with {} when no string is attached.",
+                nargs="?",
+                attached_only=True,
+                help="Same as -I, with {} when no string is attached.",
             ),
-            Option(
-                short="-L",
+            Argument(
+                "-L",
                 type="str",
-                description="Use at most N non-blank input lines per "
-                "command line.",
+                help="Use at most N non-blank input lines per command line.",
             ),
-            Option(
-                short="-l",
-                long="--max-lines",
+            Argument(
+                "-l",
+                "--max-lines",
                 type="str",
-                value_optional=True,
-                description="Same as -L, with 1 when no count is attached.",
+                nargs="?",
+                attached_only=True,
+                help="Same as -L, with 1 when no count is attached.",
             ),
-            Option(
-                short="-n",
-                long="--max-args",
+            Argument(
+                "-n",
+                "--max-args",
                 type="str",
-                description="Use at most N arguments per command line.",
+                help="Use at most N arguments per command line.",
             ),
-            Option(
-                short="-o",
-                long="--open-tty",
-                description="Reopen stdin as the terminal in each "
+            Argument(
+                "-o",
+                "--open-tty",
+                action="store_true",
+                help="Reopen stdin as the terminal in each "
                 "command (there is no terminal, so this fails).",
             ),
-            Option(
-                short="-p",
-                long="--interactive",
-                description="Prompt before running each command "
+            Argument(
+                "-p",
+                "--interactive",
+                action="store_true",
+                help="Prompt before running each command "
                 "(there is no terminal, so this fails).",
             ),
-            Option(
-                short="-r",
-                long="--no-run-if-empty",
-                description="Do not run the command on empty input.",
+            Argument(
+                "-r",
+                "--no-run-if-empty",
+                action="store_true",
+                help="Do not run the command on empty input.",
             ),
-            Option(
-                short="-s",
-                long="--max-chars",
+            Argument(
+                "-s",
+                "--max-chars",
                 type="str",
-                description="Limit a command line to N bytes.",
+                help="Limit a command line to N bytes.",
             ),
-            Option(
-                short="-t",
-                long="--verbose",
-                description="Print each command on stderr before running it.",
+            Argument(
+                "-t",
+                "--verbose",
+                action="store_true",
+                help="Print each command on stderr before running it.",
             ),
-            Option(
-                long="--show-limits",
-                description="Show the command-line length limits.",
+            Argument(
+                "--show-limits",
+                action="store_true",
+                help="Show the command-line length limits.",
             ),
-            Option(
-                short="-x",
-                long="--exit",
-                description="Exit if a command line exceeds the size limit.",
+            Argument(
+                "-x",
+                "--exit",
+                action="store_true",
+                help="Exit if a command line exceeds the size limit.",
             ),
-            Option(
-                short="-P",
-                long="--max-procs",
+            Argument(
+                "-P",
+                "--max-procs",
                 type="str",
-                description="Run up to N commands at a time; 0 runs "
+                help="Run up to N commands at a time; 0 runs "
                 "them all at once.",
             ),
-            Option(
-                long="--process-slot-var",
+            Argument(
+                "--process-slot-var",
                 type="str",
-                description="Set this variable to each command's slot number.",
+                help="Set this variable to each command's slot number.",
             ),
             VERSION_OPTION,
             HELP_OPTION,
+            Argument("texts", nargs="*", metavar=""),
         ),
-        rest=Operand(type="str"),
     ),
     "timeout": CommandSpec(
         description="Run a command with a time limit.",
-        options=(
-            Option(
-                short="-f",
-                long="--foreground",
-                description="Signal only the command, not its process group.",
+        arguments=(
+            Argument(
+                "-f",
+                "--foreground",
+                action="store_true",
+                help="Signal only the command, not its process group.",
             ),
-            Option(
-                short="-k",
-                long="--kill-after",
+            Argument(
+                "-k",
+                "--kill-after",
                 type="str",
-                description="Also send KILL this long after the first signal.",
+                help="Also send KILL this long after the first signal.",
             ),
-            Option(
-                short="-p",
-                long="--preserve-status",
-                description="Exit with the command's status even when it "
-                "times out.",
+            Argument(
+                "-p",
+                "--preserve-status",
+                action="store_true",
+                help="Exit with the command's status even when it times out.",
             ),
-            Option(
-                short="-s",
-                long="--signal",
+            Argument(
+                "-s",
+                "--signal",
                 type="str",
-                description="Signal to send on timeout (default TERM).",
+                help="Signal to send on timeout (default TERM).",
             ),
-            Option(
-                short="-v",
-                long="--verbose",
-                description="Report each signal sent on stderr.",
+            Argument(
+                "-v",
+                "--verbose",
+                action="store_true",
+                help="Report each signal sent on stderr.",
             ),
             HELP_OPTION,
             VERSION_OPTION,
+            Argument("texts", nargs="*", metavar=""),
         ),
-        rest=Operand(type="str"),
     ),
     "read": CommandSpec(
         description="Read a line from standard input into variables.",
-        options=(
-            Option(
-                short="-r",
-                description="Raw mode: backslash is not an escape character.",
+        arguments=(
+            Argument(
+                "-r",
+                action="store_true",
+                help="Raw mode: backslash is not an escape character.",
             ),
-            Option(
-                short="-a",
+            Argument(
+                "-a", type="str", help="Store the words in the named array."
+            ),
+            Argument(
+                "-d",
                 type="str",
-                description="Store the words in the named array.",
+                help="Read up to this character instead of newline.",
             ),
-            Option(
-                short="-d",
+            Argument(
+                "-n", type="str", help="Return after at most N characters."
+            ),
+            Argument(
+                "-N",
                 type="str",
-                description="Read up to this character instead of newline.",
+                help="Return after exactly N characters, delimiters included.",
             ),
-            Option(
-                short="-n",
+            Argument("-t", type="str", help="Time out after N seconds."),
+            Argument(
+                "-p", type="str", help="Prompt (shown only on a terminal)."
+            ),
+            Argument(
+                "-s", action="store_true", help="Do not echo (terminal only)."
+            ),
+            Argument(
+                "-e", action="store_true", help="Use readline (terminal only)."
+            ),
+            Argument(
+                "-i",
                 type="str",
-                description="Return after at most N characters.",
+                help="Initial text for readline (terminal only).",
             ),
-            Option(
-                short="-N",
-                type="str",
-                description="Return after exactly N characters, "
-                "delimiters included.",
-            ),
-            Option(
-                short="-t", type="str", description="Time out after N seconds."
-            ),
-            Option(
-                short="-p",
-                type="str",
-                description="Prompt (shown only on a terminal).",
-            ),
-            Option(short="-s", description="Do not echo (terminal only)."),
-            Option(short="-e", description="Use readline (terminal only)."),
-            Option(
-                short="-i",
-                type="str",
-                description="Initial text for readline (terminal only).",
-            ),
-            Option(
-                short="-u",
-                type="str",
-                description="Read from this descriptor.",
-            ),
+            Argument("-u", type="str", help="Read from this descriptor."),
+            Argument("texts", nargs="*", metavar=""),
         ),
-        rest=Operand(type="str"),
     ),
     "mapfile": CommandSpec(
         description="Read lines from standard input into an array.",
-        options=(
-            Option(
-                short="-d",
-                type="str",
-                description="Line delimiter instead of newline.",
+        arguments=(
+            Argument(
+                "-d", type="str", help="Line delimiter instead of newline."
             ),
-            Option(
-                short="-n", type="str", description="Copy at most N lines."
-            ),
-            Option(
-                short="-O",
-                type="str",
-                description="Start storing at this index.",
-            ),
-            Option(
-                short="-s",
-                type="str",
-                description="Discard the first N lines.",
-            ),
-            Option(short="-t", description="Strip the delimiter."),
-            Option(
-                short="-u",
-                type="str",
-                description="Read from this descriptor.",
-            ),
-            Option(
-                short="-C",
-                type="str",
-                description="Call this every quantum lines.",
-            ),
-            Option(
-                short="-c",
-                type="str",
-                description="Lines between callback calls.",
-            ),
+            Argument("-n", type="str", help="Copy at most N lines."),
+            Argument("-O", type="str", help="Start storing at this index."),
+            Argument("-s", type="str", help="Discard the first N lines."),
+            Argument("-t", action="store_true", help="Strip the delimiter."),
+            Argument("-u", type="str", help="Read from this descriptor."),
+            Argument("-C", type="str", help="Call this every quantum lines."),
+            Argument("-c", type="str", help="Lines between callback calls."),
+            Argument("texts", nargs="*", metavar=""),
         ),
-        rest=Operand(type="str"),
     ),
 }
 
@@ -324,25 +307,26 @@ def parse_shell_options(spec: CommandSpec, argv: list[str]) -> ShellParse:
     long_value: set[str] = set()
     long_optional: set[str] = set()
     alias: dict[str, str] = {}
-    for opt in spec.options:
-        short = opt.short.lstrip("-") if opt.short else None
-        long = opt.long.lstrip("-") if opt.long else None
+    for opt in compile_spec(spec).options:
+        short, long = option_spellings(opt)
+        short = short.lstrip("-") if short else None
+        long = long.lstrip("-") if long else None
         name = short or long or ""
         if short is not None:
             (
                 short_bool
-                if opt.type == "bool"
+                if opt.action in ("store_true", "count")
                 else short_optional
-                if opt.value_optional
+                if opt.nargs == "?"
                 else short_value
             ).add(short)
             alias[short] = name
         if long is not None:
             (
                 long_bool
-                if opt.type == "bool"
+                if opt.action in ("store_true", "count")
                 else long_optional
-                if opt.value_optional
+                if opt.nargs == "?"
                 else long_value
             ).add(long)
             alias[long] = name

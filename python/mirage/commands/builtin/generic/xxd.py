@@ -373,8 +373,7 @@ async def _write_output(
                 stderr=fs_error_line("xxd", target, exc).encode(),
                 exit_code=OPEN_OUTPUT_EXIT,
             )
-        # The stretches are not the file, so the cache drops what it holds.
-        return None, IOResult(writes={target.mount_path: b""})
+        return None, IOResult()
     if reverse:
         try:
             existing = await read_bytes(target) if read_bytes else b""
@@ -398,9 +397,7 @@ async def _write_output(
             stderr=fs_error_line("xxd", target, exc).encode(),
             exit_code=OPEN_OUTPUT_EXIT,
         )
-    return None, IOResult(
-        writes={target.mount_path: data}, cache=[target.mount_path]
-    )
+    return None, IOResult()
 
 
 __all__ = ["xxd"]

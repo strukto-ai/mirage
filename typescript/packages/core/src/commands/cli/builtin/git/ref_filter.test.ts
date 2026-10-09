@@ -19,7 +19,7 @@ import { filterWords, listModeOption, withoutFilterValues } from './ref_filter.t
 import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
 
 function words(verb: string, argv: string[]): ReturnType<typeof filterWords> {
-  const spec = GIT.subcommands.find((node) => node.name === verb)
+  const spec = GIT.spec.subcommands.find((node) => node.name === verb)
   const inv = cliInvocation({
     config: null,
     argv: [verb, ...argv],

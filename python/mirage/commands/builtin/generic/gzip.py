@@ -92,7 +92,6 @@ async def gzip(
     read = stdin_bytes(read_bytes, stdin)
     source = normalized_read(read_bytes)
     piped = stdin_stream(source, stdin)
-    writes: dict[str, ByteSource] = {}
     stdout: list[bytes] = []
     lines: list[str] = []
     exit_code = 0
@@ -182,8 +181,6 @@ async def gzip(
             if existed:
                 continue
             break
-        if link is None:
-            writes[out_path] = data
         if not keep:
             await (
                 unlink(p)
@@ -192,7 +189,7 @@ async def gzip(
             )
     stderr = ("\n".join(lines) + "\n").encode() if lines else None
     return b"".join(stdout) or None, IOResult(
-        writes=writes, stderr=stderr, exit_code=exit_code
+        stderr=stderr, exit_code=exit_code
     )
 
 

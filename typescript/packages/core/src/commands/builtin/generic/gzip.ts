@@ -113,7 +113,6 @@ export async function gzipGeneric(
     return [result, new IOResult()]
   }
   const read = stdinStream(stream, opts.stdin)
-  const writes: Record<string, Uint8Array> = {}
   const stdout: Uint8Array[] = []
   const lines: string[] = []
   let exitCode = 0
@@ -186,7 +185,6 @@ export async function gzipGeneric(
       if (existed) continue
       break
     }
-    if (link === null) writes[outPath] = data
     if (!keep) {
       if (link === null || resolver === null) await unlink(p)
       else await resolver.unlink(link)
@@ -195,6 +193,6 @@ export async function gzipGeneric(
   const stderr = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
   return [
     stdout.length > 0 ? concat(stdout) : null,
-    new IOResult({ writes, exitCode, ...(stderr !== null ? { stderr } : {}) }),
+    new IOResult({ exitCode, ...(stderr !== null ? { stderr } : {}) }),
   ]
 }

@@ -315,7 +315,7 @@ async def handle_command(
             ),
             drop_caches=(
                 functools.partial(drop_mount_caches, registry)
-                if drops_mount_caches(cli_install.spec)
+                if drops_mount_caches(cli_install.cli)
                 else None
             ),
         )

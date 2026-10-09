@@ -129,20 +129,8 @@ class CallStack:
             return ()
         return tuple(frame.function_name for frame in reversed(frames))
 
-    def get_positional(self, index: int) -> str:
-        pos = self.current.positional
-        if 0 < index <= len(pos):
-            return pos[index - 1]
-        return ""
-
     def get_all_positional(self) -> list[str]:
         return self.current.positional
-
-    def get_positional_count(self) -> int:
-        return len(self.current.positional)
-
-    def shift(self, n: int = 1) -> None:
-        self.current.positional = self.current.positional[n:]
 
     def set_positional(self, values: list[str]) -> None:
         self.current.positional = values

@@ -450,10 +450,7 @@ async def sort_generic(
                 stderr=sort_die(OPEN_FAILED, parsed.output.raw_path, strerror),
                 exit_code=2,
             )
-        return b"", IOResult(
-            writes={parsed.output.mount_path: output},
-            cache=[parsed.output.mount_path],
-        )
+        return b"", IOResult()
     return output, IOResult()
 
 

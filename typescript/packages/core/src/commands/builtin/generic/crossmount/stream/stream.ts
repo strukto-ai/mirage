@@ -89,7 +89,6 @@ export async function runStream(
     result.reads = merged.reads
     result.writes = merged.writes
     result.cache = merged.cache
-    result.renames = merged.renames
     result.matchedRuns = merged.matchedRuns
     result.sizedRuns = merged.sizedRuns
     result.countedRuns = merged.countedRuns

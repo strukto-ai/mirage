@@ -27,10 +27,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(( 1 / 0 )) 2>&1; echo code=$?",
+      "command": "(( 1 / 0 )) 2>&1; echo code=$?; f() { ((1/0)); echo later >&2; }; f 2>&1; { ((2/0)); echo grp >&2; } 2>&1",
       "expect": {
         "exit": 0,
-        "stdout": "bash: ((: 1 / 0 : division by 0 (error token is \"0 \")\ncode=1\n",
+        "stdout": "bash: ((: 1 / 0 : division by 0 (error token is \"0 \")\ncode=1\nbash: ((: 1/0: division by 0 (error token is \"0\")\nlater\nbash: ((: 2/0: division by 0 (error token is \"0\")\ngrp\n",
         "stderr": ""
       }
     }

@@ -112,11 +112,9 @@ async def test_a_commit_needs_detach(git_rw, repo_path: Path):
     assert code == 128
     assert (
         err
-        == (
-            f"fatal: a branch is expected, got commit '{sha[:7]}'\n"
-            f"hint: If you want to detach HEAD at the commit, try "
-            f"again with the --detach option.\n"
-        ).encode()
+        == f"fatal: a branch is expected, got commit '{sha[:7]}'\n"
+        f"hint: If you want to detach HEAD at the commit, try "
+        f"again with the --detach option.\n".encode()
     )
     assert head_ref(repo_path) == b"ref: refs/heads/main"
 

@@ -14,6 +14,7 @@
 
 from mirage.commands.builtin.trello import COMMANDS
 from mirage.commands.config import Command
+from mirage.commands.spec.compile import compile_spec
 from mirage.vfs.trello.prompt import PROMPT, WRITE_PROMPT
 
 
@@ -51,8 +52,10 @@ def _unmatched(line: str, verbs: dict[str, Command]) -> list[str]:
     if name is None:
         return [f"{line!r} names no registered command"]
     spec = verbs[name].spec
-    longs = {option.long for option in spec.options}
-    takes_operands = spec.rest is not None or bool(spec.positional)
+    longs = {option.names[-1] for option in compile_spec(spec).options}
+    takes_operands = compile_spec(spec).rest is not None or bool(
+        compile_spec(spec).positional
+    )
     problems = []
     rest = tokens[len(name.split()) :]
     i = 0

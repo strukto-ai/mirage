@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec } from '../../../spec/compile.ts'
+import type { CommandSpec } from '../../../spec/types.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AirtableConfigSchema } from '../../../../core/airtable/config.ts'
 import {
@@ -25,7 +27,6 @@ import { getTestParser } from '../../../../workspace/fixtures/workspace_fixture.
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { UsageStyle } from '../../../spec/types.ts'
 import { cliSpecFor } from '../../specs.ts'
-import type { CLISpec } from '../../types.ts'
 import { AIRTABLE } from './index.ts'
 
 // Mirrors python/tests/commands/cli/builtin/airtable/test_tree.py.
@@ -55,8 +56,8 @@ options:
   -h, --help  Show this help and exit
 `
 
-function leaf(...path: string[]): CLISpec {
-  let node = AIRTABLE
+function leaf(...path: string[]): CommandSpec {
+  let node = AIRTABLE.spec
   for (const name of path) {
     const child = node.subcommands.find((c) => c.name === name)
     if (child === undefined) throw new Error(`no subcommand ${name}`)
@@ -85,17 +86,18 @@ describe('airtable tree', () => {
   it('is registered under its name', () => {
     expect(cliSpecFor('airtable')).toBe(AIRTABLE)
     expect(AIRTABLE.configModel).toBe(AirtableConfigSchema)
-    expect(AIRTABLE.usageStyle).toBe(UsageStyle.ARGPARSE)
+    expect(AIRTABLE.spec.usageStyle).toBe(UsageStyle.ARGPARSE)
     expect(
       Object.fromEntries(
-        AIRTABLE.subcommands.map((g) => [g.name, g.subcommands.map((v) => v.name)]),
+        AIRTABLE.spec.subcommands.map((g) => [g.name, g.subcommands.map((v) => v.name)]),
       ),
     ).toEqual(VERBS)
   })
 
   it('classifies only the writers as writes', () => {
     for (const [noun, verbs] of Object.entries(VERBS)) {
-      for (const verb of verbs) expect(leaf(noun, verb).write).toBe(WRITES.has(`${noun} ${verb}`))
+      for (const verb of verbs)
+        expect(AIRTABLE.handlers[[noun, verb].join(' ')]?.write).toBe(WRITES.has(`${noun} ${verb}`))
     }
   })
 
@@ -106,10 +108,10 @@ describe('airtable tree', () => {
       ['comment', 'add'],
     ]
     for (const path of below) {
-      const required = leaf(...path).options.filter((o) => o.required)
-      expect(required.map((o) => o.long).sort()).toEqual(['--base', '--table'])
+      const required = compileSpec(leaf(...path)).options.filter((o) => o.required)
+      expect(required.map((o) => o.names.at(-1)).sort()).toEqual(['--base', '--table'])
     }
-    expect(leaf('table', 'get').options.map((o) => o.long)).toEqual(['--base'])
+    expect(compileSpec(leaf('table', 'get')).options.map((o) => o.names.at(-1))).toEqual(['--base'])
   })
 
   it('renders the tree as help', async () => {

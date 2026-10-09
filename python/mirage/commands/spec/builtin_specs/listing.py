@@ -12,231 +12,241 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import CommandSpec, Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 
 SPECS: dict[str, CommandSpec] = {
     "ls": CommandSpec(
-        options=(
-            Option(short="-l"),
-            Option(short="-b", long="--escape"),
-            Option(short="-a", long="--all"),
-            Option(short="-A", long="--almost-all"),
-            Option(short="-h", long="--human-readable"),
-            Option(short="-t"),
-            Option(short="-S"),
-            Option(short="-X"),
-            Option(short="-v"),
-            Option(short="-U"),
-            Option(long="--sort", type="str"),
-            Option(short="-c"),
-            Option(short="-u"),
-            Option(long="--time", type="str"),
-            Option(long="--time-style", type="str"),
-            Option(short="-r", long="--reverse"),
-            Option(short="-1"),
-            Option(short="-R", long="--recursive"),
-            Option(short="-d", long="--directory"),
+        arguments=(
+            Argument("-l", action="store_true"),
+            Argument("-b", "--escape", action="store_true"),
+            Argument("-a", "--all", action="store_true"),
+            Argument("-A", "--almost-all", action="store_true"),
+            Argument("-h", "--human-readable", action="store_true"),
+            Argument("-t", action="store_true"),
+            Argument("-S", action="store_true"),
+            Argument("-X", action="store_true"),
+            Argument("-v", action="store_true"),
+            Argument("-U", action="store_true"),
+            Argument("--sort"),
+            Argument("-c", action="store_true"),
+            Argument("-u", action="store_true"),
+            Argument("--time"),
+            Argument("--time-style"),
+            Argument("-r", "--reverse", action="store_true"),
+            Argument("-1", action="store_true"),
+            Argument("-R", "--recursive", action="store_true"),
+            Argument("-d", "--directory", action="store_true"),
             # -F classifies outright; only the long form takes GNU's WHEN.
-            Option(
-                short="-F",
-                long="--classify",
-                type="str",
-                value_optional=True,
+            Argument(
+                "-F",
+                "--classify",
+                nargs="?",
+                attached_only=True,
                 short_value=False,
             ),
-            Option(short="-p"),
-            Option(long="--file-type"),
-            Option(long="--indicator-style", type="str"),
-            Option(short="-L", long="--dereference"),
-            Option(short="-H", long="--dereference-command-line"),
-            Option(long="--dereference-command-line-symlink-to-dir"),
-            Option(short="-g"),
-            Option(short="-o"),
-            Option(short="-n", long="--numeric-uid-gid"),
-            Option(short="-i", long="--inode"),
+            Argument("-p", action="store_true"),
+            Argument("--file-type", action="store_true"),
+            Argument("--indicator-style"),
+            Argument("-L", "--dereference", action="store_true"),
+            Argument("-H", "--dereference-command-line", action="store_true"),
+            Argument(
+                "--dereference-command-line-symlink-to-dir",
+                action="store_true",
+            ),
+            Argument("-g", action="store_true"),
+            Argument("-o", action="store_true"),
+            Argument("-n", "--numeric-uid-gid", action="store_true"),
+            Argument("-i", "--inode", action="store_true"),
             # Accepted no-op like grep --color (#471).
-            Option(long="--color", type="str", value_optional=True),
-            Option(long="--group-directories-first"),
-            Option(long="--block-size", type="str"),
-            Option(long="--hyperlink", type="str", value_optional=True),
-            Option(short="-Z", long="--context"),
-        ),
-        rest=Operand(type="path"),
+            Argument("--color", nargs="?", attached_only=True),
+            Argument("--group-directories-first", action="store_true"),
+            Argument("--block-size"),
+            Argument("--hyperlink", nargs="?", attached_only=True),
+            Argument("-Z", "--context", action="store_true"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "stat": CommandSpec(
-        options=(
-            Option(short="-c", long="--format", type="str"),
-            Option(short="-f", long="--file-system"),
-            Option(short="-L", long="--dereference"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-c", "--format"),
+            Argument("-f", "--file-system", action="store_true"),
+            Argument("-L", "--dereference", action="store_true"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "pwd": CommandSpec(
-        options=(
-            Option(short="-P"),
-            Option(short="-L"),
-        ),
-        rest=Operand(type="str"),
+        arguments=(
+            Argument("-P", action="store_true"),
+            Argument("-L", action="store_true"),
+            Argument("texts", nargs="*", metavar=""),
+        )
     ),
     "find": CommandSpec(
-        options=(
-            Option(short="-name", type="str", multiple=True),
-            Option(short="-type", type="str", multiple=True),
-            Option(short="-maxdepth", type="str", multiple=True),
-            Option(short="-size", type="str", multiple=True),
-            Option(short="-mtime", type="str", multiple=True),
-            Option(short="-iname", type="str", multiple=True),
-            Option(short="-path", type="str", multiple=True),
-            Option(short="-mindepth", type="str", multiple=True),
-            Option(short="-printf", type="str", multiple=True),
-            Option(short="-newer", type="str", multiple=True),
-            Option(short="-newermt", type="str", multiple=True),
+        # `!` is GNU's negation, spelled without a leading dash, so the
+        # rest slot's PATH kind would read it as a start point. It joins
+        # the parens here rather than becoming an option: an option is
+        # matched by spelling and `-not` already covers that half, while
+        # these three are grammar the expression parser consumes.
+        ignore_tokens=frozenset({"(", ")", "!"}),
+        arguments=(
+            Argument("-name", action="append"),
+            Argument("-type", action="append"),
+            Argument("-maxdepth", action="append"),
+            Argument("-size", action="append"),
+            Argument("-mtime", action="append"),
+            Argument("-iname", action="append"),
+            Argument("-path", action="append"),
+            Argument("-mindepth", action="append"),
+            Argument("-printf", action="append"),
+            Argument("-newer", action="append"),
+            Argument("-newermt", action="append"),
             # `-exec CMD ARGS... ;` is consumed by the expression parser,
             # never by this spec: the classifier keeps its words as text
             # (`exec_spans`), and there is no argparse shape for an
             # option whose argument is a program.
             # GNU find's link policy: -P (no follow) is the default, -H
             # follows only the start point, -L follows everything.
-            Option(short="-P"),
-            Option(short="-H"),
-            Option(short="-L"),
-            Option(short="-print"),
-            Option(short="-print0"),
-            Option(short="-delete"),
-            Option(short="-depth"),
-            Option(short="-xdev"),
-            Option(short="-mount"),
-            Option(short="-prune"),
-            Option(short="-ls"),
-            Option(short="-empty"),
-            Option(short="-o"),
-            Option(short="-or"),
-            Option(short="-a"),
-            Option(short="-and"),
-            Option(short="-not"),
+            Argument("-P", action="store_true"),
+            Argument("-H", action="store_true"),
+            Argument("-L", action="store_true"),
+            Argument("-print", action="store_true"),
+            Argument("-print0", action="store_true"),
+            Argument("-delete", action="store_true"),
+            Argument("-depth", action="store_true"),
+            Argument("-xdev", action="store_true"),
+            Argument("-mount", action="store_true"),
+            Argument("-prune", action="store_true"),
+            Argument("-ls", action="store_true"),
+            Argument("-empty", action="store_true"),
+            Argument("-o", action="store_true"),
+            Argument("-or", action="store_true"),
+            Argument("-a", action="store_true"),
+            Argument("-and", action="store_true"),
+            Argument("-not", action="store_true"),
+            Argument("paths", type="path", nargs="*", metavar=""),
         ),
-        rest=Operand(type="path"),
-        # `!` is GNU's negation, spelled without a leading dash, so the
-        # rest slot's PATH kind would read it as a start point. It joins
-        # the parens here rather than becoming an Option: an option is
-        # matched by spelling and `-not` already covers that half, while
-        # these three are grammar the expression parser consumes.
-        ignore_tokens=frozenset({"(", ")", "!"}),
     ),
     "tree": CommandSpec(
-        options=(
-            Option(short="-a"),
-            Option(short="-L", type="str"),
-            Option(short="-I", type="str"),
-            Option(short="-d"),
-            Option(short="-P", type="str"),
-            Option(short="-x"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-a", action="store_true"),
+            Argument("-L"),
+            Argument("-I"),
+            Argument("-d", action="store_true"),
+            Argument("-P"),
+            Argument("-x", action="store_true"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "du": CommandSpec(
-        options=(
-            Option(short="-h"),
-            Option(short="-s"),
-            Option(short="-a"),
-            Option(short="-d", long="--max-depth", type="str"),
-            Option(short="-c"),
-            Option(short="-L"),
-            Option(short="-P"),
-            Option(short="-S", long="--separate-dirs"),
-            Option(short="-x", long="--one-file-system"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-h", action="store_true"),
+            Argument("-s", action="store_true"),
+            Argument("-a", action="store_true"),
+            Argument("-d", "--max-depth"),
+            Argument("-c", action="store_true"),
+            Argument("-L", action="store_true"),
+            Argument("-P", action="store_true"),
+            Argument("-S", "--separate-dirs", action="store_true"),
+            Argument("-x", "--one-file-system", action="store_true"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "df": CommandSpec(
-        options=(
-            Option(short="-h"),
-            Option(short="-H"),
-            Option(short="-k"),
-            Option(short="-i"),
-            Option(short="-a"),
-            Option(short="-T"),
-            Option(short="-P"),
-            Option(short="-B", type="str"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-h", action="store_true"),
+            Argument("-H", action="store_true"),
+            Argument("-k", action="store_true"),
+            Argument("-i", action="store_true"),
+            Argument("-a", action="store_true"),
+            Argument("-T", action="store_true"),
+            Argument("-P", action="store_true"),
+            Argument("-B"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "mount": CommandSpec(
         description="Mount a filesystem.",
-        options=(
-            Option(
-                short="-a",
-                long="--all",
-                description="Mount all filesystems mentioned in fstab.",
+        arguments=(
+            Argument(
+                "-a",
+                "--all",
+                action="store_true",
+                help="Mount all filesystems mentioned in fstab.",
             ),
-            Option(
-                short="-f",
-                long="--fake",
-                description="Dry run; skip the mount(2) syscall.",
+            Argument(
+                "-f",
+                "--fake",
+                action="store_true",
+                help="Dry run; skip the mount(2) syscall.",
             ),
-            Option(
-                short="-l",
-                long="--show-labels",
-                description="Show also filesystem labels.",
+            Argument(
+                "-l",
+                "--show-labels",
+                action="store_true",
+                help="Show also filesystem labels.",
             ),
-            Option(
-                short="-n",
-                long="--no-mtab",
-                description="Don't write to /etc/mtab.",
+            Argument(
+                "-n",
+                "--no-mtab",
+                action="store_true",
+                help="Don't write to /etc/mtab.",
             ),
-            Option(
-                short="-o",
-                long="--options",
-                type="str",
-                description="Comma-separated list of mount options.",
+            Argument(
+                "-o",
+                "--options",
+                help="Comma-separated list of mount options.",
             ),
-            Option(
-                short="-r",
-                long="--read-only",
-                description="Mount the filesystem read-only.",
+            Argument(
+                "-r",
+                "--read-only",
+                action="store_true",
+                help="Mount the filesystem read-only.",
             ),
-            Option(
-                short="-t",
-                long="--types",
-                type="str",
-                description="Limit the set of filesystem types.",
+            Argument(
+                "-t",
+                "--types",
+                help="Limit the set of filesystem types.",
             ),
-            Option(
-                short="-v",
-                long="--verbose",
-                description="Say what is being done.",
+            Argument(
+                "-v",
+                "--verbose",
+                action="store_true",
+                help="Say what is being done.",
             ),
-            Option(
-                short="-w",
-                long="--rw",
-                description="Mount the filesystem read-write (default).",
+            Argument(
+                "-w",
+                "--rw",
+                action="store_true",
+                help="Mount the filesystem read-write (default).",
             ),
-            Option(
-                short="-B",
-                long="--bind",
-                description="Mount a subtree somewhere else.",
+            Argument(
+                "-B",
+                "--bind",
+                action="store_true",
+                help="Mount a subtree somewhere else.",
             ),
-            Option(
-                short="-M",
-                long="--move",
-                description="Move a subtree to some other place.",
+            Argument(
+                "-M",
+                "--move",
+                action="store_true",
+                help="Move a subtree to some other place.",
             ),
-            Option(
-                short="-R",
-                long="--rbind",
-                description="Mount a subtree and all submounts somewhere "
-                "else.",
+            Argument(
+                "-R",
+                "--rbind",
+                action="store_true",
+                help="Mount a subtree and all submounts somewhere else.",
             ),
+            Argument("texts", nargs="*", metavar=""),
         ),
-        rest=Operand(type="str"),
     ),
     "file": CommandSpec(
-        options=(
-            Option(short="-b"),
-            Option(short="-i"),
-            Option(short="-L"),
-            Option(short="-h"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-b", action="store_true"),
+            Argument("-i", action="store_true"),
+            Argument("-L", action="store_true"),
+            Argument("-h", action="store_true"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
 }

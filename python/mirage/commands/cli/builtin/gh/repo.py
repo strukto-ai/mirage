@@ -633,7 +633,7 @@ async def clone_cmd(
         ref = parse_repo(spec)
     url = f"{web_origin(inv.config)}/{ref.owner}/{ref.repo}.git"
     target = names[1] if len(names) > 1 else ref.repo
-    leaf, _ = find_node(GIT, ["clone"]) or (GIT, ())
+    leaf, _ = find_node(GIT.spec, ["clone"]) or (GIT.spec, ())
     words = [*gitflags, url, target]
     parsed = parse_command(
         leaf,

@@ -20,10 +20,10 @@ from mirage.commands.cli.builtin.gh.constants import (
     SEARCH_SORTS,
 )
 from mirage.commands.cli.builtin.gh.template import render_template
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLIHandler, CLIInvocation
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GhConfig
 from mirage.core.github.search import search
@@ -97,60 +97,61 @@ def _query(kind: str, words: tuple[str, ...], fl: FlagView) -> str:
     )
 
 
-def _option(name: str) -> Option:
+def _option(name: str) -> Argument:
     choices = {
         "state": ("open", "closed"),
         "include-forks": ("false", "true", "only"),
         "checks": ("pending", "success", "failure"),
         "review": ("none", "required", "approved", "changes_requested"),
     }.get(name, ())
-    return Option(
-        long="--" + name,
-        short={"repo": "-R", "base": "-B", "head": "-H"}.get(name),
-        type="str",
-        multiple=name in SEARCH_MULTIPLE,
-        value_optional=name in SEARCH_BOOLEAN,
+    short = {"repo": "-R", "base": "-B", "head": "-H"}.get(name)
+    names = (short, "--" + name) if short is not None else ("--" + name,)
+    return Argument(
+        *names,
+        action="append" if name in SEARCH_MULTIPLE else "store",
+        nargs="?" if name in SEARCH_BOOLEAN else None,
+        attached_only=name in SEARCH_BOOLEAN,
         choices=("true", "false") if name in SEARCH_BOOLEAN else choices,
     )
 
 
-def search_spec() -> CLISpec:
+def search_spec() -> CommandSpec:
     leaves = []
     for kind in SEARCH_FLAGS:
         options = [_option(name) for name in SEARCH_FLAGS[kind]]
         options.extend(
             (
-                Option(long="--json", type="str"),
-                Option(long="--jq", short="-q", type="str"),
-                Option(long="--template", short="-t", type="str"),
-                Option(long="--limit", short="-L", type="int", default="30"),
+                Argument("--json"),
+                Argument("-q", "--jq"),
+                Argument("-t", "--template"),
+                Argument("-L", "--limit", type="int", default="30"),
             )
         )
         if kind in SEARCH_SORTS:
             options.extend(
                 (
-                    Option(
-                        long="--sort",
-                        type="str",
-                        choices=tuple(SEARCH_SORTS[kind]),
-                    ),
-                    Option(
-                        long="--order", type="str", choices=("asc", "desc")
-                    ),
+                    Argument("--sort", choices=tuple(SEARCH_SORTS[kind])),
+                    Argument("--order", choices=("asc", "desc")),
                 )
             )
         leaves.append(
-            CLISpec(
+            CommandSpec(
                 name=kind,
                 description=f"Search for {kind}",
-                fn=partial(search_cmd, kind),
-                rest=Operand(type="str", name="QUERY"),
-                options=tuple(options),
+                arguments=(*options, Argument("QUERY", nargs="*")),
             )
         )
-    return CLISpec(
+    return CommandSpec(
         name="search", description="Search GitHub", subcommands=tuple(leaves)
     )
+
+
+def search_handlers() -> dict[str, CLIHandler]:
+    """Bind the search leaves by their canonical paths below gh."""
+    return {
+        f"search {kind}": CLIHandler(fn=partial(search_cmd, kind))
+        for kind in SEARCH_FLAGS
+    }
 
 
 def _search_error(exc: GitHubApiError, query: str) -> str:

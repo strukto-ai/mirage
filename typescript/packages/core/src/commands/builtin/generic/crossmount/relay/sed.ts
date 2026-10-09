@@ -21,23 +21,16 @@ export async function runSed(
   // The session's environment, whose locale decides bytes or characters.
   env?: Record<string, string>,
 ): Promise<CrossResult> {
-  const reads = new IOResult()
   const write = async (path: PathSpec, data: Uint8Array): Promise<void> => {
     await dispatch('write', path, [data])
-    Reflect.deleteProperty(reads.reads, path.virtual)
   }
-  const [body, io] = (await sedGeneric(
-    flatten(scopes),
-    texts,
-    { ...crossOpts(bag), stdin, cwd, dispatch, argv, ...(env !== undefined ? { env } : {}) },
-    fileStreamOp(dispatch, reads),
-    write,
-  )) ?? [null, new IOResult()]
-  const merged = await reads.merge(io)
-  // Every read went through the dispatcher, whose cold read keeps what the
-  // file cache may hold; listing a read path again would keep a filetype
-  // renderer's output there, which cat would then print. A written path
-  // stays listed. Mirrors Python's run_sed.
-  merged.cache = merged.cache.filter((p) => !(p in merged.reads))
-  return [body, merged]
+  return (
+    (await sedGeneric(
+      flatten(scopes),
+      texts,
+      { ...crossOpts(bag), stdin, cwd, dispatch, argv, ...(env !== undefined ? { env } : {}) },
+      fileStreamOp(dispatch),
+      write,
+    )) ?? [null, new IOResult()]
+  )
 }

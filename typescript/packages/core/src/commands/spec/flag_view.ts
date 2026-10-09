@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec, argumentDest } from './compile.ts'
 import { flagKwargName, OPERAND, REFUSED, SPELLED } from './constants.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { PathSpec } from '../../types.ts'
@@ -77,12 +78,7 @@ export function spreadOperands(
  * into a throw. Mirrors Python's `spec_flag_names`.
  */
 export function specFlagNames(spec: CommandSpec): ReadonlySet<string> {
-  const names = new Set<string>()
-  for (const option of spec.options) {
-    const canonical = option.long ?? option.short
-    if (canonical !== null) names.add(flagKwargName(canonical))
-  }
-  return names
+  return new Set(compileSpec(spec).options.map((option) => flagKwargName(argumentDest(option))))
 }
 
 /**

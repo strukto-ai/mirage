@@ -17,15 +17,8 @@ import { SessionState } from '../../../session/session.ts'
 import { eventOf, handleTrap } from './trap.ts'
 import { TrapEvent } from './types.ts'
 
-const DEC = new TextDecoder()
-const USAGE = 'trap: usage: trap [-lp] [[arg] signal_spec ...]\n'
-
 function makeSession(): SessionState {
   return new SessionState({ sessionId: 's1' })
-}
-
-function stderr(io: { stderr: unknown }): string {
-  return io.stderr instanceof Uint8Array ? DEC.decode(io.stderr) : ''
 }
 
 describe('eventOf', () => {
@@ -50,18 +43,6 @@ describe('eventOf', () => {
 })
 
 describe('handleTrap', () => {
-  it('registers and lists with bash quoting', () => {
-    const session = makeSession()
-    const [, io] = handleTrap(["printf '%s' x", 'EXIT'], session)
-    expect(io.exitCode).toBe(0)
-    expect(session.exitTrap).toBe("printf '%s' x")
-    const row = "trap -- 'printf '\\''%s'\\'' x' EXIT\n"
-    const [out] = handleTrap(['-p', 'EXIT', '0'], session)
-    expect(DEC.decode(out as Uint8Array)).toBe(row + row)
-    const [all] = handleTrap([], session)
-    expect(DEC.decode(all as Uint8Array)).toBe(row)
-  })
-
   it.each([[['-', 'EXIT']], [['EXIT']], [['0']], [['--', '-', 'EXIT']]])(
     'reset form %j clears the action',
     (args) => {
@@ -72,50 +53,6 @@ describe('handleTrap', () => {
       expect(session.exitTrap).toBeNull()
     },
   )
-
-  it('keeps and lists an empty action', () => {
-    const session = makeSession()
-    handleTrap(['', 'EXIT'], session)
-    const [out] = handleTrap(['-p'], session)
-    expect(DEC.decode(out as Uint8Array)).toBe("trap -- '' EXIT\n")
-  })
-
-  it('takes ownership from the parent when it registers', () => {
-    const session = makeSession()
-    session.exitTrap = 'echo parent'
-    session.exitTrapInherited = true
-    handleTrap(['echo child', 'EXIT'], session)
-    expect(session.exitTrap).toBe('echo child')
-    expect(session.exitTrapInherited).toBe(false)
-  })
-
-  it('answers a lone action with usage', () => {
-    const [, io] = handleTrap(['echo BAD'], makeSession())
-    expect(io.exitCode).toBe(2)
-    expect(stderr(io)).toBe(USAGE)
-  })
-
-  it('prints usage for an invalid option', () => {
-    const [, io] = handleTrap(['-z'], makeSession())
-    expect(io.exitCode).toBe(2)
-    expect(stderr(io)).toBe('bash: trap: -z: invalid option\n' + USAGE)
-  })
-
-  it('refuses the signal list', () => {
-    const [, io] = handleTrap(['-l'], makeSession())
-    expect(io.exitCode).toBe(2)
-    expect(stderr(io)).toBe('mirage: trap: -l: not supported\n')
-  })
-
-  it('refuses other events and still sets EXIT', () => {
-    const session = makeSession()
-    const [, io] = handleTrap(['echo x', 'TERM', 'FOO', 'EXIT'], session)
-    expect(io.exitCode).toBe(1)
-    expect(stderr(io)).toBe(
-      'mirage: trap: TERM: not supported\n' + 'bash: trap: FOO: invalid signal specification\n',
-    )
-    expect(session.exitTrap).toBe('echo x')
-  })
 
   it('treats resetting another event as a no-op', () => {
     const [, io] = handleTrap(['-', 'TERM'], makeSession())

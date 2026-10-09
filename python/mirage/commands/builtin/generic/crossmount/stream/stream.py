@@ -127,7 +127,6 @@ async def run_stream(
         result.reads = merged.reads
         result.writes = merged.writes
         result.cache = merged.cache
-        result.renames = merged.renames
         result.matched_runs = merged.matched_runs
         result.sized_runs = merged.sized_runs
         result.counted_runs = merged.counted_runs

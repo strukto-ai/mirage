@@ -1,3 +1,5 @@
+import { CommandSpec } from '../../../spec/types.ts'
+
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { JsonValue } from '../../../../types.ts'
 import { csvValues, ghBool, ghTransport, jsonFields, textOut, typedOut } from './accessor.ts'
@@ -11,11 +13,11 @@ import {
   SEARCH_SORTS,
 } from './constants.ts'
 import { renderTemplate } from './template.ts'
-import { CLISpec, type CLIInvocation } from '../../types.ts'
+import { CLIHandler, type CLIInvocation } from '../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { Option, Operand } from '../../../spec/types.ts'
+import { Argument } from '../../../spec/types.ts'
 import { GitHubApiError } from '../../../../core/github/client.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { search } from '../../../../core/github/search.ts'
@@ -75,7 +77,7 @@ function query(kind: string, words: readonly string[], fl: FlagView): string {
   ].join(' ')
 }
 
-function option(name: string): Option {
+function option(name: string): Argument {
   const choices: Record<string, string[]> = {
     state: ['open', 'closed'],
     'include-forks': ['false', 'true', 'only'],
@@ -83,43 +85,49 @@ function option(name: string): Option {
     review: ['none', 'required', 'approved', 'changes_requested'],
   }
   const shorts: Record<string, string> = { repo: '-R', base: '-B', head: '-H' }
-  return new Option({
-    long: `--${name}`,
-    ...(shorts[name] === undefined ? {} : { short: shorts[name] }),
-    type: 'str',
-    multiple: SEARCH_MULTIPLE.includes(name),
-    valueOptional: SEARCH_BOOLEAN.includes(name),
+  return new Argument([...(shorts[name] === undefined ? [] : [shorts[name]]), `--${name}`], {
+    action: SEARCH_MULTIPLE.includes(name) ? 'append' : 'store',
+    nargs: SEARCH_BOOLEAN.includes(name) ? '?' : null,
+    attachedOnly: SEARCH_BOOLEAN.includes(name),
     choices: SEARCH_BOOLEAN.includes(name) ? ['true', 'false'] : (choices[name] ?? []),
   })
 }
 
-export function searchSpec(): CLISpec {
-  return new CLISpec({
+export function searchSpec(): CommandSpec {
+  return new CommandSpec({
     name: 'search',
     description: 'Search GitHub',
     subcommands: Object.entries(SEARCH_FLAGS).map(
       ([kind, names]) =>
-        new CLISpec({
+        new CommandSpec({
           name: kind,
           description: `Search for ${kind}`,
-          fn: (inv) => searchCmd(kind, inv),
-          rest: new Operand({ type: 'str', name: 'QUERY' }),
-          options: [
+          arguments: [
             ...names.map(option),
-            new Option({ long: '--json', type: 'str' }),
-            new Option({ long: '--jq', short: '-q', type: 'str' }),
-            new Option({ long: '--template', short: '-t', type: 'str' }),
-            new Option({ long: '--limit', short: '-L', type: 'int', default: '30' }),
+            new Argument('--json'),
+            new Argument(['-q', '--jq']),
+            new Argument(['-t', '--template']),
+            new Argument(['-L', '--limit'], { type: 'int', default: '30' }),
             ...(SEARCH_SORTS[kind] === undefined
               ? []
               : [
-                  new Option({ long: '--sort', type: 'str', choices: SEARCH_SORTS[kind] }),
-                  new Option({ long: '--order', type: 'str', choices: ['asc', 'desc'] }),
+                  new Argument('--sort', { choices: SEARCH_SORTS[kind] }),
+                  new Argument('--order', { choices: ['asc', 'desc'] }),
                 ]),
+            new Argument('QUERY', { nargs: '*' }),
           ],
         }),
     ),
   })
+}
+
+export function searchHandlers(): Record<string, CLIHandler> {
+  return Object.fromEntries(
+    Object.keys(SEARCH_FLAGS).map((kind) => [
+      `search ${kind}`,
+      new CLIHandler({ fn: (inv) => searchCmd(kind, inv) }),
+    ]),
+  )
 }
 
 async function searchCmd(kind: string, inv: CLIInvocation): Promise<CommandFnResult> {

@@ -19,8 +19,8 @@ import { NodeType as NT } from './types.ts'
  * Statement kinds the executor dispatches on.
  *
  * `nodeKind` owns every tree-sitter node-type check, including the
- * lookahead that distinguishes `select` from `for` and `until` from
- * `while`.
+ * lookahead that distinguishes `select` from `for`, `until` from `while`
+ * and a `(( ))` command from a `{ }` group.
  */
 export const NodeKind = Object.freeze({
   COMMENT: 'comment',
@@ -32,6 +32,7 @@ export const NodeKind = Object.freeze({
   REDIRECT: 'redirect',
   SUBSHELL: 'subshell',
   COMPOUND: 'compound',
+  ARITH: 'arith',
   IF: 'if',
   FOR: 'for',
   CFOR: 'cfor',
@@ -110,11 +111,6 @@ const PIPELINE_TRANSPARENT_KINDS: ReadonlySet<NodeKind> = new Set([
  */
 export function pipelineTransparent(node: KindNodeLike): boolean {
   const kind = nodeKind(node)
-  if (kind === NodeKind.COMPOUND) {
-    // `(( ))` parses as a compound statement too, and it is a command of
-    // its own, not a group.
-    return node.children?.[0]?.type !== NT.ARITH_OPEN
-  }
   if (kind === NodeKind.REDIRECT) {
     // A redirected statement is as transparent as what it redirects:
     // `{ false | true; } >f` keeps the group's record, while `echo hi >f`
@@ -160,6 +156,9 @@ export function simpleCommand(node: KindNodeLike): boolean {
 export function nodeKind(node: KindNodeLike): NodeKind {
   const ntype = node.type
   const simple = SIMPLE_KINDS[ntype]
+  if (simple === NodeKind.COMPOUND && node.children?.[0]?.type === NT.ARITH_OPEN) {
+    return NodeKind.ARITH
+  }
   if (simple !== undefined) return simple
   if (ntype === NT.FOR_STATEMENT) {
     if (node.children?.[0]?.type === NT.SELECT) return NodeKind.SELECT

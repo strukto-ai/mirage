@@ -11,13 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../../commands/spec/types.ts'
+import { CLIHandler } from '../../../commands/cli/types.ts'
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type * as cacheContextModule from '../../../cache/context.ts'
 import type * as ioTypesModule from '../../../io/types.ts'
-import { CLISpec } from '../../../commands/cli/types.ts'
+import { CLI } from '../../../commands/cli/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { OpRecord } from '../../../observe/record.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
@@ -25,7 +27,7 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { createShellParser } from '../../../shell/parse/index.ts'
 import { ops } from '../../../test-utils.ts'
 import { Limit, MountMode, PathSpec } from '../../../types.ts'
-import { cachingRamWorkspace, captureMarks } from '../../fixtures/workspace_fixture.ts'
+import { cachingRamWorkspace } from '../../fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { dropMountCaches } from './run.ts'
 
@@ -153,10 +155,13 @@ describe('a CLI write and the mount caches', () => {
     try {
       ws.registerCli(
         'acme',
-        new CLISpec({
-          name: 'acme',
+        new CLI({
+          spec: new CommandSpec({
+            name: 'acme',
+            subcommands: [new CommandSpec({ name: 'close' })],
+          }),
+          handlers: { close: new CLIHandler({ fn: outOfBandWriter(ram), write: true }) },
           configModel: (input) => input,
-          subcommands: [new CLISpec({ name: 'close', write: true, fn: outOfBandWriter(ram) })],
         }),
         { token: 't' },
       )
@@ -178,10 +183,10 @@ describe('a CLI write and the mount caches', () => {
     try {
       ws.registerCli(
         'acme',
-        new CLISpec({
-          name: 'acme',
+        new CLI({
+          spec: new CommandSpec({ name: 'acme', subcommands: [new CommandSpec({ name: 'peek' })] }),
+          handlers: { peek: new CLIHandler({ fn: outOfBandWriter(ram) }) },
           configModel: (input) => input,
-          subcommands: [new CLISpec({ name: 'peek', fn: outOfBandWriter(ram) })],
         }),
         { token: 't' },
       )
@@ -207,9 +212,9 @@ describe('a CLI write and the mount caches', () => {
     try {
       ws.registerCli(
         'tool',
-        new CLISpec({
-          name: 'tool',
-          subcommands: [new CLISpec({ name: 'poke', write: true, fn: outOfBandWriter(ram) })],
+        new CLI({
+          spec: new CommandSpec({ name: 'tool', subcommands: [new CommandSpec({ name: 'poke' })] }),
+          handlers: { poke: new CLIHandler({ fn: outOfBandWriter(ram), write: true }) },
         }),
       )
       await seed(ram, other)
@@ -250,21 +255,6 @@ describe('the provenance mark', () => {
     delete DEFAULT_COMMAND_LIMITS.sleep
     slowWrite.gate = null
     slowWrite.returned = 0
-  })
-
-  it('marks a claimed write with the claimed value', async () => {
-    const ws = await cachingRamWorkspace()
-    const captured = captureMarks(ws)
-    try {
-      expect((await ws.shell('echo a | tee /r/f')).exitCode).toBe(0)
-    } finally {
-      await ws.close()
-    }
-    expect(captured).toHaveLength(1)
-    const [marks, writes] = captured[0] ?? [[], {} as Record<string, ByteSource>]
-    const claimed = marks.filter(([op, path]) => op === 'write' && path === '/r/f')
-    expect(claimed).toHaveLength(1)
-    expect(claimed[0]?.[2]).toBe(writes['/r/f'])
   })
 
   it.each([

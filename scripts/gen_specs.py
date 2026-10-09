@@ -20,15 +20,17 @@ import pkgutil
 import sys
 from collections.abc import Sequence
 from dataclasses import MISSING, Field, asdict, fields
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
 import mirage.commands.builtin
+from mirage.commands.cli.specs import BUILTIN_CLI_SPECS, cli_spec_for
 from mirage.commands.config import Command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import CommandSpec, Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.registry import REGISTRY, resolve_class
 
@@ -166,6 +168,8 @@ def _meta_for(rcs: list[Command]) -> dict[str, Any]:
 def _default(o: object) -> object:
     if isinstance(o, (set, frozenset)):
         return sorted(o)
+    if isinstance(o, Enum):
+        return o.value
     raise TypeError(f"unserializable: {type(o)}")
 
 
@@ -203,17 +207,44 @@ def _prune(payload: dict[str, Any], cls: type) -> dict[str, Any]:
     return kept
 
 
-def _spec_payload(spec: Any) -> dict[str, Any]:
+def _spec_payload(spec: CommandSpec) -> dict[str, Any]:
     payload = _prune(asdict(spec), CommandSpec)
-    if "options" in payload:
-        payload["options"] = [_prune(o, Option) for o in payload["options"]]
-    if "positional" in payload:
-        payload["positional"] = [
-            _prune(p, Operand) for p in payload["positional"]
+    if "arguments" in payload:
+        # Parsing and help partition options from positionals. Keep the
+        # order within each partition while comparing the shared grammar.
+        payload["arguments"] = [
+            _prune(argument, Argument)
+            for argument in sorted(
+                payload["arguments"],
+                key=lambda arg: not arg["names"][0].startswith("-"),
+            )
         ]
-    if payload.get("rest") is not None:
-        payload["rest"] = _prune(payload["rest"], Operand)
+    if "subcommands" in payload:
+        payload["subcommands"] = [
+            _spec_payload(child) for child in spec.subcommands
+        ]
     return payload
+
+
+def _cli_specs() -> dict[str, Any]:
+    """Dump every bundled CLI grammar and canonical handler policy."""
+    programs = {}
+    for name in sorted(BUILTIN_CLI_SPECS):
+        cli = cli_spec_for(name)
+        programs[name] = {
+            "grammar": _spec_payload(cli.spec),
+            "handlers": {
+                path: {
+                    "write": handler.write,
+                    "limit": handler.limit.model_dump(mode="json")
+                    if handler.limit is not None
+                    else None,
+                }
+                for path, handler in sorted(cli.handlers.items())
+            },
+            "config_model": cli.config_model is not None,
+        }
+    return programs
 
 
 def _emit_one(
@@ -422,9 +453,12 @@ def _emit_vfs_names(registry: dict[str, list[Command]]) -> None:
         "command_vfs_names": sorted(command_vfs_names),
         "capabilities": _capabilities(),
         "configs": _configs(),
+        "cli_specs": _cli_specs(),
     }
     path = OUT.parent / "vfs.json"
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, default=_default) + "\n"
+    )
     print(f"emitted {len(payload['registry'])} registry names to {path}")
 
 

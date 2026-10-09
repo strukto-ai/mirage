@@ -28,9 +28,7 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     handle_declare_functions,
     handle_declare_print,
-    handle_export,
     handle_local,
-    handle_readonly,
     note_local_array,
 )
 from mirage.workspace.executor.builtins.declare.constants import (
@@ -41,12 +39,15 @@ from mirage.workspace.executor.builtins.declare.declare import (
     declared_kind,
     held_value,
     kind_conflict,
+    mark_names,
     start_local,
 )
 from mirage.workspace.executor.builtins.declare.types import (
     AttrMarks,
+    Declaration,
     DeclarationOperand,
 )
+from mirage.workspace.executor.builtins.shared import fail
 from mirage.workspace.expand import expand_node
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -55,7 +56,6 @@ from mirage.workspace.session.state import (
     conversion_scalar,
     ensure_var_visible,
     seed_var,
-    session_view,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -102,16 +102,6 @@ _DECLARE_USAGE = (
     "declare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] "
     "or declare -p [-aAfFilnrtux] [name ...]"
 )
-# The stored attributes a `-letter` / `+letter` toggles.
-_ATTR_LETTERS = {
-    "i": VarAttr.INTEGER,
-    "l": VarAttr.LOWER,
-    "u": VarAttr.UPPER,
-    "n": VarAttr.NAMEREF,
-    "t": VarAttr.TRACE,
-    "x": VarAttr.EXPORT,
-    "r": VarAttr.READONLY,
-}
 # `-l` displaces `-u` and vice versa; the record keeps one.
 _DISPLACES = {"l": VarAttr.UPPER, "u": VarAttr.LOWER}
 # The attributes that shape a value as it stores.
@@ -119,10 +109,7 @@ _SHAPING = frozenset({VarAttr.INTEGER, VarAttr.LOWER, VarAttr.UPPER})
 
 
 def _declare_option_refusal(
-    cmd: str,
-    flag_chars: set[str],
-    plus_chars: set[str],
-    context: EvaluationContext,
+    cmd: str, flag_chars: set[str], plus_chars: set[str]
 ) -> tuple[Any, IOResult, ExecutionNode] | None:
     """The refusal a `declare` family option cluster earns, if any.
 
@@ -134,8 +121,6 @@ def _declare_option_refusal(
         cmd (str): the builtin's own name for the diagnostic.
         flag_chars (set[str]): the `-` letters, `--` excluded.
         plus_chars (set[str]): the `+` letters.
-        context (EvaluationContext): the evaluation (unused today, kept so
-            a later check that reads it does not change the signature).
     """
     bad = next(
         (
@@ -148,13 +133,8 @@ def _declare_option_refusal(
     if bad is None:
         return None
     sign = "-" if bad in flag_chars else "+"
-    err = encode_text(
-        f"bash: {cmd}: {sign}{bad}: invalid option\n{_DECLARE_USAGE}\n"
-    )
-    return (
-        None,
-        IOResult(exit_code=2, stderr=err),
-        ExecutionNode(command=cmd, exit_code=2, stderr=err),
+    return fail(
+        cmd, f"bash: {cmd}: {sign}{bad}: invalid option\n{_DECLARE_USAGE}\n", 2
     )
 
 
@@ -183,11 +163,11 @@ def _declared_marks(flag_chars: set[str], plus_chars: set[str]) -> AttrMarks:
     marks: list[tuple[VarAttr, bool]] = []
     for c in "xiluntr":
         if c in on:
-            marks.append((_ATTR_LETTERS[c], True))
+            marks.append((VarAttr(c), True))
             if c in _DISPLACES:
                 marks.append((_DISPLACES[c], False))
         elif c in plus_chars and c != "r":
-            marks.append((_ATTR_LETTERS[c], False))
+            marks.append((VarAttr(c), False))
     return tuple(marks)
 
 
@@ -299,7 +279,7 @@ async def execute_declaration(
                 not opts_done
                 and expanded.startswith("+")
                 and len(expanded) > 1
-                and keyword in (NT.LOCAL, "declare", "typeset")
+                and keyword not in VISIBLE_SCOPE_BUILTINS
             ):
                 # `+attr` turns an attribute off. Only the declare
                 # family reads it: `export +x` and `readonly +r` are
@@ -319,17 +299,17 @@ async def execute_declaration(
             b"".join(trace_array(n, items, add) for n, add, items in staged)
             + trace_command([cmd_word, *traced])
         )
-    if keyword in (NT.LOCAL, "declare", "typeset"):
-        refused = _declare_option_refusal(
-            cmd_word, flag_chars, plus_chars, context
-        )
-        if refused is not None:
-            return refused
-    if ("f" in flag_chars or "F" in flag_chars) and keyword in (
-        NT.LOCAL,
-        "declare",
-        "typeset",
-    ):
+    if keyword in VISIBLE_SCOPE_BUILTINS:
+        # Array literals travel as data: the handler stores them through
+        # the session view and owns both refusal voices, so the executor
+        # only expands and stages. The flags pass through so -p, the bare
+        # listing and bad options work.
+        attr = VarAttr.READONLY if keyword == "readonly" else VarAttr.EXPORT
+        return await mark_names([*flag_words, *operands], session, view, attr)
+    refused = _declare_option_refusal(cmd_word, flag_chars, plus_chars)
+    if refused is not None:
+        return refused
+    if "f" in flag_chars or "F" in flag_chars:
         # `-f`/`-F` select functions, not variables: `-rf` freezes,
         # `-xf` exports, `-f NAME` prints the body, `-F NAME` prints the
         # name, and a missing name is exit 1 without a word.
@@ -352,13 +332,12 @@ async def execute_declaration(
         return await handle_declare_print(words, session, flag_chars)
     conversion_errors: list[str] = []
     kind = declared_kind(flag_chars)
-    if kind is not None and keyword not in VISIBLE_SCOPE_BUILTINS:
+    if kind is not None:
         # `declare -a NAME` / `declare -A NAME` with no value declare
         # an empty array of that kind, so ${#NAME[@]} is 0 and an
         # element write leaves the other slots unassigned. GNU
         # refuses to convert between the two kinds and says so per
-        # name while the rest of the operands still declare. `export`
-        # and `readonly` leave a bare name's value alone.
+        # name while the rest of the operands still declare.
         want_assoc = kind is VarKind.ASSOC
         for bare in words:
             if "=" in bare:
@@ -410,43 +389,20 @@ async def execute_declaration(
                 )
             else:
                 seed_var(session, bare, [] if scalar is None else [scalar])
-    handler_view = session_view(
-        session,
-        namespace.registry.policies,
-        diagnostics=context.frame.diagnostics,
-    )
     # declare/typeset scope like `local` inside a function (bash
     # semantics) and assign globally at top level, which is exactly
     # handle_local's fallback when no function scope is active. `-r`
     # rides the same path and lands on what each operand wrote, so
     # `f() { local -r A=(x); }` freezes f's own A, not the caller's.
-    if keyword in (NT.LOCAL, "declare", "typeset"):
-        result = await handle_local(
-            operands,
-            session,
-            handler_view,
-            # `declare`/`typeset` share this handler but have to name
-            # themselves in a diagnostic rather than say `local`.
-            cmd=cmd_word,
-            kind=kind,
-            shaping=shaping,
-            marks=marks,
-            plus="".join(sorted(plus_chars)),
-            nameref="n" in flag_chars and "n" not in plus_chars,
-            global_scope="g" in flag_chars,
-            inherit="I" in flag_chars,
-        )
-        return _merge_conversion_errors(result, conversion_errors)
-    # Array literals travel as data: the handler stores them through
-    # the session view and owns both refusal voices, so the executor
-    # only expands and stages. The flags pass through so -p, the bare
-    # listing and bad options work.
-    if keyword == "readonly":
-        result = await handle_readonly(
-            [*flag_words, *operands], session, handler_view, kind=kind
-        )
-    else:
-        result = await handle_export(
-            [*flag_words, *operands], session, handler_view
-        )
+    decl = Declaration(
+        cmd=cmd_word,
+        kind=kind,
+        shaping=shaping,
+        marks=marks,
+        plus="".join(sorted(plus_chars)),
+        nameref="n" in flag_chars and "n" not in plus_chars,
+        global_scope="g" in flag_chars,
+        inherit="I" in flag_chars,
+    )
+    result = await handle_local(operands, session, view, decl)
     return _merge_conversion_errors(result, conversion_errors)

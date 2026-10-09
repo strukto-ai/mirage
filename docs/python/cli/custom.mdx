@@ -5,8 +5,11 @@ icon: code
 ---
 
 Define a custom CLI when an agent needs service operations with a stable
-command grammar. Use a typed `CLISpec` for parsed commands and generated help,
+command grammar. Use a typed `CLI` for parsed commands and generated help,
 or a script CLI when the program should parse its own arguments.
+
+Shell builtins and CLIs keep separate catalogs and dispatch. Both use
+`CommandSpec` for argument parsing.
 
 ## Define a typed command
 
@@ -19,35 +22,32 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from mirage import (CLIInvocation, CLISpec, FlagView, Operand, Option,
-                    Workspace)
+from mirage import (Argument, CLI, CLIHandler, CLIInvocation, CommandSpec,
+                    FlagView, Workspace)
 from mirage.io import IOResult
-
 
 class PagerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     account: Literal["engineering", "support"]
-
 
 async def acknowledge(inv: CLIInvocation[PagerConfig]) -> tuple[bytes, IOResult]:
     incident_id = inv.texts[0]
     by = FlagView(inv.flags, inv.spec).as_str("by")
     return f"acknowledged {incident_id} by {by}\n".encode(), IOResult()
 
-
-PAGER = CLISpec(
-    name="pager",
-    config_model=PagerConfig,
-    subcommands=(
-        CLISpec(
+PAGER = CLI(
+    spec=CommandSpec(
+        name="pager",
+        subcommands=(CommandSpec(
             name="ack",
-            fn=acknowledge,
-            write=True,
-            positional=(Operand(name="INCIDENT_ID", type="str",
-                                required=True), ),
-            options=(Option(long="--by", type="str", required=True), ),
-        ),
+            arguments=(
+                Argument("INCIDENT_ID"),
+                Argument("--by", required=True),
+            ),
+        ),),
     ),
+    handlers={"ack": CLIHandler(fn=acknowledge, write=True)},
+    config_model=PagerConfig,
 )
 
 ws = Workspace({})
@@ -56,7 +56,7 @@ ws.register_cli("pager-support", PAGER, {"account": "support"})
 ```
 
 
-The same spec can be installed for multiple accounts. Service IDs use textual
+The same CLI can be installed for multiple accounts. Service IDs use textual
 operands; file operands use `type="path"`. Read flags through `FlagView(inv.flags, inv.spec)`
 so a read of an undeclared option fails rather than looking like an omitted flag.
 
@@ -64,26 +64,31 @@ so a read of an undeclared option fails rather than looking like an omitted flag
 
 | Node | Declares | Handler input |
 | --- | --- | --- |
-| Leaf | `fn`, options and operands | Parsed flags, paths and text on `inv` |
+| Leaf | `CommandSpec.arguments`, a `CLIHandler` binding | Parsed flags, paths and text on `inv` |
 | Group | `subcommands`, optional inherited options | Dispatches to a leaf |
-| Script root | `script`, optional runtime | Raw argv, stdin and environment |
+| Script CLI | `CLI.script`, optional runtime | Raw argv, stdin and environment |
 
-A node has exactly one of these shapes. Names and aliases are single words;
+A typed node is a leaf or a group. Names and aliases are single words;
 child names and aliases share one namespace. Options cannot collide across
 ancestors and descendants. Construction validates the tree and compiles the
 grammar; do not repeat parser validation in every handler.
 
-Declare `config_model` only on the root of an account CLI. Registration validates
+`CommandSpec.arguments` holds options and positional arguments: a dashed name
+such as `--by` declares an option; a bare name declares a positional.
+`CLI.handlers` maps canonical paths below the root to `CLIHandler` bindings,
+such as `"ack"`, `"incident ack"`, or `""` for a single-command program.
+
+Declare `config_model` on the account `CLI`. Registration validates
 each installation, and `inv.config` holds that account's settings. Without a
 config model, a typed CLI accepts no config and receives `None`.
 
-Mark mutating leaves `write=True`. This classifies the command for policy and
+Mark mutating `CLIHandler` bindings `write=True`. This classifies the command for policy and
 cache invalidation; it does not grant permission or perform the mutation.
 Descriptions, options and operands supply `--help` and `man` at every level.
 
 ## Register the program
 
-Installing a tree directly is the shortest path:
+Installing a CLI directly is the shortest path:
 
 ```python
 ws.register_cli("pager-eng", PAGER, {"account": "engineering"})
@@ -92,7 +97,7 @@ ws.register_cli("pager-eng", PAGER, {"account": "engineering"})
 The installed name is the dispatch key and does not have to equal the spec's
 root name. This is what makes one tree usable for several accounts.
 
-To resolve a bare name from workspace YAML, register the tree before loading
+To resolve a bare name from workspace YAML, register the CLI before loading
 the workspace:
 
 ```python
@@ -111,7 +116,7 @@ clis:
 
 `cli:` may instead point directly at `module:ATTR` or `./file.py:ATTR`. Relative
 files resolve next to the YAML file. A packaged Python CLI can publish the same
-tree without import side effects:
+CLI without import side effects:
 
 ```toml
 [project.entry-points."mirage.clis"]
@@ -134,7 +139,7 @@ Build the service client from `inv.config`. A CLI should not find a matching
 VFS to obtain credentials or a backend accessor. Reuse core service functions
 between CLI and VFS implementations where their behavior is the same.
 
-File arguments use `inv.view`:
+For file arguments such as uploads or attachments, use `inv.view`:
 
 | Entry point | Purpose |
 | --- | --- |
@@ -160,9 +165,9 @@ A named typed CLI is saved by spec name. Fields declared as Pydantic secrets in
 `config_model` are redacted. Loading that snapshot must provide fresh install
 config through `clis=`; Mirage refuses to restore redacted credentials as if
 they were usable values. The loading process must also make the spec name
-resolvable, or pass `(spec, config)` as that install's `clis=` override. A tree
+resolvable, or pass `(cli, config)` as that install's `clis=` override. A tree
 installed directly in live code survives `Workspace.copy`, which carries the
-live spec and revealed config together.
+live CLI and revealed config together.
 
 A script CLI is different: the script source is embedded in the snapshot and
 its opaque config is serialized verbatim because there is no config model to
@@ -185,16 +190,16 @@ clis:
 
 The file is embedded at load. Words after the head arrive as argv, piped input
 arrives on stdin, and config arrives as JSON in `MIRAGE_CLI_CONFIG`. The
-program's stdout, stderr, and exit status become the shell result. A script root
-cannot declare `config_model`, subcommands, or a function leaf; it parses and
+program's stdout, stderr, and exit status become the shell result. A script CLI
+cannot declare `config_model`, subcommands, or function handlers; it parses and
 documents its own options, including `--help`.
 
 Slot 0 is the installed name on monty and quickjs, so two installs can identify
 themselves and user-facing errors can name the invoked program. Wasi and local
 run CPython with `-c`, which owns `sys.argv[0]`; arguments still begin at index
 1. A YAML script declares no Mirage grammar, so every option reaches the
-program unchanged. A script spec constructed in code may declare options or
-operands to opt back into Mirage parsing and generated help.
+program unchanged. A script CLI constructed in code may supply a `CommandSpec`
+to opt into Mirage parsing and generated help.
 
 Runtime argument spellings differ:
 
@@ -210,65 +215,48 @@ broader authority is intentional.
 
 ## Authoring reference
 
-The public constructors and their source docstrings are authoritative for exact
-types and defaults: [`CLISpec` and `CLIInvocation`](https://github.com/strukto-ai/mirage/blob/main/python/mirage/commands/cli/types.py),
-and [`Option` and `Operand`](https://github.com/strukto-ai/mirage/blob/main/python/mirage/commands/spec/types.py).
-The shared worked-example gate compiles these public imports and pins their
-runtime behavior; source-adjacent constructor tests pin the validation rules.
-The tables below explain how an author should use that surface.
+The public constructors document exact types and defaults:
+[`CLI` and `CLIHandler`](https://github.com/strukto-ai/mirage/blob/main/python/mirage/commands/cli/types.py),
+and [`CommandSpec` and `Argument`](https://github.com/strukto-ai/mirage/blob/main/python/mirage/commands/spec/types.py).
 
-### `CLISpec`
+### `CLI` and `CLIHandler`
 
 | Field | Authoring meaning |
 | --- | --- |
-| `name` | Word at this node; root identity or canonical subcommand name. |
-| `aliases` | Alternate subcommand words; inert on the installed root. |
-| `fn` | Leaf handler, called only as `fn(inv)`. |
+| `CLI.spec` | Root `CommandSpec` describing the program's grammar. |
+| `CLI.handlers` | Canonical leaf paths mapped to `CLIHandler` bindings. |
+| `CLI.config_model` | Pydantic model for per-install account validation. |
+| `CLI.script`, `CLI.runtime` | Embedded script and optional runtime; used instead of typed handlers. |
+| `CLIHandler.fn` | Leaf handler, called as `fn(inv)`. |
+| `CLIHandler.write`, `CLIHandler.limit` | Mutation classification and optional execution-limit category. |
+
+### `CommandSpec`
+
+| Field | Authoring meaning |
+| --- | --- |
+| `name`, `aliases` | Command word and alternate subcommand words. |
 | `subcommands` | Child nodes for a group. |
-| `write` | Marks a mutating leaf for policy classification. |
-| `config_model` | Root Pydantic model for per-install validation and snapshot redaction. |
-| `script` | Embedded whole-program source; mutually exclusive with a typed tree. |
-| `runtime` | Runtime entry name for `script`; absent means first language match. |
-| `usage_style` | One renderer/error dialect for the whole program. Keep the default for an invented CLI. |
-| `limit` | Optional execution-limit category for a leaf. |
-| `options` | Options parsed at this node; group values merge into the leaf flags. |
-| `positional` | Ordered operand slots; leaf-only on a tree. |
-| `rest` | Repeated trailing operand slot. |
-| `description` | Help text for this node. |
-| `epilog` | Trailing help text. |
-| `ignore_tokens` | Parser tokens intentionally ignored by a compatibility grammar. |
-| `old_option_style` | Tar-style first-word option cluster; not a general CLI escape hatch. |
-| `operand_base` | Option whose value rebases later path operands; currently tar-style semantics. |
+| `arguments` | Options and positional arguments; group options are inherited by leaves. |
+| `description`, `epilog` | Help text and trailing help text. |
+| `usage_style` | Root help and refusal dialect: argparse, Git, clap or Cobra. Cobra keeps standard help and option errors; handlers own missing positional refusals. |
+| `allow_abbrev` | Whether unique long-option prefixes are accepted. |
 
-### `Option`
+### `Argument`
 
 | Field | Authoring meaning |
 | --- | --- |
-| `short`, `long` | Accepted spellings; at least one is required. |
-| `type` | `bool`, `str`, `int`, `float`, or `path`; `path` enters VFS resolution. |
-| `numeric_shorthand` | Accept `-5` as this option's value. |
-| `count` | Count repeated boolean occurrences such as `-vvv`. |
-| `multiple` | Accumulate repeated values in a list. |
-| `pair` | Consume two tokens per occurrence and accumulate them flattened. |
-| `value_optional` | GNU attached optional value such as `--color=auto`. |
-| `short_value` | Whether a value-taking short option accepts an attached value. |
+| Names | One positional name, or one or more dashed option spellings. |
+| `type` | `str` (default), `int`, `float`, or virtual `path`. |
+| `action` | `store` (default), `store_true`, `count`, `append`, or `extend`. |
+| `nargs` | One value by default; `?` for optional or an integer for fixed arity. Positionals also accept `*`, `+`, or `REMAINDER`. |
 | `choices` | Allowed values, validated by the parser. |
-| `required` | Require the option unless a default supplies it. |
-| `default` | Value used when absent; unlike `env`, it does not count as supplied. |
-| `metavar` | Bare value name used by foreign usage styles. |
-| `env` | Session variable supplying an omitted option; counts as supplied. |
-| `description` | Help text. |
+| `required` | Require an option; positional arity comes from `nargs`. |
+| `default`, `env` | Option fallbacks; an environment value counts as supplied. |
+| `help`, `metavar` | Help description and displayed value name. |
 
-### `Operand`
-
-| Field | Authoring meaning |
-| --- | --- |
-| `type` | `path` for VFS-resolved operands or a textual/numeric value type. |
-| `provided_by` | Options that supply this slot and make the positional optional. |
-| `text_when` | Flags that make an otherwise path slot textual. |
-| `name` | Bare name used in usage output. |
-| `required` | Require the slot and let the parser render the error. |
-| `remainder` | Gather every later token verbatim, including option-looking words. |
+This follows argparse's naming conventions and supports a subset of its
+features. Positional defaults and variadic options are unsupported; `append`
+collects single option values, while `extend` flattens fixed groups.
 
 ### `CLIInvocation`
 

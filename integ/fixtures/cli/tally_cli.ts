@@ -1,7 +1,9 @@
 import {
-  CLISpec,
+  CLI,
+  CLIHandler,
+  CommandSpec,
   IOResult,
-  Operand,
+  Argument,
   z,
   type CLIInvocation,
   type CommandFnResult,
@@ -17,16 +19,18 @@ function total(inv: CLIInvocation): CommandFnResult {
   return [new TextEncoder().encode(line), new IOResult()]
 }
 
-export const TALLY = new CLISpec({
-  name: 'tally',
-  description: 'Add numbers in a unit',
+export const TALLY = new CLI({
+  spec: new CommandSpec({
+    name: 'tally',
+    description: 'Add numbers in a unit',
+    subcommands: [
+      new CommandSpec({
+        name: 'sum',
+        description: 'Sum the operands',
+        arguments: [new Argument('values', { nargs: '*', metavar: '' })],
+      }),
+    ],
+  }),
+  handlers: { sum: new CLIHandler({ fn: total }) },
   configModel: TallyConfig,
-  subcommands: [
-    new CLISpec({
-      name: 'sum',
-      description: 'Sum the operands',
-      fn: total,
-      rest: new Operand({ type: 'str' }),
-    }),
-  ],
 })

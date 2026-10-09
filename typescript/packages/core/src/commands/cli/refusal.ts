@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec, argumentDest, optionSpellings, positionalRequired } from '../spec/compile.ts'
 import {
   CLAP_EXIT,
   GIT_LONG_OPTIONS,
@@ -70,37 +71,39 @@ export function gitUsage(path: string, spec: CommandSpec): string {
  */
 function gitRows(path: string, spec: CommandSpec): string[] {
   const table = GIT_LONG_OPTIONS.get(path) ?? []
-  const negations = new Set(
-    spec.options
-      .filter(
-        (opt) =>
-          opt.long?.startsWith(NEGATION) === true &&
-          opt.short === null &&
-          opt.type === 'bool' &&
-          table.includes(`[no-]${opt.long.slice(NEGATION.length)}`),
-      )
-      .map((opt) => opt.long),
-  )
+  const options = compileSpec(spec).options
+  const negations = new Set<string>()
+  for (const opt of options) {
+    const [short, long] = optionSpellings(opt)
+    if (
+      long?.startsWith(NEGATION) &&
+      short === null &&
+      (opt.action === 'store_true' || opt.action === 'count') &&
+      table.includes(`[no-]${long.slice(NEGATION.length)}`)
+    )
+      negations.add(long)
+  }
   const rows: string[] = []
-  for (const opt of spec.options) {
-    let long = opt.long
+  for (const opt of options) {
+    const [short, originalLong] = optionSpellings(opt)
+    let long = originalLong
     if (long !== null && negations.has(long)) continue
     if (long !== null && negations.has(`${NEGATION}${long.slice(2)}`)) {
       long = `--[no-]${long.slice(2)}`
     }
-    let spelled = [opt.short, long].filter((name) => name !== null).join(', ')
-    if (opt.type !== 'bool') {
-      const named = opt.long !== null ? opt.long.slice(2) : (opt.short ?? '-').slice(1)
+    let spelled = [short, long].filter((name) => name !== null).join(', ')
+    if (opt.action !== 'store_true' && opt.action !== 'count') {
+      const named = argumentDest(opt).replace(/^-+/, '')
       const value = `<${opt.metavar ?? named}>`
-      if (!opt.valueOptional) spelled += ` ${value}`
-      else spelled += opt.long !== null ? `[=${value}]` : `[${value}]`
+      if (opt.nargs !== '?') spelled += ` ${value}`
+      else spelled += long !== null ? `[=${value}]` : `[${value}]`
     }
     const left = `    ${spelled}`
     const gap =
       left.length <= GIT_USAGE_WIDTH + 1
         ? ' '.repeat(GIT_USAGE_WIDTH + GIT_USAGE_GAP - left.length)
         : '\n' + ' '.repeat(GIT_USAGE_WIDTH + GIT_USAGE_GAP)
-    rows.push(`${left}${gap}${opt.description ?? ''}\n`)
+    rows.push(`${left}${gap}${opt.help ?? ''}\n`)
   }
   return rows
 }
@@ -125,7 +128,13 @@ export function gitOptionRefusal(word: string, path: string, spec: CommandSpec):
   if (word === HELP_SWITCH) return [usage, '']
   const eq = word.indexOf('=')
   const name = eq === -1 ? word : word.slice(0, eq)
-  if (eq !== -1 && spec.options.some((opt) => opt.long === name && opt.type === 'bool')) {
+  if (
+    eq !== -1 &&
+    name.startsWith(LONG_PREFIX) &&
+    compileSpec(spec).options.some(
+      (opt) => opt.names.includes(name) && (opt.action === 'store_true' || opt.action === 'count'),
+    )
+  ) {
     return ['', `error: option \`${name.slice(2)}' takes no value\n`]
   }
   const noun = word.startsWith(LONG_PREFIX) ? 'option' : 'switch'
@@ -150,12 +159,16 @@ export function clapSupplied(
   typed: readonly string[],
   env: Readonly<Record<string, string>>,
 ): string[] {
-  const byDest = new Map(spec.options.map((opt) => [opt.long ?? opt.short ?? '', opt]))
+  const byDest = new Map(compileSpec(spec).options.map((opt) => [argumentDest(opt), opt]))
   const bits: string[] = []
   for (const dest of typed) {
     const opt = byDest.get(dest)
     if (opt === undefined) continue
-    bits.push(opt.type === 'bool' ? dest : `${dest} <${optionMetavar(opt)}>`)
+    bits.push(
+      opt.action === 'store_true' || opt.action === 'count'
+        ? dest
+        : `${dest} <${optionMetavar(opt)}>`,
+    )
   }
   for (const [dest, opt] of byDest) {
     if (opt.env === null || typed.includes(dest) || !(opt.env in env)) continue
@@ -166,8 +179,10 @@ export function clapSupplied(
 
 /** Every operand slot of a leaf, as a clap usage line spells them. */
 function clapOperands(spec: CommandSpec): string[] {
-  const slots = spec.positional.map((operand) => operandSlot(operand))
-  if (spec.rest !== null) slots.push(operandSlot(spec.rest, !spec.rest.required))
+  const compiled = compileSpec(spec)
+  const slots = compiled.positional.map((operand) => operandSlot(operand))
+  const rest = compiled.rest
+  if (rest !== null) slots.push(operandSlot(rest, !positionalRequired(rest)))
   return slots
 }
 

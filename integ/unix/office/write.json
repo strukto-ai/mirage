@@ -8,12 +8,18 @@
         "sharepoint",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/office && printf slide-bytes | tee /data/office/deck.pptx > /dev/null && cat /data/office/deck.pptx",
+      "read": "fresh",
+      "scenario": [
+        {
+          "command": "mkdir -p /data/office && printf slide-bytes | tee /data/office/deck.pptx > /dev/null && cat /data/office/deck.pptx"
+        }
+      ],
       "expect": {
         "exit": 0,
         "stdout": "slide-bytes<odsp-metadata/>",
         "stderr": ""
-      }
+      },
+      "note": "Under `read: fresh`: SharePoint rewrites an uploaded Office file, so the write's bytes carry no token and the next read downloads the rewritten file. Under `bounded` the bytes sent are served until the mount's ttl."
     },
     {
       "id": "office_nested_write_read_keeps_the_enriched_copy",
@@ -23,7 +29,12 @@
         "sharepoint",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/office && eval 'printf slide-bytes | tee /data/office/nested.pptx > /dev/null && cat /data/office/nested.pptx'; echo; cat /data/office/nested.pptx; rm -r /data/office",
+      "read": "fresh",
+      "scenario": [
+        {
+          "command": "mkdir -p /data/office && eval 'printf slide-bytes | tee /data/office/nested.pptx > /dev/null && cat /data/office/nested.pptx'; echo; cat /data/office/nested.pptx"
+        }
+      ],
       "expect": {
         "exit": 0,
         "stdout": "slide-bytes<odsp-metadata/>\nslide-bytes<odsp-metadata/>",

@@ -265,57 +265,23 @@ function formatInt(
   return applyPad(prefix, digits, flags, width, allowZero)
 }
 
-/** Render a string for `%s` with GNU width/precision rules. */
-function formatPrintfStr(
-  s: string,
-  flags: string,
-  width: number | null,
-  precision: number | null,
-): string {
-  if (precision !== null) s = s.slice(0, precision)
-  return applyPad('', s, flags, width, false)
-}
-
-function formatChar(value: string, flags: string, width: number | null): string {
-  const ch = value ? value.charAt(0) : '\0'
-  return applyPad('', ch, flags, width, false)
-}
-
 // ---- float formatting (exact-decimal, round-half-to-even; matches C double) ----
 
-function floatBits(x: number): { sign: number; expField: number; frac: bigint } {
-  const buf = new ArrayBuffer(8)
-  new DataView(buf).setFloat64(0, x)
-  const hi = new DataView(buf).getUint32(0)
-  const lo = new DataView(buf).getUint32(4)
-  const sign = hi >>> 31
+/** The integer significand and binary exponent of a finite |x|: |x| = m * 2**e2. */
+function binaryParts(x: number): [bigint, number] {
+  const view = new DataView(new ArrayBuffer(8))
+  view.setFloat64(0, x)
+  const hi = view.getUint32(0)
   const expField = (hi >>> 20) & 0x7ff
-  const frac = (BigInt(hi & 0xfffff) << 32n) | BigInt(lo >>> 0)
-  return { sign, expField, frac }
+  const frac = (BigInt(hi & 0xfffff) << 32n) | BigInt(view.getUint32(4))
+  return expField === 0 ? [frac, -1074] : [frac | (1n << 52n), expField - 1075]
 }
 
 /** Exact unsigned decimal digits of a finite nonzero |x|: significant digit string (no leading zeros) and the power of ten of the leading digit. */
 function exactDecimal(x: number): { digits: string; pointExp: number } {
-  const { expField, frac } = floatBits(x)
-  let m: bigint
-  let e2: number
-  if (expField === 0) {
-    m = frac
-    e2 = -1074
-  } else {
-    m = frac | (1n << 52n)
-    e2 = expField - 1075
-  }
-  let n: bigint
-  let k: number
-  if (e2 >= 0) {
-    n = m << BigInt(e2)
-    k = 0
-  } else {
-    k = -e2
-    n = m * 5n ** BigInt(k)
-  }
-  const s = n.toString()
+  const [m, e2] = binaryParts(x)
+  const k = Math.max(0, -e2)
+  const s = (e2 >= 0 ? m << BigInt(e2) : m * 5n ** BigInt(k)).toString()
   return { digits: s, pointExp: s.length - 1 - k }
 }
 
@@ -364,16 +330,7 @@ function roundFixed(
 }
 
 function fixedParts(x: number): { intPart: string; fracPart: string } {
-  const { expField, frac } = floatBits(x)
-  let m: bigint
-  let e2: number
-  if (expField === 0) {
-    m = frac
-    e2 = -1074
-  } else {
-    m = frac | (1n << 52n)
-    e2 = expField - 1075
-  }
+  const [m, e2] = binaryParts(x)
   if (e2 >= 0) return { intPart: (m << BigInt(e2)).toString(), fracPart: '' }
   const k = -e2
   const n = m * 5n ** BigInt(k)
@@ -700,14 +657,15 @@ function convert(
   posix: boolean,
   warnings: string[],
 ): [string, string | null, boolean] {
-  if (conv === 's') return [formatPrintfStr(raw ?? '', flags, width, precision), null, false]
-  if (conv === 'c') return [formatChar(raw ?? '', flags, width), null, false]
-  if (conv === 'b') {
-    const [expanded, stop] = expandEscapes(raw ?? '', warnings)
-    const text = precision !== null ? expanded.slice(0, precision) : expanded
+  if ('sbcq'.includes(conv)) {
+    let text = raw ?? ''
+    let stop = false
+    if (conv === 'b') [text, stop] = expandEscapes(text, warnings)
+    else if (conv === 'q') text = quoteShell(text)
+    else if (conv === 'c') text = text.charAt(0) || '\0'
+    if (precision !== null && (conv === 's' || conv === 'b')) text = text.slice(0, precision)
     return [applyPad('', text, flags, width, false), null, stop]
   }
-  if (conv === 'q') return [applyPad('', quoteShell(raw ?? ''), flags, width, false), null, false]
   if ('diouxX'.includes(conv)) {
     const [value, err] =
       raw === null
@@ -784,35 +742,23 @@ export function runPrintf(
           continue
         }
         let width: number | null = typeof widthStar === 'number' ? widthStar : null
-        if (widthStar === '*') {
-          const star = argI < total ? (args[argI] ?? '0') : '0'
-          if (argI < total) argI += 1
-          const following = argI < total ? (args[argI] ?? null) : null
-          const [wv, err, fatal] = starValue(star, false, following, program, posix, messages)
-          if (err !== null) {
-            messages.push(err)
-            failed = true
-          }
-          if (fatal) return [out.join(''), messages, true, null]
-          const w = Number(wv)
-          if (w < 0) {
-            flags += '-'
-            width = -w
-          } else width = w
-        }
         let precision: number | null = typeof precStar === 'number' ? precStar : null
-        if (precStar === '*') {
+        for (const prec of [false, true]) {
+          if ((prec ? precStar : widthStar) !== '*') continue
           const star = argI < total ? (args[argI] ?? '0') : '0'
           if (argI < total) argI += 1
           const following = argI < total ? (args[argI] ?? null) : null
-          const [pv, err, fatal] = starValue(star, true, following, program, posix, messages)
+          const [value, err, fatal] = starValue(star, prec, following, program, posix, messages)
           if (err !== null) {
             messages.push(err)
             failed = true
           }
           if (fatal) return [out.join(''), messages, true, null]
-          const p = Number(pv)
-          precision = p < 0 ? null : p
+          if (prec) precision = value < 0n ? null : Number(value)
+          else if (value < 0n) {
+            flags += '-'
+            width = Number(-value)
+          } else width = Number(value)
         }
         const raw = argI < total ? (args[argI] ?? '') : null
         if (raw !== null) argI += 1

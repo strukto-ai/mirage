@@ -286,10 +286,8 @@ async def test_a_missing_http_repository_is_not_found(served):
     assert result.exit_code == 128
     assert (
         result.stderr
-        == (
-            f"Cloning into 'm'...\nfatal: repository "
-            f"'{url}/nope.git/' not found\n"
-        ).encode()
+        == f"Cloning into 'm'...\nfatal: repository "
+        f"'{url}/nope.git/' not found\n".encode()
     )
     assert left.stdout == b"removed\n"
 

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLISpec } from '../../commands/cli/types.ts'
+import type { CommandSpec } from '../../commands/spec/types.ts'
 import { nodeHelp, ownsArgv } from '../../commands/cli/walk.ts'
 import type { UsageStyle } from '../../commands/spec/types.ts'
 import { effectivePathMode } from '../../context/session_context.ts'
@@ -74,7 +74,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
 
 export function cliPages(
   head: string,
-  node: CLISpec,
+  node: CommandSpec,
   session: SessionState,
   style: UsageStyle,
   path: readonly string[] = [],
@@ -94,10 +94,6 @@ export function cliPages(
     ),
   )
   const pages = [`## \`${name}\`\n\n${fence}text\n${text}\n${fence}`]
-  if (ownsArgv(node))
-    pages.push(
-      'This program parses its own arguments; only its registered description is available here.',
-    )
   for (const child of node.subcommands)
     pages.push(...cliPages(head, child, session, style, [...path, child.name]))
   return pages
@@ -112,8 +108,14 @@ export function skillMd(registry: MountRegistry, session: SessionState): string 
   for (const [head, install] of [...registry.clis.items()].sort(([a], [b]) =>
     a < b ? -1 : a > b ? 1 : 0,
   )) {
-    if (commandVisible(head, session))
-      parts.push(...cliPages(head, install.spec, session, install.spec.usageStyle))
+    if (commandVisible(head, session)) {
+      const pages = cliPages(head, install.cli.spec, session, install.cli.spec.usageStyle)
+      parts.push(...pages)
+      if (pages.length > 0 && ownsArgv(install.cli))
+        parts.push(
+          'This program parses its own arguments; only its registered description is available here.',
+        )
+    }
   }
   if (parts.length === 3) parts.push('No registered CLIs are visible in this session.')
   return parts.join('\n\n') + '\n'

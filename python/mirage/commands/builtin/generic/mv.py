@@ -426,7 +426,6 @@ async def mv_generic(
             else None
         ),
     )
-    renames: list[tuple[str, str]] = []
     writes: dict[str, ByteSource] = {}
     lines: list[str] = []
     created: set[str] = set()
@@ -608,12 +607,6 @@ async def mv_generic(
         )
         if not ok:
             continue
-        if (
-            backup is not None
-            and copies is None
-            and isinstance(strategy, NativeMove)
-        ):
-            renames.append((target.virtual, backup.virtual))
         if copies is not None and source_link:
             try:
                 await rename_link(copies, src, target)
@@ -690,8 +683,6 @@ async def mv_generic(
                 continue
             writes[src.mount_path] = b""
             writes[target.mount_path] = b""
-        if not source_link and isinstance(strategy, NativeMove):
-            renames.append((src.virtual, target.virtual))
         if not src_is_dir:
             created.add(key_of(target))
         if flags.verbose:
@@ -702,7 +693,6 @@ async def mv_generic(
     output = "\n".join(lines) + "\n" if lines else None
     return output.encode() if output else None, IOResult(
         writes=writes,
-        renames=renames,
         stderr=stderr_of(errors),
         exit_code=1 if len(errors) > len(accepted) else 0,
     )

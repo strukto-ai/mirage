@@ -15,9 +15,9 @@
 from collections.abc import Sequence
 from functools import partial
 
-from mirage.commands.cli.types import CLISpec
 from mirage.commands.cli.walk import find_node, node_help
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.compile import compile_spec, option_spellings
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
@@ -109,25 +109,26 @@ def _cli_entries(
         session (SessionState): the session reading the manual.
     """
     return [
-        ManEntry(name=name, spec=install.spec)
+        ManEntry(name=name, spec=install.cli.spec)
         for name, install in registry.clis.items().items()
         if command_visible(name, session)
     ]
 
 
 def _render_options_table(spec: CommandSpec) -> list[str]:
-    if not spec.options:
+    if not compile_spec(spec).options:
         return []
     lines: list[str] = []
     lines.append("## OPTIONS")
     lines.append("")
     lines.append("| short | long | value | description |")
     lines.append("| ----- | ---- | ----- | ----------- |")
-    for opt in spec.options:
-        short = opt.short if opt.short is not None else ""
-        long = opt.long if opt.long is not None else ""
-        desc = opt.description if opt.description is not None else ""
-        lines.append(f"| {short} | {long} | {opt.type} | {desc} |")
+    for opt in compile_spec(spec).options:
+        short, long = option_spellings(opt)
+        kind = "bool" if opt.action in ("store_true", "count") else opt.type
+        lines.append(
+            f"| {short or ''} | {long or ''} | {kind} | {opt.help or ''} |"
+        )
     return lines
 
 
@@ -176,7 +177,7 @@ def _child_visible(
 
 
 def _render_cli_entry(
-    head: str, verbs: Sequence[str], spec: CLISpec, session: SessionState
+    head: str, verbs: Sequence[str], spec: CommandSpec, session: SessionState
 ) -> str | None:
     """The page for one node of an installed CLI, None when verbs miss
     or the session cannot see the node they name.
@@ -196,7 +197,7 @@ def _render_cli_entry(
         head (str): installed head word, as typed.
         verbs (Sequence[str]): verb words after the head, aliases
             allowed.
-        spec (CLISpec): the installed program tree.
+        spec (CommandSpec): the installed program tree.
         session (SessionState): the session reading the manual.
     """
     found = find_node(spec, verbs)
@@ -257,7 +258,7 @@ def _cli_man(
         session (SessionState): the session reading the manual.
     """
     head = install.name
-    entry = _render_cli_entry(head, verbs, install.spec, session)
+    entry = _render_cli_entry(head, verbs, install.cli.spec, session)
     if entry is None:
         typed = " ".join([head, *verbs])
         err = encode_text(f"man: no entry for {typed}\n")

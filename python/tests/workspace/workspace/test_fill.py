@@ -21,8 +21,8 @@ import pytest
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 from mirage import Action, CommandContext, Deny, MountMode, Policy, Workspace
-from mirage.commands.cli.types import CLISpec
-from mirage.commands.spec.types import FlagValue, Option
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import Argument, CommandSpec, FlagValue
 from mirage.io import IOResult
 from mirage.policy import Ask
 from mirage.policy.match import Outcome
@@ -1335,36 +1335,42 @@ async def _cli_probe(inv):
     return None, IOResult()
 
 
-def _shared_cli_spec() -> CLISpec:
-    return CLISpec(
-        name="mycli",
-        options=(Option(long="--token", type="str", env="CLI_SHARED"),),
-        subcommands=(
-            CLISpec(
-                name="alpha",
-                fn=_cli_probe,
-                options=(Option(long="--a", type="str", env="CLI_SHARED"),),
+def _shared_cli_spec() -> CLI:
+    return CLI(
+        spec=CommandSpec(
+            name="mycli",
+            subcommands=(
+                CommandSpec(
+                    name="alpha",
+                    arguments=(Argument("--a", env="CLI_SHARED"),),
+                ),
             ),
+            arguments=(Argument("--token", env="CLI_SHARED"),),
         ),
+        handlers={"alpha": CLIHandler(fn=_cli_probe)},
     )
 
 
-def _cli_spec() -> CLISpec:
-    return CLISpec(
-        name="mycli",
-        options=(Option(long="--token", type="str", env="CLI_ROOT"),),
-        subcommands=(
-            CLISpec(
-                name="alpha",
-                fn=_cli_noop,
-                options=(Option(long="--a", type="str", env="CLI_ALPHA"),),
+def _cli_spec() -> CLI:
+    return CLI(
+        spec=CommandSpec(
+            name="mycli",
+            subcommands=(
+                CommandSpec(
+                    name="alpha",
+                    arguments=(Argument("--a", env="CLI_ALPHA"),),
+                ),
+                CommandSpec(
+                    name="beta",
+                    arguments=(Argument("--b", env="CLI_BETA"),),
+                ),
             ),
-            CLISpec(
-                name="beta",
-                fn=_cli_noop,
-                options=(Option(long="--b", type="str", env="CLI_BETA"),),
-            ),
+            arguments=(Argument("--token", env="CLI_ROOT"),),
         ),
+        handlers={
+            "alpha": CLIHandler(fn=_cli_noop),
+            "beta": CLIHandler(fn=_cli_noop),
+        },
     )
 
 
@@ -1440,10 +1446,13 @@ async def test_group_env_option_reaches_the_leaf():
         _PROBE_FLAGS.clear()
         ws.register_cli(
             "mycli",
-            CLISpec(
-                name="mycli",
-                options=(Option(long="--token", type="str", env="CLI_ROOT"),),
-                subcommands=(CLISpec(name="alpha", fn=_cli_probe),),
+            CLI(
+                spec=CommandSpec(
+                    name="mycli",
+                    subcommands=(CommandSpec(name="alpha"),),
+                    arguments=(Argument("--token", env="CLI_ROOT"),),
+                ),
+                handlers={"alpha": CLIHandler(fn=_cli_probe)},
             ),
         )
         io = await ws.shell("mycli alpha")

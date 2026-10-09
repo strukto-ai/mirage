@@ -23,7 +23,7 @@ from mirage.commands.cli.builtin.ntn.failure import (
     guarded,
     source_hint,
 )
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLIHandler
 from mirage.core.notion.client import NotionAPIError
 from mirage.io.types import IOResult
 
@@ -184,9 +184,7 @@ def test_every_ntn_leaf_is_guarded() -> None:
     # executor's generic shape, which nothing notices until someone reads a
     # 404 from it.
     unguarded = [
-        " ".join(path)
-        for path, leaf in _leaves(NTN, ())
-        if not _is_guarded(leaf)
+        path for path, leaf in NTN.handlers.items() if not _is_guarded(leaf)
     ]
     assert unguarded == []
 
@@ -206,17 +204,5 @@ async def _succeed(_inv: None) -> tuple[None, IOResult]:
     return None, _OK
 
 
-def _leaves(
-    node: CLISpec, path: tuple[str, ...]
-) -> list[tuple[tuple[str, ...], CLISpec]]:
-    here = path + (node.name,)
-    if node.fn is not None:
-        return [(here, node)]
-    found: list[tuple[tuple[str, ...], CLISpec]] = []
-    for child in node.subcommands:
-        found.extend(_leaves(child, here))
-    return found
-
-
-def _is_guarded(leaf: CLISpec) -> bool:
+def _is_guarded(leaf: CLIHandler) -> bool:
     return isinstance(leaf.fn, partial) and leaf.fn.func is guarded

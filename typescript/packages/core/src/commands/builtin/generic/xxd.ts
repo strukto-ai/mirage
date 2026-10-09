@@ -297,8 +297,7 @@ async function writeOutput(
       if (!isFsError(err)) throw err
       return failed(target, err, OPEN_OUTPUT_EXIT)
     }
-    // The stretches are not the file, so the cache drops what it holds.
-    return [null, new IOResult({ writes: { [target.mountPath]: new Uint8Array(0) } })]
+    return [null, new IOResult()]
   }
   if (dump === null) {
     let existing: Uint8Array = new Uint8Array(0)
@@ -325,7 +324,7 @@ async function writeOutput(
     if (!isFsError(err)) throw err
     return failed(target, err, OPEN_OUTPUT_EXIT)
   }
-  return [null, new IOResult({ writes: { [target.mountPath]: data }, cache: [target.mountPath] })]
+  return [null, new IOResult()]
 }
 
 interface XxdFlags {

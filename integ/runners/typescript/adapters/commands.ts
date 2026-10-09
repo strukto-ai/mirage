@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { concatAggregate } from '@struktoai/mirage-core/commands/builtin/aggregators'
-import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
-import { Operand } from '@struktoai/mirage-core/commands/spec/types'
+import { CLI as CLIProgram, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
+import { Argument, CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { commandIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { RAM_COMMANDS } from '@struktoai/mirage-core/commands/builtin/ram/index'
@@ -150,18 +150,24 @@ export class CommandService extends RAMVFS {
     return super.readdir(path, index)
   }
 }
-export const CLI = new CLISpec({
-  name: 'scope-probe',
-  rest: new Operand({ type: 'path' }),
-  fn: async (inv) => {
-    let size = 0
-    for (const path of inv.paths) {
-      const [stat] = await inv.view.dispatch('stat', path)
-      size += (stat as FileStat).size ?? 0
-    }
-    return [
-      new TextEncoder().encode(`${size}:${inv.paths.map((p) => p.virtual).join(',')}\n`),
-      new IOResult(),
-    ]
+export const CLI = new CLIProgram({
+  spec: new CommandSpec({
+    name: 'scope-probe',
+    arguments: [new Argument('paths', { type: 'path', nargs: '*', metavar: '' })],
+  }),
+  handlers: {
+    '': new CLIHandler({
+      fn: async (inv) => {
+        let size = 0
+        for (const path of inv.paths) {
+          const [stat] = await inv.view.dispatch('stat', path)
+          size += (stat as FileStat).size ?? 0
+        }
+        return [
+          new TextEncoder().encode(`${size}:${inv.paths.map((p) => p.virtual).join(',')}\n`),
+          new IOResult(),
+        ]
+      },
+    }),
   },
 })

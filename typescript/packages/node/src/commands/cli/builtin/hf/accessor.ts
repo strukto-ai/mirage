@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import type { FlagView } from '@struktoai/mirage-core/commands/spec/index'
@@ -63,12 +62,9 @@ export function hubFor(
 /**
  * Refuse a line that left a required operand empty.
  *
- * `Operand.required` is inert outside the clap dialect on purpose: only clap
- * names the empty slots, and under every other style the refusal stays the
- * leaf's own business, worded by the command (`executor/command/cli.ts`). hf is
- * argparse, so each leaf that takes operands calls this, and it words the
- * refusal the way argparse does rather than letting the line reach the Hub and
- * come back as an authentication error.
+ * Installed CLI invocations validate required arguments before calling
+ * the handler. This guard also protects direct handler calls from reaching
+ * the Hub with an incomplete request.
  */
 export function requireOperands(inv: CLIInvocation, names: readonly string[]): void {
   const missing = names.slice(inv.texts.length)

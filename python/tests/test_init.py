@@ -12,10 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import subprocess
+import sys
+
 import mirage
 
 
 def test_all_names_resolve():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys\n"
+            "import mirage\n"
+            "assert not any(m.startswith('mirage.commands') for m in sys.modules)\n"
+            "from mirage import CommandSpec\n"
+            "from mirage.commands.spec.types import CommandSpec as Impl\n"
+            "assert CommandSpec is Impl\n",
+        ],
+        check=True,
+    )
     missing = [name for name in mirage.__all__ if not hasattr(mirage, name)]
     assert missing == []
 
@@ -28,7 +44,7 @@ def test_authoring_surface_is_stable():
     assert set(mirage.__all__) >= {
         "Accessor",
         "BaseVFS",
-        "CLISpec",
+        "CLI",
         "CommandSpec",
         "Effect",
         "FileStat",

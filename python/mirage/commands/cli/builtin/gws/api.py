@@ -26,10 +26,10 @@ from mirage.commands.cli.builtin.gws.methods import (
     GwsMethod,
     gws_method_description,
 )
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLIHandler, CLIInvocation
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import FlagValue, Option
+from mirage.commands.spec.types import Argument, CommandSpec, FlagValue
 from mirage.core.google.client import (
     TokenManager,
     drive_base,
@@ -54,11 +54,11 @@ _PAGE_ALL_HELP = (
 )
 _PAGE_LIMIT_HELP = "Stop after this many pages instead of reading them all"
 
-API_OPTIONS: tuple[Option, ...] = (
-    Option(long="--params", type="str", description=_PARAMS_HELP),
-    Option(long="--json", type="str", description=_JSON_HELP),
-    Option(long="--page-all", description=_PAGE_ALL_HELP),
-    Option(long="--page-limit", type="str", description=_PAGE_LIMIT_HELP),
+API_OPTIONS: tuple[Argument, ...] = (
+    Argument("--params", help=_PARAMS_HELP),
+    Argument("--json", help=_JSON_HELP),
+    Argument("--page-all", action="store_true", help=_PAGE_ALL_HELP),
+    Argument("--page-limit", help=_PAGE_LIMIT_HELP),
 )
 
 
@@ -381,36 +381,34 @@ def _with_query(url: str, query: dict[str, str]) -> str:
     return url + sep + "&".join(f"{k}={v}" for k, v in query.items())
 
 
-def method_leaf(method: GwsMethod) -> CLISpec:
+def method_leaf(method: GwsMethod) -> CommandSpec:
     """Build the CLI leaf for one Discovery passthrough method.
 
     Args:
         method (GwsMethod): the Discovery method being wrapped.
     """
-    return CLISpec(
+    return CommandSpec(
         name=method.method,
         description=gws_method_description(method),
-        fn=functools.partial(run_gws_method, method),
-        write=method.http != "GET",
-        options=API_OPTIONS,
+        arguments=(*API_OPTIONS,),
     )
 
 
-def _build_group(name: str, node: dict[str, Any]) -> CLISpec:
+def _build_group(name: str, node: dict[str, Any]) -> CommandSpec:
     leaves = tuple(method_leaf(m) for m in node.get("__methods__", ()))
     groups = tuple(
         _build_group(child, sub)
         for child, sub in node.items()
         if child != "__methods__"
     )
-    return CLISpec(
+    return CommandSpec(
         name=name,
         description=f"Google API {name} methods",
         subcommands=leaves + groups,
     )
 
 
-def api_groups(service: str) -> tuple[CLISpec, ...]:
+def api_groups(service: str) -> tuple[CommandSpec, ...]:
     """Build one service's passthrough subtree from the method table.
 
     Multi-word Discovery resources ("users messages attachments") become
@@ -429,3 +427,14 @@ def api_groups(service: str) -> tuple[CLISpec, ...]:
             node = node.setdefault(word, {})
         node.setdefault("__methods__", []).append(m)
     return tuple(_build_group(name, sub) for name, sub in root.items())
+
+
+def api_handlers() -> dict[str, CLIHandler]:
+    """Bind Discovery methods by their canonical paths below gws."""
+    return {
+        f"{method.service} {method.resource} {method.method}": CLIHandler(
+            fn=functools.partial(run_gws_method, method),
+            write=method.http != "GET",
+        )
+        for method in GWS_METHODS
+    }

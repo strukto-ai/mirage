@@ -17,16 +17,16 @@ from mirage.core.google.config import GoogleConfig
 
 
 def leaf(*path: str):
-    node = GWS
+    node = GWS.spec
     for name in path:
         node = next(c for c in node.subcommands if c.name == name)
     return node
 
 
 def test_tree_lists_every_service():
-    assert GWS.name == "gws"
+    assert GWS.spec.name == "gws"
     assert GWS.config_model is GoogleConfig
-    assert [g.name for g in GWS.subcommands] == [
+    assert [g.name for g in GWS.spec.subcommands] == [
         "drive",
         "sheets",
         "docs",
@@ -61,9 +61,7 @@ def test_passthroughs_nest_by_discovery_resource():
     assert [
         v.name for v in leaf("gmail", "users", "messages").subcommands
     ] == ["list", "get", "send", "trash", "attachments"]
-    assert (
-        leaf("gmail", "users", "messages", "attachments", "get").fn is not None
-    )
+    assert GWS.handlers["gmail users messages attachments get"].fn is not None
 
 
 def test_bespoke_verbs_drop_the_plus_marker():
@@ -80,21 +78,21 @@ def test_bespoke_verbs_drop_the_plus_marker():
         "write",
         "append",
     ]
-    assert leaf("docs", "write").write
+    assert GWS.handlers["docs write"].write
 
 
 def test_writes_follow_http_semantics():
-    assert not leaf("drive", "files", "list").write
-    assert not leaf("slides", "presentations", "get").write
-    assert leaf("slides", "presentations", "create").write
-    assert leaf("slides", "presentations", "batchUpdate").write
-    assert leaf("drive", "files", "delete").write
-    assert not leaf("drive", "permissions", "list").write
-    assert leaf("drive", "permissions", "create").write
-    assert leaf("drive", "permissions", "delete").write
-    assert leaf("sheets", "spreadsheets", "batchUpdate").write
-    assert leaf("gmail", "users", "messages", "trash").write
-    assert not leaf("gmail", "triage").write
+    assert not GWS.handlers["drive files list"].write
+    assert not GWS.handlers["slides presentations get"].write
+    assert GWS.handlers["slides presentations create"].write
+    assert GWS.handlers["slides presentations batchUpdate"].write
+    assert GWS.handlers["drive files delete"].write
+    assert not GWS.handlers["drive permissions list"].write
+    assert GWS.handlers["drive permissions create"].write
+    assert GWS.handlers["drive permissions delete"].write
+    assert GWS.handlers["sheets spreadsheets batchUpdate"].write
+    assert GWS.handlers["gmail users messages trash"].write
+    assert not GWS.handlers["gmail triage"].write
 
 
 def test_calendar_passthroughs_nest_by_discovery_resource():
@@ -111,12 +109,12 @@ def test_calendar_passthroughs_nest_by_discovery_resource():
         "patch",
         "delete",
     ]
-    assert not leaf("calendar", "events", "list").write
-    assert leaf("calendar", "events", "insert").write
-    assert leaf("calendar", "events", "delete").write
+    assert not GWS.handlers["calendar events list"].write
+    assert GWS.handlers["calendar events insert"].write
+    assert GWS.handlers["calendar events delete"].write
     # freebusy.query is a POST that mutates nothing, but write follows the
     # HTTP verb everywhere else in the tree and a second rule would be worse.
-    assert leaf("calendar", "freebusy", "query").write
+    assert GWS.handlers["calendar freebusy query"].write
 
 
 def test_forms_passthroughs_nest_by_discovery_resource():
@@ -130,5 +128,5 @@ def test_forms_passthroughs_nest_by_discovery_resource():
     assert [
         v.name for v in leaf("forms", "forms", "responses").subcommands
     ] == ["list", "get"]
-    assert not leaf("forms", "forms", "get").write
-    assert leaf("forms", "forms", "create").write
+    assert not GWS.handlers["forms forms get"].write
+    assert GWS.handlers["forms forms create"].write

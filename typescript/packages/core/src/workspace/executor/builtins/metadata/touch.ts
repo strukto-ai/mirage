@@ -126,7 +126,6 @@ export async function handleTouch(
   const noCreate = fl.asBool('no_create')
 
   const errors: string[] = []
-  const writes: Record<string, Uint8Array> = {}
   for (const target of await expandOperands(namespace, operands)) {
     if (fl.asBool('no_dereference') && namespace.isLink(target.virtual)) {
       await setattrLink(dispatch, target, { mtime: stamp })
@@ -202,7 +201,6 @@ export async function handleTouch(
           errors.push(`touch: cannot touch '${target.rawPath}': Read-only file system\n`)
           continue
         }
-        writes[resolved.virtual] = new Uint8Array(0)
         // A file touch creates is 0666 under the session's umask; only
         // a mask away from bash's default is worth a mode write, since
         // 644 is what a fresh file renders as.
@@ -234,5 +232,5 @@ export async function handleTouch(
       errors.push(`touch: cannot touch '${target.rawPath}': ${String(fsStrerror(err))}\n`)
     }
   }
-  return finish('touch', errors, new IOResult({ writes }))
+  return finish('touch', errors, new IOResult())
 }

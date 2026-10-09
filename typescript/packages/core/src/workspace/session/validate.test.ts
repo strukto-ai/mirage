@@ -11,10 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../commands/spec/types.ts'
+import { CLIHandler } from '../../commands/cli/types.ts'
 
 import { describe, expect, it } from 'vitest'
 
-import { CLISpec } from '../../commands/cli/types.ts'
+import { CLI } from '../../commands/cli/types.ts'
 import { IOResult } from '../../io/types.ts'
 import type { AdmissionRules, CommandRule } from '../../policy/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -189,7 +191,10 @@ describe('createSession reads the verbs of an installed CLI', () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     ws.registerCli(
       'prog',
-      new CLISpec({ name: 'prog', subcommands: [new CLISpec({ name: 'run', fn: noopVerb })] }),
+      new CLI({
+        spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
+        handlers: { run: new CLIHandler({ fn: noopVerb }) },
+      }),
     )
     expect(() =>
       ws.createSession('bad', {

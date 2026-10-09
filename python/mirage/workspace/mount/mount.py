@@ -987,11 +987,7 @@ class MountEntry:
             ),
             mount_prefix=mount_prefix,
             index=self.index,
-            io=(
-                dispatched_io(self.io, context.dispatch)
-                if context.dispatch is not None
-                else self.io
-            ),
+            io=dispatched_io(self.io, context.dispatch),
             dispatch=context.dispatch,
             session_id=context.session_id,
             env=context.env,

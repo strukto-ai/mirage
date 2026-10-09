@@ -20,14 +20,13 @@ from mirage.commands.spec.parser import (
     parse_command,
     parse_to_kwargs,
 )
-from mirage.commands.spec.types import CommandSpec, Operand, Option, ValueType
+from mirage.commands.spec.types import Argument, CommandSpec, ValueType
 
 __all__ = [
     "AMBIGUOUS_NAMES",
     "CommandSpec",
-    "Operand",
     "ValueType",
-    "Option",
+    "Argument",
     "ParsedArgs",
     "SPECS",
     "FlagView",

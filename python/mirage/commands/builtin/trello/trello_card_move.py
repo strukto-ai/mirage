@@ -18,7 +18,7 @@ from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.builtin.trello._scope import require_card, require_list
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import CommandSpec, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.context import require_mount_writable
 from mirage.core.trello.client import card_move
 from mirage.core.trello.normalize import normalize_card
@@ -27,10 +27,10 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(
-    options=(
-        Option(long="--card_id", type="str"),
-        Option(long="--list_id", type="str"),
-    ),
+    arguments=(
+        Argument("--card_id", type="str"),
+        Argument("--list_id", type="str"),
+    )
 )
 
 

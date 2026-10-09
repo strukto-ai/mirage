@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.policy.types import AdmissionRules
 from mirage.runtime.base import Runtime
@@ -54,8 +55,11 @@ async def _noop(config, paths, *texts, **flags):
     return None, IOResult()
 
 
-def _cli_tree() -> CLISpec:
-    return CLISpec(name="prog", subcommands=(CLISpec(name="run", fn=_noop),))
+def _cli_tree() -> CLI:
+    return CLI(
+        spec=CommandSpec(name="prog", subcommands=(CommandSpec(name="run"),)),
+        handlers={"run": CLIHandler(fn=_noop)},
+    )
 
 
 def test_builtins_route_session():

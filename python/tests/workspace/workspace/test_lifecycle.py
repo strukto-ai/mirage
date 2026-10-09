@@ -29,9 +29,9 @@ from mirage.cache.index.config import (
     RedisIndexConfig,
 )
 from mirage.cache.index.view import IndexView
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Command
-from mirage.commands.spec import CommandSpec, Operand
+from mirage.commands.spec import Argument, CommandSpec
 from mirage.io import IOResult
 from mirage.runtime.base import Runtime
 from mirage.shell.console import (
@@ -280,7 +280,10 @@ async def test_retired_command_cannot_cache_bytes_for_replacement_mount(
     if change == "reveal":
         mounts["/"] = replacement
     ws = Workspace(mounts)
-    ws.register_cli("gate", CLISpec(name="gate", fn=gate))
+    ws.register_cli(
+        "gate",
+        CLI(spec=CommandSpec(name="gate"), handlers={"": CLIHandler(fn=gate)}),
+    )
     running = asyncio.create_task(ws.shell("cat /data/file; gate"))
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
@@ -573,7 +576,9 @@ async def test_close_refuses_lifecycle_changes_but_allows_runtime_drain(
     async def cli(_inv):
         return None, IOResult()
 
-    spec = CLISpec(name="held", fn=cli)
+    spec = CLI(
+        spec=CommandSpec(name="held"), handlers={"": CLIHandler(fn=cli)}
+    )
     ws.register_cli("held", spec)
 
     class DrainingRuntime(Runtime):
@@ -809,7 +814,11 @@ async def test_unmount_waits_for_admitted_vfs_use(
     ws.mount("/data").register(
         Command(
             name="readvalue",
-            spec=CommandSpec(rest=Operand(type="path")),
+            spec=CommandSpec(
+                arguments=(
+                    Argument("paths", type="path", nargs="*", metavar=""),
+                )
+            ),
             vfs="ram",
             filetype=None,
             fn=command,

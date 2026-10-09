@@ -18,6 +18,7 @@ import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
+import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { isProgramInvocation } from '../../context/session_context.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { SessionState } from '../session/session.ts'
@@ -166,7 +167,9 @@ export async function runErrTrap(
     session.errexitExiting ||
     session.errexitImmune ||
     session.errexitIgnored ||
-    (ERR_TRAP_EXEMPT_TYPES.has(statement.type) && !unopened && !arithmetic(statement))
+    (ERR_TRAP_EXEMPT_TYPES.has(statement.type) &&
+      !unopened &&
+      nodeKind(statement) !== NodeKind.ARITH)
   )
     return []
   session.errTrapRunning = true
@@ -175,12 +178,6 @@ export async function runErrTrap(
   } finally {
     session.errTrapRunning = false
   }
-}
-
-/** Whether a statement is `(( ... ))`, which the grammar parses as a
- * compound statement but bash runs as a command of its own. */
-function arithmetic(node: TSNodeLike): boolean {
-  return node.type === NT.COMPOUND_STATEMENT && node.children[0]?.type === '(('
 }
 
 /**
@@ -263,11 +260,13 @@ async function runAction(
  * bash clears the action before it runs it, and an `exit` in it, or one
  * it registers there, does not run again. `$?` starts at `status`, and a
  * bare `exit` keeps it. The status the shell ends with stays `status`
- * unless the action exits, or fails under `set -e`, which exits too. Hard
- * stops (cancellation, a killed job, a closed workspace) are not an end the
- * shell reaches, and never get here. `callStack` holds the frames the
- * action runs in: the function that called `exit` is still on them.
- * Returns null when no action of this shell's own is set.
+ * unless the action exits, or fails where `set -e` acts (not in a test,
+ * the left of `&&`/`||` or after `!`), which exits too; its commands
+ * answer ERR and RETURN afresh. Hard stops (cancellation, a killed job, a
+ * closed workspace) are not an end the shell reaches, and never get here.
+ * `callStack` holds the frames the action runs in: the function that
+ * called `exit` is still on them. Returns null when no action of this
+ * shell's own is set.
  */
 export async function runExitTrap(
   executeFn: ExecuteStringFn | null,
@@ -288,12 +287,8 @@ export async function runExitTrap(
   session.exitTrap = null
   if (action === '') return null
   recordStatus(session, status)
-  // The status the shell is ending with, while the action runs: a bare
-  // `exit` in it keeps it, as bash's does.
   const saved = session.trapStatus
   session.trapStatus = status
-  // Its own commands answer ERR and RETURN afresh; the failure that set
-  // `-e` off was answered already.
   const exiting = session.errexitExiting
   session.errexitExiting = false
   let final = status
@@ -308,8 +303,6 @@ export async function runExitTrap(
     })
     stdout = await materialize(io.stdout)
     stderr = await io.materializeStderr()
-    // Only a failure `set -e` acts on ends the shell: one in a test, the
-    // left of `&&`/`||` or after `!` leaves the status alone.
     if (io.exitCode !== 0 && session.shellOptions.errexit === true && !session.errexitImmune)
       final = io.exitCode
   } catch (err) {
@@ -378,21 +371,19 @@ export async function endShell(
   } catch (err) {
     if (err instanceof ExitSignal) {
       const cleanup = await runExitTrap(executeFn, session, err.containedCode, stdin, callStack)
-      if (cleanup === null) throw err
-      throw new ExitSignal(
-        cleanup.exitCode,
-        concat([err.stderr, await cleanup.materializeStderr()]),
-        concat([err.stdout ?? new Uint8Array(), await cleanup.materializeStdout()]),
-      )
-    }
-    if (err instanceof ReturnSignal) {
+      if (cleanup !== null) {
+        err.stdout = concat([err.stdout ?? new Uint8Array(), await cleanup.materializeStdout()])
+        err.stderr = concat([err.stderr, await cleanup.materializeStderr()])
+        err.exitCode = err.containedCode = cleanup.exitCode
+      }
+    } else if (err instanceof ReturnSignal) {
       const cleanup = await runExitTrap(executeFn, session, err.exitCode, stdin, callStack)
-      if (cleanup === null) throw err
-      throw new ReturnSignal(
-        cleanup.exitCode,
-        concat([err.stderr, await cleanup.materializeStderr()]),
-        asyncChain([err.stdout, cleanup.stdout]),
-      )
+      if (cleanup !== null)
+        throw new ReturnSignal(
+          cleanup.exitCode,
+          concat([err.stderr, await cleanup.materializeStderr()]),
+          asyncChain([err.stdout, cleanup.stdout]),
+        )
     }
     throw err
   }

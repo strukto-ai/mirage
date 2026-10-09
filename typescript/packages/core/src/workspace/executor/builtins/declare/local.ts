@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { type ShellVar, VarAttr, type VarKind } from '../../../../shell/variable.ts'
+import { type ShellVar, VarAttr } from '../../../../shell/variable.ts'
 import { sessionEntry, type SessionState } from '../../../session/session.ts'
 import {
   appended,
@@ -24,18 +23,17 @@ import {
   evaluateInteger,
   inCallEnv,
   reachGlobal,
+  sessionView,
   shadowLocal,
   visibleArrays,
   visibleAssocs,
 } from '../../../session/state.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import { ExecutionNode } from '../../../types.ts'
-import { isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
+import { fail, isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
 import { SUBSCRIPT_RE } from './constants.ts'
 import {
   declarationResult,
   dropReference,
-  heldSlot,
   heldValue,
   identifierRefusal,
   kindConflict,
@@ -52,9 +50,7 @@ import {
   visibleRecord,
 } from './declare.ts'
 import type { BuiltinCall, Result } from '../types.ts'
-import type { AttrMarks, DeclarationOperand } from './types.ts'
-import { sessionView } from '../../../session/state.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import type { AttrMarks, Declaration, DeclarationOperand } from './types.ts'
 
 /**
  * Declare names in the running function's scope, or globally.
@@ -65,49 +61,36 @@ import { encodeText } from '../../../../shell/bytes.ts'
  * freezes `R` at 1 and refuses the second write, which fails the builtin
  * while the later operands still declare, and `declare -r R=1 R=(2)` leaves
  * `(1)`. `assignments` holds the operands in order: `NAME`, `NAME=value`,
- * `NAME+=value` and staged array literals.
- *
- * `cmd` is the spelling that reached here: `declare` and `typeset` route
- * through this handler and must say their own name, not `local`. `shaping`
- * holds the value-shaping marks (`-i -l -u`, `+i +l +u`), put on or taken
- * off each name *before* its value stores so the declaration's own value
- * coerces exactly as a later write would (`declare +i N+=x` over an integer
- * 5 stores `5x`); `marks` the attribute letters put on or taken off
- * each operand once it lands, readonly last; `plus` the `+` letters, for the
- * two that cannot be taken off (`plusRefusal`). `nameref` (`-n`) stores a
- * value on the reference's own record, which also takes the marks; under
- * `globalScope` (`-g`) a name the function shadows has its *global* record
- * read, written and marked (`reachGlobal`); `inherit` (`-I`) starts a new
- * local from the value it shadows (`startLocal`).
+ * `NAME+=value` and staged array literals; `options` the spelling and the
+ * letters it carried, `local` with none by default.
  */
 export async function handleLocal(
   assignments: readonly DeclarationOperand[],
   session: SessionState,
   state: SessionView | null = null,
-  cmd = 'local',
-  kind: VarKind | null = null,
-  shaping: AttrMarks = [],
-  marks: AttrMarks = [],
-  plus = '',
-  nameref = false,
-  globalScope = false,
-  inherit = false,
+  options: Partial<Declaration> = {},
 ): Promise<Result> {
-  if (cmd === 'local' && session.localVars === null) {
+  const decl: Declaration = {
+    cmd: 'local',
+    kind: null,
+    shaping: [],
+    marks: [],
+    plus: '',
+    nameref: false,
+    globalScope: false,
+    inherit: false,
+    ...options,
+  }
+  if (decl.cmd === 'local' && session.localVars === null) {
     // `local` is the one spelling that needs a function scope;
     // `declare`/`typeset` share this handler and are legal at top level.
     // Without the check the builtin took its operands, stored them
     // globally and exited 0, which is the silent-accept this whole tier
     // exists to remove.
-    const err = encodeText('bash: local: can only be used in a function\n')
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: err }),
-      new ExecutionNode({ command: cmd, exitCode: 1, stderr: err }),
-    ]
+    return fail('local', 'bash: local: can only be used in a function\n')
   }
   const view = requireView(state)
-  const restore = globalScope
+  const restore = decl.globalScope
     ? reachGlobal(
         session,
         assignments.map((a) => (typeof a === 'string' ? operandParts(a)[0] : a.name)),
@@ -118,14 +101,8 @@ export async function handleLocal(
       assignments,
       session,
       view,
-      cmd,
-      kind,
-      shaping,
-      marks,
-      plus,
-      nameref,
-      globalScope ? null : session.localVars,
-      inherit,
+      decl,
+      decl.globalScope ? null : session.localVars,
     )
   } finally {
     restore?.()
@@ -137,15 +114,10 @@ async function declareOperands(
   operands: readonly DeclarationOperand[],
   session: SessionState,
   view: SessionView,
-  cmd: string,
-  kind: VarKind | null,
-  shaping: AttrMarks,
-  marks: AttrMarks,
-  plus: string,
-  nameref: boolean,
+  decl: Declaration,
   locals: Map<string, ShellVar | null> | null,
-  inherit: boolean,
 ): Promise<Result> {
+  const { cmd, kind, shaping, marks, plus, nameref, inherit } = decl
   const errors: string[] = []
   const warnings: string[] = []
   const stored = new Map<number, string>()
@@ -167,22 +139,7 @@ async function declareOperands(
     for (const [position, operand] of operands.entries()) {
       let line: string | null
       if (typeof operand === 'string') {
-        line =
-          refused !== null
-            ? null
-            : await declareOperand(
-                session,
-                view,
-                operand,
-                cmd,
-                kind,
-                shaping,
-                marks,
-                plus,
-                nameref,
-                locals,
-                inherit,
-              )
+        line = refused !== null ? null : await declareOperand(session, view, operand, decl, locals)
       } else {
         // A literal takes its marks at its place, against the target its
         // own write cleared, even when a policy refused a later literal;
@@ -193,7 +150,7 @@ async function declareOperands(
         if (checked === undefined) continue
         const name = operand.name
         line =
-          (nameref ? literalReferenceRefusal(session, view, cmd, name) : null) ??
+          (nameref ? referenceLine(session, view, cmd, name, false) : null) ??
           plusRefusal(cmd, session, view, name, plus)
         if (line === null) {
           await stampMarks(
@@ -218,18 +175,19 @@ async function declareOperands(
 }
 
 /**
- * The line a `-n` array literal earns on the reference it was written
- * through: an array cannot become one, and a frozen one keeps every mark
+ * The line a `-n` operand earns on the name it lands on: an array cannot
+ * become a reference (`referenceRefusal`), and a frozen one keeps every mark
  * (`declare -nr r=t; declare -n r=(3)` writes `t` and refuses `r`), as
- * bash's does.
+ * bash's does. `bare` is an operand that gave no value.
  */
-function literalReferenceRefusal(
+function referenceLine(
   session: SessionState,
   view: SessionView,
   cmd: string,
   name: string,
+  bare: boolean,
 ): string | null {
-  const line = referenceRefusal(cmd, name, visibleRecord(session, name), false)
+  const line = referenceRefusal(cmd, name, visibleRecord(session, name), bare)
   if (line === null && view.isReadonly(name, false)) return readonlyLine(cmd, name)
   return line
 }
@@ -246,38 +204,27 @@ async function declareOperand(
   session: SessionState,
   view: SessionView,
   assign: string,
-  cmd: string,
-  kind: VarKind | null,
-  shaping: AttrMarks,
-  marks: AttrMarks,
-  plus: string,
-  nameref: boolean,
+  decl: Declaration,
   locals: Map<string, ShellVar | null> | null,
-  inherit: boolean,
 ): Promise<string | null> {
+  const { cmd, kind, plus, nameref, inherit } = decl
+  // The reference's own `-i -l -u` come off unless asked for, as bash's do
+  // (`declare -l x=T; declare -n x=U` aims at `U`); its target's stay.
+  const shaping = nameref ? unshaped(decl.shaping) : decl.shaping
+  const marks = nameref ? unshaped(decl.marks) : decl.marks
   const badName = identifierRefusal(cmd, assign)
   if (badName !== null) return badName
   const [key, append, given] = operandParts(assign)
   const fresh = locals !== null && !locals.has(key)
-  if (nameref) {
-    // The reference's own `-i -l -u` come off unless asked for, as bash's
-    // do (`declare -l x=T; declare -n x=U` aims at `U`); its target's stay.
-    shaping = unshaped(shaping)
-    marks = unshaped(marks)
-  }
   if (given === null) {
     if (locals !== null) shadowLocal(session, locals, key)
     if (fresh) {
       const line = await freshLocal(session, view, cmd, key, inherit)
       if (line !== null) return line
     }
-    if (nameref) {
-      const bad =
-        referenceRefusal(cmd, key, visibleRecord(session, key), true) ??
-        (view.isReadonly(key, false) ? readonlyLine(cmd, key) : null)
-      if (bad !== null) return bad
-    }
-    const line = plusRefusal(cmd, session, view, key, plus)
+    const line =
+      (nameref ? referenceLine(session, view, cmd, key, true) : null) ??
+      plusRefusal(cmd, session, view, key, plus)
     if (line !== null) return line
     if (
       envGet(session, key) === null &&
@@ -305,17 +252,13 @@ async function declareOperand(
   if ((creates || !nameref) && view.isReadonly(key, !nameref)) return readonlyLine(cmd, key)
   if (locals !== null) shadowLocal(session, locals, key)
   if (creates) startLocal(session, key, inherit)
-  if (nameref) {
-    // Checked on the local, which exists from here on even when the array
-    // it inherited cannot become a reference, as bash's does, so the
-    // function's later writes stay its own. A name no local replaces
-    // reports its array before its readonly mark.
-    const badRef =
-      referenceRefusal(cmd, key, visibleRecord(session, key), false) ??
-      (view.isReadonly(key, false) ? readonlyLine(cmd, key) : null)
-    if (badRef !== null) return badRef
-  }
-  const line = plusRefusal(cmd, session, view, key, plus)
+  // A reference is checked on the local, which exists from here on even
+  // when the array it inherited cannot become a reference, as bash's does,
+  // so the function's later writes stay its own. A name no local replaces
+  // reports its array before its readonly mark.
+  const line =
+    (nameref ? referenceLine(session, view, cmd, key, false) : null) ??
+    plusRefusal(cmd, session, view, key, plus)
   if (line !== null) return line
   if (nameref) {
     return aimReference(session, view, cmd, key, append, given, shaping, marks, creates)
@@ -329,7 +272,7 @@ async function declareOperand(
   const checked = deref(session, key) || key
   await premark(view, key, shaping)
   const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
-  const [slot, added] = append ? appended(heldSlot(held), given, integer) : [given, null]
+  const [slot, added] = append ? appended(held, given, integer) : [given, null]
   const [value, assigned] = scalarValue(held, slot, kind)
   if (kind !== null) await dropReference(session, view, key)
   await view.set(key, value, true, assigned, added)
@@ -375,9 +318,7 @@ async function aimReference(
   const old = typeof held === 'string' ? held : ''
   let value = old + given
   if (shaping.some(([attr, on]) => attr === VarAttr.Integer && on)) {
-    await (append
-      ? evaluateInteger(session, view, old, given)
-      : evaluateInteger(session, view, given))
+    await evaluateInteger(session, view, append ? old : given, append ? given : null)
     value = ''
   }
   if (isValidName(value) || SUBSCRIPT_RE.test(value)) {
@@ -416,7 +357,7 @@ async function freshLocal(
   view: SessionView,
   cmd: string,
   name: string,
-  inherit = false,
+  inherit: boolean,
 ): Promise<string | null> {
   const record = sessionEntry(session.vars, name)
   if (record === undefined || inCallEnv(session, name)) return null
@@ -426,7 +367,7 @@ async function freshLocal(
     return null
   }
   await view.unset(name, false)
-  for (const attr of localAttrs(record, inherit)) await view.mark(name, attr, true)
+  for (const attr of localAttrs(record, false)) await view.mark(name, attr, true)
   return null
 }
 

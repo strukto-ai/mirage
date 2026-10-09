@@ -18,8 +18,9 @@ from mirage.commands.cli.specs import (
     unregister_cli_spec,
 )
 from mirage.commands.cli.types import (
+    CLI,
+    CLIHandler,
     CLIInvocation,
-    CLISpec,
     CLIView,
     WalkResult,
 )
@@ -28,7 +29,8 @@ from mirage.commands.cli.walk import node_help, walk
 __all__ = [
     "CLIView",
     "CLIInvocation",
-    "CLISpec",
+    "CLI",
+    "CLIHandler",
     "WalkResult",
     "cli_spec_for",
     "node_help",

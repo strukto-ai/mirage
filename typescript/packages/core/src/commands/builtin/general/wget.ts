@@ -135,19 +135,12 @@ async function wget(
       new IOResult({
         exitCode: EXIT_SERVER_ERROR,
         stderr: q ? new Uint8Array() : ENC.encode(line),
-        writes: { [dest]: data },
       }),
     ]
   }
   // Real wget puts its progress report on stderr and nothing on stdout.
   const line = `'${dest}' saved [${String(data.byteLength)}/${String(data.byteLength)}]\n`
-  return [
-    null,
-    new IOResult({
-      stderr: q ? new Uint8Array() : ENC.encode(line),
-      writes: { [dest]: data },
-    }),
-  ]
+  return [null, new IOResult({ stderr: q ? new Uint8Array() : ENC.encode(line) })]
 }
 
 export const GENERAL_WGET = command({

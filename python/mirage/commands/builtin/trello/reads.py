@@ -25,7 +25,7 @@ from mirage.commands.builtin.trello._scope import (
 )
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import CommandSpec, Operand
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.trello.client import (
     get_board,
     get_card,
@@ -60,7 +60,7 @@ class TrelloRead:
 
 
 SPEC_NONE = CommandSpec()
-SPEC_ARG = CommandSpec(rest=Operand(type="str"))
+SPEC_ARG = CommandSpec(arguments=(Argument("texts", nargs="*", metavar=""),))
 
 
 def _first(texts: list[str], label: str) -> str:

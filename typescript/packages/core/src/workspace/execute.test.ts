@@ -15,7 +15,8 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { CLISpec } from '../commands/cli/types.ts'
+import { CLI, CLIHandler } from '../commands/cli/types.ts'
+import { CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
@@ -403,7 +404,13 @@ describe('native output', () => {
         closed = true
       }
     }
-    ws.registerCli('writer', new CLISpec({ name: 'writer', fn: () => [source(), new IOResult()] }))
+    ws.registerCli(
+      'writer',
+      new CLI({
+        spec: new CommandSpec({ name: 'writer' }),
+        handlers: { '': new CLIHandler({ fn: () => [source(), new IOResult()] }) },
+      }),
+    )
     try {
       const result = await ws.shell('writer | head -c 1')
       expect(new TextDecoder().decode(result.stdout)).toBe('x')

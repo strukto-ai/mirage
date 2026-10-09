@@ -22,6 +22,7 @@ import pytest
 from mirage import Workspace
 from mirage.commands.cli.builtin.himalaya import HIMALAYA
 from mirage.commands.cli.builtin.himalaya import util as util_module
+from mirage.commands.spec.compile import compile_spec
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 from mirage.vfs.email.email import EmailVFS
@@ -35,16 +36,19 @@ CONFIG = {
 
 
 def leaf(*path: str):
-    node = HIMALAYA
+    node = HIMALAYA.spec
     for name in path:
         node = next(c for c in node.subcommands if c.name == name)
     return node
 
 
 def test_tree_shape_matches_the_himalaya_vocabulary():
-    assert HIMALAYA.name == "himalaya"
+    assert HIMALAYA.spec.name == "himalaya"
     assert HIMALAYA.config_model is EmailConfig
-    assert [g.name for g in HIMALAYA.subcommands] == ["envelope", "message"]
+    assert [g.name for g in HIMALAYA.spec.subcommands] == [
+        "envelope",
+        "message",
+    ]
     assert [v.name for v in leaf("envelope").subcommands] == ["list", "search"]
     assert [v.name for v in leaf("message").subcommands] == [
         "read",
@@ -65,24 +69,34 @@ def test_upstream_aliases_resolve():
 def test_the_mailbox_is_a_flag_and_the_message_id_is_an_operand():
     for verb in ("read", "reply", "forward"):
         node = leaf("message", verb)
-        assert node.rest is not None
-        mailbox = next(o for o in node.options if o.long == "--mailbox")
-        assert mailbox.short == "-m"
-    assert leaf("message", "compose").rest is None
+        assert compile_spec(node).rest is not None
+        mailbox = next(
+            o for o in compile_spec(node).options if "--mailbox" in o.names
+        )
+        assert "-m" in mailbox.names
+    assert compile_spec(leaf("message", "compose")).rest is None
 
 
 def test_no_composer_flag_is_required_since_compose_can_read_stdin():
     assert all(
-        not option.required for option in leaf("message", "compose").options
+        not option.required
+        for option in compile_spec(leaf("message", "compose")).options
     )
 
 
 def test_write_classification_splits_reads_from_sends():
-    assert not leaf("envelope", "list").write
-    assert not leaf("envelope", "search").write
-    assert not leaf("message", "read").write
+    assert not HIMALAYA.handlers["envelope list"].write
+    assert not HIMALAYA.handlers["envelope search"].write
+    assert not HIMALAYA.handlers["message read"].write
     for verb in ("compose", "send", "reply", "forward"):
-        assert leaf("message", verb).write
+        assert HIMALAYA.handlers[
+            " ".join(
+                (
+                    "message",
+                    verb,
+                )
+            )
+        ].write
 
 
 @pytest.mark.asyncio

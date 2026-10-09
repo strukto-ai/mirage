@@ -166,7 +166,9 @@ async def install_exec_redirects(
     that cannot be opened is bash's shell-attributed error and leaves
     the redirects unchanged, every earlier one on the line included
     (`_roll_back`). Numbered descriptors use the same bindings and
-    share open file descriptions when duplicated.
+    share open file descriptions when duplicated, and a copy of a
+    terminal stream stays that stream when the shell later rebinds its
+    own (`exec 3>&1; exec >f`).
 
     Args:
         dispatch (DispatchFn): op dispatcher.
@@ -240,9 +242,6 @@ async def _install_descriptor(
         )
         if identity == CLOSED and target != FD_CLOSE:
             return bad_descriptor_line(target)
-        # Copies share the open description, including its offset, and
-        # one of the terminal's streams stays that stream when the shell
-        # later rebinds its own (`exec 3>&1; exec >f`).
         source = _read_end(session, target, stdin)
         original = session.descriptors.get(target)
         stream = original.stream if original is not None else None
@@ -295,9 +294,6 @@ async def _install_descriptor(
                     SharedInput(await materialize(data) or b""),
                 )
         else:
-            # Opened now, as bash opens it at `exec` time: truncating
-            # creates the file empty, appending only when it is not there,
-            # so `exec >> new; test -e new` succeeds with nothing written.
             await create_file(
                 dispatch, session, scope, b"", append=redirect.append
             )
@@ -384,7 +380,8 @@ def _identity(session: SessionState, fd: int) -> tuple[str, bool]:
     fd 2 is later pointed at, and `exec 2>&1` after that puts stderr
     back on the terminal's stderr, as bash does. Stdin is always the
     read end, so a stream bound to it (`exec 1>&0`) has nowhere to
-    write.
+    write, and fd 0 names its own read end unless an `exec` rebound it
+    (`exec 0<&1`), which a later dup from fd 0 copies.
 
     Args:
         session (SessionState): shell session state.
@@ -398,9 +395,6 @@ def _identity(session: SessionState, fd: int) -> tuple[str, bool]:
             else (CLOSED, False)
         )
     if fd == FD_STDIN:
-        # fd 0 is its own read end unless an `exec` rebound it: closed,
-        # or a writing stream's identity (`exec 0<&1`), which a later dup
-        # from fd 0 copies as bash's does.
         identity = session.exec_stdin_identity
         return (TO_STDIN if identity is None else identity), False
     if fd == FD_STDERR:
@@ -625,12 +619,6 @@ async def divert_statement(
         io.exit_code = 1
         await _routed(dispatch, session, Channel.STDERR, line, rest)
     elif unwritable and io.exit_code == 0 and _stdout_to_stderr(statement):
-        # The statement's own output was what could not be written, so
-        # the write error is its failure (bash's `echo hi >&2` under
-        # `exec 2>&0` reports 1). A diagnostic that could not be
-        # delivered leaves the status alone: GNU find still exits 0
-        # after `-exec nosuch`, ls keeps its 2 and cat its 1, since the
-        # failed write is of a message, not of the work.
         io.exit_code = 1
     if io.exit_code != earned:
         record_status(session, io.exit_code)

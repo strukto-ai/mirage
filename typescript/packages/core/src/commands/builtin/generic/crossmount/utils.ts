@@ -161,19 +161,13 @@ export function readBytesOp(dispatch: DispatchFn): (p: PathSpec) => Promise<Uint
   }
 }
 
-/** A directory-aware whole-file reader that preserves cache and read accounting. */
-export function fileStreamOp(
-  dispatch: DispatchFn,
-  io: IOResult,
-): (p: PathSpec) => AsyncIterable<Uint8Array> {
+/** A directory-aware whole-file reader. */
+export function fileStreamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterable<Uint8Array> {
   const stat = statOp(dispatch)
   const read = readBytesOp(dispatch)
   async function* stream(path: PathSpec): AsyncIterable<Uint8Array> {
     if ((await stat(path)).type === FileType.DIRECTORY) throw eisdir(path)
-    const data = await read(path)
-    io.reads[path.virtual] = data
-    if (!io.cache.includes(path.virtual)) io.cache.push(path.virtual)
-    yield data
+    yield await read(path)
   }
   return stream
 }
@@ -274,7 +268,6 @@ export function streamOperands(
         Object.assign(io.reads, branch.reads)
         Object.assign(io.writes, branch.writes)
         io.cache.push(...branch.cache)
-        io.renames.push(...branch.renames)
         io.stderr = concatBytes([await materialize(io.stderr), await materialize(branch.stderr)])
         io.exitCode = Math.max(io.exitCode, branch.exitCode)
         if (branch.refusal !== null) io.refusal = branch.refusal

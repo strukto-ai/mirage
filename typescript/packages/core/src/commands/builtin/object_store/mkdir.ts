@@ -44,7 +44,6 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
     const verbose = fl.asBool('verbose')
     const parents = fl.asBool('parents')
     const lines: string[] = []
-    const writes: Record<string, Uint8Array> = {}
     const errors: string[] = []
     const links = opts.ns?.links ?? null
     for (const path of resolved) {
@@ -61,7 +60,6 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
         errors.push(failed)
         continue
       }
-      writes[path.mountPath] = new Uint8Array()
       lines.push(...createdLines(names))
     }
     const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null
@@ -69,7 +67,6 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
     return [
       output,
       new IOResult({
-        writes,
         exitCode: errors.length > 0 ? 1 : 0,
         ...(stderr !== undefined ? { stderr } : {}),
       }),

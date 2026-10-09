@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
-from mirage import CLIInvocation, CLISpec
-from mirage.commands.spec.types import Operand
+from mirage import CLI, CLIHandler, CLIInvocation
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io import IOResult
 
 
@@ -15,10 +15,16 @@ async def total(inv: CLIInvocation[TallyConfig]) -> tuple[bytes, IOResult]:
     return line.encode(), IOResult()
 
 
-TALLY = CLISpec(name="tally",
-                description="Add numbers in a unit",
-                config_model=TallyConfig,
-                subcommands=(CLISpec(name="sum",
-                                     description="Sum the operands",
-                                     fn=total,
-                                     rest=Operand(type="str")), ))
+TALLY = CLI(
+    spec=CommandSpec(
+        name="tally",
+        description="Add numbers in a unit",
+        subcommands=(CommandSpec(
+            name="sum",
+            description="Sum the operands",
+            arguments=(Argument("values", nargs="*", metavar=""),),
+        ),),
+    ),
+    handlers={"sum": CLIHandler(fn=total)},
+    config_model=TallyConfig,
+)

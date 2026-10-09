@@ -13,30 +13,26 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.airtable import reads, writes
-from mirage.commands.cli.types import CLISpec
-from mirage.commands.spec.types import Operand, Option
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.airtable.config import AirtableConfig
 
-BASE_OPTION = Option(
-    long="--base", type="str", required=True, description="Base ID (app...)"
+BASE_OPTION = Argument("--base", required=True, help="Base ID (app...)")
+
+TABLE_OPTION = Argument("--table", required=True, help="Table ID or name")
+
+FIELDS_OPTION = Argument(
+    "--fields",
+    help="Cell values as a JSON object keyed by field name",
 )
 
-TABLE_OPTION = Option(
-    long="--table", type="str", required=True, description="Table ID or name"
+TYPECAST_OPTION = Argument(
+    "--typecast",
+    action="store_true",
+    help="Let Airtable convert string values to the field types",
 )
 
-FIELDS_OPTION = Option(
-    long="--fields",
-    type="str",
-    description="Cell values as a JSON object keyed by field name",
-)
-
-TYPECAST_OPTION = Option(
-    long="--typecast",
-    description="Let Airtable convert string values to the field types",
-)
-
-RECORD = Operand(type="str", name="RECORD")
+RECORD = Argument("RECORD", nargs="?")
 
 CREATE_EPILOG = (
     "Without --fields, reads records.jsonl lines from stdin "
@@ -59,145 +55,153 @@ DELETE_EPILOG = (
 # the ids the mount prints after the last "__" of a directory name; a
 # write takes one record from flags or many as JSONL on stdin, the shape
 # records.jsonl holds. Install with an AirtableConfig.
-AIRTABLE = CLISpec(
-    name="airtable",
-    description="Airtable Web API client",
-    config_model=AirtableConfig,
-    subcommands=(
-        CLISpec(
-            name="base",
-            description="Read bases",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    description="List the bases the token reaches as JSON",
-                    fn=reads.base_list,
-                ),
-                CLISpec(
-                    name="get",
-                    description="Get one base and its tables (base.json)",
-                    fn=reads.base_get,
-                    positional=(Operand(type="str", name="BASE"),),
+AIRTABLE = CLI(
+    spec=CommandSpec(
+        name="airtable",
+        description="Airtable Web API client",
+        subcommands=(
+            CommandSpec(
+                name="base",
+                description="Read bases",
+                subcommands=(
+                    CommandSpec(
+                        name="list",
+                        description="List the bases the token reaches as JSON",
+                    ),
+                    CommandSpec(
+                        name="get",
+                        description="Get one base and its tables (base.json)",
+                        arguments=(Argument("BASE", nargs="?"),),
+                    ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="table",
-            description="Read table schemas",
-            subcommands=(
-                CLISpec(
-                    name="get",
-                    description="Get one table's fields and views (table.json)",
-                    fn=reads.table_get,
-                    options=(BASE_OPTION,),
-                    positional=(Operand(type="str", name="TABLE"),),
+            CommandSpec(
+                name="table",
+                description="Read table schemas",
+                subcommands=(
+                    CommandSpec(
+                        name="get",
+                        description="Get one table's fields and views (table.json)",
+                        arguments=(
+                            BASE_OPTION,
+                            Argument("TABLE", nargs="?"),
+                        ),
+                    ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="record",
-            description="Read and write records",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    description="List records as JSONL (records.jsonl)",
-                    fn=reads.record_list,
-                    options=(
-                        BASE_OPTION,
-                        TABLE_OPTION,
-                        Option(
-                            long="--view",
-                            type="str",
-                            description="View ID or name; its filter "
-                            "and sort apply",
-                        ),
-                        Option(
-                            long="--formula",
-                            type="str",
-                            description="Only the records this formula "
-                            "is true for (filterByFormula)",
-                        ),
-                        Option(
-                            long="--max-records",
-                            type="int",
-                            description="Stop after N records",
+            CommandSpec(
+                name="record",
+                description="Read and write records",
+                subcommands=(
+                    CommandSpec(
+                        name="list",
+                        description="List records as JSONL (records.jsonl)",
+                        arguments=(
+                            BASE_OPTION,
+                            TABLE_OPTION,
+                            Argument(
+                                "--view",
+                                help="View ID or name; its filter "
+                                "and sort apply",
+                            ),
+                            Argument(
+                                "--formula",
+                                help="Only the records this formula "
+                                "is true for (filterByFormula)",
+                            ),
+                            Argument(
+                                "--max-records",
+                                type="int",
+                                help="Stop after N records",
+                            ),
                         ),
                     ),
-                ),
-                CLISpec(
-                    name="get",
-                    description="Get one record as a JSONL line",
-                    fn=reads.record_get,
-                    options=(BASE_OPTION, TABLE_OPTION),
-                    positional=(RECORD,),
-                ),
-                CLISpec(
-                    name="create",
-                    description="Create records from --fields or stdin",
-                    fn=writes.record_create,
-                    write=True,
-                    options=(
-                        BASE_OPTION,
-                        TABLE_OPTION,
-                        FIELDS_OPTION,
-                        TYPECAST_OPTION,
+                    CommandSpec(
+                        name="get",
+                        description="Get one record as a JSONL line",
+                        arguments=(
+                            BASE_OPTION,
+                            TABLE_OPTION,
+                            RECORD,
+                        ),
                     ),
-                    epilog=CREATE_EPILOG,
-                ),
-                CLISpec(
-                    name="update",
-                    description="Update records' cells (PATCH) from "
-                    "RECORD --fields or stdin",
-                    fn=writes.record_update,
-                    write=True,
-                    options=(
-                        BASE_OPTION,
-                        TABLE_OPTION,
-                        FIELDS_OPTION,
-                        TYPECAST_OPTION,
+                    CommandSpec(
+                        name="create",
+                        description="Create records from --fields or stdin",
+                        epilog=CREATE_EPILOG,
+                        arguments=(
+                            BASE_OPTION,
+                            TABLE_OPTION,
+                            FIELDS_OPTION,
+                            TYPECAST_OPTION,
+                        ),
                     ),
-                    positional=(RECORD,),
-                    epilog=UPDATE_EPILOG,
-                ),
-                CLISpec(
-                    name="delete",
-                    description="Delete records by RECORD or from stdin",
-                    fn=writes.record_delete,
-                    write=True,
-                    options=(BASE_OPTION, TABLE_OPTION),
-                    rest=RECORD,
-                    epilog=DELETE_EPILOG,
+                    CommandSpec(
+                        name="update",
+                        description="Update records' cells (PATCH) from "
+                        "RECORD --fields or stdin",
+                        epilog=UPDATE_EPILOG,
+                        arguments=(
+                            BASE_OPTION,
+                            TABLE_OPTION,
+                            FIELDS_OPTION,
+                            TYPECAST_OPTION,
+                            RECORD,
+                        ),
+                    ),
+                    CommandSpec(
+                        name="delete",
+                        description="Delete records by RECORD or from stdin",
+                        epilog=DELETE_EPILOG,
+                        arguments=(
+                            BASE_OPTION,
+                            TABLE_OPTION,
+                            Argument("RECORD", nargs="*"),
+                        ),
+                    ),
                 ),
             ),
-        ),
-        CLISpec(
-            name="comment",
-            description="Read and add record comments",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    description="List a record's comments, newest first",
-                    fn=reads.comment_list,
-                    options=(BASE_OPTION, TABLE_OPTION),
-                    positional=(RECORD,),
-                ),
-                CLISpec(
-                    name="add",
-                    description="Comment on a record",
-                    fn=writes.comment_add,
-                    write=True,
-                    options=(
-                        BASE_OPTION,
-                        TABLE_OPTION,
-                        Option(
-                            long="--text",
-                            type="str",
-                            description="Comment text (or pipe via stdin)",
+            CommandSpec(
+                name="comment",
+                description="Read and add record comments",
+                subcommands=(
+                    CommandSpec(
+                        name="list",
+                        description="List a record's comments, newest first",
+                        arguments=(
+                            BASE_OPTION,
+                            TABLE_OPTION,
+                            RECORD,
                         ),
                     ),
-                    positional=(RECORD,),
+                    CommandSpec(
+                        name="add",
+                        description="Comment on a record",
+                        arguments=(
+                            BASE_OPTION,
+                            TABLE_OPTION,
+                            Argument(
+                                "--text",
+                                help="Comment text (or pipe via stdin)",
+                            ),
+                            RECORD,
+                        ),
+                    ),
                 ),
             ),
         ),
     ),
+    handlers={
+        "base list": CLIHandler(fn=reads.base_list),
+        "base get": CLIHandler(fn=reads.base_get),
+        "table get": CLIHandler(fn=reads.table_get),
+        "record list": CLIHandler(fn=reads.record_list),
+        "record get": CLIHandler(fn=reads.record_get),
+        "record create": CLIHandler(fn=writes.record_create, write=True),
+        "record update": CLIHandler(fn=writes.record_update, write=True),
+        "record delete": CLIHandler(fn=writes.record_delete, write=True),
+        "comment list": CLIHandler(fn=reads.comment_list),
+        "comment add": CLIHandler(fn=writes.comment_add, write=True),
+    },
+    config_model=AirtableConfig,
 )

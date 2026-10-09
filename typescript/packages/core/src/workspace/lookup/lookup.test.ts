@@ -11,9 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../commands/spec/types.ts'
+import { CLIHandler } from '../../commands/cli/types.ts'
 
 import { describe, expect, it } from 'vitest'
-import { CLISpec } from '../../commands/cli/types.ts'
+import { CLI } from '../../commands/cli/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
@@ -61,8 +63,11 @@ function noopVerb(): [null, IOResult] {
   return [null, new IOResult()]
 }
 
-function cliTree(): CLISpec {
-  return new CLISpec({ name: 'prog', subcommands: [new CLISpec({ name: 'run', fn: noopVerb })] })
+function cliTree(): CLI {
+  return new CLI({
+    spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
+    handlers: { run: new CLIHandler({ fn: noopVerb }) },
+  })
 }
 
 describe('lookup', () => {

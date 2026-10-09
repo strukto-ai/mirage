@@ -22,7 +22,8 @@ import {
   arrayWith,
   type ShellArray,
 } from '../../shell/array.ts'
-import type { ArithWrite } from '../../shell/types.ts'
+import { ArithError, ReadonlyError } from '../../shell/errors.ts'
+import type { ArithResult, ArithWrite } from '../../shell/types.ts'
 import type { ShellValue } from '../../shell/variable.ts'
 import type { SessionState } from './session.ts'
 import {
@@ -35,7 +36,8 @@ import {
   visibleArrays,
   visibleAssocs,
   deref,
-  type RandomReader,
+  RandomReader,
+  sessionArith,
 } from './state.ts'
 
 const ELEMENT_REF = /^([A-Za-z_]\w*)(?:\[([\s\S]+)\])?$/
@@ -175,4 +177,33 @@ export async function landArith(
   } finally {
     reader.settle()
   }
+}
+
+/**
+ * Evaluate `text` as an arithmetic command or expansion does and land what
+ * it assigned through `land`, which settles its `RANDOM` draws. Reads
+ * resolve against the visible env, so a hidden name counts as unset, and
+ * bash bound the assignments made before an error, which land before the
+ * error is thrown; a PolicyDenied from `land` wins over it. Mirrors
+ * Python's landed_arith.
+ */
+export async function landedArith(
+  session: SessionState,
+  view: SessionView | null,
+  text: string,
+  land: typeof landArith = landArith,
+  nounset = false,
+): Promise<bigint> {
+  const reader = new RandomReader(session)
+  let result: ArithResult
+  try {
+    result = sessionArith(session, text, reader, nounset)
+  } catch (err) {
+    if (err instanceof ArithError || err instanceof ReadonlyError) {
+      await land(session, view, err.writes, reader)
+    }
+    throw err
+  }
+  await land(session, view, result.writes, reader)
+  return result.value
 }

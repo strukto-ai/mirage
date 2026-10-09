@@ -18,8 +18,6 @@ BACKSLASH = 0x5C
 NEWLINE = 0x0A
 HASH = 0x23
 DOLLAR = 0x24
-LESS = 0x3C
-GREATER = 0x3E
 OPEN_PAREN = 0x28
 CLOSE_PAREN = 0x29
 CLOSE_BRACE = 0x7D
@@ -32,7 +30,7 @@ BACKTICK = 0x60
 QUOTE_OPENERS = frozenset((SINGLE_QUOTE, DOUBLE_QUOTE, BACKTICK))
 
 # `$(`, `<(` and `>(` open a substitution that runs to its balancing paren.
-SUBSTITUTION_OPENERS = frozenset((DOLLAR, LESS, GREATER))
+SUBSTITUTION_OPENERS = frozenset(b"$<>")
 
 # A `#` opens a comment only where a word may start: after a blank or a
 # metacharacter, never inside a word (`a#b`, `$#`).

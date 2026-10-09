@@ -14,14 +14,21 @@
 
 from collections.abc import Sequence
 
+from mirage.commands.spec.compile import (
+    argument_dest,
+    compile_spec,
+    option_spellings,
+    positional_name,
+    positional_required,
+)
 from mirage.commands.spec.constants import ARG_PLACEHOLDER
-from mirage.commands.spec.types import CommandSpec, Operand, Option, UsageStyle
+from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 
 # (name, one-line help) rows a CLI group passes for its children.
 SubcommandRows = Sequence[tuple[str, str]]
 
 
-def option_metavar(opt: Option) -> str:
+def option_metavar(opt: Argument) -> str:
     """The bare name of an option's value, declared or derived.
 
     clap derives one from the long spelling when the author declares no
@@ -30,15 +37,15 @@ def option_metavar(opt: Option) -> str:
     say so.
 
     Args:
-        opt (Option): the value-taking option.
+        opt (Argument): the value-taking option.
     """
     if opt.metavar is not None:
         return opt.metavar
-    spelling = opt.long or opt.short or ""
+    spelling = argument_dest(opt)
     return spelling.lstrip("-").replace("-", "_").upper()
 
 
-def operand_slot(operand: Operand, ellipsis: bool = False) -> str:
+def operand_slot(operand: Argument, ellipsis: bool = False) -> str:
     """One operand's slot in a clap usage line.
 
     Required slots take angle brackets and optional ones square, which
@@ -46,31 +53,28 @@ def operand_slot(operand: Operand, ellipsis: bool = False) -> str:
     trailing ellipsis on a variadic.
 
     Args:
-        operand (Operand): the slot.
+        operand (Argument): the slot.
         ellipsis (bool): whether the slot is variadic (a rest operand).
     """
-    name = operand.name or ARG_PLACEHOLDER
-    slot = f"<{name}>" if operand.required else f"[{name}]"
+    name = positional_name(operand) or ARG_PLACEHOLDER
+    slot = f"<{name}>" if positional_required(operand) else f"[{name}]"
     return f"{slot}..." if ellipsis else slot
 
 
-def _value_label(opt: Option) -> str:
-    if opt.type == "bool":
+def _value_label(opt: Argument) -> str:
+    if opt.action in ("store_true", "count"):
         return ""
-    # A pair option takes two tokens, and the first one names the value.
-    value = "<path>" if opt.type == "path" else "<text>"
-    if opt.pair:
+    kind = "path" if opt.type == "path" else "text"
+    value = f"<{opt.metavar if opt.metavar is not None else kind}>"
+    if opt.value_types:
         return f" <name> {value}"
+    if isinstance(opt.nargs, int):
+        return f" {value}" * opt.nargs
     return f" {value}"
 
 
-def _flag_display(opt: Option) -> str:
-    parts: list[str] = []
-    if opt.short is not None:
-        parts.append(opt.short)
-    if opt.long is not None:
-        parts.append(opt.long)
-    return ", ".join(parts) + _value_label(opt)
+def _flag_display(opt: Argument) -> str:
+    return ", ".join(opt.names) + _value_label(opt)
 
 
 def flag_rows(spec: CommandSpec) -> list[tuple[str, str]]:
@@ -79,10 +83,12 @@ def flag_rows(spec: CommandSpec) -> list[tuple[str, str]]:
     Args:
         spec (CommandSpec): the spec whose options to render.
     """
-    return [(_flag_display(o), o.description or "") for o in spec.options]
+    return [
+        (_flag_display(o), o.help or "") for o in compile_spec(spec).options
+    ]
 
 
-def _slot(operand: Operand) -> str:
+def _slot(operand: Argument) -> str:
     """One operand's placeholder outside the clap dialect.
 
     A spec that named the slot gets that name, which is what argparse
@@ -92,13 +98,13 @@ def _slot(operand: Operand) -> str:
     `gh api <endpoint>`.
 
     Args:
-        operand (Operand): the slot to render.
+        operand (Argument): the slot to render.
 
     Returns:
         str: the bracketed placeholder.
     """
-    if operand.name:
-        return f"<{operand.name}>"
+    if positional_name(operand):
+        return f"<{positional_name(operand)}>"
     return "<path>" if operand.type == "path" else "<text>"
 
 
@@ -126,22 +132,23 @@ def usage_line(
         # program's own first line rather than one synthesized from
         # its slots.
         return "Usage: " + synopsis
+    compiled = compile_spec(spec)
     clap = style is UsageStyle.CLAP
     bits = [name]
-    if spec.options:
+    if compiled.options:
         bits.append("[OPTIONS]" if clap else "[flags]")
     if subcommands:
         bits.append("<COMMAND>" if clap else "<command> [<args>]")
-    for operand in spec.positional:
+    for operand in compiled.positional:
         if clap:
             bits.append(operand_slot(operand))
         else:
             bits.append(_slot(operand))
-    if spec.rest is not None:
+    if compiled.rest is not None:
         if clap:
-            bits.append(operand_slot(spec.rest, ellipsis=True))
+            bits.append(operand_slot(compiled.rest, ellipsis=True))
         else:
-            bits.append(f"[{_slot(spec.rest)}...]")
+            bits.append(f"[{_slot(compiled.rest)}...]")
     return "Usage: " + " ".join(bits)
 
 
@@ -197,7 +204,7 @@ def render_help(
             else:
                 lines.append(f"  {sub}")
 
-    if spec.options:
+    if compile_spec(spec).options:
         lines.append("")
         lines.append("Options:" if clap else "Flags:")
         rows = flag_rows(spec)
@@ -207,6 +214,17 @@ def render_help(
                 lines.append(f"  {flag}")
             else:
                 lines.append(f"  {flag.ljust(width)}  {desc}")
+
+    operands = [
+        argument
+        for argument in spec.arguments
+        if not argument.names[0].startswith("-") and argument.help
+    ]
+    if operands:
+        lines.extend(["", "Arguments:"])
+        width = max(len(_slot(operand)) for operand in operands)
+        for operand in operands:
+            lines.append(f"  {_slot(operand).ljust(width)}  {operand.help}")
 
     if spec.epilog:
         lines.append("")
@@ -262,41 +280,54 @@ def argparse_help(
             options are listed on their group.
         subcommands (SubcommandRows): Visible immediate subcommands.
     """
+    compiled = compile_spec(spec)
     usage = [name]
     rows = []
-    for opt in spec.options:
+    for opt in compiled.options:
         value = opt.metavar or (
             "{" + ",".join(opt.choices) + "}"
             if opt.choices
             else option_metavar(opt)
         )
-        suffix = "" if opt.type == "bool" else " " + value
-        if opt.pair:
+        suffix = "" if opt.action in ("store_true", "count") else " " + value
+        if opt.value_types:
             suffix = " NAME " + value
-        if opt.value_optional:
-            suffix = "[=" + value + "]"
-        flags = ", ".join(
-            flag + suffix for flag in (opt.short, opt.long) if flag
-        )
-        slot = (opt.short or opt.long or "") + suffix
+        elif isinstance(opt.nargs, int):
+            suffix = (" " + value) * opt.nargs
+        if opt.nargs == "?":
+            suffix = ("[=" if opt.attached_only else " [") + value + "]"
+        flags = ", ".join(flag + suffix for flag in opt.names)
+        slot = (option_spellings(opt)[0] or argument_dest(opt)) + suffix
         usage.append(slot if opt.required else "[" + slot + "]")
-        details = [opt.description or ""]
+        details = [opt.help or ""]
         if opt.default is not None:
             details.append(f"(default: {opt.default})")
         if opt.env is not None:
             details.append(f"(env: {opt.env})")
         if opt.required:
             details.append("(required)")
-        if opt.multiple:
+        if opt.action in ("append", "extend"):
             details.append("(repeatable)")
         rows.append((flags, " ".join(v for v in details if v)))
     operands = []
-    for operand in (*spec.positional, *((spec.rest,) if spec.rest else ())):
-        label = operand.name or ("PATH" if operand.type == "path" else "ARG")
-        slot = label + (" ..." if operand is spec.rest else "")
-        usage.append(slot if operand.required else "[" + slot + "]")
+    for operand in (
+        *compiled.positional,
+        *((compiled.rest,) if compiled.rest else ()),
+    ):
+        label = positional_name(operand) or (
+            "PATH" if operand.type == "path" else "ARG"
+        )
+        slot = label + (" ..." if operand is compiled.rest else "")
+        usage.append(
+            slot if positional_required(operand) else "[" + slot + "]"
+        )
         operands.append(
-            (label, "Virtual path" if operand.type == "path" else "")
+            (
+                label,
+                operand.help
+                if operand.help is not None
+                else ("Virtual path" if operand.type == "path" else ""),
+            )
         )
     if subcommands:
         usage.append("{" + ",".join(sub for sub, _ in subcommands) + "} ...")

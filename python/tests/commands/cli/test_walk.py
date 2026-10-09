@@ -16,7 +16,7 @@ from dataclasses import replace
 
 import pytest
 
-from mirage.commands.cli import CLISpec, walk
+from mirage.commands.cli import CLI, CLIHandler, walk
 from mirage.commands.cli.walk import (
     env_names,
     find_child,
@@ -26,7 +26,7 @@ from mirage.commands.cli.walk import (
     owns_argv,
     supplied_env_names,
 )
-from mirage.commands.spec.types import Option, UsageStyle
+from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.runtime.types import ScriptSource
 from mirage.types import PathSpec
 
@@ -35,41 +35,35 @@ async def _verb(config, paths, *texts, **flags):
     return None
 
 
-def _tree() -> CLISpec:
-    return CLISpec(
+def _tree() -> CommandSpec:
+    return CommandSpec(
         name="gws",
         description="Google Workspace",
-        options=(
-            Option(
-                short="-C",
-                long="--cwd",
-                type="str",
-                description="run as if started there",
-            ),
-            Option(short="-v", long="--verbose", count=True),
-        ),
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="gmail",
                 description="Gmail messages",
-                options=(
-                    Option(
-                        long="--account",
-                        type="str",
+                subcommands=(
+                    CommandSpec(name="send"),
+                    CommandSpec(name="list"),
+                ),
+                arguments=(
+                    Argument(
+                        "--account",
                         default="primary",
                         choices=("primary", "work"),
                     ),
                 ),
-                subcommands=(
-                    CLISpec(name="send", fn=_verb, write=True),
-                    CLISpec(name="list", fn=_verb),
-                ),
             ),
-            CLISpec(
+            CommandSpec(
                 name="docs",
                 description="Google Docs",
-                subcommands=(CLISpec(name="cat", fn=_verb),),
+                subcommands=(CommandSpec(name="cat"),),
             ),
+        ),
+        arguments=(
+            Argument("-C", "--cwd", help="run as if started there"),
+            Argument("-v", "--verbose", action="count"),
         ),
     )
 
@@ -77,7 +71,7 @@ def _tree() -> CLISpec:
 def test_resolves_a_leaf_and_keeps_its_argv():
     result = walk("gws", _tree(), ["gmail", "send", "-t", "a@x.com", "hi"])
     assert result.leaf is not None
-    assert result.leaf.write is True
+    assert result.leaf.name == "send"
     assert result.path == ("gmail", "send")
     assert result.argv == ("-t", "a@x.com", "hi")
     assert result.exit_code == 0
@@ -115,9 +109,12 @@ def test_bare_root_prints_usage_to_stdout_exit_1():
     assert b"commands:" in result.output
 
 
-def test_help_prints_the_same_usage_exit_0():
-    bare = walk("gws", _tree(), [])
-    helped = walk("gws", _tree(), ["--help"])
+@pytest.mark.parametrize("style", [UsageStyle.ARGPARSE, UsageStyle.COBRA])
+@pytest.mark.parametrize("switch", ["--help", "-h"])
+def test_help_prints_the_same_usage_exit_0(style, switch):
+    tree = replace(_tree(), usage_style=style)
+    bare = walk("gws", tree, [])
+    helped = walk("gws", tree, [switch])
     assert helped.exit_code == 0
     assert helped.stream == "stdout"
     assert helped.output == bare.output
@@ -234,7 +231,7 @@ def test_double_dash_ends_group_options():
 
 
 def test_leaf_root_passes_argv_through():
-    single = CLISpec(name="hello", fn=_verb)
+    single = CommandSpec(name="hello")
     result = walk("hello", single, ["--help", "-x", "arg"])
     assert result.leaf is single
     assert result.path == ()
@@ -242,10 +239,10 @@ def test_leaf_root_passes_argv_through():
 
 
 def test_required_group_option_missing_exits_129():
-    tree = CLISpec(
+    tree = CommandSpec(
         name="tool",
-        options=(Option(long="--token", type="str", required=True),),
-        subcommands=(CLISpec(name="run", fn=_verb),),
+        subcommands=(CommandSpec(name="run"),),
+        arguments=(Argument("--token", required=True),),
     )
     result = walk("tool", tree, ["run"])
     assert result.exit_code == 129
@@ -262,10 +259,10 @@ def test_group_help_lists_the_injected_help_flag():
 
 
 def test_optional_value_long_at_group_level():
-    tree = CLISpec(
+    tree = CommandSpec(
         name="tool",
-        options=(Option(long="--color", type="str", value_optional=True),),
-        subcommands=(CLISpec(name="run", fn=_verb),),
+        subcommands=(CommandSpec(name="run"),),
+        arguments=(Argument("--color", nargs="?", attached_only=True),),
     )
     attached = walk("tool", tree, ["--color=auto", "run"])
     assert attached.leaf is not None
@@ -276,10 +273,10 @@ def test_optional_value_long_at_group_level():
 
 
 def test_multichar_short_at_group_level():
-    tree = CLISpec(
+    tree = CommandSpec(
         name="tool",
-        options=(Option(short="-name", type="str"),),
-        subcommands=(CLISpec(name="run", fn=_verb),),
+        subcommands=(CommandSpec(name="run"),),
+        arguments=(Argument("-name"),),
     )
     detached = walk("tool", tree, ["-name", "foo", "run"])
     assert detached.leaf is not None
@@ -293,14 +290,11 @@ def test_multichar_short_at_group_level():
 
 
 def test_alias_resolves_to_the_canonical_verb():
-    tree = CLISpec(
+    tree = CommandSpec(
         name="tool",
         subcommands=(
-            CLISpec(
-                name="checkout",
-                aliases=("co",),
-                description="Switch branches",
-                fn=_verb,
+            CommandSpec(
+                name="checkout", aliases=("co",), description="Switch branches"
             ),
         ),
     )
@@ -311,14 +305,13 @@ def test_alias_resolves_to_the_canonical_verb():
 
 
 def test_alias_renders_beside_the_canonical_name():
-    tree = CLISpec(
+    tree = CommandSpec(
         name="tool",
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="checkout",
                 aliases=("co", "cout"),
                 description="Switch branches",
-                fn=_verb,
             ),
         ),
     )
@@ -333,10 +326,13 @@ def test_group_long_prefix_expands_like_git():
 
 
 def test_group_ambiguous_prefix_uses_git_wording():
-    tree = CLISpec(
+    tree = CommandSpec(
         name="tool",
-        options=(Option(long="--context", type="str"), Option(long="--count")),
-        subcommands=(CLISpec(name="run", fn=_verb),),
+        subcommands=(CommandSpec(name="run"),),
+        arguments=(
+            Argument("--context"),
+            Argument("--count", action="store_true"),
+        ),
     )
     result = walk("tool", tree, ["--co", "run"])
     assert result.exit_code == 129
@@ -353,10 +349,10 @@ def test_help_prefix_reaches_the_injected_help():
 
 
 def test_int_typed_group_option_uses_git_wording():
-    tree = CLISpec(
+    tree = CommandSpec(
         name="tool",
-        options=(Option(long="--depth", type="int"),),
-        subcommands=(CLISpec(name="run", fn=_verb),),
+        subcommands=(CommandSpec(name="run"),),
+        arguments=(Argument("--depth", type="int"),),
     )
     bad = walk("tool", tree, ["--depth", "x", "run"])
     assert bad.exit_code == 129
@@ -369,10 +365,10 @@ def test_int_typed_group_option_uses_git_wording():
 
 
 def test_float_typed_group_option_uses_git_wording():
-    tree = CLISpec(
+    tree = CommandSpec(
         name="tool",
-        options=(Option(long="--ratio", type="float"),),
-        subcommands=(CLISpec(name="run", fn=_verb),),
+        subcommands=(CommandSpec(name="run"),),
+        arguments=(Argument("--ratio", type="float"),),
     )
     bad = walk("tool", tree, ["--ratio", "5x", "run"])
     assert bad.exit_code == 129
@@ -385,9 +381,9 @@ def test_float_typed_group_option_uses_git_wording():
 
 
 def test_find_child_matches_name_or_alias():
-    tree = CLISpec(
+    tree = CommandSpec(
         name="gws",
-        subcommands=(CLISpec(name="checkout", aliases=("co",), fn=_verb),),
+        subcommands=(CommandSpec(name="checkout", aliases=("co",)),),
     )
     assert find_child(tree, "checkout").name == "checkout"
     assert find_child(tree, "co").name == "checkout"
@@ -415,7 +411,7 @@ def test_find_node_misses_on_an_unknown_verb():
 def test_script_root_terminates_the_walk_with_argv_verbatim():
     # A script node is a terminal leaf like an fn node: the walk hands
     # back every token so the program can re-parse argv natively.
-    spec = CLISpec(name="pager", script=ScriptSource("print('hi')"))
+    spec = CommandSpec(name="pager")
     result = walk("pager", spec, ["--frobnicate", "report.txt"])
     assert result.leaf is spec
     assert result.path == ()
@@ -425,41 +421,44 @@ def test_script_root_terminates_the_walk_with_argv_verbatim():
 
 def test_owns_argv_only_for_a_grammarless_script_root():
     source = ScriptSource("print('hi')")
-    assert owns_argv(CLISpec(name="pager", script=source))
-    declared = CLISpec(
-        name="pager",
-        script=source,
-        options=(Option(long="--width", type="int"),),
+    assert owns_argv(CLI(CommandSpec(name="pager"), script=source))
+    declared = CommandSpec(
+        name="pager", arguments=(Argument("--width", type="int"),)
     )
-    assert not owns_argv(declared)
-    assert not owns_argv(CLISpec(name="prog", fn=_verb))
+    assert not owns_argv(CLI(declared, script=source))
+    assert not owns_argv(
+        CLI(CommandSpec(name="prog"), handlers={"": CLIHandler(_verb)})
+    )
 
 
 def test_manual_of_a_grammarless_script_omits_the_help_row():
     # man renders from the spec, so it must not advertise a --help the
     # program answers itself.
     text = node_help(
-        "pager", CLISpec(name="pager", script=ScriptSource("print(1)"))
+        "pager",
+        CLI(CommandSpec(name="pager"), script=ScriptSource("print(1)")).spec,
     )
     assert text.startswith("usage: pager\n")
     assert "--help" not in text
 
 
 def test_group_help_lists_a_child_that_declares_its_own_help():
-    # The listed group is grammar only; a rebuilt CLISpec would refuse
+    # The listed group is grammar only; a rebuilt CommandSpec would refuse
     # the added --help as colliding with the child's own.
-    child = CLISpec(name="run", fn=_verb, options=(Option(long="--help"),))
-    tree = CLISpec(name="tool", subcommands=(child,))
+    child = CommandSpec(
+        name="run", arguments=(Argument("--help", action="store_true"),)
+    )
+    tree = CommandSpec(name="tool", subcommands=(child,))
     assert "run" in node_help("tool", tree)
 
 
 def test_path_typed_group_option_resolves_against_cwd():
     # A group option declared "path" has to mean what it means on a
     # leaf, or the type is a lie at exactly one level of the tree.
-    tree = CLISpec(
+    tree = CommandSpec(
         name="tool",
-        options=(Option(short="-C", type="path"),),
-        subcommands=(CLISpec(name="run", fn=_verb),),
+        subcommands=(CommandSpec(name="run"),),
+        arguments=(Argument("-C", type="path"),),
     )
     relative = walk("tool", tree, ["-C", "build", "run"], "/repo/src")
     assert relative.group_flags == {
@@ -470,10 +469,10 @@ def test_path_typed_group_option_resolves_against_cwd():
 
 
 def test_path_typed_group_default_lands_as_the_cwd():
-    tree = CLISpec(
+    tree = CommandSpec(
         name="tool",
-        options=(Option(short="-C", type="path", default="."),),
-        subcommands=(CLISpec(name="run", fn=_verb),),
+        subcommands=(CommandSpec(name="run"),),
+        arguments=(Argument("-C", type="path", default="."),),
     )
     assert walk("tool", tree, ["run"], "/repo/src").group_flags == {
         "-C": PathSpec.from_str_path(".", cwd="/repo/src")
@@ -481,10 +480,10 @@ def test_path_typed_group_default_lands_as_the_cwd():
 
 
 def test_repeated_path_group_option_resolves_every_value():
-    tree = CLISpec(
+    tree = CommandSpec(
         name="tool",
-        options=(Option(long="--dir", type="path", multiple=True),),
-        subcommands=(CLISpec(name="run", fn=_verb),),
+        subcommands=(CommandSpec(name="run"),),
+        arguments=(Argument("--dir", type="path", action="append"),),
     )
     result = walk("tool", tree, ["--dir", "a", "--dir", "/b", "run"], "/w")
     assert result.group_flags == {
@@ -495,31 +494,27 @@ def test_repeated_path_group_option_resolves_every_value():
     }
 
 
-def _env_tree() -> CLISpec:
-    return CLISpec(
+def _env_tree() -> CommandSpec:
+    return CommandSpec(
         name="tool",
-        options=(Option(long="--token", type="str", env="ROOT_T"),),
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="alpha",
-                options=(Option(long="--a", type="str", env="ALPHA_T"),),
                 subcommands=(
-                    CLISpec(
+                    CommandSpec(
                         name="deep",
-                        fn=_verb,
-                        options=(
-                            Option(long="--d", type="str", env="DEEP_T"),
-                        ),
+                        arguments=(Argument("--d", env="DEEP_T"),),
                     ),
                 ),
+                arguments=(Argument("--a", env="ALPHA_T"),),
             ),
-            CLISpec(
+            CommandSpec(
                 name="beta",
-                fn=_verb,
                 aliases=("b",),
-                options=(Option(long="--b", type="str", env="BETA_T"),),
+                arguments=(Argument("--b", env="BETA_T"),),
             ),
         ),
+        arguments=(Argument("--token", env="ROOT_T"),),
     )
 
 
@@ -571,17 +566,16 @@ def test_group_env_yields_to_the_typed_value():
     assert result.group_flags == {"--token": "typed"}
 
 
-def _shared_env_tree() -> CLISpec:
-    return CLISpec(
+def _shared_env_tree() -> CommandSpec:
+    return CommandSpec(
         name="tool",
-        options=(Option(long="--token", type="str", env="SHARED"),),
         subcommands=(
-            CLISpec(
+            CommandSpec(
                 name="alpha",
-                fn=_verb,
-                options=(Option(long="--a", type="str", env="SHARED"),),
+                arguments=(Argument("--a", env="SHARED"),),
             ),
         ),
+        arguments=(Argument("--token", env="SHARED"),),
     )
 
 
@@ -610,11 +604,11 @@ def test_supplied_env_names_double_dash_keeps_descendants_readable():
 
 
 def test_option_shaped_alias_uses_the_declared_leaf():
-    leaf = CLISpec(name="version", aliases=("--version", "-v"), fn=_verb)
-    spec = CLISpec(
+    leaf = CommandSpec(name="version", aliases=("--version", "-v"))
+    spec = CommandSpec(
         name="tool",
-        options=(Option(short="-C", type="path", default="."),),
         subcommands=(leaf,),
+        arguments=(Argument("-C", type="path", default="."),),
     )
     result = walk("tool", spec, ["--version"], cwd="/work")
     assert result.leaf is leaf
@@ -622,32 +616,30 @@ def test_option_shaped_alias_uses_the_declared_leaf():
     assert result.group_flags["-C"].virtual == "/work"
     assert result.argv == ()
     # A real option keeps its meaning even if a child also declares that alias.
-    spec = replace(spec, options=(Option(short="-v"),))
+    spec = replace(spec, arguments=(Argument("-v", action="store_true"),))
     result = walk("tool", spec, ["-v", "version"])
     assert result.leaf is leaf
     assert result.group_flags["-v"] is True
 
 
 def test_option_shaped_alias_is_an_operand_after_double_dash():
-    leaf = CLISpec(name="version", aliases=("--version", "-v"), fn=_verb)
-    spec = CLISpec(name="tool", subcommands=(leaf,))
+    leaf = CommandSpec(name="version", aliases=("--version", "-v"))
+    spec = CommandSpec(name="tool", subcommands=(leaf,))
     for word in ("--version", "-v"):
         result = walk("tool", spec, ["--", word])
         assert result.leaf is None
         assert result.exit_code == 1
         assert (
             result.output
-            == (
-                f"tool: '{word}' is not a tool command. See 'tool --help'.\n"
-            ).encode()
+            == f"tool: '{word}' is not a tool command. See 'tool --help'.\n".encode()
         )
     assert walk("tool", spec, ["--", "version"]).leaf is leaf
 
 
 def test_git_root_refuses_double_dash_like_an_unknown_option():
-    leaf = CLISpec(name="status", fn=_verb)
-    inner = CLISpec(name="remote", subcommands=(leaf,))
-    spec = CLISpec(
+    leaf = CommandSpec(name="status")
+    inner = CommandSpec(name="remote", subcommands=(leaf,))
+    spec = CommandSpec(
         name="git", usage_style=UsageStyle.GIT, subcommands=(leaf, inner)
     )
     for argv in (["--", "status"], ["--"]):
@@ -678,11 +670,131 @@ def test_git_root_refuses_double_dash_like_an_unknown_option():
     ],
 )
 def test_an_operand_base_moves_like_a_chdir(argv, expected):
-    tree = CLISpec(
+    tree = CommandSpec(
         name="git",
         operand_base="-C",
-        options=(Option(short="-C", type="path", default="."),),
-        subcommands=(CLISpec(name="status", fn=_verb),),
+        subcommands=(CommandSpec(name="status"),),
+        arguments=(Argument("-C", type="path", default="."),),
     )
     result = walk("git", tree, [*argv, "status"], cwd="/work")
     assert result.group_flags["-C"].virtual == expected
+
+
+ARITY_TREE = CommandSpec(
+    name="tool",
+    arguments=(
+        Argument("-v", action="store_true"),
+        Argument("--output", nargs=1, type="path", env="OUTPUT"),
+        Argument("-p", "--point", nargs=2, env="POINT"),
+        Argument("-c", "--color", nargs="?"),
+        Argument("-g", "--gnu", nargs="?", attached_only=True),
+        Argument(
+            "--rawfile",
+            nargs=2,
+            action="extend",
+            type="path",
+            value_types=("str", "path"),
+        ),
+    ),
+    subcommands=(
+        CommandSpec(name="run", arguments=(Argument("--token", env="TOKEN"),)),
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        ["--point", "1", "2"],
+        ["-p", "1", "2"],
+        ["-p1", "2"],
+        ["-vp", "1", "2"],
+        ["-vp1", "2"],
+    ],
+)
+def test_group_fixed_nargs_consumes_all_values_before_the_subcommand(words):
+    result = walk("tool", ARITY_TREE, [*words, "run"])
+    assert result.path == ("run",)
+    assert result.group_flags["--point"] == ["1", "2"]
+    assert result.argv == ()
+
+
+def test_group_fixed_nargs_store_replaces_and_extend_accumulates():
+    points = ["--point", "1", "2", "--point", "3", "4"]
+    files = ["--rawfile", "a", "b", "--rawfile", "c", "d"]
+    result = walk("tool", ARITY_TREE, [*points, *files, "run"], cwd="/work")
+    assert result.group_flags["--point"] == ["3", "4"]
+    values = result.group_flags["--rawfile"]
+    assert values[::2] == ["a", "c"]
+    assert all(isinstance(value, PathSpec) for value in values[1::2])
+    assert [value.virtual for value in values[1::2]] == ["/work/b", "/work/d"]
+    for words, message in (
+        (["--output"], "error: option '--output' requires a value"),
+        (["--point"], "error: option '--point' requires a value"),
+        (["--point", "1"], "error: option '--point' requires a value"),
+        (["-p"], "error: option '-p' requires a value"),
+        (["-p1"], "error: option '-p' requires a value"),
+        (["--point=1"], "unknown option: --point=1"),
+        (["--point=1", "2", "run"], "unknown option: --point=1"),
+        (["--poi=1", "2", "run"], "unknown option: --poi=1"),
+        (["--point=", "1", "2", "run"], "unknown option: --point="),
+    ):
+        refused = walk("tool", ARITY_TREE, words)
+        assert refused.leaf is None
+        assert refused.exit_code == 129
+        assert refused.stream == "stderr"
+        assert refused.output.decode().splitlines()[0] == message
+    for word, path in (
+        ("--output=x", "/work/x"),
+        ("--out=x", "/work/x"),
+        ("--output=", "/work"),
+    ):
+        attached = walk("tool", ARITY_TREE, [word, "run"], cwd="/work")
+        assert attached.path == ("run",)
+        assert attached.exit_code == 0
+        assert [
+            value.virtual for value in attached.group_flags["--output"]
+        ] == [path]
+        assert attached.argv == ()
+
+
+@pytest.mark.parametrize(
+    "words, flags",
+    [
+        (["--color", "auto"], {"--color": "auto"}),
+        (["-c", "auto"], {"--color": "auto"}),
+        (["-vc", "auto"], {"-v": True, "--color": "auto"}),
+        (["-vc", "--"], {"-v": True, "--color": True}),
+        (["--gnu"], {"--gnu": True}),
+        (["-vgauto"], {"-v": True, "--gnu": "auto"}),
+        (["-vg"], {"-v": True, "--gnu": True}),
+    ],
+)
+def test_group_optional_values_consume_detached_values(words, flags):
+    result = walk("tool", ARITY_TREE, [*words, "run"])
+    assert result.path == ("run",)
+    assert result.group_flags == flags
+
+
+def test_supplied_environment_scan_skips_the_complete_group_argument():
+    assert supplied_env_names(
+        ARITY_TREE, ["--point", "x", "y", "run", "--token", "secret"]
+    ) == frozenset({"POINT", "TOKEN"})
+    assert supplied_env_names(
+        ARITY_TREE, ["--output=x", "run", "--token", "secret"]
+    ) == frozenset({"OUTPUT", "TOKEN"})
+
+
+def test_group_help_and_abbreviation_settings_apply_to_the_whole_node():
+    tree = CommandSpec(
+        name="tool",
+        arguments=(Argument("--verbose", action="store_true"),),
+        subcommands=(CommandSpec(name="run"),),
+        allow_abbrev=False,
+        add_help=False,
+    )
+    for words in (["--verb", "run"], ["--help"], ["-h"]):
+        result = walk("tool", tree, words)
+        assert result.exit_code != 0
+        assert b"unknown option" in result.output
+    assert "--help" not in node_help("tool", tree)

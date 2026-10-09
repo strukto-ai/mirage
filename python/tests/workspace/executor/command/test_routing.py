@@ -16,7 +16,7 @@ import pytest
 
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import CommandSpec, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import DeviceInput
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -54,7 +54,7 @@ def test_option_loop_exits_only_for_a_parsed_early_answer(argv, expected):
 
 
 def test_option_loop_exit_rules_do_not_apply_to_custom_grammars():
-    spec = CommandSpec(options=(Option(long="--version"),))
+    spec = CommandSpec(arguments=(Argument("--version", action="store_true"),))
     assert not routing.option_loop_exits("jq", spec, ["--version"], "/")
     assert not routing.option_loop_exits("jq", None, ["--version"], "/")
 

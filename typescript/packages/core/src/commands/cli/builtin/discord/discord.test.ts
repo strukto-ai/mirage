@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec } from '../../../spec/compile.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as DiscordAccessorModule from '../../../../accessor/discord.ts'
 import type {
@@ -89,16 +90,19 @@ const VERBS = [
 
 describe('discord tree', () => {
   it('matches the OpenClaw vocabulary and registers itself', () => {
-    expect(DISCORD.subcommands.map((v) => v.name)).toEqual(VERBS)
+    expect(DISCORD.spec.subcommands.map((v) => v.name)).toEqual(VERBS)
     expect(cliSpecFor('discord')).toBe(DISCORD)
   })
 
   it('classifies writers and keeps --answer repeatable', () => {
-    const writers = new Set(DISCORD.subcommands.filter((v) => v.write).map((v) => v.name))
+    const writers = new Set(
+      DISCORD.spec.subcommands.filter((v) => DISCORD.handlers[v.name]?.write).map((v) => v.name),
+    )
     expect(writers).toEqual(new Set(['send', 'edit', 'delete', 'react', 'thread-create', 'poll']))
-    const pollSpec = DISCORD.subcommands.find((v) => v.name === 'poll')
-    const answer = pollSpec?.options.find((o) => o.long === '--answer')
-    expect(answer?.multiple).toBe(true)
+    const pollSpec = DISCORD.spec.subcommands.find((v) => v.name === 'poll')
+    if (pollSpec === undefined) throw new Error('missing poll grammar')
+    const answer = compileSpec(pollSpec).options.find((o) => o.names.includes('--answer'))
+    expect(answer?.action).toBe('append')
     expect(answer?.required).toBe(true)
   })
 })
