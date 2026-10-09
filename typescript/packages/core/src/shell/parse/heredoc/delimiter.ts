@@ -38,8 +38,9 @@ export function ansiCEnd(token: string, start: number): number {
   return token.length
 }
 
-/** Where a word's next character is once continued lines are joined. */
-function joined(token: string, index: number): number {
+/** Where the next character is once continued lines are joined, as bash
+ * joins them before it reads one. Mirrors Python's joined. */
+export function joined(token: string, index: number): number {
   while (token.startsWith('\\\n', index)) index += 2
   return index
 }

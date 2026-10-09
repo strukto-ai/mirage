@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 ARITH_OPEN_TOKEN = "(("
 
 QUOTES = (b"'", b'"')
@@ -245,3 +247,79 @@ CD_ANCHORS = ("/", "./", "../", "~")
 # ``test``/``[`` are absent on purpose: the flat builtin parses its
 # integer operands strictly (``to_int``), bash's own split.
 ARITH_TEST_OPERATORS = frozenset({"-eq", "-ne", "-lt", "-le", "-gt", "-ge"})
+
+# A shell identifier, as the names a word reads are found.
+IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+# The nodes whose text the respelling pass leaves to their own grammar:
+# tests, arithmetic, strings, expansions, heredoc bodies and comments.
+UNLEXED = frozenset(
+    {
+        "test_command",
+        "arithmetic_expansion",
+        "string_content",
+        "raw_string",
+        "ansi_c_string",
+        "expansion",
+        "heredoc_content",
+        "comment",
+        "binary_expression",
+        "unary_expression",
+        "postfix_expression",
+    }
+)
+
+# The bytes a word can start after, so a digit string there is a
+# redirect's descriptor rather than the tail of a word.
+WORD_START = b" \t\n;&|(){}"
+
+# A run of digits at the respelling position.
+DIGIT_RUN = re.compile(rb"\d+")
+
+# A backslash before a blank, which escapes the blank into the word it
+# opens.
+ESCAPED_BLANK = re.compile(rb"\\[ \t]")
+
+# What follows a case arm's terminator when the arm is the last one.
+LAST_CASE_ARM = re.compile(rb"\s*esac(?![^\s;&|()<>])")
+
+# Test operators the grammar lexes apart from a word in an argument list or
+# an error region, where bash reads a word.
+BARE_WORDS = frozenset({"==", "=~"})
+
+# A `$` that no name, digit, special parameter, brace, paren, bracket or
+# quote follows, which bash reads as a literal `$`.
+LITERAL_DOLLAR = re.compile(rb"\$(?![\w@*#?$!{(\['\"-])")
+
+# The list and pipe operators, which end a `[` command's words.
+LIST_TOKENS = frozenset({"&&", "||", "|", "|&", ";", "&", ";;"})
+
+# The expression nodes a `[` test is built from, walked for a list
+# operator the grammar folded into it.
+TEST_PARTS = frozenset(
+    {
+        "binary_expression",
+        "unary_expression",
+        "negation_expression",
+        "parenthesized_expression",
+        "ERROR",
+    }
+)
+
+# A for or select header's variable spelled as a name.
+HEADER_NAME = re.compile(rb"\w+")
+
+# The `in` or `do` after a for or select header's variable.
+HEADER_FOLLOWER = re.compile(rb"\s*(in|do)(?![^\s;&|()<>])")
+
+# The nodes a newline between two children of cannot be whitespace, so a
+# newline the grammar folded into one ends the statement.
+STATEMENT_NODES = frozenset(
+    {
+        "command",
+        "declaration_command",
+        "file_redirect",
+        "redirected_statement",
+        "unset_command",
+    }
+)

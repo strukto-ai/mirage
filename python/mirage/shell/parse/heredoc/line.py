@@ -15,6 +15,21 @@
 from mirage.shell.parse.heredoc import constants
 
 
+def ends_escaped(text: str | bytes | bytearray) -> bool:
+    """Whether an odd run of backslashes ends ``text``, so its last
+    backslash escapes what follows: the newline it continues, or the end
+    of the input it quotes. An even run is escaped backslashes only.
+
+    Args:
+        text (str | bytes | bytearray): a line, without its newline.
+    """
+    if isinstance(text, str):
+        run = len(text) - len(text.rstrip("\\"))
+    else:
+        run = len(text) - len(text.rstrip(b"\\"))
+    return run % 2 == 1
+
+
 def construct_closer(data: bytes, index: int, bare: bool) -> int | None:
     """The byte closing the construct that opens at ``index``.
 

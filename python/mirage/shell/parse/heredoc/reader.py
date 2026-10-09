@@ -23,6 +23,7 @@ from mirage.shell.parse.heredoc.delimiter import (
 from mirage.shell.parse.heredoc.line import (
     construct_closer,
     construct_end,
+    ends_escaped,
     operator_line_end,
     quote_end,
 )
@@ -95,8 +96,7 @@ def read_body(
             line.extend(data[begin:end])
             places.extend(range(begin, end))
             position = len(data) if newline < 0 else newline + 1
-            trailing = len(line) - len(line.rstrip(b"\\"))
-            continued = not quoted and trailing % 2 != 0 and newline >= 0
+            continued = not quoted and ends_escaped(line) and newline >= 0
             if continued:
                 line.pop()
                 places.pop()
