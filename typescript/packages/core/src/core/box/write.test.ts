@@ -316,6 +316,14 @@ describe('box write ops', () => {
     expect(records.map((r) => [r.op, r.path])).toEqual([['copy', '/data/c.txt']])
   })
 
+  it('copy of a whole folder is recorded as a prefix', async () => {
+    const [, records] = await runWithRecording(() =>
+      copy(makeAccessor(), spec('/data/sub'), spec('/data/new')),
+    )
+    expect(vi.mocked(api.copyFolder)).toHaveBeenCalledWith(STUB_TM, '300', '100', 'new')
+    expect(records.map((r) => [r.op, r.path])).toEqual([['copy_prefix', '/data/new']])
+  })
+
   const COPY_TREE: Record<string, ApiModule.BoxItem[]> = {
     '0': [{ type: 'folder', id: '100', name: 'data' }],
     '100': [

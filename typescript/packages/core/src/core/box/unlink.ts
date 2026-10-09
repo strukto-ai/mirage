@@ -22,13 +22,8 @@ import { liveOf } from './fingerprint.ts'
 import { pathParts, resolveItem } from './resolve.ts'
 
 /**
- * Delete a resolved file, conditioned on a `write: conditional` mount. A
- * delete needs no read of its own, only that nobody wrote since: the version
- * the mount holds, else the sha1 its own lookup found, is held against the
- * live one, and the etag goes out as `If-Match`. Mirrors Python's
- * `delete_resolved`.
- *
- * @throws a stale-write error when the file changed or went since it was measured
+ * Delete a resolved file, held to the version read, else the one found.
+ * Mirrors Python's `delete_resolved`.
  */
 export async function deleteResolved(
   accessor: BoxAccessor,
@@ -41,9 +36,7 @@ export async function deleteResolved(
   try {
     await deleteFile(accessor.tokenManager, item.id, etag)
   } catch (err) {
-    const lost = await refused(path, err, cond, etag)
-    if (lost !== null) throw lost
-    throw err
+    throw (await refused(path, err, cond, etag)) ?? err
   }
 }
 

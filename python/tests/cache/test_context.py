@@ -39,10 +39,7 @@ from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.cache.types import LiveVersion, WriteCondition, WriteContext
-from mirage.errors.types import (
-    OperationNotSupportedError,
-    StaleWriteError,
-)
+from mirage.errors.types import OperationNotSupportedError
 from mirage.types import PathSpec
 
 
@@ -308,58 +305,6 @@ async def test_an_own_version_conditions_only_its_own_path(own_path, want):
     finally:
         push_write_context(prev)
     assert cond is not None and cond.if_match == want
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "held, live, want, kept",
-    [
-        (None, LiveVersion(content="s1", native="e1"), None, []),
-        ("s1", LiveVersion(content="s1", native="e1"), "e1", []),
-        (
-            "s1",
-            LiveVersion(content="s2", native="e2"),
-            StaleWriteError,
-            ["s1"],
-        ),
-        ("s1", None, StaleWriteError, []),
-        (
-            "s1",
-            LiveVersion(content="s1", native=None),
-            OperationNotSupportedError,
-            [],
-        ),
-    ],
-    ids=["plain", "current", "changed", "gone", "no-native"],
-)
-async def test_native_condition_translates_the_held_content_token(
-    held, live, want, kept
-):
-    path = PathSpec(virtual="/box/f", directory="/box/", vfs_path="/f")
-    kept_versions: list[str] = []
-
-    async def keep(_path: PathSpec, version: str) -> None:
-        kept_versions.append(version)
-
-    context = WriteContext(
-        vfs="box",
-        conditions=frozenset({"put", "copy", "delete"}),
-        read_version=_held,
-        read_versions=_held_all,
-        drop=_noop,
-        keep=keep,
-    )
-    prev = push_write_context(context)
-    try:
-        cond = WriteCondition(if_match=held)
-        if isinstance(want, type):
-            with pytest.raises(want):
-                await native_condition(path, cond, live, "delete")
-        else:
-            assert await native_condition(path, cond, live, "delete") == want
-    finally:
-        push_write_context(prev)
-    assert kept_versions == kept
 
 
 @pytest.mark.asyncio

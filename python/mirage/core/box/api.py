@@ -69,18 +69,13 @@ async def refused(
     cond: WriteCondition | None,
     etag: str | None,
 ) -> StaleWriteError | None:
-    """The refusal a request sent with ``If-Match`` met, None for any other.
-
-    Box answers 412 when the file changed since the etag sent and 404 when
-    it is gone; anything else keeps its own meaning, as does any answer to
-    a request that went plain.
+    """The refusal an ``If-Match`` request met (412 changed, 404 gone).
 
     Args:
         path (PathSpec): the path the request wrote.
         exc (BoxApiError): Box's answer.
-        cond (WriteCondition | None): the condition the write carried; its
-            content token is the version a refusal keeps.
-        etag (str | None): the etag sent as ``If-Match``, None if none.
+        cond (WriteCondition | None): the write's condition.
+        etag (str | None): the etag sent, None if the request went plain.
     """
     if not etag:
         return None
@@ -92,7 +87,7 @@ async def refused(
 
 
 def if_match(etag: str | None) -> dict[str, str] | None:
-    """The header that conditions a request on ``etag``, None to go plain.
+    """The ``If-Match`` header for ``etag``, None to go plain.
 
     Args:
         etag (str | None): the file's etag, or None.

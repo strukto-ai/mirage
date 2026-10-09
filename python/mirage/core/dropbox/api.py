@@ -63,15 +63,11 @@ async def refused(
 ) -> StaleWriteError | None:
     """The refusal a write sent with a rev met, None for any other failure.
 
-    A write that sent no rev went plain, so its failure keeps its own
-    meaning.
-
     Args:
         path (PathSpec): the path the write named.
         exc (DropboxApiError): Dropbox's answer.
-        cond (WriteCondition | None): the condition the write carried; its
-            content token is the version a refusal keeps.
-        rev (str | None): the rev the write sent, None if none.
+        cond (WriteCondition | None): the write's condition.
+        rev (str | None): the rev sent, None if the write went plain.
     """
     if not rev:
         return None

@@ -31,10 +31,9 @@ import { statFromEntry } from './stat.ts'
 
 // Single-call upload; Dropbox caps it at ~150 MB (larger files need
 // upload sessions, not supported here). A failed upload still evicts the
-// path: Dropbox may have stored the bytes before its reply broke off. On a
-// `write: conditional` mount a held version is checked against the file's
-// live content_hash, which costs one get_metadata, and its rev goes out in
-// `update` mode, so a file changed since it was read is refused.
+// path: Dropbox may have stored the bytes before its reply broke off. A held
+// version costs one get_metadata and goes out as the file's rev in `update`
+// mode.
 export async function write(
   accessor: DropboxAccessor,
   path: PathSpec,
@@ -61,8 +60,6 @@ export async function write(
       },
     )
   } catch (err) {
-    const lost = await refused(path, err, cond, rev)
-    if (lost !== null) throw lost
-    throw err
+    throw (await refused(path, err, cond, rev)) ?? err
   }
 }

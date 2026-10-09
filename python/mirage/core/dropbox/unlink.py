@@ -33,19 +33,12 @@ from mirage.types import PathSpec
 async def delete_resolved(
     accessor: DropboxAccessor, path: PathSpec, entry: dict[str, Any]
 ) -> None:
-    """Delete a looked-up file, conditioned on a ``write: conditional`` mount.
-
-    A delete needs no read of its own, only that nobody wrote since: the
-    version the mount holds, else the content_hash its own lookup found,
-    is held against the live one, and the rev goes out as ``parent_rev``.
+    """Delete a looked-up file, held to the version read, else the one found.
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
         path (PathSpec): the file's path.
         entry (dict[str, Any]): the file's metadata, from its lookup.
-
-    Raises:
-        StaleWriteError: the file changed or went since it was measured.
     """
     live = live_of(entry)
     cond = await delete_condition(path, live.content if live else None)
@@ -55,10 +48,7 @@ async def delete_resolved(
             accessor.token_manager, dropbox_path_of(accessor, path), rev
         )
     except DropboxApiError as exc:
-        lost = await refused(path, exc, cond, rev)
-        if lost is not None:
-            raise lost from exc
-        raise
+        raise (await refused(path, exc, cond, rev)) or exc
 
 
 async def unlink(accessor: DropboxAccessor, path: PathSpec) -> None:

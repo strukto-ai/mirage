@@ -41,12 +41,8 @@ export async function rmdir(accessor: BoxAccessor, path: PathSpec): Promise<void
 }
 
 /**
- * Delete a folder only if it is empty, as POSIX rmdir does. Box answers 409
- * for a folder that still holds anything; naming that is ours, since a bare
- * BoxApiError reaches the caller as a condition `classify` cannot name (EIO
- * over FUSE). Mirrors Python's `delete_empty_folder`.
- *
- * @throws ENOTEMPTY when the folder still holds anything
+ * Delete a folder only if it is empty: Box's 409 becomes ENOTEMPTY. Mirrors
+ * Python's `delete_empty_folder`.
  */
 export async function deleteEmptyFolder(
   tm: BoxTokenManager,
@@ -61,7 +57,7 @@ export async function deleteEmptyFolder(
   }
 }
 
-/** Delete a web link plainly: it holds no content, so no version. Mirrors Python's `_delete_link`. */
+/** Delete a web link plainly, since it holds no content. Mirrors Python's `_delete_link`. */
 async function deleteLink(tm: BoxTokenManager, linkId: string, path: PathSpec): Promise<void> {
   try {
     await deleteWebLink(tm, linkId)
@@ -72,11 +68,9 @@ async function deleteLink(tm: BoxTokenManager, linkId: string, path: PathSpec): 
 }
 
 /**
- * Delete a folder file by file, each only if it is still as measured: a file
- * the agent read is held to that version, any other to the sha1 its listing
- * row shows, and goes out with its etag as `If-Match`. A file that changed
- * stays, with the folders above it, and lands in `lost` with the version it
- * was measured on. Returns whether the folder itself was deleted.
+ * Delete a folder file by file, each held to the version read or listed. A file
+ * that changed stays, with the folders above it. Returns whether the folder
+ * itself was deleted.
  */
 async function deleteTree(
   accessor: BoxAccessor,
@@ -137,10 +131,8 @@ async function remove(
 }
 
 /**
- * Remove a file or a folder and everything under it. On a `write:
- * conditional` mount a folder is walked file by file, as `rm -r` walks an
- * object store: the files that changed since they were measured stay, and the
- * first is named. Mirrors Python's `rm_r`.
+ * Remove a file or folder; a conditional mount walks it file by file. Mirrors
+ * Python's `rm_r`.
  */
 export async function rmR(accessor: BoxAccessor, path: PathSpec): Promise<void> {
   const parts = pathParts(path)

@@ -49,10 +49,8 @@ async function clearDest(
 }
 
 /**
- * Move a file or folder with Box's own move. Only a destination it replaces is
- * measured: Box moves the item whole, so a write that landed on the source
- * moves with it. Both ends are recorded, since the source left and the
- * destination was replaced. Mirrors Python's `rename`.
+ * Move a file or folder whole; only a destination it replaces is held. Mirrors
+ * Python's `rename`.
  */
 export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const tm = accessor.tokenManager

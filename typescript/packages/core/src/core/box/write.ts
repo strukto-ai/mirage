@@ -31,9 +31,7 @@ import { statFromItem } from './stat.ts'
 /**
  * Upload a new file, or a new version of an existing one. A failed upload
  * still evicts the path: Box may have stored the bytes before its reply
- * broke off. On a `write: conditional` mount the version held is checked
- * against the file's live sha1 and its etag goes out as `If-Match`, so a
- * file changed since it was read is refused.
+ * broke off. A held version goes out as the file's etag.
  */
 export async function write(
   accessor: BoxAccessor,
@@ -72,8 +70,6 @@ export async function write(
       () => invalidateAfterWrite(path),
     )
   } catch (err) {
-    const lost = await refused(path, err, cond, etag)
-    if (lost !== null) throw lost
-    throw err
+    throw (await refused(path, err, cond, etag)) ?? err
   }
 }

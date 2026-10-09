@@ -33,11 +33,8 @@ import { GONE_STATUS, LOST_STATUS } from './constants.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 
 /**
- * The refusal a request sent with `If-Match` met, null for any other: Box
- * answers 412 when the file changed since the etag sent and 404 when it is
- * gone; anything else keeps its own meaning, as does any answer to a request
- * that went plain (`etag` null). A refusal keeps `cond`'s content token.
- * Mirrors Python's `refused`.
+ * The refusal an `If-Match` request met (412 changed, 404 gone), null for any
+ * other or a request that went plain. Mirrors Python's `refused`.
  */
 export async function refused(
   path: PathSpec,

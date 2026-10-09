@@ -29,11 +29,7 @@ from mirage.types import PathSpec
 
 
 async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
-    """Move a file or folder with Box's own move.
-
-    Only a destination it replaces is measured: Box moves the item whole,
-    so a write that landed on the source moves with it. Both ends are
-    recorded, since the source left and the destination was replaced.
+    """Move a file or folder whole; only a destination it replaces is held.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -83,10 +79,7 @@ async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
                 tm, item["id"], name=new_name, parent_id=dst_parent
             )
     except BoxApiError as exc:
-        lost = await retaken(exc, cond, dst)
-        if lost is not None:
-            raise lost from exc
-        raise
+        raise (await retaken(exc, cond, dst)) or exc
     # Only a folder has a subtree to drop, and only a positive "file"
     # rules one out. The type checks above refused a file onto a folder,
     # so dst held nothing below it unless the moved item is a folder.

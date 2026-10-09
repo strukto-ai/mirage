@@ -506,6 +506,31 @@ async def test_copy_file(root_accessor):
 
 
 @pytest.mark.asyncio
+async def test_copy_of_a_whole_folder_is_recorded_as_a_prefix(root_accessor):
+    scope = RecordingScope()
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+            patch(
+                "mirage.core.box.copy.copy_folder", new_callable=AsyncMock
+            ) as cd,
+            patch(
+                "mirage.core.box.copy.invalidate_subtree",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await copy(root_accessor, _spec("/data/sub"), _spec("/data/new"))
+    finally:
+        scope.close()
+    cd.assert_awaited_once_with(
+        root_accessor.token_manager, "300", "100", name="new"
+    )
+    assert [(r.op, r.path) for r in scope.records] == [
+        ("copy_prefix", "/data/new")
+    ]
+
+
+@pytest.mark.asyncio
 async def test_write_records_the_virtual_path(root_accessor):
     # A key named like its mount: neither m/k.txt nor /m/k.txt is virtual.
     spec = PathSpec(

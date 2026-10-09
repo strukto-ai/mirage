@@ -34,9 +34,7 @@ async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
     """Upload a new file, or a new version of an existing one.
 
     A failed upload still evicts the path: Box may have stored the bytes
-    before its reply broke off. On a ``write: conditional`` mount the
-    version held is checked against the file's live sha1 and its etag goes
-    out as ``If-Match``, so a file changed since it was read is refused.
+    before its reply broke off. A held version goes out as the file's etag.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -75,7 +73,4 @@ async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
     try:
         await evict_after(send(), lambda _: invalidate_after_write(path))
     except BoxApiError as exc:
-        lost = await refused(path, exc, cond, etag)
-        if lost is not None:
-            raise lost from exc
-        raise
+        raise (await refused(path, exc, cond, etag)) or exc

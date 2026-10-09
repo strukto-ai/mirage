@@ -74,11 +74,8 @@ export class BoxApiError extends Error {
 }
 
 /**
- * The type of the item a 409 names as holding the name, or null: Box answers a
- * request onto a taken name with `item_name_in_use` and the item there in
- * `context_info.conflicts` (`file`, `folder`, `web_link`; measured
- * 2026-10-08). A body that is not a JSON object, such as a proxy's HTML page,
- * names none. Mirrors Python's `conflict_of`.
+ * The type of the item a 409 names in `context_info.conflicts`, or null.
+ * Mirrors Python's `conflict_of`.
  */
 export function conflictOf(text: string): string | null {
   if (!text.trimStart().startsWith('{')) return null

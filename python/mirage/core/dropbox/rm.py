@@ -43,14 +43,10 @@ async def _delete_tree(
     path: PathSpec,
     lost: list[tuple[PathSpec, str | None]],
 ) -> bool:
-    """Delete a folder file by file, each only if it is still as measured.
+    """Delete a folder file by file, each held to the version read or listed.
 
-    A file the agent read is held to that version, any other to the
-    content_hash its listing row shows, and goes out with its rev as
-    ``parent_rev``. A file that changed stays, with the folders above it.
-    delete_v2 takes a folder whole, so a folder goes only once a listing
-    shows it empty; a file another writer creates in it between that
-    listing and the delete goes with it.
+    A file that changed stays, with the folders above it; a folder goes once
+    a listing shows it empty.
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
@@ -125,19 +121,11 @@ async def _remove(
 
 
 async def rm_r(accessor: DropboxAccessor, path: PathSpec) -> None:
-    """Remove a file or a folder and everything under it.
-
-    On a ``write: conditional`` mount a folder is walked file by file, as
-    ``rm -r`` walks an object store: the files that changed since they
-    were measured stay, and the first is named. Otherwise delete_v2 removes
-    a folder recursively, so rm -r maps to one call.
+    """Remove a file or folder; a conditional mount walks it file by file.
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
         path (PathSpec): the operand.
-
-    Raises:
-        StaleWriteError: a file changed since it was measured.
     """
     api_path = dropbox_path_of(accessor, path)
     timer = start_op()

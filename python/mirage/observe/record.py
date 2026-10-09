@@ -48,14 +48,23 @@ WRITE_FINGERPRINT_OPS = frozenset({"write"})
 #
 # All three hold the op names a `record()` call spells, not the op-table
 # slots: the recursive delete is the `rm_recursive` slot but records as
-# "rm_r", and the rename op records as "rename" or "rename_prefix"
-# depending on which of its two paths ran.
+# "rm_r", the rename op records as "rename" or "rename_prefix"
+# depending on which of its two paths ran, and a copy of a whole folder
+# in one request as "copy_prefix".
 STAMP_FINGERPRINT_OPS = frozenset({"read", "write", "create", "truncate"})
 CONTENT_CHANGING_OPS = frozenset(
     {"write", "create", "truncate", "append", "pwrite"}
 )
 RETRACT_FINGERPRINT_OPS = frozenset(
-    {"unlink", "rm_r", "rmdir", "rename", "rename_prefix", "copy"}
+    {
+        "unlink",
+        "rm_r",
+        "rmdir",
+        "rename",
+        "rename_prefix",
+        "copy",
+        "copy_prefix",
+    }
 )
 # Stamps name the bytes at a path; retracts mean the line no longer knows them.
 VERSION_OPS = STAMP_FINGERPRINT_OPS | RETRACT_FINGERPRINT_OPS
@@ -65,7 +74,7 @@ VERSION_OPS = STAMP_FINGERPRINT_OPS | RETRACT_FINGERPRINT_OPS
 # spells them with two names. A point op must not take a subtree: it
 # touched one key, and on a keyed store the keys beneath its path are
 # objects of their own.
-SUBTREE_RETRACT_OPS = frozenset({"rm_r", "rename_prefix"})
+SUBTREE_RETRACT_OPS = frozenset({"rm_r", "rename_prefix", "copy_prefix"})
 
 
 @dataclass

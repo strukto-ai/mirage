@@ -182,9 +182,8 @@ export async function lookup(tm: DropboxTokenManager, path: string): Promise<Dro
 }
 
 /**
- * The refusal a write sent with a rev met, null for any other failure; a
- * write that sent no rev went plain, so its failure keeps its own meaning. A
- * refusal keeps `cond`'s content token. Mirrors Python's `refused`.
+ * The refusal a write sent with a rev met, null for any other failure or a
+ * write that went plain. Mirrors Python's `refused`.
  */
 export async function refused(
   path: PathSpec,

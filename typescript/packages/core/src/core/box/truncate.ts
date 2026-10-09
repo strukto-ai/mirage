@@ -24,10 +24,9 @@ import { pathParts, resolveItem } from './resolve.ts'
 import { write } from './write.ts'
 
 /**
- * Resize a file by rewriting it whole. Emptying reads nothing, so its write
- * carries the version the agent read. Any other length downloads the file and
- * hands its write the sha1 of those bytes; a file Box keeps no sha1 for hands
- * none, and its write goes out plain. Mirrors Python's `truncate`.
+ * Resize a file by rewriting it whole. Emptying reads nothing and carries the
+ * agent's version; a resize holds the sha1 of the bytes it downloaded, or none
+ * for a file without one. Mirrors Python's `truncate`.
  */
 export async function truncate(
   accessor: BoxAccessor,

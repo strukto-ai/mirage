@@ -440,11 +440,10 @@ async def native_condition(
     live: LiveVersion | None,
     kind: WriteKind,
 ) -> str | None:
-    """The backend's own token a conditioned write sends, None to go plain.
+    """The native token a write sends in place of the held content token.
 
-    The held version is a content token, so it is compared with the live
-    one here and the live native token goes out in its place: the backend
-    refuses whatever lands between this lookup and the write.
+    None when the write goes plain; the backend refuses whatever lands
+    between the lookup and the write.
 
     Args:
         path (PathSpec): the path written.
@@ -472,14 +471,7 @@ async def native_condition(
 
 
 def writes_conditioned() -> bool:
-    """Whether the mount running this op is a ``write: conditional`` one.
-
-    A backend asks before handing a read's token on to the op's write, so
-    an unconditional mount's reads cache exactly what they did.
-
-    Returns:
-        bool: True on a ``write: conditional`` mount.
-    """
+    """Whether the mount running this op is a ``write: conditional`` one."""
     return _write.get() is not None
 
 
@@ -526,11 +518,8 @@ async def drop_cached(path: PathSpec, keep: str | None = None) -> None:
 async def evict_keeping_version(path: PathSpec) -> None:
     """Evict ``path``'s cached bytes and listing, keeping the version held.
 
-    For a request that raised and may or may not have changed the path:
-    what is cached may now be stale, but the version mirage holds keeps
-    the next write conditioned, so a change the request did make is
-    refused rather than written over. Without a write context it is a
-    plain eviction.
+    For a request that raised and may have landed: the next write stays
+    conditioned on what the agent read.
 
     Args:
         path (PathSpec): the path the request may have changed.
@@ -577,11 +566,7 @@ async def stale(
 async def keep_refused(
     lost: list[tuple[PathSpec, str | None]],
 ) -> StaleWriteError | None:
-    """Keep the version of every file a walk left behind, and refuse the first.
-
-    Each file the walk found changed keeps the version it lost on, so a
-    retry without a read is refused on any of them, not only the one
-    named; this holds when the walk stopped on a later error too.
+    """Keep the version of every file a walk left behind; refuse the first.
 
     Args:
         lost (list[tuple[PathSpec, str | None]]): each file left behind,
@@ -596,9 +581,6 @@ async def keep_refused(
 
 async def held_versions(paths: list[PathSpec]) -> list[str | None]:
     """The version the mount holds for each path, in one store round trip.
-
-    For a walk that measures its files against what the agent read; every
-    None on an unconditional mount.
 
     Args:
         paths (list[PathSpec]): the paths, in order.

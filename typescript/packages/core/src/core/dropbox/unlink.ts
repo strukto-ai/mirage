@@ -28,13 +28,8 @@ import { liveOf } from './fingerprint.ts'
 import { dropboxPathOf } from './paths.ts'
 
 /**
- * Delete a looked-up file, conditioned on a `write: conditional` mount. A
- * delete needs no read of its own, only that nobody wrote since: the version
- * the mount holds, else the content_hash its own lookup found, is held against
- * the live one, and the rev goes out as `parent_rev`. Mirrors Python's
- * `delete_resolved`.
- *
- * @throws a stale-write error when the file changed or went since it was measured
+ * Delete a looked-up file, held to the version read, else the one found.
+ * Mirrors Python's `delete_resolved`.
  */
 export async function deleteResolved(
   accessor: DropboxAccessor,
@@ -47,9 +42,7 @@ export async function deleteResolved(
   try {
     await deletePath(accessor.tokenManager, dropboxPathOf(accessor, path), rev)
   } catch (err) {
-    const lost = await refused(path, err, cond, rev)
-    if (lost !== null) throw lost
-    throw err
+    throw (await refused(path, err, cond, rev)) ?? err
   }
 }
 

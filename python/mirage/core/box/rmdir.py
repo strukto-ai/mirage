@@ -60,12 +60,7 @@ async def rmdir(
 async def delete_empty_folder(
     tm: BoxTokenManager, folder_id: str, path: PathSpec
 ) -> None:
-    """Delete a folder only if it is empty, as POSIX rmdir does.
-
-    Box answers 409 for a folder that still holds anything. Naming that
-    is ours: BoxApiError is a bare RuntimeError, so an unmapped 409 would
-    reach the caller as a condition ``classify`` cannot name (EIO over
-    FUSE, no errno for ``ws.vfs`` and the sandbox runtimes).
+    """Delete a folder only if it is empty: Box's 409 becomes ENOTEMPTY.
 
     Args:
         tm (BoxTokenManager): token manager.
@@ -86,7 +81,7 @@ async def delete_empty_folder(
 async def _delete_link(
     tm: BoxTokenManager, link_id: str, path: PathSpec
 ) -> None:
-    """Delete a web link plainly: it holds no content, so no version.
+    """Delete a web link plainly, since it holds no content.
 
     Args:
         tm (BoxTokenManager): token manager.
@@ -107,11 +102,9 @@ async def _delete_tree(
     path: PathSpec,
     lost: list[tuple[PathSpec, str | None]],
 ) -> bool:
-    """Delete a folder file by file, each only if it is still as measured.
+    """Delete a folder file by file, each held to the version read or listed.
 
-    A file the agent read is held to that version, any other to the sha1
-    its listing row shows, and goes out with its etag as ``If-Match``. A
-    file that changed stays, with the folders above it.
+    A file that changed stays, with the folders above it.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -185,18 +178,11 @@ async def _remove(
 
 
 async def rm_r(accessor: BoxAccessor, path: PathSpec) -> None:
-    """Remove a file or a folder and everything under it.
-
-    On a ``write: conditional`` mount a folder is walked file by file, as
-    ``rm -r`` walks an object store: the files that changed since they
-    were measured stay, and the first is named.
+    """Remove a file or folder; a conditional mount walks it file by file.
 
     Args:
         accessor (BoxAccessor): Box accessor.
         path (PathSpec): the operand.
-
-    Raises:
-        StaleWriteError: a file changed since it was measured.
     """
     parts = path_parts(path)
     if not parts:

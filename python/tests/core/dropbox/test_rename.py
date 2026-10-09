@@ -86,7 +86,7 @@ async def test_rename_conflict_replaces_empty_dir_destination():
             return_value={".tag": "folder", "name": "dst"},
         ):
             with patch(
-                "mirage.core.dropbox.rename.list_folder",
+                "mirage.core.dropbox.copy.list_folder",
                 new_callable=AsyncMock,
                 return_value=[],
             ):
@@ -117,7 +117,7 @@ async def test_rename_conflict_keeps_error_for_nonempty_dir():
             return_value={".tag": "folder", "name": "dst"},
         ):
             with patch(
-                "mirage.core.dropbox.rename.list_folder",
+                "mirage.core.dropbox.copy.list_folder",
                 new_callable=AsyncMock,
                 return_value=[{".tag": "file", "name": "keep.txt"}],
             ):
@@ -195,7 +195,7 @@ async def _moved(*replies, existing: str | None) -> list[tuple[str, str]]:
                 else {".tag": existing, "name": "b"},
             ):
                 with patch(
-                    "mirage.core.dropbox.rename.list_folder",
+                    "mirage.core.dropbox.copy.list_folder",
                     new_callable=AsyncMock,
                     return_value=[],
                 ):

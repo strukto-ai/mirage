@@ -33,14 +33,9 @@ import { dropboxPathOf } from './paths.ts'
 import { deleteResolved } from './unlink.ts'
 
 /**
- * Delete a folder file by file, each only if it is still as measured: a file
- * the agent read is held to that version, any other to the content_hash its
- * listing row shows, and goes out with its rev as `parent_rev`. A file that
- * changed stays, with the folders above it, and lands in `lost` with the
- * version it was measured on. delete_v2 takes a folder whole, so a folder goes
- * only once a listing shows it empty; a file another writer creates in it
- * between that listing and the delete goes with it. Returns whether the folder
- * itself was deleted.
+ * Delete a folder file by file, each held to the version read or listed. A file
+ * that changed stays, with the folders above it; a folder goes once a listing
+ * shows it empty. Returns whether the folder itself was deleted.
  */
 async function deleteTree(
   accessor: DropboxAccessor,
@@ -97,11 +92,8 @@ async function remove(
 }
 
 /**
- * Remove a file or a folder and everything under it. On a `write:
- * conditional` mount a folder is walked file by file, as `rm -r` walks an
- * object store: the files that changed since they were measured stay, and the
- * first is named. Otherwise delete_v2 removes a folder recursively, so rm -r
- * maps to one call. Mirrors Python's `rm_r`.
+ * Remove a file or folder; a conditional mount walks it file by file. Mirrors
+ * Python's `rm_r`.
  */
 export async function rmR(accessor: DropboxAccessor, path: PathSpec): Promise<void> {
   const apiPath = dropboxPathOf(accessor, path)

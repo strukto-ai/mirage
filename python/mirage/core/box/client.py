@@ -62,12 +62,7 @@ class BoxApiError(RuntimeError):
 
 
 def conflict_of(text: str) -> str | None:
-    """The type of the item a 409 names as holding the name, or None.
-
-    Box answers a request onto a taken name with ``item_name_in_use`` and
-    the item there in ``context_info.conflicts`` (``file``, ``folder``,
-    ``web_link``; measured 2026-10-08). A body that is not a JSON object,
-    such as a proxy's HTML page, names none.
+    """The type of the item a 409 names in ``context_info.conflicts``.
 
     Args:
         text (str): the error body.

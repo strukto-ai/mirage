@@ -423,14 +423,8 @@ function require(context: WriteContext, path: PathSpec, kind: WriteKind): void {
 }
 
 /**
- * The backend's own token a conditioned write sends, null to go plain. The
- * held version is a content token, so it is compared with the live one here
- * and the live native token goes out in its place: the backend refuses
- * whatever lands between this lookup and the write. Mirrors Python's
- * `native_condition`.
- *
- * @throws a stale-write error when the file changed or went since it was read
- * @throws an ENOTSUP error when the backend gave no token to send
+ * The native token a write sends in place of the held content token, null when
+ * the write goes plain. Mirrors Python's `native_condition`.
  */
 export async function nativeCondition(
   path: PathSpec,
@@ -451,10 +445,8 @@ export async function nativeCondition(
 }
 
 /**
- * Keep the version of every file a walk left behind, and return the refusal
- * naming the first, or null. Each one keeps the version it lost on, so a retry
- * without a read is refused on any of them, not only the one named; this holds
- * when the walk stopped on a later error too. Mirrors Python's `keep_refused`.
+ * Keep the version of every file a walk left behind; refuse the first. Mirrors
+ * Python's `keep_refused`.
  */
 export async function keepRefused(
   lost: readonly (readonly [PathSpec, string | null])[],
@@ -465,9 +457,8 @@ export async function keepRefused(
 }
 
 /**
- * The version the mount holds for each path, in one store round trip, for a
- * walk that measures its files against what the agent read; every null on an
- * unconditional mount. Mirrors Python's `held_versions`.
+ * The version the mount holds for each path, in one store round trip. Mirrors
+ * Python's `held_versions`.
  */
 export async function heldVersions(paths: readonly PathSpec[]): Promise<(string | null)[]> {
   const first = paths[0]
@@ -477,12 +468,9 @@ export async function heldVersions(paths: readonly PathSpec[]): Promise<(string 
 }
 
 /**
- * Whether the mount that owns `path` is a `write: conditional` one, for a
- * backend that hands a read's token on only where a write will send it, so
- * an unconditional mount's reads cache exactly what they did. Never throws:
- * while overlapping lines leave the owner unclear it answers true, so a read
- * still hands on the token a conditional mount's write needs. Mirrors
- * Python's `writes_conditioned`.
+ * Whether the mount that owns `path` is a `write: conditional` one; true while
+ * overlapping lines leave the owner unclear. Mirrors Python's
+ * `writes_conditioned`.
  */
 export function writesConditioned(path: PathSpec): boolean {
   const states = writeStorage.liveStores()
@@ -506,11 +494,8 @@ export function conditioned(path: PathSpec, kind: 'copy' | 'delete'): boolean {
 }
 
 /**
- * Evict `path`'s cached bytes and listing, keeping the version held. For a
- * request that raised and may or may not have changed the path: what is cached
- * may now be stale, but the version mirage holds keeps the next write
- * conditioned, so a change the request did make is refused rather than written
- * over. Without a write context it is a plain eviction. Mirrors Python's
+ * Evict `path`'s cached bytes and listing, keeping the version held, for a
+ * request that raised and may have landed. Mirrors Python's
  * `evict_keeping_version`.
  */
 export async function evictKeepingVersion(path: PathSpec): Promise<void> {

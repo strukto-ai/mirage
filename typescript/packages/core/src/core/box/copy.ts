@@ -36,15 +36,8 @@ import { liveOf } from './fingerprint.ts'
 import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
 
 /**
- * Clear the file a copy or move lands on, conditioned when it must be: on a
- * `write: conditional` mount the delete carries the destination's etag when
- * mirage holds its version, so a destination changed since it was read is
- * refused, not destroyed. Returns the condition the op carries, null on an
- * unconditional mount: a destination that comes back before the copy lands is
- * then another writer's.
- * Mirrors Python's `replace_file`.
- *
- * @throws a stale-write error when the destination changed or went since it was read
+ * Clear the file a copy or move lands on, held to the version read. Returns
+ * the op's condition, null when unconditional. Mirrors Python's `replace_file`.
  */
 export async function replaceFile(
   accessor: BoxAccessor,
@@ -57,20 +50,16 @@ export async function replaceFile(
     try {
       await deleteFile(accessor.tokenManager, existing.id, etag)
     } catch (err) {
-      const lost = await refused(dst, err, cond, etag)
-      if (lost !== null) throw lost
-      throw err
+      throw (await refused(dst, err, cond, etag)) ?? err
     }
   }
   return cond
 }
 
 /**
- * The refusal for a copy or move whose cleared destination came back: another
- * writer took the name between the clear and the copy. Its file is not deleted
- * a second time, and the version held stays held, so a retry without a read is
- * refused again; a folder or web link there holds no file version, so it keeps
- * none. Null for any other failure. Mirrors Python's `retaken`.
+ * The refusal for a copy or move whose cleared destination came back. The held
+ * version stays held; a folder or web link there keeps none. Mirrors Python's
+ * `retaken`.
  */
 export async function retaken(
   err: unknown,
@@ -148,16 +137,9 @@ async function copyInto(
 }
 
 /**
- * Copy a file or folder server-side.
- *
- * The copy records the paths it changed: a file it cleared or landed, and a
- * folder it copied whole. The eviction runs also when the copy fails, since a
- * merge may have landed some children before one failed. On an unconditional
- * mount it evicts `dst` (its subtree for a folder). On a `write: conditional`
- * mount it evicts exactly what changed, so a merge leaves the versions of the
- * files it did not touch, and a file request that raised, which may or may not
- * have landed, loses its cached bytes and listing but keeps the version mirage
- * holds, so a change it did make is refused rather than written over.
+ * Copy a file or folder server-side, recording each path it changed. The
+ * eviction runs also when the copy fails. A conditional mount evicts only what
+ * changed, and a request that raised keeps its held version.
  */
 export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const item = await resolveItem(accessor, pathParts(src))
@@ -168,7 +150,9 @@ export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec):
   await evictAfter(
     () => copyInto(accessor, item, dst, changed, sent),
     async () => {
-      for (const [spec, timer] of changed) record('copy', spec.virtual, 'box', 0, timer)
+      for (const [spec, timer, whole] of changed) {
+        record(whole ? 'copy_prefix' : 'copy', spec.virtual, 'box', 0, timer)
+      }
       if (!writesConditioned(dst)) {
         await (folder ? invalidateSubtree(dst) : invalidateAfterWrite(dst))
         return

@@ -30,10 +30,8 @@ async def truncate(
 ) -> None:
     """Resize a file by rewriting it whole.
 
-    Emptying reads nothing, so its write carries the version the agent
-    read. Any other length downloads the file and hands its write the sha1
-    of those bytes; a file Box keeps no sha1 for hands none, and its write
-    goes out plain.
+    Emptying reads nothing and carries the agent's version; a resize holds
+    the sha1 of the bytes it downloaded, or none for a file without one.
 
     Args:
         accessor (BoxAccessor): Box accessor.

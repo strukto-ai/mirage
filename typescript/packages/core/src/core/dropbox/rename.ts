@@ -16,18 +16,16 @@ import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { invalidateAfterMove, invalidateAncestors } from '../../cache/context.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { listFolder, movePath, type DropboxEntry } from './api.ts'
-import { notAFolder, replaceOnto } from './copy.ts'
+import { movePath } from './api.ts'
+import { replaceOnto } from './copy.ts'
 import { dropboxPathOf } from './paths.ts'
 
 // move_v2 rejects an existing destination, but rename(2) replaces one:
 // a file outright, and a directory when it is empty. So a conflict
 // deletes the target and retries, except for a folder that still lists a
 // child, where the original error propagates and the generic mv reports
-// "Directory not empty" (mirrors msgraph's renameReplace). A held
-// destination a folder has taken is refused, with nothing deleted. The source
-// is not measured: move_v2 moves the entry whole, so only replacing the
-// destination can lose a write, and that delete carries its measured rev.
+// "Directory not empty" (mirrors msgraph's renameReplace). The source moves
+// whole, so only a destination it replaces is held to its version.
 export async function rename(
   accessor: DropboxAccessor,
   src: PathSpec,
@@ -38,16 +36,7 @@ export async function rename(
   const tm = accessor.tokenManager
   const timer = startOp()
   const upto = lostCount()
-  const emptyOrNotAFolder = async (existing: DropboxEntry): Promise<boolean> =>
-    (await notAFolder(existing)) || (await listFolder(tm, to, { limit: 1 })).length === 0
-  const [moved, replaced] = await replaceOnto(
-    tm,
-    src,
-    dst,
-    to,
-    () => movePath(tm, from, to),
-    emptyOrNotAFolder,
-  )
+  const [moved, replaced] = await replaceOnto(tm, src, dst, to, () => movePath(tm, from, to), true)
   const replacedNonFile = replaced !== null && replaced['.tag'] !== 'file'
   // A folder carries a subtree under both names. dst also loses one when
   // the move replaced anything there but a file (an empty folder, or an

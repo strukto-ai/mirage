@@ -25,10 +25,8 @@ export interface WriteCondition {
 }
 
 /**
- * A file's current tokens, as the backend's own lookup reports them, for a
- * backend whose cache token is not the one its write condition takes: the
- * content token is what mirage holds and compares, the native token is what
- * the backend's condition is sent with. Mirrors Python's `LiveVersion`.
+ * A file's live tokens: the content token mirage compares, the native token
+ * the backend's condition takes. Mirrors Python's `LiveVersion`.
  */
 export interface LiveVersion {
   readonly content: string | null

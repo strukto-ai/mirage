@@ -12,12 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
-
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import invalidate_after_move, invalidate_ancestors
-from mirage.core.dropbox.api import list_folder, move_path
-from mirage.core.dropbox.copy import not_a_folder, replace_onto
+from mirage.core.dropbox.api import move_path
+from mirage.core.dropbox.copy import replace_onto
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
@@ -31,12 +29,8 @@ async def rename(
     conflict deletes the target and retries, except for a folder that
     still lists a child, where the original error propagates and the
     generic mv reports "Directory not empty" (mirrors msgraph's
-    rename_replace). A destination mirage holds a version of that a
-    folder has taken is refused, with nothing deleted (``replace_onto``).
-
-    The source is not measured: move_v2 moves the entry whole, so a write
-    that landed on it travels with it. Only replacing the destination can
-    lose one, so that delete carries the destination's measured rev.
+    rename_replace). The source moves whole, so only a destination it
+    replaces is held to its version (``replace_onto``).
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
@@ -49,18 +43,13 @@ async def rename(
     timer = start_op()
     upto = lost_count()
 
-    async def empty_or_not_a_folder(existing: dict[str, Any]) -> bool:
-        if await not_a_folder(existing):
-            return True
-        return not await list_folder(tm, to_path, limit=1)
-
     moved, replaced = await replace_onto(
         tm,
         src,
         dst,
         to_path,
         lambda: move_path(tm, from_path, to_path),
-        empty_or_not_a_folder,
+        empty_folder=True,
     )
     replaced_non_file = replaced is not None and replaced.get(".tag") != "file"
     # A folder carries a subtree under both names. dst also loses one when

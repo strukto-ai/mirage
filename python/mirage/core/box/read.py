@@ -68,10 +68,8 @@ async def read(
 ) -> bytes:
     """Read a file, optionally only a byte range of it.
 
-    On a ``write: conditional`` mount a whole read stamps the sha1 of the
-    bytes it returned, which is Box's own token for them, even when the
-    listing row it resolved through is older: the next write must hold
-    the version the agent read, or it goes out plain over a later change.
+    On a ``write: conditional`` mount a whole read stamps its bytes' own
+    sha1, even through an outdated listing row.
 
     Args:
         accessor (BoxAccessor): Box accessor.

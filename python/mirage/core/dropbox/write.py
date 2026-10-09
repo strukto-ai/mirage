@@ -37,10 +37,8 @@ async def write(
     need upload sessions, not supported here).
 
     A failed upload still evicts the path: Dropbox may have stored the
-    bytes before its reply broke off. On a ``write: conditional`` mount a
-    held version is checked against the file's live content_hash, which
-    costs one get_metadata, and its rev goes out in ``update`` mode, so a
-    file changed since it was read is refused.
+    bytes before its reply broke off. A held version costs one get_metadata
+    and goes out as the file's rev in ``update`` mode.
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
@@ -75,7 +73,4 @@ async def write(
     try:
         await evict_after(send(), evict)
     except DropboxApiError as exc:
-        lost = await refused(path, exc, cond, rev)
-        if lost is not None:
-            raise lost from exc
-        raise
+        raise (await refused(path, exc, cond, rev)) or exc

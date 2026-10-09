@@ -32,19 +32,12 @@ from mirage.types import PathSpec
 async def delete_resolved(
     accessor: BoxAccessor, path: PathSpec, item: dict[str, Any]
 ) -> None:
-    """Delete a resolved file, conditioned on a ``write: conditional`` mount.
-
-    A delete needs no read of its own, only that nobody wrote since: the
-    version the mount holds, else the sha1 its own lookup found, is held
-    against the live one, and the etag goes out as ``If-Match``.
+    """Delete a resolved file, held to the version read, else the one found.
 
     Args:
         accessor (BoxAccessor): Box accessor.
         path (PathSpec): the file's path.
         item (dict[str, Any]): the file as the lookup found it.
-
-    Raises:
-        StaleWriteError: the file changed or went since it was measured.
     """
     live = live_of(item)
     cond = await delete_condition(path, live.content if live else None)
@@ -52,10 +45,7 @@ async def delete_resolved(
     try:
         await delete_file(accessor.token_manager, item["id"], etag)
     except BoxApiError as exc:
-        lost = await refused(path, exc, cond, etag)
-        if lost is not None:
-            raise lost from exc
-        raise
+        raise (await refused(path, exc, cond, etag)) or exc
 
 
 async def unlink(accessor: BoxAccessor, path: PathSpec) -> None:

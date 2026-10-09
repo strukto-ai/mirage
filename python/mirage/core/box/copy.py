@@ -51,11 +51,7 @@ from mirage.utils.key_prefix import child_spec
 async def replace_file(
     accessor: BoxAccessor, dst: PathSpec, existing: dict[str, Any] | None
 ) -> WriteCondition | None:
-    """Clear the file a copy or move lands on, conditioned when it must be.
-
-    On a ``write: conditional`` mount the delete carries the destination's
-    etag when mirage holds its version, so a destination changed since it
-    was read is refused, not destroyed.
+    """Clear the file a copy or move lands on, held to the version read.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -63,12 +59,7 @@ async def replace_file(
         existing (dict[str, Any] | None): the file there, None when none.
 
     Returns:
-        WriteCondition | None: the condition the op carries, None on an
-        unconditional mount; a destination that comes back before the copy
-        lands is then another writer's.
-
-    Raises:
-        StaleWriteError: the destination changed or went since it was read.
+        WriteCondition | None: the op's condition, None when unconditional.
     """
     cond = await write_condition(dst, "copy")
     etag = await native_condition(dst, cond, live_of(existing), "copy")
@@ -76,10 +67,7 @@ async def replace_file(
         try:
             await delete_file(accessor.token_manager, existing["id"], etag)
         except BoxApiError as exc:
-            lost = await refused(dst, exc, cond, etag)
-            if lost is not None:
-                raise lost from exc
-            raise
+            raise (await refused(dst, exc, cond, etag)) or exc
     return cond
 
 
@@ -88,10 +76,7 @@ async def retaken(
 ) -> StaleWriteError | None:
     """The refusal for a copy or move whose cleared destination came back.
 
-    Another writer took the name between the clear and the copy. Its file is
-    not deleted a second time, and the version held stays held, so a retry
-    without a read is refused again; a folder or web link there holds no
-    file version, so it keeps none. None for any other failure.
+    The held version stays held; a folder or web link there keeps none.
 
     Args:
         exc (BoxApiError): Box's answer to the copy or move.
@@ -172,25 +157,14 @@ async def _copy_into(
             if not cleared:
                 changed.append((dst, timer, False))
     except BoxApiError as exc:
-        lost = await retaken(exc, cond, dst)
-        if lost is not None:
-            raise lost from exc
-        raise
+        raise (await retaken(exc, cond, dst)) or exc
 
 
 async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
-    """Copy a file or folder server-side.
+    """Copy a file or folder server-side, recording each path it changed.
 
-    The copy records the paths it changed: a file it cleared or landed,
-    and a folder it copied whole. The eviction runs also when the copy
-    fails, since a merge may have landed some children before one
-    failed. On an unconditional mount it evicts ``dst`` (its subtree for
-    a folder). On a ``write: conditional`` mount it evicts exactly what
-    changed, so a merge leaves the versions of the files it did not
-    touch, and a file request that raised, which may or may not have
-    landed, loses its cached bytes and listing but keeps the version
-    mirage holds, so a change it did make is refused rather than written
-    over.
+    The eviction runs also when the copy fails. A conditional mount evicts
+    only what changed, and a request that raised keeps its held version.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -205,8 +179,9 @@ async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     sent: list[PathSpec] = []
 
     async def evict(_: None) -> None:
-        for spec, timer, _whole in changed:
-            record("copy", spec.virtual, "box", 0, timer)
+        for spec, timer, whole in changed:
+            op = "copy_prefix" if whole else "copy"
+            record(op, spec.virtual, "box", 0, timer)
         if not writes_conditioned():
             if folder:
                 await invalidate_subtree(dst)
