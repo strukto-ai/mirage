@@ -171,3 +171,27 @@ it.each([
     await ws.close()
   }
 })
+
+const sideEffectCommands = (
+  JSON.parse(
+    readFileSync(
+      new URL('../../../../../../integ/bash/syntax/quoting.json', import.meta.url),
+      'utf8',
+    ),
+  ) as { cases: { command: string }[] }
+).cases
+  .map((c) => c.command)
+  .filter((command) => command.includes('/data/unexpected'))
+
+it.each(sideEffectCommands)(
+  'a missing quote refuses before any command runs: %s',
+  async (command) => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { shellParser: parser })
+    try {
+      expect((await ws.shell(command)).exitCode).toBe(2)
+      expect((await ws.shell('test -e /data/unexpected')).exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  },
+)

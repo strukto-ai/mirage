@@ -271,6 +271,9 @@ for (const backend of ['ram', 'redis']) {
           await new Promise((resolve) => setTimeout(resolve, 1100))
           expect((await short.listDir('/dir')).status).toBe(LookupStatus.EXPIRED)
           expect((await short.get('/dir/a')).entry).toEqual(got)
+          await short.invalidateDir('/dir')
+          expect((await short.listDir('/dir')).status).toBe(LookupStatus.NOT_FOUND)
+          expect((await short.get('/dir/a')).status).toBe(LookupStatus.NOT_FOUND)
         } finally {
           await short.clear()
           await short.close()
